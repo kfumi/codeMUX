@@ -1,6 +1,8 @@
 use rusqlite::{Connection, Result};
 
 pub fn initialize_database(conn: &Connection) -> Result<()> {
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS sessions (
