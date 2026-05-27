@@ -18,13 +18,14 @@ pub fn load_config(app: &AppHandle) -> AppConfig {
         serde_json::from_str(&content).expect("Failed to parse config")
     } else {
         let config = AppConfig::default();
-        save_config(app, &config);
+        let _ = save_config(app, &config);
         config
     }
 }
 
-pub fn save_config(app: &AppHandle, config: &AppConfig) {
+pub fn save_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
     let config_path = get_config_path(app);
-    let content = serde_json::to_string_pretty(config).expect("Failed to serialize config");
-    std::fs::write(config_path, content).expect("Failed to write config");
+    let content = serde_json::to_string_pretty(config).map_err(|e| format!("Failed to serialize config: {}", e))?;
+    std::fs::write(config_path, content).map_err(|e| format!("Failed to write config: {}", e))?;
+    Ok(())
 }

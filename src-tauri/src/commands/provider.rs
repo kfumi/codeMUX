@@ -18,7 +18,7 @@ pub fn update_provider(state: State<'_, AppState>, app: AppHandle, provider: Pro
         config.providers.push(provider);
     }
 
-    config::save_config(&app, &config);
+    config::save_config(&app, &config)?;
     Ok(())
 }
 
@@ -26,7 +26,7 @@ pub fn update_provider(state: State<'_, AppState>, app: AppHandle, provider: Pro
 pub fn set_active_provider(state: State<'_, AppState>, app: AppHandle, provider_id: String) -> Result<(), String> {
     let mut config = state.config.lock().unwrap();
     config.active_provider_id = Some(provider_id);
-    config::save_config(&app, &config);
+    config::save_config(&app, &config)?;
     Ok(())
 }
 
@@ -38,6 +38,6 @@ pub fn set_theme(state: State<'_, AppState>, app: AppHandle, theme: String) -> R
         "dark" => crate::config::types::Theme::Dark,
         _ => crate::config::types::Theme::System,
     };
-    config::save_config(&app, &config);
+    config::save_config(&app, &config)?;
     Ok(())
 }
