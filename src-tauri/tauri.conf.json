@@ -10,7 +10,6 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "title": "codeMUX",
     "windows": [
       {
         "title": "codeMUX - AI编码工具聚合平台",
