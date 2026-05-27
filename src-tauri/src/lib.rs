@@ -1,10 +1,13 @@
 mod db;
+mod config;
+mod commands;
 
 use tauri::Manager;
 use std::sync::Mutex;
 
 pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
+    pub config: Mutex<config::types::AppConfig>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -13,11 +16,21 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let conn = db::initialize(&app.handle()).expect("Failed to initialize database");
+            let config = config::load_config(&app.handle());
+
             app.manage(AppState {
                 db: Mutex::new(conn),
+                config: Mutex::new(config),
             });
+
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![
+            commands::provider::get_config,
+            commands::provider::update_provider,
+            commands::provider::set_active_provider,
+            commands::provider::set_theme,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
