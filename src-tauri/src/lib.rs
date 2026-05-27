@@ -1,6 +1,7 @@
 mod db;
 mod config;
 mod commands;
+mod provider;
 
 use tauri::Manager;
 use std::sync::Mutex;
@@ -35,6 +36,7 @@ pub fn run() {
             commands::session::delete_session,
             commands::session::update_session_title,
             commands::session::get_messages,
+            commands::chat::send_message,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
