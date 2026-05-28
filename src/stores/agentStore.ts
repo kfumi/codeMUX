@@ -61,7 +61,7 @@ function parseAgentEvent(raw: string): AgentMessage {
   }
 }
 
-export const useAgentStore = create<AgentState>((set, get) => ({
+export const useAgentStore = create<AgentState>((set) => ({
   events: {},
   isRunning: {},
   error: {},
