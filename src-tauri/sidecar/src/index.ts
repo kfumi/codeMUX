@@ -1,6 +1,18 @@
 import * as readline from 'node:readline';
+import { execSync } from 'node:child_process';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { SidecarCommand } from './types.js';
+
+function findClaudeExecutable(): string | undefined {
+  try {
+    if (process.platform === 'win32') {
+      return execSync('where claude', { encoding: 'utf-8' }).trim().split('\n')[0]?.trim();
+    }
+    return execSync('which claude', { encoding: 'utf-8' }).trim();
+  } catch {
+    return undefined;
+  }
+}
 
 let activeQuery: ReturnType<typeof query> | null = null;
 let abortController: AbortController | null = null;
@@ -21,7 +33,8 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
 
   // Log config for debugging (without exposing full API key)
   const keyPreview = cmd.apiKey ? `${cmd.apiKey.slice(0, 10)}...` : 'not set';
-  process.stderr.write(`[sidecar] Starting query: model=${cmd.model || 'default'}, cwd=${cmd.cwd}, apiKey=${keyPreview}\n`);
+  const claudePath = findClaudeExecutable();
+  process.stderr.write(`[sidecar] Starting query: model=${cmd.model || 'default'}, cwd=${cmd.cwd}, apiKey=${keyPreview}, claude=${claudePath || 'not found'}\n`);
 
   abortController = new AbortController();
 
@@ -32,6 +45,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
         cwd: cmd.cwd,
         resume: cmd.sessionId,
         model: cmd.model,
+        pathToClaudeCodeExecutable: claudePath,
         abortController,
         permissionMode: 'default',
         allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
