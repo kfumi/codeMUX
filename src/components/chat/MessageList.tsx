@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import type { ChatMessage } from '../../types/chat';
 import { MessageItem } from './MessageItem';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { Bot } from 'lucide-react';
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -30,10 +29,7 @@ export function MessageList({ messages, isLoading, isStreaming, streamingContent
         <MessageItem key={message.id} message={message} onFileClick={onFileClick} />
       ))}
       {isStreaming && streamingContent && (
-        <div className="flex gap-3 justify-start">
-          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-            <Bot className="h-4 w-4 text-primary" />
-          </div>
+        <div className="flex justify-start">
           <div className="max-w-[80%] rounded-lg px-4 py-2 bg-muted">
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <MarkdownRenderer content={streamingContent} onFileClick={onFileClick} />
