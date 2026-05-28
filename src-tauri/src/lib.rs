@@ -24,6 +24,7 @@ pub fn run() {
                 db: Mutex::new(conn),
                 config: Mutex::new(config),
             });
+            app.manage(agent::commands::AgentState::default());
 
             Ok(())
         })
@@ -41,6 +42,9 @@ pub fn run() {
             commands::chat::send_message,
             commands::chat::send_message_stream,
             commands::file::read_file,
+            agent::commands::start_agent_session,
+            agent::commands::interrupt_agent_session,
+            agent::commands::shutdown_agent,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
