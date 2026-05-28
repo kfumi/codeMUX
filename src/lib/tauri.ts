@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, Channel } from '@tauri-apps/api/core';
 import type { Session } from '../types/session';
 import type { ChatMessage } from '../types/chat';
 import type { AppConfig, ProviderConfig, Theme } from '../types/provider';
@@ -13,6 +13,13 @@ export const sessionApi = {
 
 export const chatApi = {
   sendMessage: (sessionId: string, content: string): Promise<string> => invoke('send_message', { sessionId, content }),
+  sendMessageStream: (sessionId: string, content: string, onChunk: (token: string) => void): Promise<void> => {
+    const channel = new Channel<string>();
+    channel.onmessage = (token: string) => {
+      onChunk(token);
+    };
+    return invoke('send_message_stream', { sessionId, content, channel });
+  },
 };
 
 export const configApi = {
@@ -20,4 +27,9 @@ export const configApi = {
   updateProvider: (provider: ProviderConfig): Promise<void> => invoke('update_provider', { provider }),
   setActiveProvider: (providerId: string): Promise<void> => invoke('set_active_provider', { providerId }),
   setTheme: (theme: Theme): Promise<void> => invoke('set_theme', { theme: theme.toLowerCase() }),
+  testConnection: (provider: ProviderConfig): Promise<string> => invoke('test_connection', { provider }),
+};
+
+export const fileApi = {
+  readFile: (path: string): Promise<string> => invoke('read_file', { path }),
 };
