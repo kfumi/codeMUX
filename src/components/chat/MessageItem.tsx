@@ -1,12 +1,15 @@
 import type { ChatMessage } from '../../types/chat';
 import { cn } from '../../lib/utils';
 import { User, Bot } from 'lucide-react';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface MessageItemProps {
   message: ChatMessage;
+  isStreaming?: boolean;
+  onFileClick?: (path: string) => void;
 }
 
-export function MessageItem({ message }: MessageItemProps) {
+export function MessageItem({ message, isStreaming, onFileClick }: MessageItemProps) {
   const isUser = message.role === 'user';
 
   return (
@@ -22,7 +25,16 @@ export function MessageItem({ message }: MessageItemProps) {
           isUser ? 'bg-primary text-primary-foreground' : 'bg-muted'
         )}
       >
-        <div className="whitespace-pre-wrap break-words">{message.content}</div>
+        {isUser ? (
+          <div className="whitespace-pre-wrap break-words">{message.content}</div>
+        ) : (
+          <div className="prose prose-sm dark:prose-invert max-w-none">
+            <MarkdownRenderer content={message.content} onFileClick={onFileClick} />
+          </div>
+        )}
+        {isStreaming && !isUser && (
+          <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-0.5" />
+        )}
       </div>
       {isUser && (
         <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0">
