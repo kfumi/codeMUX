@@ -6,16 +6,19 @@ interface ChatState {
   messages: Record<string, ChatMessage[]>;
   isLoading: boolean;
   isStreaming: boolean;
+  streamingContent: Record<string, string>;
   error: string | null;
   fetchMessages: (sessionId: string) => Promise<void>;
   sendMessage: (sessionId: string, content: string) => Promise<void>;
 }
 
-export const useChatStore = create<ChatState>((set) => ({
+export const useChatStore = create<ChatState>((set, get) => ({
   messages: {},
   isLoading: false,
   isStreaming: false,
+  streamingContent: {},
   error: null,
+
   fetchMessages: async (sessionId: string) => {
     set({ isLoading: true, error: null });
     try {
@@ -28,8 +31,10 @@ export const useChatStore = create<ChatState>((set) => ({
       set({ error: String(error), isLoading: false });
     }
   },
+
   sendMessage: async (sessionId: string, content: string) => {
-    set({ isStreaming: true, error: null });
+    set({ isStreaming: true, error: null, streamingContent: { ...get().streamingContent, [sessionId]: '' } });
+
     const tempUserMessage: ChatMessage = {
       id: `temp-${Date.now()}`,
       session_id: sessionId,
@@ -43,13 +48,27 @@ export const useChatStore = create<ChatState>((set) => ({
         [sessionId]: [...(state.messages[sessionId] || []), tempUserMessage],
       },
     }));
+
     try {
-      await chatApi.sendMessage(sessionId, content);
+      await chatApi.sendMessageStream(sessionId, content, (token: string) => {
+        set((state) => ({
+          streamingContent: {
+            ...state.streamingContent,
+            [sessionId]: (state.streamingContent[sessionId] || '') + token,
+          },
+        }));
+      });
+
       const messages = await sessionApi.getMessages(sessionId);
-      set((state) => ({
-        messages: { ...state.messages, [sessionId]: messages },
-        isStreaming: false,
-      }));
+      set((state) => {
+        const newStreamingContent = { ...state.streamingContent };
+        delete newStreamingContent[sessionId];
+        return {
+          messages: { ...state.messages, [sessionId]: messages },
+          isStreaming: false,
+          streamingContent: newStreamingContent,
+        };
+      });
     } catch (error) {
       set({ error: String(error), isStreaming: false });
     }
