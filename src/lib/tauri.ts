@@ -4,7 +4,7 @@ import type { ChatMessage } from '../types/chat';
 import type { AppConfig, ProviderConfig, Theme } from '../types/provider';
 
 export const sessionApi = {
-  create: (title: string): Promise<Session> => invoke('create_session', { title }),
+  create: (title: string, mode?: string): Promise<Session> => invoke('create_session', { title, mode }),
   getAll: (): Promise<Session[]> => invoke('get_all_sessions'),
   delete: (sessionId: string): Promise<void> => invoke('delete_session', { sessionId }),
   updateTitle: (sessionId: string, title: string): Promise<void> => invoke('update_session_title', { sessionId, title }),
@@ -20,6 +20,23 @@ export const chatApi = {
     };
     return invoke('send_message_stream', { sessionId, content, channel });
   },
+};
+
+export const agentApi = {
+  startSession: (
+    sessionId: string,
+    prompt: string,
+    cwd: string,
+    onEvent: (event: string) => void,
+  ): Promise<void> => {
+    const channel = new Channel<string>();
+    channel.onmessage = (event: string) => {
+      onEvent(event);
+    };
+    return invoke('start_agent_session', { sessionId, prompt, cwd, channel });
+  },
+  interrupt: (): Promise<void> => invoke('interrupt_agent_session'),
+  shutdown: (): Promise<void> => invoke('shutdown_agent'),
 };
 
 export const configApi = {
