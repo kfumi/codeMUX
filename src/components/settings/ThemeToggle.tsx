@@ -14,21 +14,24 @@ export function ThemeToggle() {
   ];
 
   return (
-    <div className="space-y-2">
-      <label className="text-sm font-medium">主题</label>
-      <div className="flex gap-2">
-        {themes.map(({ value, label, icon: Icon }) => (
-          <Button
-            key={value}
-            variant={currentTheme === value ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setTheme(value)}
-            className="flex items-center gap-2"
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </Button>
-        ))}
+    <div className="space-y-4">
+      <h3 className="font-medium">外观</h3>
+      <div className="space-y-2">
+        <label className="text-sm text-muted-foreground">主题</label>
+        <div className="flex gap-2">
+          {themes.map(({ value, label, icon: Icon }) => (
+            <Button
+              key={value}
+              variant={currentTheme === value ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setTheme(value)}
+              className="flex items-center gap-2"
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </Button>
+          ))}
+        </div>
       </div>
     </div>
   );

@@ -29,7 +29,8 @@ export function ProviderConfig() {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium">API 配置</h3>
+      <h3 className="font-medium">供应商配置</h3>
+      <p className="text-sm text-muted-foreground">配置 AI 服务提供商。</p>
       <div className="space-y-2">
         <label className="text-sm">API Key</label>
         <Input

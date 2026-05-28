@@ -9,21 +9,30 @@ interface SidebarProps {
 
 export function Sidebar({ onNewSession, onOpenSettings }: SidebarProps) {
   return (
-    <div className="flex flex-col h-full">
-      <div className="p-4 border-b">
-        <h1 className="text-xl font-bold">codeMUX</h1>
+    <div className="flex flex-col h-full bg-background">
+      <div className="p-3 border-b">
+        <h1 className="text-lg font-bold text-foreground">codeMUX</h1>
       </div>
-      <div className="p-2">
-        <Button variant="outline" className="w-full justify-start gap-2" onClick={onNewSession}>
+
+      {/* Top actions */}
+      <div className="p-2 space-y-1">
+        <Button variant="ghost" className="w-full justify-start gap-2 text-sm" onClick={onNewSession}>
           <Plus className="h-4 w-4" />
-          新对话
+          快速对话
         </Button>
       </div>
+
+      {/* Session list */}
       <div className="flex-1 overflow-auto">
+        <div className="px-2 py-1">
+          <span className="text-xs text-muted-foreground px-2">对话</span>
+        </div>
         <SessionList />
       </div>
+
+      {/* Bottom settings */}
       <div className="p-2 border-t">
-        <Button variant="ghost" className="w-full justify-start gap-2" onClick={onOpenSettings}>
+        <Button variant="ghost" className="w-full justify-start gap-2 text-sm" onClick={onOpenSettings}>
           <Settings className="h-4 w-4" />
           设置
         </Button>
