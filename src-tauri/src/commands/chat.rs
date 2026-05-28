@@ -71,3 +71,75 @@ pub async fn send_message(
 
     Ok(response)
 }
+
+#[tauri::command]
+pub async fn send_message_stream(
+    state: State<'_, AppState>,
+    session_id: String,
+    content: String,
+    model: Option<String>,
+    channel: tauri::ipc::Channel<String>,
+) -> Result<(), String> {
+    // 1. Resolve the active provider config
+    let provider_config = {
+        let config = state.config.lock().unwrap();
+        let active_id = config
+            .active_provider_id
+            .as_deref()
+            .ok_or("No active provider configured")?;
+        config
+            .providers
+            .iter()
+            .find(|p| p.id == active_id)
+            .cloned()
+            .ok_or_else(|| format!("Provider '{}' not found", active_id))?
+    };
+
+    // 2. Load existing message history
+    let history: Vec<ChatMessage> = {
+        let db = state.db.lock().unwrap();
+        operations::get_messages_by_session(&db, &session_id)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|m| ChatMessage {
+                role: m.role,
+                content: m.content,
+            })
+            .collect()
+    };
+
+    // 3. Save the user message to DB
+    {
+        let db = state.db.lock().unwrap();
+        operations::create_message(&db, &session_id, "user", &content)
+            .map_err(|e| e.to_string())?;
+    }
+
+    // 4. Build the full message list
+    let mut messages = history;
+    messages.push(ChatMessage {
+        role: "user".to_string(),
+        content: content.clone(),
+    });
+
+    // 5. Call the provider in streaming mode
+    let prov = provider::create_provider(&provider_config);
+    let model_str = model.as_deref().unwrap_or(&provider_config.default_model);
+    let mut receiver = prov.send_message_stream(messages, model_str).await?;
+
+    // 6. Read tokens from receiver and send through channel
+    let mut full_response = String::new();
+    while let Some(token) = receiver.recv().await {
+        full_response.push_str(&token);
+        let _ = channel.send(token);
+    }
+
+    // 7. Save the complete assistant response to DB
+    {
+        let db = state.db.lock().unwrap();
+        operations::create_message(&db, &session_id, "assistant", &full_response)
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}

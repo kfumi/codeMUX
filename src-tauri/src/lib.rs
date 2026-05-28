@@ -31,12 +31,14 @@ pub fn run() {
             commands::provider::update_provider,
             commands::provider::set_active_provider,
             commands::provider::set_theme,
+            commands::provider::test_connection,
             commands::session::create_session,
             commands::session::get_all_sessions,
             commands::session::delete_session,
             commands::session::update_session_title,
             commands::session::get_messages,
             commands::chat::send_message,
+            commands::chat::send_message_stream,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
