@@ -3,6 +3,7 @@ import { MainLayout } from './components/layout/MainLayout';
 import { Sidebar } from './components/layout/Sidebar';
 import { ChatPanel } from './components/chat/ChatPanel';
 import { SettingsDialog } from './components/settings/SettingsDialog';
+import { PreviewPanel } from './components/preview/PreviewPanel';
 import { useSessionStore } from './stores/sessionStore';
 import { useSettingsStore } from './stores/settingsStore';
 
@@ -25,6 +26,7 @@ function App() {
         sidebar={
           <Sidebar onNewSession={handleNewSession} onOpenSettings={() => setSettingsOpen(true)} />
         }
+        preview={<PreviewPanel />}
       >
         {activeSessionId ? (
           <ChatPanel sessionId={activeSessionId} />
