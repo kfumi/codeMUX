@@ -19,6 +19,10 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
     process.env.ANTHROPIC_API_KEY = cmd.apiKey;
   }
 
+  // Log config for debugging (without exposing full API key)
+  const keyPreview = cmd.apiKey ? `${cmd.apiKey.slice(0, 10)}...` : 'not set';
+  process.stderr.write(`[sidecar] Starting query: model=${cmd.model || 'default'}, cwd=${cmd.cwd}, apiKey=${keyPreview}\n`);
+
   abortController = new AbortController();
 
   try {
@@ -40,7 +44,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
 
     emit({ type: 'sidecar_query_done' });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
+    const errorMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
     if (errorMsg !== 'The operation was aborted') {
       emit({ type: 'sidecar_error', error: errorMsg });
     }
