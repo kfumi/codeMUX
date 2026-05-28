@@ -1,4 +1,7 @@
 import * as readline from 'node:readline';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import { execSync } from 'node:child_process';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { SidecarCommand } from './types.js';
@@ -11,6 +14,25 @@ function findClaudeExecutable(): string | undefined {
     return execSync('which claude', { encoding: 'utf-8' }).trim();
   } catch {
     return undefined;
+  }
+}
+
+/** Load env vars from ~/.claude/settings.json and apply to process.env */
+function loadClaudeSettingsEnv(): void {
+  try {
+    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    if (!fs.existsSync(settingsPath)) return;
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    if (settings.env && typeof settings.env === 'object') {
+      for (const [key, value] of Object.entries(settings.env)) {
+        if (typeof value === 'string' && !process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+      process.stderr.write(`[sidecar] Loaded ${Object.keys(settings.env).length} env vars from ~/.claude/settings.json\n`);
+    }
+  } catch (err) {
+    process.stderr.write(`[sidecar] Warning: failed to load Claude settings: ${err}\n`);
   }
 }
 
@@ -81,6 +103,9 @@ function handleInterrupt(): void {
 }
 
 async function main(): Promise<void> {
+  // Load Claude Code settings (env vars like ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, etc.)
+  loadClaudeSettingsEnv();
+
   emit({ type: 'sidecar_ready' });
 
   const rl = readline.createInterface({ input: process.stdin });
