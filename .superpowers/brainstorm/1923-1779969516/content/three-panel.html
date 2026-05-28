@@ -1,0 +1,112 @@
+<h2>三栏布局 + 代码预览</h2>
+<p class="subtitle">点击对话中的文件链接 → 右侧面板展示文件内容和 diff</p>
+
+<div class="mockup">
+  <div class="mockup-header">完整布局预览</div>
+  <div class="mockup-body" style="padding:0; overflow:hidden;">
+    <div style="display:flex; height:420px; font-family:system-ui; font-size:13px;">
+
+      <!-- 左侧: 会话列表 -->
+      <div style="width:200px; background:#f8f9fa; border-right:1px solid #e5e7eb; display:flex; flex-direction:column;">
+        <div style="padding:12px; border-bottom:1px solid #e5e7eb;">
+          <div style="background:#3b82f6; color:white; padding:6px 12px; border-radius:6px; text-align:center; cursor:pointer; font-size:12px;">+ 新建对话</div>
+        </div>
+        <div style="flex:1; overflow-y:auto;">
+          <div style="padding:8px 12px; background:#e0f2fe; border-left:3px solid #3b82f6; cursor:pointer;">重构登录模块</div>
+          <div style="padding:8px 12px; cursor:pointer; color:#6b7280;">API 接口优化</div>
+          <div style="padding:8px 12px; cursor:pointer; color:#6b7280;">Bug 修复讨论</div>
+        </div>
+        <div style="padding:12px; border-top:1px solid #e5e7eb; color:#9ca3af; font-size:11px; text-align:center;">DeepSeek · deepseek-chat</div>
+      </div>
+
+      <!-- 中间: 对话区域 -->
+      <div style="flex:1; display:flex; flex-direction:column; min-width:0;">
+        <div style="padding:12px 16px; border-bottom:1px solid #e5e7eb; font-weight:600; font-size:14px;">重构登录模块</div>
+
+        <div style="flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:12px;">
+          <!-- 用户消息 -->
+          <div style="display:flex; justify-content:flex-end;">
+            <div style="background:#3b82f6; color:white; padding:10px 14px; border-radius:12px 12px 4px 12px; max-width:70%; font-size:13px;">
+              帮我重构登录模块，使用 JWT 替代 session
+            </div>
+          </div>
+
+          <!-- AI 消息 -->
+          <div style="display:flex; gap:8px; max-width:85%;">
+            <div style="width:28px; height:28px; background:#8b5cf6; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-size:12px; flex-shrink:0;">AI</div>
+            <div style="background:#f3f4f6; padding:12px 14px; border-radius:4px 12px 12px 12px; line-height:1.6;">
+              <div style="margin-bottom:8px;">已完成登录模块重构，修改了以下文件：</div>
+              <div style="display:flex; flex-direction:column; gap:4px;">
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span style="display:inline-flex; align-items:center; gap:4px; background:#dbeafe; color:#1d4ed8; padding:3px 8px; border-radius:4px; cursor:pointer; font-size:12px; font-family:monospace;">📄 src/auth/jwt.ts</span>
+                  <span style="color:#16a34a; font-size:11px;">+42 -18</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span style="display:inline-flex; align-items:center; gap:4px; background:#dbeafe; color:#1d4ed8; padding:3px 8px; border-radius:4px; cursor:pointer; font-size:12px; font-family:monospace;">📄 src/auth/middleware.ts</span>
+                  <span style="color:#16a34a; font-size:11px;">+28 -5</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span style="display:inline-flex; align-items:center; gap:4px; background:#dbeafe; color:#1d4ed8; padding:3px 8px; border-radius:4px; cursor:pointer; font-size:12px; font-family:monospace;">📄 src/routes/login.ts</span>
+                  <span style="color:#f59e0b; font-size:11px;">已修改</span>
+                </div>
+              </div>
+              <div style="margin-top:10px; font-size:13px;">
+                主要变更：使用 <code style="background:#e5e7eb; padding:1px 4px; border-radius:3px; font-size:12px;">jsonwebtoken</code> 替代 express-session，token 有效期 24 小时。
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding:12px 16px; border-top:1px solid #e5e7eb; display:flex; gap:8px;">
+          <div style="flex:1; background:#f9fafb; border:1px solid #d1d5db; border-radius:8px; padding:8px 12px; color:#9ca3af; font-size:13px;">输入消息...</div>
+          <div style="background:#3b82f6; color:white; padding:8px 16px; border-radius:8px; cursor:pointer; font-size:13px;">发送</div>
+        </div>
+      </div>
+
+      <!-- 右侧: 代码预览面板 -->
+      <div style="width:380px; background:#1e1e2e; border-left:1px solid #313244; display:flex; flex-direction:column; color:#cdd6f4;">
+        <div style="padding:10px 14px; border-bottom:1px solid #313244; display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; gap:8px; font-size:12px;">
+            <span style="background:#313244; padding:3px 8px; border-radius:4px; cursor:pointer;">文件</span>
+            <span style="background:#45475a; padding:3px 8px; border-radius:4px; cursor:pointer;">Diff</span>
+          </div>
+          <span style="font-size:11px; color:#6c7086; cursor:pointer;">✕</span>
+        </div>
+
+        <div style="padding:8px 14px; background:#181825; border-bottom:1px solid #313244; font-family:monospace; font-size:12px; color:#89b4fa;">
+          src/auth/jwt.ts
+        </div>
+
+        <div style="flex:1; overflow-y:auto; font-family:'Cascadia Code',Consolas,monospace; font-size:12px; line-height:1.7;">
+          <div style="padding:2px 14px; background:#1e6f50;">+ <span style="color:#a6e3a1;">import</span> jwt <span style="color:#cba6f7;">from</span> <span style="color:#a6e3a1;">'jsonwebtoken'</span>;</div>
+          <div style="padding:2px 14px; background:#1e6f50;">+ </div>
+          <div style="padding:2px 14px; background:#1e6f50;">+ <span style="color:#cba6f7;">const</span> SECRET = process.env.<span style="color:#89b4fa;">JWT_SECRET</span>;</div>
+          <div style="padding:2px 14px;">  <span style="color:#cba6f7;">export</span> <span style="color:#cba6f7;">function</span> <span style="color:#89b4fa;">generateToken</span>(user: User) {</div>
+          <div style="padding:2px 14px; background:#7f1d1d;">-   <span style="color:#cba6f7;">return</span> session.<span style="color:#89b4fa;">create</span>(user.id);</div>
+          <div style="padding:2px 14px; background:#1e6f50;">+   <span style="color:#cba6f7;">return</span> jwt.<span style="color:#89b4fa;">sign</span>({ id: user.id }, SECRET, {</div>
+          <div style="padding:2px 14px; background:#1e6f50;">+     expiresIn: <span style="color:#a6e3a1;">'24h'</span></div>
+          <div style="padding:2px 14px; background:#1e6f50;">+   });</div>
+          <div style="padding:2px 14px;">  }</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="inline-diff" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>内联 Diff 视图</h3>
+      <p>右侧面板默认显示 diff 模式（增绿删红），也支持切换到完整文件视图。适合快速审查变更。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="file-first" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>文件优先视图</h3>
+      <p>右侧面板默认显示完整文件内容，高亮变更行。点击"查看 Diff"按钮切换到 diff 模式。</p>
+    </div>
+  </div>
+</div>

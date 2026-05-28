@@ -1,0 +1,37 @@
+<h2>架构方案选择</h2>
+<p class="subtitle">基于你的需求，我提出三种架构方案</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>单体架构（推荐）</h3>
+      <p><strong>结构：</strong>所有功能在一个应用中，模块化组织</p>
+      <p><strong>优势：</strong>开发简单，部署方便，适合个人工具</p>
+      <p><strong>劣势：</strong>功能增多后可能变得臃肿</p>
+      <p><strong>适合：</strong>追求快速开发和简洁维护</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>轻量级插件化架构</h3>
+      <p><strong>结构：</strong>核心框架 + 插件系统，功能通过插件扩展</p>
+      <p><strong>优势：</strong>灵活可扩展，社区可贡献插件</p>
+      <p><strong>劣势：</strong>需要设计插件API，开发复杂度较高</p>
+      <p><strong>适合：</strong>未来可能需要扩展功能</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>混合架构</h3>
+      <p><strong>结构：</strong>核心单体 + 可选插件，渐进式扩展</p>
+      <p><strong>优势：</strong>平衡简单性和扩展性</p>
+      <p><strong>劣势：</strong>需要合理划分核心和插件边界</p>
+      <p><strong>适合：</strong>希望兼顾快速开发和未来扩展</p>
+    </div>
+  </div>
+</div>

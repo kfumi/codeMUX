@@ -1,0 +1,56 @@
+<h2>供应商配置模块设计</h2>
+<p class="subtitle">管理DeepSeek和其他OpenAI兼容接口</p>
+
+<div class="mockup">
+  <div class="mockup-header">供应商配置架构</div>
+  <div class="mockup-body">
+    <div style="display: flex; flex-direction: column; gap: 20px; padding: 20px;">
+      <!-- 配置界面层 -->
+      <div style="background: #e3f2fd; padding: 15px; border-radius: 8px;">
+        <h4 style="margin: 0 0 10px 0;">配置界面层</h4>
+        <div style="display: flex; gap: 10px;">
+          <div style="background: white; padding: 10px; border-radius: 4px; flex: 1;">
+            <strong>供应商列表</strong>
+            <p style="font-size: 12px; margin: 5px 0 0 0;">显示已配置的供应商，支持添加/删除</p>
+          </div>
+          <div style="background: white; padding: 10px; border-radius: 4px; flex: 1;">
+            <strong>配置表单</strong>
+            <p style="font-size: 12px; margin: 5px 0 0 0;">API Key、端点URL、模型选择等</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 供应商适配器层 -->
+      <div style="background: #fff3e0; padding: 15px; border-radius: 8px;">
+        <h4 style="margin: 0 0 10px 0;">供应商适配器层</h4>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">DeepSeek适配器</div>
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">OpenAI兼容适配器</div>
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">Claude适配器</div>
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">Codex适配器</div>
+        </div>
+      </div>
+
+      <!-- 配置存储 -->
+      <div style="background: #e8f5e8; padding: 15px; border-radius: 8px;">
+        <h4 style="margin: 0 0 10px 0;">配置存储</h4>
+        <div style="background: white; padding: 10px; border-radius: 4px;">
+          <strong>providers.json</strong>
+          <p style="font-size: 12px; margin: 5px 0 0 0;">存储所有供应商配置，支持导入/导出</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>配置项说明</h3>
+  <ul>
+    <li><strong>供应商名称：</strong>自定义显示名称</li>
+    <li><strong>API类型：</strong>DeepSeek / OpenAI兼容 / 其他</li>
+    <li><strong>API Key：</strong>认证密钥（加密存储）</li>
+    <li><strong>端点URL：</strong>API地址（DeepSeek默认：https://api.deepseek.com）</li>
+    <li><strong>默认模型：</strong>如 deepseek-chat、deepseek-coder</li>
+    <li><strong>参数配置：</strong>temperature、max_tokens等</li>
+  </ul>
+</div>

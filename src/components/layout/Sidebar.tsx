@@ -1,9 +1,9 @@
 import { SessionList } from '../session/SessionList';
 import { Button } from '../ui/button';
-import { Plus, Settings, Bot } from 'lucide-react';
+import { Plus, Settings } from 'lucide-react';
 
 interface SidebarProps {
-  onNewSession: (mode?: 'chat' | 'agent') => void;
+  onNewSession: () => void;
   onOpenSettings: () => void;
 }
 
@@ -16,20 +16,16 @@ export function Sidebar({ onNewSession, onOpenSettings }: SidebarProps) {
 
       {/* Top actions */}
       <div className="p-2 space-y-1">
-        <Button variant="ghost" className="w-full justify-start gap-2 text-sm" onClick={() => onNewSession('chat')}>
+        <Button variant="ghost" className="w-full justify-start gap-2 text-sm" onClick={onNewSession}>
           <Plus className="h-4 w-4" />
-          快速对话
-        </Button>
-        <Button variant="ghost" className="w-full justify-start gap-2 text-sm" onClick={() => onNewSession('agent')}>
-          <Bot className="h-4 w-4" />
-          Agent 任务
+          新任务
         </Button>
       </div>
 
       {/* Session list */}
       <div className="flex-1 overflow-auto">
         <div className="px-2 py-1">
-          <span className="text-xs text-muted-foreground px-2">对话</span>
+          <span className="text-xs text-muted-foreground px-2">任务</span>
         </div>
         <SessionList />
       </div>

@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { configApi } from '../../lib/tauri';
 import type { ProviderConfig as ProviderConfigType } from '../../types/provider';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import { Save, TestTube } from 'lucide-react';
+import { Save, TestTube, Loader2, CheckCircle, XCircle } from 'lucide-react';
 
 export function ProviderConfig() {
-  const { config } = useSettingsStore();
+  const { config, updateProvider } = useSettingsStore();
   const activeProvider = config?.providers.find(
     (p) => p.id === config.active_provider_id
   );
@@ -14,17 +15,63 @@ export function ProviderConfig() {
   const [formData, setFormData] = useState<Partial<ProviderConfigType>>(
     activeProvider || {}
   );
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [testMessage, setTestMessage] = useState('');
 
   if (!activeProvider) {
     return <div>未配置供应商</div>;
   }
 
   const handleSave = async () => {
-    console.log('Save config:', formData);
+    if (!formData.id) return;
+    setIsSaving(true);
+    setSaveStatus('idle');
+    try {
+      await updateProvider({ ...activeProvider, ...formData } as ProviderConfigType);
+      setSaveStatus('success');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch {
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleTest = async () => {
-    console.log('Test connection');
+    setIsTesting(true);
+    setTestStatus('idle');
+    setTestMessage('');
+    try {
+      const provider = { ...activeProvider, ...formData } as ProviderConfigType;
+      const response = await configApi.testConnection(provider);
+      setTestStatus('success');
+      setTestMessage(`连接成功: ${response.slice(0, 100)}`);
+      setTimeout(() => setTestStatus('idle'), 5000);
+    } catch (err) {
+      setTestStatus('error');
+      setTestMessage(`连接失败: ${err}`);
+      setTimeout(() => setTestStatus('idle'), 5000);
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const getSaveButtonContent = () => {
+    if (isSaving) return <><Loader2 className="h-4 w-4 animate-spin" />保存中...</>;
+    if (saveStatus === 'success') return <><CheckCircle className="h-4 w-4" />已保存</>;
+    if (saveStatus === 'error') return <><XCircle className="h-4 w-4" />保存失败</>;
+    return <><Save className="h-4 w-4" />保存</>;
+  };
+
+  const getTestButtonContent = () => {
+    if (isTesting) return <><Loader2 className="h-4 w-4 animate-spin" />测试中...</>;
+    if (testStatus === 'success') return <><CheckCircle className="h-4 w-4" />连接成功</>;
+    if (testStatus === 'error') return <><XCircle className="h-4 w-4" />连接失败</>;
+    return <><TestTube className="h-4 w-4" />测试连接</>;
   };
 
   return (
@@ -57,15 +104,28 @@ export function ProviderConfig() {
         />
       </div>
       <div className="flex gap-2">
-        <Button onClick={handleSave} className="flex items-center gap-2">
-          <Save className="h-4 w-4" />
-          保存
+        <Button
+          onClick={handleSave}
+          disabled={isSaving}
+          variant={saveStatus === 'error' ? 'destructive' : 'default'}
+          className="flex items-center gap-2"
+        >
+          {getSaveButtonContent()}
         </Button>
-        <Button variant="outline" onClick={handleTest} className="flex items-center gap-2">
-          <TestTube className="h-4 w-4" />
-          测试连接
+        <Button
+          variant={testStatus === 'error' ? 'destructive' : 'outline'}
+          onClick={handleTest}
+          disabled={isTesting}
+          className="flex items-center gap-2"
+        >
+          {getTestButtonContent()}
         </Button>
       </div>
+      {testMessage && (
+        <p className={`text-sm ${testStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+          {testMessage}
+        </p>
+      )}
     </div>
   );
 }

@@ -35,16 +35,27 @@ pub enum Theme {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            providers: vec![ProviderConfig {
-                id: "deepseek".to_string(),
-                name: "DeepSeek".to_string(),
-                api_type: ApiType::DeepSeek,
-                api_key: String::new(),
-                endpoint_url: "https://api.deepseek.com".to_string(),
-                default_model: "deepseek-chat".to_string(),
-                is_active: true,
-            }],
-            active_provider_id: Some("deepseek".to_string()),
+            providers: vec![
+                ProviderConfig {
+                    id: "deepseek".to_string(),
+                    name: "DeepSeek".to_string(),
+                    api_type: ApiType::DeepSeek,
+                    api_key: String::new(),
+                    endpoint_url: "https://api.deepseek.com".to_string(),
+                    default_model: "deepseek-chat".to_string(),
+                    is_active: false,
+                },
+                ProviderConfig {
+                    id: "anthropic".to_string(),
+                    name: "Anthropic (Claude)".to_string(),
+                    api_type: ApiType::Claude,
+                    api_key: String::new(),
+                    endpoint_url: "https://api.anthropic.com".to_string(),
+                    default_model: "claude-sonnet-4-6".to_string(),
+                    is_active: true,
+                },
+            ],
+            active_provider_id: Some("anthropic".to_string()),
             theme: Theme::System,
         }
     }
