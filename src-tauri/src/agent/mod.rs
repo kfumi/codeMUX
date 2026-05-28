@@ -31,16 +31,22 @@ impl SidecarHandle {
 
 /// Path to the sidecar script (dist/index.js).
 ///
-/// NOTE: In dev mode, `resource_dir()` points to `target/debug/`, NOT the source tree.
-/// For development, you may need to adjust this path to point to the actual sidecar location
-/// (e.g., `src-tauri/sidecar/dist/index.js`). Consider using `app_handle.path().app_data_dir()`
-/// or a relative path from the executable. This is a known issue — adjust as needed.
+/// In production, uses `resource_dir()`. In dev mode (debug), falls back to
+/// the Cargo manifest directory so the sidecar is found in the source tree.
 fn sidecar_script_path(app_handle: &tauri::AppHandle) -> PathBuf {
-    let resource_dir = app_handle
-        .path()
-        .resource_dir()
-        .unwrap_or_else(|_| PathBuf::from("."));
-    resource_dir.join("sidecar").join("dist").join("index.js")
+    let sidecar_rel = PathBuf::from("sidecar").join("dist").join("index.js");
+
+    // Try resource_dir first (production)
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        let path = resource_dir.join(&sidecar_rel);
+        if path.exists() {
+            return path;
+        }
+    }
+
+    // Fall back to CARGO_MANIFEST_DIR (dev mode)
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir.join(sidecar_rel)
 }
 
 /// Spawn the sidecar process and return a handle + event receiver.

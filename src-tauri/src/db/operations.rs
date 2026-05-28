@@ -24,26 +24,6 @@ pub struct Message {
 }
 
 // 会话操作
-pub fn create_session(conn: &Connection, title: &str) -> Result<Session> {
-    let id = Uuid::new_v4().to_string();
-    let now = Utc::now().to_rfc3339();
-
-    conn.execute(
-        "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-        params![id, title, now, now],
-    )?;
-
-    Ok(Session {
-        id,
-        title: title.to_string(),
-        provider_id: None,
-        model: None,
-        mode: None,
-        created_at: now.clone(),
-        updated_at: now,
-    })
-}
-
 pub fn create_session_with_mode(conn: &Connection, title: &str, mode: &str) -> Result<Session> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
