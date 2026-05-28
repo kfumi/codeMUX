@@ -8,7 +8,7 @@ interface SessionState {
   isLoading: boolean;
   error: string | null;
   fetchSessions: () => Promise<void>;
-  createSession: (title: string) => Promise<Session>;
+  createSession: (title: string, mode?: string) => Promise<Session>;
   deleteSession: (sessionId: string) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
@@ -28,10 +28,10 @@ export const useSessionStore = create<SessionState>((set) => ({
       set({ error: String(error), isLoading: false });
     }
   },
-  createSession: async (title: string) => {
+  createSession: async (title: string, mode?: string) => {
     set({ isLoading: true, error: null });
     try {
-      const session = await sessionApi.create(title);
+      const session = await sessionApi.create(title, mode);
       set((state) => ({
         sessions: [session, ...state.sessions],
         activeSessionId: session.id,

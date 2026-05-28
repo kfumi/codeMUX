@@ -3,9 +3,15 @@ use crate::AppState;
 use crate::db::operations;
 
 #[tauri::command]
-pub fn create_session(state: State<'_, AppState>, title: String) -> Result<operations::Session, String> {
+pub fn create_session(
+    state: State<'_, AppState>,
+    title: String,
+    mode: Option<String>,
+) -> Result<operations::Session, String> {
     let db = state.db.lock().unwrap();
-    operations::create_session(&db, &title).map_err(|e| e.to_string())
+    let mode_str = mode.as_deref().unwrap_or("chat");
+    operations::create_session_with_mode(&db, &title, mode_str)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
