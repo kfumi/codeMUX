@@ -5,6 +5,7 @@ import { ChatPanel } from './components/chat/ChatPanel';
 import { AgentPanel } from './components/agent/AgentPanel';
 import { SettingsDialog } from './components/settings/SettingsDialog';
 import { PreviewPanel } from './components/preview/PreviewPanel';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { useSessionStore } from './stores/sessionStore';
 import { useSettingsStore } from './stores/settingsStore';
 
@@ -19,7 +20,11 @@ function App() {
 
   const handleNewSession = async (mode: 'chat' | 'agent' = 'chat') => {
     const title = mode === 'agent' ? '新 Agent 任务' : '新对话';
-    await createSession(title, mode);
+    try {
+      await createSession(title, mode);
+    } catch (err) {
+      console.error('Failed to create session:', err);
+    }
   };
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
@@ -33,6 +38,7 @@ function App() {
         }
         preview={<PreviewPanel />}
       >
+        <ErrorBoundary>
         {activeSessionId ? (
           isAgentMode ? (
             <AgentPanel sessionId={activeSessionId} />
@@ -47,6 +53,7 @@ function App() {
             </div>
           </div>
         )}
+        </ErrorBoundary>
       </MainLayout>
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>

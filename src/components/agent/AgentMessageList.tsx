@@ -129,9 +129,11 @@ function AgentEventItem({ msg }: { msg: AgentMessage }) {
   }
 }
 
+const EMPTY_EVENTS: AgentMessage[] = [];
+
 export function AgentMessageList({ sessionId }: AgentMessageListProps) {
-  const events = useAgentStore((s) => s.events[sessionId] || []);
-  const isRunning = useAgentStore((s) => s.isRunning[sessionId] || false);
+  const events = useAgentStore((s) => s.events[sessionId] ?? EMPTY_EVENTS);
+  const isRunning = useAgentStore((s) => s.isRunning[sessionId] ?? false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

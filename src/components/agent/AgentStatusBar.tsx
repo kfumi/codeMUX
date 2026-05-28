@@ -1,4 +1,4 @@
-import { useAgentStore } from '../../stores/agentStore';
+import { useAgentStore, type AgentMessage } from '../../stores/agentStore';
 import { Square, Loader2 } from 'lucide-react';
 import { Button } from '../ui/button';
 
@@ -6,10 +6,12 @@ interface AgentStatusBarProps {
   sessionId: string;
 }
 
+const EMPTY_EVENTS: AgentMessage[] = [];
+
 export function AgentStatusBar({ sessionId }: AgentStatusBarProps) {
-  const isRunning = useAgentStore((s) => s.isRunning[sessionId] || false);
+  const isRunning = useAgentStore((s) => s.isRunning[sessionId] ?? false);
   const error = useAgentStore((s) => s.error[sessionId]);
-  const events = useAgentStore((s) => s.events[sessionId] || []);
+  const events = useAgentStore((s) => s.events[sessionId] ?? EMPTY_EVENTS);
   const interrupt = useAgentStore((s) => s.interrupt);
 
   const lastResult = [...events].reverse().find((e) => e.kind === 'result');

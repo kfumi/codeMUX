@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { useAgentStore } from '../../stores/agentStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { AgentMessageList } from './AgentMessageList';
@@ -12,16 +11,10 @@ interface AgentPanelProps {
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions } = useSessionStore();
   const { startQuery, isRunning } = useAgentStore();
-  const [cwd, setCwd] = useState('');
+  const cwd = '.';
 
   const session = sessions.find((s) => s.id === sessionId);
   const running = isRunning[sessionId] || false;
-
-  useEffect(() => {
-    if (!cwd) {
-      setCwd('.'); // Default to current directory
-    }
-  }, [cwd]);
 
   const handleSend = async (content: string) => {
     await startQuery(sessionId, content, cwd);
