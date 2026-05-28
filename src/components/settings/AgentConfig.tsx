@@ -7,20 +7,21 @@ const STORAGE_KEY_ANTHROPIC_KEY = 'agent-anthropic-api-key';
 const STORAGE_KEY_ANTHROPIC_MODEL = 'agent-anthropic-model';
 
 const MODEL_OPTIONS = [
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (推荐)' },
-  { value: 'claude-opus-4-7', label: 'Claude Opus 4.7 (最强)' },
-  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (最快)' },
+  { value: '', label: '使用默认模型 (推荐)' },
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+  { value: 'claude-opus-4-7', label: 'Claude Opus 4.7' },
+  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
 ];
 
 export function AgentConfig() {
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('claude-sonnet-4-6');
+  const [model, setModel] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success'>('idle');
 
   useEffect(() => {
     setApiKey(localStorage.getItem(STORAGE_KEY_ANTHROPIC_KEY) || '');
-    setModel(localStorage.getItem(STORAGE_KEY_ANTHROPIC_MODEL) || 'claude-sonnet-4-6');
+    setModel(localStorage.getItem(STORAGE_KEY_ANTHROPIC_MODEL) || '');
   }, []);
 
   const handleSave = () => {

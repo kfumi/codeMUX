@@ -39,17 +39,21 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
   abortController = new AbortController();
 
   try {
+    const options: Record<string, unknown> = {
+      cwd: cmd.cwd,
+      abortController,
+      permissionMode: 'bypassPermissions',
+      allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
+    };
+    if (cmd.sessionId) options.resume = cmd.sessionId;
+    if (cmd.model) options.model = cmd.model;
+    if (claudePath) options.pathToClaudeCodeExecutable = claudePath;
+
+    process.stderr.write(`[sidecar] query options: ${JSON.stringify({ ...options, abortController: '[object]' })}\n`);
+
     activeQuery = query({
       prompt: cmd.prompt,
-      options: {
-        cwd: cmd.cwd,
-        resume: cmd.sessionId,
-        model: cmd.model,
-        pathToClaudeCodeExecutable: claudePath,
-        abortController,
-        permissionMode: 'default',
-        allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
-      },
+      options: options as any,
     });
 
     for await (const message of activeQuery) {
