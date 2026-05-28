@@ -1,9 +1,42 @@
+import { useEffect } from 'react';
+import { MainLayout } from './components/layout/MainLayout';
+import { Sidebar } from './components/layout/Sidebar';
+import { useSessionStore } from './stores/sessionStore';
+import { useSettingsStore } from './stores/settingsStore';
+
 function App() {
+  const { createSession, activeSessionId } = useSessionStore();
+  const { fetchConfig } = useSettingsStore();
+
+  useEffect(() => {
+    fetchConfig();
+  }, [fetchConfig]);
+
+  const handleNewSession = async () => {
+    await createSession('新对话');
+  };
+
+  const handleOpenSettings = () => {
+    console.log('Open settings');
+  };
+
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <h1 className="text-2xl font-bold p-4">codeMUX</h1>
-      <p className="px-4 text-muted-foreground">AI编码工具聚合平台</p>
-    </div>
+    <MainLayout
+      sidebar={
+        <Sidebar onNewSession={handleNewSession} onOpenSettings={handleOpenSettings} />
+      }
+    >
+      <div className="flex-1 flex items-center justify-center">
+        {activeSessionId ? (
+          <p>对话区域 - 会话 {activeSessionId}</p>
+        ) : (
+          <div className="text-center">
+            <h2 className="text-2xl font-bold mb-2">欢迎使用 codeMUX</h2>
+            <p className="text-muted-foreground">点击 "新对话" 开始</p>
+          </div>
+        )}
+      </div>
+    </MainLayout>
   );
 }
 
