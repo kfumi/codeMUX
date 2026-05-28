@@ -38,5 +38,13 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         "
     )?;
 
+    // Migration: add mode column if missing
+    let has_mode: bool = conn
+        .prepare("SELECT mode FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_mode {
+        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'chat'", []);
+    }
+
     Ok(())
 }

@@ -9,6 +9,7 @@ pub struct Session {
     pub title: String,
     pub provider_id: Option<String>,
     pub model: Option<String>,
+    pub mode: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -37,13 +38,34 @@ pub fn create_session(conn: &Connection, title: &str) -> Result<Session> {
         title: title.to_string(),
         provider_id: None,
         model: None,
+        mode: None,
+        created_at: now.clone(),
+        updated_at: now,
+    })
+}
+
+pub fn create_session_with_mode(conn: &Connection, title: &str, mode: &str) -> Result<Session> {
+    let id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+
+    conn.execute(
+        "INSERT INTO sessions (id, title, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, title, mode, now, now],
+    )?;
+
+    Ok(Session {
+        id,
+        title: title.to_string(),
+        provider_id: None,
+        model: None,
+        mode: Some(mode.to_string()),
         created_at: now.clone(),
         updated_at: now,
     })
 }
 
 pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare("SELECT id, title, provider_id, model, created_at, updated_at FROM sessions ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, title, provider_id, model, mode, created_at, updated_at FROM sessions ORDER BY updated_at DESC")?;
 
     let sessions = stmt.query_map([], |row| {
         Ok(Session {
@@ -51,8 +73,9 @@ pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
             title: row.get(1)?,
             provider_id: row.get(2)?,
             model: row.get(3)?,
-            created_at: row.get(4)?,
-            updated_at: row.get(5)?,
+            mode: row.get(4)?,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
         })
     })?.collect::<Result<Vec<_>>>()?;
 
