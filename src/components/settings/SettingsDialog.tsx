@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { ThemeToggle } from './ThemeToggle';
 import { ProviderConfig } from './ProviderConfig';
-import { Settings, Palette, Plug } from 'lucide-react';
+import { AgentConfig } from './AgentConfig';
+import { Settings, Palette, Plug, Bot } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 interface SettingsDialogProps {
@@ -10,15 +11,16 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type SettingsTab = 'general' | 'appearance' | 'provider';
+type SettingsTab = 'general' | 'appearance' | 'provider' | 'agent';
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('agent');
 
   const tabs = [
-    { id: 'general' as SettingsTab, label: '常规', icon: Settings },
-    { id: 'appearance' as SettingsTab, label: '外观', icon: Palette },
+    { id: 'agent' as SettingsTab, label: '智能体', icon: Bot },
     { id: 'provider' as SettingsTab, label: '供应商配置', icon: Plug },
+    { id: 'appearance' as SettingsTab, label: '外观', icon: Palette },
+    { id: 'general' as SettingsTab, label: '常规', icon: Settings },
   ];
 
   return (
@@ -49,6 +51,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
           {/* Right content */}
           <div className="flex-1 p-4">
+            {activeTab === 'agent' && <AgentConfig />}
             {activeTab === 'general' && (
               <div className="space-y-4">
                 <h3 className="font-medium">常规设置</h3>

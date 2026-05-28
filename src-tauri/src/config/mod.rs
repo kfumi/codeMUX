@@ -15,23 +15,7 @@ pub fn load_config(app: &AppHandle) -> AppConfig {
 
     if config_path.exists() {
         let content = std::fs::read_to_string(&config_path).expect("Failed to read config");
-        let mut config: AppConfig = serde_json::from_str(&content).expect("Failed to parse config");
-
-        // Migration: ensure Anthropic provider exists
-        if !config.providers.iter().any(|p| p.id == "anthropic") {
-            config.providers.push(types::ProviderConfig {
-                id: "anthropic".to_string(),
-                name: "Anthropic (Claude)".to_string(),
-                api_type: types::ApiType::Claude,
-                api_key: String::new(),
-                endpoint_url: "https://api.anthropic.com".to_string(),
-                default_model: "claude-sonnet-4-6".to_string(),
-                is_active: false,
-            });
-            let _ = save_config(app, &config);
-        }
-
-        config
+        serde_json::from_str(&content).expect("Failed to parse config")
     } else {
         let config = AppConfig::default();
         let _ = save_config(app, &config);

@@ -27,6 +27,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       options: {
         cwd: cmd.cwd,
         resume: cmd.sessionId,
+        model: cmd.model,
         abortController,
         permissionMode: 'default',
         allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],

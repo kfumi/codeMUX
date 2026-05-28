@@ -31,6 +31,8 @@ pub async fn start_agent_session(
     prompt: String,
     cwd: String,
     channel: tauri::ipc::Channel<String>,
+    api_key: Option<String>,
+    model: Option<String>,
 ) -> Result<(), String> {
     // Ensure sidecar is running
     let need_spawn = {
@@ -64,8 +66,8 @@ pub async fn start_agent_session(
         *guard = Some(channel);
     }
 
-    // Read API key from app config
-    let api_key = {
+    // Use provided API key, or fall back to active provider's key
+    let api_key = api_key.unwrap_or_else(|| {
         let state: State<'_, crate::AppState> = app.state();
         let config = state.config.lock().unwrap();
         config
@@ -74,16 +76,19 @@ pub async fn start_agent_session(
             .find(|p| p.is_active)
             .map(|p| p.api_key.clone())
             .unwrap_or_default()
-    };
+    });
 
     // Build and send start command
-    let cmd = serde_json::json!({
+    let mut cmd = serde_json::json!({
         "type": "start",
         "prompt": prompt,
         "cwd": cwd,
         "sessionId": session_id,
         "apiKey": api_key,
     });
+    if let Some(m) = model {
+        cmd["model"] = serde_json::Value::String(m);
+    }
 
     let guard = agent_state.sidecar.lock().await;
     if let Some(handle) = guard.as_ref() {
