@@ -39,6 +39,7 @@ pub fn run() {
             commands::session::get_messages,
             commands::chat::send_message,
             commands::chat::send_message_stream,
+            commands::file::read_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
