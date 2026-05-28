@@ -1,6 +1,6 @@
 pub mod types;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use std::path::PathBuf;
 use crate::config::types::AppConfig;
 
