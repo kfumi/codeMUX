@@ -31,8 +31,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::provider::get_config,
             commands::provider::update_provider,
+            commands::provider::delete_provider,
             commands::provider::set_active_provider,
             commands::provider::set_theme,
+            commands::provider::fetch_provider_models,
             commands::session::create_session,
             commands::session::get_all_sessions,
             commands::session::delete_session,

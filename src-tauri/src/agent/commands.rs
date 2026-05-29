@@ -70,9 +70,9 @@ pub async fn start_agent_session(
         let state: State<'_, crate::AppState> = app.state();
         let config = state.config.lock().unwrap();
         config
-            .providers
-            .iter()
-            .find(|p| p.is_active)
+            .active_provider_id
+            .as_ref()
+            .and_then(|id| config.providers.iter().find(|p| &p.id == id))
             .map(|p| p.api_key.clone())
             .unwrap_or_default()
     });
