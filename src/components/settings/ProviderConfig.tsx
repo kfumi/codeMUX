@@ -155,34 +155,51 @@ export function ProviderConfigPanel() {
       <p className="text-sm text-muted-foreground">管理 AI 供应商，激活的供应商将用于智能体。</p>
 
       {/* Provider cards */}
-      <div className="flex flex-wrap gap-3">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
         {providers.map((p) => (
           <div
             key={p.id}
-            onClick={() => openEdit(p)}
-            className="w-[200px] p-3 bg-card border rounded-lg cursor-pointer hover:border-primary/50 transition-colors"
+            className="p-3 bg-card border rounded-lg transition-colors"
             style={{
               borderColor: p.id === activeId ? 'hsl(var(--primary))' : undefined,
               borderWidth: p.id === activeId ? '2px' : '1px',
             }}
           >
             <div className="flex items-center justify-between mb-2">
-              <span className="font-medium text-sm truncate">{p.name || '未命名'}</span>
-              {p.id === activeId && (
-                <span className="text-[10px] bg-primary text-primary-foreground px-1.5 py-0.5 rounded-full">
-                  激活
-                </span>
-              )}
+              <span
+                className="font-medium text-sm truncate cursor-pointer hover:text-primary transition-colors"
+                onClick={() => openEdit(p)}
+              >
+                {p.name || '未命名'}
+              </span>
+              <Button
+                variant={p.id === activeId ? 'default' : 'outline'}
+                size="sm"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => setActiveProvider(p.id)}
+              >
+                {p.id === activeId ? '已激活' : '激活'}
+              </Button>
             </div>
-            <div className="text-xs text-muted-foreground truncate">{p.default_model}</div>
-            <div className="text-xs text-muted-foreground/60 mt-1">{maskKey(p.api_key)}</div>
+            <div
+              className="text-xs text-muted-foreground truncate cursor-pointer hover:text-foreground transition-colors"
+              onClick={() => openEdit(p)}
+            >
+              {p.default_model}
+            </div>
+            <div
+              className="text-xs text-muted-foreground/60 mt-1 cursor-pointer hover:text-foreground/60 transition-colors"
+              onClick={() => openEdit(p)}
+            >
+              {maskKey(p.api_key)}
+            </div>
           </div>
         ))}
 
         {/* Add card */}
         <div
           onClick={openNew}
-          className="w-[200px] p-3 border border-dashed rounded-lg cursor-pointer hover:border-primary/50 transition-colors flex items-center justify-center min-h-[88px]"
+          className="p-3 border border-dashed rounded-lg cursor-pointer hover:border-primary/50 transition-colors flex items-center justify-center min-h-[88px]"
         >
           <span className="text-sm text-muted-foreground">+ 添加供应商</span>
         </div>
