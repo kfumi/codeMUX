@@ -1,131 +1,282 @@
 import { useState } from 'react';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { configApi } from '../../lib/tauri';
-import type { ProviderConfig as ProviderConfigType } from '../../types/provider';
+import type { Provider } from '../../types/provider';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import { Save, TestTube, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Loader2, Eye, EyeOff } from 'lucide-react';
 
-export function ProviderConfig() {
-  const { config, updateProvider } = useSettingsStore();
-  const activeProvider = config?.providers.find(
-    (p) => p.id === config.active_provider_id
-  );
+const BUILT_IN_MODELS = [
+  'claude-opus-4-20250514',
+  'claude-sonnet-4-20250514',
+  'claude-haiku-4-20250514',
+];
 
-  const [formData, setFormData] = useState<Partial<ProviderConfigType>>(
-    activeProvider || {}
-  );
-  const [isSaving, setIsSaving] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [testMessage, setTestMessage] = useState('');
+function generateId(): string {
+  return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
+}
 
-  if (!activeProvider) {
-    return <div>未配置供应商</div>;
-  }
+function maskKey(key: string): string {
+  if (!key) return '未设置';
+  if (key.length <= 8) return '••••••••';
+  return key.slice(0, 4) + '••••' + key.slice(-4);
+}
+
+export function ProviderConfigPanel() {
+  const { config, updateProvider, deleteProvider, setActiveProvider, fetchModels } = useSettingsStore();
+  const providers = config?.providers ?? [];
+  const activeId = config?.active_provider_id ?? null;
+
+  const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
+  const [isNew, setIsNew] = useState(false);
+  const [showKey, setShowKey] = useState(false);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [fetchStatus, setFetchStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [fetchMessage, setFetchMessage] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+
+  const openEdit = (provider: Provider) => {
+    setEditingProvider({ ...provider });
+    setIsNew(false);
+    setShowKey(false);
+    setAvailableModels([]);
+    setFetchStatus('idle');
+    setDeleteConfirm(false);
+  };
+
+  const openNew = () => {
+    setEditingProvider({
+      id: generateId(),
+      name: '',
+      api_key: '',
+      anthropic_base_url: '',
+      openai_base_url: '',
+      default_model: BUILT_IN_MODELS[1],
+    });
+    setIsNew(true);
+    setShowKey(false);
+    setAvailableModels([]);
+    setFetchStatus('idle');
+    setDeleteConfirm(false);
+  };
+
+  const closeModal = () => {
+    setEditingProvider(null);
+  };
 
   const handleSave = async () => {
-    if (!formData.id) return;
-    setIsSaving(true);
-    setSaveStatus('idle');
-    try {
-      await updateProvider({ ...activeProvider, ...formData } as ProviderConfigType);
-      setSaveStatus('success');
-      setTimeout(() => setSaveStatus('idle'), 2000);
-    } catch {
-      setSaveStatus('error');
-      setTimeout(() => setSaveStatus('idle'), 3000);
-    } finally {
-      setIsSaving(false);
+    if (!editingProvider) return;
+    await updateProvider(editingProvider);
+    if (isNew) {
+      await setActiveProvider(editingProvider.id);
     }
+    closeModal();
   };
 
-  const handleTest = async () => {
-    setIsTesting(true);
-    setTestStatus('idle');
-    setTestMessage('');
+  const handleActivate = async () => {
+    if (!editingProvider) return;
+    await setActiveProvider(editingProvider.id);
+    closeModal();
+  };
+
+  const handleDelete = async () => {
+    if (!editingProvider) return;
+    await deleteProvider(editingProvider.id);
+    closeModal();
+  };
+
+  const handleFetchModels = async () => {
+    if (!editingProvider) return;
+    const url = editingProvider.anthropic_base_url || editingProvider.openai_base_url;
+    if (!url || !editingProvider.api_key) return;
+
+    setIsFetchingModels(true);
+    setFetchStatus('idle');
+    setFetchMessage('');
     try {
-      const provider = { ...activeProvider, ...formData } as ProviderConfigType;
-      const response = await configApi.testConnection(provider);
-      setTestStatus('success');
-      setTestMessage(`连接成功: ${response.slice(0, 100)}`);
-      setTimeout(() => setTestStatus('idle'), 5000);
+      const models = await fetchModels(editingProvider.api_key, url);
+      setAvailableModels(models);
+      setFetchStatus('success');
+      setFetchMessage(`获取到 ${models.length} 个模型`);
     } catch (err) {
-      setTestStatus('error');
-      setTestMessage(`连接失败: ${err}`);
-      setTimeout(() => setTestStatus('idle'), 5000);
+      setFetchStatus('error');
+      setFetchMessage(`获取失败: ${err}`);
+      setAvailableModels(BUILT_IN_MODELS);
     } finally {
-      setIsTesting(false);
+      setIsFetchingModels(false);
     }
   };
 
-  const getSaveButtonContent = () => {
-    if (isSaving) return <><Loader2 className="h-4 w-4 animate-spin" />保存中...</>;
-    if (saveStatus === 'success') return <><CheckCircle className="h-4 w-4" />已保存</>;
-    if (saveStatus === 'error') return <><XCircle className="h-4 w-4" />保存失败</>;
-    return <><Save className="h-4 w-4" />保存</>;
-  };
-
-  const getTestButtonContent = () => {
-    if (isTesting) return <><Loader2 className="h-4 w-4 animate-spin" />测试中...</>;
-    if (testStatus === 'success') return <><CheckCircle className="h-4 w-4" />连接成功</>;
-    if (testStatus === 'error') return <><XCircle className="h-4 w-4" />连接失败</>;
-    return <><TestTube className="h-4 w-4" />测试连接</>;
+  const updateField = (field: keyof Provider, value: string) => {
+    if (!editingProvider) return;
+    setEditingProvider({ ...editingProvider, [field]: value });
   };
 
   return (
     <div className="space-y-4">
       <h3 className="font-medium">供应商配置</h3>
-      <p className="text-sm text-muted-foreground">配置 AI 服务提供商。</p>
-      <div className="space-y-2">
-        <label className="text-sm">API Key</label>
-        <Input
-          type="password"
-          value={formData.api_key || ''}
-          onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-          placeholder="输入 API Key"
-        />
-      </div>
-      <div className="space-y-2">
-        <label className="text-sm">API 端点</label>
-        <Input
-          value={formData.endpoint_url || ''}
-          onChange={(e) => setFormData({ ...formData, endpoint_url: e.target.value })}
-          placeholder="https://api.deepseek.com"
-        />
-      </div>
-      <div className="space-y-2">
-        <label className="text-sm">默认模型</label>
-        <Input
-          value={formData.default_model || ''}
-          onChange={(e) => setFormData({ ...formData, default_model: e.target.value })}
-          placeholder="deepseek-chat"
-        />
-      </div>
-      <div className="flex gap-2">
-        <Button
-          onClick={handleSave}
-          disabled={isSaving}
-          variant={saveStatus === 'error' ? 'destructive' : 'default'}
-          className="flex items-center gap-2"
+      <p className="text-sm text-muted-foreground">管理 AI 供应商，激活的供应商将用于智能体。</p>
+
+      {/* Provider cards */}
+      <div className="flex flex-wrap gap-3">
+        {providers.map((p) => (
+          <div
+            key={p.id}
+            onClick={() => openEdit(p)}
+            className="w-[200px] p-3 bg-card border rounded-lg cursor-pointer hover:border-primary/50 transition-colors"
+            style={{
+              borderColor: p.id === activeId ? 'hsl(var(--primary))' : undefined,
+              borderWidth: p.id === activeId ? '2px' : '1px',
+            }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-medium text-sm truncate">{p.name || '未命名'}</span>
+              {p.id === activeId && (
+                <span className="text-[10px] bg-primary text-primary-foreground px-1.5 py-0.5 rounded-full">
+                  激活
+                </span>
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground truncate">{p.default_model}</div>
+            <div className="text-xs text-muted-foreground/60 mt-1">{maskKey(p.api_key)}</div>
+          </div>
+        ))}
+
+        {/* Add card */}
+        <div
+          onClick={openNew}
+          className="w-[200px] p-3 border border-dashed rounded-lg cursor-pointer hover:border-primary/50 transition-colors flex items-center justify-center min-h-[88px]"
         >
-          {getSaveButtonContent()}
-        </Button>
-        <Button
-          variant={testStatus === 'error' ? 'destructive' : 'outline'}
-          onClick={handleTest}
-          disabled={isTesting}
-          className="flex items-center gap-2"
-        >
-          {getTestButtonContent()}
-        </Button>
+          <span className="text-sm text-muted-foreground">+ 添加供应商</span>
+        </div>
       </div>
-      {testMessage && (
-        <p className={`text-sm ${testStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>
-          {testMessage}
-        </p>
-      )}
+
+      {/* Edit modal */}
+      <Dialog open={!!editingProvider} onOpenChange={(open) => !open && closeModal()}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>{isNew ? '添加供应商' : '编辑供应商'}</DialogTitle>
+          </DialogHeader>
+
+          {editingProvider && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">供应商名称</label>
+                <Input
+                  value={editingProvider.name}
+                  onChange={(e) => updateField('name', e.target.value)}
+                  placeholder="如 OpenRouter"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">API Key</label>
+                <div className="relative">
+                  <Input
+                    type={showKey ? 'text' : 'password'}
+                    value={editingProvider.api_key}
+                    onChange={(e) => updateField('api_key', e.target.value)}
+                    placeholder="输入 API Key"
+                    className="pr-9"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setShowKey(!showKey)}
+                  >
+                    {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Anthropic Base URL</label>
+                  <Input
+                    value={editingProvider.anthropic_base_url}
+                    onChange={(e) => updateField('anthropic_base_url', e.target.value)}
+                    placeholder="https://api.anthropic.com"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">OpenAI Base URL</label>
+                  <Input
+                    value={editingProvider.openai_base_url}
+                    onChange={(e) => updateField('openai_base_url', e.target.value)}
+                    placeholder="可选"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">默认模型</label>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <Select
+                      value={editingProvider.default_model}
+                      onValueChange={(value) => updateField('default_model', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(availableModels.length > 0 ? availableModels : BUILT_IN_MODELS).map((m) => (
+                          <SelectItem key={m} value={m}>{m}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleFetchModels}
+                    disabled={isFetchingModels || !editingProvider.api_key || !(editingProvider.anthropic_base_url || editingProvider.openai_base_url)}
+                    className="shrink-0"
+                  >
+                    {isFetchingModels ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      '获取列表'
+                    )}
+                  </Button>
+                </div>
+                {fetchMessage && (
+                  <p className={`text-xs mt-1 ${fetchStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                    {fetchMessage}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex justify-between">
+            <div>
+              {!isNew && (
+                deleteConfirm ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-red-500">确认删除？</span>
+                    <Button variant="destructive" size="sm" onClick={handleDelete}>确认</Button>
+                    <Button variant="outline" size="sm" onClick={() => setDeleteConfirm(false)}>取消</Button>
+                  </div>
+                ) : (
+                  <Button variant="ghost" size="sm" className="text-red-500" onClick={() => setDeleteConfirm(true)}>
+                    删除
+                  </Button>
+                )
+              )}
+            </div>
+            <div className="flex gap-2">
+              {!isNew && editingProvider?.id !== activeId && (
+                <Button variant="outline" onClick={handleActivate}>激活</Button>
+              )}
+              <Button variant="outline" onClick={closeModal}>取消</Button>
+              <Button onClick={handleSave}>保存</Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

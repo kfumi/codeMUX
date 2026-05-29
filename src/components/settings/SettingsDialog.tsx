@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { ThemeToggle } from './ThemeToggle';
-import { ProviderConfig } from './ProviderConfig';
-import { AgentConfig } from './AgentConfig';
-import { Settings, Palette, Plug, Bot } from 'lucide-react';
+import { ProviderConfigPanel } from './ProviderConfig';
+import { Settings, Palette, Plug } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 interface SettingsDialogProps {
@@ -11,13 +10,12 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type SettingsTab = 'general' | 'appearance' | 'provider' | 'agent';
+type SettingsTab = 'general' | 'appearance' | 'provider';
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('agent');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('provider');
 
   const tabs = [
-    { id: 'agent' as SettingsTab, label: '智能体', icon: Bot },
     { id: 'provider' as SettingsTab, label: '供应商配置', icon: Plug },
     { id: 'appearance' as SettingsTab, label: '外观', icon: Palette },
     { id: 'general' as SettingsTab, label: '常规', icon: Settings },
@@ -25,10 +23,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[700px] p-0">
-        <div className="flex">
-          {/* Left navigation */}
-          <div className="w-40 border-r p-2">
+      <DialogContent className="sm:max-w-[700px] h-[520px] p-0 flex flex-col">
+        <div className="flex flex-1 overflow-hidden">
+          <div className="w-40 border-r p-2 shrink-0">
             <DialogHeader className="p-2">
               <DialogTitle className="text-sm">设置</DialogTitle>
             </DialogHeader>
@@ -49,9 +46,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </nav>
           </div>
 
-          {/* Right content */}
-          <div className="flex-1 p-4">
-            {activeTab === 'agent' && <AgentConfig />}
+          <div className="flex-1 p-4 overflow-auto">
             {activeTab === 'general' && (
               <div className="space-y-4">
                 <h3 className="font-medium">常规设置</h3>
@@ -59,7 +54,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               </div>
             )}
             {activeTab === 'appearance' && <ThemeToggle />}
-            {activeTab === 'provider' && <ProviderConfig />}
+            {activeTab === 'provider' && <ProviderConfigPanel />}
           </div>
         </div>
       </DialogContent>
