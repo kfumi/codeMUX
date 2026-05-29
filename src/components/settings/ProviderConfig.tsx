@@ -81,6 +81,8 @@ export function ProviderConfigPanel() {
 
   const closeModal = () => {
     setEditingProvider(null);
+    setFetchStatus('idle');
+    setFetchMessage('');
   };
 
   const handleSave = async () => {
@@ -229,23 +231,21 @@ export function ProviderConfigPanel() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Anthropic Base URL</label>
-                  <Input
-                    value={editingProvider.anthropic_base_url}
-                    onChange={(e) => updateField('anthropic_base_url', e.target.value)}
-                    placeholder="https://api.anthropic.com"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">OpenAI Base URL</label>
-                  <Input
-                    value={editingProvider.openai_base_url}
-                    onChange={(e) => updateField('openai_base_url', e.target.value)}
-                    placeholder="可选"
-                  />
-                </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Anthropic Base URL</label>
+                <Input
+                  value={editingProvider.anthropic_base_url}
+                  onChange={(e) => updateField('anthropic_base_url', e.target.value)}
+                  placeholder="https://api.anthropic.com"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">OpenAI Base URL</label>
+                <Input
+                  value={editingProvider.openai_base_url}
+                  onChange={(e) => updateField('openai_base_url', e.target.value)}
+                  placeholder="可选"
+                />
               </div>
 
               <div>
