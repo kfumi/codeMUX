@@ -69,9 +69,14 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, string>) {
     case 'assistant': {
       const rawBlocks = msg.data.message?.content;
       const blocks = Array.isArray(rawBlocks) ? rawBlocks : typeof rawBlocks === 'string' ? [{ type: 'text', text: rawBlocks }] : [];
+      // Filter out "No response requested." — useless message from interrupted queries
+      const filteredBlocks = blocks.filter((b: any) =>
+        !(b?.type === 'text' && b.text?.trim() === 'No response requested.')
+      );
+      if (filteredBlocks.length === 0) return null;
       return (
         <div className="space-y-3 animate-fade-in-up">
-          {blocks.map((block: any, i: number) => {
+          {filteredBlocks.map((block: any, i: number) => {
             if (block?.type === 'thinking' && block.thinking) {
               return <ThinkingBlock key={i} thinking={block.thinking} />;
             }
