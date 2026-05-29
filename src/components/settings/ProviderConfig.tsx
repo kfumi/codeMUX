@@ -9,9 +9,9 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Loader2, Eye, EyeOff } from 'lucide-react';
 
 const BUILT_IN_MODELS: ModelInfo[] = [
-  { id: 'claude-opus-4-20250514', owned_by: 'anthropic' },
-  { id: 'claude-sonnet-4-20250514', owned_by: 'anthropic' },
-  { id: 'claude-haiku-4-20250514', owned_by: 'anthropic' },
+  { id: 'claude-opus', owned_by: 'anthropic' },
+  { id: 'claude-sonnet', owned_by: 'anthropic' },
+  { id: 'claude-haiku', owned_by: 'anthropic' },
 ];
 
 function generateId(): string {
@@ -53,7 +53,12 @@ export function ProviderConfigPanel() {
     setEditingProvider({ ...provider });
     setIsNew(false);
     setShowKey(false);
-    setAvailableModels([]);
+    // Seed available models with the current default so the Select can display it
+    if (provider.default_model && !BUILT_IN_MODELS.some((m) => m.id === provider.default_model)) {
+      setAvailableModels([{ id: provider.default_model, owned_by: 'current' }]);
+    } else {
+      setAvailableModels([]);
+    }
     setFetchStatus('idle');
     setDeleteConfirm(false);
   };
