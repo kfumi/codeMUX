@@ -15,7 +15,15 @@ pub fn load_config(app: &AppHandle) -> AppConfig {
 
     if config_path.exists() {
         let content = std::fs::read_to_string(&config_path).expect("Failed to read config");
-        serde_json::from_str(&content).expect("Failed to parse config")
+        match serde_json::from_str::<AppConfig>(&content) {
+            Ok(config) => config,
+            Err(_) => {
+                // Old config format or corrupted — reset to default
+                let config = AppConfig::default();
+                let _ = save_config(app, &config);
+                config
+            }
+        }
     } else {
         let config = AppConfig::default();
         let _ = save_config(app, &config);
