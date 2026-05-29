@@ -59,13 +59,16 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
   if (cmd.apiKey) {
     process.env.ANTHROPIC_API_KEY = cmd.apiKey;
   }
+  if (cmd.baseUrl) {
+    process.env.ANTHROPIC_BASE_URL = cmd.baseUrl;
+  }
 
   const keyPreview = cmd.apiKey ? `${cmd.apiKey.slice(0, 10)}...` : 'not set';
   const claudePath = findClaudeExecutable();
   const appSessionId = cmd.sessionId;
   const claudeSessionId = appSessionId ? sessionIdMap.get(appSessionId) : undefined;
 
-  process.stderr.write(`[sidecar] Starting query: model=${cmd.model || 'default'}, cwd=${cmd.cwd}, apiKey=${keyPreview}, claude=${claudePath || 'not found'}\n`);
+  process.stderr.write(`[sidecar] Starting query: cwd=${cmd.cwd}, apiKey=${keyPreview}, baseUrl=${cmd.baseUrl || 'default'}, claude=${claudePath || 'not found'}\n`);
   process.stderr.write(`[sidecar] Session: app=${appSessionId || 'none'}, claude=${claudeSessionId || 'new'}\n`);
 
   abortController = new AbortController();
