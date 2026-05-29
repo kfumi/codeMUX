@@ -27,21 +27,22 @@ function AgentEventItem({ msg }: { msg: AgentMessage }) {
       );
 
     case 'assistant': {
-      const blocks = msg.data.message?.content || [];
+      const rawBlocks = msg.data.message?.content;
+      const blocks = Array.isArray(rawBlocks) ? rawBlocks : typeof rawBlocks === 'string' ? [{ type: 'text', text: rawBlocks }] : [];
       return (
         <div className="space-y-1">
-          {blocks.map((block, i) => {
-            if (block.type === 'thinking' && block.thinking) {
+          {blocks.map((block: any, i: number) => {
+            if (block?.type === 'thinking' && block.thinking) {
               return <ThinkingBlock key={i} thinking={block.thinking} />;
             }
-            if (block.type === 'text' && block.text) {
+            if (block?.type === 'text' && block.text) {
               return (
                 <div key={i} className="prose prose-sm dark:prose-invert max-w-none">
                   <MarkdownRenderer content={block.text} />
                 </div>
               );
             }
-            if (block.type === 'tool_use' && block.name) {
+            if (block?.type === 'tool_use' && block.name) {
               return (
                 <ToolCallCard
                   key={i}
@@ -57,13 +58,25 @@ function AgentEventItem({ msg }: { msg: AgentMessage }) {
     }
 
     case 'tool_result': {
-      const results = msg.data.message?.content || [];
+      const rawContent: any = msg.data.message?.content;
+      // content can be a string or an array of content blocks
+      if (typeof rawContent === 'string') {
+        if (rawContent.length > 200) {
+          return <TerminalBlock command="tool_result" output={rawContent} />;
+        }
+        return (
+          <div className="text-xs text-muted-foreground bg-muted/30 rounded p-2 my-1 whitespace-pre-wrap max-h-40 overflow-auto">
+            {rawContent}
+          </div>
+        );
+      }
+      const results = Array.isArray(rawContent) ? rawContent : [];
       return (
         <div>
-          {results.map((r, i) => {
-            if (r.type === 'tool_result') {
+          {results.map((r: any, i: number) => {
+            if (r?.type === 'tool_result') {
               const content = r.content || '';
-              if (content.length > 200) {
+              if (typeof content === 'string' && content.length > 200) {
                 return (
                   <TerminalBlock
                     key={i}
@@ -74,7 +87,7 @@ function AgentEventItem({ msg }: { msg: AgentMessage }) {
               }
               return (
                 <div key={i} className="text-xs text-muted-foreground bg-muted/30 rounded p-2 my-1 whitespace-pre-wrap max-h-40 overflow-auto">
-                  {content}
+                  {typeof content === 'string' ? content : JSON.stringify(content)}
                 </div>
               );
             }
