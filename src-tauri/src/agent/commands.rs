@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
 
 use super::{SidecarHandle, spawn_sidecar};
@@ -32,6 +32,7 @@ pub async fn start_agent_session(
     cwd: String,
     channel: tauri::ipc::Channel<String>,
     api_key: Option<String>,
+    base_url: Option<String>,
 ) -> Result<(), String> {
     // Ensure sidecar is running
     let need_spawn = {
@@ -65,26 +66,20 @@ pub async fn start_agent_session(
         *guard = Some(channel);
     }
 
-    // Use provided API key, or fall back to active provider's key
-    let api_key = api_key.unwrap_or_else(|| {
-        let state: State<'_, crate::AppState> = app.state();
-        let config = state.config.lock().unwrap();
-        config
-            .active_provider_id
-            .as_ref()
-            .and_then(|id| config.providers.iter().find(|p| &p.id == id))
-            .map(|p| p.api_key.clone())
-            .unwrap_or_default()
-    });
-
     // Build and send start command
-    let cmd = serde_json::json!({
+    let mut cmd = serde_json::json!({
         "type": "start",
         "prompt": prompt,
         "cwd": cwd,
         "sessionId": session_id,
-        "apiKey": api_key,
     });
+
+    if let Some(key) = api_key {
+        cmd["apiKey"] = serde_json::Value::String(key);
+    }
+    if let Some(url) = base_url {
+        cmd["baseUrl"] = serde_json::Value::String(url);
+    }
 
     let guard = agent_state.sidecar.lock().await;
     if let Some(handle) = guard.as_ref() {
