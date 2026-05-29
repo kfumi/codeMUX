@@ -1,0 +1,35 @@
+<h2>数据存储方式</h2>
+<p class="subtitle">对话历史和配置数据的存储方案</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>本地SQLite数据库</h3>
+      <p><strong>优势：</strong>性能好，支持复杂查询，数据结构化</p>
+      <p><strong>劣势：</strong>需要管理数据库迁移，备份相对复杂</p>
+      <p><strong>适合：</strong>数据量大，需要高效查询</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>JSON文件存储</h3>
+      <p><strong>优势：</strong>简单直观，易于备份和版本控制，无需额外依赖</p>
+      <p><strong>劣势：</strong>性能随数据增长下降，不支持复杂查询</p>
+      <p><strong>适合：</strong>数据量小，追求简单性</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>混合存储</h3>
+      <p><strong>方式：</strong>配置用JSON，对话历史用SQLite</p>
+      <p><strong>优势：</strong>平衡简单性和性能</p>
+      <p><strong>劣势：</strong>需要管理两种存储方式</p>
+      <p><strong>适合：</strong>配置简单但对话数据量大</p>
+    </div>
+  </div>
+</div>

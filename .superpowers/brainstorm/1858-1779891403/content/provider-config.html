@@ -1,0 +1,37 @@
+<h2>供应商配置管理</h2>
+<p class="subtitle">如何管理不同AI供应商（Claude、Codex、国产大模型等）</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>统一配置文件</h3>
+      <p><strong>方式：</strong>使用JSON/YAML配置文件管理所有供应商</p>
+      <p><strong>优势：</strong>简单直观，易于版本控制，可手动编辑</p>
+      <p><strong>劣势：</strong>需要重启应用生效，缺少动态管理</p>
+      <p><strong>适合：</strong>配置相对固定，不需要频繁切换</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>图形化配置界面</h3>
+      <p><strong>方式：</strong>在应用内提供可视化的配置管理界面</p>
+      <p><strong>优势：</strong>用户友好，实时生效，支持验证</p>
+      <p><strong>劣势：</strong>开发工作量大，需要设计配置UI</p>
+      <p><strong>适合：</strong>需要频繁切换配置，用户体验优先</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>混合模式</h3>
+      <p><strong>方式：</strong>配置文件 + 图形界面，支持导入导出</p>
+      <p><strong>优势：</strong>灵活性高，支持批量配置，可备份恢复</p>
+      <p><strong>劣势：</strong>实现复杂度较高</p>
+      <p><strong>适合：</strong>需要平衡灵活性和易用性</p>
+    </div>
+  </div>
+</div>

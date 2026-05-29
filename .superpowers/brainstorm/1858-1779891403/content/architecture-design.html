@@ -1,0 +1,61 @@
+<h2>整体架构设计</h2>
+<p class="subtitle">Tauri + React 单体架构</p>
+
+<div class="mockup">
+  <div class="mockup-header">系统架构图</div>
+  <div class="mockup-body">
+    <div style="display: flex; flex-direction: column; gap: 20px; padding: 20px;">
+      <!-- 前端层 -->
+      <div style="background: #e3f2fd; padding: 15px; border-radius: 8px;">
+        <h4 style="margin: 0 0 10px 0;">前端层 (React + TypeScript)</h4>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">对话界面</div>
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">会话管理</div>
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">配置界面</div>
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">工具可视化</div>
+        </div>
+      </div>
+
+      <!-- Tauri桥接层 -->
+      <div style="background: #fff3e0; padding: 15px; border-radius: 8px;">
+        <h4 style="margin: 0 0 10px 0;">Tauri桥接层</h4>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">IPC通信</div>
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">命令注册</div>
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">事件系统</div>
+        </div>
+      </div>
+
+      <!-- 后端层 -->
+      <div style="background: #e8f5e8; padding: 15px; border-radius: 8px;">
+        <h4 style="margin: 0 0 10px 0;">后端层 (Rust)</h4>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">CLI管理器</div>
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">供应商适配器</div>
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">数据库管理</div>
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">文件操作</div>
+        </div>
+      </div>
+
+      <!-- 数据层 -->
+      <div style="background: #f3e5f5; padding: 15px; border-radius: 8px;">
+        <h4 style="margin: 0 0 10px 0;">数据层</h4>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">SQLite数据库</div>
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">配置文件</div>
+          <div style="background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;">缓存系统</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>架构说明</h3>
+  <ul>
+    <li><strong>前端层：</strong>React + TypeScript，负责UI渲染和用户交互</li>
+    <li><strong>Tauri桥接层：</strong>处理前端和Rust后端的IPC通信</li>
+    <li><strong>后端层：</strong>Rust实现，处理CLI集成、数据存储、文件操作等</li>
+    <li><strong>数据层：</strong>SQLite存储对话历史，JSON存储配置</li>
+  </ul>
+</div>

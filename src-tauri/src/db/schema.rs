@@ -3,15 +3,26 @@ use rusqlite::{Connection, Result};
 pub fn initialize_database(conn: &Connection) -> Result<()> {
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
 
+    // 创建表（新库直接包含所有列）
     conn.execute_batch(
         "
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            path TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
             provider_id TEXT,
             model TEXT,
+            project_id TEXT,
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS messages (
@@ -32,9 +43,31 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             created_at TEXT NOT NULL,
             FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
         );
+        "
+    )?;
 
+    // Migration: add mode column if missing
+    let has_mode: bool = conn
+        .prepare("SELECT mode FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_mode {
+        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'chat'", []);
+    }
+
+    // Migration: add project_id column if missing
+    let has_project_id: bool = conn
+        .prepare("SELECT project_id FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_project_id {
+        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL", []);
+    }
+
+    // 创建索引（在所有迁移之后，确保列存在）
+    conn.execute_batch(
+        "
         CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
         CREATE INDEX IF NOT EXISTS idx_tool_calls_message_id ON tool_calls(message_id);
+        CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions(project_id);
         "
     )?;
 

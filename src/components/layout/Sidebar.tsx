@@ -1,41 +1,77 @@
+import { useEffect } from 'react';
 import { SessionList } from '../session/SessionList';
-import { Button } from '../ui/button';
-import { Plus, Settings } from 'lucide-react';
+import { Settings, MessageSquarePlus } from 'lucide-react';
+import { useProjectStore } from '../../stores/projectStore';
+import { open } from '@tauri-apps/plugin-dialog';
 
 interface SidebarProps {
   onNewSession: () => void;
+  onNewSessionInProject: (projectId: string) => void;
   onOpenSettings: () => void;
 }
 
-export function Sidebar({ onNewSession, onOpenSettings }: SidebarProps) {
-  return (
-    <div className="flex flex-col h-full bg-background">
-      <div className="p-3 border-b">
-        <h1 className="text-lg font-bold text-foreground">codeMUX</h1>
-      </div>
+export function Sidebar({ onNewSession, onNewSessionInProject, onOpenSettings }: SidebarProps) {
+  const { fetchProjects } = useProjectStore();
 
-      {/* Top actions */}
-      <div className="p-2 space-y-1">
-        <Button variant="ghost" className="w-full justify-start gap-2 text-sm" onClick={onNewSession}>
-          <Plus className="h-4 w-4" />
-          快速对话
-        </Button>
+  useEffect(() => {
+    fetchProjects();
+  }, [fetchProjects]);
+
+  const handleAddProject = async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: '选择项目文件夹',
+      });
+      if (selected) {
+        const path = selected as string;
+        const name = path.split(/[/\\]/).pop() || path;
+        await useProjectStore.getState().createProject(name, path);
+      }
+    } catch (err) {
+      console.error('Failed to add project:', err);
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* New session button */}
+      <div className="px-3 pt-2 pb-2.5">
+        <button
+          onClick={onNewSession}
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium
+            text-[hsl(var(--sidebar-fg))]/80
+            hover:text-[hsl(var(--sidebar-glow))]
+            hover:bg-[hsl(var(--sidebar-glow)/0.08)]
+            active:scale-[0.98]
+            transition-all duration-200"
+        >
+          <MessageSquarePlus className="h-4 w-4" />
+          新对话
+        </button>
       </div>
 
       {/* Session list */}
-      <div className="flex-1 overflow-auto">
-        <div className="px-2 py-1">
-          <span className="text-xs text-muted-foreground px-2">对话</span>
-        </div>
-        <SessionList />
+      <div className="flex-1 overflow-auto px-3 scroll-smooth">
+        <SessionList
+          onNewSessionInProject={onNewSessionInProject}
+          onAddProject={handleAddProject}
+        />
       </div>
 
       {/* Bottom settings */}
-      <div className="p-2 border-t">
-        <Button variant="ghost" className="w-full justify-start gap-2 text-sm" onClick={onOpenSettings}>
-          <Settings className="h-4 w-4" />
+      <div className="p-3 border-t border-[hsl(var(--sidebar-border))]">
+        <button
+          onClick={onOpenSettings}
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px]
+            text-[hsl(var(--sidebar-fg))]
+            hover:bg-[hsl(var(--sidebar-accent))]
+            transition-all duration-200"
+        >
+          <Settings className="h-3.5 w-3.5" />
           设置
-        </Button>
+        </button>
       </div>
     </div>
   );
