@@ -2,28 +2,47 @@ import { useState, useEffect } from 'react';
 import { useAgentStore } from '../../stores/agentStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { AgentMessageList } from './AgentMessageList';
-import { ChatInput } from '../chat/ChatInput';
-import { FolderOpen } from 'lucide-react';
+import { AgentInput } from './AgentInput';
+import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { FolderOpen, MoreHorizontal, Pencil } from 'lucide-react';
 
 interface AgentPanelProps {
   sessionId: string;
 }
 
 export function AgentPanel({ sessionId }: AgentPanelProps) {
-  const { sessions } = useSessionStore();
+  const { sessions, updateSessionTitle } = useSessionStore();
   const { projects } = useProjectStore();
   const { startQuery, isRunning, interrupt, loadSessionMessages } = useAgentStore();
+  const { config } = useSettingsStore();
 
   const session = sessions.find((s) => s.id === sessionId);
   const project = session?.project_id ? projects.find((p) => p.id === session.project_id) : null;
+  const activeProvider = config?.providers.find((p) => p.id === config.active_provider_id) ?? null;
+
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+
+  const handleRenameOpen = () => {
+    setRenameValue(session?.title || '');
+    setRenameOpen(true);
+  };
+
+  const handleRenameSave = async () => {
+    const trimmed = renameValue.trim();
+    if (trimmed && trimmed !== session?.title) {
+      await updateSessionTitle(sessionId, trimmed);
+    }
+    setRenameOpen(false);
+  };
 
   const [cwd, setCwd] = useState(() => {
     return localStorage.getItem('agent-cwd') || '.';
-  });
-
-  const [model, setModel] = useState(() => {
-    return localStorage.getItem('agent-model') || 'default';
   });
 
   useEffect(() => {
@@ -39,14 +58,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   const running = isRunning[sessionId] || false;
 
-  const handleModelChange = (value: string) => {
-    setModel(value);
-    localStorage.setItem('agent-model', value);
-  };
-
   const handleSend = async (content: string) => {
-    const apiKey = localStorage.getItem('agent-anthropic-api-key') || undefined;
-    await startQuery(sessionId, content, cwd, apiKey);
+    const apiKey = activeProvider?.api_key || undefined;
+    const baseUrl = activeProvider?.anthropic_base_url || undefined;
+    await startQuery(sessionId, content, cwd, apiKey, baseUrl);
   };
 
   return (
@@ -56,6 +71,17 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         <h2 className="text-[13px] font-medium text-foreground/80 truncate">
           {session?.title || '新对话'}
         </h2>
+        <DropdownMenu
+          trigger={
+            <button className="p-1 rounded-md hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors">
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+          }
+        >
+          <DropdownMenuItem icon={<Pencil className="h-3.5 w-3.5" />} onClick={handleRenameOpen}>
+            重命名
+          </DropdownMenuItem>
+        </DropdownMenu>
         <div className="flex-1" />
         {project && (
           <div className="flex items-center gap-1.5 text-[12px] text-foreground bg-muted/40 rounded-lg px-2.5 py-1.5 border border-border/30"
@@ -71,13 +97,32 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       <AgentMessageList sessionId={sessionId} />
 
       {/* Input composer */}
-      <ChatInput
+      <AgentInput
         onSend={handleSend}
         onStop={interrupt}
         isLoading={running}
-        model={model}
-        onModelChange={handleModelChange}
+        modelName={activeProvider?.default_model}
       />
+
+      {/* Rename dialog */}
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>重命名对话</DialogTitle>
+          </DialogHeader>
+          <Input
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSave(); }}
+            placeholder="输入对话名称"
+            autoFocus
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenameOpen(false)}>取消</Button>
+            <Button onClick={handleRenameSave}>保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -32,7 +32,7 @@ interface AgentState {
   titledSessions: Record<string, boolean>;
 
   /** Start a new agent query */
-  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string) => Promise<void>;
+  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string) => Promise<void>;
   /** Interrupt the current query */
   interrupt: () => Promise<void>;
   /** Clear events for a session */
@@ -81,7 +81,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   error: {},
   titledSessions: {},
 
-  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string) => {
+  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string) => {
     // Auto-update session title on first message
     const state = get();
     if (!state.titledSessions[sessionId]) {
@@ -130,7 +130,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             });
           }
         }
-      }, apiKey);
+      }, apiKey, baseUrl);
     } catch (err) {
       set((s) => ({
         isRunning: { ...s.isRunning, [sessionId]: false },
