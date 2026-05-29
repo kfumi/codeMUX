@@ -6,7 +6,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '../ui/select';
-import { Loader2, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Eye, EyeOff, Zap, CheckCircle, XCircle } from 'lucide-react';
 
 const BUILT_IN_MODELS: ModelInfo[] = [
   { id: 'claude-opus', owned_by: 'anthropic' },
@@ -16,12 +16,6 @@ const BUILT_IN_MODELS: ModelInfo[] = [
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
-}
-
-function maskKey(key: string): string {
-  if (!key) return '未设置';
-  if (key.length <= 8) return '••••••••';
-  return key.slice(0, 4) + '••••' + key.slice(-4);
 }
 
 function groupModels(models: ModelInfo[]): Map<string, ModelInfo[]> {
@@ -36,7 +30,7 @@ function groupModels(models: ModelInfo[]): Map<string, ModelInfo[]> {
 }
 
 export function ProviderConfigPanel() {
-  const { config, updateProvider, deleteProvider, setActiveProvider, fetchModels } = useSettingsStore();
+  const { config, updateProvider, deleteProvider, setActiveProvider, fetchModels, testProvider } = useSettingsStore();
   const providers = config?.providers ?? [];
   const activeId = config?.active_provider_id ?? null;
 
@@ -45,6 +39,8 @@ export function ProviderConfigPanel() {
   const [showKey, setShowKey] = useState(false);
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Map<string, 'success' | 'error'>>(new Map());
   const [fetchStatus, setFetchStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [fetchMessage, setFetchMessage] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -119,6 +115,19 @@ export function ProviderConfigPanel() {
     closeModal();
   };
 
+  const handleTest = async (providerId: string) => {
+    setTestingId(providerId);
+    setTestResults((prev) => new Map(prev).set(providerId, undefined as unknown as 'success' | 'error'));
+    try {
+      await testProvider(providerId);
+      setTestResults((prev) => new Map(prev).set(providerId, 'success'));
+    } catch {
+      setTestResults((prev) => new Map(prev).set(providerId, 'error'));
+    } finally {
+      setTestingId(null);
+    }
+  };
+
   const handleFetchModels = async () => {
     if (!editingProvider) return;
     const url = editingProvider.anthropic_base_url || editingProvider.openai_base_url;
@@ -190,26 +199,43 @@ export function ProviderConfigPanel() {
               >
                 {p.name || '未命名'}
               </span>
-              <Button
-                variant={p.id === activeId ? 'default' : 'outline'}
-                size="sm"
-                className="h-6 px-2 text-[11px]"
-                onClick={() => setActiveProvider(p.id)}
-              >
-                {p.id === activeId ? '已激活' : '激活'}
-              </Button>
+              <div className="flex items-center gap-1">
+                {testResults.get(p.id) === 'success' && (
+                  <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+                )}
+                {testResults.get(p.id) === 'error' && (
+                  <XCircle className="h-3.5 w-3.5 text-red-500" />
+                )}
+                <button
+                  title="测试模型"
+                  className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                  disabled={testingId === p.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleTest(p.id);
+                  }}
+                >
+                  {testingId === p.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Zap className="h-3.5 w-3.5" />
+                  )}
+                </button>
+                <Button
+                  variant={p.id === activeId ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-6 px-2 text-[11px]"
+                  onClick={() => setActiveProvider(p.id)}
+                >
+                  {p.id === activeId ? '已激活' : '激活'}
+                </Button>
+              </div>
             </div>
             <div
               className="text-xs text-muted-foreground truncate cursor-pointer hover:text-foreground transition-colors"
               onClick={() => openEdit(p)}
             >
               {p.default_model}
-            </div>
-            <div
-              className="text-xs text-muted-foreground/60 mt-1 cursor-pointer hover:text-foreground/60 transition-colors"
-              onClick={() => openEdit(p)}
-            >
-              {maskKey(p.api_key)}
             </div>
           </div>
         ))}

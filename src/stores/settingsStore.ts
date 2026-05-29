@@ -13,6 +13,7 @@ interface SettingsState {
   updateProvider: (provider: Provider) => Promise<void>;
   deleteProvider: (providerId: string) => Promise<void>;
   fetchModels: (apiKey: string, baseUrl: string) => Promise<ModelInfo[]>;
+  testProvider: (providerId: string) => Promise<string>;
   getActiveProvider: () => Provider | null;
 }
 
@@ -89,6 +90,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   fetchModels: async (apiKey: string, baseUrl: string) => {
     const models = await configApi.fetchModels(apiKey, baseUrl);
     return models;
+  },
+
+  testProvider: async (providerId: string) => {
+    const result = await configApi.testProvider(providerId);
+    return result;
   },
 
   getActiveProvider: () => {

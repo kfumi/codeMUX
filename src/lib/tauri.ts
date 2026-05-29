@@ -56,6 +56,8 @@ export const configApi = {
   setTheme: (theme: Theme): Promise<void> => invoke('set_theme', { theme: theme.toLowerCase() }),
   fetchModels: (apiKey: string, baseUrl: string): Promise<ModelInfo[]> =>
     invoke('fetch_provider_models', { apiKey, baseUrl }),
+  testProvider: (providerId: string): Promise<string> =>
+    invoke('test_provider', { providerId }),
 };
 
 export const fileApi = {

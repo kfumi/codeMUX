@@ -2,6 +2,7 @@ use tauri::{AppHandle, State};
 use crate::AppState;
 use crate::config::types::{AppConfig, Provider, Theme};
 use crate::config;
+use futures::StreamExt;
 
 #[tauri::command]
 pub fn get_config(state: State<'_, AppState>) -> AppConfig {
@@ -176,4 +177,153 @@ pub async fn fetch_provider_models(api_key: String, base_url: String) -> Result<
     } else {
         Err(format!("获取失败: {}", last_error))
     }
+}
+
+/// Test a provider by sending a streaming request. Returns model name on success.
+#[tauri::command]
+pub async fn test_provider(state: State<'_, AppState>, provider_id: String) -> Result<String, String> {
+    let provider = {
+        let config = state.config.lock().unwrap();
+        config.providers.iter().find(|p| p.id == provider_id).cloned()
+            .ok_or("供应商不存在")?
+    };
+
+    let max_retries = 2;
+    let mut last_error = String::new();
+
+    for attempt in 0..=max_retries {
+        match test_provider_once(&provider).await {
+            Ok(model) => return Ok(model),
+            Err(e) => {
+                last_error = e;
+                // Only retry on timeout-like errors
+                if last_error.contains("超时") || last_error.contains("timeout") || last_error.contains("连接") {
+                    if attempt < max_retries {
+                        continue;
+                    }
+                }
+                return Err(last_error);
+            }
+        }
+    }
+
+    Err(last_error)
+}
+
+/// Single test attempt: try Anthropic endpoint first, then OpenAI.
+async fn test_provider_once(provider: &Provider) -> Result<String, String> {
+    let model = if provider.default_model.is_empty() {
+        "claude-haiku-4-5-20251001".to_string()
+    } else {
+        provider.default_model.clone()
+    };
+
+    // Try Anthropic endpoint first
+    if !provider.anthropic_base_url.is_empty() && !provider.api_key.is_empty() {
+        match test_anthropic_stream(&provider.anthropic_base_url, &provider.api_key, &model).await {
+            Ok(()) => return Ok(model),
+            Err(e) => {
+                // If auth failure, don't try OpenAI
+                if e.contains("认证失败") {
+                    return Err(e);
+                }
+                // Otherwise fall through to try OpenAI
+                if provider.openai_base_url.is_empty() {
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    // Try OpenAI endpoint
+    if !provider.openai_base_url.is_empty() && !provider.api_key.is_empty() {
+        return test_openai_stream(&provider.openai_base_url, &provider.api_key, &model).await
+            .map(|_| model);
+    }
+
+    Err("请配置 Base URL 和 API Key".to_string())
+}
+
+/// Test Anthropic streaming endpoint. Returns Ok(()) if first chunk received.
+async fn test_anthropic_stream(base_url: &str, api_key: &str, model: &str) -> Result<(), String> {
+    let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "Hi"}],
+        "stream": true
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    let resp = client.post(&url)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| if e.is_timeout() { "请求超时".to_string() } else { format!("连接失败: {}", e) })?;
+
+    let status = resp.status().as_u16();
+    if status == 401 || status == 403 {
+        return Err("认证失败，请检查 API Key".to_string());
+    }
+    if !(200..300).contains(&status) {
+        return Err(format!("请求失败: HTTP {}", status));
+    }
+
+    // Read stream until first chunk received
+    let mut stream = resp.bytes_stream();
+    if let Some(chunk) = stream.next().await {
+        chunk.map_err(|e| format!("流读取失败: {}", e))?;
+        return Ok(());
+    }
+
+    Err("未收到响应".to_string())
+}
+
+/// Test OpenAI-compatible streaming endpoint. Returns Ok(()) if first chunk received.
+async fn test_openai_stream(base_url: &str, api_key: &str, model: &str) -> Result<(), String> {
+    let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "Hi"}],
+        "stream": true
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    let resp = client.post(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| if e.is_timeout() { "请求超时".to_string() } else { format!("连接失败: {}", e) })?;
+
+    let status = resp.status().as_u16();
+    if status == 401 || status == 403 {
+        return Err("认证失败，请检查 API Key".to_string());
+    }
+    if !(200..300).contains(&status) {
+        return Err(format!("请求失败: HTTP {}", status));
+    }
+
+    let mut stream = resp.bytes_stream();
+    if let Some(chunk) = stream.next().await {
+        chunk.map_err(|e| format!("流读取失败: {}", e))?;
+        return Ok(());
+    }
+
+    Err("未收到响应".to_string())
 }
