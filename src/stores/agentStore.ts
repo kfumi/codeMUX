@@ -53,6 +53,8 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'system', data };
       case 'result':
         return { kind: 'result', data };
+      case 'sidecar_debug':
+        return { kind: 'raw', data };
       default:
         return { kind: 'raw', data };
     }

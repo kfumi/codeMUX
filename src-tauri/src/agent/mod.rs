@@ -65,13 +65,24 @@ pub async fn spawn_sidecar(
         "node"
     };
 
-    let mut child = Command::new(node_cmd)
-        .arg(script_path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn sidecar: {}. Is Node.js installed?", e))?;
+    // Use cmd.exe on Windows to inherit full user environment (PATH, HOME, etc.)
+    let mut child = if cfg!(target_os = "windows") {
+        Command::new("cmd.exe")
+            .args(["/c", "node", script_path.to_str().unwrap()])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn sidecar: {}. Is Node.js installed?", e))?
+    } else {
+        Command::new(node_cmd)
+            .arg(script_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn sidecar: {}. Is Node.js installed?", e))?
+    };
 
     // Set up stdin writer
     let stdin = child.stdin.take().ok_or("Failed to open sidecar stdin")?;
@@ -95,6 +106,9 @@ pub async fn spawn_sidecar(
     let stdout = child.stdout.take().ok_or("Failed to open sidecar stdout")?;
     let (event_tx, event_rx) = mpsc::channel::<String>(256);
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+
+    // Clone for stderr task (needs to send debug events to same channel)
+    let stderr_event_tx = event_tx.clone();
 
     tokio::spawn(async move {
         let reader = BufReader::new(stdout);
@@ -122,13 +136,19 @@ pub async fn spawn_sidecar(
         Err(_) => return Err("Sidecar died before signaling ready".to_string()),
     }
 
-    // Log stderr
+    // Log stderr and forward to frontend for debugging
     if let Some(stderr) = child.stderr.take() {
         tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 eprintln!("[sidecar stderr] {}", line);
+                // Also send stderr to frontend as a debug event
+                let debug_msg = serde_json::json!({
+                    "type": "sidecar_debug",
+                    "message": line
+                });
+                let _ = stderr_event_tx.send(debug_msg.to_string()).await;
             }
         });
     }

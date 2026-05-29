@@ -115,6 +115,14 @@ function AgentEventItem({ msg }: { msg: AgentMessage }) {
       return null;
 
     case 'raw':
+      // Show sidecar debug messages prominently
+      if (msg.data.type === 'sidecar_debug') {
+        return (
+          <div className="text-xs text-blue-400 font-mono bg-blue-500/10 rounded p-2 my-1">
+            {String(msg.data.message)}
+          </div>
+        );
+      }
       return (
         <details className="text-xs text-muted-foreground">
           <summary>原始事件: {String(msg.data.type)}</summary>
