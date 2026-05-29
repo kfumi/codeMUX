@@ -41,6 +41,7 @@ export function ProviderConfigPanel() {
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Map<string, 'success' | 'error'>>(new Map());
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [fetchStatus, setFetchStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [fetchMessage, setFetchMessage] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -116,15 +117,23 @@ export function ProviderConfigPanel() {
   };
 
   const handleTest = async (providerId: string) => {
+    const provider = providers.find((p) => p.id === providerId);
+    const name = provider?.name || '未知';
     setTestingId(providerId);
     setTestResults((prev) => new Map(prev).set(providerId, undefined as unknown as 'success' | 'error'));
+    const start = Date.now();
     try {
       await testProvider(providerId);
+      const ms = Date.now() - start;
       setTestResults((prev) => new Map(prev).set(providerId, 'success'));
-    } catch {
+      setToast({ message: `${name} 运行正常 (${ms}ms)`, type: 'success' });
+    } catch (err) {
+      const ms = Date.now() - start;
       setTestResults((prev) => new Map(prev).set(providerId, 'error'));
+      setToast({ message: `${name} 连接失败 (${ms}ms): ${err}`, type: 'error' });
     } finally {
       setTestingId(null);
+      setTimeout(() => setToast(null), 4000);
     }
   };
 
@@ -388,6 +397,19 @@ export function ProviderConfigPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Toast notification */}
+      {toast && (
+        <div
+          className={`fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium transition-all duration-300 ${
+            toast.type === 'success'
+              ? 'bg-green-600 text-white'
+              : 'bg-red-600 text-white'
+          }`}
+        >
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }
