@@ -11,6 +11,19 @@ interface AgentMessageListProps {
 }
 
 function AgentEventItem({ msg }: { msg: AgentMessage }) {
+  try {
+  return renderEvent(msg);
+  } catch (err) {
+    return (
+      <div className="text-xs text-red-400 bg-red-500/10 rounded p-2 my-1">
+        渲染错误: {String(err)}
+        <pre className="mt-1 text-[10px] opacity-50">{JSON.stringify(msg, null, 2).slice(0, 200)}</pre>
+      </div>
+    );
+  }
+}
+
+function renderEvent(msg: AgentMessage) {
   switch (msg.kind) {
     case 'ready':
       return (
@@ -22,7 +35,7 @@ function AgentEventItem({ msg }: { msg: AgentMessage }) {
     case 'system':
       return (
         <div className="text-xs text-muted-foreground py-2 border-b mb-2">
-          会话初始化 | 模型: {msg.data.model} | 工具: {msg.data.tools.length} 个
+          会话初始化 | 模型: {msg.data.model || '未知'} | 工具: {Array.isArray(msg.data.tools) ? msg.data.tools.length : 0} 个
         </div>
       );
 
