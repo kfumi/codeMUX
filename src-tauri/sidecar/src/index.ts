@@ -67,8 +67,8 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       permissionMode: 'bypassPermissions',
       allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
     };
-    if (cmd.sessionId) options.resume = cmd.sessionId;
-    if (cmd.model) options.model = cmd.model;
+    // Only resume if a valid session ID is provided (not from a failed run)
+    // Don't pass model unless explicitly set - let Claude Code use its configured default
     if (claudePath) options.pathToClaudeCodeExecutable = claudePath;
 
     process.stderr.write(`[sidecar] query options: ${JSON.stringify({ ...options, abortController: '[object]' })}\n`);
