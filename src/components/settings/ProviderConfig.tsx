@@ -53,12 +53,7 @@ export function ProviderConfigPanel() {
     setEditingProvider({ ...provider });
     setIsNew(false);
     setShowKey(false);
-    // Seed available models with the current default so the Select can display it
-    if (provider.default_model && !BUILT_IN_MODELS.some((m) => m.id === provider.default_model)) {
-      setAvailableModels([{ id: provider.default_model, owned_by: 'current' }]);
-    } else {
-      setAvailableModels([]);
-    }
+    setAvailableModels([]);
     setFetchStatus('idle');
     setDeleteConfirm(false);
   };
@@ -252,24 +247,32 @@ export function ProviderConfigPanel() {
                 <label className="text-xs text-muted-foreground mb-1 block">默认模型</label>
                 <div className="flex gap-2">
                   <div className="flex-1">
-                    <Select
-                      value={editingProvider.default_model}
-                      onValueChange={(value) => updateField('default_model', value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[...groupModels(availableModels.length > 0 ? availableModels : BUILT_IN_MODELS).entries()].map(([group, models]) => (
-                          <SelectGroup key={group}>
-                            <SelectLabel>{group}</SelectLabel>
-                            {models.map((m) => (
-                              <SelectItem key={m.id} value={m.id}>{m.id}</SelectItem>
-                            ))}
-                          </SelectGroup>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {availableModels.length > 0 ? (
+                      <Select
+                        value={editingProvider.default_model}
+                        onValueChange={(value) => updateField('default_model', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[...groupModels(availableModels).entries()].map(([group, models]) => (
+                            <SelectGroup key={group}>
+                              <SelectLabel>{group}</SelectLabel>
+                              {models.map((m) => (
+                                <SelectItem key={m.id} value={m.id}>{m.id}</SelectItem>
+                              ))}
+                            </SelectGroup>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        value={editingProvider.default_model}
+                        onChange={(e) => updateField('default_model', e.target.value)}
+                        placeholder="如 claude-sonnet-4-20250514"
+                      />
+                    )}
                   </div>
                   <Button
                     variant="outline"
