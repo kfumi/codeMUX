@@ -141,6 +141,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   interrupt: async () => {
     await agentApi.interrupt();
+    // Sidecar doesn't emit an event on abort, so reset running state directly
+    set((s) => {
+      const isRunning = { ...s.isRunning };
+      for (const sid of Object.keys(isRunning)) {
+        if (isRunning[sid]) isRunning[sid] = false;
+      }
+      return { isRunning };
+    });
   },
 
   clearEvents: (sessionId: string) => {
