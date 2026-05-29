@@ -39,6 +39,13 @@ function loadClaudeSettingsEnv(): void {
 let activeQuery: ReturnType<typeof query> | null = null;
 let abortController: AbortController | null = null;
 
+/**
+ * Maps app session ID -> Claude Code's real session ID.
+ * Captured from the first SDK message that contains a session_id field.
+ * Used to resume conversations with full context on subsequent queries.
+ */
+const sessionIdMap = new Map<string, string>();
+
 function emit(obj: unknown): void {
   process.stdout.write(JSON.stringify(obj) + '\n');
 }
@@ -53,10 +60,13 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
     process.env.ANTHROPIC_API_KEY = cmd.apiKey;
   }
 
-  // Log config for debugging (without exposing full API key)
   const keyPreview = cmd.apiKey ? `${cmd.apiKey.slice(0, 10)}...` : 'not set';
   const claudePath = findClaudeExecutable();
+  const appSessionId = cmd.sessionId;
+  const claudeSessionId = appSessionId ? sessionIdMap.get(appSessionId) : undefined;
+
   process.stderr.write(`[sidecar] Starting query: model=${cmd.model || 'default'}, cwd=${cmd.cwd}, apiKey=${keyPreview}, claude=${claudePath || 'not found'}\n`);
+  process.stderr.write(`[sidecar] Session: app=${appSessionId || 'none'}, claude=${claudeSessionId || 'new'}\n`);
 
   abortController = new AbortController();
 
@@ -67,9 +77,13 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       permissionMode: 'bypassPermissions',
       allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
     };
-    // Only resume if a valid session ID is provided (not from a failed run)
-    // Don't pass model unless explicitly set - let Claude Code use its configured default
     if (claudePath) options.pathToClaudeCodeExecutable = claudePath;
+
+    // Resume existing conversation if we have a captured Claude session ID
+    if (claudeSessionId) {
+      options.resume = claudeSessionId;
+      process.stderr.write(`[sidecar] Resuming Claude session: ${claudeSessionId}\n`);
+    }
 
     process.stderr.write(`[sidecar] query options: ${JSON.stringify({ ...options, abortController: '[object]' })}\n`);
 
@@ -79,6 +93,14 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
     });
 
     for await (const message of activeQuery) {
+      // Capture the real Claude session ID from any SDK message
+      if (appSessionId && !sessionIdMap.has(appSessionId)) {
+        const msg = message as Record<string, unknown>;
+        if (typeof msg.session_id === 'string' && msg.session_id) {
+          sessionIdMap.set(appSessionId, msg.session_id);
+          process.stderr.write(`[sidecar] Captured Claude session ID: ${msg.session_id} for app session: ${appSessionId}\n`);
+        }
+      }
       emit(message);
     }
 
@@ -100,6 +122,11 @@ function handleInterrupt(): void {
     abortController = null;
   }
   activeQuery = null;
+}
+
+function handleResetSession(cmd: Extract<SidecarCommand, { type: 'reset_session' }>): void {
+  const deleted = sessionIdMap.delete(cmd.sessionId);
+  process.stderr.write(`[sidecar] Reset session ${cmd.sessionId}: ${deleted ? 'cleared' : 'not found'}\n`);
 }
 
 async function main(): Promise<void> {
@@ -128,6 +155,9 @@ async function main(): Promise<void> {
         handleStart(cmd).catch((err) => {
           emit({ type: 'sidecar_error', error: String(err) });
         });
+        break;
+      case 'reset_session':
+        handleResetSession(cmd);
         break;
       case 'interrupt':
         handleInterrupt();

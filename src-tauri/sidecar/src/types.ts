@@ -1,6 +1,7 @@
 // Commands from Rust to sidecar (via stdin)
 export type SidecarCommand =
   | { type: 'start'; prompt: string; cwd: string; sessionId?: string; apiKey?: string; model?: string }
+  | { type: 'reset_session'; sessionId: string }
   | { type: 'interrupt' }
   | { type: 'shutdown' };
 

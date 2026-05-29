@@ -2,9 +2,18 @@ import { invoke, Channel } from '@tauri-apps/api/core';
 import type { Session } from '../types/session';
 import type { ChatMessage } from '../types/chat';
 import type { AppConfig, ProviderConfig, Theme } from '../types/provider';
+import type { Project } from '../types/project';
+
+export const projectApi = {
+  create: (name: string, path: string): Promise<Project> => invoke('create_project', { name, path }),
+  getAll: (): Promise<Project[]> => invoke('get_all_projects'),
+  delete: (projectId: string): Promise<void> => invoke('delete_project', { projectId }),
+  rename: (projectId: string, name: string): Promise<void> => invoke('rename_project', { projectId, name }),
+};
 
 export const sessionApi = {
-  create: (title: string, mode?: string): Promise<Session> => invoke('create_session', { title, mode }),
+  create: (title: string, mode?: string, projectId?: string): Promise<Session> =>
+    invoke('create_session', { title, mode, projectId: projectId ?? null }),
   getAll: (): Promise<Session[]> => invoke('get_all_sessions'),
   delete: (sessionId: string): Promise<void> => invoke('delete_session', { sessionId }),
   updateTitle: (sessionId: string, title: string): Promise<void> => invoke('update_session_title', { sessionId, title }),
@@ -38,6 +47,11 @@ export const agentApi = {
   },
   interrupt: (): Promise<void> => invoke('interrupt_agent_session'),
   shutdown: (): Promise<void> => invoke('shutdown_agent'),
+  resetSession: (sessionId: string): Promise<void> => invoke('reset_agent_session', { sessionId }),
+  saveEvents: (sessionId: string, eventsJson: string): Promise<void> =>
+    invoke('save_agent_events', { sessionId, eventsJson }),
+  getEvents: (sessionId: string): Promise<string> =>
+    invoke('get_agent_events', { sessionId }),
 };
 
 export const configApi = {

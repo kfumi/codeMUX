@@ -131,3 +131,23 @@ pub async fn shutdown_agent(
     }
     Ok(())
 }
+
+/// Reset the Claude session mapping for a given app session.
+/// This clears the captured Claude session ID so the next query starts fresh.
+#[tauri::command]
+pub async fn reset_agent_session(
+    agent_state: State<'_, AgentState>,
+    session_id: String,
+) -> Result<(), String> {
+    let cmd = serde_json::json!({
+        "type": "reset_session",
+        "sessionId": session_id,
+    });
+
+    let guard = agent_state.sidecar.lock().await;
+    if let Some(handle) = guard.as_ref() {
+        handle.send_command(&cmd.to_string()).await?;
+    }
+
+    Ok(())
+}
