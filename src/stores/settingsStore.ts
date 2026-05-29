@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { AppConfig, Provider, Theme } from '../types/provider';
+import type { ModelInfo } from '../lib/tauri';
 import { configApi } from '../lib/tauri';
 
 interface SettingsState {
@@ -11,7 +12,7 @@ interface SettingsState {
   setActiveProvider: (providerId: string) => Promise<void>;
   updateProvider: (provider: Provider) => Promise<void>;
   deleteProvider: (providerId: string) => Promise<void>;
-  fetchModels: (apiKey: string, baseUrl: string) => Promise<string[]>;
+  fetchModels: (apiKey: string, baseUrl: string) => Promise<ModelInfo[]>;
   getActiveProvider: () => Provider | null;
 }
 

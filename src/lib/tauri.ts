@@ -3,6 +3,11 @@ import type { Session } from '../types/session';
 import type { AppConfig, Provider, Theme } from '../types/provider';
 import type { Project } from '../types/project';
 
+export interface ModelInfo {
+  id: string;
+  owned_by: string;
+}
+
 export const projectApi = {
   create: (name: string, path: string): Promise<Project> => invoke('create_project', { name, path }),
   getAll: (): Promise<Project[]> => invoke('get_all_projects'),
@@ -49,7 +54,7 @@ export const configApi = {
   deleteProvider: (providerId: string): Promise<void> => invoke('delete_provider', { providerId }),
   setActiveProvider: (providerId: string): Promise<void> => invoke('set_active_provider', { providerId }),
   setTheme: (theme: Theme): Promise<void> => invoke('set_theme', { theme: theme.toLowerCase() }),
-  fetchModels: (apiKey: string, baseUrl: string): Promise<string[]> =>
+  fetchModels: (apiKey: string, baseUrl: string): Promise<ModelInfo[]> =>
     invoke('fetch_provider_models', { apiKey, baseUrl }),
 };
 

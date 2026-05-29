@@ -1,16 +1,17 @@
 import { useState } from 'react';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Provider } from '../../types/provider';
+import type { ModelInfo } from '../../lib/tauri';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '../ui/select';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
 
-const BUILT_IN_MODELS = [
-  'claude-opus-4-20250514',
-  'claude-sonnet-4-20250514',
-  'claude-haiku-4-20250514',
+const BUILT_IN_MODELS: ModelInfo[] = [
+  { id: 'claude-opus-4-20250514', owned_by: 'anthropic' },
+  { id: 'claude-sonnet-4-20250514', owned_by: 'anthropic' },
+  { id: 'claude-haiku-4-20250514', owned_by: 'anthropic' },
 ];
 
 function generateId(): string {
@@ -23,6 +24,17 @@ function maskKey(key: string): string {
   return key.slice(0, 4) + '••••' + key.slice(-4);
 }
 
+function groupModels(models: ModelInfo[]): Map<string, ModelInfo[]> {
+  const groups = new Map<string, ModelInfo[]>();
+  for (const m of models) {
+    const key = m.owned_by || 'unknown';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(m);
+  }
+  // Sort groups by key alphabetically
+  return new Map([...groups.entries()].sort(([a], [b]) => a.localeCompare(b)));
+}
+
 export function ProviderConfigPanel() {
   const { config, updateProvider, deleteProvider, setActiveProvider, fetchModels } = useSettingsStore();
   const providers = config?.providers ?? [];
@@ -31,7 +43,7 @@ export function ProviderConfigPanel() {
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [showKey, setShowKey] = useState(false);
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchStatus, setFetchStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [fetchMessage, setFetchMessage] = useState('');
@@ -53,7 +65,7 @@ export function ProviderConfigPanel() {
       api_key: '',
       anthropic_base_url: '',
       openai_base_url: '',
-      default_model: BUILT_IN_MODELS[1],
+      default_model: BUILT_IN_MODELS[1].id,
     });
     setIsNew(true);
     setShowKey(false);
@@ -90,7 +102,17 @@ export function ProviderConfigPanel() {
   const handleFetchModels = async () => {
     if (!editingProvider) return;
     const url = editingProvider.anthropic_base_url || editingProvider.openai_base_url;
-    if (!url || !editingProvider.api_key) return;
+
+    if (!url?.trim()) {
+      setFetchStatus('error');
+      setFetchMessage('请填写 Base URL');
+      return;
+    }
+    if (!editingProvider.api_key?.trim()) {
+      setFetchStatus('error');
+      setFetchMessage('请填写 API Key');
+      return;
+    }
 
     setIsFetchingModels(true);
     setFetchStatus('idle');
@@ -101,8 +123,19 @@ export function ProviderConfigPanel() {
       setFetchStatus('success');
       setFetchMessage(`获取到 ${models.length} 个模型`);
     } catch (err) {
+      const msg = String(err);
       setFetchStatus('error');
-      setFetchMessage(`获取失败: ${err}`);
+      if (msg.includes('认证失败')) {
+        setFetchMessage('认证失败，请检查 API Key');
+      } else if (msg.includes('未找到')) {
+        setFetchMessage('接口地址未找到');
+      } else if (msg.includes('超时')) {
+        setFetchMessage('请求超时');
+      } else if (msg.includes('不支持')) {
+        setFetchMessage('该接口不支持获取模型');
+      } else {
+        setFetchMessage(`获取失败: ${msg}`);
+      }
       setAvailableModels(BUILT_IN_MODELS);
     } finally {
       setIsFetchingModels(false);
@@ -222,8 +255,13 @@ export function ProviderConfigPanel() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {(availableModels.length > 0 ? availableModels : BUILT_IN_MODELS).map((m) => (
-                          <SelectItem key={m} value={m}>{m}</SelectItem>
+                        {[...groupModels(availableModels.length > 0 ? availableModels : BUILT_IN_MODELS).entries()].map(([group, models]) => (
+                          <SelectGroup key={group}>
+                            <SelectLabel>{group}</SelectLabel>
+                            {models.map((m) => (
+                              <SelectItem key={m.id} value={m.id}>{m.id}</SelectItem>
+                            ))}
+                          </SelectGroup>
                         ))}
                       </SelectContent>
                     </Select>
