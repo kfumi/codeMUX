@@ -1,19 +1,16 @@
-export type ApiType = 'DeepSeek' | 'OpenAICompatible' | 'Claude';
-
 export type Theme = 'Light' | 'Dark' | 'System';
 
-export interface ProviderConfig {
+export interface Provider {
   id: string;
   name: string;
-  api_type: ApiType;
   api_key: string;
-  endpoint_url: string;
+  anthropic_base_url: string;
+  openai_base_url: string;
   default_model: string;
-  is_active: boolean;
 }
 
 export interface AppConfig {
-  providers: ProviderConfig[];
+  providers: Provider[];
   active_provider_id: string | null;
   theme: Theme;
 }
