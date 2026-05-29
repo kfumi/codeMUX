@@ -41,14 +41,23 @@ function buildResultMap(events: AgentMessage[]): Record<string, string> {
 
 function renderEvent(msg: AgentMessage, resultMap: Record<string, string>) {
   switch (msg.kind) {
-    case 'user':
+    case 'user': {
+      const content = msg.data.content;
+      if (content === '[Request interrupted by user for tool use]') {
+        return (
+          <div className="text-xs text-muted-foreground/50 py-2 px-1 animate-fade-in">
+            工具运行中断
+          </div>
+        );
+      }
       return (
         <div className="flex justify-end animate-fade-in-up">
           <div className="max-w-[80%] bg-primary/10 text-foreground rounded-2xl rounded-tr-md px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap">
-            {msg.data.content}
+            {content}
           </div>
         </div>
       );
+    }
 
     case 'ready':
       return (

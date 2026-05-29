@@ -141,24 +141,30 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   interrupt: async () => {
     await agentApi.interrupt();
-    // Sidecar doesn't emit an event on abort, so reset running state directly
-    // and persist any events that were received before the interruption
+    // Sidecar doesn't emit an event on abort, so reset running state directly,
+    // add an interrupt marker, and persist events
     set((s) => {
       const isRunning = { ...s.isRunning };
+      const events = { ...s.events };
       for (const sid of Object.keys(isRunning)) {
         if (isRunning[sid]) {
           isRunning[sid] = false;
+          // Add interrupt marker message
+          const interruptMsg: AgentMessage = {
+            kind: 'user',
+            data: { content: '[Request interrupted by user for tool use]' },
+          };
+          events[sid] = [...(events[sid] || []), interruptMsg];
           // Save events for interrupted sessions
-          const sessionEvents = s.events[sid];
-          if (sessionEvents && sessionEvents.length > 0) {
-            const eventsToSave = sessionEvents.filter((e) => e.kind !== 'done');
+          if (events[sid].length > 0) {
+            const eventsToSave = events[sid].filter((e) => e.kind !== 'done');
             agentApi.saveEvents(sid, JSON.stringify(eventsToSave)).catch((err) => {
               console.error('Failed to save agent events on interrupt:', err);
             });
           }
         }
       }
-      return { isRunning };
+      return { isRunning, events };
     });
   },
 
