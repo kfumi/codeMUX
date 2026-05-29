@@ -6,7 +6,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '../ui/select';
-import { Loader2, Eye, EyeOff, Zap, CheckCircle, XCircle } from 'lucide-react';
+import { Loader2, Eye, EyeOff, Zap } from 'lucide-react';
 
 const BUILT_IN_MODELS: ModelInfo[] = [
   { id: 'claude-opus', owned_by: 'anthropic' },
@@ -40,7 +40,6 @@ export function ProviderConfigPanel() {
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Map<string, 'success' | 'error'>>(new Map());
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [fetchStatus, setFetchStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [fetchMessage, setFetchMessage] = useState('');
@@ -120,16 +119,13 @@ export function ProviderConfigPanel() {
     const provider = providers.find((p) => p.id === providerId);
     const name = provider?.name || '未知';
     setTestingId(providerId);
-    setTestResults((prev) => new Map(prev).set(providerId, undefined as unknown as 'success' | 'error'));
     const start = Date.now();
     try {
       await testProvider(providerId);
       const ms = Date.now() - start;
-      setTestResults((prev) => new Map(prev).set(providerId, 'success'));
       setToast({ message: `${name} 运行正常 (${ms}ms)`, type: 'success' });
     } catch (err) {
       const ms = Date.now() - start;
-      setTestResults((prev) => new Map(prev).set(providerId, 'error'));
       setToast({ message: `${name} 连接失败 (${ms}ms): ${err}`, type: 'error' });
     } finally {
       setTestingId(null);
@@ -209,12 +205,6 @@ export function ProviderConfigPanel() {
                 {p.name || '未命名'}
               </span>
               <div className="flex items-center gap-1">
-                {testResults.get(p.id) === 'success' && (
-                  <CheckCircle className="h-3.5 w-3.5 text-green-500" />
-                )}
-                {testResults.get(p.id) === 'error' && (
-                  <XCircle className="h-3.5 w-3.5 text-red-500" />
-                )}
                 <button
                   title="测试模型"
                   className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
