@@ -105,25 +105,8 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, string>) {
 
     case 'result':
       return (
-        <div className="border-t border-border/20 pt-4 mt-4 space-y-2.5 animate-fade-in-up">
-          <div className="flex items-center gap-2 text-[13px] font-medium text-foreground/80">
-            {msg.data.subtype === 'success' ? (
-              <>
-                <div className="w-4 h-4 rounded-full bg-emerald-500/15 flex items-center justify-center">
-                  <Sparkles className="h-2.5 w-2.5 text-emerald-500" />
-                </div>
-                任务完成
-              </>
-            ) : (
-              `任务结束: ${msg.data.subtype}`
-            )}
-          </div>
-          {msg.data.result && (
-            <div className="prose prose-sm dark:prose-invert max-w-none leading-[1.7]">
-              <MarkdownRenderer content={msg.data.result} />
-            </div>
-          )}
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground/60 pt-1"
+        <div className="border-t border-border/20 pt-3 mt-4 animate-fade-in-up">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground/60"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             <span>耗时 {(msg.data.duration_ms / 1000).toFixed(1)}s</span>
