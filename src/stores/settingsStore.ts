@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AppConfig, ProviderConfig, Theme } from '../types/provider';
+import type { AppConfig, Provider, Theme } from '../types/provider';
 import { configApi } from '../lib/tauri';
 
 interface SettingsState {
@@ -9,13 +9,17 @@ interface SettingsState {
   fetchConfig: () => Promise<void>;
   setTheme: (theme: Theme) => Promise<void>;
   setActiveProvider: (providerId: string) => Promise<void>;
-  updateProvider: (provider: ProviderConfig) => Promise<void>;
+  updateProvider: (provider: Provider) => Promise<void>;
+  deleteProvider: (providerId: string) => Promise<void>;
+  fetchModels: (apiKey: string, baseUrl: string) => Promise<string[]>;
+  getActiveProvider: () => Provider | null;
 }
 
-export const useSettingsStore = create<SettingsState>((set) => ({
+export const useSettingsStore = create<SettingsState>((set, get) => ({
   config: null,
   isLoading: false,
   error: null,
+
   fetchConfig: async () => {
     set({ isLoading: true, error: null });
     try {
@@ -25,6 +29,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       set({ error: String(error), isLoading: false });
     }
   },
+
   setTheme: async (theme: Theme) => {
     try {
       await configApi.setTheme(theme);
@@ -35,6 +40,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       set({ error: String(error) });
     }
   },
+
   setActiveProvider: async (providerId: string) => {
     try {
       await configApi.setActiveProvider(providerId);
@@ -45,18 +51,48 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       set({ error: String(error) });
     }
   },
-  updateProvider: async (provider: ProviderConfig) => {
+
+  updateProvider: async (provider: Provider) => {
     try {
       await configApi.updateProvider(provider);
       set((state) => {
         if (!state.config) return { config: null };
-        const providers = state.config.providers.map((p) =>
-          p.id === provider.id ? provider : p
-        );
+        const exists = state.config.providers.some((p) => p.id === provider.id);
+        const providers = exists
+          ? state.config.providers.map((p) => (p.id === provider.id ? provider : p))
+          : [...state.config.providers, provider];
         return { config: { ...state.config, providers } };
       });
     } catch (error) {
       set({ error: String(error) });
     }
+  },
+
+  deleteProvider: async (providerId: string) => {
+    try {
+      await configApi.deleteProvider(providerId);
+      set((state) => {
+        if (!state.config) return { config: null };
+        const providers = state.config.providers.filter((p) => p.id !== providerId);
+        const active_provider_id =
+          state.config.active_provider_id === providerId
+            ? providers[0]?.id ?? null
+            : state.config.active_provider_id;
+        return { config: { ...state.config, providers, active_provider_id } };
+      });
+    } catch (error) {
+      set({ error: String(error) });
+    }
+  },
+
+  fetchModels: async (apiKey: string, baseUrl: string) => {
+    const models = await configApi.fetchModels(apiKey, baseUrl);
+    return models;
+  },
+
+  getActiveProvider: () => {
+    const config = get().config;
+    if (!config) return null;
+    return config.providers.find((p) => p.id === config.active_provider_id) ?? null;
   },
 }));
