@@ -29,9 +29,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   const handleSend = async (content: string) => {
     const apiKey = localStorage.getItem('agent-anthropic-api-key') || undefined;
-    const storedModel = localStorage.getItem('agent-anthropic-model');
-    const model = storedModel && storedModel.trim() ? storedModel : undefined;
-    await startQuery(sessionId, content, cwd, apiKey, model);
+    await startQuery(sessionId, content, cwd, apiKey);
   };
 
   return (

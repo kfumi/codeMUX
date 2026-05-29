@@ -28,7 +28,7 @@ interface AgentState {
   error: Record<string, string | null>;
 
   /** Start a new agent query */
-  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, model?: string) => Promise<void>;
+  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string) => Promise<void>;
   /** Interrupt the current query */
   interrupt: () => Promise<void>;
   /** Clear events for a session */
@@ -68,7 +68,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   isRunning: {},
   error: {},
 
-  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, model?: string) => {
+  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string) => {
     set((state) => ({
       isRunning: { ...state.isRunning, [sessionId]: true },
       error: { ...state.error, [sessionId]: null },
@@ -93,7 +93,7 @@ export const useAgentStore = create<AgentState>((set) => ({
               : state.error,
           }));
         }
-      }, apiKey, model);
+      }, apiKey);
     } catch (err) {
       set((state) => ({
         isRunning: { ...state.isRunning, [sessionId]: false },
