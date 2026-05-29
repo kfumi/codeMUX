@@ -1,7 +1,6 @@
 mod db;
 mod config;
 mod commands;
-mod provider;
 mod agent;
 
 use tauri::Manager;
@@ -34,7 +33,6 @@ pub fn run() {
             commands::provider::update_provider,
             commands::provider::set_active_provider,
             commands::provider::set_theme,
-            commands::provider::test_connection,
             commands::session::create_session,
             commands::session::get_all_sessions,
             commands::session::delete_session,
@@ -46,8 +44,6 @@ pub fn run() {
             commands::project::get_all_projects,
             commands::project::delete_project,
             commands::project::rename_project,
-            commands::chat::send_message,
-            commands::chat::send_message_stream,
             commands::file::read_file,
             agent::commands::start_agent_session,
             agent::commands::interrupt_agent_session,

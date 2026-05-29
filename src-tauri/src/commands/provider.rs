@@ -2,8 +2,6 @@ use tauri::{AppHandle, State};
 use crate::AppState;
 use crate::config::types::{AppConfig, ProviderConfig};
 use crate::config;
-use crate::provider;
-use crate::provider::types::{AiProvider, ChatMessage};
 
 #[tauri::command]
 pub fn get_config(state: State<'_, AppState>) -> AppConfig {
@@ -44,18 +42,3 @@ pub fn set_theme(state: State<'_, AppState>, app: AppHandle, theme: String) -> R
     Ok(())
 }
 
-#[tauri::command]
-pub async fn test_connection(provider: ProviderConfig) -> Result<String, String> {
-    let provider_impl = provider::create_provider(&provider);
-    let messages = vec![ChatMessage {
-        role: "user".to_string(),
-        content: "Hi".to_string(),
-    }];
-    let model = if provider.default_model.is_empty() {
-        "default".to_string()
-    } else {
-        provider.default_model.clone()
-    };
-    let response = provider_impl.send_message(messages, &model).await?;
-    Ok(response)
-}
