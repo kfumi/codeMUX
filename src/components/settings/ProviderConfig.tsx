@@ -48,6 +48,7 @@ export function ProviderConfigPanel() {
   const [fetchStatus, setFetchStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [fetchMessage, setFetchMessage] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   const openEdit = (provider: Provider) => {
     setEditingProvider({ ...provider });
@@ -56,6 +57,7 @@ export function ProviderConfigPanel() {
     setAvailableModels([]);
     setFetchStatus('idle');
     setDeleteConfirm(false);
+    setSaveError('');
   };
 
   const openNew = () => {
@@ -72,16 +74,32 @@ export function ProviderConfigPanel() {
     setAvailableModels([]);
     setFetchStatus('idle');
     setDeleteConfirm(false);
+    setSaveError('');
   };
 
   const closeModal = () => {
     setEditingProvider(null);
     setFetchStatus('idle');
     setFetchMessage('');
+    setSaveError('');
   };
 
   const handleSave = async () => {
     if (!editingProvider) return;
+    setSaveError('');
+
+    const missing: string[] = [];
+    if (!editingProvider.name?.trim()) missing.push('供应商名称');
+    if (!editingProvider.api_key?.trim()) missing.push('API Key');
+    if (!editingProvider.anthropic_base_url?.trim()) missing.push('Anthropic Base URL');
+    if (!editingProvider.openai_base_url?.trim()) missing.push('OpenAI Base URL');
+    if (!editingProvider.default_model?.trim()) missing.push('默认模型');
+
+    if (missing.length > 0) {
+      setSaveError(`请填写: ${missing.join('、')}`);
+      return;
+    }
+
     await updateProvider(editingProvider);
     if (isNew) {
       await setActiveProvider(editingProvider.id);
@@ -312,6 +330,10 @@ export function ProviderConfigPanel() {
                 )}
               </div>
             </div>
+          )}
+
+          {saveError && (
+            <p className="text-xs text-red-500 -mt-1">{saveError}</p>
           )}
 
           <DialogFooter className="flex justify-between">
