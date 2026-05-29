@@ -66,14 +66,19 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, string>) {
         </div>
       );
 
-    case 'system':
+    case 'system': {
+      const model = msg.data.model;
+      const tools = Array.isArray(msg.data.tools) ? msg.data.tools : [];
+      // Skip rendering if the init message has no useful data
+      if (!model && tools.length === 0) return null;
       return (
         <div className="text-xs text-muted-foreground py-2 px-1 border-b border-border/20 mb-4 animate-fade-in"
           style={{ fontFamily: "'JetBrains Mono', monospace" }}
         >
-          会话初始化 · 模型: {msg.data.model || '未知'} · 工具: {Array.isArray(msg.data.tools) ? msg.data.tools.length : 0} 个
+          会话初始化 · 模型: {model || '未知'} · 工具: {tools.length} 个
         </div>
       );
+    }
 
     case 'assistant': {
       const rawBlocks = msg.data.message?.content;
@@ -138,12 +143,26 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, string>) {
         </div>
       );
 
+    case 'api_retry': {
+      const { attempt, max_retries, error_status, error } = msg.data;
+      const isLastRetry = attempt >= max_retries;
+      return (
+        <div className={`text-xs rounded-xl p-3 my-1 border animate-fade-in ${
+          isLastRetry
+            ? 'text-red-500 bg-red-500/[0.06] border-red-500/15'
+            : 'text-amber-500 bg-amber-500/[0.06] border-amber-500/15'
+        }`}>
+          {isLastRetry ? '请求失败' : `请求重试 ${attempt}/${max_retries}`} · {error_status}: {error}
+        </div>
+      );
+    }
+
     case 'done':
       return null;
 
     case 'raw':
-      // 隐藏 sidecar 调试信息，不在对话中展示
-      if (msg.data.type === 'sidecar_debug') {
+      // 隐藏 sidecar 调试信息和 SDK 内部系统消息，不在对话中展示
+      if (msg.data.type === 'sidecar_debug' || msg.data.type === 'system') {
         return null;
       }
       return (

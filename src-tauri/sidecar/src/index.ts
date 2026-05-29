@@ -24,12 +24,14 @@ function loadClaudeSettingsEnv(): void {
     if (!fs.existsSync(settingsPath)) return;
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
     if (settings.env && typeof settings.env === 'object') {
+      const keys = Object.keys(settings.env);
+      process.stderr.write(`[sidecar] Settings env keys: ${keys.join(', ')}\n`);
       for (const [key, value] of Object.entries(settings.env)) {
         if (typeof value === 'string' && !process.env[key]) {
           process.env[key] = value;
         }
       }
-      process.stderr.write(`[sidecar] Loaded ${Object.keys(settings.env).length} env vars from ~/.claude/settings.json\n`);
+      process.stderr.write(`[sidecar] Loaded ${keys.length} env vars from ~/.claude/settings.json\n`);
     }
   } catch (err) {
     process.stderr.write(`[sidecar] Warning: failed to load Claude settings: ${err}\n`);
@@ -65,6 +67,21 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
 
   const keyPreview = cmd.apiKey ? `${cmd.apiKey.slice(0, 10)}...` : 'not set';
   const claudePath = findClaudeExecutable();
+
+  // Debug: verify env vars are set correctly before spawning SDK
+  const envKey = process.env.ANTHROPIC_API_KEY;
+  const envUrl = process.env.ANTHROPIC_BASE_URL;
+  process.stderr.write(`[sidecar] ENV ANTHROPIC_API_KEY=${envKey ? envKey.slice(0, 10) + '...' : 'NOT SET'}\n`);
+  process.stderr.write(`[sidecar] ENV ANTHROPIC_BASE_URL=${envUrl || 'NOT SET'}\n`);
+  process.stderr.write(`[sidecar] ENV ANTHROPIC_API_KEY length=${envKey?.length || 0}\n`);
+  // Check for other auth-related env vars that might conflict
+  const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
+  const cookie = process.env.ANTHROPIC_COOKIE;
+  if (authToken) process.stderr.write(`[sidecar] WARNING: ANTHROPIC_AUTH_TOKEN is also set! (len=${authToken.length})\n`);
+  if (cookie) process.stderr.write(`[sidecar] WARNING: ANTHROPIC_COOKIE is also set!\n`);
+  // Log all ANTHROPIC_* env vars in the environment
+  const anthropicVars = Object.keys(process.env).filter(k => k.startsWith('ANTHROPIC_'));
+  process.stderr.write(`[sidecar] All ANTHROPIC_* env vars: ${anthropicVars.join(', ') || '(none)'}\n`);
   const appSessionId = cmd.sessionId;
   const claudeSessionId = appSessionId ? sessionIdMap.get(appSessionId) : undefined;
 
@@ -74,13 +91,41 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
   abortController = new AbortController();
 
   try {
+    // Build explicit env for the SDK subprocess — ensures provider switch
+    // picks up new ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL instead of using
+    // whatever the child process inherited at startup.
+    const subprocessEnv: Record<string, string | undefined> = { ...process.env };
+    // Force-overwrite auth vars so stale values from settings.json can't leak through
+    if (cmd.apiKey) subprocessEnv.ANTHROPIC_API_KEY = cmd.apiKey;
+    if (cmd.baseUrl) subprocessEnv.ANTHROPIC_BASE_URL = cmd.baseUrl;
+    // Remove ANTHROPIC_AUTH_TOKEN — it's the Claude account login token from
+    // ~/.claude/settings.json. When set alongside ANTHROPIC_API_KEY, Claude Code
+    // uses the auth token (for anthropic.com) instead of the API key, causing
+    // 401 on non-Anthropic endpoints like DeepSeek.
+    delete subprocessEnv.ANTHROPIC_AUTH_TOKEN;
+    delete subprocessEnv.ANTHROPIC_COOKIE;
+    // Remove global model overrides from settings — the user's chosen model
+    // is passed via the SDK --model flag, these env defaults would interfere.
+    for (const key of Object.keys(subprocessEnv)) {
+      if (key.startsWith('ANTHROPIC_DEFAULT_')) {
+        delete subprocessEnv[key];
+      }
+    }
+
     const options: Record<string, unknown> = {
       cwd: cmd.cwd,
       abortController,
       permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
       allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
+      env: subprocessEnv,
+      // Capture stderr from the Claude Code subprocess for debugging
+      stderr: (data: string) => {
+        process.stderr.write(`[claude-stderr] ${data}`);
+      },
     };
     if (claudePath) options.pathToClaudeCodeExecutable = claudePath;
+    if (cmd.model) options.model = cmd.model;
 
     // Resume existing conversation if we have a captured Claude session ID
     if (claudeSessionId) {
@@ -90,15 +135,43 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
 
     process.stderr.write(`[sidecar] query options: ${JSON.stringify({ ...options, abortController: '[object]' })}\n`);
 
+    process.stderr.write(`[sidecar] Calling query()...\n`);
     activeQuery = query({
       prompt: cmd.prompt,
       options: options as any,
     });
+    process.stderr.write(`[sidecar] query() returned, starting iteration...\n`);
 
-    for await (const message of activeQuery) {
+    let msgCount = 0;
+    const MESSAGE_TIMEOUT_MS = 120_000; // 2 minutes per message
+
+    // Iteration with timeout detection
+    const iterator = activeQuery[Symbol.asyncIterator]();
+    while (true) {
+      const result = await Promise.race([
+        iterator.next(),
+        new Promise<never>((_, reject) => {
+          const timer = setTimeout(() => {
+            reject(new Error(`Query timed out: no message received for ${MESSAGE_TIMEOUT_MS / 1000}s (after msg #${msgCount})`));
+          }, MESSAGE_TIMEOUT_MS);
+          // Allow the timer to not keep the process alive
+          if (timer.unref) timer.unref();
+        }),
+      ]);
+
+      if (result.done) break;
+
+      msgCount++;
+      const message = result.value;
+      const msg = message as Record<string, unknown>;
+      process.stderr.write(`[sidecar] Message #${msgCount}: type=${msg.type}, subtype=${msg.subtype || 'none'}\n`);
+      // Log full content for system messages (especially api_retry)
+      if (msg.type === 'system') {
+        process.stderr.write(`[sidecar]   → ${JSON.stringify(message)}\n`);
+      }
+
       // Capture the real Claude session ID from any SDK message
       if (appSessionId && !sessionIdMap.has(appSessionId)) {
-        const msg = message as Record<string, unknown>;
         if (typeof msg.session_id === 'string' && msg.session_id) {
           sessionIdMap.set(appSessionId, msg.session_id);
           process.stderr.write(`[sidecar] Captured Claude session ID: ${msg.session_id} for app session: ${appSessionId}\n`);
@@ -107,6 +180,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       emit(message);
     }
 
+    process.stderr.write(`[sidecar] Query iteration done. Total messages: ${msgCount}\n`);
     emit({ type: 'sidecar_query_done' });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);

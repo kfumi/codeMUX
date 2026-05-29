@@ -61,7 +61,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const handleSend = async (content: string) => {
     const apiKey = activeProvider?.api_key || undefined;
     const baseUrl = activeProvider?.anthropic_base_url || undefined;
-    await startQuery(sessionId, content, cwd, apiKey, baseUrl);
+    const model = activeProvider?.default_model || undefined;
+    await startQuery(sessionId, content, cwd, apiKey, baseUrl, model);
   };
 
   return (

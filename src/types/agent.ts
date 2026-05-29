@@ -63,6 +63,7 @@ export interface AgentSystemMessage {
 export interface AgentResultMessage {
   type: 'result';
   subtype: 'success' | string;
+  is_error: boolean;
   uuid: string;
   session_id: string;
   duration_ms: number;

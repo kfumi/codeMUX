@@ -1,14 +1,5 @@
 import { useState } from 'react';
-import {
-  FileText,
-  Edit3,
-  Search,
-  Globe,
-  Terminal,
-  ChevronDown,
-  ChevronRight,
-  Wrench,
-} from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 interface ToolCallCardProps {
   toolName: string;
@@ -16,17 +7,6 @@ interface ToolCallCardProps {
   result?: string;
   status?: 'pending' | 'running' | 'done' | 'error';
 }
-
-const TOOL_ICONS: Record<string, typeof FileText> = {
-  Read: FileText,
-  Write: FileText,
-  Edit: Edit3,
-  Glob: Search,
-  Grep: Search,
-  Bash: Terminal,
-  WebSearch: Globe,
-  WebFetch: Globe,
-};
 
 function getToolSummary(toolName: string, input: Record<string, unknown>): string {
   switch (toolName) {
@@ -53,7 +33,6 @@ function getToolSummary(toolName: string, input: Record<string, unknown>): strin
 
 export function ToolCallCard({ toolName, input, result, status }: ToolCallCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const Icon = TOOL_ICONS[toolName] || Wrench;
   const summary = getToolSummary(toolName, input);
 
   const statusColors = {
@@ -70,7 +49,6 @@ export function ToolCallCard({ toolName, input, result, status }: ToolCallCardPr
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        <Icon className="h-4 w-4 text-blue-500" />
         <span className="font-medium">{toolName}</span>
         <span className="text-muted-foreground truncate flex-1 text-left">{summary}</span>
         {status && <span className={`text-xs ${statusColors[status]}`}>{status}</span>}

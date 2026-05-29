@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '../../lib/utils';
 
 interface DropdownMenuProps {
@@ -7,36 +8,52 @@ interface DropdownMenuProps {
   align?: 'left' | 'right';
 }
 
-export function DropdownMenu({ trigger, children, align = 'right' }: DropdownMenuProps) {
+export function DropdownMenu({ trigger, children, align = 'left' }: DropdownMenuProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    setPos({
+      top: rect.bottom + 4,
+      left: align === 'left' ? rect.left : rect.right,
+    });
+  }, [open, align]);
 
   useEffect(() => {
     if (!open) return;
-    const handleClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+    const handleOutside = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t)) return;
+      if (panelRef.current?.contains(t)) return;
+      setOpen(false);
     };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener('pointerdown', handleOutside, true);
+    return () => document.removeEventListener('pointerdown', handleOutside, true);
   }, [open]);
 
-  return (
-    <div className="relative" ref={ref}>
-      <div onClick={() => setOpen(!open)}>{trigger}</div>
-      {open && (
+  const panel = open
+    ? createPortal(
         <div
-          className={cn(
-            'absolute z-50 mt-1 min-w-[160px] rounded-md border bg-popover p-1 shadow-md',
-            align === 'right' ? 'right-0' : 'left-0'
-          )}
+          ref={panelRef}
+          className="fixed z-[100] min-w-[160px] rounded-md border bg-popover p-1 shadow-lg"
+          style={{ top: pos.top, left: pos.left }}
           onClick={() => setOpen(false)}
         >
           {children}
-        </div>
-      )}
-    </div>
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <>
+      <div ref={triggerRef} onClick={() => setOpen(!open)}>{trigger}</div>
+      {panel}
+    </>
   );
 }
 

@@ -32,12 +32,13 @@ export const agentApi = {
     onEvent: (event: string) => void,
     apiKey?: string,
     baseUrl?: string,
+    model?: string,
   ): Promise<void> => {
     const channel = new Channel<string>();
     channel.onmessage = (event: string) => {
       onEvent(event);
     };
-    return invoke('start_agent_session', { sessionId, prompt, cwd, channel, apiKey, baseUrl });
+    return invoke('start_agent_session', { sessionId, prompt, cwd, channel, apiKey, baseUrl, model });
   },
   interrupt: (): Promise<void> => invoke('interrupt_agent_session'),
   shutdown: (): Promise<void> => invoke('shutdown_agent'),

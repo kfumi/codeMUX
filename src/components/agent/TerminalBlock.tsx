@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Terminal, ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 interface TerminalBlockProps {
   command: string;
@@ -17,7 +17,6 @@ export function TerminalBlock({ command, output, isRunning }: TerminalBlockProps
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        <Terminal className="h-4 w-4" />
         <span className="truncate">{command}</span>
         {isRunning && <span className="ml-auto text-amber-500 animate-pulse">运行中...</span>}
       </button>

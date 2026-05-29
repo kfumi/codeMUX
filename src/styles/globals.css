@@ -77,6 +77,11 @@
   }
 }
 
+/* ——— Password input tweaks ——— */
+input[type="password"]::-ms-reveal {
+  display: none;
+}
+
 /* ——— Tauri drag region ——— */
 *[data-tauri-drag-region] {
   -webkit-app-region: drag;
@@ -120,20 +125,20 @@
 
 /* ——— Smooth scrollbar ——— */
 .scroll-smooth::-webkit-scrollbar {
-  width: 14px;
+  width: 12px;
 }
 .scroll-smooth::-webkit-scrollbar-track {
   background: transparent;
 }
 .scroll-smooth::-webkit-scrollbar-thumb {
   background: hsl(var(--muted-foreground) / 0.25);
-  border-radius: 5px;
+  border-radius: 50px;
   border: 2px solid transparent;
   background-clip: content-box;
   min-height: 100px;
 }
 .scroll-smooth::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.45);
+  background: hsl(var(--muted-foreground) / 0.5);
   border: 2px solid transparent;
   background-clip: content-box;
 }

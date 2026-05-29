@@ -99,7 +99,7 @@ export function ProjectGroup({
               重命名项目
             </DropdownMenuItem>
             <DropdownMenuItem
-              icon={<Trash2 className="h-4.5 w-4.5" />}
+              icon={<Trash2 className="h-3.5 w-3.5" />}
               danger
               onClick={() => setConfirmOpen(true)}
             >
@@ -111,7 +111,7 @@ export function ProjectGroup({
             title={`在 ${project.name} 中开始对话`}
             onClick={() => onNewSessionInProject(project.id)}
           >
-            <MessageSquarePlus className="h-4 w-4" />
+            <MessageSquarePlus className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>

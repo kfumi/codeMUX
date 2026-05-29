@@ -18,6 +18,7 @@ export type AgentMessage =
   | { kind: 'result'; data: AgentResultMessage }
   | { kind: 'ready'; data: SidecarReadyEvent }
   | { kind: 'error'; data: SidecarErrorEvent }
+  | { kind: 'api_retry'; data: { attempt: number; max_retries: number; retry_delay_ms: number; error_status: number; error: string } }
   | { kind: 'done' }
   | { kind: 'raw'; data: Record<string, unknown> };
 
@@ -32,7 +33,7 @@ interface AgentState {
   titledSessions: Record<string, boolean>;
 
   /** Start a new agent query */
-  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string) => Promise<void>;
+  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => Promise<void>;
   /** Interrupt the current query */
   interrupt: () => Promise<void>;
   /** Clear events for a session */
@@ -56,7 +57,13 @@ function parseAgentEvent(raw: string): AgentMessage {
       case 'user':
         return { kind: 'tool_result', data };
       case 'system':
-        return { kind: 'system', data };
+        if (data.subtype === 'init') {
+          return { kind: 'system', data };
+        }
+        if (data.subtype === 'api_retry') {
+          return { kind: 'api_retry', data };
+        }
+        return { kind: 'raw', data };
       case 'result':
         return { kind: 'result', data };
       case 'sidecar_debug':
@@ -81,7 +88,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   error: {},
   titledSessions: {},
 
-  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string) => {
+  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => {
     // Auto-update session title on first message
     const state = get();
     if (!state.titledSessions[sessionId]) {
@@ -113,7 +120,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           },
         }));
 
-        if (event.kind === 'done' || event.kind === 'error') {
+        if (event.kind === 'done' || event.kind === 'error' || (event.kind === 'result' && event.data?.is_error)) {
           set((s) => ({
             isRunning: { ...s.isRunning, [sessionId]: false },
             error: event.kind === 'error'
@@ -130,7 +137,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             });
           }
         }
-      }, apiKey, baseUrl);
+      }, apiKey, baseUrl, model);
     } catch (err) {
       set((s) => ({
         isRunning: { ...s.isRunning, [sessionId]: false },

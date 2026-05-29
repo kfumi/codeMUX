@@ -41,7 +41,7 @@ export function SessionItem({ session, isActive, onClick, onDelete }: SessionIte
             setConfirmOpen(true);
           }}
         >
-          <Trash2 className="h-3 w-3" />
+          <Trash2 className="h-3.5 w-3.5" />
         </button>
       </div>
 

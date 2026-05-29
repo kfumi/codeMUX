@@ -33,6 +33,7 @@ pub async fn start_agent_session(
     channel: tauri::ipc::Channel<String>,
     api_key: Option<String>,
     base_url: Option<String>,
+    model: Option<String>,
 ) -> Result<(), String> {
     // Ensure sidecar is running
     let need_spawn = {
@@ -79,6 +80,9 @@ pub async fn start_agent_session(
     }
     if let Some(url) = base_url {
         cmd["baseUrl"] = serde_json::Value::String(url);
+    }
+    if let Some(m) = model {
+        cmd["model"] = serde_json::Value::String(m);
     }
 
     let guard = agent_state.sidecar.lock().await;

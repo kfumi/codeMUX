@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Brain } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 interface ThinkingBlockProps {
   thinking: string;
@@ -17,7 +17,6 @@ export function ThinkingBlock({ thinking }: ThinkingBlockProps) {
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        <Brain className="h-4 w-4" />
         <span>思考过程</span>
       </button>
       {isExpanded && (
