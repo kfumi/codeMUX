@@ -191,17 +191,15 @@ export function ProviderConfigPanel() {
         {providers.map((p) => (
           <div
             key={p.id}
-            className="p-3 bg-card border rounded-lg transition-colors"
+            className="p-3 bg-card border rounded-lg transition-colors cursor-pointer hover:border-primary/50"
             style={{
               borderColor: p.id === activeId ? 'hsl(var(--primary))' : undefined,
               borderWidth: p.id === activeId ? '2px' : '1px',
             }}
+            onClick={() => openEdit(p)}
           >
             <div className="flex items-center justify-between mb-2">
-              <span
-                className="font-medium text-sm truncate cursor-pointer hover:text-primary transition-colors"
-                onClick={() => openEdit(p)}
-              >
+              <span className="font-medium text-sm truncate">
                 {p.name || '未命名'}
               </span>
               <div className="flex items-center gap-1">
@@ -224,16 +222,16 @@ export function ProviderConfigPanel() {
                   variant={p.id === activeId ? 'default' : 'outline'}
                   size="sm"
                   className="h-6 px-2 text-[11px]"
-                  onClick={() => setActiveProvider(p.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveProvider(p.id);
+                  }}
                 >
                   {p.id === activeId ? '已激活' : '激活'}
                 </Button>
               </div>
             </div>
-            <div
-              className="text-xs text-muted-foreground truncate cursor-pointer hover:text-foreground transition-colors"
-              onClick={() => openEdit(p)}
-            >
+            <div className="text-xs text-muted-foreground truncate">
               {p.default_model}
             </div>
           </div>
