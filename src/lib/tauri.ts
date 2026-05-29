@@ -1,7 +1,6 @@
 import { invoke, Channel } from '@tauri-apps/api/core';
 import type { Session } from '../types/session';
-import type { ChatMessage } from '../types/chat';
-import type { AppConfig, ProviderConfig, Theme } from '../types/provider';
+import type { AppConfig, Provider, Theme } from '../types/provider';
 import type { Project } from '../types/project';
 
 export const projectApi = {
@@ -17,18 +16,7 @@ export const sessionApi = {
   getAll: (): Promise<Session[]> => invoke('get_all_sessions'),
   delete: (sessionId: string): Promise<void> => invoke('delete_session', { sessionId }),
   updateTitle: (sessionId: string, title: string): Promise<void> => invoke('update_session_title', { sessionId, title }),
-  getMessages: (sessionId: string): Promise<ChatMessage[]> => invoke('get_messages', { sessionId }),
-};
-
-export const chatApi = {
-  sendMessage: (sessionId: string, content: string): Promise<string> => invoke('send_message', { sessionId, content }),
-  sendMessageStream: (sessionId: string, content: string, onChunk: (token: string) => void): Promise<void> => {
-    const channel = new Channel<string>();
-    channel.onmessage = (token: string) => {
-      onChunk(token);
-    };
-    return invoke('send_message_stream', { sessionId, content, channel });
-  },
+  getMessages: (sessionId: string): Promise<unknown[]> => invoke('get_messages', { sessionId }),
 };
 
 export const agentApi = {
@@ -38,12 +26,13 @@ export const agentApi = {
     cwd: string,
     onEvent: (event: string) => void,
     apiKey?: string,
+    baseUrl?: string,
   ): Promise<void> => {
     const channel = new Channel<string>();
     channel.onmessage = (event: string) => {
       onEvent(event);
     };
-    return invoke('start_agent_session', { sessionId, prompt, cwd, channel, apiKey });
+    return invoke('start_agent_session', { sessionId, prompt, cwd, channel, apiKey, baseUrl });
   },
   interrupt: (): Promise<void> => invoke('interrupt_agent_session'),
   shutdown: (): Promise<void> => invoke('shutdown_agent'),
@@ -56,10 +45,12 @@ export const agentApi = {
 
 export const configApi = {
   get: (): Promise<AppConfig> => invoke('get_config'),
-  updateProvider: (provider: ProviderConfig): Promise<void> => invoke('update_provider', { provider }),
+  updateProvider: (provider: Provider): Promise<void> => invoke('update_provider', { provider }),
+  deleteProvider: (providerId: string): Promise<void> => invoke('delete_provider', { providerId }),
   setActiveProvider: (providerId: string): Promise<void> => invoke('set_active_provider', { providerId }),
   setTheme: (theme: Theme): Promise<void> => invoke('set_theme', { theme: theme.toLowerCase() }),
-  testConnection: (provider: ProviderConfig): Promise<string> => invoke('test_connection', { provider }),
+  fetchModels: (apiKey: string, baseUrl: string): Promise<string[]> =>
+    invoke('fetch_provider_models', { apiKey, baseUrl }),
 };
 
 export const fileApi = {

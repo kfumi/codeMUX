@@ -1,18 +1,17 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAgentStore, type AgentMessage } from '../../stores/agentStore';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolCallCard } from './ToolCallCard';
-import { TerminalBlock } from './TerminalBlock';
-import { MarkdownRenderer } from '../chat/MarkdownRenderer';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import { Loader2, Sparkles, ArrowDown } from 'lucide-react';
 
 interface AgentMessageListProps {
   sessionId: string;
 }
 
-function AgentEventItem({ msg }: { msg: AgentMessage }) {
+function AgentEventItem({ msg, resultMap }: { msg: AgentMessage; resultMap: Record<string, string> }) {
   try {
-    return renderEvent(msg);
+    return renderEvent(msg, resultMap);
   } catch (err) {
     return (
       <div className="text-xs text-red-500 bg-red-500/[0.06] rounded-xl p-3 my-1 border border-red-500/15">
@@ -23,7 +22,24 @@ function AgentEventItem({ msg }: { msg: AgentMessage }) {
   }
 }
 
-function renderEvent(msg: AgentMessage) {
+function buildResultMap(events: AgentMessage[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const evt of events) {
+    if (evt.kind !== 'tool_result') continue;
+    const rawContent: any = evt.data?.message?.content;
+    if (Array.isArray(rawContent)) {
+      for (const r of rawContent) {
+        if (r?.type === 'tool_result' && r.tool_use_id) {
+          const content = typeof r.content === 'string' ? r.content : JSON.stringify(r.content);
+          map[r.tool_use_id] = content;
+        }
+      }
+    }
+  }
+  return map;
+}
+
+function renderEvent(msg: AgentMessage, resultMap: Record<string, string>) {
   switch (msg.kind) {
     case 'user':
       return (
@@ -67,11 +83,13 @@ function renderEvent(msg: AgentMessage) {
               );
             }
             if (block?.type === 'tool_use' && block.name) {
+              const result = block.id ? resultMap[block.id] : undefined;
               return (
                 <ToolCallCard
                   key={i}
                   toolName={block.name}
                   input={block.input || {}}
+                  result={result}
                 />
               );
             }
@@ -81,48 +99,9 @@ function renderEvent(msg: AgentMessage) {
       );
     }
 
-    case 'tool_result': {
-      const rawContent: any = msg.data.message?.content;
-      if (typeof rawContent === 'string') {
-        if (rawContent.length > 200) {
-          return <TerminalBlock command="tool_result" output={rawContent} />;
-        }
-        return (
-          <div className="text-xs text-muted-foreground bg-muted/30 rounded-xl p-3 my-1.5 whitespace-pre-wrap max-h-40 overflow-auto border border-border/20"
-            style={{ fontFamily: "'JetBrains Mono', monospace" }}
-          >
-            {rawContent}
-          </div>
-        );
-      }
-      const results = Array.isArray(rawContent) ? rawContent : [];
-      return (
-        <div>
-          {results.map((r: any, i: number) => {
-            if (r?.type === 'tool_result') {
-              const content = r.content || '';
-              if (typeof content === 'string' && content.length > 200) {
-                return (
-                  <TerminalBlock
-                    key={i}
-                    command={`tool_result: ${r.tool_use_id}`}
-                    output={content}
-                  />
-                );
-              }
-              return (
-                <div key={i} className="text-xs text-muted-foreground bg-muted/30 rounded-xl p-3 my-1.5 whitespace-pre-wrap max-h-40 overflow-auto border border-border/20"
-                  style={{ fontFamily: "'JetBrains Mono', monospace" }}
-                >
-                  {typeof content === 'string' ? content : JSON.stringify(content)}
-                </div>
-              );
-            }
-            return null;
-          })}
-        </div>
-      );
-    }
+    case 'tool_result':
+      // 已在 assistant 的 tool_use 中内联展示，跳过
+      return null;
 
     case 'result':
       return (
@@ -193,6 +172,7 @@ const EMPTY_EVENTS: AgentMessage[] = [];
 export function AgentMessageList({ sessionId }: AgentMessageListProps) {
   const events = useAgentStore((s) => s.events[sessionId] ?? EMPTY_EVENTS);
   const isRunning = useAgentStore((s) => s.isRunning[sessionId] ?? false);
+  const resultMap = useMemo(() => buildResultMap(events), [events]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -267,7 +247,7 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
             </div>
           )}
           {events.map((msg, i) => (
-            <AgentEventItem key={i} msg={msg} />
+            <AgentEventItem key={i} msg={msg} resultMap={resultMap} />
           ))}
           {isRunning && (
             <div className="flex items-center gap-2.5 text-sm text-muted-foreground/60 py-2 animate-fade-in">
