@@ -61,7 +61,7 @@ export function DiffView({ oldContent, newContent }: DiffViewProps) {
       </div>
 
       {/* Diff lines */}
-      <div className="leading-relaxed">
+      <div className="leading-relaxed overflow-x-auto">
         {diffLinesData.map((line, index) => {
           const bgClass =
             line.type === 'added'
@@ -73,11 +73,11 @@ export function DiffView({ oldContent, newContent }: DiffViewProps) {
           const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
 
           return (
-            <div key={index} className={`px-4 ${bgClass}`}>
-              <span className="text-muted-foreground/40 select-none inline-block w-10 text-right mr-1">
+            <div key={index} className={`px-4 whitespace-nowrap ${bgClass}`}>
+              <span className="text-muted-foreground/40 select-none inline-block text-right mr-1">
                 {line.oldLineNum ?? ''}
               </span>
-              <span className="text-muted-foreground/40 select-none inline-block w-10 text-right mr-2">
+              <span className="text-muted-foreground/40 select-none inline-block text-right mr-2">
                 {line.newLineNum ?? ''}
               </span>
               <span className="text-muted-foreground/50 select-none mr-1">{prefix}</span>
