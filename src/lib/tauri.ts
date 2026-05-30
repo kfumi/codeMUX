@@ -8,6 +8,13 @@ export interface ModelInfo {
   owned_by: string;
 }
 
+export interface FileTreeNode {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  children?: FileTreeNode[];
+}
+
 export const projectApi = {
   create: (name: string, path: string): Promise<Project> => invoke('create_project', { name, path }),
   getAll: (): Promise<Project[]> => invoke('get_all_projects'),
@@ -66,4 +73,6 @@ export const configApi = {
 
 export const fileApi = {
   readFile: (path: string): Promise<string> => invoke('read_file', { path }),
+  listDirectory: (path: string, depth?: number): Promise<FileTreeNode[]> =>
+    invoke('list_directory', { path, depth }),
 };
