@@ -62,13 +62,15 @@ function convertTree(nodes: FileTreeNode[]): FileTreeNodeData[] {
 
 /** Normalize file paths from various formats to OS-native paths */
 function normalizeFilePath(p: string): string {
+  // Strip Windows extended-length prefix: //?/ or \\?\
+  let path = p.replace(/^\/\/\?\//, '').replace(/^\\\\\?\\/, '');
   // Unix-style drive path: /d/project/... → D:\project\...
-  const driveMatch = p.match(/^\/([a-zA-Z])\/(.+)$/);
+  const driveMatch = path.match(/^\/([a-zA-Z])\/(.+)$/);
   if (driveMatch) {
     return `${driveMatch[1].toUpperCase()}:\\${driveMatch[2].replace(/\//g, '\\')}`;
   }
   // Ensure forward slashes work on Windows too
-  return p.replace(/\//g, '\\');
+  return path.replace(/\//g, '\\');
 }
 
 export const usePreviewStore = create<PreviewState>((set, get) => ({
