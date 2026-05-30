@@ -53,6 +53,10 @@ function getToolSummaryData(toolName: string, input: Record<string, unknown>): T
     case 'Agent':
     case 'subagent':
       return [{ type: 'text', content: String(input.description || input.prompt || '').slice(0, 100) }];
+    case 'Skill':
+      return [{ type: 'text', content: String(input.skill || '') }];
+    case 'AskUserQuestion':
+      return []; // 参数由 AskUserQuestionCard 展示
     default:
       return [{ type: 'text', content: String(input.description || input.prompt || JSON.stringify(input).slice(0, 80)) }];
   }

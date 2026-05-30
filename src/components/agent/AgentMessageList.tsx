@@ -385,9 +385,11 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
 }
 
 const EMPTY_EVENTS: AgentMessage[] = [];
+const EMPTY_TIMESTAMPS: number[] = [];
 
 export function AgentMessageList({ sessionId }: AgentMessageListProps) {
   const events = useAgentStore((s) => s.events[sessionId] ?? EMPTY_EVENTS);
+  const eventTimestamps = useAgentStore((s) => s.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
   const isRunning = useAgentStore((s) => s.isRunning[sessionId] ?? false);
   const config = useSettingsStore((s) => s.config);
   const provider = config?.providers.find((p) => p.id === config.active_provider_id) ?? null;
@@ -399,8 +401,6 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
   const [autoScroll, setAutoScroll] = useState(true);
   // 跟踪上一次事件数量，用于区分历史加载和实时消息
   const prevCountRef = useRef(0);
-  // 跟踪每个事件到达的时间戳，用于计算执行时长
-  const eventTimestampsRef = useRef<number[]>([]);
   const openFile = usePreviewStore((s) => s.openFile);
   const handleFileClick = useCallback(
     (path: string, originalContent?: string) => {
@@ -428,7 +428,6 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
   // 切换会话时重置状态
   useEffect(() => {
     prevCountRef.current = 0;
-    eventTimestampsRef.current = [];
     setAutoScroll(true);
     setShowScrollBtn(false);
   }, [sessionId]);
@@ -439,25 +438,13 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
       setShowScrollBtn(false);
       setAutoScroll(true);
       prevCountRef.current = 0;
-      eventTimestampsRef.current = [];
     }
   }, [events.length, isRunning]);
 
-  // 同步更新时间戳（在渲染阶段，确保 useMemo 能读到最新值）
-  {
-    const timestamps = eventTimestampsRef.current;
-    if (events.length > timestamps.length) {
-      const now = Date.now();
-      while (timestamps.length < events.length) {
-        timestamps.push(now);
-      }
-    }
-  }
-
   // 计算工具调用和思考过程的执行时长
-  const toolDurations = useMemo(() => buildToolDurationMap(events, eventTimestampsRef.current), [events]);
-  const thinkingDurations = useMemo(() => buildThinkingDurationMap(events, eventTimestampsRef.current), [events]);
-  const assistantTextMap = useMemo(() => buildAssistantTextMap(events, eventTimestampsRef.current), [events]);
+  const toolDurations = useMemo(() => buildToolDurationMap(events, eventTimestamps), [events, eventTimestamps]);
+  const thinkingDurations = useMemo(() => buildThinkingDurationMap(events, eventTimestamps), [events, eventTimestamps]);
+  const assistantTextMap = useMemo(() => buildAssistantTextMap(events, eventTimestamps), [events, eventTimestamps]);
 
   // 滚动到底部：历史加载用 instant，实时消息用 smooth
   useEffect(() => {
@@ -493,7 +480,7 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
             </div>
           )}
           {events.map((msg, i) => (
-            <AgentEventItem key={i} msg={msg} resultMap={resultMap} provider={provider} onFileClick={handleFileClick} toolDurations={toolDurations} thinkingDurations={thinkingDurations} eventIndex={i} timestamp={eventTimestampsRef.current[i]} assistantTextMap={assistantTextMap} />
+            <AgentEventItem key={i} msg={msg} resultMap={resultMap} provider={provider} onFileClick={handleFileClick} toolDurations={toolDurations} thinkingDurations={thinkingDurations} eventIndex={i} timestamp={eventTimestamps[i]} assistantTextMap={assistantTextMap} />
           ))}
           {isRunning && (
             <div className="flex items-center gap-2.5 text-sm text-muted-foreground/60 py-2 animate-fade-in">

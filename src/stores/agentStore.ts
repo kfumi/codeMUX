@@ -26,6 +26,8 @@ export type AgentMessage =
 interface AgentState {
   /** Events for each session */
   events: Record<string, AgentMessage[]>;
+  /** Timestamps (ms) for each event, recorded at arrival time */
+  eventTimestamps: Record<string, number[]>;
   /** Whether a query is currently running */
   isRunning: Record<string, boolean>;
   /** Error message if any */
@@ -87,6 +89,7 @@ function truncateTitle(text: string, maxLen = 30): string {
 
 export const useAgentStore = create<AgentState>((set, get) => ({
   events: {},
+  eventTimestamps: {},
   isRunning: {},
   error: {},
   titledSessions: {},
@@ -116,10 +119,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     try {
       await agentApi.startSession(sessionId, prompt, cwd, (raw: string) => {
         const event = parseAgentEvent(raw);
+        const now = Date.now();
         set((s) => ({
           events: {
             ...s.events,
             [sessionId]: [...(s.events[sessionId] || []), event],
+          },
+          eventTimestamps: {
+            ...s.eventTimestamps,
+            [sessionId]: [...(s.eventTimestamps[sessionId] || []), now],
           },
         }));
 
@@ -182,11 +190,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     set((state) => {
       const newEvents = { ...state.events };
       delete newEvents[sessionId];
+      const newTimestamps = { ...state.eventTimestamps };
+      delete newTimestamps[sessionId];
       const newRunning = { ...state.isRunning };
       delete newRunning[sessionId];
       const newError = { ...state.error };
       delete newError[sessionId];
-      return { events: newEvents, isRunning: newRunning, error: newError };
+      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError };
     });
   },
 
