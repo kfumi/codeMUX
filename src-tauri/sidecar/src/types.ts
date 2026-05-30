@@ -3,7 +3,8 @@ export type SidecarCommand =
   | { type: 'start'; prompt: string; cwd: string; sessionId?: string; apiKey?: string; baseUrl?: string; model?: string }
   | { type: 'reset_session'; sessionId: string }
   | { type: 'interrupt' }
-  | { type: 'shutdown' };
+  | { type: 'shutdown' }
+  | { type: 'tool_response'; toolUseId: string; response: unknown };
 
 // The sidecar emits raw SDKMessage JSON lines to stdout.
 // We re-export key shapes here for reference only.

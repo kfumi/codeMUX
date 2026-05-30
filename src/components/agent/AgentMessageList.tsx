@@ -5,6 +5,7 @@ import { calculateCost } from '../../lib/pricing';
 import type { Provider } from '../../types/provider';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolCallCard } from './ToolCallCard';
+import { AskUserQuestionCard } from './AskUserQuestionCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { Loader2, Sparkles, ArrowDown, Copy, Check } from 'lucide-react';
 import { usePreviewStore } from '../../stores/previewStore';
@@ -297,6 +298,14 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
       // 已在 assistant 的 tool_use 中内联展示，跳过
       return null;
 
+    case 'ask_user_question':
+      return (
+        <AskUserQuestionCard
+          toolUseId={msg.data.tool_use_id}
+          questions={msg.data.questions}
+        />
+      );
+
     case 'result': {
       const cost = calculateCost(msg.data.usage, provider);
       const assistantData = assistantTextMap?.[eventIndex];
@@ -307,11 +316,21 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
           >
             {assistantData && <CopyButton content={assistantData.text} />}
             {assistantData?.timestamp != null && (
-              <span className="tabular-nums">{formatTime(assistantData.timestamp)}</span>
+              <>
+                <span className="tabular-nums">{formatTime(assistantData.timestamp)}</span>
+                <span className="text-muted-foreground/30">|</span>
+              </>
             )}
             <span>耗时 {(msg.data.duration_ms / 1000).toFixed(1)}s</span>
+            <span className="text-muted-foreground/30">|</span>
             <span>轮次 {msg.data.num_turns}</span>
-            {cost != null && <span>${cost.toFixed(4)}</span>}
+            {cost != null && (
+              <>
+                <span className="text-muted-foreground/30">|</span>
+                <span>${cost.toFixed(4)}</span>
+              </>
+            )}
+            <span className="text-muted-foreground/30">|</span>
             <span>{msg.data.usage?.input_tokens}+{msg.data.usage?.output_tokens} token</span>
           </div>
         </div>

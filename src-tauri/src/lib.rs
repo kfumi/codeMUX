@@ -54,6 +54,7 @@ pub fn run() {
             agent::commands::interrupt_agent_session,
             agent::commands::shutdown_agent,
             agent::commands::reset_agent_session,
+            agent::commands::send_tool_response,
             agent::commands::delete_claude_session_files,
         ])
         .run(tauri::generate_context!())

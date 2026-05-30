@@ -140,6 +140,27 @@ pub async fn shutdown_agent(
     Ok(())
 }
 
+/// Send a tool response (e.g. AskUserQuestion answer) back to the sidecar.
+#[tauri::command]
+pub async fn send_tool_response(
+    agent_state: State<'_, AgentState>,
+    tool_use_id: String,
+    response: serde_json::Value,
+) -> Result<(), String> {
+    let cmd = serde_json::json!({
+        "type": "tool_response",
+        "toolUseId": tool_use_id,
+        "response": response,
+    });
+
+    let guard = agent_state.sidecar.lock().await;
+    if let Some(handle) = guard.as_ref() {
+        handle.send_command(&cmd.to_string()).await?;
+    }
+
+    Ok(())
+}
+
 /// Reset the Claude session mapping for a given app session.
 /// This clears the captured Claude session ID so the next query starts fresh.
 #[tauri::command]

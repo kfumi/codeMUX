@@ -6,6 +6,9 @@ import { execSync } from 'node:child_process';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { SidecarCommand } from './types.js';
 
+/** Pending tool responses waiting for user input */
+const pendingToolResponses = new Map<string, { resolve: (value: unknown) => void }>();
+
 function findClaudeExecutable(): string | undefined {
   try {
     if (process.platform === 'win32') {
@@ -148,11 +151,40 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       abortController,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
+      allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'AskUserQuestion'],
       env: subprocessEnv,
       // Capture stderr from the Claude Code subprocess for debugging
       stderr: (data: string) => {
         process.stderr.write(`[claude-stderr] ${data}`);
+      },
+      // Intercept interactive tools that need user input
+      canUseTool: async (toolName: string, input: Record<string, unknown>, opts: { toolUseID: string; signal: AbortSignal }) => {
+        if (toolName === 'AskUserQuestion') {
+          const toolUseId = opts.toolUseID;
+          const questions = (input as any).questions ?? [];
+          process.stderr.write(`[sidecar] AskUserQuestion intercepted, toolUseId=${toolUseId}\n`);
+          // Emit event to frontend with questions
+          emit({
+            type: 'ask_user_question',
+            tool_use_id: toolUseId,
+            questions,
+          });
+          // Wait for frontend to send back the user's response (array of answers)
+          const userAnswers = await new Promise<string[]>((resolve) => {
+            pendingToolResponses.set(toolUseId, { resolve: resolve as (v: unknown) => void });
+          });
+          pendingToolResponses.delete(toolUseId);
+          // Format: Record<questionText, answerText> (multi-select joined by comma)
+          const answersRecord: Record<string, string> = {};
+          questions.forEach((q: any, i: number) => {
+            const answer = userAnswers[i];
+            answersRecord[q.question] = Array.isArray(answer) ? answer.join(', ') : String(answer ?? '');
+          });
+          process.stderr.write(`[sidecar] AskUserQuestion resolved: ${JSON.stringify(answersRecord)}\n`);
+          return { behavior: 'allow', updatedInput: { ...input, answers: answersRecord } };
+        }
+        // Auto-allow all other tools
+        return { behavior: 'allow', updatedInput: input };
       },
     };
     if (claudePath) options.pathToClaudeCodeExecutable = claudePath;
@@ -274,6 +306,17 @@ async function main(): Promise<void> {
       case 'interrupt':
         handleInterrupt();
         break;
+      case 'tool_response': {
+        // Resolve pending canUseTool promise with the user's response
+        const pending = pendingToolResponses.get(cmd.toolUseId);
+        if (pending) {
+          pending.resolve(cmd.response);
+          process.stderr.write(`[sidecar] tool_response resolved for toolUseId=${cmd.toolUseId}\n`);
+        } else {
+          process.stderr.write(`[sidecar] tool_response: no pending request for toolUseId=${cmd.toolUseId}\n`);
+        }
+        break;
+      }
       case 'shutdown':
         process.exit(0);
         break;

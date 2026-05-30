@@ -19,6 +19,7 @@ export type AgentMessage =
   | { kind: 'ready'; data: SidecarReadyEvent }
   | { kind: 'error'; data: SidecarErrorEvent }
   | { kind: 'api_retry'; data: { attempt: number; max_retries: number; retry_delay_ms: number; error_status: number; error: string } }
+  | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string }>; multiSelect?: boolean }> } }
   | { kind: 'done' }
   | { kind: 'raw'; data: Record<string, unknown> };
 
@@ -66,6 +67,8 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'raw', data };
       case 'result':
         return { kind: 'result', data };
+      case 'ask_user_question':
+        return { kind: 'ask_user_question', data };
       case 'sidecar_debug':
         return { kind: 'raw', data };
       default:
