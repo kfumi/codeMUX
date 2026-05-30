@@ -57,7 +57,8 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
     const onMove = (ev: MouseEvent) => {
       if (!previewDragging.current) return;
       const delta = startX - ev.clientX;
-      const newWidth = Math.min(800, Math.max(300, startWidth + delta));
+      const maxWidth = Math.floor(window.innerWidth / 2);
+      const newWidth = Math.min(maxWidth, Math.max(300, startWidth + delta));
       setPreviewWidth(newWidth);
     };
 

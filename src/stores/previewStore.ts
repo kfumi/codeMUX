@@ -204,7 +204,8 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
   toggleFileTree: () => set((s) => ({ showFileTree: !s.showFileTree })),
 
   setPanelWidth: (width: number) => {
-    const clamped = Math.min(PANEL_WIDTH_MAX, Math.max(PANEL_WIDTH_MIN, width));
+    const dynamicMax = Math.min(PANEL_WIDTH_MAX, Math.floor(window.innerWidth / 2));
+    const clamped = Math.min(dynamicMax, Math.max(PANEL_WIDTH_MIN, width));
     set({ panelWidth: clamped });
   },
 

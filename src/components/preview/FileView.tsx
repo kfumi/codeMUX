@@ -41,7 +41,7 @@ export function FileView({ content, filePath }: FileViewProps) {
     <div className="font-mono text-xs leading-relaxed overflow-x-auto">
       {lines.map((line, index) => (
         <div key={index} className="px-4 hover:bg-muted/30 transition-colors whitespace-nowrap">
-          <span className="text-muted-foreground/40 select-none mr-4 inline-block w-8 text-right">
+          <span className="text-muted-foreground/40 select-none mr-4 inline-block text-right">
             {index + 1}
           </span>
           <span dangerouslySetInnerHTML={{ __html: line || ' ' }} />
