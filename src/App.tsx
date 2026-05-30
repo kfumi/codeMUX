@@ -9,6 +9,7 @@ import { useSessionStore } from './stores/sessionStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useTheme } from './hooks/useTheme';
 import { Sparkles } from 'lucide-react';
+import { TooltipProvider } from './components/ui/tooltip';
 
 function App() {
   const { createSession, activeSessionId } = useSessionStore();
@@ -30,7 +31,7 @@ function App() {
   };
 
   return (
-    <>
+    <TooltipProvider>
       <MainLayout
         sidebar={(onToggleCollapse) => (
           <Sidebar
@@ -69,7 +70,7 @@ function App() {
         </ErrorBoundary>
       </MainLayout>
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
-    </>
+    </TooltipProvider>
   );
 }
 

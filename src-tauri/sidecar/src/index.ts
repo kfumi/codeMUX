@@ -228,9 +228,14 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       const message = result.value;
       const msg = message as Record<string, unknown>;
       process.stderr.write(`[sidecar] Message #${msgCount}: type=${msg.type}, subtype=${msg.subtype || 'none'}\n`);
-      // Log full content for system messages (especially api_retry)
+      // Log full content for system messages and assistant messages (debug)
       if (msg.type === 'system') {
         process.stderr.write(`[sidecar]   → ${JSON.stringify(message)}\n`);
+      }
+      if (msg.type === 'assistant') {
+        const m: any = message;
+        const usage = m?.message?.usage || m?.usage;
+        process.stderr.write(`[sidecar]   → assistant usage: ${JSON.stringify(usage || 'NONE')}\n`);
       }
 
       // Capture the real Claude session ID from any SDK message

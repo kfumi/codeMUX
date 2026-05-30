@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAgentStore } from '../../stores/agentStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -7,6 +7,7 @@ import { usePreviewStore } from '../../stores/previewStore';
 import { cn } from '../../lib/utils';
 import { AgentMessageList } from './AgentMessageList';
 import { AgentInput } from './AgentInput';
+import { ContextProgress } from './ContextProgress';
 import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { Button } from '../ui/button';
@@ -16,6 +17,8 @@ import { FolderOpen, MoreHorizontal, Pencil, PanelRightOpen, PanelRightClose } f
 interface AgentPanelProps {
   sessionId: string;
 }
+
+const EMPTY_EVENTS: import('../../stores/agentStore').AgentMessage[] = [];
 
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, updateSessionTitle } = useSessionStore();
@@ -70,6 +73,40 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
   }, [sessionId, project?.path]);
 
+  const events = useAgentStore((s) => s.events[sessionId] ?? EMPTY_EVENTS);
+
+  // Compute context usage from events
+  const contextUsage = useMemo(() => {
+    let usedTokens = 0;
+
+    for (let i = events.length - 1; i >= 0; i--) {
+      const evt = events[i];
+      if (usedTokens === 0 && evt.kind === 'assistant') {
+        const data: any = evt.data;
+        const usage = data?.message?.usage || data?.usage;
+        if (usage?.input_tokens) {
+          usedTokens = usage.input_tokens
+            + (usage.cache_creation_input_tokens || 0)
+            + (usage.cache_read_input_tokens || 0);
+        }
+      }
+      if (usedTokens === 0 && evt.kind === 'result') {
+        const data: any = evt.data;
+        if (data?.usage?.input_tokens) {
+          usedTokens = data.usage.input_tokens
+            + (data.usage.cache_creation_input_tokens || 0)
+            + (data.usage.cache_read_input_tokens || 0);
+        }
+      }
+      if (usedTokens > 0) break;
+    }
+
+    // Provider configured context_window takes priority over SDK's modelUsage
+    const totalTokens = activeProvider?.context_window || 200_000;
+
+    return { usedTokens, totalTokens };
+  }, [events, activeProvider]);
+
   const running = isRunning[sessionId] || false;
 
   const handleSend = async (content: string) => {
@@ -98,6 +135,9 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           </DropdownMenuItem>
         </DropdownMenu>
         <div className="flex-1" />
+        {contextUsage.usedTokens > 0 && (
+          <ContextProgress usedTokens={contextUsage.usedTokens} totalTokens={contextUsage.totalTokens} />
+        )}
         {project && (
           <div className="flex items-center gap-1.5 text-[12px] text-foreground bg-muted/40 rounded-lg px-2.5 py-1.5 border border-border/30 min-w-0 max-w-[300px]"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}

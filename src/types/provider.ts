@@ -13,6 +13,8 @@ export interface Provider {
   cache_read_price?: number;
   /** 输出 token 单价 ($/1M tokens) */
   output_price?: number;
+  /** 上下文窗口大小 (tokens)，默认 200000 */
+  context_window?: number;
 }
 
 export interface AppConfig {
