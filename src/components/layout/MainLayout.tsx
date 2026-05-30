@@ -1,6 +1,7 @@
 import { ReactNode, useCallback, useRef, useState } from 'react';
 import { TitleBar } from './TitleBar';
 import { usePreviewStore } from '../../stores/previewStore';
+import { PanelLeftOpen, PanelLeftClose } from 'lucide-react';
 
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 500;
@@ -14,6 +15,7 @@ interface MainLayoutProps {
 
 export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const sidebarDragging = useRef(false);
 
   const { isOpen: previewOpen, panelWidth: previewWidth, setPanelWidth: setPreviewWidth } = usePreviewStore();
@@ -71,29 +73,55 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
     document.addEventListener('mouseup', onUp);
   }, [previewWidth, setPreviewWidth]);
 
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => !prev);
+  }, []);
+
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Title bar — spans full width, window controls on far right */}
       <TitleBar />
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar — follows theme */}
-        <aside
-          className="flex flex-col bg-[hsl(var(--sidebar-bg))] border-r border-[hsl(var(--sidebar-border))] shrink-0 relative sidebar-grain rounded-tr-2xl rounded-br-2xl"
-          style={{ width: sidebarWidth }}
-        >
-          <div className="relative z-10 flex flex-col h-full">
-            {sidebar}
-          </div>
-        </aside>
+        {/* Sidebar toggle button (visible when collapsed) */}
+        {sidebarCollapsed && (
+          <button
+            onClick={toggleSidebar}
+            className="p-1.5 m-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors self-start"
+            title="展开侧边栏"
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </button>
+        )}
 
-        {/* Sidebar drag handle */}
-        <div
-          className="w-1 shrink-0 cursor-col-resize group relative"
-          onMouseDown={handleSidebarMouseDown}
-        >
-          <div className="absolute inset-y-0 -left-0.5 w-2 group-hover:bg-primary/20 transition-colors" />
-        </div>
+        {/* Sidebar — follows theme */}
+        {!sidebarCollapsed && (
+          <>
+            <aside
+              className="flex flex-col bg-[hsl(var(--sidebar-bg))] border-r border-[hsl(var(--sidebar-border))] shrink-0 relative sidebar-grain rounded-tr-2xl rounded-br-2xl"
+              style={{ width: sidebarWidth }}
+            >
+              <div className="relative z-10 flex flex-col h-full">
+                {sidebar}
+              </div>
+            </aside>
+
+            {/* Sidebar drag handle + collapse button */}
+            <div
+              className="w-1 shrink-0 cursor-col-resize group relative"
+              onMouseDown={handleSidebarMouseDown}
+            >
+              <div className="absolute inset-y-0 -left-0.5 w-2 group-hover:bg-primary/20 transition-colors" />
+              <button
+                onClick={toggleSidebar}
+                className="absolute top-1 -left-3 p-0.5 rounded bg-background border border-border shadow-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors opacity-0 group-hover:opacity-100"
+                title="收起侧边栏"
+              >
+                <PanelLeftClose className="h-3 w-3" />
+              </button>
+            </div>
+          </>
+        )}
 
         {/* Main content area */}
         <main className="flex-1 flex overflow-hidden bg-background">

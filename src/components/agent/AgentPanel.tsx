@@ -98,10 +98,18 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           </DropdownMenuItem>
         </DropdownMenu>
         <div className="flex-1" />
+        {project && (
+          <div className="flex items-center gap-1.5 text-[12px] text-foreground bg-muted/40 rounded-lg px-2.5 py-1.5 border border-border/30 min-w-0 max-w-[300px]"
+            style={{ fontFamily: "'JetBrains Mono', monospace" }}
+          >
+            <FolderOpen className="h-3 w-3 text-foreground/70 shrink-0" />
+            <span className="truncate">{project.path}</span>
+          </div>
+        )}
         <button
           onClick={togglePreview}
           className={cn(
-            'p-1.5 rounded-md transition-colors',
+            'p-1.5 rounded-md transition-colors shrink-0',
             previewOpen
               ? 'bg-muted text-foreground'
               : 'text-muted-foreground hover:text-foreground'
@@ -114,14 +122,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
             <PanelRightOpen className="h-4 w-4" />
           )}
         </button>
-        {project && (
-          <div className="flex items-center gap-1.5 text-[12px] text-foreground bg-muted/40 rounded-lg px-2.5 py-1.5 border border-border/30"
-            style={{ fontFamily: "'JetBrains Mono', monospace" }}
-          >
-            <FolderOpen className="h-3 w-3 text-foreground/70 shrink-0" />
-            <span className="truncate max-w-[200px]">{project.path}</span>
-          </div>
-        )}
       </div>
 
       {/* Message area */}
