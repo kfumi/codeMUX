@@ -6,6 +6,7 @@ interface ToolCallCardProps {
   input: Record<string, unknown>;
   result?: string;
   status?: 'pending' | 'running' | 'done' | 'error';
+  durationMs?: number;
   onFileClick?: (path: string, originalContent?: string) => void;
 }
 
@@ -57,7 +58,12 @@ function getToolSummaryData(toolName: string, input: Record<string, unknown>): T
   }
 }
 
-export function ToolCallCard({ toolName, input, result, status, onFileClick }: ToolCallCardProps) {
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+export function ToolCallCard({ toolName, input, result, status, durationMs, onFileClick }: ToolCallCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const summaryParts = getToolSummaryData(toolName, input);
 
@@ -98,6 +104,13 @@ export function ToolCallCard({ toolName, input, result, status, onFileClick }: T
             )
           )}
         </span>
+        {durationMs != null && (
+          <span className="text-xs text-muted-foreground/50 shrink-0 tabular-nums"
+            style={{ fontFamily: "'JetBrains Mono', monospace" }}
+          >
+            {formatDuration(durationMs)}
+          </span>
+        )}
       </div>
       {isExpanded && (
         <div className="border-t px-3 py-2 space-y-2">

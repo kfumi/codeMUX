@@ -6,16 +6,16 @@ import type { Provider } from '../../types/provider';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolCallCard } from './ToolCallCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { Loader2, Sparkles, ArrowDown } from 'lucide-react';
+import { Loader2, Sparkles, ArrowDown, Copy, Check } from 'lucide-react';
 import { usePreviewStore } from '../../stores/previewStore';
 
 interface AgentMessageListProps {
   sessionId: string;
 }
 
-function AgentEventItem({ msg, resultMap, provider, onFileClick }: { msg: AgentMessage; resultMap: Record<string, ToolResultEntry>; provider: Provider | null; onFileClick: (path: string, originalContent?: string) => void }) {
+function AgentEventItem({ msg, resultMap, provider, onFileClick, toolDurations, thinkingDurations, eventIndex, timestamp, assistantTextMap }: { msg: AgentMessage; resultMap: Record<string, ToolResultEntry>; provider: Provider | null; onFileClick: (path: string, originalContent?: string) => void; toolDurations: Record<string, number>; thinkingDurations: Record<number, number>; eventIndex: number; timestamp?: number; assistantTextMap?: Record<number, { text: string; timestamp?: number }> }) {
   try {
-    return renderEvent(msg, resultMap, provider, onFileClick);
+    return renderEvent(msg, resultMap, provider, onFileClick, toolDurations, thinkingDurations, eventIndex, timestamp, assistantTextMap);
   } catch (err) {
     return (
       <div className="text-xs text-red-500 bg-red-500/[0.06] rounded-xl p-3 my-1 border border-red-500/15">
@@ -48,7 +48,157 @@ function buildResultMap(events: AgentMessage[]): Record<string, ToolResultEntry>
   return map;
 }
 
-function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntry>, provider: Provider | null, onFileClick: (path: string, originalContent?: string) => void) {
+/** Map each event index to the nearest preceding assistant's text content and timestamp */
+function buildAssistantTextMap(
+  events: AgentMessage[],
+  eventTimestamps: number[],
+): Record<number, { text: string; timestamp?: number }> {
+  const map: Record<number, { text: string; timestamp?: number }> = {};
+  let lastAssistant: { text: string; timestamp?: number } | null = null;
+
+  for (let i = 0; i < events.length; i++) {
+    const evt = events[i];
+    if (evt.kind === 'assistant') {
+      const blocks = Array.isArray(evt.data?.message?.content) ? evt.data.message.content : [];
+      const text = blocks
+        .filter((b: any) => b?.type === 'text' && b.text)
+        .map((b: any) => b.text)
+        .join('\n\n');
+      if (text) {
+        lastAssistant = { text, timestamp: eventTimestamps[i] };
+      }
+    }
+    if (evt.kind === 'result' && lastAssistant) {
+      map[i] = lastAssistant;
+    }
+  }
+
+  return map;
+}
+
+/** Extract tool call durations: prefer SDK tool_progress events, fallback to frontend timestamps */
+function buildToolDurationMap(events: AgentMessage[], eventTimestamps: number[]): Record<string, number> {
+  const durations: Record<string, number> = {};
+
+  // 1. Frontend timestamps for all tools (tool_use -> tool_result)
+  const startTimes: Record<string, number> = {};
+  for (let i = 0; i < events.length; i++) {
+    const evt = events[i];
+    const ts = eventTimestamps[i];
+    if (!ts) continue;
+
+    if (evt.kind === 'assistant') {
+      const blocks = Array.isArray(evt.data?.message?.content) ? evt.data.message.content : [];
+      for (const block of blocks) {
+        if (block?.type === 'tool_use' && block.id && !startTimes[block.id]) {
+          startTimes[block.id] = ts;
+        }
+      }
+    }
+
+    if (evt.kind === 'tool_result') {
+      const data: any = evt.data;
+      const rawContent = data?.message?.content;
+      if (Array.isArray(rawContent)) {
+        for (const r of rawContent) {
+          if (r?.type === 'tool_result' && r.tool_use_id && startTimes[r.tool_use_id]) {
+            durations[r.tool_use_id] = ts - startTimes[r.tool_use_id];
+          }
+        }
+      }
+      if (data?.tool_use_result?.tool_use_id && startTimes[data.tool_use_result.tool_use_id]) {
+        durations[data.tool_use_result.tool_use_id] = ts - startTimes[data.tool_use_result.tool_use_id];
+      }
+      if (data?.parent_tool_use_id && startTimes[data.parent_tool_use_id] && !durations[data.parent_tool_use_id]) {
+        durations[data.parent_tool_use_id] = ts - startTimes[data.parent_tool_use_id];
+      }
+    }
+  }
+
+  // 2. SDK tool_progress events (override frontend timestamps)
+  for (const evt of events) {
+    if (evt.kind !== 'raw') continue;
+    const data = evt.data;
+    if (data.type !== 'tool_progress') continue;
+    const toolUseId = data.tool_use_id;
+    const elapsed = data.elapsed_time_seconds;
+    if (typeof toolUseId === 'string' && typeof elapsed === 'number') {
+      durations[toolUseId] = Math.round(elapsed * 1000);
+    }
+  }
+
+  // 3. SDK task_notification events (override for Agent tools)
+  for (const evt of events) {
+    if (evt.kind !== 'raw' && evt.kind !== 'system') continue;
+    const data: any = evt.data;
+    if (data?.type !== 'system' || data?.subtype !== 'task_notification') continue;
+    const toolUseId = data.tool_use_id;
+    const durationMs = data?.usage?.duration_ms;
+    if (typeof toolUseId === 'string' && typeof durationMs === 'number' && durationMs > 0) {
+      durations[toolUseId] = durationMs;
+    }
+  }
+
+  return durations;
+}
+
+/** Compute thinking block durations: time from assistant message with thinking to the next event */
+function buildThinkingDurationMap(
+  events: AgentMessage[],
+  eventTimestamps: number[],
+): Record<number, number> {
+  const durations: Record<number, number> = {};
+
+  for (let i = 0; i < events.length; i++) {
+    const evt = events[i];
+    if (evt.kind !== 'assistant') continue;
+    const blocks = Array.isArray(evt.data?.message?.content) ? evt.data.message.content : [];
+    const hasThinking = blocks.some((b: any) => b?.type === 'thinking' && b.thinking);
+    if (!hasThinking) continue;
+
+    const startTs = eventTimestamps[i];
+    // Find the next event with a valid timestamp
+    for (let j = i + 1; j < events.length; j++) {
+      if (eventTimestamps[j]) {
+        durations[i] = eventTimestamps[j] - startTs;
+        break;
+      }
+    }
+  }
+
+  return durations;
+}
+
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  const h = d.getHours().toString().padStart(2, '0');
+  const m = d.getMinutes().toString().padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+function CopyButton({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* ignore */ }
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="inline-flex items-center text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors"
+      title="复制"
+    >
+      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+    </button>
+  );
+}
+
+function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntry>, provider: Provider | null, onFileClick: (path: string, originalContent?: string) => void, toolDurations: Record<string, number>, thinkingDurations: Record<number, number>, eventIndex: number, timestamp?: number, assistantTextMap?: Record<number, { text: string; timestamp?: number }>) {
   switch (msg.kind) {
     case 'user': {
       const content = msg.data.content;
@@ -60,9 +210,19 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
         );
       }
       return (
-        <div className="flex justify-end animate-fade-in-up">
+        <div className="flex flex-col items-end animate-fade-in-up">
           <div className="max-w-[80%] bg-primary/10 text-foreground rounded-2xl rounded-tr-md px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap">
             {content}
+          </div>
+          <div className="flex items-center gap-1.5 mt-1">
+            {timestamp != null && (
+              <span className="text-[10px] text-muted-foreground/40 tabular-nums"
+                style={{ fontFamily: "'JetBrains Mono', monospace" }}
+              >
+                {formatTime(timestamp)}
+              </span>
+            )}
+            <CopyButton content={content} />
           </div>
         </div>
       );
@@ -101,7 +261,7 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
         <div className="space-y-3 animate-fade-in-up">
           {filteredBlocks.map((block: any, i: number) => {
             if (block?.type === 'thinking' && block.thinking) {
-              return <ThinkingBlock key={i} thinking={block.thinking} />;
+              return <ThinkingBlock key={i} thinking={block.thinking} durationMs={thinkingDurations[eventIndex]} />;
             }
             if (block?.type === 'text' && block.text) {
               return (
@@ -122,6 +282,7 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
                   input={block.input || {}}
                   result={entry?.content}
                   status={status}
+                  durationMs={block.id ? toolDurations[block.id] : undefined}
                   onFileClick={onFileClick}
                 />
               );
@@ -138,11 +299,16 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
 
     case 'result': {
       const cost = calculateCost(msg.data.usage, provider);
+      const assistantData = assistantTextMap?.[eventIndex];
       return (
         <div className="border-t border-border/20 pt-3 mt-4 animate-fade-in-up">
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground/60"
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/60"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
+            {assistantData && <CopyButton content={assistantData.text} />}
+            {assistantData?.timestamp != null && (
+              <span className="tabular-nums">{formatTime(assistantData.timestamp)}</span>
+            )}
             <span>耗时 {(msg.data.duration_ms / 1000).toFixed(1)}s</span>
             <span>轮次 {msg.data.num_turns}</span>
             {cost != null && <span>${cost.toFixed(4)}</span>}
@@ -214,6 +380,8 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
   const [autoScroll, setAutoScroll] = useState(true);
   // 跟踪上一次事件数量，用于区分历史加载和实时消息
   const prevCountRef = useRef(0);
+  // 跟踪每个事件到达的时间戳，用于计算执行时长
+  const eventTimestampsRef = useRef<number[]>([]);
   const openFile = usePreviewStore((s) => s.openFile);
   const handleFileClick = useCallback(
     (path: string, originalContent?: string) => {
@@ -241,6 +409,7 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
   // 切换会话时重置状态
   useEffect(() => {
     prevCountRef.current = 0;
+    eventTimestampsRef.current = [];
     setAutoScroll(true);
     setShowScrollBtn(false);
   }, [sessionId]);
@@ -251,8 +420,25 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
       setShowScrollBtn(false);
       setAutoScroll(true);
       prevCountRef.current = 0;
+      eventTimestampsRef.current = [];
     }
   }, [events.length, isRunning]);
+
+  // 同步更新时间戳（在渲染阶段，确保 useMemo 能读到最新值）
+  {
+    const timestamps = eventTimestampsRef.current;
+    if (events.length > timestamps.length) {
+      const now = Date.now();
+      while (timestamps.length < events.length) {
+        timestamps.push(now);
+      }
+    }
+  }
+
+  // 计算工具调用和思考过程的执行时长
+  const toolDurations = useMemo(() => buildToolDurationMap(events, eventTimestampsRef.current), [events]);
+  const thinkingDurations = useMemo(() => buildThinkingDurationMap(events, eventTimestampsRef.current), [events]);
+  const assistantTextMap = useMemo(() => buildAssistantTextMap(events, eventTimestampsRef.current), [events]);
 
   // 滚动到底部：历史加载用 instant，实时消息用 smooth
   useEffect(() => {
@@ -288,7 +474,7 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
             </div>
           )}
           {events.map((msg, i) => (
-            <AgentEventItem key={i} msg={msg} resultMap={resultMap} provider={provider} onFileClick={handleFileClick} />
+            <AgentEventItem key={i} msg={msg} resultMap={resultMap} provider={provider} onFileClick={handleFileClick} toolDurations={toolDurations} thinkingDurations={thinkingDurations} eventIndex={i} timestamp={eventTimestampsRef.current[i]} assistantTextMap={assistantTextMap} />
           ))}
           {isRunning && (
             <div className="flex items-center gap-2.5 text-sm text-muted-foreground/60 py-2 animate-fade-in">

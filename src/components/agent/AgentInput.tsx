@@ -108,10 +108,6 @@ export function AgentInput({ onSend, onStop, isLoading, modelName }: AgentInputP
             </div>
           </div>
         </div>
-
-        <p className="text-center text-[11px] text-muted-foreground/50 mt-2.5 select-none">
-          Claude Agent 将自主完成编码任务
-        </p>
       </div>
     </div>
   );

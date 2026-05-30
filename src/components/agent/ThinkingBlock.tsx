@@ -3,9 +3,15 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 
 interface ThinkingBlockProps {
   thinking: string;
+  durationMs?: number;
 }
 
-export function ThinkingBlock({ thinking }: ThinkingBlockProps) {
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+export function ThinkingBlock({ thinking, durationMs }: ThinkingBlockProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   if (!thinking.trim()) return null;
@@ -18,6 +24,13 @@ export function ThinkingBlock({ thinking }: ThinkingBlockProps) {
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         <span>思考过程</span>
+        {durationMs != null && (
+          <span className="ml-auto text-xs text-muted-foreground/50 tabular-nums"
+            style={{ fontFamily: "'JetBrains Mono', monospace" }}
+          >
+            {formatDuration(durationMs)}
+          </span>
+        )}
       </button>
       {isExpanded && (
         <div className="px-3 pb-3 text-sm text-muted-foreground whitespace-pre-wrap border-t pt-2">
