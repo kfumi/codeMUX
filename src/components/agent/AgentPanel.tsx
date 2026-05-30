@@ -3,13 +3,15 @@ import { useAgentStore } from '../../stores/agentStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { usePreviewStore } from '../../stores/previewStore';
+import { cn } from '../../lib/utils';
 import { AgentMessageList } from './AgentMessageList';
 import { AgentInput } from './AgentInput';
 import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import { FolderOpen, MoreHorizontal, Pencil } from 'lucide-react';
+import { FolderOpen, MoreHorizontal, Pencil, PanelRightOpen, PanelRightClose } from 'lucide-react';
 
 interface AgentPanelProps {
   sessionId: string;
@@ -20,6 +22,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { projects } = useProjectStore();
   const { startQuery, isRunning, interrupt, loadSessionMessages } = useAgentStore();
   const { config } = useSettingsStore();
+  const { isOpen: previewOpen, togglePanel: togglePreview } = usePreviewStore();
 
   const session = sessions.find((s) => s.id === sessionId);
   const project = session?.project_id ? projects.find((p) => p.id === session.project_id) : null;
@@ -88,6 +91,22 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           </DropdownMenuItem>
         </DropdownMenu>
         <div className="flex-1" />
+        <button
+          onClick={togglePreview}
+          className={cn(
+            'p-1.5 rounded-md transition-colors',
+            previewOpen
+              ? 'bg-muted text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+          title={previewOpen ? '收起预览面板' : '展开预览面板'}
+        >
+          {previewOpen ? (
+            <PanelRightClose className="h-4 w-4" />
+          ) : (
+            <PanelRightOpen className="h-4 w-4" />
+          )}
+        </button>
         {project && (
           <div className="flex items-center gap-1.5 text-[12px] text-foreground bg-muted/40 rounded-lg px-2.5 py-1.5 border border-border/30"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
