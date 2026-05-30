@@ -53,7 +53,7 @@ export function DiffView({ oldContent, newContent }: DiffViewProps) {
   }, [changes]);
 
   return (
-    <div className="font-mono text-sm">
+    <div className="font-mono text-xs">
       {/* Stats header */}
       <div className="px-4 py-2 border-b border-border/30 text-xs text-muted-foreground/60 flex gap-3">
         <span className="text-green-500">+{stats.additions}</span>
