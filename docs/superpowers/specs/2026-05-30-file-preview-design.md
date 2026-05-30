@@ -117,10 +117,11 @@ interface ToolSummaryPart {
 - 各工具映射：
   - **Read** → `file-link`，无 originalContent（纯预览）
   - **Write** → `file-link`，无 originalContent（纯预览，无法获取旧内容）
-  - **Edit** → `file-link`，无 originalContent（读取磁盘当前内容展示，不做 Diff）
+  - **Edit** → `file-link`，携带 `originalContent`（通过 `input.old_string` 构造修改前内容片段，用于 Diff 对比）
   - **Glob / Grep / Bash / 其他** → 全部 `text`
 
 - `ToolCallCard` 新增 `onFileClick?: (path: string, originalContent?: string) => void` prop
+- Edit 工具的 `originalContent` 取自 `input.old_string`（修改前的文件片段）
 
 - 渲染时 `file-link` 类型渲染为可点击按钮，点击时调用 `onFileClick` 并阻止事件冒泡（不触发卡片展开/收起）
 
@@ -292,12 +293,17 @@ export const fileApi = {
 
 ```
 用户点击 Edit 工具的文件路径
-  → ToolCallCard.onFileClick(path)
-  → previewStore.openFile(path)
-  → fileApi.readFile(path) 获取 currentContent
-  → 由于 Edit 工具不传 originalContent，仅展示当前文件内容
-  → 用户可手动切换到 Diff 模式（如需对比，需在对话历史中找到该文件的上一次内容）
+  → ToolCallCard.onFileClick(path, oldString)
+  → previewStore.openFile(path, oldString)
+  → fileApi.readFile(path) 获取 currentContent（磁盘已修改后的内容）
+  → oldString !== currentContent → 自动切 Diff 模式
+  → DiffView 展示 oldString 片段 vs currentContent 的对比
 ```
+
+注意：Edit 工具的 `input.old_string` 仅是被替换的文件片段，不是完整文件。
+DiffView 需支持"片段 vs 完整文件"的对比模式，或者读取同一会话中该文件
+的上一次 Read 结果作为完整 originalContent（优先方案：直接用 old_string 作为
+原始内容片段进行局部 Diff）。
 
 ### 打开面板 → 浏览文件树
 
