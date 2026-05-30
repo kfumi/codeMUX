@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Session } from '../types/session';
-import { sessionApi } from '../lib/tauri';
+import { sessionApi, agentApi } from '../lib/tauri';
+import { useAgentStore } from './agentStore';
 
 interface SessionState {
   sessions: Session[];
@@ -46,6 +47,16 @@ export const useSessionStore = create<SessionState>((set) => ({
   deleteSession: async (sessionId: string) => {
     set({ isLoading: true, error: null });
     try {
+      // Clean up Claude Code session files (best-effort, don't block on failure)
+      try {
+        await agentApi.deleteClaudeSessionFiles(sessionId);
+        await agentApi.resetSession(sessionId);
+      } catch {
+        // Ignore cleanup errors — the session mapping may not exist
+      }
+      // Clear in-memory agent events
+      useAgentStore.getState().clearEvents(sessionId);
+      // Delete from database
       await sessionApi.delete(sessionId);
       set((state) => {
         const newSessions = state.sessions.filter((s) => s.id !== sessionId);

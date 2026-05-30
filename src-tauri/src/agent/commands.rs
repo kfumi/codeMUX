@@ -68,10 +68,19 @@ pub async fn start_agent_session(
     }
 
     // Build and send start command
+    // Resolve "." to home directory — "." would otherwise resolve to the Tauri
+    // process CWD (src-tauri), which is not useful for the user.
+    let resolved_cwd = if cwd == "." {
+        std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_else(|_| cwd.clone())
+    } else {
+        cwd
+    };
     let mut cmd = serde_json::json!({
         "type": "start",
         "prompt": prompt,
-        "cwd": cwd,
+        "cwd": resolved_cwd,
         "sessionId": session_id,
     });
 
@@ -149,4 +158,120 @@ pub async fn reset_agent_session(
     }
 
     Ok(())
+}
+
+/// Delete all Claude Code session files for a given app session.
+///
+/// Reads `~/.claude/session-id-map.json` to find the Claude session ID,
+/// then removes:
+/// - `~/.claude/projects/{project}/{claudeSessionId}.jsonl` (conversation log)
+/// - `~/.claude/session-env/{claudeSessionId}/` (session environment)
+/// - `~/.claude/file-history/{claudeSessionId}/` (file edit history)
+/// - `~/.claude/todos/{claudeSessionId}*.json` (task lists)
+/// - `~/.claude/debug/{claudeSessionId}.txt` (debug logs)
+/// - Matching lines from `~/.claude/history.jsonl` (global input history)
+#[tauri::command]
+pub async fn delete_claude_session_files(
+    app_session_id: String,
+) -> Result<Vec<String>, String> {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| "Cannot determine home directory".to_string())?;
+    let claude_dir = PathBuf::from(&home).join(".claude");
+
+    // Read session ID mapping
+    let map_file = claude_dir.join("session-id-map.json");
+    let map_content = fs::read_to_string(&map_file)
+        .map_err(|e| format!("Failed to read session-id-map.json: {}", e))?;
+    let map: serde_json::Value = serde_json::from_str(&map_content)
+        .map_err(|e| format!("Failed to parse session-id-map.json: {}", e))?;
+
+    let claude_session_id = match map.get(&app_session_id).and_then(|v| v.as_str()) {
+        Some(id) => id.to_string(),
+        None => return Ok(vec![]), // No mapping found, nothing to clean up
+    };
+
+    let mut deleted = Vec::new();
+    let projects_dir = claude_dir.join("projects");
+
+    // 1. Delete conversation JSONL files across all project directories
+    if projects_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&projects_dir) {
+            for entry in entries.flatten() {
+                if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    continue;
+                }
+                let jsonl = entry.path().join(format!("{}.jsonl", claude_session_id));
+                if jsonl.exists() {
+                    let _ = fs::remove_file(&jsonl);
+                    deleted.push(jsonl.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    // 2. Delete session-env directory
+    let session_env = claude_dir.join("session-env").join(&claude_session_id);
+    if session_env.exists() {
+        let _ = fs::remove_dir_all(&session_env);
+        deleted.push(session_env.to_string_lossy().to_string());
+    }
+
+    // 3. Delete file-history directory
+    let file_history = claude_dir.join("file-history").join(&claude_session_id);
+    if file_history.exists() {
+        let _ = fs::remove_dir_all(&file_history);
+        deleted.push(file_history.to_string_lossy().to_string());
+    }
+
+    // 4. Delete matching todo files
+    let todos_dir = claude_dir.join("todos");
+    if todos_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&todos_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with(&claude_session_id) {
+                    let _ = fs::remove_file(entry.path());
+                    deleted.push(entry.path().to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    // 5. Delete debug log
+    let debug_file = claude_dir.join("debug").join(format!("{}.txt", claude_session_id));
+    if debug_file.exists() {
+        let _ = fs::remove_file(&debug_file);
+        deleted.push(debug_file.to_string_lossy().to_string());
+    }
+
+    // 6. Filter global history.jsonl
+    let history_file = claude_dir.join("history.jsonl");
+    if history_file.exists() {
+        if let Ok(content) = fs::read_to_string(&history_file) {
+            let filtered: String = content
+                .lines()
+                .filter(|line| {
+                    !line.contains(&format!("\"sessionId\":\"{}\"", claude_session_id))
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            // Only write back if something was actually removed
+            if filtered.len() != content.len() {
+                let _ = fs::write(&history_file, filtered);
+                deleted.push(history_file.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    // 7. Remove the mapping entry itself
+    if let serde_json::Value::Object(mut map_obj) = map {
+        map_obj.remove(&app_session_id);
+        let _ = fs::write(&map_file, serde_json::to_string_pretty(&map_obj).unwrap_or_default());
+    }
+
+    Ok(deleted)
 }

@@ -5,7 +5,8 @@ import { SessionItem } from './SessionItem';
 import { Button } from '../ui/button';
 import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
 import { ConfirmDialog } from '../ui/confirm-dialog';
-import { Folder, ChevronRight, MoreHorizontal, Pencil, Trash2, MessageSquarePlus } from 'lucide-react';
+import { Folder, ChevronRight, MoreHorizontal, Pencil, Trash2, MessageSquarePlus, FolderOpen } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { cn } from '../../lib/utils';
 
 interface ProjectGroupProps {
@@ -89,6 +90,12 @@ export function ProjectGroup({
             }
             align="right"
           >
+            <DropdownMenuItem
+              icon={<FolderOpen className="h-3.5 w-3.5" />}
+              onClick={() => invoke('open_in_explorer', { path: project.path })}
+            >
+              在文件资源管理器打开
+            </DropdownMenuItem>
             <DropdownMenuItem
               icon={<Pencil className="h-3.5 w-3.5" />}
               onClick={() => {

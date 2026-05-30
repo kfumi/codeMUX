@@ -42,19 +42,23 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   };
 
   const [cwd, setCwd] = useState(() => {
-    return localStorage.getItem('agent-cwd') || '.';
+    return localStorage.getItem('agent-user-cwd') || '.';
   });
 
   useEffect(() => {
     loadSessionMessages(sessionId);
   }, [sessionId, loadSessionMessages]);
 
+  // Reset cwd when switching sessions
   useEffect(() => {
     if (project?.path) {
+      // Project session: use project path
       setCwd(project.path);
-      localStorage.setItem('agent-cwd', project.path);
+    } else {
+      // Non-project session: restore user's last manually-set cwd
+      setCwd(localStorage.getItem('agent-user-cwd') || '.');
     }
-  }, [project?.path]);
+  }, [sessionId, project?.path]);
 
   const running = isRunning[sessionId] || false;
 

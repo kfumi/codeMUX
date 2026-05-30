@@ -43,6 +43,9 @@ export const agentApi = {
   interrupt: (): Promise<void> => invoke('interrupt_agent_session'),
   shutdown: (): Promise<void> => invoke('shutdown_agent'),
   resetSession: (sessionId: string): Promise<void> => invoke('reset_agent_session', { sessionId }),
+  /** Delete all Claude Code session files (history, file-history, etc.) for an app session. */
+  deleteClaudeSessionFiles: (appSessionId: string): Promise<string[]> =>
+    invoke('delete_claude_session_files', { appSessionId }),
   saveEvents: (sessionId: string, eventsJson: string): Promise<void> =>
     invoke('save_agent_events', { sessionId, eventsJson }),
   getEvents: (sessionId: string): Promise<string> =>

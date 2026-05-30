@@ -48,10 +48,12 @@ pub fn run() {
             commands::project::delete_project,
             commands::project::rename_project,
             commands::file::read_file,
+            commands::file::open_in_explorer,
             agent::commands::start_agent_session,
             agent::commands::interrupt_agent_session,
             agent::commands::shutdown_agent,
             agent::commands::reset_agent_session,
+            agent::commands::delete_claude_session_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

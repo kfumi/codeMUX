@@ -48,6 +48,37 @@ let abortController: AbortController | null = null;
  */
 const sessionIdMap = new Map<string, string>();
 
+/** Path to persist the session ID mapping so Rust can read it for cleanup. */
+const SESSION_MAP_FILE = path.join(os.homedir(), '.claude', 'session-id-map.json');
+
+/** Load persisted session ID mapping from disk on startup. */
+function loadSessionMap(): void {
+  try {
+    if (fs.existsSync(SESSION_MAP_FILE)) {
+      const data = JSON.parse(fs.readFileSync(SESSION_MAP_FILE, 'utf-8'));
+      if (data && typeof data === 'object') {
+        for (const [k, v] of Object.entries(data)) {
+          if (typeof v === 'string') sessionIdMap.set(k, v);
+        }
+        process.stderr.write(`[sidecar] Loaded ${sessionIdMap.size} session mappings from disk\n`);
+      }
+    }
+  } catch (err) {
+    process.stderr.write(`[sidecar] Warning: failed to load session map: ${err}\n`);
+  }
+}
+
+/** Persist the current session ID mapping to disk. */
+function saveSessionMap(): void {
+  try {
+    const obj: Record<string, string> = {};
+    sessionIdMap.forEach((v, k) => { obj[k] = v; });
+    fs.writeFileSync(SESSION_MAP_FILE, JSON.stringify(obj, null, 2), 'utf-8');
+  } catch (err) {
+    process.stderr.write(`[sidecar] Warning: failed to save session map: ${err}\n`);
+  }
+}
+
 function emit(obj: unknown): void {
   process.stdout.write(JSON.stringify(obj) + '\n');
 }
@@ -113,7 +144,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
     }
 
     const options: Record<string, unknown> = {
-      cwd: cmd.cwd,
+      cwd: cmd.cwd === '.' ? os.homedir() : cmd.cwd,
       abortController,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
@@ -174,6 +205,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       if (appSessionId && !sessionIdMap.has(appSessionId)) {
         if (typeof msg.session_id === 'string' && msg.session_id) {
           sessionIdMap.set(appSessionId, msg.session_id);
+          saveSessionMap();
           process.stderr.write(`[sidecar] Captured Claude session ID: ${msg.session_id} for app session: ${appSessionId}\n`);
         }
       }
@@ -203,12 +235,15 @@ function handleInterrupt(): void {
 
 function handleResetSession(cmd: Extract<SidecarCommand, { type: 'reset_session' }>): void {
   const deleted = sessionIdMap.delete(cmd.sessionId);
+  if (deleted) saveSessionMap();
   process.stderr.write(`[sidecar] Reset session ${cmd.sessionId}: ${deleted ? 'cleared' : 'not found'}\n`);
 }
 
 async function main(): Promise<void> {
   // Load Claude Code settings (env vars like ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, etc.)
   loadClaudeSettingsEnv();
+  // Load persisted session ID mapping
+  loadSessionMap();
 
   emit({ type: 'sidecar_ready' });
 
