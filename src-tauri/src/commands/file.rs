@@ -46,3 +46,76 @@ pub fn read_file(_app: AppHandle, path: String) -> Result<String, String> {
 
     std::fs::read_to_string(&canonical).map_err(|e| format!("Failed to read file: {}", e))
 }
+
+use serde::Serialize;
+
+#[derive(Serialize, Clone)]
+pub struct FileNode {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub children: Option<Vec<FileNode>>,
+}
+
+/// List directory contents as a tree structure.
+/// Excludes common large/hidden directories. Default depth = 2.
+#[tauri::command]
+pub fn list_directory(path: String, depth: Option<u32>) -> Result<Vec<FileNode>, String> {
+    let dir = std::path::PathBuf::from(&path);
+    if !dir.is_dir() {
+        return Err(format!("Not a directory: {}", path));
+    }
+    let max_depth = depth.unwrap_or(2);
+    list_dir_recursive(&dir, max_depth)
+}
+
+fn list_dir_recursive(dir: &std::path::Path, remaining_depth: u32) -> Result<Vec<FileNode>, String> {
+    let excluded = [
+        ".git", "node_modules", "target", ".next", "dist",
+        ".venv", "__pycache__", ".turbo", ".cache", "build",
+    ];
+
+    let mut entries: Vec<FileNode> = Vec::new();
+    let read_dir = std::fs::read_dir(dir).map_err(|e| format!("Failed to read dir: {}", e))?;
+
+    for entry in read_dir {
+        let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+        let file_name = entry.file_name().to_string_lossy().to_string();
+
+        if excluded.contains(&file_name.as_str()) {
+            continue;
+        }
+        // Skip hidden files/dirs (starting with .)
+        if file_name.starts_with('.') && file_name != ".env" {
+            continue;
+        }
+
+        let path = entry.path();
+        let is_dir = path.is_dir();
+        let path_str = path.to_string_lossy().to_string();
+
+        let children = if is_dir && remaining_depth > 0 {
+            Some(list_dir_recursive(&path, remaining_depth - 1)?)
+        } else {
+            None
+        };
+
+        entries.push(FileNode {
+            name: file_name,
+            path: path_str,
+            is_dir,
+            children,
+        });
+    }
+
+    // Sort: directories first, then files, each alphabetically
+    entries.sort_by(|a, b| {
+        match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        }
+    });
+
+    Ok(entries)
+}

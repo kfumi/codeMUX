@@ -49,6 +49,7 @@ pub fn run() {
             commands::project::rename_project,
             commands::file::read_file,
             commands::file::open_in_explorer,
+            commands::file::list_directory,
             agent::commands::start_agent_session,
             agent::commands::interrupt_agent_session,
             agent::commands::shutdown_agent,
