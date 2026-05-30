@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { Project } from '../types/project';
-import { projectApi } from '../lib/tauri';
+import { projectApi, agentApi } from '../lib/tauri';
+import { useSessionStore } from './sessionStore';
+import { useAgentStore } from './agentStore';
 
 interface ProjectState {
   projects: Project[];
@@ -46,6 +48,18 @@ export const useProjectStore = create<ProjectState>((set) => ({
   deleteProject: async (projectId: string) => {
     set({ isLoading: true, error: null });
     try {
+      // Clean up Claude session files for all sessions in this project
+      const sessions = useSessionStore.getState().sessions.filter((s) => s.project_id === projectId);
+      for (const session of sessions) {
+        try {
+          await agentApi.deleteClaudeSessionFiles(session.id);
+          await agentApi.resetSession(session.id);
+        } catch {
+          // Ignore cleanup errors
+        }
+        useAgentStore.getState().clearEvents(session.id);
+      }
+
       await projectApi.delete(projectId);
       set((state) => ({
         projects: state.projects.filter((p) => p.id !== projectId),
