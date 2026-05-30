@@ -70,9 +70,12 @@ export function ToolCallCard({ toolName, input, result, status, onFileClick }: T
 
   return (
     <div className="border rounded-md my-2 bg-muted/20">
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         className="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-muted/40 transition-colors"
         onClick={() => setIsExpanded(!isExpanded)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsExpanded(!isExpanded); }}
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         {status && <span className={`h-2 w-2 rounded-full shrink-0 ${dotColor[status]}`} />}
@@ -95,7 +98,7 @@ export function ToolCallCard({ toolName, input, result, status, onFileClick }: T
             )
           )}
         </span>
-      </button>
+      </div>
       {isExpanded && (
         <div className="border-t px-3 py-2 space-y-2">
           <div>
