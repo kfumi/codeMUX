@@ -1,47 +1,187 @@
 import { create } from 'zustand';
-import { fileApi } from '../lib/tauri';
+import { fileApi, type FileTreeNode } from '../lib/tauri';
 
-export interface FileEntry {
+export interface OpenFile {
   path: string;
-  additions?: number;
-  deletions?: number;
+  originalContent?: string;  // 修改前内容（Write/Edit 传入）
+  currentContent?: string;   // 当前磁盘内容
+  isLoading: boolean;
+  error?: string;
+}
+
+export interface FileTreeNodeData {
+  name: string;
+  path: string;
+  isDir: boolean;
+  children?: FileTreeNodeData[];
 }
 
 interface PreviewState {
+  // 面板状态
   isOpen: boolean;
-  files: FileEntry[];
-  activeFile: string | null;
-  fileContent: string | null;
+  panelWidth: number;
+  showFileTree: boolean;
+
+  // 文件 Tab
+  openFiles: OpenFile[];
+  activeFilePath: string | null;
   viewMode: 'diff' | 'file';
-  setOpen: (open: boolean) => void;
-  setFiles: (files: FileEntry[]) => void;
-  selectFile: (path: string) => Promise<void>;
-  setViewMode: (mode: 'diff' | 'file') => void;
+
+  // 文件树
+  treeRoot: FileTreeNodeData[] | null;
+  treeRootPath: string | null;
+
+  // Actions
+  openFile: (path: string, originalContent?: string) => Promise<void>;
+  closeFile: (path: string) => void;
+  setActiveFile: (path: string) => void;
   togglePanel: () => void;
+  toggleFileTree: () => void;
+  setPanelWidth: (width: number) => void;
+  setViewMode: (mode: 'diff' | 'file') => void;
+  loadFileTree: (rootPath: string) => Promise<void>;
+  reset: () => void;
 }
 
-export const usePreviewStore = create<PreviewState>((set) => ({
+const PANEL_WIDTH_MIN = 300;
+const PANEL_WIDTH_MAX = 800;
+const PANEL_WIDTH_DEFAULT = 400;
+
+function convertTree(nodes: FileTreeNode[]): FileTreeNodeData[] {
+  return nodes.map((n) => ({
+    name: n.name,
+    path: n.path,
+    isDir: n.is_dir,
+    children: n.children ? convertTree(n.children) : undefined,
+  }));
+}
+
+export const usePreviewStore = create<PreviewState>((set, get) => ({
   isOpen: false,
-  files: [],
-  activeFile: null,
-  fileContent: null,
-  viewMode: 'diff',
+  panelWidth: PANEL_WIDTH_DEFAULT,
+  showFileTree: true,
 
-  setOpen: (open: boolean) => set({ isOpen: open }),
+  openFiles: [],
+  activeFilePath: null,
+  viewMode: 'file',
 
-  setFiles: (files: FileEntry[]) => set({ files }),
+  treeRoot: null,
+  treeRootPath: null,
 
-  selectFile: async (path: string) => {
-    set({ activeFile: path, fileContent: null });
+  openFile: async (path: string, originalContent?: string) => {
+    const state = get();
+
+    // If file is already open, just switch to it
+    const existing = state.openFiles.find((f) => f.path === path);
+    if (existing) {
+      const hasOriginal = originalContent ?? existing.originalContent;
+      const currentContent = existing.currentContent;
+      const shouldDiff = hasOriginal && currentContent && hasOriginal !== currentContent;
+      set({
+        activeFilePath: path,
+        viewMode: shouldDiff ? 'diff' : 'file',
+        isOpen: true,
+      });
+      // Update originalContent if newly provided
+      if (originalContent && originalContent !== existing.originalContent) {
+        set({
+          openFiles: state.openFiles.map((f) =>
+            f.path === path ? { ...f, originalContent } : f
+          ),
+        });
+      }
+      return;
+    }
+
+    // Add new file entry with loading state
+    const newFile: OpenFile = { path, originalContent, isLoading: true };
+    set({
+      openFiles: [...state.openFiles, newFile],
+      activeFilePath: path,
+      isOpen: true,
+    });
+
+    // Load file content from disk
     try {
       const content = await fileApi.readFile(path);
-      set({ fileContent: content });
+      const shouldDiff = originalContent && originalContent !== content;
+      set((s) => ({
+        openFiles: s.openFiles.map((f) =>
+          f.path === path ? { ...f, currentContent: content, isLoading: false } : f
+        ),
+        viewMode: shouldDiff ? 'diff' : 'file',
+      }));
     } catch (error) {
-      set({ fileContent: `// Error reading file: ${error}` });
+      set((s) => ({
+        openFiles: s.openFiles.map((f) =>
+          f.path === path
+            ? { ...f, isLoading: false, error: String(error) }
+            : f
+        ),
+      }));
     }
+  },
+
+  closeFile: (path: string) => {
+    const state = get();
+    const remaining = state.openFiles.filter((f) => f.path !== path);
+    let newActive = state.activeFilePath;
+
+    if (state.activeFilePath === path) {
+      if (remaining.length === 0) {
+        newActive = null;
+      } else {
+        const closedIndex = state.openFiles.findIndex((f) => f.path === path);
+        const nextIndex = Math.min(closedIndex, remaining.length - 1);
+        newActive = remaining[nextIndex].path;
+      }
+    }
+
+    set({ openFiles: remaining, activeFilePath: newActive });
+  },
+
+  setActiveFile: (path: string) => {
+    const state = get();
+    const file = state.openFiles.find((f) => f.path === path);
+    if (!file) return;
+
+    const hasOriginal = !!file.originalContent;
+    const isModified = hasOriginal && file.currentContent && file.originalContent !== file.currentContent;
+
+    set({
+      activeFilePath: path,
+      viewMode: isModified ? 'diff' : 'file',
+    });
+  },
+
+  togglePanel: () => set((s) => ({ isOpen: !s.isOpen })),
+
+  toggleFileTree: () => set((s) => ({ showFileTree: !s.showFileTree })),
+
+  setPanelWidth: (width: number) => {
+    const clamped = Math.min(PANEL_WIDTH_MAX, Math.max(PANEL_WIDTH_MIN, width));
+    set({ panelWidth: clamped });
   },
 
   setViewMode: (mode: 'diff' | 'file') => set({ viewMode: mode }),
 
-  togglePanel: () => set((state) => ({ isOpen: !state.isOpen })),
+  loadFileTree: async (rootPath: string) => {
+    try {
+      const nodes = await fileApi.listDirectory(rootPath, 2);
+      set({ treeRoot: convertTree(nodes), treeRootPath: rootPath });
+    } catch (error) {
+      console.error('Failed to load file tree:', error);
+      set({ treeRoot: null });
+    }
+  },
+
+  reset: () =>
+    set({
+      isOpen: false,
+      openFiles: [],
+      activeFilePath: null,
+      viewMode: 'file',
+      treeRoot: null,
+      treeRootPath: null,
+    }),
 }));
