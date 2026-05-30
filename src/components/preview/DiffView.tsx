@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { diffLines, Change } from 'diff';
 
 interface DiffViewProps {
@@ -6,32 +7,85 @@ interface DiffViewProps {
 }
 
 export function DiffView({ oldContent, newContent }: DiffViewProps) {
-  const changes: Change[] = diffLines(oldContent, newContent);
+  const changes: Change[] = useMemo(() => diffLines(oldContent, newContent), [oldContent, newContent]);
+
+  const stats = useMemo(() => {
+    let additions = 0;
+    let deletions = 0;
+    for (const change of changes) {
+      const lines = change.value.split('\n').filter((_l, i, arr) =>
+        i < arr.length - 1 || arr[arr.length - 1] !== ''
+      );
+      if (change.added) additions += lines.length;
+      if (change.removed) deletions += lines.length;
+    }
+    return { additions, deletions };
+  }, [changes]);
+
+  // Build lines with line numbers
+  const diffLinesData = useMemo(() => {
+    const result: Array<{
+      type: 'added' | 'removed' | 'unchanged';
+      content: string;
+      oldLineNum: number | null;
+      newLineNum: number | null;
+    }> = [];
+
+    let oldLine = 1;
+    let newLine = 1;
+
+    for (const change of changes) {
+      const lines = change.value.split('\n').filter((_l, i, arr) =>
+        i < arr.length - 1 || arr[arr.length - 1] !== ''
+      );
+      for (const line of lines) {
+        if (change.added) {
+          result.push({ type: 'added', content: line, oldLineNum: null, newLineNum: newLine++ });
+        } else if (change.removed) {
+          result.push({ type: 'removed', content: line, oldLineNum: oldLine++, newLineNum: null });
+        } else {
+          result.push({ type: 'unchanged', content: line, oldLineNum: oldLine++, newLineNum: newLine++ });
+        }
+      }
+    }
+
+    return result;
+  }, [changes]);
 
   return (
-    <div className="font-mono text-sm leading-relaxed">
-      {changes.map((change, index) => {
-        const lines = change.value.split('\n').filter((_, i, arr) =>
-          i < arr.length - 1 || arr[arr.length - 1] !== ''
-        );
-        return lines.map((line, lineIndex) => {
-          let bgClass = '';
-          let prefix = ' ';
-          if (change.added) {
-            bgClass = 'bg-[#1e6f50]';
-            prefix = '+';
-          } else if (change.removed) {
-            bgClass = 'bg-[#7f1d1d]';
-            prefix = '-';
-          }
+    <div className="font-mono text-sm">
+      {/* Stats header */}
+      <div className="px-4 py-2 border-b border-border/30 text-xs text-muted-foreground/60 flex gap-3">
+        <span className="text-green-500">+{stats.additions}</span>
+        <span className="text-red-500">-{stats.deletions}</span>
+      </div>
+
+      {/* Diff lines */}
+      <div className="leading-relaxed">
+        {diffLinesData.map((line, index) => {
+          const bgClass =
+            line.type === 'added'
+              ? 'bg-green-500/10'
+              : line.type === 'removed'
+                ? 'bg-red-500/10'
+                : '';
+
+          const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
+
           return (
-            <div key={`${index}-${lineIndex}`} className={`px-4 ${bgClass}`}>
-              <span className="text-zinc-500 select-none mr-2 inline-block w-4 text-right">{prefix}</span>
-              <span className="text-zinc-300">{line}</span>
+            <div key={index} className={`px-4 ${bgClass}`}>
+              <span className="text-muted-foreground/40 select-none inline-block w-10 text-right mr-1">
+                {line.oldLineNum ?? ''}
+              </span>
+              <span className="text-muted-foreground/40 select-none inline-block w-10 text-right mr-2">
+                {line.newLineNum ?? ''}
+              </span>
+              <span className="text-muted-foreground/50 select-none mr-1">{prefix}</span>
+              <span>{line.content}</span>
             </div>
           );
-        });
-      })}
+        })}
+      </div>
     </div>
   );
 }
