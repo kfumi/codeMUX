@@ -138,8 +138,12 @@ fn list_dir_recursive(dir: &std::path::Path, remaining_depth: u32, canonical_bas
             }
         }
 
-        // Normalize path to forward slashes for cross-platform frontend compatibility
+        // Normalize path to forward slashes, stripping Windows extended-length prefix
         let path_str = path.to_string_lossy().replace('\\', "/");
+        let path_str = match path_str.strip_prefix("//?/") {
+            Some(s) => s.to_string(),
+            None => path_str,
+        };
 
         let children = if is_dir && remaining_depth > 0 {
             Some(list_dir_recursive(&path, remaining_depth - 1, canonical_base)?)
