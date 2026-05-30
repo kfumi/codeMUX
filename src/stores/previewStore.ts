@@ -192,7 +192,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
 
   loadFileTree: async (rootPath: string) => {
     try {
-      const nodes = await fileApi.listDirectory(rootPath, 2, rootPath);
+      const nodes = await fileApi.listDirectory(rootPath, 5, rootPath);
       set({ treeRoot: convertTree(nodes), treeRootPath: rootPath });
     } catch (error) {
       console.error('Failed to load file tree:', error);
