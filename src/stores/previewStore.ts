@@ -107,7 +107,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
       if (originalContent && originalContent !== existing.originalContent) {
         set({
           openFiles: state.openFiles.map((f) =>
-            f.path === normalizedPath ? { ...f, originalContent } : f
+            normalizeFilePath(f.path) === normalizedPath ? { ...f, originalContent } : f
           ),
         });
       }
@@ -128,14 +128,14 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
       const shouldDiff = originalContent && originalContent !== content;
       set((s) => ({
         openFiles: s.openFiles.map((f) =>
-          f.path === normalizedPath ? { ...f, currentContent: content, isLoading: false } : f
+          normalizeFilePath(f.path) === normalizedPath ? { ...f, currentContent: content, isLoading: false } : f
         ),
         viewMode: shouldDiff ? 'diff' : 'file',
       }));
     } catch (error) {
       set((s) => ({
         openFiles: s.openFiles.map((f) =>
-          f.path === normalizedPath
+          normalizeFilePath(f.path) === normalizedPath
             ? { ...f, isLoading: false, error: String(error) }
             : f
         ),
