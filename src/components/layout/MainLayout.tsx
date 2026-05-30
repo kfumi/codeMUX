@@ -8,7 +8,7 @@ const SIDEBAR_MAX = 500;
 const SIDEBAR_DEFAULT = 260;
 
 interface MainLayoutProps {
-  sidebar: ReactNode;
+  sidebar: ReactNode | ((onToggleCollapse: () => void) => ReactNode);
   children: ReactNode;
   preview?: ReactNode;
 }
@@ -102,7 +102,7 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
               style={{ width: sidebarWidth }}
             >
               <div className="relative z-10 flex flex-col h-full">
-                {sidebar}
+                {typeof sidebar === 'function' ? sidebar(toggleSidebar) : sidebar}
               </div>
             </aside>
 

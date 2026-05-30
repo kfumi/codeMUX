@@ -32,13 +32,14 @@ function App() {
   return (
     <>
       <MainLayout
-        sidebar={
+        sidebar={(onToggleCollapse) => (
           <Sidebar
             onNewSession={() => handleNewSession()}
             onNewSessionInProject={(projectId) => handleNewSession(projectId)}
             onOpenSettings={() => setSettingsOpen(true)}
+            onToggleCollapse={onToggleCollapse}
           />
-        }
+        )}
         preview={<PreviewPanel />}
       >
         <ErrorBoundary>

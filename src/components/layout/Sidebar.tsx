@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { SessionList } from '../session/SessionList';
-import { Settings, MessageSquarePlus } from 'lucide-react';
+import { Settings, MessageSquarePlus, PanelLeftClose } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { open } from '@tauri-apps/plugin-dialog';
 
@@ -8,9 +8,10 @@ interface SidebarProps {
   onNewSession: () => void;
   onNewSessionInProject: (projectId: string) => void;
   onOpenSettings: () => void;
+  onToggleCollapse?: () => void;
 }
 
-export function Sidebar({ onNewSession, onNewSessionInProject, onOpenSettings }: SidebarProps) {
+export function Sidebar({ onNewSession, onNewSessionInProject, onOpenSettings, onToggleCollapse }: SidebarProps) {
   const { fetchProjects } = useProjectStore();
 
   useEffect(() => {
@@ -36,11 +37,11 @@ export function Sidebar({ onNewSession, onNewSessionInProject, onOpenSettings }:
 
   return (
     <div className="flex flex-col h-full">
-      {/* New session button */}
-      <div className="px-3 pt-2 pb-2.5">
+      {/* New session button + collapse */}
+      <div className="px-3 pt-2 pb-2.5 flex items-center gap-1">
         <button
           onClick={onNewSession}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium
+          className="flex-1 flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium
             text-[hsl(var(--sidebar-fg))]/80
             hover:text-[hsl(var(--sidebar-glow))]
             hover:bg-[hsl(var(--sidebar-glow)/0.08)]
@@ -50,6 +51,18 @@ export function Sidebar({ onNewSession, onNewSessionInProject, onOpenSettings }:
           <MessageSquarePlus className="h-4 w-4" />
           新对话
         </button>
+        {onToggleCollapse && (
+          <button
+            onClick={onToggleCollapse}
+            className="p-1.5 rounded-md text-[hsl(var(--sidebar-fg))]/50
+              hover:text-[hsl(var(--sidebar-glow))]
+              hover:bg-[hsl(var(--sidebar-glow)/0.08)]
+              transition-all duration-200 shrink-0"
+            title="收起侧边栏"
+          >
+            <PanelLeftClose className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
       {/* Session list */}
