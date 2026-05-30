@@ -92,7 +92,8 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
     const state = get();
 
     // If file is already open, just switch to it
-    const existing = state.openFiles.find((f) => f.path === normalizedPath);
+    // Compare normalized paths to handle mixed / and \ separators
+    const existing = state.openFiles.find((f) => normalizeFilePath(f.path) === normalizedPath);
     if (existing) {
       const hasOriginal = originalContent ?? existing.originalContent;
       const currentContent = existing.currentContent;
@@ -143,15 +144,16 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
   },
 
   closeFile: (path: string) => {
+    const normalizedPath = normalizeFilePath(path);
     const state = get();
-    const remaining = state.openFiles.filter((f) => f.path !== path);
+    const remaining = state.openFiles.filter((f) => normalizeFilePath(f.path) !== normalizedPath);
     let newActive = state.activeFilePath;
 
-    if (state.activeFilePath === path) {
+    if (state.activeFilePath && normalizeFilePath(state.activeFilePath) === normalizedPath) {
       if (remaining.length === 0) {
         newActive = null;
       } else {
-        const closedIndex = state.openFiles.findIndex((f) => f.path === path);
+        const closedIndex = state.openFiles.findIndex((f) => normalizeFilePath(f.path) === normalizedPath);
         const nextIndex = Math.min(closedIndex, remaining.length - 1);
         newActive = remaining[nextIndex].path;
       }
@@ -161,15 +163,16 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
   },
 
   setActiveFile: (path: string) => {
+    const normalizedPath = normalizeFilePath(path);
     const state = get();
-    const file = state.openFiles.find((f) => f.path === path);
+    const file = state.openFiles.find((f) => normalizeFilePath(f.path) === normalizedPath);
     if (!file) return;
 
     const hasOriginal = !!file.originalContent;
     const isModified = hasOriginal && file.currentContent && file.originalContent !== file.currentContent;
 
     set({
-      activeFilePath: path,
+      activeFilePath: file.path,  // Use the path already stored (normalized)
       viewMode: isModified ? 'diff' : 'file',
     });
   },
