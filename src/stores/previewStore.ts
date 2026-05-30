@@ -60,6 +60,17 @@ function convertTree(nodes: FileTreeNode[]): FileTreeNodeData[] {
   }));
 }
 
+/** Normalize file paths from various formats to OS-native paths */
+function normalizeFilePath(p: string): string {
+  // Unix-style drive path: /d/project/... → D:\project\...
+  const driveMatch = p.match(/^\/([a-zA-Z])\/(.+)$/);
+  if (driveMatch) {
+    return `${driveMatch[1].toUpperCase()}:\\${driveMatch[2].replace(/\//g, '\\')}`;
+  }
+  // Ensure forward slashes work on Windows too
+  return p.replace(/\//g, '\\');
+}
+
 export const usePreviewStore = create<PreviewState>((set, get) => ({
   isOpen: false,
   panelWidth: PANEL_WIDTH_DEFAULT,
@@ -77,16 +88,17 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
   setProjectPath: (path: string) => set({ projectPath: path }),
 
   openFile: async (path: string, originalContent?: string) => {
+    const normalizedPath = normalizeFilePath(path);
     const state = get();
 
     // If file is already open, just switch to it
-    const existing = state.openFiles.find((f) => f.path === path);
+    const existing = state.openFiles.find((f) => f.path === normalizedPath);
     if (existing) {
       const hasOriginal = originalContent ?? existing.originalContent;
       const currentContent = existing.currentContent;
       const shouldDiff = hasOriginal && currentContent && hasOriginal !== currentContent;
       set({
-        activeFilePath: path,
+        activeFilePath: normalizedPath,
         viewMode: shouldDiff ? 'diff' : 'file',
         isOpen: true,
       });
@@ -94,7 +106,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
       if (originalContent && originalContent !== existing.originalContent) {
         set({
           openFiles: state.openFiles.map((f) =>
-            f.path === path ? { ...f, originalContent } : f
+            f.path === normalizedPath ? { ...f, originalContent } : f
           ),
         });
       }
@@ -102,27 +114,27 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
     }
 
     // Add new file entry with loading state
-    const newFile: OpenFile = { path, originalContent, isLoading: true };
+    const newFile: OpenFile = { path: normalizedPath, originalContent, isLoading: true };
     set({
       openFiles: [...state.openFiles, newFile],
-      activeFilePath: path,
+      activeFilePath: normalizedPath,
       isOpen: true,
     });
 
     // Load file content from disk
     try {
-      const content = await fileApi.readFile(path, state.projectPath ?? undefined);
+      const content = await fileApi.readFile(normalizedPath, state.projectPath ?? undefined);
       const shouldDiff = originalContent && originalContent !== content;
       set((s) => ({
         openFiles: s.openFiles.map((f) =>
-          f.path === path ? { ...f, currentContent: content, isLoading: false } : f
+          f.path === normalizedPath ? { ...f, currentContent: content, isLoading: false } : f
         ),
         viewMode: shouldDiff ? 'diff' : 'file',
       }));
     } catch (error) {
       set((s) => ({
         openFiles: s.openFiles.map((f) =>
-          f.path === path
+          f.path === normalizedPath
             ? { ...f, isLoading: false, error: String(error) }
             : f
         ),
