@@ -29,15 +29,24 @@ pub fn open_in_explorer(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn read_file(_app: AppHandle, path: String) -> Result<String, String> {
-    // Resolve relative to the app's current working directory
-    let base = std::env::current_dir().map_err(|e| e.to_string())?;
-    let full_path = base.join(&path);
+pub fn read_file(_app: AppHandle, path: String, base_path: Option<String>) -> Result<String, String> {
+    // Use provided base_path or fall back to current_dir
+    let base = if let Some(bp) = base_path {
+        std::path::PathBuf::from(bp)
+    } else {
+        std::env::current_dir().map_err(|e| e.to_string())?
+    };
+
+    let full_path = if std::path::Path::new(&path).is_absolute() {
+        std::path::PathBuf::from(&path)
+    } else {
+        base.join(&path)
+    };
 
     // Security: ensure the resolved path is under the base directory
     let canonical = full_path
         .canonicalize()
-        .map_err(|e| format!("File not found: {}", e))?;
+        .map_err(|e| format!("File not found: {} (path: {})", e, full_path.display()))?;
     let canonical_base = base
         .canonicalize()
         .map_err(|e| e.to_string())?;

@@ -22,7 +22,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { projects } = useProjectStore();
   const { startQuery, isRunning, interrupt, loadSessionMessages } = useAgentStore();
   const { config } = useSettingsStore();
-  const { isOpen: previewOpen, togglePanel: togglePreview, loadFileTree } = usePreviewStore();
+  const { isOpen: previewOpen, togglePanel: togglePreview, loadFileTree, setProjectPath } = usePreviewStore();
 
   const session = sessions.find((s) => s.id === sessionId);
   const project = session?.project_id ? projects.find((p) => p.id === session.project_id) : null;
@@ -54,9 +54,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   useEffect(() => {
     if (project?.path) {
+      setProjectPath(project.path);
       loadFileTree(project.path);
     }
-  }, [project?.path, loadFileTree]);
+  }, [project?.path, setProjectPath, loadFileTree]);
 
   // Reset cwd when switching sessions
   useEffect(() => {

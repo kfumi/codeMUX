@@ -31,7 +31,11 @@ interface PreviewState {
   treeRoot: FileTreeNodeData[] | null;
   treeRootPath: string | null;
 
+  // 项目路径
+  projectPath: string | null;
+
   // Actions
+  setProjectPath: (path: string) => void;
   openFile: (path: string, originalContent?: string) => Promise<void>;
   closeFile: (path: string) => void;
   setActiveFile: (path: string) => void;
@@ -68,6 +72,10 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
   treeRoot: null,
   treeRootPath: null,
 
+  projectPath: null,
+
+  setProjectPath: (path: string) => set({ projectPath: path }),
+
   openFile: async (path: string, originalContent?: string) => {
     const state = get();
 
@@ -103,7 +111,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
 
     // Load file content from disk
     try {
-      const content = await fileApi.readFile(path);
+      const content = await fileApi.readFile(path, state.projectPath ?? undefined);
       const shouldDiff = originalContent && originalContent !== content;
       set((s) => ({
         openFiles: s.openFiles.map((f) =>
