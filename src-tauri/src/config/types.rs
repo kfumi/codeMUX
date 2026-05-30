@@ -8,6 +8,15 @@ pub struct Provider {
     pub anthropic_base_url: String,
     pub openai_base_url: String,
     pub default_model: String,
+    /// 输入 token 单价 ($/1M tokens)
+    #[serde(default)]
+    pub input_price: Option<f64>,
+    /// 缓存命中 token 单价 ($/1M tokens)
+    #[serde(default)]
+    pub cache_read_price: Option<f64>,
+    /// 输出 token 单价 ($/1M tokens)
+    #[serde(default)]
+    pub output_price: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +44,9 @@ impl Default for AppConfig {
                 anthropic_base_url: "https://api.anthropic.com".to_string(),
                 openai_base_url: String::new(),
                 default_model: "claude-sonnet-4-20250514".to_string(),
+                input_price: None,
+                cache_read_price: None,
+                output_price: None,
             }],
             active_provider_id: Some(id),
             theme: Theme::System,

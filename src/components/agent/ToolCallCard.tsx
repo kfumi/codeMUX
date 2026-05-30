@@ -8,26 +8,35 @@ interface ToolCallCardProps {
   status?: 'pending' | 'running' | 'done' | 'error';
 }
 
+/** Normalize double backslashes to single */
+function normalizePath(p: string): string {
+  return p.replace(/\\\\/g, '\\');
+}
+
 function getToolSummary(toolName: string, input: Record<string, unknown>): string {
   switch (toolName) {
     case 'Read':
-      return String(input.file_path || '');
     case 'Write':
-      return String(input.file_path || '');
     case 'Edit':
-      return String(input.file_path || '');
+      return normalizePath(String(input.file_path || ''));
     case 'Glob':
       return String(input.pattern || '');
-    case 'Grep':
-      return String(input.pattern || '');
+    case 'Grep': {
+      const pattern = String(input.pattern || '');
+      const path = input.path ? normalizePath(String(input.path)) : '';
+      return path ? `${pattern} (in ${path})` : pattern;
+    }
     case 'Bash':
-      return String(input.command || '');
+      return String(input.description || input.command || '');
     case 'WebSearch':
       return String(input.query || '');
     case 'WebFetch':
       return String(input.url || '');
+    case 'Agent':
+    case 'subagent':
+      return String(input.description || input.prompt || '').slice(0, 100);
     default:
-      return JSON.stringify(input).slice(0, 80);
+      return String(input.description || input.prompt || JSON.stringify(input).slice(0, 80));
   }
 }
 
@@ -35,11 +44,11 @@ export function ToolCallCard({ toolName, input, result, status }: ToolCallCardPr
   const [isExpanded, setIsExpanded] = useState(false);
   const summary = getToolSummary(toolName, input);
 
-  const statusColors = {
-    pending: 'text-muted-foreground',
-    running: 'text-yellow-500 animate-pulse',
-    done: 'text-green-500',
-    error: 'text-red-500',
+  const dotColor = {
+    pending: 'bg-muted-foreground/40',
+    running: 'bg-yellow-500 animate-pulse',
+    done: 'bg-green-500',
+    error: 'bg-red-500',
   };
 
   return (
@@ -49,9 +58,9 @@ export function ToolCallCard({ toolName, input, result, status }: ToolCallCardPr
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        {status && <span className={`h-2 w-2 rounded-full shrink-0 ${dotColor[status]}`} />}
         <span className="font-medium">{toolName}</span>
-        <span className="text-muted-foreground truncate flex-1 text-left">{summary}</span>
-        {status && <span className={`text-xs ${statusColors[status]}`}>{status}</span>}
+        {summary && <span className="text-muted-foreground truncate flex-1 text-left text-xs">{summary}</span>}
       </button>
       {isExpanded && (
         <div className="border-t px-3 py-2 space-y-2">

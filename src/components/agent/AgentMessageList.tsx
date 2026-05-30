@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAgentStore, type AgentMessage } from '../../stores/agentStore';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { calculateCost } from '../../lib/pricing';
+import type { Provider } from '../../types/provider';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolCallCard } from './ToolCallCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -9,9 +12,9 @@ interface AgentMessageListProps {
   sessionId: string;
 }
 
-function AgentEventItem({ msg, resultMap }: { msg: AgentMessage; resultMap: Record<string, string> }) {
+function AgentEventItem({ msg, resultMap, provider }: { msg: AgentMessage; resultMap: Record<string, ToolResultEntry>; provider: Provider | null }) {
   try {
-    return renderEvent(msg, resultMap);
+    return renderEvent(msg, resultMap, provider);
   } catch (err) {
     return (
       <div className="text-xs text-red-500 bg-red-500/[0.06] rounded-xl p-3 my-1 border border-red-500/15">
@@ -22,8 +25,13 @@ function AgentEventItem({ msg, resultMap }: { msg: AgentMessage; resultMap: Reco
   }
 }
 
-function buildResultMap(events: AgentMessage[]): Record<string, string> {
-  const map: Record<string, string> = {};
+interface ToolResultEntry {
+  content: string;
+  isError: boolean;
+}
+
+function buildResultMap(events: AgentMessage[]): Record<string, ToolResultEntry> {
+  const map: Record<string, ToolResultEntry> = {};
   for (const evt of events) {
     if (evt.kind !== 'tool_result') continue;
     const rawContent: any = evt.data?.message?.content;
@@ -31,7 +39,7 @@ function buildResultMap(events: AgentMessage[]): Record<string, string> {
       for (const r of rawContent) {
         if (r?.type === 'tool_result' && r.tool_use_id) {
           const content = typeof r.content === 'string' ? r.content : JSON.stringify(r.content);
-          map[r.tool_use_id] = content;
+          map[r.tool_use_id] = { content, isError: !!r.is_error };
         }
       }
     }
@@ -39,7 +47,7 @@ function buildResultMap(events: AgentMessage[]): Record<string, string> {
   return map;
 }
 
-function renderEvent(msg: AgentMessage, resultMap: Record<string, string>) {
+function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntry>, provider: Provider | null) {
   switch (msg.kind) {
     case 'user': {
       const content = msg.data.content;
@@ -102,13 +110,17 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, string>) {
               );
             }
             if (block?.type === 'tool_use' && block.name) {
-              const result = block.id ? resultMap[block.id] : undefined;
+              const entry = block.id ? resultMap[block.id] : undefined;
+              const status = !entry ? 'pending' as const
+                : entry.isError ? 'error' as const
+                : 'done' as const;
               return (
                 <ToolCallCard
                   key={i}
                   toolName={block.name}
                   input={block.input || {}}
-                  result={result}
+                  result={entry?.content}
+                  status={status}
                 />
               );
             }
@@ -122,7 +134,8 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, string>) {
       // 已在 assistant 的 tool_use 中内联展示，跳过
       return null;
 
-    case 'result':
+    case 'result': {
+      const cost = calculateCost(msg.data.usage, provider);
       return (
         <div className="border-t border-border/20 pt-3 mt-4 animate-fade-in-up">
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground/60"
@@ -130,11 +143,12 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, string>) {
           >
             <span>耗时 {(msg.data.duration_ms / 1000).toFixed(1)}s</span>
             <span>轮次 {msg.data.num_turns}</span>
-            <span>${msg.data.total_cost_usd?.toFixed(4)}</span>
+            {cost != null && <span>${cost.toFixed(4)}</span>}
             <span>{msg.data.usage?.input_tokens}+{msg.data.usage?.output_tokens} token</span>
           </div>
         </div>
       );
+    }
 
     case 'error':
       return (
@@ -188,6 +202,8 @@ const EMPTY_EVENTS: AgentMessage[] = [];
 export function AgentMessageList({ sessionId }: AgentMessageListProps) {
   const events = useAgentStore((s) => s.events[sessionId] ?? EMPTY_EVENTS);
   const isRunning = useAgentStore((s) => s.isRunning[sessionId] ?? false);
+  const config = useSettingsStore((s) => s.config);
+  const provider = config?.providers.find((p) => p.id === config.active_provider_id) ?? null;
   const resultMap = useMemo(() => buildResultMap(events), [events]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -263,7 +279,7 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
             </div>
           )}
           {events.map((msg, i) => (
-            <AgentEventItem key={i} msg={msg} resultMap={resultMap} />
+            <AgentEventItem key={i} msg={msg} resultMap={resultMap} provider={provider} />
           ))}
           {isRunning && (
             <div className="flex items-center gap-2.5 text-sm text-muted-foreground/60 py-2 animate-fade-in">

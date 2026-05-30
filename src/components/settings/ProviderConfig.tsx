@@ -176,7 +176,7 @@ export function ProviderConfigPanel() {
     }
   };
 
-  const updateField = (field: keyof Provider, value: string) => {
+  const updateField = (field: keyof Provider, value: string | number | undefined) => {
     if (!editingProvider) return;
     setEditingProvider({ ...editingProvider, [field]: value });
   };
@@ -351,6 +351,42 @@ export function ProviderConfigPanel() {
                     {fetchMessage}
                   </p>
                 )}
+              </div>
+
+              <div className="pt-1">
+                <label className="text-xs text-muted-foreground mb-1.5 block">计费配置 <span className="text-muted-foreground/50">（可选，$/1M tokens）</span></label>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-[11px] text-muted-foreground/70 mb-0.5 block">输入</label>
+                    <Input
+                      type="number"
+                      value={editingProvider.input_price ?? ''}
+                      onChange={(e) => updateField('input_price', e.target.value ? Number(e.target.value) : undefined)}
+                      placeholder="3.00"
+                      step="0.01"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-muted-foreground/70 mb-0.5 block">缓存命中</label>
+                    <Input
+                      type="number"
+                      value={editingProvider.cache_read_price ?? ''}
+                      onChange={(e) => updateField('cache_read_price', e.target.value ? Number(e.target.value) : undefined)}
+                      placeholder="0.30"
+                      step="0.01"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-muted-foreground/70 mb-0.5 block">输出</label>
+                    <Input
+                      type="number"
+                      value={editingProvider.output_price ?? ''}
+                      onChange={(e) => updateField('output_price', e.target.value ? Number(e.target.value) : undefined)}
+                      placeholder="15.00"
+                      step="0.01"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           )}
