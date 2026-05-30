@@ -73,6 +73,6 @@ export const configApi = {
 
 export const fileApi = {
   readFile: (path: string): Promise<string> => invoke('read_file', { path }),
-  listDirectory: (path: string, depth?: number): Promise<FileTreeNode[]> =>
-    invoke('list_directory', { path, depth }),
+  listDirectory: (path: string, depth?: number, basePath?: string): Promise<FileTreeNode[]> =>
+    invoke('list_directory', { path, depth, basePath }),
 };

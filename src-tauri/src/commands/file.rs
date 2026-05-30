@@ -59,24 +59,22 @@ pub struct FileNode {
 /// List directory contents as a tree structure.
 /// Excludes common large/hidden directories. Default depth = 2, max depth = 5.
 #[tauri::command]
-pub fn list_directory(_app: AppHandle, path: String, depth: Option<u32>) -> Result<Vec<FileNode>, String> {
-    // Resolve relative to the app's current working directory
-    let base = std::env::current_dir().map_err(|e| e.to_string())?;
-    let full_path = base.join(&path);
+pub fn list_directory(_app: AppHandle, path: String, base_path: Option<String>, depth: Option<u32>) -> Result<Vec<FileNode>, String> {
+    // Use provided base_path as security base, or fall back to current_dir
+    let base = if let Some(bp) = base_path {
+        std::path::PathBuf::from(bp)
+    } else {
+        std::env::current_dir().map_err(|e| e.to_string())?
+    };
+    let canonical_base = base.canonicalize().map_err(|e| format!("Base path not found: {}", e))?;
 
-    // Security: ensure the resolved path is under the base directory
-    let canonical = full_path
-        .canonicalize()
-        .map_err(|e| format!("Directory not found: {}", e))?;
-    let canonical_base = base
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
+    let dir = std::path::PathBuf::from(&path);
+    if !dir.is_dir() {
+        return Err(format!("Not a directory: {}", path));
+    }
+    let canonical = dir.canonicalize().map_err(|e| format!("Path not found: {}", e))?;
     if !canonical.starts_with(&canonical_base) {
         return Err("Access denied: path outside project directory".to_string());
-    }
-
-    if !canonical.is_dir() {
-        return Err(format!("Not a directory: {}", path));
     }
 
     // Cap depth at 5 to prevent huge responses
