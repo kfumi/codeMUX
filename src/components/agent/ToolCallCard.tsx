@@ -6,6 +6,14 @@ interface ToolCallCardProps {
   input: Record<string, unknown>;
   result?: string;
   status?: 'pending' | 'running' | 'done' | 'error';
+  onFileClick?: (path: string, originalContent?: string) => void;
+}
+
+interface ToolSummaryPart {
+  type: 'text' | 'file-link';
+  content: string;
+  filePath?: string;
+  originalContent?: string;
 }
 
 /** Normalize double backslashes to single */
@@ -13,36 +21,45 @@ function normalizePath(p: string): string {
   return p.replace(/\\\\/g, '\\');
 }
 
-function getToolSummary(toolName: string, input: Record<string, unknown>): string {
+function getToolSummaryData(toolName: string, input: Record<string, unknown>): ToolSummaryPart[] {
   switch (toolName) {
-    case 'Read':
-    case 'Write':
-    case 'Edit':
-      return normalizePath(String(input.file_path || ''));
+    case 'Read': {
+      const path = normalizePath(String(input.file_path || ''));
+      return [{ type: 'file-link', content: path, filePath: path }];
+    }
+    case 'Write': {
+      const path = normalizePath(String(input.file_path || ''));
+      return [{ type: 'file-link', content: path, filePath: path }];
+    }
+    case 'Edit': {
+      const path = normalizePath(String(input.file_path || ''));
+      const oldString = typeof input.old_string === 'string' ? input.old_string : undefined;
+      return [{ type: 'file-link', content: path, filePath: path, originalContent: oldString }];
+    }
     case 'Glob':
-      return String(input.pattern || '');
+      return [{ type: 'text', content: String(input.pattern || '') }];
     case 'Grep': {
       const pattern = String(input.pattern || '');
       const path = input.path ? normalizePath(String(input.path)) : '';
-      return path ? `${pattern} (in ${path})` : pattern;
+      return [{ type: 'text', content: path ? `${pattern} (in ${path})` : pattern }];
     }
     case 'Bash':
-      return String(input.description || input.command || '');
+      return [{ type: 'text', content: String(input.description || input.command || '') }];
     case 'WebSearch':
-      return String(input.query || '');
+      return [{ type: 'text', content: String(input.query || '') }];
     case 'WebFetch':
-      return String(input.url || '');
+      return [{ type: 'text', content: String(input.url || '') }];
     case 'Agent':
     case 'subagent':
-      return String(input.description || input.prompt || '').slice(0, 100);
+      return [{ type: 'text', content: String(input.description || input.prompt || '').slice(0, 100) }];
     default:
-      return String(input.description || input.prompt || JSON.stringify(input).slice(0, 80));
+      return [{ type: 'text', content: String(input.description || input.prompt || JSON.stringify(input).slice(0, 80)) }];
   }
 }
 
-export function ToolCallCard({ toolName, input, result, status }: ToolCallCardProps) {
+export function ToolCallCard({ toolName, input, result, status, onFileClick }: ToolCallCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const summary = getToolSummary(toolName, input);
+  const summaryParts = getToolSummaryData(toolName, input);
 
   const dotColor = {
     pending: 'bg-muted-foreground/40',
@@ -60,7 +77,24 @@ export function ToolCallCard({ toolName, input, result, status }: ToolCallCardPr
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         {status && <span className={`h-2 w-2 rounded-full shrink-0 ${dotColor[status]}`} />}
         <span className="font-medium">{toolName}</span>
-        {summary && <span className="text-muted-foreground truncate flex-1 text-left text-xs">{summary}</span>}
+        <span className="text-muted-foreground truncate flex-1 text-left text-xs">
+          {summaryParts.map((part, i) =>
+            part.type === 'file-link' ? (
+              <button
+                key={i}
+                className="text-primary hover:underline cursor-pointer"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onFileClick?.(part.filePath!, part.originalContent);
+                }}
+              >
+                {part.content}
+              </button>
+            ) : (
+              <span key={i}>{part.content}</span>
+            )
+          )}
+        </span>
       </button>
       {isExpanded && (
         <div className="border-t px-3 py-2 space-y-2">
