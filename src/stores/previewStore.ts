@@ -21,6 +21,7 @@ interface PreviewState {
   isOpen: boolean;
   panelWidth: number;
   showFileTree: boolean;
+  fileTreeWidth: number;
 
   // 文件 Tab
   openFiles: OpenFile[];
@@ -38,10 +39,13 @@ interface PreviewState {
   setProjectPath: (path: string) => void;
   openFile: (path: string, originalContent?: string) => Promise<void>;
   closeFile: (path: string) => void;
+  closeOtherFiles: (path: string) => void;
+  closeAllFiles: () => void;
   setActiveFile: (path: string) => void;
   togglePanel: () => void;
   toggleFileTree: () => void;
   setPanelWidth: (width: number) => void;
+  setFileTreeWidth: (width: number) => void;
   setViewMode: (mode: 'diff' | 'file') => void;
   loadFileTree: (rootPath: string) => Promise<void>;
   reset: () => void;
@@ -73,10 +77,15 @@ function normalizeFilePath(p: string): string {
   return path.replace(/\//g, '\\');
 }
 
+const FILE_TREE_WIDTH_MIN = 150;
+const FILE_TREE_WIDTH_MAX = 350;
+const FILE_TREE_WIDTH_DEFAULT = 200;
+
 export const usePreviewStore = create<PreviewState>((set, get) => ({
   isOpen: false,
   panelWidth: PANEL_WIDTH_DEFAULT,
   showFileTree: true,
+  fileTreeWidth: FILE_TREE_WIDTH_DEFAULT,
 
   openFiles: [],
   activeFilePath: null,
@@ -164,6 +173,17 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
     set({ openFiles: remaining, activeFilePath: newActive });
   },
 
+  closeOtherFiles: (path: string) => {
+    const normalizedPath = normalizeFilePath(path);
+    const state = get();
+    const kept = state.openFiles.filter((f) => normalizeFilePath(f.path) === normalizedPath);
+    set({ openFiles: kept, activeFilePath: kept.length > 0 ? kept[0].path : null });
+  },
+
+  closeAllFiles: () => {
+    set({ openFiles: [], activeFilePath: null });
+  },
+
   setActiveFile: (path: string) => {
     const normalizedPath = normalizeFilePath(path);
     const state = get();
@@ -186,6 +206,11 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
   setPanelWidth: (width: number) => {
     const clamped = Math.min(PANEL_WIDTH_MAX, Math.max(PANEL_WIDTH_MIN, width));
     set({ panelWidth: clamped });
+  },
+
+  setFileTreeWidth: (width: number) => {
+    const clamped = Math.min(FILE_TREE_WIDTH_MAX, Math.max(FILE_TREE_WIDTH_MIN, width));
+    set({ fileTreeWidth: clamped });
   },
 
   setViewMode: (mode: 'diff' | 'file') => set({ viewMode: mode }),

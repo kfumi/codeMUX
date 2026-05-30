@@ -1,3 +1,4 @@
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { usePreviewStore } from '../../stores/previewStore';
 import { DiffView } from './DiffView';
 import { FileView } from './FileView';
@@ -5,14 +6,105 @@ import { FileTree } from './FileTree';
 import { X, FileCode, GitCompare, PanelLeft, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
+function TabContextMenu({
+  filePath,
+  filePaths,
+  onClose,
+  onCloseOthers,
+  onCloseAll,
+  style,
+}: {
+  filePath: string;
+  filePaths: string[];
+  onClose: (path: string) => void;
+  onCloseOthers: (path: string) => void;
+  onCloseAll: () => void;
+  style: React.CSSProperties;
+}) {
+  return (
+    <div
+      className="fixed z-50 bg-background border border-border rounded-md shadow-lg py-1 text-xs min-w-[140px]"
+      style={style}
+    >
+      <button
+        className="w-full text-left px-3 py-1.5 hover:bg-muted/50 transition-colors"
+        onClick={() => { onClose(filePath); }}
+      >
+        关闭
+      </button>
+      <button
+        className="w-full text-left px-3 py-1.5 hover:bg-muted/50 transition-colors"
+        onClick={() => { onCloseOthers(filePath); }}
+      >
+        关闭其他
+      </button>
+      {filePaths.length > 1 && (
+        <button
+          className="w-full text-left px-3 py-1.5 hover:bg-muted/50 transition-colors"
+          onClick={onCloseAll}
+        >
+          关闭所有
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function PreviewPanel() {
   const {
-    isOpen, panelWidth, showFileTree, openFiles, activeFilePath, viewMode,
-    togglePanel, setActiveFile, setViewMode, closeFile, toggleFileTree,
+    isOpen, panelWidth, showFileTree, fileTreeWidth, openFiles, activeFilePath, viewMode,
+    togglePanel, setActiveFile, setViewMode, closeFile, closeOtherFiles, closeAllFiles,
+    toggleFileTree, setFileTreeWidth,
   } = usePreviewStore();
 
   const activeFile = openFiles.find((f) => f.path === activeFilePath);
   const hasOriginal = !!activeFile?.originalContent;
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+
+  // Close context menu on outside click
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = () => setContextMenu(null);
+    window.addEventListener('click', handler);
+    return () => window.removeEventListener('click', handler);
+  }, [contextMenu]);
+
+  // File tree drag resize
+  const treeDragRef = useRef(false);
+  const handleTreeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    treeDragRef.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const startX = e.clientX;
+    const startWidth = fileTreeWidth;
+
+    const onMove = (ev: MouseEvent) => {
+      if (!treeDragRef.current) return;
+      const delta = ev.clientX - startX;
+      setFileTreeWidth(startWidth + delta);
+    };
+
+    const onUp = () => {
+      treeDragRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [fileTreeWidth, setFileTreeWidth]);
+
+  const handleTabContextMenu = useCallback((e: React.MouseEvent, path: string) => {
+    e.preventDefault();
+    setContextMenu({ path, x: e.clientX, y: e.clientY });
+  }, []);
+
   if (!isOpen) return null;
 
   return (
@@ -74,13 +166,22 @@ export function PreviewPanel() {
         </button>
       </div>
 
-      {/* Main content: optional file tree + tab/content area */}
+      {/* Main content: file tree + tab/content area */}
       <div className="flex flex-1 overflow-hidden">
         {/* File tree sidebar */}
         {showFileTree && (
-          <div className="w-[200px] border-r border-border/30 overflow-hidden shrink-0">
-            <FileTree />
-          </div>
+          <>
+            <div className="border-r border-border/30 overflow-hidden shrink-0" style={{ width: fileTreeWidth }}>
+              <FileTree />
+            </div>
+            {/* Drag handle between file tree and content */}
+            <div
+              className="w-1 shrink-0 cursor-col-resize group relative"
+              onMouseDown={handleTreeMouseDown}
+            >
+              <div className="absolute inset-y-0 -left-0.5 w-2 group-hover:bg-primary/20 transition-colors" />
+            </div>
+          </>
         )}
 
         {/* Tab + content area */}
@@ -97,12 +198,13 @@ export function PreviewPanel() {
                   <div
                     key={file.path}
                     className={cn(
-                      'flex items-center gap-1 px-3 py-1.5 text-xs font-mono whitespace-nowrap border-r border-border/20 transition-colors cursor-pointer',
+                      'flex items-center gap-1 px-3 py-1.5 text-xs font-mono whitespace-nowrap border-r border-border/20 transition-colors cursor-pointer select-none',
                       isActive
                         ? 'bg-background text-foreground/80'
                         : 'text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/30'
                     )}
                     onClick={() => setActiveFile(file.path)}
+                    onContextMenu={(e) => handleTabContextMenu(e, file.path)}
                   >
                     <span className="truncate max-w-[120px]">{fileName}</span>
                     {fileIsModified && <span className="text-yellow-500 text-[10px]">●</span>}
@@ -148,6 +250,18 @@ export function PreviewPanel() {
           </div>
         </div>
       </div>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <TabContextMenu
+          filePath={contextMenu.path}
+          filePaths={openFiles.map((f) => f.path)}
+          onClose={closeFile}
+          onCloseOthers={closeOtherFiles}
+          onCloseAll={closeAllFiles}
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        />
+      )}
     </div>
   );
 }
