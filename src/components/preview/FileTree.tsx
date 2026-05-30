@@ -4,7 +4,7 @@ import { usePreviewStore, type FileTreeNodeData } from '../../stores/previewStor
 import { cn } from '../../lib/utils';
 
 function TreeNode({ node, onFileClick, level = 0 }: { node: FileTreeNodeData; onFileClick: (path: string) => void; level: number }) {
-  const [expanded, setExpanded] = useState(level < 1);
+  const [expanded, setExpanded] = useState(false);
 
   const handleClick = useCallback(() => {
     if (node.isDir) {
