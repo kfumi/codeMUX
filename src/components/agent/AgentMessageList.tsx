@@ -7,14 +7,15 @@ import { ThinkingBlock } from './ThinkingBlock';
 import { ToolCallCard } from './ToolCallCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { Loader2, Sparkles, ArrowDown } from 'lucide-react';
+import { usePreviewStore } from '../../stores/previewStore';
 
 interface AgentMessageListProps {
   sessionId: string;
 }
 
-function AgentEventItem({ msg, resultMap, provider }: { msg: AgentMessage; resultMap: Record<string, ToolResultEntry>; provider: Provider | null }) {
+function AgentEventItem({ msg, resultMap, provider, onFileClick }: { msg: AgentMessage; resultMap: Record<string, ToolResultEntry>; provider: Provider | null; onFileClick: (path: string, originalContent?: string) => void }) {
   try {
-    return renderEvent(msg, resultMap, provider);
+    return renderEvent(msg, resultMap, provider, onFileClick);
   } catch (err) {
     return (
       <div className="text-xs text-red-500 bg-red-500/[0.06] rounded-xl p-3 my-1 border border-red-500/15">
@@ -47,7 +48,7 @@ function buildResultMap(events: AgentMessage[]): Record<string, ToolResultEntry>
   return map;
 }
 
-function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntry>, provider: Provider | null) {
+function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntry>, provider: Provider | null, onFileClick: (path: string, originalContent?: string) => void) {
   switch (msg.kind) {
     case 'user': {
       const content = msg.data.content;
@@ -121,6 +122,7 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
                   input={block.input || {}}
                   result={entry?.content}
                   status={status}
+                  onFileClick={onFileClick}
                 />
               );
             }
@@ -212,6 +214,13 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
   const [autoScroll, setAutoScroll] = useState(true);
   // 跟踪上一次事件数量，用于区分历史加载和实时消息
   const prevCountRef = useRef(0);
+  const openFile = usePreviewStore((s) => s.openFile);
+  const handleFileClick = useCallback(
+    (path: string, originalContent?: string) => {
+      openFile(path, originalContent);
+    },
+    [openFile]
+  );
 
   // 监听滚动位置 - 只在有内容、内容溢出、且用户上滚时才显示按钮
   const handleScroll = useCallback(() => {
@@ -279,7 +288,7 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
             </div>
           )}
           {events.map((msg, i) => (
-            <AgentEventItem key={i} msg={msg} resultMap={resultMap} provider={provider} />
+            <AgentEventItem key={i} msg={msg} resultMap={resultMap} provider={provider} onFileClick={handleFileClick} />
           ))}
           {isRunning && (
             <div className="flex items-center gap-2.5 text-sm text-muted-foreground/60 py-2 animate-fade-in">
