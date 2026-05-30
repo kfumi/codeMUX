@@ -12,22 +12,44 @@ interface Question {
 interface AskUserQuestionCardProps {
   toolUseId: string;
   questions: Question[];
+  submitted?: boolean;
+  resultContent?: string;
 }
 
 const OTHER_IDX = -1;
 
-export function AskUserQuestionCard({ toolUseId, questions }: AskUserQuestionCardProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
+/** Try to extract answers from tool_result content */
+function parseResultAnswers(resultContent: string, questions: Question[]): string[] {
+  // Try JSON parse first
+  try {
+    const parsed = JSON.parse(resultContent);
+    if (Array.isArray(parsed)) return parsed.map(String);
+    if (parsed?.answers) return Object.values(parsed.answers).map(String);
+  } catch { /* not JSON */ }
+  // Try to extract from "question"="answer" pattern
+  const answers: string[] = [];
+  for (const q of questions) {
+    const re = new RegExp(`"${q.question.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"\\s*=\\s*"([^"]*)"`, 'i');
+    const match = resultContent.match(re);
+    answers.push(match?.[1] || '');
+  }
+  return answers.some(a => a) ? answers : [];
+}
+
+export function AskUserQuestionCard({ toolUseId, questions, submitted: propSubmitted, resultContent }: AskUserQuestionCardProps) {
+  // Parse answers from result content if available
+  const parsedAnswers = propSubmitted && resultContent ? parseResultAnswers(resultContent, questions) : [];
+
+  const [isExpanded, setIsExpanded] = useState(!propSubmitted);
   const [selections, setSelections] = useState<Record<number, Set<number>>>(() => {
     const init: Record<number, Set<number>> = {};
     questions.forEach((_, i) => { init[i] = new Set(); });
     return init;
   });
   const [otherTexts, setOtherTexts] = useState<Record<number, string>>({});
-  const [submitted, setSubmitted] = useState(false);
+  const [submitted, setSubmitted] = useState(propSubmitted || false);
   const [submitting, setSubmitting] = useState(false);
-  // Store submitted answers for display
-  const [submittedAnswers, setSubmittedAnswers] = useState<string[]>([]);
+  const [submittedAnswers, setSubmittedAnswers] = useState<string[]>(parsedAnswers);
 
   const toggleOption = (qIdx: number, oIdx: number) => {
     if (submitted) return;
@@ -95,7 +117,7 @@ export function AskUserQuestionCard({ toolUseId, questions }: AskUserQuestionCar
             questions.map((q, qIdx) => (
               <div key={qIdx}>
                 <p className="text-xs text-muted-foreground mb-0.5">{q.question}</p>
-                <p className="text-sm font-medium">{submittedAnswers[qIdx]}</p>
+                <p className="text-sm font-medium">{submittedAnswers[qIdx] || '已回答'}</p>
               </div>
             ))
           ) : (

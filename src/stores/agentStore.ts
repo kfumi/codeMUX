@@ -107,10 +107,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     // 添加用户消息到事件列表
     const userMsg: AgentMessage = { kind: 'user', data: { content: prompt } };
+    const userTs = Date.now();
     set((s) => ({
       events: {
         ...s.events,
         [sessionId]: [...(s.events[sessionId] || []), userMsg],
+      },
+      eventTimestamps: {
+        ...s.eventTimestamps,
+        [sessionId]: [...(s.eventTimestamps[sessionId] || []), userTs],
       },
       isRunning: { ...s.isRunning, [sessionId]: true },
       error: { ...s.error, [sessionId]: null },
@@ -209,8 +214,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const eventsJson = await agentApi.getEvents(sessionId);
       if (eventsJson) {
         const events: AgentMessage[] = JSON.parse(eventsJson);
+        // Generate placeholder timestamps to keep arrays aligned (historical events have no real timing)
+        const timestamps = new Array(events.length).fill(0);
         set((state) => ({
           events: { ...state.events, [sessionId]: events },
+          eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
         }));
       }
     } catch (err) {

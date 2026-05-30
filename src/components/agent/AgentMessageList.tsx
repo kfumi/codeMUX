@@ -298,13 +298,17 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
       // 已在 assistant 的 tool_use 中内联展示，跳过
       return null;
 
-    case 'ask_user_question':
+    case 'ask_user_question': {
+      const resultEntry = resultMap[msg.data.tool_use_id];
       return (
         <AskUserQuestionCard
           toolUseId={msg.data.tool_use_id}
           questions={msg.data.questions}
+          submitted={!!resultEntry}
+          resultContent={resultEntry?.content}
         />
       );
+    }
 
     case 'result': {
       const cost = calculateCost(msg.data.usage, provider);
