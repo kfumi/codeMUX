@@ -187,3 +187,14 @@ input[type="password"]::-ms-reveal {
   background: hsl(38 92% 55% / 0.25);
   color: inherit;
 }
+
+/* ——— Prose code overrides ——— */
+/* Override typography plugin's code color to let highlight.js work */
+.prose {
+  --tw-prose-pre-code: currentColor;
+  --tw-prose-invert-pre-code: currentColor;
+}
+.prose :where(code):not(:where([class~="not-prose"] *))::before,
+.prose :where(code):not(:where([class~="not-prose"] *))::after {
+  content: none;
+}

@@ -217,7 +217,7 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
           </div>
           <div className="flex items-center gap-1.5 mt-1">
             {timestamp != null && timestamp > 0 && (
-              <span className="text-[10px] text-muted-foreground/40 tabular-nums"
+              <span className="text-xs text-muted-foreground/40 tabular-nums"
                 style={{ fontFamily: "'JetBrains Mono', monospace" }}
               >
                 {formatTime(timestamp)}
