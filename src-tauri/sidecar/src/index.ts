@@ -244,6 +244,14 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
         const m: any = message;
         const usage = m?.message?.usage || m?.usage;
         process.stderr.write(`[sidecar]   → assistant usage: ${JSON.stringify(usage || 'NONE')}\n`);
+        // Debug: log tool_use block names to trace TodoWrite
+        const blocks = m?.message?.content;
+        if (Array.isArray(blocks)) {
+          const toolNames = blocks.filter((b: any) => b?.type === 'tool_use').map((b: any) => b.name);
+          if (toolNames.length > 0) {
+            process.stderr.write(`[sidecar]   → tool_use blocks: ${toolNames.join(', ')}\n`);
+          }
+        }
       }
 
       // Capture the real Claude session ID from any SDK message

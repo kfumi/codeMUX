@@ -93,77 +93,94 @@ function truncateTitle(text: string, maxLen = 30): string {
 /**
  * Extract the current todo list from a stream of agent events.
  * Handles TodoWrite (full list replacement), TaskCreate/TaskUpdate (incremental),
- * and infers completion from result events.
+ * and infers status from tool execution flow when TodoWrite doesn't update statuses.
  */
 function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
   let todos: TodoItem[] = [];
-  const taskMap = new Map<string, TodoItem>(); // for Task tools: taskId -> item
-  let sawResult = false;
+  const taskMap = new Map<string, TodoItem>();
+  let hasExplicitUpdates = false; // true if any TodoWrite with non-pending status was seen
 
   for (const evt of events) {
-    // Mark all remaining todos as completed when the result arrives
-    if (evt.kind === 'result') {
-      sawResult = true;
-      continue;
-    }
+    if (evt.kind === 'assistant') {
+      const blocks = Array.isArray(evt.data?.message?.content) ? evt.data.message.content : [];
 
-    if (evt.kind !== 'assistant') continue;
-    const blocks = Array.isArray(evt.data?.message?.content) ? evt.data.message.content : [];
+      for (const block of blocks) {
+        if (block?.type !== 'tool_use' || !block.name) continue;
 
-    for (const block of blocks) {
-      if (block?.type !== 'tool_use' || !block.name) continue;
-
-      // TodoWrite: replaces the entire todo list
-      if (block.name === 'TodoWrite') {
-        const inputTodos = (block.input as any)?.todos;
-        if (Array.isArray(inputTodos)) {
-          todos = inputTodos.map((t: any) => ({
-            content: String(t.content || ''),
-            status: (['pending', 'in_progress', 'completed'].includes(t.status) ? t.status : 'pending') as TodoItem['status'],
-            activeForm: t.activeForm || undefined,
-          }));
-          taskMap.clear();
-        }
-      }
-
-      // TaskCreate: adds a single task
-      if (block.name === 'TaskCreate') {
-        const input = block.input as any;
-        const tempId = `temp_${todos.length}`;
-        const item: TodoItem = {
-          content: String(input?.subject || input?.description || ''),
-          status: 'pending',
-          activeForm: input?.activeForm || undefined,
-        };
-        taskMap.set(tempId, item);
-        todos.push(item);
-      }
-
-      // TaskUpdate: updates an existing task by taskId
-      if (block.name === 'TaskUpdate') {
-        const input = block.input as any;
-        const taskId = input?.taskId;
-        if (taskId && taskMap.has(taskId)) {
-          const item = taskMap.get(taskId)!;
-          if (input.status) {
-            item.status = (['pending', 'in_progress', 'completed', 'deleted'].includes(input.status)
-              ? input.status === 'deleted' ? 'completed' : input.status
-              : 'pending') as TodoItem['status'];
+        // TodoWrite: replaces the entire todo list
+        if (block.name === 'TodoWrite') {
+          const inputTodos = (block.input as any)?.todos;
+          if (Array.isArray(inputTodos)) {
+            const newTodos = inputTodos.map((t: any) => ({
+              content: String(t.content || ''),
+              status: (['pending', 'in_progress', 'completed'].includes(t.status) ? t.status : 'pending') as TodoItem['status'],
+              activeForm: t.activeForm || undefined,
+            }));
+            // Check if this TodoWrite has any non-pending status
+            if (newTodos.some((t) => t.status !== 'pending')) {
+              hasExplicitUpdates = true;
+            }
+            todos = newTodos;
+            taskMap.clear();
           }
-          if (input.subject) item.content = String(input.subject);
-          if (input.activeForm) item.activeForm = String(input.activeForm);
+        }
+
+        // TaskCreate: adds a single task
+        if (block.name === 'TaskCreate') {
+          const input = block.input as any;
+          const tempId = `temp_${todos.length}`;
+          const item: TodoItem = {
+            content: String(input?.subject || input?.description || ''),
+            status: 'pending',
+            activeForm: input?.activeForm || undefined,
+          };
+          taskMap.set(tempId, item);
+          todos.push(item);
+        }
+
+        // TaskUpdate: updates an existing task by taskId
+        if (block.name === 'TaskUpdate') {
+          const input = block.input as any;
+          const taskId = input?.taskId;
+          if (taskId && taskMap.has(taskId)) {
+            const item = taskMap.get(taskId)!;
+            if (input.status) {
+              hasExplicitUpdates = true;
+              item.status = (['pending', 'in_progress', 'completed', 'deleted'].includes(input.status)
+                ? input.status === 'deleted' ? 'completed' : input.status
+                : 'pending') as TodoItem['status'];
+            }
+            if (input.subject) item.content = String(input.subject);
+            if (input.activeForm) item.activeForm = String(input.activeForm);
+          }
+        }
+
+        // Infer progress from tool calls: mark first pending task as in_progress
+        if (!hasExplicitUpdates && todos.length > 0 && block.name !== 'TodoWrite' && block.name !== 'TaskCreate' && block.name !== 'TaskUpdate') {
+          const firstPending = todos.find((t) => t.status === 'pending');
+          if (firstPending) {
+            firstPending.status = 'in_progress';
+          }
         }
       }
     }
-  }
 
-  // After result: mark all non-completed tasks as completed
-  if (sawResult && todos.length > 0) {
-    todos = todos.map((t) =>
-      t.status !== 'completed'
-        ? { ...t, status: 'completed' as const }
-        : t
-    );
+    // Infer progress from tool results: mark first in_progress task as completed
+    if (!hasExplicitUpdates && evt.kind === 'tool_result' && todos.length > 0) {
+      const firstInProgress = todos.find((t) => t.status === 'in_progress');
+      if (firstInProgress) {
+        firstInProgress.status = 'completed';
+      }
+    }
+
+    // Mark all remaining as completed when the final result arrives
+    if (evt.kind === 'result' && todos.length > 0) {
+      todos = todos.map((t) =>
+        t.status !== 'completed'
+          ? { ...t, status: 'completed' as const }
+          : t
+      );
+    }
   }
 
   return todos;

@@ -89,17 +89,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         const data: any = evt.data;
         const usage = data?.message?.usage || data?.usage;
         if (usage?.input_tokens) {
-          usedTokens = usage.input_tokens
-            + (usage.cache_creation_input_tokens || 0)
-            + (usage.cache_read_input_tokens || 0);
+          // input_tokens already includes cache tokens — don't double-count
+          usedTokens = usage.input_tokens;
         }
       }
       if (usedTokens === 0 && evt.kind === 'result') {
         const data: any = evt.data;
         if (data?.usage?.input_tokens) {
-          usedTokens = data.usage.input_tokens
-            + (data.usage.cache_creation_input_tokens || 0)
-            + (data.usage.cache_read_input_tokens || 0);
+          usedTokens = data.usage.input_tokens;
         }
       }
       if (usedTokens > 0) break;
