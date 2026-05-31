@@ -391,6 +391,127 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
 const EMPTY_EVENTS: AgentMessage[] = [];
 const EMPTY_TIMESTAMPS: number[] = [];
 
+// 消息导航组件 - 右侧短杠导航
+function MessageNav({
+  userIdxes,
+  messages,
+  scrollContainer,
+}: {
+  userIdxes: number[];
+  messages: AgentMessage[];
+  scrollContainer: React.RefObject<HTMLDivElement | null>;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const [hoveredBar, setHoveredBar] = useState<number | null>(null);
+  const [activeIdx, setActiveIdx] = useState(-1);
+
+  // 监听滚动，计算当前可视区域顶部附近的用户消息
+  useEffect(() => {
+    const container = scrollContainer.current;
+    if (!container || userIdxes.length === 0) return;
+
+    const updateActive = () => {
+      const containerRect = container.getBoundingClientRect();
+      const containerTop = containerRect.top + 40; // 留一点顶部边距
+
+      let closest = -1;
+      let minDist = Infinity;
+
+      for (const idx of userIdxes) {
+        const el = document.getElementById(`msg-${idx}`);
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        const dist = rect.top - containerTop;
+        // 找到距离顶部最近且在可视区域内的消息
+        if (dist >= -20 && dist < minDist) {
+          minDist = dist;
+          closest = idx;
+        }
+      }
+
+      // 如果没有找到，在顶部上方的消息中找最近的
+      if (closest === -1) {
+        for (const idx of userIdxes) {
+          const el = document.getElementById(`msg-${idx}`);
+          if (!el) continue;
+          const rect = el.getBoundingClientRect();
+          const dist = Math.abs(rect.top - containerTop);
+          if (dist < minDist) {
+            minDist = dist;
+            closest = idx;
+          }
+        }
+      }
+
+      setActiveIdx(closest);
+    };
+
+    updateActive();
+    container.addEventListener('scroll', updateActive, { passive: true });
+    return () => container.removeEventListener('scroll', updateActive);
+  }, [userIdxes, scrollContainer]);
+
+  const handleClick = (idx: number) => {
+    document.getElementById(`msg-${idx}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  // 截取消息预览文本
+  const getPreview = (msg: AgentMessage): string => {
+    if (msg.kind === 'user') {
+      const text = msg.data.content;
+      return text.length > 20 ? text.slice(0, 20) + '...' : text;
+    }
+    return '';
+  };
+
+  if (userIdxes.length <= 1) return null;
+
+  return (
+    <div
+      className="absolute right-2 top-0 bottom-0 w-8 flex items-center justify-center z-10"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => { setHovered(false); setHoveredBar(null); }}
+    >
+      <div
+        className={`
+          flex flex-col items-center gap-2.5 py-4
+          transition-opacity duration-200
+          ${hovered ? 'opacity-100' : 'opacity-0'}
+        `}
+      >
+        {userIdxes.map((idx) => (
+          <div key={idx} className="relative group">
+            <button
+              onMouseEnter={() => setHoveredBar(idx)}
+              onMouseLeave={() => setHoveredBar(null)}
+              onClick={() => handleClick(idx)}
+              className={`
+                w-4 h-1.5 rounded-full transition-all duration-150
+                ${idx === activeIdx
+                  ? 'bg-primary scale-125'
+                  : 'bg-muted-foreground/25 hover:bg-muted-foreground/50'
+                }
+              `}
+            />
+            {/* 消息预览气泡 */}
+            {hoveredBar === idx && (
+              <div className="
+                absolute right-full top-1/2 -translate-y-1/2 mr-2
+                max-w-[220px] px-3 py-1.5 rounded-lg
+                bg-popover border border-border shadow-lg
+                text-xs text-popover-foreground whitespace-nowrap overflow-hidden text-ellipsis
+                animate-fade-in pointer-events-none
+              ">
+                {getPreview(messages[idx])}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function AgentMessageList({ sessionId }: AgentMessageListProps) {
   const events = useAgentStore((s) => s.events[sessionId] ?? EMPTY_EVENTS);
   const eventTimestamps = useAgentStore((s) => s.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
@@ -450,6 +571,15 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
   const thinkingDurations = useMemo(() => buildThinkingDurationMap(events, eventTimestamps), [events, eventTimestamps]);
   const assistantTextMap = useMemo(() => buildAssistantTextMap(events, eventTimestamps), [events, eventTimestamps]);
 
+  // 提取用户消息的事件索引，用于右侧导航
+  const userIdxes = useMemo(
+    () => events.reduce<number[]>((acc, msg, i) => {
+      if (msg.kind === 'user') acc.push(i);
+      return acc;
+    }, []),
+    [events]
+  );
+
   // 滚动到底部：历史加载用 instant，实时消息用 smooth
   useEffect(() => {
     if (!autoScroll) return;
@@ -484,7 +614,9 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
             </div>
           )}
           {events.map((msg, i) => (
-            <AgentEventItem key={i} msg={msg} resultMap={resultMap} provider={provider} onFileClick={handleFileClick} toolDurations={toolDurations} thinkingDurations={thinkingDurations} eventIndex={i} timestamp={eventTimestamps[i]} assistantTextMap={assistantTextMap} />
+            <div key={i} id={msg.kind === 'user' ? `msg-${i}` : undefined}>
+              <AgentEventItem msg={msg} resultMap={resultMap} provider={provider} onFileClick={handleFileClick} toolDurations={toolDurations} thinkingDurations={thinkingDurations} eventIndex={i} timestamp={eventTimestamps[i]} assistantTextMap={assistantTextMap} />
+            </div>
           ))}
           {isRunning && (
             <div className="flex items-center gap-2.5 text-sm text-muted-foreground/60 py-2 animate-fade-in">
@@ -495,6 +627,9 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
           <div ref={bottomRef} />
         </div>
       </div>
+
+      {/* 消息导航 - 右侧短杠 */}
+      <MessageNav userIdxes={userIdxes} messages={events} scrollContainer={scrollRef} />
 
       {/* Scroll to bottom button */}
       <div className="absolute bottom-0 left-0 right-0 flex justify-center pb-2 pointer-events-none">
