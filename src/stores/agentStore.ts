@@ -92,13 +92,21 @@ function truncateTitle(text: string, maxLen = 30): string {
 
 /**
  * Extract the current todo list from a stream of agent events.
- * Handles both TodoWrite (full list replacement) and TaskCreate/TaskUpdate (incremental).
+ * Handles TodoWrite (full list replacement), TaskCreate/TaskUpdate (incremental),
+ * and infers completion from result events.
  */
 function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
   let todos: TodoItem[] = [];
   const taskMap = new Map<string, TodoItem>(); // for Task tools: taskId -> item
+  let sawResult = false;
 
   for (const evt of events) {
+    // Mark all remaining todos as completed when the result arrives
+    if (evt.kind === 'result') {
+      sawResult = true;
+      continue;
+    }
+
     if (evt.kind !== 'assistant') continue;
     const blocks = Array.isArray(evt.data?.message?.content) ? evt.data.message.content : [];
 
@@ -114,7 +122,7 @@ function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
             status: (['pending', 'in_progress', 'completed'].includes(t.status) ? t.status : 'pending') as TodoItem['status'],
             activeForm: t.activeForm || undefined,
           }));
-          taskMap.clear(); // Task map is no longer needed
+          taskMap.clear();
         }
       }
 
@@ -147,6 +155,15 @@ function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
         }
       }
     }
+  }
+
+  // After result: mark all non-completed tasks as completed
+  if (sawResult && todos.length > 0) {
+    todos = todos.map((t) =>
+      t.status !== 'completed'
+        ? { ...t, status: 'completed' as const }
+        : t
+    );
   }
 
   return todos;

@@ -142,9 +142,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         {contextUsage.usedTokens > 0 && (
           <ContextProgress usedTokens={contextUsage.usedTokens} totalTokens={contextUsage.totalTokens} />
         )}
-        {todos.length > 0 && (
-          <TodoList todos={todos} className="shrink-0 max-w-[280px]" />
-        )}
         {project && (
           <div className="flex items-center gap-1.5 text-[12px] text-foreground bg-muted/40 rounded-lg px-2.5 py-1.5 border border-border/30 min-w-0 max-w-[300px]"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
@@ -174,13 +171,22 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       {/* Message area */}
       <AgentMessageList sessionId={sessionId} />
 
-      {/* Input composer */}
-      <AgentInput
-        onSend={handleSend}
-        onStop={interrupt}
-        isLoading={running}
-        modelName={activeProvider?.default_model}
-      />
+      {/* Todo list + Input composer */}
+      <div className="relative">
+        {todos.length > 0 && (
+          <div className="px-5 pb-1">
+            <div className="max-w-3xl mx-auto">
+              <TodoList todos={todos} />
+            </div>
+          </div>
+        )}
+        <AgentInput
+          onSend={handleSend}
+          onStop={interrupt}
+          isLoading={running}
+          modelName={activeProvider?.default_model}
+        />
+      </div>
 
       {/* Rename dialog */}
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
