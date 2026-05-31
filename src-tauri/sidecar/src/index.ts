@@ -161,9 +161,16 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       canUseTool: async (toolName: string, input: Record<string, unknown>, opts: { toolUseID: string; signal: AbortSignal }) => {
         if (toolName === 'AskUserQuestion') {
           const toolUseId = opts.toolUseID;
-          const questions = (input as any).questions ?? [];
-          process.stderr.write(`[sidecar] AskUserQuestion intercepted, toolUseId=${toolUseId}\n`);
-          // Emit event to frontend with questions
+          // questions may come as a JSON string or array
+          let questions: any[] = [];
+          const rawQ = (input as any).questions;
+          if (typeof rawQ === 'string') {
+            try { questions = JSON.parse(rawQ); } catch { questions = []; }
+          } else if (Array.isArray(rawQ)) {
+            questions = rawQ;
+          }
+          process.stderr.write(`[sidecar] AskUserQuestion intercepted, toolUseId=${toolUseId}, questions=${questions.length}\n`);
+          // Emit event to frontend with questions (always as parsed array)
           emit({
             type: 'ask_user_question',
             tool_use_id: toolUseId,
@@ -181,7 +188,8 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
             answersRecord[q.question] = Array.isArray(answer) ? answer.join(', ') : String(answer ?? '');
           });
           process.stderr.write(`[sidecar] AskUserQuestion resolved: ${JSON.stringify(answersRecord)}\n`);
-          return { behavior: 'allow', updatedInput: { ...input, answers: answersRecord } };
+          // Ensure questions is always an array in updatedInput (not a JSON string)
+          return { behavior: 'allow', updatedInput: { ...input, questions, answers: answersRecord } };
         }
         // Auto-allow all other tools
         return { behavior: 'allow', updatedInput: input };

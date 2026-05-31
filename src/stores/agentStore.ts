@@ -144,11 +144,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               : s.error,
           }));
 
-          // Persist agent events to database
+          // Persist agent events to database (with timestamps)
           const currentEvents = get().events[sessionId];
+          const currentTimestamps = get().eventTimestamps[sessionId];
           if (currentEvents && currentEvents.length > 0) {
             const eventsToSave = currentEvents.filter((e) => e.kind !== 'done');
-            agentApi.saveEvents(sessionId, JSON.stringify(eventsToSave)).catch((err) => {
+            // Rebuild matching timestamps for filtered events
+            const timestampsToSave = currentEvents
+              .map((e, i) => (e.kind !== 'done' ? currentTimestamps?.[i] ?? 0 : null))
+              .filter((t): t is number => t !== null);
+            const payload = JSON.stringify({ events: eventsToSave, timestamps: timestampsToSave });
+            agentApi.saveEvents(sessionId, payload).catch((err) => {
               console.error('Failed to save agent events:', err);
             });
           }
@@ -169,6 +175,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     set((s) => {
       const isRunning = { ...s.isRunning };
       const events = { ...s.events };
+      const eventTimestamps = { ...s.eventTimestamps };
       for (const sid of Object.keys(isRunning)) {
         if (isRunning[sid]) {
           isRunning[sid] = false;
@@ -178,16 +185,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             data: { content: '[Request interrupted by user for tool use]' },
           };
           events[sid] = [...(events[sid] || []), interruptMsg];
+          eventTimestamps[sid] = [...(eventTimestamps[sid] || []), Date.now()];
           // Save events for interrupted sessions
           if (events[sid].length > 0) {
             const eventsToSave = events[sid].filter((e) => e.kind !== 'done');
-            agentApi.saveEvents(sid, JSON.stringify(eventsToSave)).catch((err) => {
+            const tsArr = eventTimestamps[sid] || [];
+            const timestampsToSave = events[sid]
+              .map((e, i) => (e.kind !== 'done' ? tsArr[i] ?? 0 : null))
+              .filter((t): t is number => t !== null);
+            const payload = JSON.stringify({ events: eventsToSave, timestamps: timestampsToSave });
+            agentApi.saveEvents(sid, payload).catch((err) => {
               console.error('Failed to save agent events on interrupt:', err);
             });
           }
         }
       }
-      return { isRunning, events };
+      return { isRunning, events, eventTimestamps };
     });
   },
 
@@ -213,9 +226,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     try {
       const eventsJson = await agentApi.getEvents(sessionId);
       if (eventsJson) {
-        const events: AgentMessage[] = JSON.parse(eventsJson);
-        // Generate placeholder timestamps to keep arrays aligned (historical events have no real timing)
-        const timestamps = new Array(events.length).fill(0);
+        const parsed = JSON.parse(eventsJson);
+        // Support both old format (plain array) and new format (object with timestamps)
+        let events: AgentMessage[];
+        let timestamps: number[];
+        if (Array.isArray(parsed)) {
+          // Old format: plain array of events
+          events = parsed;
+          timestamps = new Array(events.length).fill(0);
+        } else {
+          // New format: { events, timestamps }
+          events = parsed.events || [];
+          timestamps = parsed.timestamps || new Array(events.length).fill(0);
+        }
         set((state) => ({
           events: { ...state.events, [sessionId]: events },
           eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },

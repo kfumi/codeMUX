@@ -216,7 +216,7 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
             {content}
           </div>
           <div className="flex items-center gap-1.5 mt-1">
-            {timestamp != null && (
+            {timestamp != null && timestamp > 0 && (
               <span className="text-[10px] text-muted-foreground/40 tabular-nums"
                 style={{ fontFamily: "'JetBrains Mono', monospace" }}
               >
@@ -319,7 +319,7 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             {assistantData && <CopyButton content={assistantData.text} />}
-            {assistantData?.timestamp != null && (
+            {assistantData?.timestamp != null && assistantData.timestamp > 0 && (
               <>
                 <span className="tabular-nums">{formatTime(assistantData.timestamp)}</span>
                 <span className="text-muted-foreground/30">|</span>
