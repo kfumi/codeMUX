@@ -80,6 +80,13 @@ export interface AgentResultMessage {
   terminal_reason?: string;
 }
 
+/** Todo item from TodoWrite or Task tools */
+export interface TodoItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  activeForm?: string;
+}
+
 /** Sidecar lifecycle events */
 export interface SidecarReadyEvent {
   type: 'sidecar_ready';

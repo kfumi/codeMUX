@@ -151,7 +151,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       abortController,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'AskUserQuestion'],
+      allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'AskUserQuestion', 'TodoWrite'],
       env: subprocessEnv,
       // Capture stderr from the Claude Code subprocess for debugging
       stderr: (data: string) => {

@@ -8,6 +8,7 @@ import { cn } from '../../lib/utils';
 import { AgentMessageList } from './AgentMessageList';
 import { AgentInput } from './AgentInput';
 import { ContextProgress } from './ContextProgress';
+import { TodoList } from './TodoList';
 import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { Button } from '../ui/button';
@@ -19,6 +20,7 @@ interface AgentPanelProps {
 }
 
 const EMPTY_EVENTS: import('../../stores/agentStore').AgentMessage[] = [];
+const EMPTY_TODOS: import('../../types/agent').TodoItem[] = [];
 
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, updateSessionTitle } = useSessionStore();
@@ -26,6 +28,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { startQuery, isRunning, interrupt, loadSessionMessages } = useAgentStore();
   const { config } = useSettingsStore();
   const { isOpen: previewOpen, togglePanel: togglePreview, loadFileTree, setProjectPath } = usePreviewStore();
+
+  const todos = useAgentStore((s) => s.todos[sessionId] ?? EMPTY_TODOS);
 
   const session = sessions.find((s) => s.id === sessionId);
   const project = session?.project_id ? projects.find((p) => p.id === session.project_id) : null;
@@ -137,6 +141,9 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         <div className="flex-1" />
         {contextUsage.usedTokens > 0 && (
           <ContextProgress usedTokens={contextUsage.usedTokens} totalTokens={contextUsage.totalTokens} />
+        )}
+        {todos.length > 0 && (
+          <TodoList todos={todos} className="shrink-0 max-w-[280px]" />
         )}
         {project && (
           <div className="flex items-center gap-1.5 text-[12px] text-foreground bg-muted/40 rounded-lg px-2.5 py-1.5 border border-border/30 min-w-0 max-w-[300px]"

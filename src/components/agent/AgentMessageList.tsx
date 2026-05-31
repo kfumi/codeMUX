@@ -272,6 +272,10 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
               );
             }
             if (block?.type === 'tool_use' && block.name) {
+              // Skip task management tools — rendered in TodoList panel
+              if (block.name === 'TodoWrite' || block.name === 'TaskCreate' || block.name === 'TaskUpdate') {
+                return null;
+              }
               const entry = block.id ? resultMap[block.id] : undefined;
               const status = !entry ? 'pending' as const
                 : entry.isError ? 'error' as const

@@ -8,6 +8,7 @@ import type {
   AgentResultMessage,
   SidecarReadyEvent,
   SidecarErrorEvent,
+  TodoItem,
 } from '../types/agent';
 
 export type AgentMessage =
@@ -34,6 +35,8 @@ interface AgentState {
   error: Record<string, string | null>;
   /** Track which sessions have had their title updated */
   titledSessions: Record<string, boolean>;
+  /** Current todos per session (extracted from TodoWrite / Task tools) */
+  todos: Record<string, TodoItem[]>;
 
   /** Start a new agent query */
   startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => Promise<void>;
@@ -87,12 +90,75 @@ function truncateTitle(text: string, maxLen = 30): string {
   return firstLine.slice(0, maxLen) + '...';
 }
 
+/**
+ * Extract the current todo list from a stream of agent events.
+ * Handles both TodoWrite (full list replacement) and TaskCreate/TaskUpdate (incremental).
+ */
+function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
+  let todos: TodoItem[] = [];
+  const taskMap = new Map<string, TodoItem>(); // for Task tools: taskId -> item
+
+  for (const evt of events) {
+    if (evt.kind !== 'assistant') continue;
+    const blocks = Array.isArray(evt.data?.message?.content) ? evt.data.message.content : [];
+
+    for (const block of blocks) {
+      if (block?.type !== 'tool_use' || !block.name) continue;
+
+      // TodoWrite: replaces the entire todo list
+      if (block.name === 'TodoWrite') {
+        const inputTodos = (block.input as any)?.todos;
+        if (Array.isArray(inputTodos)) {
+          todos = inputTodos.map((t: any) => ({
+            content: String(t.content || ''),
+            status: (['pending', 'in_progress', 'completed'].includes(t.status) ? t.status : 'pending') as TodoItem['status'],
+            activeForm: t.activeForm || undefined,
+          }));
+          taskMap.clear(); // Task map is no longer needed
+        }
+      }
+
+      // TaskCreate: adds a single task
+      if (block.name === 'TaskCreate') {
+        const input = block.input as any;
+        const tempId = `temp_${todos.length}`;
+        const item: TodoItem = {
+          content: String(input?.subject || input?.description || ''),
+          status: 'pending',
+          activeForm: input?.activeForm || undefined,
+        };
+        taskMap.set(tempId, item);
+        todos.push(item);
+      }
+
+      // TaskUpdate: updates an existing task by taskId
+      if (block.name === 'TaskUpdate') {
+        const input = block.input as any;
+        const taskId = input?.taskId;
+        if (taskId && taskMap.has(taskId)) {
+          const item = taskMap.get(taskId)!;
+          if (input.status) {
+            item.status = (['pending', 'in_progress', 'completed', 'deleted'].includes(input.status)
+              ? input.status === 'deleted' ? 'completed' : input.status
+              : 'pending') as TodoItem['status'];
+          }
+          if (input.subject) item.content = String(input.subject);
+          if (input.activeForm) item.activeForm = String(input.activeForm);
+        }
+      }
+    }
+  }
+
+  return todos;
+}
+
 export const useAgentStore = create<AgentState>((set, get) => ({
   events: {},
   eventTimestamps: {},
   isRunning: {},
   error: {},
   titledSessions: {},
+  todos: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => {
     // Auto-update session title on first message
@@ -125,16 +191,24 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       await agentApi.startSession(sessionId, prompt, cwd, (raw: string) => {
         const event = parseAgentEvent(raw);
         const now = Date.now();
-        set((s) => ({
-          events: {
-            ...s.events,
-            [sessionId]: [...(s.events[sessionId] || []), event],
-          },
-          eventTimestamps: {
-            ...s.eventTimestamps,
-            [sessionId]: [...(s.eventTimestamps[sessionId] || []), now],
-          },
-        }));
+        set((s) => {
+          const prev = s.events[sessionId] || [];
+          const newEvents = [...prev, event];
+          return {
+            events: {
+              ...s.events,
+              [sessionId]: newEvents,
+            },
+            eventTimestamps: {
+              ...s.eventTimestamps,
+              [sessionId]: [...(s.eventTimestamps[sessionId] || []), now],
+            },
+            todos: {
+              ...s.todos,
+              [sessionId]: extractTodosFromEvents(newEvents),
+            },
+          };
+        });
 
         if (event.kind === 'done' || event.kind === 'error' || (event.kind === 'result' && event.data?.is_error)) {
           set((s) => ({
@@ -214,7 +288,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       delete newRunning[sessionId];
       const newError = { ...state.error };
       delete newError[sessionId];
-      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError };
+      const newTodos = { ...state.todos };
+      delete newTodos[sessionId];
+      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, todos: newTodos };
     });
   },
 
@@ -242,6 +318,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         set((state) => ({
           events: { ...state.events, [sessionId]: events },
           eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
+          todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
         }));
       }
     } catch (err) {
