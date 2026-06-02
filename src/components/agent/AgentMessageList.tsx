@@ -172,9 +172,34 @@ function buildThinkingDurationMap(
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
+  const now = new Date();
   const h = d.getHours().toString().padStart(2, '0');
   const m = d.getMinutes().toString().padStart(2, '0');
-  return `${h}:${m}`;
+  const time = `${h}:${m}`;
+
+  const isSameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  if (isSameDay(d, now)) {
+    return time;
+  }
+  if (isSameDay(d, yesterday)) {
+    return `昨天 ${time}`;
+  }
+  if (d.getFullYear() === now.getFullYear()) {
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+    return `${month}-${day} ${time}`;
+  }
+  const year = d.getFullYear();
+  const month = (d.getMonth() + 1).toString().padStart(2, '0');
+  const day = d.getDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day} ${time}`;
 }
 
 function CopyButton({ content }: { content: string }) {
@@ -452,7 +477,17 @@ function MessageNav({
   }, [userIdxes, scrollContainer]);
 
   const handleClick = (idx: number) => {
-    document.getElementById(`msg-${idx}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const el = document.getElementById(`msg-${idx}`);
+    if (!el) return;
+    const container = scrollContainer.current;
+    if (container) {
+      const containerTop = container.getBoundingClientRect().top;
+      const elTop = el.getBoundingClientRect().top;
+      const offset = 22; // 消息顶部留出间距
+      container.scrollTo({ top: container.scrollTop + (elTop - containerTop) - offset, behavior: 'smooth' });
+    } else {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   // 截取消息预览文本
@@ -571,10 +606,10 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
   const thinkingDurations = useMemo(() => buildThinkingDurationMap(events, eventTimestamps), [events, eventTimestamps]);
   const assistantTextMap = useMemo(() => buildAssistantTextMap(events, eventTimestamps), [events, eventTimestamps]);
 
-  // 提取用户消息的事件索引，用于右侧导航
+  // 提取用户消息的事件索引，用于右侧导航（排除中断消息）
   const userIdxes = useMemo(
     () => events.reduce<number[]>((acc, msg, i) => {
-      if (msg.kind === 'user') acc.push(i);
+      if (msg.kind === 'user' && msg.data.content !== '[Request interrupted by user for tool use]') acc.push(i);
       return acc;
     }, []),
     [events]
