@@ -55,6 +55,19 @@ function getToolSummaryData(toolName: string, input: Record<string, unknown>): T
       return [{ type: 'text', content: String(input.description || input.prompt || '').slice(0, 100) }];
     case 'Skill':
       return [{ type: 'text', content: String(input.skill || '') }];
+    case 'TaskList':
+      return []; // 仅展示工具名
+    case 'TaskGet':
+      return [{ type: 'text', content: String(input.taskId || '') }];
+    case 'TaskCreate':
+      return [{ type: 'text', content: String(input.subject || input.description || '') }];
+    case 'TaskUpdate': {
+      const parts = [];
+      if (input.taskId) parts.push(`#${input.taskId}`);
+      if (input.status) parts.push(`[${input.status}]`);
+      if (input.subject) parts.push(String(input.subject));
+      return [{ type: 'text', content: parts.join(' ') || '' }];
+    }
     case 'AskUserQuestion':
       return []; // 参数由 AskUserQuestionCard 展示
     default:

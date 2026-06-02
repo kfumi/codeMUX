@@ -30,25 +30,14 @@ export function TodoList({ todos, className }: TodoListProps) {
 
   const completed = todos.filter((t) => t.status === 'completed').length;
   const total = todos.length;
-  const progress = total > 0 ? (completed / total) * 100 : 0;
 
   return (
     <div className={`relative ${className ?? ''}`}>
       {/* Expandable list — positioned above, expands upward */}
       {isExpanded && (
         <div className="absolute bottom-full left-0 mb-1 w-[320px] max-h-[300px] overflow-auto border border-border/40 rounded-xl bg-background shadow-lg z-50 animate-fade-in-up">
-          {/* Progress bar */}
-          <div className="px-3 pt-3 pb-1">
-            <div className="h-1 rounded-full bg-muted/50 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-green-500/70 transition-all duration-500 ease-out"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </div>
-
           {/* Todo list */}
-          <div className="px-3 pb-2.5 space-y-0.5 stagger-children">
+          <div className="px-3 py-2.5 space-y-0.5 stagger-children">
             {todos.map((todo, i) => (
               <div key={i} className="flex items-center gap-2 py-1 text-xs leading-relaxed">
                 {getStatusIcon(todo.status)}

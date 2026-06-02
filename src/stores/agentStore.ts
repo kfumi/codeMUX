@@ -99,6 +99,10 @@ function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
   let todos: TodoItem[] = [];
   const taskMap = new Map<string, TodoItem>();
   let hasExplicitUpdates = false; // true if any TodoWrite with non-pending status was seen
+  // Track which task index each tool call is associated with (tool_use_id → task index)
+  const toolToTask = new Map<string, number>();
+  // Auto-incrementing task ID counter (1, 2, 3...) matching SDK convention
+  let nextTaskId = 1;
 
   for (const evt of events) {
     if (evt.kind === 'assistant') {
@@ -121,21 +125,28 @@ function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
               hasExplicitUpdates = true;
             }
             todos = newTodos;
+            // Rebuild taskMap with sequential IDs so subsequent TaskUpdate can find them
             taskMap.clear();
+            newTodos.forEach((t, i) => {
+              taskMap.set(String(i + 1), t);
+            });
           }
+          continue; // skip inference for TodoWrite
         }
 
         // TaskCreate: adds a single task
         if (block.name === 'TaskCreate') {
           const input = block.input as any;
-          const tempId = `temp_${todos.length}`;
+          // Use SDK-provided id if available, otherwise auto-increment (1, 2, 3...)
+          const taskId = String(input?.id || input?.task_id || nextTaskId++);
           const item: TodoItem = {
             content: String(input?.subject || input?.description || ''),
             status: 'pending',
             activeForm: input?.activeForm || undefined,
           };
-          taskMap.set(tempId, item);
+          taskMap.set(taskId, item);
           todos.push(item);
+          continue; // skip inference for TaskCreate
         }
 
         // TaskUpdate: updates an existing task by taskId
@@ -153,33 +164,55 @@ function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
             if (input.subject) item.content = String(input.subject);
             if (input.activeForm) item.activeForm = String(input.activeForm);
           }
+          continue; // skip inference for TaskUpdate
         }
 
         // Infer progress from tool calls: mark first pending task as in_progress
-        if (!hasExplicitUpdates && todos.length > 0 && block.name !== 'TodoWrite' && block.name !== 'TaskCreate' && block.name !== 'TaskUpdate') {
+        // and record which task this tool call is associated with.
+        // Skip task-management and read-only query tools — they don't represent work.
+        const skipInferenceTools = ['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'];
+        if (!hasExplicitUpdates && todos.length > 0 && !skipInferenceTools.includes(block.name)) {
           const firstPending = todos.find((t) => t.status === 'pending');
           if (firstPending) {
             firstPending.status = 'in_progress';
+            if (block.id) {
+              toolToTask.set(block.id, todos.indexOf(firstPending));
+            }
           }
         }
       }
     }
 
-    // Infer progress from tool results: mark first in_progress task as completed
+    // Infer progress from tool results: only complete the task this tool was associated with
     if (!hasExplicitUpdates && evt.kind === 'tool_result' && todos.length > 0) {
-      const firstInProgress = todos.find((t) => t.status === 'in_progress');
-      if (firstInProgress) {
-        firstInProgress.status = 'completed';
+      const data: any = evt.data;
+      const rawContent = data?.message?.content;
+      if (Array.isArray(rawContent)) {
+        for (const r of rawContent) {
+          if (r?.type === 'tool_result' && r.tool_use_id && toolToTask.has(r.tool_use_id)) {
+            const taskIdx = toolToTask.get(r.tool_use_id)!;
+            if (todos[taskIdx] && todos[taskIdx].status !== 'completed') {
+              todos[taskIdx].status = 'completed';
+            }
+            toolToTask.delete(r.tool_use_id);
+          }
+        }
       }
-    }
-
-    // Mark all remaining as completed when the final result arrives
-    if (evt.kind === 'result' && todos.length > 0) {
-      todos = todos.map((t) =>
-        t.status !== 'completed'
-          ? { ...t, status: 'completed' as const }
-          : t
-      );
+      // Fallback: also check tool_use_result and parent_tool_use_id
+      if (data?.tool_use_result?.tool_use_id && toolToTask.has(data.tool_use_result.tool_use_id)) {
+        const taskIdx = toolToTask.get(data.tool_use_result.tool_use_id)!;
+        if (todos[taskIdx] && todos[taskIdx].status !== 'completed') {
+          todos[taskIdx].status = 'completed';
+        }
+        toolToTask.delete(data.tool_use_result.tool_use_id);
+      }
+      if (data?.parent_tool_use_id && toolToTask.has(data.parent_tool_use_id)) {
+        const taskIdx = toolToTask.get(data.parent_tool_use_id)!;
+        if (todos[taskIdx] && todos[taskIdx].status !== 'completed') {
+          todos[taskIdx].status = 'completed';
+        }
+        toolToTask.delete(data.parent_tool_use_id);
+      }
     }
   }
 
