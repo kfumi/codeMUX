@@ -88,15 +88,23 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       if (usedTokens === 0 && evt.kind === 'assistant') {
         const data: any = evt.data;
         const usage = data?.message?.usage || data?.usage;
-        if (usage?.input_tokens) {
-          // input_tokens already includes cache tokens — don't double-count
-          usedTokens = usage.input_tokens;
+        if (usage) {
+          const input = usage.input_tokens || 0;
+          const cacheRead = usage.cache_read_input_tokens || 0;
+          const cacheCreation = usage.cache_creation_input_tokens || 0;
+          const total = input + cacheRead + cacheCreation;
+          if (total > 0) usedTokens = total;
         }
       }
       if (usedTokens === 0 && evt.kind === 'result') {
         const data: any = evt.data;
-        if (data?.usage?.input_tokens) {
-          usedTokens = data.usage.input_tokens;
+        if (data?.usage) {
+          const usage = data.usage;
+          const input = usage.input_tokens || 0;
+          const cacheRead = usage.cache_read_input_tokens || 0;
+          const cacheCreation = usage.cache_creation_input_tokens || 0;
+          const total = input + cacheRead + cacheCreation;
+          if (total > 0) usedTokens = total;
         }
       }
       if (usedTokens > 0) break;

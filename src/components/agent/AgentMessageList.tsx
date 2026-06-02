@@ -360,7 +360,20 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
               </>
             )}
             <span className="text-muted-foreground/30">|</span>
-            <span>{msg.data.usage?.input_tokens}+{msg.data.usage?.output_tokens} token</span>
+            <span>{(msg.data.usage?.input_tokens || 0) + (msg.data.usage?.cache_read_input_tokens || 0) + (msg.data.usage?.cache_creation_input_tokens || 0)}+{msg.data.usage?.output_tokens} token</span>
+            {(() => {
+              const totalInput = (msg.data.usage?.input_tokens || 0) + (msg.data.usage?.cache_read_input_tokens || 0) + (msg.data.usage?.cache_creation_input_tokens || 0);
+              const cacheRead = msg.data.usage?.cache_read_input_tokens || 0;
+              if (totalInput > 0 && cacheRead > 0) {
+                return (
+                  <>
+                    <span className="text-muted-foreground/30">|</span>
+                    <span>缓存命中 {((cacheRead / totalInput) * 100).toFixed(0)}%</span>
+                  </>
+                );
+              }
+              return null;
+            })()}
           </div>
         </div>
       );
