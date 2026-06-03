@@ -117,12 +117,19 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   }, [events, activeProvider]);
 
   const running = isRunning[sessionId] || false;
+  const anyRunning = Object.values(isRunning).some(Boolean);
 
   const handleSend = async (content: string) => {
     const apiKey = activeProvider?.api_key || undefined;
     const baseUrl = activeProvider?.anthropic_base_url || undefined;
     const model = activeProvider?.default_model || undefined;
-    await startQuery(sessionId, content, cwd, apiKey, baseUrl, model);
+    try {
+      await startQuery(sessionId, content, cwd, apiKey, baseUrl, model);
+    } catch (err) {
+      useAgentStore.setState((s) => ({
+        error: { ...s.error, [sessionId]: String(err) },
+      }));
+    }
   };
 
   return (
@@ -188,7 +195,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         <AgentInput
           onSend={handleSend}
           onStop={interrupt}
-          isLoading={running}
+          isLoading={anyRunning}
           modelName={activeProvider?.default_model}
         />
       </div>

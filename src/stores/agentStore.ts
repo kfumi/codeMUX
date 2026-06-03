@@ -228,6 +228,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   todos: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => {
+    // Check if another session is already running
+    const currentIsRunning = get().isRunning;
+    for (const [sid, running] of Object.entries(currentIsRunning)) {
+      if (running && sid !== sessionId) {
+        throw new Error('请等待当前任务完成后再发起新对话');
+      }
+    }
+
     // Auto-update session title on first message
     const state = get();
     if (!state.titledSessions[sessionId]) {
