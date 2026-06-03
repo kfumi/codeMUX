@@ -7,61 +7,61 @@
 @layer base {
   :root {
     --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --foreground: 210 15% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 210 15% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 38 92% 50%;
-    --primary-foreground: 30 20% 98%;
+    --popover-foreground: 210 15% 11%;
+    --primary: 210 100% 60%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary-foreground: 210 15% 15%;
     --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted-foreground: 210 12% 46%;
     --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent-foreground: 210 15% 15%;
     --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 38 92% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 20% 90%;
+    --input: 210 20% 90%;
+    --ring: 210 100% 60%;
     --radius: 0.625rem;
     /* Sidebar — light mode: follows theme */
     --sidebar-bg: 0 0% 97%;
-    --sidebar-fg: 222.2 47.4% 20%;
-    --sidebar-border: 214.3 31.8% 91.4%;
+    --sidebar-fg: 210 15% 25%;
+    --sidebar-border: 210 20% 90%;
     --sidebar-muted: 210 40% 96%;
     --sidebar-accent: 210 40% 93%;
-    --sidebar-glow: 38 92% 50%;
+    --sidebar-glow: 210 100% 60%;
   }
 
   .dark {
-    --background: 224 18% 6%;
-    --foreground: 30 10% 90%;
-    --card: 224 18% 7%;
-    --card-foreground: 30 10% 90%;
-    --popover: 224 18% 8%;
-    --popover-foreground: 30 10% 90%;
-    --primary: 38 92% 55%;
-    --primary-foreground: 30 20% 8%;
-    --secondary: 224 15% 14%;
-    --secondary-foreground: 30 10% 85%;
-    --muted: 224 15% 14%;
-    --muted-foreground: 30 8% 55%;
-    --accent: 224 15% 14%;
-    --accent-foreground: 30 10% 85%;
+    --background: 0 0% 9%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 11%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 210 100% 61%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 14%;
+    --secondary-foreground: 0 0% 85%;
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 55%;
+    --accent: 0 0% 14%;
+    --accent-foreground: 0 0% 85%;
     --destructive: 0 62.8% 45%;
-    --destructive-foreground: 30 10% 95%;
-    --border: 224 12% 16%;
-    --input: 224 12% 16%;
-    --ring: 38 92% 55%;
+    --destructive-foreground: 0 0% 95%;
+    --border: 0 0% 16%;
+    --input: 0 0% 16%;
+    --ring: 210 100% 61%;
     /* Sidebar — dark mode */
-    --sidebar-bg: 224 18% 5.5%;
-    --sidebar-fg: 30 10% 80%;
-    --sidebar-border: 224 12% 11%;
-    --sidebar-muted: 224 12% 9%;
-    --sidebar-accent: 224 15% 13%;
-    --sidebar-glow: 38 92% 55%;
+    --sidebar-bg: 0 0% 7%;
+    --sidebar-fg: 0 0% 80%;
+    --sidebar-border: 0 0% 11%;
+    --sidebar-muted: 0 0% 9%;
+    --sidebar-accent: 0 0% 13%;
+    --sidebar-glow: 210 100% 61%;
   }
 }
 
@@ -113,7 +113,7 @@ input[type="password"]::-ms-reveal {
   position: absolute;
   inset: -1px;
   border-radius: inherit;
-  background: linear-gradient(135deg, hsl(38 92% 55% / 0.15), hsl(38 92% 55% / 0.05), transparent);
+  background: linear-gradient(135deg, hsl(210 100% 61% / 0.15), hsl(210 100% 61% / 0.05), transparent);
   opacity: 0;
   transition: opacity 0.4s ease;
   pointer-events: none;
@@ -184,7 +184,7 @@ input[type="password"]::-ms-reveal {
 
 /* ——— Selection color ——— */
 ::selection {
-  background: hsl(38 92% 55% / 0.25);
+  background: hsl(210 100% 61% / 0.25);
   color: inherit;
 }
 

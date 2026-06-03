@@ -70,6 +70,9 @@ function getToolSummaryData(toolName: string, input: Record<string, unknown>): T
     }
     case 'AskUserQuestion':
       return []; // 参数由 AskUserQuestionCard 展示
+    case 'EnterPlanMode':
+    case 'ExitPlanMode':
+      return []; // 无有意义的参数，仅展示工具名
     default:
       return [{ type: 'text', content: String(input.description || input.prompt || JSON.stringify(input).slice(0, 80)) }];
   }

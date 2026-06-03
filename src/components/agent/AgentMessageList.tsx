@@ -237,7 +237,7 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
       }
       return (
         <div className="flex flex-col items-end animate-fade-in-up">
-          <div className="max-w-[80%] bg-primary/10 text-foreground rounded-2xl rounded-tr-md px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap">
+          <div className="max-w-[80%] bg-primary/10 text-foreground rounded-2xl rounded-tr-md px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-all">
             {content}
           </div>
           <div className="flex items-center gap-1.5 mt-1">
