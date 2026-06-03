@@ -215,6 +215,13 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
 
     let msgCount = 0;
     const MESSAGE_TIMEOUT_MS = 120_000; // 2 minutes per message
+    let compacting = false;
+    let compactTimer: ReturnType<typeof setTimeout> | null = null;
+    const COMPACT_TIMEOUT_MS = 5000; // 5s after compacting status
+
+    function clearCompactTimer() {
+      if (compactTimer) { clearTimeout(compactTimer); compactTimer = null; }
+    }
 
     // Iteration with timeout detection
     const iterator = activeQuery[Symbol.asyncIterator]();
@@ -225,11 +232,27 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
           const timer = setTimeout(() => {
             reject(new Error(`Query timed out: no message received for ${MESSAGE_TIMEOUT_MS / 1000}s (after msg #${msgCount})`));
           }, MESSAGE_TIMEOUT_MS);
-          // Allow the timer to not keep the process alive
           if (timer.unref) timer.unref();
         }),
+        // When compacting, if no new message arrives within COMPACT_TIMEOUT_MS, treat as done
+        ...(compacting ? [new Promise<{ done: true; value: undefined }>((resolve) => {
+          compactTimer = setTimeout(() => {
+            process.stderr.write(`[sidecar] Compact timeout: no message after ${COMPACT_TIMEOUT_MS}ms, treating as complete\n`);
+            // Emit synthetic compact_boundary since SDK didn't send it
+            emit({
+              type: 'system',
+              subtype: 'compact_boundary',
+              compact_metadata: { trigger: 'manual', pre_tokens: 0 },
+              session_id: claudeSessionId || '',
+              uuid: `compact-timeout-${Date.now()}`,
+            });
+            resolve({ done: true, value: undefined });
+          }, COMPACT_TIMEOUT_MS);
+          if (compactTimer.unref) compactTimer.unref();
+        })] : []),
       ]);
 
+      clearCompactTimer();
       if (result.done) break;
 
       msgCount++;
@@ -239,6 +262,18 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       // Log full content for system messages and assistant messages (debug)
       if (msg.type === 'system') {
         process.stderr.write(`[sidecar]   → ${JSON.stringify(message)}\n`);
+      }
+      // Log ALL non-assistant messages for debugging compact/status flows
+      if (msg.type !== 'assistant' && msg.type !== 'user' && msg.type !== 'system') {
+        process.stderr.write(`[sidecar]   → [${msg.type}] ${JSON.stringify(message)}\n`);
+      }
+      // Track compacting status
+      if (msg.type === 'system' && msg.subtype === 'status' && (msg as any).status === 'compacting') {
+        compacting = true;
+        process.stderr.write(`[sidecar] Compact in progress, will timeout after ${COMPACT_TIMEOUT_MS}ms of silence\n`);
+      }
+      if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
+        compacting = false;
       }
       if (msg.type === 'assistant') {
         const m: any = message;

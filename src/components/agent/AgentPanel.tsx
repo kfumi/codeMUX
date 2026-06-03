@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAgentStore } from '../../stores/agentStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -13,7 +13,10 @@ import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import { FolderOpen, MoreHorizontal, Pencil, PanelRightOpen, PanelRightClose } from 'lucide-react';
+import type { SlashCommand, CommandContext } from '../../lib/slashCommands';
+import { agentApi } from '../../lib/tauri';
 
 interface AgentPanelProps {
   sessionId: string;
@@ -23,10 +26,10 @@ const EMPTY_EVENTS: import('../../stores/agentStore').AgentMessage[] = [];
 const EMPTY_TODOS: import('../../types/agent').TodoItem[] = [];
 
 export function AgentPanel({ sessionId }: AgentPanelProps) {
-  const { sessions, updateSessionTitle } = useSessionStore();
+  const { sessions, updateSessionTitle, createSession } = useSessionStore();
   const { projects } = useProjectStore();
-  const { startQuery, isRunning, interrupt, loadSessionMessages } = useAgentStore();
-  const { config } = useSettingsStore();
+  const { startQuery, isRunning, interrupt, loadSessionMessages, clearEvents } = useAgentStore();
+  const { config, getActiveProvider } = useSettingsStore();
   const { isOpen: previewOpen, togglePanel: togglePreview, loadFileTree, setProjectPath } = usePreviewStore();
 
   const todos = useAgentStore((s) => s.todos[sessionId] ?? EMPTY_TODOS);
@@ -37,6 +40,9 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [infoTitle, setInfoTitle] = useState('');
+  const [infoContent, setInfoContent] = useState('');
 
   const handleRenameOpen = () => {
     setRenameValue(session?.title || '');
@@ -131,6 +137,65 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
   };
 
+  // 弹窗展示信息
+  const showInfoDialog = useCallback((title: string, content: string) => {
+    setInfoTitle(title);
+    setInfoContent(content);
+    setInfoOpen(true);
+  }, []);
+
+  // 从 events 中提取费用信息
+  const getCostInfo = useCallback((): string => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      const evt = events[i];
+      if (evt.kind === 'result' && evt.data) {
+        const data = evt.data as any;
+        const usage = data.usage;
+        const duration = data.duration_ms;
+        const turns = data.num_turns;
+        const lines: string[] = [];
+        if (turns) lines.push(`**对话轮次**　${turns}`);
+        if (duration) lines.push(`**耗时**　${(duration / 1000).toFixed(1)}s`);
+        if (usage) {
+          const input = usage.input_tokens || 0;
+          const output = usage.output_tokens || 0;
+          const cacheRead = usage.cache_read_input_tokens || 0;
+          const cacheCreation = usage.cache_creation_input_tokens || 0;
+          lines.push(`**输入 tokens**　${input.toLocaleString()}`);
+          lines.push(`**输出 tokens**　${output.toLocaleString()}`);
+          if (cacheRead) lines.push(`**缓存命中**　${cacheRead.toLocaleString()}`);
+          if (cacheCreation) lines.push(`**缓存创建**　${cacheCreation.toLocaleString()}`);
+          const total = input + output + cacheRead + cacheCreation;
+          lines.push(`**总计**　${total.toLocaleString()} tokens`);
+        }
+        if (data.total_cost) lines.push(`**费用**　$${data.total_cost.toFixed(4)}`);
+        return lines.join('\n\n');
+      }
+    }
+    return '暂无费用信息（当前会话还没有完成过对话）';
+  }, [events]);
+
+  // 斜杠命令处理
+  const handleCommand = useCallback(async (command: SlashCommand, args: string) => {
+    if (command.handler === 'local' && command.action) {
+      const ctx: CommandContext = {
+        sessionId,
+        cwd,
+        showInfoDialog,
+        createSession: async () => { await createSession('新对话', 'agent'); },
+        clearEvents,
+        resetSession: () => { agentApi.resetSession(sessionId); },
+        getActiveProvider: () => getActiveProvider(),
+        getTheme: () => config?.theme || 'System',
+        getCostInfo,
+      };
+      await command.action(ctx, args);
+    } else if (command.handler === 'prompt' && command.prompt) {
+      const prompt = command.prompt.replace(/\{args\}/g, args || '');
+      await handleSend(prompt);
+    }
+  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, getCostInfo, handleSend]);
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -193,6 +258,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         )}
         <AgentInput
           onSend={handleSend}
+          onCommand={handleCommand}
           onStop={() => interrupt(sessionId)}
           isLoading={running}
           modelName={activeProvider?.default_model}
@@ -215,6 +281,21 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setRenameOpen(false)}>取消</Button>
             <Button onClick={handleRenameSave}>保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Info dialog (斜杠命令结果) */}
+      <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>{infoTitle}</DialogTitle>
+          </DialogHeader>
+          <div className="text-sm leading-relaxed max-h-[60vh] overflow-y-auto [&_p]:my-1.5 [&_strong]:text-foreground [&_strong]:font-semibold [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded-md [&_code]:bg-muted [&_code]:text-[13px] [&_code]:font-mono [&_blockquote]:border-l-2 [&_blockquote]:border-primary/40 [&_blockquote]:pl-3 [&_blockquote]:py-1 [&_blockquote]:my-2 [&_blockquote]:text-muted-foreground [&_blockquote]:text-xs [&_ul]:my-1 [&_ul]:pl-4 [&_ul]:list-disc [&_li]:my-0.5 [&_hr]:my-3 [&_hr]:border-border">
+            <MarkdownRenderer content={infoContent} />
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setInfoOpen(false)}>关闭</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

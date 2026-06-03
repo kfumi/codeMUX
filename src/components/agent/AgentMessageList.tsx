@@ -401,6 +401,13 @@ function renderEvent(sessionId: string, msg: AgentMessage, resultMap: Record<str
       );
     }
 
+    case 'compact':
+      return (
+        <div className="text-center py-3">
+          <span className="text-xs text-muted-foreground/50 tracking-wider">- 上下文已压缩 -</span>
+        </div>
+      );
+
     case 'done':
       return null;
 

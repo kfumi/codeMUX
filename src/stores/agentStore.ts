@@ -21,6 +21,7 @@ export type AgentMessage =
   | { kind: 'error'; data: SidecarErrorEvent }
   | { kind: 'api_retry'; data: { attempt: number; max_retries: number; retry_delay_ms: number; error_status: number; error: string } }
   | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string }>; multiSelect?: boolean }> } }
+  | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
   | { kind: 'done' }
   | { kind: 'raw'; data: Record<string, unknown> };
 
@@ -68,6 +69,9 @@ function parseAgentEvent(raw: string): AgentMessage {
         }
         if (data.subtype === 'api_retry') {
           return { kind: 'api_retry', data };
+        }
+        if (data.subtype === 'compact_boundary') {
+          return { kind: 'compact', data };
         }
         return { kind: 'raw', data };
       case 'result':
@@ -228,9 +232,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   todos: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => {
-    // Auto-update session title on first message
+    // Auto-update session title on first message (skip slash commands)
     const state = get();
-    if (!state.titledSessions[sessionId]) {
+    if (!state.titledSessions[sessionId] && !prompt.startsWith('/')) {
       const title = truncateTitle(prompt);
       if (title) {
         useSessionStore.getState().updateSessionTitle(sessionId, title);
@@ -286,19 +290,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           }));
 
           // Persist agent events to database (with timestamps)
-          const currentEvents = get().events[sessionId];
-          const currentTimestamps = get().eventTimestamps[sessionId];
-          if (currentEvents && currentEvents.length > 0) {
-            const eventsToSave = currentEvents.filter((e) => e.kind !== 'done');
-            // Rebuild matching timestamps for filtered events
-            const timestampsToSave = currentEvents
-              .map((e, i) => (e.kind !== 'done' ? currentTimestamps?.[i] ?? 0 : null))
-              .filter((t): t is number => t !== null);
-            const payload = JSON.stringify({ events: eventsToSave, timestamps: timestampsToSave });
-            agentApi.saveEvents(sessionId, payload).catch((err) => {
-              console.error('Failed to save agent events:', err);
-            });
-          }
+          // Delay slightly to catch late-arriving events (e.g. compact_boundary after sidecar_query_done)
+          setTimeout(() => {
+            const currentEvents = get().events[sessionId];
+            const currentTimestamps = get().eventTimestamps[sessionId];
+            if (currentEvents && currentEvents.length > 0) {
+              const eventsToSave = currentEvents.filter((e) => e.kind !== 'done');
+              const timestampsToSave = currentEvents
+                .map((e, i) => (e.kind !== 'done' ? currentTimestamps?.[i] ?? 0 : null))
+                .filter((t): t is number => t !== null);
+              const payload = JSON.stringify({ events: eventsToSave, timestamps: timestampsToSave });
+              agentApi.saveEvents(sessionId, payload).catch((err) => {
+                console.error('Failed to save agent events:', err);
+              });
+            }
+          }, 1000);
         }
       }, apiKey, baseUrl, model);
     } catch (err) {

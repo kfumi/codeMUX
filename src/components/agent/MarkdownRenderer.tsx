@@ -41,7 +41,7 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
 
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[[remarkGfm, { breaks: true }]]}
       rehypePlugins={[rehypeHighlight, rehypeRaw]}
       components={{
         pre({ children, ...props }) {
