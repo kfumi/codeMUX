@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
@@ -5,24 +6,21 @@ use tokio::sync::Mutex;
 use super::{SidecarHandle, spawn_sidecar};
 
 /// Managed state for the agent sidecar.
+/// Each session gets its own sidecar process, enabling concurrent execution.
 pub struct AgentState {
-    pub sidecar: Arc<Mutex<Option<SidecarHandle>>>,
-    /// The currently active frontend channel for receiving events.
-    /// Set per-query; cleared when the query ends.
-    pub active_channel: Arc<Mutex<Option<tauri::ipc::Channel<String>>>>,
+    pub sidecars: Arc<Mutex<HashMap<String, SidecarHandle>>>,
 }
 
 impl Default for AgentState {
     fn default() -> Self {
         Self {
-            sidecar: Arc::new(Mutex::new(None)),
-            active_channel: Arc::new(Mutex::new(None)),
+            sidecars: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
 
-/// Start a new agent session. Spawns the sidecar if needed, sends the prompt,
-/// and streams SDKMessage JSON events back through the channel.
+/// Start a new agent session. Spawns a dedicated sidecar for this session,
+/// sends the prompt, and streams SDKMessage JSON events back through the channel.
 #[tauri::command]
 pub async fn start_agent_session(
     app: AppHandle,
@@ -35,41 +33,36 @@ pub async fn start_agent_session(
     base_url: Option<String>,
     model: Option<String>,
 ) -> Result<(), String> {
-    // Ensure sidecar is running
-    let need_spawn = {
-        let guard = agent_state.sidecar.lock().await;
-        guard.is_none()
-    };
-
-    if need_spawn {
-        let (handle, mut rx) = spawn_sidecar(&app).await?;
-        {
-            let mut guard = agent_state.sidecar.lock().await;
-            *guard = Some(handle);
-        }
-
-        // Spawn persistent forwarding task: reads from sidecar stdout,
-        // forwards events to whichever frontend channel is currently active.
-        let active_ch = agent_state.active_channel.clone();
-        tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                let guard = active_ch.lock().await;
-                if let Some(ch) = guard.as_ref() {
-                    let _ = ch.send(event.clone());
-                }
-            }
-        });
-    }
-
-    // Set the active channel for this query
+    // If this session already has a sidecar, shut it down first
     {
-        let mut guard = agent_state.active_channel.lock().await;
-        *guard = Some(channel);
+        let mut sidecars = agent_state.sidecars.lock().await;
+        if let Some(mut old_handle) = sidecars.remove(&session_id) {
+            old_handle.shutdown().await;
+        }
     }
+
+    // Spawn a new sidecar for this session
+    let (handle, mut rx) = spawn_sidecar(&app).await?;
+
+    // Store the new sidecar
+    {
+        let mut sidecars = agent_state.sidecars.lock().await;
+        sidecars.insert(session_id.clone(), handle);
+    }
+
+    // Spawn a dedicated event forwarding task for this session's sidecar
+    let session_id_clone = session_id.clone();
+    tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            let _ = channel.send(event);
+        }
+        // Sidecar stdout closed — the process likely exited.
+        // Remove from sidecar map if still present.
+        // (We can't access agent_state here, so cleanup happens on next start/shutdown)
+        eprintln!("[agent] Sidecar for session {} exited", session_id_clone);
+    });
 
     // Build and send start command
-    // Resolve "." to home directory — "." would otherwise resolve to the Tauri
-    // process CWD (src-tauri), which is not useful for the user.
     let resolved_cwd = if cwd == "." {
         std::env::var("USERPROFILE")
             .or_else(|_| std::env::var("HOME"))
@@ -94,56 +87,49 @@ pub async fn start_agent_session(
         cmd["model"] = serde_json::Value::String(m);
     }
 
-    let guard = agent_state.sidecar.lock().await;
-    if let Some(handle) = guard.as_ref() {
-        handle
-            .send_command(&cmd.to_string())
-            .await?;
+    let sidecars = agent_state.sidecars.lock().await;
+    if let Some(handle) = sidecars.get(&session_id) {
+        handle.send_command(&cmd.to_string()).await?;
     }
 
     Ok(())
 }
 
-/// Interrupt the currently running agent query and clear the active channel.
+/// Interrupt the currently running agent query for a specific session.
 #[tauri::command]
 pub async fn interrupt_agent_session(
     agent_state: State<'_, AgentState>,
+    session_id: String,
 ) -> Result<(), String> {
-    {
-        let guard = agent_state.sidecar.lock().await;
-        if let Some(handle) = guard.as_ref() {
-            handle
-                .send_command(r#"{"type":"interrupt"}"#)
-                .await?;
-        }
-    }
-    {
-        let mut guard = agent_state.active_channel.lock().await;
-        *guard = None;
+    let mut sidecars = agent_state.sidecars.lock().await;
+    if let Some(handle) = sidecars.remove(&session_id) {
+        // Send interrupt first, then shut down
+        let _ = handle.send_command(r#"{"type":"interrupt"}"#).await;
+        // Note: we intentionally don't call shutdown here — the sidecar will
+        // exit after the interrupt. The cleanup happens via the forwarder task.
     }
     Ok(())
 }
 
-/// Shutdown the sidecar process.
+/// Shutdown a specific session's sidecar process.
 #[tauri::command]
 pub async fn shutdown_agent(
     agent_state: State<'_, AgentState>,
+    session_id: String,
 ) -> Result<(), String> {
-    {
-        let mut guard = agent_state.active_channel.lock().await;
-        *guard = None;
-    }
-    let mut guard = agent_state.sidecar.lock().await;
-    if let Some(mut handle) = guard.take() {
+    let mut sidecars = agent_state.sidecars.lock().await;
+    if let Some(mut handle) = sidecars.remove(&session_id) {
         handle.shutdown().await;
     }
     Ok(())
 }
 
-/// Send a tool response (e.g. AskUserQuestion answer) back to the sidecar.
+/// Send a tool response (e.g. AskUserQuestion answer) back to the sidecar
+/// for a specific session.
 #[tauri::command]
 pub async fn send_tool_response(
     agent_state: State<'_, AgentState>,
+    session_id: String,
     tool_use_id: String,
     response: serde_json::Value,
 ) -> Result<(), String> {
@@ -153,8 +139,8 @@ pub async fn send_tool_response(
         "response": response,
     });
 
-    let guard = agent_state.sidecar.lock().await;
-    if let Some(handle) = guard.as_ref() {
+    let sidecars = agent_state.sidecars.lock().await;
+    if let Some(handle) = sidecars.get(&session_id) {
         handle.send_command(&cmd.to_string()).await?;
     }
 
@@ -173,8 +159,8 @@ pub async fn reset_agent_session(
         "sessionId": session_id,
     });
 
-    let guard = agent_state.sidecar.lock().await;
-    if let Some(handle) = guard.as_ref() {
+    let sidecars = agent_state.sidecars.lock().await;
+    if let Some(handle) = sidecars.get(&session_id) {
         handle.send_command(&cmd.to_string()).await?;
     }
 

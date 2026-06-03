@@ -10,6 +10,7 @@ interface Question {
 }
 
 interface AskUserQuestionCardProps {
+  sessionId: string;
   toolUseId: string;
   questions: Question[];
   submitted?: boolean;
@@ -36,7 +37,7 @@ function parseResultAnswers(resultContent: string, questions: Question[]): strin
   return answers.some(a => a) ? answers : [];
 }
 
-export function AskUserQuestionCard({ toolUseId, questions, submitted: propSubmitted, resultContent }: AskUserQuestionCardProps) {
+export function AskUserQuestionCard({ sessionId, toolUseId, questions, submitted: propSubmitted, resultContent }: AskUserQuestionCardProps) {
   // Parse answers from result content if available
   const parsedAnswers = propSubmitted && resultContent ? parseResultAnswers(resultContent, questions) : [];
 
@@ -87,7 +88,7 @@ export function AskUserQuestionCard({ toolUseId, questions, submitted: propSubmi
       return q.multiSelect ? selected : selected[0];
     });
     try {
-      await agentApi.sendToolResponse(toolUseId, answers);
+      await agentApi.sendToolResponse(sessionId, toolUseId, answers);
       setSubmittedAnswers(answers.map((a) => Array.isArray(a) ? a.join(', ') : a));
       setSubmitted(true);
     } catch (err) {

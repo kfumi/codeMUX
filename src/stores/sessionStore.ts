@@ -49,6 +49,7 @@ export const useSessionStore = create<SessionState>((set) => ({
     try {
       // Clean up Claude Code session files (best-effort, don't block on failure)
       try {
+        await agentApi.shutdown(sessionId);
         await agentApi.deleteClaudeSessionFiles(sessionId);
         await agentApi.resetSession(sessionId);
       } catch {

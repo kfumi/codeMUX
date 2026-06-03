@@ -47,11 +47,11 @@ export const agentApi = {
     };
     return invoke('start_agent_session', { sessionId, prompt, cwd, channel, apiKey, baseUrl, model });
   },
-  interrupt: (): Promise<void> => invoke('interrupt_agent_session'),
-  shutdown: (): Promise<void> => invoke('shutdown_agent'),
+  interrupt: (sessionId: string): Promise<void> => invoke('interrupt_agent_session', { sessionId }),
+  shutdown: (sessionId: string): Promise<void> => invoke('shutdown_agent', { sessionId }),
   resetSession: (sessionId: string): Promise<void> => invoke('reset_agent_session', { sessionId }),
-  sendToolResponse: (toolUseId: string, response: unknown): Promise<void> =>
-    invoke('send_tool_response', { toolUseId, response }),
+  sendToolResponse: (sessionId: string, toolUseId: string, response: unknown): Promise<void> =>
+    invoke('send_tool_response', { sessionId, toolUseId, response }),
   /** Delete all Claude Code session files (history, file-history, etc.) for an app session. */
   deleteClaudeSessionFiles: (appSessionId: string): Promise<string[]> =>
     invoke('delete_claude_session_files', { appSessionId }),

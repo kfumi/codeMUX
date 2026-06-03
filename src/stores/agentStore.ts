@@ -40,8 +40,8 @@ interface AgentState {
 
   /** Start a new agent query */
   startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => Promise<void>;
-  /** Interrupt the current query */
-  interrupt: () => Promise<void>;
+  /** Interrupt the current query for a specific session */
+  interrupt: (sessionId: string) => Promise<void>;
   /** Clear events for a session */
   clearEvents: (sessionId: string) => void;
   /** Load historical messages for a session */
@@ -228,14 +228,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   todos: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => {
-    // Check if another session is already running
-    const currentIsRunning = get().isRunning;
-    for (const [sid, running] of Object.entries(currentIsRunning)) {
-      if (running && sid !== sessionId) {
-        throw new Error('请等待当前任务完成后再发起新对话');
-      }
-    }
-
     // Auto-update session title on first message
     const state = get();
     if (!state.titledSessions[sessionId]) {
@@ -317,37 +309,32 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  interrupt: async () => {
-    await agentApi.interrupt();
+  interrupt: async (sessionId: string) => {
+    await agentApi.interrupt(sessionId);
     // Sidecar doesn't emit an event on abort, so reset running state directly,
     // add an interrupt marker, and persist events
     set((s) => {
-      const isRunning = { ...s.isRunning };
+      const isRunning = { ...s.isRunning, [sessionId]: false };
       const events = { ...s.events };
       const eventTimestamps = { ...s.eventTimestamps };
-      for (const sid of Object.keys(isRunning)) {
-        if (isRunning[sid]) {
-          isRunning[sid] = false;
-          // Add interrupt marker message
-          const interruptMsg: AgentMessage = {
-            kind: 'user',
-            data: { content: '[Request interrupted by user for tool use]' },
-          };
-          events[sid] = [...(events[sid] || []), interruptMsg];
-          eventTimestamps[sid] = [...(eventTimestamps[sid] || []), Date.now()];
-          // Save events for interrupted sessions
-          if (events[sid].length > 0) {
-            const eventsToSave = events[sid].filter((e) => e.kind !== 'done');
-            const tsArr = eventTimestamps[sid] || [];
-            const timestampsToSave = events[sid]
-              .map((e, i) => (e.kind !== 'done' ? tsArr[i] ?? 0 : null))
-              .filter((t): t is number => t !== null);
-            const payload = JSON.stringify({ events: eventsToSave, timestamps: timestampsToSave });
-            agentApi.saveEvents(sid, payload).catch((err) => {
-              console.error('Failed to save agent events on interrupt:', err);
-            });
-          }
-        }
+      // Add interrupt marker message
+      const interruptMsg: AgentMessage = {
+        kind: 'user',
+        data: { content: '[Request interrupted by user for tool use]' },
+      };
+      events[sessionId] = [...(events[sessionId] || []), interruptMsg];
+      eventTimestamps[sessionId] = [...(eventTimestamps[sessionId] || []), Date.now()];
+      // Save events for interrupted session
+      if (events[sessionId].length > 0) {
+        const eventsToSave = events[sessionId].filter((e) => e.kind !== 'done');
+        const tsArr = eventTimestamps[sessionId] || [];
+        const timestampsToSave = events[sessionId]
+          .map((e, i) => (e.kind !== 'done' ? tsArr[i] ?? 0 : null))
+          .filter((t): t is number => t !== null);
+        const payload = JSON.stringify({ events: eventsToSave, timestamps: timestampsToSave });
+        agentApi.saveEvents(sessionId, payload).catch((err) => {
+          console.error('Failed to save agent events on interrupt:', err);
+        });
       }
       return { isRunning, events, eventTimestamps };
     });

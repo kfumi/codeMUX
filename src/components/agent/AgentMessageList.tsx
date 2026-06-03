@@ -14,9 +14,9 @@ interface AgentMessageListProps {
   sessionId: string;
 }
 
-function AgentEventItem({ msg, resultMap, provider, onFileClick, toolDurations, thinkingDurations, eventIndex, timestamp, assistantTextMap }: { msg: AgentMessage; resultMap: Record<string, ToolResultEntry>; provider: Provider | null; onFileClick: (path: string, originalContent?: string) => void; toolDurations: Record<string, number>; thinkingDurations: Record<number, number>; eventIndex: number; timestamp?: number; assistantTextMap?: Record<number, { text: string; timestamp?: number }> }) {
+function AgentEventItem({ sessionId, msg, resultMap, provider, onFileClick, toolDurations, thinkingDurations, eventIndex, timestamp, assistantTextMap }: { sessionId: string; msg: AgentMessage; resultMap: Record<string, ToolResultEntry>; provider: Provider | null; onFileClick: (path: string, originalContent?: string) => void; toolDurations: Record<string, number>; thinkingDurations: Record<number, number>; eventIndex: number; timestamp?: number; assistantTextMap?: Record<number, { text: string; timestamp?: number }> }) {
   try {
-    return renderEvent(msg, resultMap, provider, onFileClick, toolDurations, thinkingDurations, eventIndex, timestamp, assistantTextMap);
+    return renderEvent(sessionId, msg, resultMap, provider, onFileClick, toolDurations, thinkingDurations, eventIndex, timestamp, assistantTextMap);
   } catch (err) {
     return (
       <div className="text-xs text-red-500 bg-red-500/[0.06] rounded-xl p-3 my-1 border border-red-500/15">
@@ -224,7 +224,7 @@ function CopyButton({ content }: { content: string }) {
   );
 }
 
-function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntry>, provider: Provider | null, onFileClick: (path: string, originalContent?: string) => void, toolDurations: Record<string, number>, thinkingDurations: Record<number, number>, eventIndex: number, timestamp?: number, assistantTextMap?: Record<number, { text: string; timestamp?: number }>) {
+function renderEvent(sessionId: string, msg: AgentMessage, resultMap: Record<string, ToolResultEntry>, provider: Provider | null, onFileClick: (path: string, originalContent?: string) => void, toolDurations: Record<string, number>, thinkingDurations: Record<number, number>, eventIndex: number, timestamp?: number, assistantTextMap?: Record<number, { text: string; timestamp?: number }>) {
   switch (msg.kind) {
     case 'user': {
       const content = msg.data.content;
@@ -327,6 +327,7 @@ function renderEvent(msg: AgentMessage, resultMap: Record<string, ToolResultEntr
       const resultEntry = resultMap[msg.data.tool_use_id];
       return (
         <AskUserQuestionCard
+          sessionId={sessionId}
           toolUseId={msg.data.tool_use_id}
           questions={msg.data.questions}
           submitted={!!resultEntry}
@@ -663,7 +664,7 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
           )}
           {events.map((msg, i) => (
             <div key={i} id={msg.kind === 'user' ? `msg-${i}` : undefined}>
-              <AgentEventItem msg={msg} resultMap={resultMap} provider={provider} onFileClick={handleFileClick} toolDurations={toolDurations} thinkingDurations={thinkingDurations} eventIndex={i} timestamp={eventTimestamps[i]} assistantTextMap={assistantTextMap} />
+              <AgentEventItem sessionId={sessionId} msg={msg} resultMap={resultMap} provider={provider} onFileClick={handleFileClick} toolDurations={toolDurations} thinkingDurations={thinkingDurations} eventIndex={i} timestamp={eventTimestamps[i]} assistantTextMap={assistantTextMap} />
             </div>
           ))}
           {isRunning && (

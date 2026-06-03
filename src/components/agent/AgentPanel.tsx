@@ -117,7 +117,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   }, [events, activeProvider]);
 
   const running = isRunning[sessionId] || false;
-  const anyRunning = Object.values(isRunning).some(Boolean);
 
   const handleSend = async (content: string) => {
     const apiKey = activeProvider?.api_key || undefined;
@@ -194,8 +193,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         )}
         <AgentInput
           onSend={handleSend}
-          onStop={interrupt}
-          isLoading={anyRunning}
+          onStop={() => interrupt(sessionId)}
+          isLoading={running}
           modelName={activeProvider?.default_model}
         />
       </div>
