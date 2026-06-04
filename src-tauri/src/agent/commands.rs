@@ -24,6 +24,7 @@ impl Default for AgentState {
 #[tauri::command]
 pub async fn start_agent_session(
     app: AppHandle,
+    state: State<'_, crate::AppState>,
     agent_state: State<'_, AgentState>,
     session_id: String,
     prompt: String,
@@ -62,6 +63,12 @@ pub async fn start_agent_session(
         eprintln!("[agent] Sidecar for session {} exited", session_id_clone);
     });
 
+    // 读取启用的 MCP servers
+    let mcp_servers = {
+        let db = state.db.lock().unwrap();
+        crate::mcp::db::get_enabled_mcp_servers(&db).unwrap_or_default()
+    };
+
     // Build and send start command
     let resolved_cwd = if cwd == "." {
         std::env::var("USERPROFILE")
@@ -85,6 +92,13 @@ pub async fn start_agent_session(
     }
     if let Some(m) = model {
         cmd["model"] = serde_json::Value::String(m);
+    }
+
+    if !mcp_servers.is_empty() {
+        let mcp_config = crate::mcp::adapters::claude::to_sdk_config(&mcp_servers);
+        if !mcp_config.as_object().map_or(true, |o| o.is_empty()) {
+            cmd["mcpServers"] = mcp_config;
+        }
     }
 
     let sidecars = agent_state.sidecars.lock().await;

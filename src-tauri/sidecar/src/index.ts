@@ -153,6 +153,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       allowDangerouslySkipPermissions: true,
       allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'AskUserQuestion', 'TodoWrite'],
       env: subprocessEnv,
+      mcpServers: cmd.mcpServers || undefined,
       // Capture stderr from the Claude Code subprocess for debugging
       stderr: (data: string) => {
         process.stderr.write(`[claude-stderr] ${data}`);
