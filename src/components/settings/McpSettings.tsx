@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { Switch } from '../ui/switch';
 import { Plus, Pencil, Trash2, Loader2, Server, Wand2, Wand } from 'lucide-react';
+import { toast } from '../ui/use-toast';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { EditorView } from '@codemirror/view';
@@ -38,7 +39,6 @@ export function McpSettingsPanel() {
   const { servers, isLoading, fetchServers, upsertServer, deleteServer, toggleServer } = useMcpStore();
   const [editing, setEditing] = useState<McpServer | null>(null);
   const [isNew, setIsNew] = useState(false);
-  const [saveError, setSaveError] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [jsonText, setJsonText] = useState('');
@@ -70,7 +70,6 @@ export function McpSettingsPanel() {
     };
     setEditing(server);
     setIsNew(true);
-    setSaveError('');
     setDeleteConfirm(false);
     setJsonText(JSON.stringify(server.transport, null, 2));
     setJsonError('');
@@ -79,7 +78,6 @@ export function McpSettingsPanel() {
   const openEdit = (server: McpServer) => {
     setEditing({ ...server });
     setIsNew(false);
-    setSaveError('');
     setDeleteConfirm(false);
     setJsonText(JSON.stringify(server.transport, null, 2));
     setJsonError('');
@@ -87,7 +85,6 @@ export function McpSettingsPanel() {
 
   const closeModal = () => {
     setEditing(null);
-    setSaveError('');
     setDeleteConfirm(false);
   };
 
@@ -120,19 +117,18 @@ export function McpSettingsPanel() {
 
   const handleSave = async () => {
     if (!editing) return;
-    setSaveError('');
 
     if (!editing.name.trim()) {
-      setSaveError('请填写 MCP 标题');
+      toast({ variant: 'destructive', title: '请填写 MCP 标题' });
       return;
     }
     const t = editing.transport;
     if (t.type === 'stdio' && !t.command.trim()) {
-      setSaveError('请填写 command');
+      toast({ variant: 'destructive', title: '请填写 command' });
       return;
     }
     if ((t.type === 'http' || t.type === 'sse') && !t.url.trim()) {
-      setSaveError('请填写 url');
+      toast({ variant: 'destructive', title: '请填写 url' });
       return;
     }
 
@@ -140,15 +136,16 @@ export function McpSettingsPanel() {
       (s) => s.name === editing.name.trim() && s.id !== editing.id
     );
     if (nameExists) {
-      setSaveError('标题已存在');
+      toast({ variant: 'destructive', title: '标题已存在' });
       return;
     }
 
     try {
       await upsertServer({ ...editing, name: editing.name.trim() });
+      toast({ variant: 'success', title: '保存成功' });
       closeModal();
     } catch {
-      setSaveError('保存失败');
+      toast({ variant: 'destructive', title: '保存失败' });
     }
   };
 
@@ -189,6 +186,20 @@ export function McpSettingsPanel() {
 
   const applyWizard = () => {
     if (!editing) return;
+
+    if (!wizName.trim()) {
+      toast({ variant: 'destructive', title: '请填写 MCP 标题' });
+      return;
+    }
+    if (wizType === 'stdio' && !wizCommand.trim()) {
+      toast({ variant: 'destructive', title: '请填写命令' });
+      return;
+    }
+    if (wizType !== 'stdio' && !wizUrl.trim()) {
+      toast({ variant: 'destructive', title: '请填写 URL' });
+      return;
+    }
+
     let transport: McpTransport;
     if (wizType === 'stdio') {
       const env: Record<string, string> = {};
@@ -234,7 +245,7 @@ export function McpSettingsPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between pr-12">
         <h3 className="font-medium">MCP Servers</h3>
         <Button size="sm" onClick={openNew}>
           <Plus className="h-4 w-4 mr-1" />
@@ -295,7 +306,7 @@ export function McpSettingsPanel() {
           {editing && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium">MCP 标题（唯一） *</label>
+                <label className="text-sm font-medium">MCP 标题（唯一） <span className="text-destructive">*</span></label>
                 <Input
                   value={editing.name}
                   onChange={(e) => setEditing({ ...editing, name: e.target.value })}
@@ -351,10 +362,6 @@ export function McpSettingsPanel() {
                   </p>
                 )}
               </div>
-
-              {saveError && (
-                <p className="text-sm text-destructive">{saveError}</p>
-              )}
             </div>
           )}
 
@@ -401,7 +408,7 @@ export function McpSettingsPanel() {
           {editing && (
             <div className="space-y-4">
               <div className="space-y-3">
-                <label className="text-sm font-medium">类型 *</label>
+                <label className="text-sm font-medium">类型 <span className="text-destructive">*</span></label>
                 <RadioGroup
                   value={wizType}
                   onValueChange={(v) => setWizType(v as McpTransportType)}
@@ -419,18 +426,18 @@ export function McpSettingsPanel() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">MCP 标题（唯一） *</label>
+                <label className="text-sm font-medium">MCP 标题（唯一） <span className="text-destructive">*</span></label>
                 <Input
                   value={wizName}
                   onChange={(e) => setWizName(e.target.value)}
-                  placeholder="例如 context7"
+                  placeholder="my-mcp-server"
                 />
               </div>
 
               {wizType === 'stdio' ? (
                 <>
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">命令 *</label>
+                    <label className="text-sm font-medium">命令 <span className="text-destructive">*</span></label>
                     <Input
                       value={wizCommand}
                       onChange={(e) => setWizCommand(e.target.value)}
@@ -461,7 +468,7 @@ export function McpSettingsPanel() {
               ) : (
                 <>
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">URL *</label>
+                    <label className="text-sm font-medium">URL <span className="text-destructive">*</span></label>
                     <Input
                       value={wizUrl}
                       onChange={(e) => setWizUrl(e.target.value)}
