@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { Switch } from '../ui/switch';
 import { Plus, Pencil, Trash2, Loader2, Server, Wand2, Wand } from 'lucide-react';
-import { toast } from '../ui/use-toast';
+import { toast } from 'sonner';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { EditorView } from '@codemirror/view';
@@ -119,16 +119,16 @@ export function McpSettingsPanel() {
     if (!editing) return;
 
     if (!editing.name.trim()) {
-      toast({ variant: 'destructive', title: '请填写 MCP 标题' });
+      toast.error('请填写 MCP 标题');
       return;
     }
     const t = editing.transport;
     if (t.type === 'stdio' && !t.command.trim()) {
-      toast({ variant: 'destructive', title: '请填写 command' });
+      toast.error('请填写 command');
       return;
     }
     if ((t.type === 'http' || t.type === 'sse') && !t.url.trim()) {
-      toast({ variant: 'destructive', title: '请填写 url' });
+      toast.error('请填写 url');
       return;
     }
 
@@ -136,16 +136,16 @@ export function McpSettingsPanel() {
       (s) => s.name === editing.name.trim() && s.id !== editing.id
     );
     if (nameExists) {
-      toast({ variant: 'destructive', title: '标题已存在' });
+      toast.error('标题已存在');
       return;
     }
 
     try {
       await upsertServer({ ...editing, name: editing.name.trim() });
-      toast({ variant: 'success', title: '保存成功' });
+      toast.success('保存成功');
       closeModal();
     } catch {
-      toast({ variant: 'destructive', title: '保存失败' });
+      toast.error('保存失败');
     }
   };
 
@@ -188,15 +188,15 @@ export function McpSettingsPanel() {
     if (!editing) return;
 
     if (!wizName.trim()) {
-      toast({ variant: 'destructive', title: '请填写 MCP 标题' });
+      toast.error('请填写 MCP 标题');
       return;
     }
     if (wizType === 'stdio' && !wizCommand.trim()) {
-      toast({ variant: 'destructive', title: '请填写命令' });
+      toast.error('请填写命令');
       return;
     }
     if (wizType !== 'stdio' && !wizUrl.trim()) {
-      toast({ variant: 'destructive', title: '请填写 URL' });
+      toast.error('请填写 URL');
       return;
     }
 

@@ -10,7 +10,7 @@ import { useSettingsStore } from './stores/settingsStore';
 import { useTheme } from './hooks/useTheme';
 import { Sparkles } from 'lucide-react';
 import { TooltipProvider } from './components/ui/tooltip';
-import { Toaster } from './components/ui/toaster';
+import { Toaster } from 'sonner';
 
 function App() {
   const { createSession, activeSessionId } = useSessionStore();
