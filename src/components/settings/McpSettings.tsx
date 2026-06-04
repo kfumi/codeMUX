@@ -394,11 +394,11 @@ export function McpSettingsPanel() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <span className="text-destructive">⚠</span>
-              删除服务器
+              删除 MCP
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            确定要删除服务器 "{servers.find((s) => s.id === deletingId)?.name}" 吗？此操作无法撤销。
+            确定要删除 MCP "{servers.find((s) => s.id === deletingId)?.name}" 吗？此操作无法撤销。
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteConfirm(false)}>取消</Button>
@@ -421,7 +421,7 @@ export function McpSettingsPanel() {
 
       {/* MCP 配置向导弹窗 */}
       <Dialog open={wizardOpen} onOpenChange={(open) => !open && setWizardOpen(false)}>
-        <DialogContent className="sm:max-w-[520px]">
+        <DialogContent className="sm:max-w-[520px] max-h-[80vh] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           <DialogHeader>
             <DialogTitle>MCP 配置向导</DialogTitle>
           </DialogHeader>

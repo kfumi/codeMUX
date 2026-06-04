@@ -50,6 +50,7 @@ impl McpAdapter for ClaudeAdapter {
                 id: uuid::Uuid::new_v4().to_string(),
                 name,
                 description: String::new(),
+                subtitle: String::new(),
                 transport,
                 enabled: true,
                 created_at: now.clone(),

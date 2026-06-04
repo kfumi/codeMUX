@@ -6,6 +6,8 @@ pub struct McpServer {
     pub id: String,
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    pub subtitle: String,
     pub transport: McpTransport,
     pub enabled: bool,
     pub created_at: String,

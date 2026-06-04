@@ -75,6 +75,14 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         let _ = conn.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL", []);
     }
 
+    // Migration: add subtitle column to mcp_servers if missing
+    let has_subtitle: bool = conn
+        .prepare("SELECT subtitle FROM mcp_servers LIMIT 0")
+        .is_ok();
+    if !has_subtitle {
+        let _ = conn.execute("ALTER TABLE mcp_servers ADD COLUMN subtitle TEXT DEFAULT ''", []);
+    }
+
     // 创建索引（在所有迁移之后，确保列存在）
     conn.execute_batch(
         "
