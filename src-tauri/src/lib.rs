@@ -2,6 +2,7 @@ mod db;
 mod config;
 mod commands;
 mod agent;
+mod mcp;
 
 use tauri::Manager;
 use std::sync::Mutex;
