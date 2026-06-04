@@ -2,6 +2,7 @@ import { invoke, Channel } from '@tauri-apps/api/core';
 import type { Session } from '../types/session';
 import type { AppConfig, Provider, Theme } from '../types/provider';
 import type { Project } from '../types/project';
+import type { McpServer } from '../types/mcp';
 
 export interface ModelInfo {
   id: string;
@@ -77,4 +78,11 @@ export const fileApi = {
   readFile: (path: string, basePath?: string): Promise<string> => invoke('read_file', { path, basePath }),
   listDirectory: (path: string, depth?: number, basePath?: string): Promise<FileTreeNode[]> =>
     invoke('list_directory', { path, depth, basePath }),
+};
+
+export const mcpApi = {
+  getAll: (): Promise<McpServer[]> => invoke('get_mcp_servers'),
+  upsert: (server: McpServer): Promise<void> => invoke('upsert_mcp_server', { server }),
+  delete: (id: string): Promise<void> => invoke('delete_mcp_server', { id }),
+  toggle: (id: string): Promise<boolean> => invoke('toggle_mcp_server', { id }),
 };
