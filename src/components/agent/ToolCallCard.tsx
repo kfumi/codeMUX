@@ -11,10 +11,11 @@ interface ToolCallCardProps {
 }
 
 interface ToolSummaryPart {
-  type: 'text' | 'file-link';
-  content: string;
+  type: 'text' | 'file-link' | 'mcp';
+  content: string | { method: string; query: string };
   filePath?: string;
   originalContent?: string;
+  displayAs?: string;
 }
 
 /** Normalize double backslashes to single */
@@ -23,6 +24,16 @@ function normalizePath(p: string): string {
 }
 
 function getToolSummaryData(toolName: string, input: Record<string, unknown>): ToolSummaryPart[] {
+  // MCP tools: mcp__<server>__<method>
+  if (toolName.startsWith('mcp__')) {
+    const parts = toolName.split('__');
+    const server = parts[1] || toolName;
+    const method = parts[2] || '';
+    const query = String(input.query || input.libraryName || input.libraryId || '');
+    const summary = query ? { method: ` [${method}]`, query: ` ${query}` } : { method: ` [${method}]`, query: '' };
+    return [{ type: 'mcp', content: summary, displayAs: server }];
+  }
+
   switch (toolName) {
     case 'Read': {
       const path = normalizePath(String(input.file_path || ''));
@@ -86,6 +97,7 @@ function formatDuration(ms: number): string {
 export function ToolCallCard({ toolName, input, result, status, durationMs, onFileClick }: ToolCallCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const summaryParts = getToolSummaryData(toolName, input);
+  const displayName = summaryParts[0]?.displayAs || toolName;
 
   const dotColor = {
     pending: 'bg-muted-foreground/40',
@@ -105,24 +117,34 @@ export function ToolCallCard({ toolName, input, result, status, durationMs, onFi
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         {status && <span className={`h-2 w-2 rounded-full shrink-0 ${dotColor[status]}`} />}
-        <span className="font-medium">{toolName}</span>
+        <span className="font-medium">{displayName}</span>
         <span className="text-muted-foreground truncate flex-1 text-left text-xs">
-          {summaryParts.map((part, i) =>
-            part.type === 'file-link' ? (
-              <button
-                key={i}
-                className="text-primary hover:underline cursor-pointer"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onFileClick?.(part.filePath!, part.originalContent);
-                }}
-              >
-                {part.content}
-              </button>
-            ) : (
-              <span key={i}>{part.content}</span>
-            )
-          )}
+          {summaryParts.map((part, i) => {
+            if (part.type === 'mcp') {
+              const { method, query } = part.content as { method: string; query: string };
+              return (
+                <span key={i}>
+                  <span className="font-medium text-foreground">{method}</span>
+                  <span>{query}</span>
+                </span>
+              );
+            }
+            if (part.type === 'file-link') {
+              return (
+                <button
+                  key={i}
+                  className="text-primary hover:underline cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onFileClick?.(part.filePath!, part.originalContent);
+                  }}
+                >
+                  {String(part.content)}
+                </button>
+              );
+            }
+            return <span key={i}>{String(part.content)}</span>;
+          })}
         </span>
         {durationMs != null && (
           <span className="text-xs text-muted-foreground/50 shrink-0 tabular-nums"
