@@ -6,7 +6,7 @@ import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Switch } from '../ui/switch';
-import { Plus, Pencil, Trash2, Loader2, Server } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Server, Wand2 } from 'lucide-react';
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
@@ -29,6 +29,7 @@ export function McpSettingsPanel() {
   const [isNew, setIsNew] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   useEffect(() => {
     fetchServers();
@@ -256,6 +257,16 @@ export function McpSettingsPanel() {
                     <SelectItem value="sse">SSE（Server-Sent Events）</SelectItem>
                   </SelectContent>
                 </Select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setWizardOpen(true)}
+                  className="mt-2"
+                >
+                  <Wand2 className="h-4 w-4 mr-1" />
+                  配置向导
+                </Button>
               </div>
 
               {/* stdio 字段 */}
@@ -351,6 +362,78 @@ export function McpSettingsPanel() {
                 {isNew ? '添加' : '保存'}
               </Button>
             </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 配置向导弹窗 */}
+      <Dialog open={wizardOpen} onOpenChange={(open) => !open && setWizardOpen(false)}>
+        <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto p-0">
+          <div className="p-6 space-y-5">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">
+                配置向导
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                快速配置 MCP 服务器，自动生成 JSON 配置
+              </p>
+            </div>
+
+            {editing && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    当前传输类型
+                  </label>
+                  <div className="text-sm text-muted-foreground">
+                    {editing.transport.type}
+                  </div>
+                </div>
+
+                {editing.transport.type === 'stdio' && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">
+                      命令
+                    </label>
+                    <Input
+                      value={editing.transport.command}
+                      onChange={(e) => updateTransportField('command', e.target.value)}
+                      placeholder="例如 cmd"
+                    />
+                  </div>
+                )}
+
+                {editing.transport.type !== 'stdio' && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">
+                      URL
+                    </label>
+                    <Input
+                      value={editing.transport.url}
+                      onChange={(e) => updateTransportField('url', e.target.value)}
+                      placeholder="https://example.com/mcp"
+                    />
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    配置预览
+                  </label>
+                  <div className="rounded-lg border bg-muted p-4 overflow-x-auto">
+                    <pre className="text-xs font-mono text-foreground whitespace-pre">
+                      {JSON.stringify(editing.transport, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="px-6 pb-6 gap-2">
+            <Button variant="outline" onClick={() => setWizardOpen(false)}>
+              关闭
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
