@@ -11,11 +11,9 @@ fn row_to_mcp_server(row: &rusqlite::Row) -> rusqlite::Result<McpServer> {
     let enabled: i32 = row.get(5)?;
 
     let transport: McpTransport = serde_json::from_str(&transport_config)
-        .unwrap_or(McpTransport::Stdio {
-            command: String::new(),
-            args: vec![],
-            env: std::collections::HashMap::new(),
-        });
+        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+            4, rusqlite::types::Type::Text, Box::new(e),
+        ))?;
 
     Ok(McpServer {
         id: row.get(0)?,
@@ -93,6 +91,19 @@ pub fn toggle_mcp_server(conn: &Connection, id: &str) -> Result<bool> {
         },
     )?;
     Ok(enabled)
+}
+
+pub fn get_mcp_server(conn: &Connection, id: &str) -> Result<Option<McpServer>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, description, transport_type, transport_config, enabled, created_at, updated_at
+         FROM mcp_servers WHERE id = ?1"
+    )?;
+
+    let mut rows = stmt.query_map(params![id], |row| row_to_mcp_server(row))?;
+    match rows.next() {
+        Some(row) => Ok(Some(row?)),
+        None => Ok(None),
+    }
 }
 
 pub fn create_mcp_server(conn: &Connection, name: &str, description: &str, transport: &McpTransport) -> Result<McpServer> {

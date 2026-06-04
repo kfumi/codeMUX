@@ -82,11 +82,19 @@ impl McpAdapter for ClaudeAdapter {
             }
         }
 
-        // 写回文件
+        // 原子写入：先写临时文件，再重命名（防止写入中途崩溃导致文件损坏）
         let content = serde_json::to_string_pretty(&config)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
-        std::fs::write(&path, content)
-            .map_err(|e| format!("Failed to write ~/.claude.json: {}", e))?;
+        let tmp_path = path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, &content)
+            .map_err(|e| format!("Failed to write temp file: {}", e))?;
+        // Windows: rename 不能覆盖已存在的文件，需要先删除
+        if path.exists() {
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("Failed to remove old ~/.claude.json: {}", e))?;
+        }
+        std::fs::rename(&tmp_path, &path)
+            .map_err(|e| format!("Failed to rename temp file to ~/.claude.json: {}", e))?;
 
         Ok(())
     }
