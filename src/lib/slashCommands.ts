@@ -17,6 +17,10 @@ export interface CommandContext {
   clearEvents: (sessionId: string) => void;
   /** 重置 sidecar 的 Claude 会话 (清除 session ID 映射) */
   resetSession: () => void;
+  /** 删除 Claude Code 会话文件 (磁盘) */
+  deleteClaudeSessionFiles: () => Promise<string[]>;
+  /** 清除数据库中保存的事件 */
+  clearSavedEvents: (sessionId: string) => Promise<void>;
   /** 获取当前活跃 provider */
   getActiveProvider: () => { default_model: string; name: string } | null;
   /** 获取当前主题 */
@@ -57,9 +61,13 @@ const commands: SlashCommand[] = [
     alias: ['清空'],
     category: 'session',
     handler: 'local',
-    action: (ctx) => {
+    action: async (ctx) => {
       ctx.clearEvents(ctx.sessionId);
       ctx.resetSession();
+      // Delete Claude Code session files from disk
+      try { await ctx.deleteClaudeSessionFiles(); } catch { /* ignore */ }
+      // Clear saved events from database
+      try { await ctx.clearSavedEvents(ctx.sessionId); } catch { /* ignore */ }
     },
   },
   {

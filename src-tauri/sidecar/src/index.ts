@@ -217,7 +217,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
     const MESSAGE_TIMEOUT_MS = 120_000; // 2 minutes per message
     let compacting = false;
     let compactTimer: ReturnType<typeof setTimeout> | null = null;
-    const COMPACT_TIMEOUT_MS = 5000; // 5s after compacting status
+    const COMPACT_TIMEOUT_MS = 60_000; // 60s — compact can take a while on large contexts
 
     function clearCompactTimer() {
       if (compactTimer) { clearTimeout(compactTimer); compactTimer = null; }
@@ -270,10 +270,17 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       // Track compacting status
       if (msg.type === 'system' && msg.subtype === 'status' && (msg as any).status === 'compacting') {
         compacting = true;
-        process.stderr.write(`[sidecar] Compact in progress, will timeout after ${COMPACT_TIMEOUT_MS}ms of silence\n`);
+        // Capture pre_tokens if available in the compacting status
+        const compactTokens = (msg as any).tokens || (msg as any).pre_tokens || (msg as any).total_tokens;
+        if (compactTokens) {
+          process.stderr.write(`[sidecar] Compact in progress, pre_tokens=${compactTokens}\n`);
+        } else {
+          process.stderr.write(`[sidecar] Compact in progress, will timeout after ${COMPACT_TIMEOUT_MS}ms of silence\n`);
+        }
       }
       if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
         compacting = false;
+        process.stderr.write(`[sidecar] Received compact_boundary: ${JSON.stringify(message)}\n`);
       }
       if (msg.type === 'assistant') {
         const m: any = message;

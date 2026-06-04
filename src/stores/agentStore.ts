@@ -45,6 +45,8 @@ interface AgentState {
   interrupt: (sessionId: string) => Promise<void>;
   /** Clear events for a session */
   clearEvents: (sessionId: string) => void;
+  /** Clear saved events from database */
+  clearSavedEvents: (sessionId: string) => Promise<void>;
   /** Load historical messages for a session */
   loadSessionMessages: (sessionId: string) => Promise<void>;
 }
@@ -360,6 +362,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       delete newTodos[sessionId];
       return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, todos: newTodos };
     });
+  },
+
+  clearSavedEvents: async (sessionId: string) => {
+    // Overwrite with empty array to clear persisted events
+    await agentApi.saveEvents(sessionId, JSON.stringify({ events: [], timestamps: [] }));
   },
 
   loadSessionMessages: async (sessionId: string) => {

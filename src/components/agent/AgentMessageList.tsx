@@ -14,9 +14,22 @@ interface AgentMessageListProps {
   sessionId: string;
 }
 
-function AgentEventItem({ sessionId, msg, resultMap, provider, onFileClick, toolDurations, thinkingDurations, eventIndex, timestamp, assistantTextMap }: { sessionId: string; msg: AgentMessage; resultMap: Record<string, ToolResultEntry>; provider: Provider | null; onFileClick: (path: string, originalContent?: string) => void; toolDurations: Record<string, number>; thinkingDurations: Record<number, number>; eventIndex: number; timestamp?: number; assistantTextMap?: Record<number, { text: string; timestamp?: number }> }) {
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes > 0) return `${minutes}m${seconds.toString().padStart(2, '0')}s`;
+  return `${seconds}s`;
+}
+
+function formatTokenCount(count: number): string {
+  if (count >= 1000) return `${(count / 1000).toFixed(1)}k`;
+  return String(count);
+}
+
+function AgentEventItem({ sessionId, msg, prevMsg, resultMap, provider, onFileClick, toolDurations, thinkingDurations, eventIndex, timestamp, assistantTextMap, events }: { sessionId: string; msg: AgentMessage; prevMsg?: AgentMessage; resultMap: Record<string, ToolResultEntry>; provider: Provider | null; onFileClick: (path: string, originalContent?: string) => void; toolDurations: Record<string, number>; thinkingDurations: Record<number, number>; eventIndex: number; timestamp?: number; assistantTextMap?: Record<number, { text: string; timestamp?: number }>; events: AgentMessage[] }) {
   try {
-    return renderEvent(sessionId, msg, resultMap, provider, onFileClick, toolDurations, thinkingDurations, eventIndex, timestamp, assistantTextMap);
+    return renderEvent(sessionId, msg, prevMsg, resultMap, provider, onFileClick, toolDurations, thinkingDurations, eventIndex, timestamp, assistantTextMap, events);
   } catch (err) {
     return (
       <div className="text-xs text-red-500 bg-red-500/[0.06] rounded-xl p-3 my-1 border border-red-500/15">
@@ -224,7 +237,7 @@ function CopyButton({ content }: { content: string }) {
   );
 }
 
-function renderEvent(sessionId: string, msg: AgentMessage, resultMap: Record<string, ToolResultEntry>, provider: Provider | null, onFileClick: (path: string, originalContent?: string) => void, toolDurations: Record<string, number>, thinkingDurations: Record<number, number>, eventIndex: number, timestamp?: number, assistantTextMap?: Record<number, { text: string; timestamp?: number }>) {
+function renderEvent(sessionId: string, msg: AgentMessage, prevMsg: AgentMessage | undefined, resultMap: Record<string, ToolResultEntry>, provider: Provider | null, onFileClick: (path: string, originalContent?: string) => void, toolDurations: Record<string, number>, thinkingDurations: Record<number, number>, eventIndex: number, timestamp?: number, assistantTextMap?: Record<number, { text: string; timestamp?: number }>, events?: AgentMessage[]) {
   switch (msg.kind) {
     case 'user': {
       const content = msg.data.content;
@@ -255,25 +268,10 @@ function renderEvent(sessionId: string, msg: AgentMessage, resultMap: Record<str
     }
 
     case 'ready':
-      return (
-        <div className="text-xs text-muted-foreground/60 py-2 px-1 animate-fade-in">
-          Agent 已就绪
-        </div>
-      );
+      return null;
 
-    case 'system': {
-      const model = msg.data.model;
-      const tools = Array.isArray(msg.data.tools) ? msg.data.tools : [];
-      // Skip rendering if the init message has no useful data
-      if (!model && tools.length === 0) return null;
-      return (
-        <div className="text-xs text-muted-foreground py-2 px-1 border-b border-border/20 mb-4 animate-fade-in"
-          style={{ fontFamily: "'JetBrains Mono', monospace" }}
-        >
-          会话初始化 · 模型: {model || '未知'} · 工具: {tools.length} 个
-        </div>
-      );
-    }
+    case 'system':
+      return null;
 
     case 'assistant': {
       const rawBlocks = msg.data.message?.content;
@@ -337,6 +335,14 @@ function renderEvent(sessionId: string, msg: AgentMessage, resultMap: Record<str
     }
 
     case 'result': {
+      // Hide result stats after compact — they're meaningless (0 turns, 0 tokens)
+      // Look backwards through events to find if there was a compact message
+      if (events) {
+        for (let i = eventIndex - 1; i >= 0; i--) {
+          if (events[i].kind === 'compact') return null;
+          if (events[i].kind === 'result') break; // Stop at previous result
+        }
+      }
       const cost = calculateCost(msg.data.usage, provider);
       const assistantData = assistantTextMap?.[eventIndex];
       return (
@@ -401,12 +407,17 @@ function renderEvent(sessionId: string, msg: AgentMessage, resultMap: Record<str
       );
     }
 
-    case 'compact':
+    case 'compact': {
+      const preTokens = msg.data.compact_metadata?.pre_tokens;
+      const tokenText = preTokens ? ` · 节省 ${formatTokenCount(preTokens)} tokens` : '';
       return (
         <div className="text-center py-3">
-          <span className="text-xs text-muted-foreground/50 tracking-wider">- 上下文已压缩 -</span>
+          <span className="text-xs text-muted-foreground/50 tracking-wider">
+            - 上下文已压缩{tokenText} -
+          </span>
         </div>
       );
+    }
 
     case 'done':
       return null;
@@ -582,6 +593,9 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
   const [autoScroll, setAutoScroll] = useState(true);
   // 跟踪上一次事件数量，用于区分历史加载和实时消息
   const prevCountRef = useRef(0);
+  // 执行计时器
+  const [elapsed, setElapsed] = useState(0);
+  const startTimeRef = useRef<number>(0);
   const openFile = usePreviewStore((s) => s.openFile);
   const handleFileClick = useCallback(
     (path: string, originalContent?: string) => {
@@ -621,6 +635,20 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
       prevCountRef.current = 0;
     }
   }, [events.length, isRunning]);
+
+  // 执行计时器
+  useEffect(() => {
+    if (isRunning) {
+      startTimeRef.current = Date.now();
+      setElapsed(0);
+      const timer = setInterval(() => {
+        setElapsed(Date.now() - startTimeRef.current);
+      }, 100);
+      return () => clearInterval(timer);
+    } else {
+      setElapsed(0);
+    }
+  }, [isRunning]);
 
   // 计算工具调用和思考过程的执行时长
   const toolDurations = useMemo(() => buildToolDurationMap(events, eventTimestamps), [events, eventTimestamps]);
@@ -671,13 +699,13 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
           )}
           {events.map((msg, i) => (
             <div key={i} id={msg.kind === 'user' ? `msg-${i}` : undefined}>
-              <AgentEventItem sessionId={sessionId} msg={msg} resultMap={resultMap} provider={provider} onFileClick={handleFileClick} toolDurations={toolDurations} thinkingDurations={thinkingDurations} eventIndex={i} timestamp={eventTimestamps[i]} assistantTextMap={assistantTextMap} />
+              <AgentEventItem sessionId={sessionId} msg={msg} prevMsg={i > 0 ? events[i - 1] : undefined} resultMap={resultMap} provider={provider} onFileClick={handleFileClick} toolDurations={toolDurations} thinkingDurations={thinkingDurations} eventIndex={i} timestamp={eventTimestamps[i]} assistantTextMap={assistantTextMap} events={events} />
             </div>
           ))}
           {isRunning && (
             <div className="flex items-center gap-2.5 text-sm text-muted-foreground/60 py-2 animate-fade-in">
               <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.8)]" />
-              <span>Agent 执行中...</span>
+              <span>Agent 执行中 · {formatElapsed(elapsed)}</span>
             </div>
           )}
           <div ref={bottomRef} />

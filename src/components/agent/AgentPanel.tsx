@@ -28,7 +28,7 @@ const EMPTY_TODOS: import('../../types/agent').TodoItem[] = [];
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, updateSessionTitle, createSession } = useSessionStore();
   const { projects } = useProjectStore();
-  const { startQuery, isRunning, interrupt, loadSessionMessages, clearEvents } = useAgentStore();
+  const { startQuery, isRunning, interrupt, loadSessionMessages, clearEvents, clearSavedEvents } = useAgentStore();
   const { config, getActiveProvider } = useSettingsStore();
   const { isOpen: previewOpen, togglePanel: togglePreview, loadFileTree, setProjectPath } = usePreviewStore();
 
@@ -185,6 +185,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         createSession: async () => { await createSession('新对话', 'agent'); },
         clearEvents,
         resetSession: () => { agentApi.resetSession(sessionId); },
+        deleteClaudeSessionFiles: () => agentApi.deleteClaudeSessionFiles(sessionId),
+        clearSavedEvents: (sid: string) => clearSavedEvents(sid),
         getActiveProvider: () => getActiveProvider(),
         getTheme: () => config?.theme || 'System',
         getCostInfo,
@@ -194,7 +196,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       const prompt = command.prompt.replace(/\{args\}/g, args || '');
       await handleSend(prompt);
     }
-  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, getCostInfo, handleSend]);
+  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, clearSavedEvents, getActiveProvider, config, getCostInfo, handleSend]);
 
   return (
     <div className="flex flex-col h-full">
