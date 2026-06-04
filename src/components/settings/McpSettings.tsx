@@ -29,7 +29,7 @@ function defaultTransport(type: McpTransportType): McpTransport {
 
 const baseTheme = EditorView.theme({
   '&': { fontSize: '13px', borderRadius: '8px', overflow: 'hidden' },
-  '.cm-content': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', padding: '8px 0' },
+  '.cm-content': { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", padding: '8px 0' },
   '.cm-gutters': { backgroundColor: 'transparent', border: 'none' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent' },
   '.cm-activeLine': { backgroundColor: 'hsl(var(--accent) / 0.3)' },
@@ -40,6 +40,7 @@ export function McpSettingsPanel() {
   const [editing, setEditing] = useState<McpServer | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState('');
@@ -63,6 +64,7 @@ export function McpSettingsPanel() {
       id: generateId(),
       name: '',
       description: '',
+      subtitle: '',
       transport: defaultTransport('stdio'),
       enabled: true,
       created_at: now,
@@ -146,16 +148,6 @@ export function McpSettingsPanel() {
       closeModal();
     } catch {
       toast.error('保存失败');
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!editing) return;
-    try {
-      await deleteServer(editing.id);
-      closeModal();
-    } catch {
-      // error handled by store
     }
   };
 
@@ -276,12 +268,12 @@ export function McpSettingsPanel() {
           >
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="font-medium text-sm truncate">{server.name}</span>
+                <span className="font-medium text-sm truncate">{server.description || server.name}</span>
                 {transportBadge(server.transport.type)}
               </div>
-              {server.description && (
+              {server.subtitle && (
                 <p className="text-xs text-muted-foreground truncate mt-0.5">
-                  {server.description}
+                  {server.subtitle}
                 </p>
               )}
             </div>
@@ -291,6 +283,14 @@ export function McpSettingsPanel() {
             />
             <Button variant="ghost" size="sm" onClick={() => openEdit(server)}>
               <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setDeletingId(server.id); setDeleteConfirm(true); }}
+              className="text-destructive hover:text-destructive"
+            >
+              <Trash2 className="h-4 w-4" />
             </Button>
           </div>
         ))}
@@ -320,6 +320,15 @@ export function McpSettingsPanel() {
                   value={editing.description}
                   onChange={(e) => setEditing({ ...editing, description: e.target.value })}
                   placeholder="例如 @upstash/context7-mcp"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">描述</label>
+                <Input
+                  value={editing.subtitle}
+                  onChange={(e) => setEditing({ ...editing, subtitle: e.target.value })}
+                  placeholder="可选描述信息"
                 />
               </div>
 
@@ -366,26 +375,7 @@ export function McpSettingsPanel() {
           )}
 
           <DialogFooter className="flex justify-between">
-            {!isNew && (
-              <>
-                {deleteConfirm ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-destructive">确认删除？</span>
-                    <Button variant="destructive" size="sm" onClick={handleDelete}>
-                      删除
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => setDeleteConfirm(false)}>
-                      取消
-                    </Button>
-                  </div>
-                ) : (
-                  <Button variant="ghost" size="sm" onClick={() => setDeleteConfirm(true)}>
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    删除
-                  </Button>
-                )}
-              </>
-            )}
+            <div />
             <div className="flex gap-2">
               <Button variant="outline" onClick={closeModal}>
                 取消
@@ -398,9 +388,40 @@ export function McpSettingsPanel() {
         </DialogContent>
       </Dialog>
 
+      {/* 删除确认弹窗 */}
+      <Dialog open={deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(false)}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span className="text-destructive">⚠</span>
+              删除服务器
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            确定要删除服务器 "{servers.find((s) => s.id === deletingId)?.name}" 吗？此操作无法撤销。
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirm(false)}>取消</Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (deletingId) {
+                  await deleteServer(deletingId);
+                  toast.success('已删除');
+                }
+                setDeleteConfirm(false);
+                setDeletingId(null);
+              }}
+            >
+              确定
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* MCP 配置向导弹窗 */}
       <Dialog open={wizardOpen} onOpenChange={(open) => !open && setWizardOpen(false)}>
-        <DialogContent className="sm:max-w-[520px] max-h-[80vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
             <DialogTitle>MCP 配置向导</DialogTitle>
           </DialogHeader>
@@ -441,7 +462,7 @@ export function McpSettingsPanel() {
                     <Input
                       value={wizCommand}
                       onChange={(e) => setWizCommand(e.target.value)}
-                      placeholder="例如 cmd"
+                      placeholder="npx 或 uvx"
                     />
                   </div>
                   <div className="space-y-2">
@@ -450,7 +471,7 @@ export function McpSettingsPanel() {
                       className={textareaClass}
                       value={wizArgs}
                       onChange={(e) => setWizArgs(e.target.value)}
-                      placeholder={"/c\nnpx\n-y\n@upstash/context7-mcp"}
+                      placeholder={"arg1\narg2\n"}
                       rows={4}
                     />
                   </div>
@@ -460,7 +481,7 @@ export function McpSettingsPanel() {
                       className={textareaClass}
                       value={wizEnv}
                       onChange={(e) => setWizEnv(e.target.value)}
-                      placeholder={"API_KEY=xxx"}
+                      placeholder={"KEY1=value1\nKEY2=value2"}
                       rows={3}
                     />
                   </div>

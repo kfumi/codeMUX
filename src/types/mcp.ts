@@ -25,6 +25,7 @@ export interface McpServer {
   id: string;
   name: string;
   description: string;
+  subtitle: string;
   transport: McpTransport;
   enabled: boolean;
   created_at: string;

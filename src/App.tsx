@@ -71,7 +71,7 @@ function App() {
         </ErrorBoundary>
       </MainLayout>
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
-      <Toaster />
+      <Toaster position="top-center" richColors />
     </TooltipProvider>
   );
 }
