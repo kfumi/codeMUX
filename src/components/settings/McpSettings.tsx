@@ -243,89 +243,25 @@ export function McpSettingsPanel() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">传输类型</label>
-                <Select
-                  value={editing.transport.type}
-                  onValueChange={(v) => updateTransportType(v as McpTransportType)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="stdio">stdio（本地进程）</SelectItem>
-                    <SelectItem value="http">HTTP Streaming</SelectItem>
-                    <SelectItem value="sse">SSE（Server-Sent Events）</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setWizardOpen(true)}
-                  className="mt-2"
-                >
-                  <Wand2 className="h-4 w-4 mr-1" />
-                  配置向导
-                </Button>
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">完整的 JSON 配置</label>
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    onClick={() => setWizardOpen(true)}
+                    className="h-auto p-0 text-sm"
+                  >
+                    <Wand2 className="h-4 w-4 mr-1" />
+                    配置向导
+                  </Button>
+                </div>
+                <div className="rounded-lg border bg-muted p-4 overflow-x-auto">
+                  <pre className="text-xs font-mono text-foreground whitespace-pre">
+                    {JSON.stringify(editing.transport, null, 2)}
+                  </pre>
+                </div>
               </div>
-
-              {/* stdio 字段 */}
-              {editing.transport.type === 'stdio' && (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Command</label>
-                    <Input
-                      value={editing.transport.command}
-                      onChange={(e) => updateTransportField('command', e.target.value)}
-                      placeholder="例如 npx"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Args（每行一个）</label>
-                    <textarea
-                      className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      value={(editing.transport.args || []).join('\n')}
-                      onChange={(e) => updateArgs(e.target.value)}
-                      placeholder={"-y\n@upstash/context7-mcp@latest"}
-                      rows={3}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">环境变量（KEY=VALUE，每行一个）</label>
-                    <textarea
-                      className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      value={Object.entries(editing.transport.env || {}).map(([k, v]) => `${k}=${v}`).join('\n')}
-                      onChange={(e) => updateKeyValue('env', e.target.value)}
-                      placeholder={"API_KEY=xxx"}
-                      rows={2}
-                    />
-                  </div>
-                </>
-              )}
-
-              {/* http/sse 字段 */}
-              {(editing.transport.type === 'http' || editing.transport.type === 'sse') && (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">URL</label>
-                    <Input
-                      value={editing.transport.url}
-                      onChange={(e) => updateTransportField('url', e.target.value)}
-                      placeholder="https://example.com/mcp"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Headers（KEY=VALUE，每行一个）</label>
-                    <textarea
-                      className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      value={Object.entries(editing.transport.headers || {}).map(([k, v]) => `${k}=${v}`).join('\n')}
-                      onChange={(e) => updateKeyValue('headers', e.target.value)}
-                      placeholder={"Authorization=Bearer xxx"}
-                      rows={2}
-                    />
-                  </div>
-                </>
-              )}
 
               {saveError && (
                 <p className="text-sm text-destructive">{saveError}</p>
@@ -375,7 +311,7 @@ export function McpSettingsPanel() {
                 配置向导
               </h2>
               <p className="text-sm text-muted-foreground mt-1">
-                快速配置 MCP 服务器，自动生成 JSON 配置
+                快速配置 MCP 服务器传输参数，JSON 配置会自动更新
               </p>
             </div>
 
@@ -383,37 +319,87 @@ export function McpSettingsPanel() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">
-                    当前传输类型
+                    传输类型
                   </label>
-                  <div className="text-sm text-muted-foreground">
-                    {editing.transport.type}
-                  </div>
+                  <Select
+                    value={editing.transport.type}
+                    onValueChange={(v) => updateTransportType(v as McpTransportType)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="stdio">stdio（本地进程）</SelectItem>
+                      <SelectItem value="http">HTTP Streaming</SelectItem>
+                      <SelectItem value="sse">SSE（Server-Sent Events）</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 {editing.transport.type === 'stdio' && (
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">
-                      命令
-                    </label>
-                    <Input
-                      value={editing.transport.command}
-                      onChange={(e) => updateTransportField('command', e.target.value)}
-                      placeholder="例如 cmd"
-                    />
-                  </div>
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">
+                        命令 *
+                      </label>
+                      <Input
+                        value={editing.transport.command}
+                        onChange={(e) => updateTransportField('command', e.target.value)}
+                        placeholder="例如 cmd"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">
+                        参数（每行一个）
+                      </label>
+                      <textarea
+                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        value={(editing.transport.args || []).join('\n')}
+                        onChange={(e) => updateArgs(e.target.value)}
+                        placeholder={"/c\nnpx\n-y\n@upstash/context7-mcp"}
+                        rows={4}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">
+                        环境变量（KEY=VALUE，每行一个）
+                      </label>
+                      <textarea
+                        className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        value={Object.entries(editing.transport.env || {}).map(([k, v]) => `${k}=${v}`).join('\n')}
+                        onChange={(e) => updateKeyValue('env', e.target.value)}
+                        placeholder={"API_KEY=xxx"}
+                        rows={3}
+                      />
+                    </div>
+                  </>
                 )}
 
                 {editing.transport.type !== 'stdio' && (
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">
-                      URL
-                    </label>
-                    <Input
-                      value={editing.transport.url}
-                      onChange={(e) => updateTransportField('url', e.target.value)}
-                      placeholder="https://example.com/mcp"
-                    />
-                  </div>
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">
+                        URL *
+                      </label>
+                      <Input
+                        value={editing.transport.url}
+                        onChange={(e) => updateTransportField('url', e.target.value)}
+                        placeholder="https://example.com/mcp"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">
+                        Headers（KEY=VALUE，每行一个）
+                      </label>
+                      <textarea
+                        className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        value={Object.entries(editing.transport.headers || {}).map(([k, v]) => `${k}=${v}`).join('\n')}
+                        onChange={(e) => updateKeyValue('headers', e.target.value)}
+                        placeholder={"Authorization=Bearer xxx"}
+                        rows={3}
+                      />
+                    </div>
+                  </>
                 )}
 
                 <div className="space-y-2">
