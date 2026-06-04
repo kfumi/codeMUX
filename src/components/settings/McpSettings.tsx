@@ -1,0 +1,359 @@
+import { useState, useEffect } from 'react';
+import { useMcpStore } from '../../stores/mcpStore';
+import type { McpServer, McpTransport, McpTransportType } from '../../types/mcp';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Switch } from '../ui/switch';
+import { Plus, Pencil, Trash2, Loader2, Server } from 'lucide-react';
+
+function generateId(): string {
+  return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
+}
+
+function defaultTransport(type: McpTransportType): McpTransport {
+  switch (type) {
+    case 'stdio':
+      return { type: 'stdio', command: '', args: [], env: {} };
+    case 'http':
+      return { type: 'http', url: '', headers: {} };
+    case 'sse':
+      return { type: 'sse', url: '', headers: {} };
+  }
+}
+
+export function McpSettingsPanel() {
+  const { servers, isLoading, fetchServers, upsertServer, deleteServer, toggleServer } = useMcpStore();
+  const [editing, setEditing] = useState<McpServer | null>(null);
+  const [isNew, setIsNew] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+
+  useEffect(() => {
+    fetchServers();
+  }, [fetchServers]);
+
+  const openNew = () => {
+    const now = new Date().toISOString();
+    setEditing({
+      id: generateId(),
+      name: '',
+      description: '',
+      transport: defaultTransport('stdio'),
+      enabled: true,
+      created_at: now,
+      updated_at: now,
+    });
+    setIsNew(true);
+    setSaveError('');
+    setDeleteConfirm(false);
+  };
+
+  const openEdit = (server: McpServer) => {
+    setEditing({ ...server });
+    setIsNew(false);
+    setSaveError('');
+    setDeleteConfirm(false);
+  };
+
+  const closeModal = () => {
+    setEditing(null);
+    setSaveError('');
+    setDeleteConfirm(false);
+  };
+
+  const handleSave = async () => {
+    if (!editing) return;
+    setSaveError('');
+
+    if (!editing.name.trim()) {
+      setSaveError('请填写名称');
+      return;
+    }
+    const t = editing.transport;
+    if (t.type === 'stdio' && !t.command.trim()) {
+      setSaveError('请填写 command');
+      return;
+    }
+    if ((t.type === 'http' || t.type === 'sse') && !t.url.trim()) {
+      setSaveError('请填写 url');
+      return;
+    }
+
+    const nameExists = servers.some(
+      (s) => s.name === editing.name.trim() && s.id !== editing.id
+    );
+    if (nameExists) {
+      setSaveError('名称已存在');
+      return;
+    }
+
+    try {
+      await upsertServer({ ...editing, name: editing.name.trim() });
+      closeModal();
+    } catch {
+      setSaveError('保存失败');
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!editing) return;
+    try {
+      await deleteServer(editing.id);
+      closeModal();
+    } catch {
+      // error handled by store
+    }
+  };
+
+  const handleToggle = async (id: string) => {
+    await toggleServer(id);
+  };
+
+  const updateTransportType = (type: McpTransportType) => {
+    if (!editing) return;
+    setEditing({ ...editing, transport: defaultTransport(type) });
+  };
+
+  const updateTransportField = (field: string, value: string) => {
+    if (!editing) return;
+    setEditing({
+      ...editing,
+      transport: { ...editing.transport, [field]: value } as McpTransport,
+    });
+  };
+
+  const updateArgs = (argsStr: string) => {
+    if (!editing || editing.transport.type !== 'stdio') return;
+    const args = argsStr.split('\n').filter((a) => a.trim());
+    setEditing({
+      ...editing,
+      transport: { ...editing.transport, args },
+    });
+  };
+
+  const updateKeyValue = (field: 'headers' | 'env', raw: string) => {
+    if (!editing) return;
+    const obj: Record<string, string> = {};
+    for (const line of raw.split('\n')) {
+      const idx = line.indexOf('=');
+      if (idx > 0) {
+        obj[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+      }
+    }
+    setEditing({
+      ...editing,
+      transport: { ...editing.transport, [field]: obj } as McpTransport,
+    });
+  };
+
+  const transportBadge = (type: McpTransportType) => {
+    const colors = {
+      stdio: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+      http: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+      sse: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
+    };
+    return (
+      <span className={`text-xs px-1.5 py-0.5 rounded ${colors[type]}`}>
+        {type}
+      </span>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-medium">MCP Servers</h3>
+        <Button size="sm" onClick={openNew}>
+          <Plus className="h-4 w-4 mr-1" />
+          添加
+        </Button>
+      </div>
+
+      {isLoading && servers.length === 0 && (
+        <div className="flex items-center justify-center py-8 text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+          加载中...
+        </div>
+      )}
+
+      {!isLoading && servers.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+          <Server className="h-8 w-8 mb-2 opacity-50" />
+          <p className="text-sm">暂无 MCP Server</p>
+          <p className="text-xs">点击上方按钮添加</p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {servers.map((server) => (
+          <div
+            key={server.id}
+            className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+          >
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-sm truncate">{server.name}</span>
+                {transportBadge(server.transport.type)}
+              </div>
+              {server.description && (
+                <p className="text-xs text-muted-foreground truncate mt-0.5">
+                  {server.description}
+                </p>
+              )}
+            </div>
+            <Switch
+              checked={server.enabled}
+              onCheckedChange={() => handleToggle(server.id)}
+            />
+            <Button variant="ghost" size="sm" onClick={() => openEdit(server)}>
+              <Pencil className="h-4 w-4" />
+            </Button>
+          </div>
+        ))}
+      </div>
+
+      {/* 编辑/新建弹窗 */}
+      <Dialog open={!!editing} onOpenChange={(open) => !open && closeModal()}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>{isNew ? '添加 MCP Server' : '编辑 MCP Server'}</DialogTitle>
+          </DialogHeader>
+
+          {editing && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">名称</label>
+                <Input
+                  value={editing.name}
+                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                  placeholder="例如 context7"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">描述</label>
+                <Input
+                  value={editing.description}
+                  onChange={(e) => setEditing({ ...editing, description: e.target.value })}
+                  placeholder="可选"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">传输类型</label>
+                <Select
+                  value={editing.transport.type}
+                  onValueChange={(v) => updateTransportType(v as McpTransportType)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="stdio">stdio（本地进程）</SelectItem>
+                    <SelectItem value="http">HTTP Streaming</SelectItem>
+                    <SelectItem value="sse">SSE（Server-Sent Events）</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* stdio 字段 */}
+              {editing.transport.type === 'stdio' && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Command</label>
+                    <Input
+                      value={editing.transport.command}
+                      onChange={(e) => updateTransportField('command', e.target.value)}
+                      placeholder="例如 npx"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Args（每行一个）</label>
+                    <textarea
+                      className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      value={(editing.transport.args || []).join('\n')}
+                      onChange={(e) => updateArgs(e.target.value)}
+                      placeholder={"-y\n@upstash/context7-mcp@latest"}
+                      rows={3}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">环境变量（KEY=VALUE，每行一个）</label>
+                    <textarea
+                      className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      value={Object.entries(editing.transport.env || {}).map(([k, v]) => `${k}=${v}`).join('\n')}
+                      onChange={(e) => updateKeyValue('env', e.target.value)}
+                      placeholder={"API_KEY=xxx"}
+                      rows={2}
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* http/sse 字段 */}
+              {(editing.transport.type === 'http' || editing.transport.type === 'sse') && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">URL</label>
+                    <Input
+                      value={editing.transport.url}
+                      onChange={(e) => updateTransportField('url', e.target.value)}
+                      placeholder="https://example.com/mcp"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Headers（KEY=VALUE，每行一个）</label>
+                    <textarea
+                      className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      value={Object.entries(editing.transport.headers || {}).map(([k, v]) => `${k}=${v}`).join('\n')}
+                      onChange={(e) => updateKeyValue('headers', e.target.value)}
+                      placeholder={"Authorization=Bearer xxx"}
+                      rows={2}
+                    />
+                  </div>
+                </>
+              )}
+
+              {saveError && (
+                <p className="text-sm text-destructive">{saveError}</p>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="flex justify-between">
+            {!isNew && (
+              <>
+                {deleteConfirm ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-destructive">确认删除？</span>
+                    <Button variant="destructive" size="sm" onClick={handleDelete}>
+                      删除
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setDeleteConfirm(false)}>
+                      取消
+                    </Button>
+                  </div>
+                ) : (
+                  <Button variant="ghost" size="sm" onClick={() => setDeleteConfirm(true)}>
+                    <Trash2 className="h-4 w-4 mr-1" />
+                    删除
+                  </Button>
+                )}
+              </>
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={closeModal}>
+                取消
+              </Button>
+              <Button onClick={handleSave}>
+                {isNew ? '添加' : '保存'}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
