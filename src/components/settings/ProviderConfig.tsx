@@ -332,6 +332,15 @@ export function ProviderConfigPanel() {
                       />
                     )}
                   </div>
+                  <label className="flex items-center gap-1.5 px-2.5 rounded-md border border-input bg-background text-xs cursor-pointer select-none shrink-0 hover:bg-accent/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={!!editingProvider.context_1m}
+                      onChange={(e) => updateField('context_1m', e.target.checked || undefined)}
+                      className="accent-primary w-3.5 h-3.5"
+                    />
+                    <span className="text-muted-foreground">1M</span>
+                  </label>
                   <Button
                     variant="outline"
                     size="sm"
@@ -389,18 +398,6 @@ export function ProviderConfigPanel() {
                 </div>
               </div>
 
-              {/* Context window size */}
-              <div className="mt-3">
-                <label className="text-[11px] text-muted-foreground/70 mb-0.5 block">上下文窗口 (tokens)</label>
-                <Input
-                  type="number"
-                  value={editingProvider.context_window ?? ''}
-                  onChange={(e) => updateField('context_window', e.target.value ? Number(e.target.value) : undefined)}
-                  placeholder="200000"
-                  step="1000"
-                />
-                <p className="text-[10px] text-muted-foreground/50 mt-0.5">默认 200000，1M 上下文填 1000000</p>
-              </div>
             </div>
           )}
 

@@ -116,8 +116,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       if (usedTokens > 0) break;
     }
 
-    // Provider configured context_window takes priority over SDK's modelUsage
-    const totalTokens = activeProvider?.context_window || 200_000;
+    // 1M context if provider has context_1m enabled, otherwise 200k
+    const totalTokens = activeProvider?.context_1m ? 1_000_000 : 200_000;
 
     return { usedTokens, totalTokens };
   }, [events, activeProvider]);
@@ -127,7 +127,11 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const handleSend = async (content: string) => {
     const apiKey = activeProvider?.api_key || undefined;
     const baseUrl = activeProvider?.anthropic_base_url || undefined;
-    const model = activeProvider?.default_model || undefined;
+    let model = activeProvider?.default_model || undefined;
+    // 追加 [1m] 以启用 SDK 的 1M 上下文窗口
+    if (model && activeProvider?.context_1m && !model.includes('[1m]')) {
+      model = model + '[1m]';
+    }
     try {
       await startQuery(sessionId, content, cwd, apiKey, baseUrl, model);
     } catch (err) {

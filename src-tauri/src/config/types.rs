@@ -17,9 +17,9 @@ pub struct Provider {
     /// 输出 token 单价 ($/1M tokens)
     #[serde(default)]
     pub output_price: Option<f64>,
-    /// 上下文窗口大小 (tokens)
+    /// 1M 上下文窗口（模型名会追加 [1m]）
     #[serde(default)]
-    pub context_window: Option<u64>,
+    pub context_1m: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,7 +50,7 @@ impl Default for AppConfig {
                 input_price: None,
                 cache_read_price: None,
                 output_price: None,
-                context_window: None,
+                context_1m: None,
             }],
             active_provider_id: Some(id),
             theme: Theme::System,
