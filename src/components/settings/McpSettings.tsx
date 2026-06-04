@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useMcpStore } from '../../stores/mcpStore';
 import type { McpServer, McpTransport, McpTransportType } from '../../types/mcp';
 import { Button } from '../ui/button';
@@ -6,7 +6,7 @@ import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Switch } from '../ui/switch';
-import { Plus, Pencil, Trash2, Loader2, Server, Wand2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Server, Wand2, Wand } from 'lucide-react';
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
@@ -30,6 +30,8 @@ export function McpSettingsPanel() {
   const [saveError, setSaveError] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [jsonText, setJsonText] = useState('');
+  const [jsonError, setJsonError] = useState('');
 
   useEffect(() => {
     fetchServers();
@@ -56,7 +58,38 @@ export function McpSettingsPanel() {
     setIsNew(false);
     setSaveError('');
     setDeleteConfirm(false);
+    setJsonText(JSON.stringify(server.transport, null, 2));
+    setJsonError('');
   };
+
+  const formatJson = () => {
+    try {
+      const parsed = JSON.parse(jsonText);
+      setJsonText(JSON.stringify(parsed, null, 2));
+      setJsonError('');
+    } catch (e) {
+      setJsonError(`JSON 格式错误，请检查: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const handleJsonChange = (text: string) => {
+    setJsonText(text);
+    validateJson(text);
+  };
+
+  const validateJson = useCallback((text: string) => {
+    try {
+      const parsed = JSON.parse(text);
+      if (editing) {
+        setEditing({ ...editing, transport: parsed as McpTransport });
+      }
+      setJsonError('');
+      return true;
+    } catch (e) {
+      setJsonError(`JSON 格式错误，请检查: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+  }, [editing]);
 
   const closeModal = () => {
     setEditing(null);
@@ -245,22 +278,43 @@ export function McpSettingsPanel() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium">完整的 JSON 配置</label>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      onClick={() => setWizardOpen(true)}
+                      className="h-auto p-0 text-sm"
+                    >
+                      <Wand2 className="h-4 w-4 mr-1" />
+                      配置向导
+                    </Button>
+                  </div>
+                </div>
+                <div className="relative">
+                  <textarea
+                    className="w-full h-64 rounded-lg border bg-muted p-4 overflow-auto text-xs font-mono text-foreground resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+                    value={jsonText}
+                    onChange={(e) => handleJsonChange(e.target.value)}
+                    spellCheck={false}
+                  />
                   <Button
                     type="button"
-                    variant="link"
+                    variant="ghost"
                     size="sm"
-                    onClick={() => setWizardOpen(true)}
-                    className="h-auto p-0 text-sm"
+                    onClick={formatJson}
+                    className="absolute top-2 right-2"
                   >
-                    <Wand2 className="h-4 w-4 mr-1" />
-                    配置向导
+                    <Wand className="h-4 w-4 mr-1" />
+                    格式化
                   </Button>
                 </div>
-                <div className="rounded-lg border bg-muted p-4 overflow-x-auto">
-                  <pre className="text-xs font-mono text-foreground whitespace-pre">
-                    {JSON.stringify(editing.transport, null, 2)}
-                  </pre>
-                </div>
+                {jsonError && (
+                  <p className="text-sm text-destructive flex items-center gap-2">
+                    <span className="text-destructive">⊘</span>
+                    {jsonError}
+                  </p>
+                )}
               </div>
 
               {saveError && (
