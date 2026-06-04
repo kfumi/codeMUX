@@ -287,7 +287,7 @@ export function McpSettingsPanel() {
 
       {/* 编辑/新建弹窗 */}
       <Dialog open={!!editing} onOpenChange={(open) => !open && closeModal()}>
-        <DialogContent className="sm:max-w-[560px]">
+        <DialogContent className="sm:max-w-[560px] px-10 pt-8 pb-6">
           <DialogHeader>
             <DialogTitle>{isNew ? '添加 MCP Server' : '编辑 MCP Server'}</DialogTitle>
           </DialogHeader>
