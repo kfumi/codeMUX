@@ -258,7 +258,7 @@ export function McpSettingsPanel() {
           {editing && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium">名称</label>
+                <label className="text-sm font-medium">MCP 标题（唯一） *</label>
                 <Input
                   value={editing.name}
                   onChange={(e) => setEditing({ ...editing, name: e.target.value })}
@@ -267,55 +267,51 @@ export function McpSettingsPanel() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">描述</label>
+                <label className="text-sm font-medium">显示名称</label>
                 <Input
                   value={editing.description}
                   onChange={(e) => setEditing({ ...editing, description: e.target.value })}
-                  placeholder="可选"
+                  placeholder="例如 @upstash/context7-mcp"
                 />
               </div>
 
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium">完整的 JSON 配置</label>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="link"
-                      size="sm"
-                      onClick={() => setWizardOpen(true)}
-                      className="h-auto p-0 text-sm"
-                    >
-                      <Wand2 className="h-4 w-4 mr-1" />
-                      配置向导
-                    </Button>
-                  </div>
-                </div>
-                <div className="relative">
-                  <textarea
-                    className="w-full h-64 rounded-lg border bg-muted p-4 overflow-auto text-xs font-mono text-foreground resize-y focus:outline-none focus:ring-2 focus:ring-ring"
-                    value={jsonText}
-                    onChange={(e) => handleJsonChange(e.target.value)}
-                    spellCheck={false}
-                  />
+                <label className="text-sm font-medium">完整的 JSON 配置</label>
+                <textarea
+                  className="w-full h-64 rounded-lg border bg-muted p-4 overflow-auto text-xs font-mono text-foreground resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+                  value={jsonText}
+                  onChange={(e) => handleJsonChange(e.target.value)}
+                  spellCheck={false}
+                />
+                <div className="flex justify-between items-center">
+                  {jsonError && (
+                    <p className="text-sm text-destructive flex items-center gap-2">
+                      <span className="text-destructive">⊘</span>
+                      {jsonError}
+                    </p>
+                  )}
+                  {!jsonError && <div />}
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={formatJson}
-                    className="absolute top-2 right-2"
                   >
                     <Wand className="h-4 w-4 mr-1" />
                     格式化
                   </Button>
                 </div>
-                {jsonError && (
-                  <p className="text-sm text-destructive flex items-center gap-2">
-                    <span className="text-destructive">⊘</span>
-                    {jsonError}
-                  </p>
-                )}
               </div>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setWizardOpen(true)}
+              >
+                <Wand2 className="h-4 w-4 mr-1" />
+                配置向导
+              </Button>
 
               {saveError && (
                 <p className="text-sm text-destructive">{saveError}</p>
@@ -362,7 +358,7 @@ export function McpSettingsPanel() {
           <div className="p-6 space-y-5">
             <div>
               <h2 className="text-lg font-semibold text-foreground">
-                配置向导
+                MCP 配置向导
               </h2>
               <p className="text-sm text-muted-foreground mt-1">
                 快速配置 MCP 服务器传输参数，JSON 配置会自动更新
@@ -373,21 +369,37 @@ export function McpSettingsPanel() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">
-                    传输类型
+                    类型 *
                   </label>
-                  <Select
-                    value={editing.transport.type}
-                    onValueChange={(v) => updateTransportType(v as McpTransportType)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="stdio">stdio（本地进程）</SelectItem>
-                      <SelectItem value="http">HTTP Streaming</SelectItem>
-                      <SelectItem value="sse">SSE（Server-Sent Events）</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <div className="flex gap-4">
+                    {(['stdio', 'http', 'sse'] as McpTransportType[]).map((type) => (
+                      <div key={type} className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          id={`wizard-type-${type}`}
+                          name="wizardTransportType"
+                          value={type}
+                          checked={editing.transport.type === type}
+                          onChange={() => updateTransportType(type)}
+                          className="h-4 w-4 text-primary border-primary focus:ring-primary"
+                        />
+                        <label htmlFor={`wizard-type-${type}`} className="text-sm cursor-pointer">
+                          {type}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    MCP 标题（唯一） *
+                  </label>
+                  <Input
+                    value={editing.name}
+                    onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                    placeholder="例如 context7"
+                  />
                 </div>
 
                 {editing.transport.type === 'stdio' && (
@@ -407,7 +419,7 @@ export function McpSettingsPanel() {
                         参数（每行一个）
                       </label>
                       <textarea
-                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         value={(editing.transport.args || []).join('\n')}
                         onChange={(e) => updateArgs(e.target.value)}
                         placeholder={"/c\nnpx\n-y\n@upstash/context7-mcp"}
@@ -419,7 +431,7 @@ export function McpSettingsPanel() {
                         环境变量（KEY=VALUE，每行一个）
                       </label>
                       <textarea
-                        className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         value={Object.entries(editing.transport.env || {}).map(([k, v]) => `${k}=${v}`).join('\n')}
                         onChange={(e) => updateKeyValue('env', e.target.value)}
                         placeholder={"API_KEY=xxx"}
@@ -446,7 +458,7 @@ export function McpSettingsPanel() {
                         Headers（KEY=VALUE，每行一个）
                       </label>
                       <textarea
-                        className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         value={Object.entries(editing.transport.headers || {}).map(([k, v]) => `${k}=${v}`).join('\n')}
                         onChange={(e) => updateKeyValue('headers', e.target.value)}
                         placeholder={"Authorization=Bearer xxx"}
@@ -472,7 +484,16 @@ export function McpSettingsPanel() {
 
           <DialogFooter className="px-6 pb-6 gap-2">
             <Button variant="outline" onClick={() => setWizardOpen(false)}>
-              关闭
+              取消
+            </Button>
+            <Button onClick={() => {
+              if (editing) {
+                setJsonText(JSON.stringify(editing.transport, null, 2));
+                setJsonError('');
+              }
+              setWizardOpen(false);
+            }}>
+              应用配置
             </Button>
           </DialogFooter>
         </DialogContent>
