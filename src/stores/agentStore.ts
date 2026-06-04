@@ -34,8 +34,6 @@ interface AgentState {
   isRunning: Record<string, boolean>;
   /** Error message if any */
   error: Record<string, string | null>;
-  /** Track which sessions have had their title updated */
-  titledSessions: Record<string, boolean>;
   /** Current todos per session (extracted from TodoWrite / Task tools) */
   todos: Record<string, TodoItem[]>;
 
@@ -230,18 +228,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   eventTimestamps: {},
   isRunning: {},
   error: {},
-  titledSessions: {},
   todos: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => {
-    // Auto-update session title on first message (skip slash commands)
+    // Auto-update session title from the first user message (skip slash commands)
     const state = get();
-    if (!state.titledSessions[sessionId] && !prompt.startsWith('/')) {
+    const hasExistingUserMsg = (state.events[sessionId] || []).some(e => e.kind === 'user');
+    if (!hasExistingUserMsg && !prompt.startsWith('/')) {
       const title = truncateTitle(prompt);
       if (title) {
         useSessionStore.getState().updateSessionTitle(sessionId, title);
       }
-      set((s) => ({ titledSessions: { ...s.titledSessions, [sessionId]: true } }));
     }
 
     // 添加用户消息到事件列表
