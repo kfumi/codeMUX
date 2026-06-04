@@ -1,0 +1,61 @@
+<h2>对话框模型展示</h2>
+<p class="subtitle">只读展示当前供应商的默认模型，不可切换</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>输入框左侧标签</h3>
+      <p>在输入框左侧显示供应商名+模型名，紧凑不占空间</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>输入框上方信息栏</h3>
+      <p>输入框上方一行显示当前供应商和模型，更醒目</p>
+    </div>
+  </div>
+</div>
+
+<h3>方案 A 预览：输入框左侧标签</h3>
+<div class="mockup">
+  <div class="mockup-header">对话界面底部</div>
+  <div class="mockup-body">
+    <div style="display:flex;gap:8px;align-items:flex-end;padding:12px;background:#1a1a2e;border:1px solid #333;border-radius:8px">
+      <div style="padding:6px 10px;background:#2563eb20;border:1px solid #2563eb40;border-radius:6px;font-size:11px;color:#60a5fa;white-space:nowrap">
+        OpenRouter<br><span style="color:#93c5fd;font-weight:500">claude-sonnet-4</span>
+      </div>
+      <div style="flex:1;padding:8px 12px;background:#111;border:1px solid #333;border-radius:6px;color:#666;font-size:13px">
+        输入消息...
+      </div>
+      <button style="padding:8px 16px;background:#2563eb;border:none;border-radius:6px;color:white;font-size:13px;cursor:pointer">
+        发送
+      </button>
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top:24px">方案 B 预览：输入框上方信息栏</h3>
+<div class="mockup">
+  <div class="mockup-header">对话界面底部</div>
+  <div class="mockup-body">
+    <div>
+      <div style="display:flex;gap:12px;align-items:center;padding:6px 12px;background:#2563eb10;border:1px solid #2563eb30;border-bottom:none;border-radius:8px 8px 0 0;font-size:11px;color:#60a5fa">
+        <span>供应商: <strong style="color:#93c5fd">OpenRouter</strong></span>
+        <span style="color:#333">|</span>
+        <span>模型: <strong style="color:#93c5fd">claude-sonnet-4</strong></span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:flex-end;padding:12px;background:#1a1a2e;border:1px solid #333;border-top:none;border-radius:0 0 8px 8px">
+        <div style="flex:1;padding:8px 12px;background:#111;border:1px solid #333;border-radius:6px;color:#666;font-size:13px">
+          输入消息...
+        </div>
+        <button style="padding:8px 16px;background:#2563eb;border:none;border-radius:6px;color:white;font-size:13px;cursor:pointer">
+          发送
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p style="margin-top:16px;color:#888;font-size:12px">点击选择你偏好的方案，或在终端告诉我。</p>

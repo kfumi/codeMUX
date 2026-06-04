@@ -1,0 +1,113 @@
+<h2>供应商配置页面设计</h2>
+<p class="subtitle">设置页 → 供应商 tab 的布局方案</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>左侧列表 + 右侧表单</h3>
+      <p>左侧显示已配置供应商列表，右侧编辑选中的供应商。底部有"添加供应商"和"删除"按钮。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>卡片式平铺</h3>
+      <p>每个供应商是一张卡片，平铺展示。卡片上显示名称和状态，点击展开编辑。</p>
+    </div>
+  </div>
+</div>
+
+<h3>方案 A 预览：左侧列表 + 右侧表单</h3>
+<div class="mockup">
+  <div class="mockup-header">设置 → 供应商</div>
+  <div class="mockup-body" style="display:flex;gap:16px;min-height:320px">
+    <!-- Left: provider list -->
+    <div style="width:180px;border-right:1px solid #333;padding-right:12px">
+      <div style="padding:8px 10px;background:#2563eb;border-radius:6px;color:white;margin-bottom:6px;font-size:13px">
+        ● OpenRouter <span style="float:right;font-size:11px;opacity:70%">激活</span>
+      </div>
+      <div style="padding:8px 10px;border-radius:6px;color:#aaa;font-size:13px;cursor:pointer">
+        ○ Anthropic 直连
+      </div>
+      <div style="padding:8px 10px;border-radius:6px;color:#aaa;font-size:13px;cursor:pointer">
+        ○ 自定义代理
+      </div>
+      <button style="margin-top:12px;width:100%;padding:6px;background:#1e1e2e;border:1px dashed #555;border-radius:6px;color:#888;font-size:12px;cursor:pointer">
+        + 添加供应商
+      </button>
+    </div>
+    <!-- Right: form -->
+    <div style="flex:1;font-size:13px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div style="font-size:15px;font-weight:600">OpenRouter</div>
+        <div style="display:flex;gap:8px">
+          <button style="padding:4px 12px;background:#2563eb;border:none;border-radius:4px;color:white;font-size:12px;cursor:pointer">激活</button>
+          <button style="padding:4px 12px;background:#dc2626;border:none;border-radius:4px;color:white;font-size:12px;cursor:pointer">删除</button>
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <div style="color:#888;font-size:11px;margin-bottom:4px;text-transform:uppercase">供应商名称</div>
+        <div style="padding:6px 10px;background:#1a1a2e;border:1px solid #333;border-radius:4px;color:#ccc">OpenRouter</div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <div style="color:#888;font-size:11px;margin-bottom:4px;text-transform:uppercase">API Key</div>
+        <div style="padding:6px 10px;background:#1a1a2e;border:1px solid #333;border-radius:4px;color:#ccc">sk-or-v1-••••••••</div>
+      </div>
+
+      <div style="display:flex;gap:12px;margin-bottom:12px">
+        <div style="flex:1">
+          <div style="color:#888;font-size:11px;margin-bottom:4px;text-transform:uppercase">Anthropic Base URL</div>
+          <div style="padding:6px 10px;background:#1a1a2e;border:1px solid #333;border-radius:4px;color:#ccc">https://openrouter.ai/api/v1</div>
+        </div>
+        <div style="flex:1">
+          <div style="color:#888;font-size:11px;margin-bottom:4px;text-transform:uppercase">OpenAI Base URL</div>
+          <div style="padding:6px 10px;background:#1a1a2e;border:1px solid #333;border-radius:4px;color:#ccc">https://openrouter.ai/api/v1</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <div style="color:#888;font-size:11px;margin-bottom:4px;text-transform:uppercase">默认模型</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div style="flex:1;padding:6px 10px;background:#1a1a2e;border:1px solid #333;border-radius:4px;color:#ccc">claude-sonnet-4-20250514</div>
+          <button style="padding:6px 12px;background:#333;border:1px solid #555;border-radius:4px;color:#ccc;font-size:12px;cursor:pointer;white-space:nowrap">获取模型列表</button>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;display:flex;justify-content:flex-end">
+        <button style="padding:6px 20px;background:#2563eb;border:none;border-radius:4px;color:white;font-size:13px;cursor:pointer">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top:24px">方案 B 预览：卡片式平铺</h3>
+<div class="mockup">
+  <div class="mockup-header">设置 → 供应商</div>
+  <div class="mockup-body" style="display:flex;gap:12px;flex-wrap:wrap">
+    <div style="width:200px;padding:12px;background:#1a1a2e;border:2px solid #2563eb;border-radius:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-weight:600;font-size:14px">OpenRouter</span>
+        <span style="font-size:10px;background:#2563eb;padding:2px 6px;border-radius:10px;color:white">激活</span>
+      </div>
+      <div style="color:#888;font-size:11px;margin-bottom:4px">默认模型</div>
+      <div style="font-size:12px;color:#ccc;margin-bottom:8px">claude-sonnet-4</div>
+      <div style="color:#888;font-size:11px">sk-or-v1-••••</div>
+    </div>
+    <div style="width:200px;padding:12px;background:#1a1a2e;border:1px solid #333;border-radius:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-weight:600;font-size:14px">Anthropic 直连</span>
+      </div>
+      <div style="color:#888;font-size:11px;margin-bottom:4px">默认模型</div>
+      <div style="font-size:12px;color:#ccc;margin-bottom:8px">claude-opus-4</div>
+      <div style="color:#888;font-size:11px">sk-ant-••••</div>
+    </div>
+    <div style="width:200px;padding:12px;background:#1a1a2e;border:1px dashed #555;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#888;font-size:13px;cursor:pointer;min-height:100px">
+      + 添加供应商
+    </div>
+  </div>
+</div>
+
+<p style="margin-top:16px;color:#888;font-size:12px">点击选择你偏好的布局方案，或在终端告诉我你的想法。</p>
