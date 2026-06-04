@@ -43,6 +43,19 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             created_at TEXT NOT NULL,
             FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS mcp_servers (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            transport_type TEXT NOT NULL,
+            transport_config TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_servers_name ON mcp_servers(name);
         "
     )?;
 
