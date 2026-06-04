@@ -4,9 +4,12 @@ import type { McpServer, McpTransport, McpTransportType } from '../../types/mcp'
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { Switch } from '../ui/switch';
 import { Plus, Pencil, Trash2, Loader2, Server, Wand2, Wand } from 'lucide-react';
+import CodeMirror from '@uiw/react-codemirror';
+import { json } from '@codemirror/lang-json';
+import { EditorView } from '@codemirror/view';
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
@@ -23,6 +26,14 @@ function defaultTransport(type: McpTransportType): McpTransport {
   }
 }
 
+const baseTheme = EditorView.theme({
+  '&': { fontSize: '13px', borderRadius: '8px', overflow: 'hidden' },
+  '.cm-content': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', padding: '8px 0' },
+  '.cm-gutters': { backgroundColor: 'transparent', border: 'none' },
+  '.cm-activeLineGutter': { backgroundColor: 'transparent' },
+  '.cm-activeLine': { backgroundColor: 'hsl(var(--accent) / 0.3)' },
+});
+
 export function McpSettingsPanel() {
   const { servers, isLoading, fetchServers, upsertServer, deleteServer, toggleServer } = useMcpStore();
   const [editing, setEditing] = useState<McpServer | null>(null);
@@ -33,13 +44,22 @@ export function McpSettingsPanel() {
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState('');
 
+  // wizard local state
+  const [wizType, setWizType] = useState<McpTransportType>('stdio');
+  const [wizName, setWizName] = useState('');
+  const [wizCommand, setWizCommand] = useState('');
+  const [wizArgs, setWizArgs] = useState('');
+  const [wizEnv, setWizEnv] = useState('');
+  const [wizUrl, setWizUrl] = useState('');
+  const [wizHeaders, setWizHeaders] = useState('');
+
   useEffect(() => {
     fetchServers();
   }, [fetchServers]);
 
   const openNew = () => {
     const now = new Date().toISOString();
-    setEditing({
+    const server: McpServer = {
       id: generateId(),
       name: '',
       description: '',
@@ -47,10 +67,13 @@ export function McpSettingsPanel() {
       enabled: true,
       created_at: now,
       updated_at: now,
-    });
+    };
+    setEditing(server);
     setIsNew(true);
     setSaveError('');
     setDeleteConfirm(false);
+    setJsonText(JSON.stringify(server.transport, null, 2));
+    setJsonError('');
   };
 
   const openEdit = (server: McpServer) => {
@@ -62,47 +85,45 @@ export function McpSettingsPanel() {
     setJsonError('');
   };
 
-  const formatJson = () => {
-    try {
-      const parsed = JSON.parse(jsonText);
-      setJsonText(JSON.stringify(parsed, null, 2));
-      setJsonError('');
-    } catch (e) {
-      setJsonError(`JSON 格式错误，请检查: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  };
-
-  const handleJsonChange = (text: string) => {
-    setJsonText(text);
-    validateJson(text);
-  };
-
-  const validateJson = useCallback((text: string) => {
-    try {
-      const parsed = JSON.parse(text);
-      if (editing) {
-        setEditing({ ...editing, transport: parsed as McpTransport });
-      }
-      setJsonError('');
-      return true;
-    } catch (e) {
-      setJsonError(`JSON 格式错误，请检查: ${e instanceof Error ? e.message : String(e)}`);
-      return false;
-    }
-  }, [editing]);
-
   const closeModal = () => {
     setEditing(null);
     setSaveError('');
     setDeleteConfirm(false);
   };
 
+  const formatJson = () => {
+    try {
+      const parsed = JSON.parse(jsonText);
+      const formatted = JSON.stringify(parsed, null, 2);
+      setJsonText(formatted);
+      if (editing) {
+        setEditing({ ...editing, transport: parsed as McpTransport });
+      }
+      setJsonError('');
+    } catch (e) {
+      setJsonError(`JSON 格式错误: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const handleJsonChange = useCallback((value: string) => {
+    setJsonText(value);
+    try {
+      const parsed = JSON.parse(value);
+      if (editing) {
+        setEditing({ ...editing, transport: parsed as McpTransport });
+      }
+      setJsonError('');
+    } catch (e) {
+      setJsonError(`JSON 格式错误: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [editing]);
+
   const handleSave = async () => {
     if (!editing) return;
     setSaveError('');
 
     if (!editing.name.trim()) {
-      setSaveError('请填写名称');
+      setSaveError('请填写 MCP 标题');
       return;
     }
     const t = editing.transport;
@@ -119,7 +140,7 @@ export function McpSettingsPanel() {
       (s) => s.name === editing.name.trim() && s.id !== editing.id
     );
     if (nameExists) {
-      setSaveError('名称已存在');
+      setSaveError('标题已存在');
       return;
     }
 
@@ -145,41 +166,54 @@ export function McpSettingsPanel() {
     await toggleServer(id);
   };
 
-  const updateTransportType = (type: McpTransportType) => {
+  const openWizard = () => {
     if (!editing) return;
-    setEditing({ ...editing, transport: defaultTransport(type) });
+    setWizType(editing.transport.type);
+    setWizName(editing.name);
+    const t = editing.transport;
+    setWizCommand(t.type === 'stdio' ? t.command : '');
+    setWizArgs(t.type === 'stdio' ? (t.args || []).join('\n') : '');
+    setWizEnv(
+      Object.entries(
+        (t.type === 'stdio' ? t.env : t.headers) || {}
+      ).map(([k, v]) => `${k}=${v}`).join('\n')
+    );
+    setWizUrl(t.type !== 'stdio' ? t.url : '');
+    setWizHeaders(
+      t.type !== 'stdio'
+        ? Object.entries(t.headers || {}).map(([k, v]) => `${k}=${v}`).join('\n')
+        : ''
+    );
+    setWizardOpen(true);
   };
 
-  const updateTransportField = (field: string, value: string) => {
+  const applyWizard = () => {
     if (!editing) return;
-    setEditing({
-      ...editing,
-      transport: { ...editing.transport, [field]: value } as McpTransport,
-    });
-  };
-
-  const updateArgs = (argsStr: string) => {
-    if (!editing || editing.transport.type !== 'stdio') return;
-    const args = argsStr.split('\n').filter((a) => a.trim());
-    setEditing({
-      ...editing,
-      transport: { ...editing.transport, args },
-    });
-  };
-
-  const updateKeyValue = (field: 'headers' | 'env', raw: string) => {
-    if (!editing) return;
-    const obj: Record<string, string> = {};
-    for (const line of raw.split('\n')) {
-      const idx = line.indexOf('=');
-      if (idx > 0) {
-        obj[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+    let transport: McpTransport;
+    if (wizType === 'stdio') {
+      const env: Record<string, string> = {};
+      for (const line of wizEnv.split('\n')) {
+        const idx = line.indexOf('=');
+        if (idx > 0) env[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
       }
+      transport = {
+        type: 'stdio',
+        command: wizCommand,
+        args: wizArgs.split('\n').filter((a) => a.trim()),
+        env,
+      };
+    } else {
+      const headers: Record<string, string> = {};
+      for (const line of wizHeaders.split('\n')) {
+        const idx = line.indexOf('=');
+        if (idx > 0) headers[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+      }
+      transport = { type: wizType, url: wizUrl, headers };
     }
-    setEditing({
-      ...editing,
-      transport: { ...editing.transport, [field]: obj } as McpTransport,
-    });
+    setEditing({ ...editing, name: wizName, transport });
+    setJsonText(JSON.stringify(transport, null, 2));
+    setJsonError('');
+    setWizardOpen(false);
   };
 
   const transportBadge = (type: McpTransportType) => {
@@ -194,6 +228,9 @@ export function McpSettingsPanel() {
       </span>
     );
   };
+
+  const textareaClass =
+    "flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2";
 
   return (
     <div className="space-y-4">
@@ -250,7 +287,7 @@ export function McpSettingsPanel() {
 
       {/* 编辑/新建弹窗 */}
       <Dialog open={!!editing} onOpenChange={(open) => !open && closeModal()}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle>{isNew ? '添加 MCP Server' : '编辑 MCP Server'}</DialogTitle>
           </DialogHeader>
@@ -276,42 +313,44 @@ export function McpSettingsPanel() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">完整的 JSON 配置</label>
-                <textarea
-                  className="w-full h-64 rounded-lg border bg-muted p-4 overflow-auto text-xs font-mono text-foreground resize-y focus:outline-none focus:ring-2 focus:ring-ring"
-                  value={jsonText}
-                  onChange={(e) => handleJsonChange(e.target.value)}
-                  spellCheck={false}
-                />
-                <div className="flex justify-between items-center">
-                  {jsonError && (
-                    <p className="text-sm text-destructive flex items-center gap-2">
-                      <span className="text-destructive">⊘</span>
-                      {jsonError}
-                    </p>
-                  )}
-                  {!jsonError && <div />}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={formatJson}
-                  >
-                    <Wand className="h-4 w-4 mr-1" />
-                    格式化
-                  </Button>
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">完整的 JSON 配置</label>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={formatJson}
+                    >
+                      <Wand className="h-4 w-4 mr-1" />
+                      格式化
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={openWizard}
+                    >
+                      <Wand2 className="h-4 w-4 mr-1" />
+                      配置向导
+                    </Button>
+                  </div>
                 </div>
+                <div className="rounded-lg border overflow-hidden">
+                  <CodeMirror
+                    value={jsonText}
+                    height="260px"
+                    extensions={[json(), EditorView.lineWrapping]}
+                    theme={baseTheme}
+                    onChange={handleJsonChange}
+                  />
+                </div>
+                {jsonError && (
+                  <p className="text-xs text-destructive">
+                    {jsonError}
+                  </p>
+                )}
               </div>
-
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setWizardOpen(true)}
-              >
-                <Wand2 className="h-4 w-4 mr-1" />
-                配置向导
-              </Button>
 
               {saveError && (
                 <p className="text-sm text-destructive">{saveError}</p>
@@ -352,147 +391,136 @@ export function McpSettingsPanel() {
         </DialogContent>
       </Dialog>
 
-      {/* 配置向导弹窗 */}
+      {/* MCP 配置向导弹窗 */}
       <Dialog open={wizardOpen} onOpenChange={(open) => !open && setWizardOpen(false)}>
-        <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto p-0">
-          <div className="p-6 space-y-5">
-            <div>
-              <h2 className="text-lg font-semibold text-foreground">
-                MCP 配置向导
-              </h2>
-              <p className="text-sm text-muted-foreground mt-1">
-                快速配置 MCP 服务器传输参数，JSON 配置会自动更新
-              </p>
-            </div>
+        <DialogContent className="sm:max-w-[520px] max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>MCP 配置向导</DialogTitle>
+          </DialogHeader>
 
-            {editing && (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">
-                    类型 *
-                  </label>
-                  <div className="flex gap-4">
-                    {(['stdio', 'http', 'sse'] as McpTransportType[]).map((type) => (
-                      <div key={type} className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          id={`wizard-type-${type}`}
-                          name="wizardTransportType"
-                          value={type}
-                          checked={editing.transport.type === type}
-                          onChange={() => updateTransportType(type)}
-                          className="h-4 w-4 text-primary border-primary focus:ring-primary"
-                        />
-                        <label htmlFor={`wizard-type-${type}`} className="text-sm cursor-pointer">
-                          {type}
-                        </label>
-                      </div>
-                    ))}
+          {editing && (
+            <div className="space-y-4">
+              <div className="space-y-3">
+                <label className="text-sm font-medium">类型 *</label>
+                <RadioGroup
+                  value={wizType}
+                  onValueChange={(v) => setWizType(v as McpTransportType)}
+                  className="flex gap-6"
+                >
+                  {(['stdio', 'http', 'sse'] as McpTransportType[]).map((type) => (
+                    <div key={type} className="flex items-center gap-2">
+                      <RadioGroupItem value={type} id={`wiz-${type}`} />
+                      <label htmlFor={`wiz-${type}`} className="text-sm cursor-pointer select-none">
+                        {type}
+                      </label>
+                    </div>
+                  ))}
+                </RadioGroup>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">MCP 标题（唯一） *</label>
+                <Input
+                  value={wizName}
+                  onChange={(e) => setWizName(e.target.value)}
+                  placeholder="例如 context7"
+                />
+              </div>
+
+              {wizType === 'stdio' ? (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">命令 *</label>
+                    <Input
+                      value={wizCommand}
+                      onChange={(e) => setWizCommand(e.target.value)}
+                      placeholder="例如 cmd"
+                    />
                   </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">
-                    MCP 标题（唯一） *
-                  </label>
-                  <Input
-                    value={editing.name}
-                    onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                    placeholder="例如 context7"
-                  />
-                </div>
-
-                {editing.transport.type === 'stdio' && (
-                  <>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-foreground">
-                        命令 *
-                      </label>
-                      <Input
-                        value={editing.transport.command}
-                        onChange={(e) => updateTransportField('command', e.target.value)}
-                        placeholder="例如 cmd"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-foreground">
-                        参数（每行一个）
-                      </label>
-                      <textarea
-                        className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        value={(editing.transport.args || []).join('\n')}
-                        onChange={(e) => updateArgs(e.target.value)}
-                        placeholder={"/c\nnpx\n-y\n@upstash/context7-mcp"}
-                        rows={4}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-foreground">
-                        环境变量（KEY=VALUE，每行一个）
-                      </label>
-                      <textarea
-                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        value={Object.entries(editing.transport.env || {}).map(([k, v]) => `${k}=${v}`).join('\n')}
-                        onChange={(e) => updateKeyValue('env', e.target.value)}
-                        placeholder={"API_KEY=xxx"}
-                        rows={3}
-                      />
-                    </div>
-                  </>
-                )}
-
-                {editing.transport.type !== 'stdio' && (
-                  <>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-foreground">
-                        URL *
-                      </label>
-                      <Input
-                        value={editing.transport.url}
-                        onChange={(e) => updateTransportField('url', e.target.value)}
-                        placeholder="https://example.com/mcp"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-foreground">
-                        Headers（KEY=VALUE，每行一个）
-                      </label>
-                      <textarea
-                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        value={Object.entries(editing.transport.headers || {}).map(([k, v]) => `${k}=${v}`).join('\n')}
-                        onChange={(e) => updateKeyValue('headers', e.target.value)}
-                        placeholder={"Authorization=Bearer xxx"}
-                        rows={3}
-                      />
-                    </div>
-                  </>
-                )}
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">
-                    配置预览
-                  </label>
-                  <div className="rounded-lg border bg-muted p-4 overflow-x-auto">
-                    <pre className="text-xs font-mono text-foreground whitespace-pre">
-                      {JSON.stringify(editing.transport, null, 2)}
-                    </pre>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">参数（每行一个）</label>
+                    <textarea
+                      className={textareaClass}
+                      value={wizArgs}
+                      onChange={(e) => setWizArgs(e.target.value)}
+                      placeholder={"/c\nnpx\n-y\n@upstash/context7-mcp"}
+                      rows={4}
+                    />
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">环境变量（KEY=VALUE，每行一个）</label>
+                    <textarea
+                      className={textareaClass}
+                      value={wizEnv}
+                      onChange={(e) => setWizEnv(e.target.value)}
+                      placeholder={"API_KEY=xxx"}
+                      rows={3}
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">URL *</label>
+                    <Input
+                      value={wizUrl}
+                      onChange={(e) => setWizUrl(e.target.value)}
+                      placeholder="https://example.com/mcp"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Headers（KEY=VALUE，每行一个）</label>
+                    <textarea
+                      className={textareaClass}
+                      value={wizHeaders}
+                      onChange={(e) => setWizHeaders(e.target.value)}
+                      placeholder={"Authorization=Bearer xxx"}
+                      rows={3}
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">配置预览</label>
+                <div className="rounded-lg border bg-muted p-3 overflow-x-auto">
+                  <pre className="text-xs font-mono text-muted-foreground whitespace-pre">
+                    {JSON.stringify(
+                      (() => {
+                        if (wizType === 'stdio') {
+                          const env: Record<string, string> = {};
+                          for (const line of wizEnv.split('\n')) {
+                            const idx = line.indexOf('=');
+                            if (idx > 0) env[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+                          }
+                          return {
+                            type: wizType,
+                            command: wizCommand,
+                            args: wizArgs.split('\n').filter((a) => a.trim()),
+                            env,
+                          };
+                        }
+                        const headers: Record<string, string> = {};
+                        for (const line of wizHeaders.split('\n')) {
+                          const idx = line.indexOf('=');
+                          if (idx > 0) headers[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+                        }
+                        return { type: wizType, url: wizUrl, headers };
+                      })(),
+                      null,
+                      2
+                    )}
+                  </pre>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
-          <DialogFooter className="px-6 pb-6 gap-2">
+          <DialogFooter>
             <Button variant="outline" onClick={() => setWizardOpen(false)}>
               取消
             </Button>
-            <Button onClick={() => {
-              if (editing) {
-                setJsonText(JSON.stringify(editing.transport, null, 2));
-                setJsonError('');
-              }
-              setWizardOpen(false);
-            }}>
+            <Button onClick={applyWizard}>
               应用配置
             </Button>
           </DialogFooter>
