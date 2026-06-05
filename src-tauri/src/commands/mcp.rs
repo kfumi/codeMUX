@@ -182,11 +182,12 @@ async fn probe_stdio(transport: &McpTransport) -> Result<bool, String> {
     }
 }
 
-async fn probe_http_sse(transport: &McpTransport) -> Result<bool, String> {
-    let (url, headers) = match transport {
-        McpTransport::Http { url, headers } | McpTransport::Sse { url, headers } => (url.clone(), headers.clone()),
-        _ => return Err("Not http/sse".into()),
+async fn probe_http(transport: &McpTransport) -> Result<bool, String> {
+    let McpTransport::Http { url, headers } = transport else {
+        return Err("Not http".into());
     };
+    let url = url.clone();
+    let headers = headers.clone();
     let transport_type = transport.transport_type();
     println!("[mcp-probe] {}: POST {}", transport_type, url);
     let client = reqwest::Client::new();
@@ -249,6 +250,49 @@ async fn probe_http_sse(transport: &McpTransport) -> Result<bool, String> {
     Ok(ok)
 }
 
+async fn probe_sse(transport: &McpTransport) -> Result<bool, String> {
+    let McpTransport::Sse { url, headers } = transport else {
+        return Err("Not an SSE transport".into());
+    };
+    println!("[mcp-probe] sse: GET {}", url);
+    let client = reqwest::Client::new();
+    let mut req = client.get(url)
+        .header("Accept", "text/event-stream");
+    for (k, v) in headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    let resp = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        req.send()
+    ).await.map_err(|_| {
+        println!("[mcp-probe] sse: TIMEOUT");
+        "Timed out".to_string()
+    })?
+     .map_err(|e| {
+        println!("[mcp-probe] sse: request failed: {}", e);
+        format!("Request failed: {}", e)
+    })?;
+
+    let status = resp.status();
+    let content_type = resp.headers().get("content-type").map(|v| v.to_str().unwrap_or("").to_string()).unwrap_or_default();
+    println!("[mcp-probe] sse: HTTP {} (Content-Type: {})", status, content_type);
+
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        println!("[mcp-probe] sse: FAILED body: {}", body.chars().take(200).collect::<String>());
+        return Err(format!("HTTP {} {}", status, body));
+    }
+
+    // SSE endpoint should return text/event-stream
+    let ok = content_type.contains("text/event-stream") || content_type.contains("application/json");
+    if ok {
+        println!("[mcp-probe] sse: CONNECTED ✓ (SSE stream available)");
+    } else {
+        println!("[mcp-probe] sse: FAILED (unexpected Content-Type: {})", content_type);
+    }
+    Ok(ok)
+}
+
 /// Probe a list of MCP servers concurrently. Returns name → connected?
 pub async fn probe_servers(servers: &[McpServer]) -> HashMap<String, bool> {
     if servers.is_empty() {
@@ -262,7 +306,8 @@ pub async fn probe_servers(servers: &[McpServer]) -> HashMap<String, bool> {
         handles.push(tokio::spawn(async move {
             let ok = match &transport {
                 McpTransport::Stdio { .. } => probe_stdio(&transport).await,
-                McpTransport::Http { .. } | McpTransport::Sse { .. } => probe_http_sse(&transport).await,
+                McpTransport::Http { .. } => probe_http(&transport).await,
+                McpTransport::Sse { .. } => probe_sse(&transport).await,
             };
             let success = ok.unwrap_or(false);
             println!("[mcp-probe] Result: {} => {}", name, if success { "CONNECTED" } else { "FAILED" });
