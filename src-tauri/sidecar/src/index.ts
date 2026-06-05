@@ -151,9 +151,22 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       abortController,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'AskUserQuestion', 'TodoWrite'],
+      allowedTools: [
+        'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep',
+        'WebSearch', 'WebFetch', 'AskUserQuestion', 'TodoWrite',
+        'WaitForMcpServers',
+        ...Object.keys(cmd.mcpServers || {}).map(name => `mcp__${name}__*`),
+      ],
       env: subprocessEnv,
       mcpServers: cmd.mcpServers || undefined,
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append: `You have MCP servers configured. Some may still be connecting (status "pending").
+You MUST call the WaitForMcpServers tool FIRST before answering ANY question.
+Do NOT list your tools, do NOT explain what you can do, do NOT answer the user — just call WaitForMcpServers immediately.
+After WaitForMcpServers returns, you will have access to MCP tools. Then answer the user normally.`,
+      },
       // Capture stderr from the Claude Code subprocess for debugging
       stderr: (data: string) => {
         process.stderr.write(`[claude-stderr] ${data}`);
@@ -306,13 +319,43 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
         }
       }
       emit(message);
+
+      // After init message, poll MCP server status for UI updates
+      if (msg.type === 'system' && msg.subtype === 'init' && Array.isArray((msg as any).mcp_servers)) {
+        const mcpServers = (msg as any).mcp_servers as Array<{ name: string; status: string }>;
+        const hasPending = mcpServers.some(s => s.status === 'pending');
+        if (hasPending && activeQuery) {
+          (async () => {
+            const MAX_POLLS = 30;
+            const POLL_INTERVAL = 2000;
+            try {
+              for (let i = 0; i < MAX_POLLS; i++) {
+                await new Promise(r => setTimeout(r, POLL_INTERVAL));
+                if (!activeQuery) break;
+                const statuses = await activeQuery.mcpServerStatus();
+                const statusMap: Record<string, string> = {};
+                for (const s of statuses) {
+                  statusMap[s.name] = s.status;
+                }
+                emit({ type: 'mcp_status_update', servers: statusMap });
+                process.stderr.write(`[sidecar] MCP poll #${i + 1}: ${JSON.stringify(statusMap)}\n`);
+                const allDone = statuses.every(s => s.status === 'connected' || s.status === 'failed');
+                if (allDone) break;
+              }
+            } catch (err) {
+              process.stderr.write(`[sidecar] MCP status poll error: ${err}\n`);
+            }
+          })();
+        }
+      }
     }
 
     process.stderr.write(`[sidecar] Query iteration done. Total messages: ${msgCount}\n`);
     emit({ type: 'sidecar_query_done' });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
-    if (errorMsg !== 'The operation was aborted') {
+    const isAbort = errorMsg.includes('aborted by user') || errorMsg === 'The operation was aborted';
+    if (!isAbort) {
       emit({ type: 'sidecar_error', error: errorMsg });
     }
   } finally {

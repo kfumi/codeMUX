@@ -57,6 +57,7 @@ export interface AgentSystemMessage {
   model: string;
   cwd: string;
   permissionMode: string;
+  mcp_servers?: Array<{ name: string; status: string }>;
 }
 
 /** Final result message */

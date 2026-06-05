@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { agentApi } from '../lib/tauri';
 import { useSessionStore } from './sessionStore';
+import { useMcpStore } from './mcpStore';
 import type {
   AgentAssistantMessage,
   AgentToolResult,
@@ -22,6 +23,7 @@ export type AgentMessage =
   | { kind: 'api_retry'; data: { attempt: number; max_retries: number; retry_delay_ms: number; error_status: number; error: string } }
   | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string }>; multiSelect?: boolean }> } }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
+  | { kind: 'mcp_status'; data: Record<string, string> }
   | { kind: 'done' }
   | { kind: 'raw'; data: Record<string, unknown> };
 
@@ -59,6 +61,8 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'error', data };
       case 'sidecar_query_done':
         return { kind: 'done' };
+      case 'mcp_status_update':
+        return { kind: 'mcp_status', data: (data as any).servers || {} };
       case 'assistant':
         return { kind: 'assistant', data };
       case 'user':
@@ -279,6 +283,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             },
           };
         });
+
+        // Extract MCP server connection status from init messages
+        if (event.kind === 'system' && event.data?.mcp_servers) {
+          const statuses: Record<string, string> = {};
+          for (const s of event.data.mcp_servers as Array<{ name: string; status: string }>) {
+            statuses[s.name] = s.status;
+          }
+          useMcpStore.getState().updateConnectionStatus(statuses);
+        }
+        // Update MCP status from polling results
+        if (event.kind === 'mcp_status') {
+          useMcpStore.getState().updateConnectionStatus(event.data);
+        }
 
         if (event.kind === 'done' || event.kind === 'error' || (event.kind === 'result' && event.data?.is_error)) {
           set((s) => ({

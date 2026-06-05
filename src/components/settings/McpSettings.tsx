@@ -6,7 +6,7 @@ import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { Switch } from '../ui/switch';
-import { Plus, Pencil, Trash2, Loader2, Server, Wand2, Wand } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Server, Wand2, Wand, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
@@ -36,7 +36,7 @@ const baseTheme = EditorView.theme({
 });
 
 export function McpSettingsPanel() {
-  const { servers, isLoading, fetchServers, upsertServer, deleteServer, toggleServer } = useMcpStore();
+  const { servers, isLoading, connectionStatus, fetchServers, probeAll, probeNonConnected, upsertServer, deleteServer, toggleServer } = useMcpStore();
   const [editing, setEditing] = useState<McpServer | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -44,6 +44,7 @@ export function McpSettingsPanel() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState('');
+  const [probing, setProbing] = useState(false);
 
   // wizard local state
   const [wizType, setWizType] = useState<McpTransportType>('stdio');
@@ -55,8 +56,13 @@ export function McpSettingsPanel() {
   const [wizHeaders, setWizHeaders] = useState('');
 
   useEffect(() => {
-    fetchServers();
-  }, [fetchServers]);
+    fetchServers().then(() => { setProbing(true); probeNonConnected().finally(() => setProbing(false)); });
+  }, [fetchServers, probeNonConnected]);
+
+  const handleRefresh = () => {
+    setProbing(true);
+    probeAll().finally(() => setProbing(false));
+  };
 
   const openNew = () => {
     const now = new Date().toISOString();
@@ -239,10 +245,15 @@ export function McpSettingsPanel() {
     <div className="space-y-4">
       <div className="flex items-center justify-between pr-12">
         <h3 className="font-medium">MCP Servers</h3>
-        <Button size="sm" onClick={openNew}>
-          <Plus className="h-4 w-4 mr-1" />
-          添加
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={handleRefresh} disabled={probing}>
+            <RefreshCw className={`h-4 w-4 ${probing ? 'animate-spin' : ''}`} />
+          </Button>
+          <Button size="sm" onClick={openNew}>
+            <Plus className="h-4 w-4 mr-1" />
+            添加
+          </Button>
+        </div>
       </div>
 
       {isLoading && servers.length === 0 && (
@@ -268,6 +279,16 @@ export function McpSettingsPanel() {
           >
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
+                <span
+                  className={`h-2 w-2 rounded-full flex-shrink-0 ${
+                    server.enabled
+                      ? connectionStatus[server.name] === 'connected' ? 'bg-green-500'
+                        : connectionStatus[server.name] === 'pending' ? 'bg-yellow-500'
+                        : connectionStatus[server.name] === 'failed' ? 'bg-red-500'
+                        : 'bg-gray-400'
+                      : 'bg-gray-300'
+                  }`}
+                />
                 <span className="font-medium text-sm truncate">{server.description || server.name}</span>
                 {transportBadge(server.transport.type)}
               </div>

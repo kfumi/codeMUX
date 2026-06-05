@@ -10,6 +10,8 @@ use std::sync::Mutex;
 pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
     pub config: Mutex<config::types::AppConfig>,
+    /// MCP connection status from startup probe: server name → connected?
+    pub mcp_status: Mutex<std::collections::HashMap<String, bool>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -21,9 +23,24 @@ pub fn run() {
             let conn = db::initialize(&app.handle()).expect("Failed to initialize database");
             let config = config::load_config(&app.handle());
 
+            // Background probe: check MCP server connectivity at startup
+            let probe_conn = db::initialize(&app.handle()).expect("Failed to init probe DB");
+            tauri::async_runtime::spawn(async move {
+                let servers = mcp::db::get_enabled_mcp_servers(&probe_conn).unwrap_or_default();
+                if servers.is_empty() {
+                    println!("[mcp-probe] Startup: no enabled MCP servers");
+                    return;
+                }
+                println!("[mcp-probe] Startup: probing {} MCP server(s)...", servers.len());
+                let results = commands::mcp::probe_servers(&servers).await;
+                let connected = results.values().filter(|v| **v).count();
+                println!("[mcp-probe] Startup: {}/{} connected", connected, results.len());
+            });
+
             app.manage(AppState {
                 db: Mutex::new(conn),
                 config: Mutex::new(config),
+                mcp_status: Mutex::new(std::collections::HashMap::new()),
             });
             app.manage(agent::commands::AgentState::default());
 
@@ -55,6 +72,7 @@ pub fn run() {
             commands::mcp::upsert_mcp_server,
             commands::mcp::delete_mcp_server,
             commands::mcp::toggle_mcp_server,
+            commands::mcp::probe_all_mcp_servers,
             agent::commands::start_agent_session,
             agent::commands::interrupt_agent_session,
             agent::commands::shutdown_agent,

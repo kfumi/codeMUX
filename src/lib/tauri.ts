@@ -85,4 +85,5 @@ export const mcpApi = {
   upsert: (server: McpServer): Promise<void> => invoke('upsert_mcp_server', { server }),
   delete: (id: string): Promise<void> => invoke('delete_mcp_server', { id }),
   toggle: (id: string): Promise<boolean> => invoke('toggle_mcp_server', { id }),
+  probeAll: (): Promise<Record<string, boolean>> => invoke('probe_all_mcp_servers'),
 };

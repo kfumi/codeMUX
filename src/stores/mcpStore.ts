@@ -6,16 +6,21 @@ interface McpStore {
   servers: McpServer[];
   isLoading: boolean;
   error: string | null;
+  connectionStatus: Record<string, string>;
   fetchServers: () => Promise<void>;
   upsertServer: (server: McpServer) => Promise<void>;
   deleteServer: (id: string) => Promise<void>;
   toggleServer: (id: string) => Promise<void>;
+  updateConnectionStatus: (statuses: Record<string, string>) => void;
+  probeAll: () => Promise<void>;
+  probeNonConnected: () => Promise<void>;
 }
 
-export const useMcpStore = create<McpStore>((set) => ({
+export const useMcpStore = create<McpStore>((set, get) => ({
   servers: [],
   isLoading: false,
   error: null,
+  connectionStatus: {},
 
   fetchServers: async () => {
     set({ isLoading: true, error: null });
@@ -66,6 +71,44 @@ export const useMcpStore = create<McpStore>((set) => ({
     } catch (error) {
       set({ error: String(error) });
       throw error;
+    }
+  },
+
+  updateConnectionStatus: (statuses: Record<string, string>) => {
+    set({ connectionStatus: statuses });
+  },
+
+  probeAll: async () => {
+    try {
+      const results = await mcpApi.probeAll();
+      const statuses: Record<string, string> = {};
+      for (const [name, ok] of Object.entries(results)) {
+        statuses[name] = ok ? 'connected' : 'failed';
+      }
+      set({ connectionStatus: statuses });
+    } catch {
+      // ignore probe errors
+    }
+  },
+
+  probeNonConnected: async () => {
+    try {
+      const current = get().connectionStatus;
+      // Skip if all enabled servers are already connected
+      const hasNonConnected = get().servers.some(s => s.enabled && current[s.name] !== 'connected');
+      if (!hasNonConnected) return;
+
+      const results = await mcpApi.probeAll();
+      const statuses = { ...current };
+      for (const [name, ok] of Object.entries(results)) {
+        // Only update non-connected servers, keep existing connected ones
+        if (statuses[name] !== 'connected') {
+          statuses[name] = ok ? 'connected' : 'failed';
+        }
+      }
+      set({ connectionStatus: statuses });
+    } catch {
+      // ignore
     }
   },
 }));
