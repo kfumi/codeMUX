@@ -3,7 +3,7 @@ import type { Session } from '../types/session';
 import type { AppConfig, Provider, Theme } from '../types/provider';
 import type { Project } from '../types/project';
 import type { McpServer } from '../types/mcp';
-import type { Skill, RepoSkillEntry, SkillSource } from '../types/skill';
+import type { Skill } from '../types/skill';
 
 export interface ModelInfo {
   id: string;
@@ -92,16 +92,11 @@ export const mcpApi = {
 
 export const skillApi = {
   listInstalled: (): Promise<Skill[]> => invoke('list_installed_skills'),
-  browseRepo: (repo: string, branch?: string, path?: string): Promise<RepoSkillEntry[]> =>
-    invoke('browse_repo_skills', { repo, branch, path }),
-  install: (repo: string, branch: string, path: string, name: string): Promise<Skill> =>
-    invoke('install_skill', { repo, branch, path, name }),
   uninstall: (id: string): Promise<boolean> => invoke('uninstall_skill', { id }),
   toggle: (id: string, enabled: boolean): Promise<boolean> =>
     invoke('toggle_skill', { id, enabled }),
   getContent: (id: string): Promise<string> => invoke('get_skill_content', { id }),
   syncBuiltins: (): Promise<Skill[]> => invoke('sync_builtin_skills'),
-  getSources: (): Promise<SkillSource[]> => invoke('get_skill_sources'),
   registerFromDisk: (name: string): Promise<Skill> =>
     invoke('register_skill_from_disk', { name }),
   getEnabledNames: (): Promise<string[]> => invoke('get_enabled_skill_names'),

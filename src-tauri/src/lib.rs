@@ -102,14 +102,11 @@ pub fn run() {
             agent::commands::send_tool_response,
             agent::commands::delete_claude_session_files,
             skills::commands::list_installed_skills,
-            skills::commands::browse_repo_skills,
-            skills::commands::install_skill,
             skills::commands::uninstall_skill,
             skills::commands::toggle_skill,
             skills::commands::get_skill_content,
             skills::commands::sync_builtin_skills,
             skills::commands::register_skill_from_disk,
-            skills::commands::get_skill_sources,
             skills::commands::get_enabled_skill_names,
         ])
         .run(tauri::generate_context!())

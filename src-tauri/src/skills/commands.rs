@@ -1,8 +1,7 @@
 use tauri::State;
 use crate::AppState;
-use super::types::{Skill, RepoSkillEntry, SkillSource};
+use super::types::Skill;
 use super::db;
-use super::github;
 use super::builtin;
 
 fn skills_dir() -> std::path::PathBuf {
@@ -16,76 +15,6 @@ fn skills_dir() -> std::path::PathBuf {
 pub fn list_installed_skills(state: State<'_, AppState>) -> Result<Vec<Skill>, String> {
     let db = state.db.lock().unwrap();
     db::list_skills(&db).map_err(|e| format!("Failed to list skills: {}", e))
-}
-
-#[tauri::command]
-pub async fn browse_repo_skills(
-    state: State<'_, AppState>,
-    repo: String,
-    branch: Option<String>,
-    path: Option<String>,
-) -> Result<Vec<RepoSkillEntry>, String> {
-    let source = SkillSource {
-        repo,
-        branch: branch.unwrap_or_else(|| "main".to_string()),
-        skills_path: path.unwrap_or_else(|| "skills/".to_string()),
-    };
-
-    let installed_names = {
-        let db = state.db.lock().unwrap();
-        db::list_skills(&db)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| s.name)
-            .collect::<Vec<_>>()
-    };
-
-    github::browse_repo_skills(&source, &installed_names).await
-}
-
-#[tauri::command]
-pub async fn install_skill(
-    state: State<'_, AppState>,
-    repo: String,
-    _branch: String,
-    path: String,
-    name: String,
-) -> Result<Skill, String> {
-    let files = github::download_skill_files(&repo, &path).await?;
-
-    let skill_dir = skills_dir().join(&name);
-    std::fs::create_dir_all(&skill_dir)
-        .map_err(|e| format!("Failed to create skill directory: {}", e))?;
-
-    for (filename, content) in &files {
-        let file_path = skill_dir.join(filename);
-        std::fs::write(&file_path, content)
-            .map_err(|e| format!("Failed to write {}: {}", filename, e))?;
-    }
-
-    let skill_md_content = files.iter()
-        .find(|(name, _)| name == "SKILL.md")
-        .map(|(_, content)| content.as_str())
-        .unwrap_or("");
-    let (description, display_name) = db::parse_frontmatter(skill_md_content);
-
-    let now = chrono::Utc::now().to_rfc3339();
-    let db_guard = state.db.lock().unwrap();
-    let existing = db::get_skill_by_name(&db_guard, &name).unwrap_or(None);
-    let skill = Skill {
-        id: existing.as_ref().map(|s| s.id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
-        name: name.clone(),
-        display_name,
-        description,
-        source_repo: Some(repo),
-        source_path: Some(path),
-        version: None,
-        installed_at: now,
-        enabled: existing.as_ref().map(|s| s.enabled).unwrap_or(true),
-        is_builtin: false,
-    };
-    db::upsert_skill(&db_guard, &skill).map_err(|e| format!("Failed to save skill: {}", e))?;
-    Ok(skill)
 }
 
 #[tauri::command]
@@ -114,6 +43,12 @@ pub fn uninstall_skill(state: State<'_, AppState>, id: String) -> Result<bool, S
 #[tauri::command]
 pub fn toggle_skill(state: State<'_, AppState>, id: String, enabled: bool) -> Result<bool, String> {
     let db_guard = state.db.lock().unwrap();
+    // Builtins are always enabled
+    if let Some(skill) = db::get_skill(&db_guard, &id).map_err(|e| format!("Failed to get skill: {}", e))? {
+        if skill.is_builtin && !enabled {
+            return Err("Cannot disable builtin skills".to_string());
+        }
+    }
     db::update_skill_enabled(&db_guard, &id, enabled)
         .map_err(|e| format!("Failed to toggle skill: {}", e))?;
     Ok(enabled)
@@ -169,11 +104,11 @@ pub fn sync_builtin_skills(state: State<'_, AppState>) -> Result<Vec<Skill>, Str
             name: name.to_string(),
             display_name,
             description,
-            source_repo: Some("anthropics/skills".to_string()),
-            source_path: Some(format!("skills/{}", name)),
+            source_repo: None,
+            source_path: None,
             version: None,
             installed_at: existing.as_ref().map(|s| s.installed_at.clone()).unwrap_or_else(|| now.clone()),
-            enabled: existing.as_ref().map(|s| s.enabled).unwrap_or(true),
+            enabled: true,  // Builtins are always enabled
             is_builtin: true,
         };
         let _ = db::upsert_skill(&db_guard, &skill);
@@ -188,11 +123,6 @@ pub fn register_skill_from_disk(state: State<'_, AppState>, name: String) -> Res
     let dir = skills_dir();
     db::register_skill_from_disk(&db_guard, &dir, &name)
         .map_err(|e| format!("Failed to register skill from disk: {}", e))
-}
-
-#[tauri::command]
-pub fn get_skill_sources() -> Result<Vec<SkillSource>, String> {
-    Ok(vec![SkillSource::default()])
 }
 
 #[tauri::command]
