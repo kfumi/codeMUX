@@ -198,7 +198,7 @@ export function registerSkillCommands(skills: SkillInfo[]): void {
       alias: [],
       category: 'skill',
       handler: 'prompt',
-      prompt: `Use the ${skill.name} skill.`,
+      prompt: `/${skill.name} {args}`,
     });
   }
 }
