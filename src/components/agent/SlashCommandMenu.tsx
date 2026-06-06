@@ -18,6 +18,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   info: '信息',
   builtin: '内置',
   custom: '自定义',
+  skill: 'Skill',
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -25,6 +26,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   info: 'text-amber-500',
   builtin: 'text-green-500',
   custom: 'text-purple-500',
+  skill: 'text-orange-500',
 };
 
 function getCommandIcon(name: string) {
@@ -62,7 +64,7 @@ export function SlashCommandMenu({ commands, selectedIndex, onSelect, visible }:
   // 按 category 分组
   const grouped: { category: string; items: (SlashCommand & { _globalIdx: number })[] }[] = [];
   let globalIdx = 0;
-  const catOrder = ['session', 'info', 'builtin', 'custom'];
+  const catOrder = ['session', 'info', 'builtin', 'custom', 'skill'];
   for (const cat of catOrder) {
     const items = commands
       .filter((c) => c.category === cat)
@@ -130,6 +132,11 @@ export function SlashCommandMenu({ commands, selectedIndex, onSelect, visible }:
                     {cmd.category === 'custom' && (
                       <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-500 font-medium">
                         自定义
+                      </span>
+                    )}
+                    {cmd.category === 'skill' && (
+                      <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-orange-500/10 text-orange-500 font-medium">
+                        skill
                       </span>
                     )}
                   </button>
