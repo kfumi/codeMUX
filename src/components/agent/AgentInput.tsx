@@ -192,7 +192,7 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
               {/* Read-only model display */}
               {modelName && (
                 <span
-                  className="px-2 py-1.5 text-[12px] font-medium text-foreground/50 truncate max-w-[160px]"
+                  className="px-2 py-1.5 text-[12px] font-medium text-foreground/50"
                   style={{ fontFamily: "'JetBrains Mono', monospace" }}
                 >
                   {modelName}

@@ -218,3 +218,12 @@ pub fn update_session_title(conn: &Connection, session_id: &str, title: &str) ->
     )?;
     Ok(())
 }
+
+pub fn update_session_provider(conn: &Connection, session_id: &str, provider_id: &str, model: &str) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE sessions SET provider_id = ?1, model = ?2, updated_at = ?3 WHERE id = ?4",
+        params![provider_id, model, now, session_id],
+    )?;
+    Ok(())
+}

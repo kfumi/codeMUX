@@ -29,6 +29,7 @@ export const sessionApi = {
   getAll: (): Promise<Session[]> => invoke('get_all_sessions'),
   delete: (sessionId: string): Promise<void> => invoke('delete_session', { sessionId }),
   updateTitle: (sessionId: string, title: string): Promise<void> => invoke('update_session_title', { sessionId, title }),
+  updateProvider: (sessionId: string, providerId: string, model: string): Promise<void> => invoke('update_session_provider', { sessionId, providerId, model }),
   getMessages: (sessionId: string): Promise<unknown[]> => invoke('get_messages', { sessionId }),
 };
 

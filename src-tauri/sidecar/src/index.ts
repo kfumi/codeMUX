@@ -173,13 +173,15 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
     // ~/.claude/settings.json. When set alongside ANTHROPIC_API_KEY, Claude Code
     // uses the auth token (for anthropic.com) instead of the API key, causing
     // 401 on non-Anthropic endpoints like DeepSeek.
-    delete subprocessEnv.ANTHROPIC_AUTH_TOKEN;
-    delete subprocessEnv.ANTHROPIC_COOKIE;
+    // NOTE: Must set to empty string instead of delete — the CLI re-reads
+    // settings.json and picks up the token even when the env var is absent.
+    subprocessEnv.ANTHROPIC_AUTH_TOKEN = '';
+    subprocessEnv.ANTHROPIC_COOKIE = '';
     // Remove global model overrides from settings — the user's chosen model
     // is passed via the SDK --model flag, these env defaults would interfere.
     for (const key of Object.keys(subprocessEnv)) {
       if (key.startsWith('ANTHROPIC_DEFAULT_')) {
-        delete subprocessEnv[key];
+        subprocessEnv[key] = '';
       }
     }
 
@@ -189,6 +191,20 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
     process.stderr.write(`[sidecar] MCP instructions built: ${mcpInstructions ? `${mcpInstructions.length} chars` : 'none'}\n`);
     if (mcpInstructions) {
       process.stderr.write(`[sidecar] MCP instructions preview: ${mcpInstructions.slice(0, 200)}...\n`);
+    }
+
+    // Build a clean settings object to override ~/.claude/settings.json.
+    // This prevents the CLI from picking up conflicting auth tokens or model
+    // overrides from the user's global Claude Code config.
+    const cleanSettings: Record<string, unknown> = {};
+    if (cmd.apiKey || cmd.baseUrl) {
+      cleanSettings.env = {
+        ...(cmd.apiKey ? { ANTHROPIC_API_KEY: cmd.apiKey } : {}),
+        ...(cmd.baseUrl ? { ANTHROPIC_BASE_URL: cmd.baseUrl } : {}),
+        ANTHROPIC_AUTH_TOKEN: '',
+        ANTHROPIC_COOKIE: '',
+        DISABLE_AUTOUPDATER: '1',
+      };
     }
 
     const options: Record<string, unknown> = {
@@ -203,6 +219,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
         ...Object.keys(cmd.mcpServers || {}).map(name => `mcp__${name}__*`),
       ],
       env: subprocessEnv,
+      ...(Object.keys(cleanSettings).length > 0 ? { settings: cleanSettings } : {}),
       mcpServers: cmd.mcpServers || undefined,
       // Emit streaming events (thinking deltas, text deltas) for real-time UI updates
       includePartialMessages: true,

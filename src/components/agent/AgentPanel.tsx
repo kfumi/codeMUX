@@ -16,7 +16,7 @@ import { Input } from '../ui/input';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { FolderOpen, MoreHorizontal, Pencil, PanelRightOpen, PanelRightClose } from 'lucide-react';
 import type { SlashCommand, CommandContext } from '../../lib/slashCommands';
-import { agentApi } from '../../lib/tauri';
+import { agentApi, sessionApi } from '../../lib/tauri';
 
 interface AgentPanelProps {
   sessionId: string;
@@ -125,13 +125,33 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const running = isRunning[sessionId] || false;
 
   const handleSend = async (content: string) => {
-    const apiKey = activeProvider?.api_key || undefined;
-    const baseUrl = activeProvider?.anthropic_base_url || undefined;
-    let model = activeProvider?.default_model || undefined;
-    // 追加 [1m] 以启用 SDK 的 1M 上下文窗口
-    if (model && activeProvider?.context_1m && !model.includes('[1m]')) {
+    // Determine which provider to use:
+    // - Existing session with stored provider_id → use that provider (model consistency)
+    // - New session or old session without provider_id → use active provider, then save it
+    let provider = activeProvider;
+    if (session?.provider_id) {
+      const storedProvider = config?.providers.find((p) => p.id === session.provider_id);
+      if (storedProvider) provider = storedProvider;
+    }
+
+    const apiKey = provider?.api_key || undefined;
+    const baseUrl = provider?.anthropic_base_url || undefined;
+    let model = provider?.default_model || undefined;
+    if (model && provider?.context_1m && !model.includes('[1m]')) {
       model = model + '[1m]';
     }
+
+    // Save provider_id and model to session on first message (for future consistency)
+    if (session && !session.provider_id && provider?.id && model) {
+      sessionApi.updateProvider(sessionId, provider.id, model).catch(() => {});
+      // Update local session state
+      useSessionStore.setState((s) => ({
+        sessions: s.sessions.map(sess =>
+          sess.id === sessionId ? { ...sess, provider_id: provider!.id, model } : sess
+        ),
+      }));
+    }
+
     try {
       await startQuery(sessionId, content, cwd, apiKey, baseUrl, model);
     } catch (err) {
@@ -267,7 +287,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           onCommand={handleCommand}
           onStop={() => interrupt(sessionId)}
           isLoading={running}
-          modelName={activeProvider?.default_model}
+          modelName={session?.model || activeProvider?.default_model}
         />
       </div>
 

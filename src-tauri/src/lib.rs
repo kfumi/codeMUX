@@ -78,6 +78,7 @@ pub fn run() {
             commands::session::get_all_sessions,
             commands::session::delete_session,
             commands::session::update_session_title,
+            commands::session::update_session_provider,
             commands::session::get_messages,
             commands::session::save_agent_events,
             commands::session::get_agent_events,
