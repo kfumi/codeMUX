@@ -45,9 +45,23 @@ export function ThinkingBlock({ thinking, durationMs }: ThinkingBlockProps) {
 export function StreamingThinkingBlock({ thinking }: { thinking: string }) {
   const endRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom as new thinking text arrives
+  // Auto-scroll to bottom only if user is already near the bottom
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = endRef.current;
+    if (!el) return;
+    // Walk up to find the scrollable parent container
+    let parent: HTMLElement | null = el.parentElement;
+    while (parent && parent !== document.body) {
+      const style = getComputedStyle(parent);
+      if (/(auto|scroll)/.test(style.overflowY)) break;
+      parent = parent.parentElement;
+    }
+    if (!parent || parent === document.body) return;
+    // Only scroll if user is within 300px of the bottom
+    const distanceFromBottom = parent.scrollHeight - parent.scrollTop - parent.clientHeight;
+    if (distanceFromBottom < 300) {
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [thinking]);
 
   if (!thinking) return null;
