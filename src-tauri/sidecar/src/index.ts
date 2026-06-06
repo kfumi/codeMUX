@@ -322,9 +322,18 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
 
     // Iteration with timeout detection
     const iterator = activeQuery[Symbol.asyncIterator]();
+    const abortSignal = abortController.signal;
+    // Promise that rejects when the user interrupts — added to Promise.race
+    // so the loop exits immediately instead of waiting for the next SDK message.
+    const abortPromise = new Promise<never>((_, reject) => {
+      if (abortSignal.aborted) { reject(abortSignal.reason); return; }
+      abortSignal.addEventListener('abort', () => reject(abortSignal.reason), { once: true });
+    });
+
     while (true) {
       const result = await Promise.race([
         iterator.next(),
+        abortPromise,
         new Promise<never>((_, reject) => {
           const timer = setTimeout(() => {
             reject(new Error(`Query timed out: no message received for ${MESSAGE_TIMEOUT_MS / 1000}s (after msg #${msgCount})`));
@@ -351,6 +360,9 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
 
       clearCompactTimer();
       if (result.done) break;
+
+      // Stop processing immediately if the user interrupted
+      if (abortController?.signal.aborted) break;
 
       msgCount++;
       const message = result.value;
@@ -437,7 +449,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
     emit({ type: 'sidecar_query_done' });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
-    const isAbort = errorMsg.includes('aborted by user') || errorMsg === 'The operation was aborted';
+    const isAbort = errorMsg.toLowerCase().includes('abort');
     if (!isAbort) {
       emit({ type: 'sidecar_error', error: errorMsg });
     }

@@ -6,4 +6,5 @@ export interface Skill {
   installed_at: string;
   enabled: boolean;
   is_builtin: boolean;
+  disk_path: string | null;
 }

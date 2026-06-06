@@ -43,6 +43,8 @@ interface AgentState {
   streamingThinking: Record<string, string>;
   /** Accumulated streaming text per session (from stream_event text deltas) */
   streamingText: Record<string, string>;
+  /** Sessions that were force-stopped (interrupt) — suppress streaming UI immediately */
+  forceStopped: Record<string, boolean>;
 
   /** Start a new agent query */
   startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => Promise<void>;
@@ -242,8 +244,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   todos: {},
   streamingThinking: {},
   streamingText: {},
+  forceStopped: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => {
+    // Clear force-stopped flag when starting a new query
+    set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     // Auto-update session title from the first user message (skip slash commands)
     const state = get();
     const hasExistingUserMsg = (state.events[sessionId] || []).some(e => e.kind === 'user');
@@ -277,7 +282,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
         // Handle streaming events (thinking/text deltas) separately —
         // update streaming state, don't append to events array
+        // Skip if session was interrupted (isRunning already false)
         if (event.kind === 'streaming') {
+          if (!get().isRunning[sessionId]) return;
           const streamEvent = event.data.event as Record<string, unknown>;
           const eventType = streamEvent.type as string;
           if (eventType === 'content_block_start') {
@@ -391,11 +398,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   interrupt: async (sessionId: string) => {
+    // 1. Immediately update UI — BEFORE sending command to sidecar
+    set((s) => ({
+      isRunning: { ...s.isRunning, [sessionId]: false },
+      forceStopped: { ...s.forceStopped, [sessionId]: true },
+      streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+      streamingText: { ...s.streamingText, [sessionId]: '' },
+    }));
+
+    // 2. Then tell sidecar to stop (async, non-blocking for UI)
     await agentApi.interrupt(sessionId);
-    // Sidecar doesn't emit an event on abort, so reset running state directly,
-    // add an interrupt marker, and persist events
+
+    // 3. Add interrupt marker and persist events
     set((s) => {
-      const isRunning = { ...s.isRunning, [sessionId]: false };
       const events = { ...s.events };
       const eventTimestamps = { ...s.eventTimestamps };
       // Add interrupt marker message
@@ -417,7 +432,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           console.error('Failed to save agent events on interrupt:', err);
         });
       }
-      return { isRunning, events, eventTimestamps };
+      return { events, eventTimestamps };
     });
   },
 
@@ -437,7 +452,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       delete newStreaming[sessionId];
       const newStreamingText = { ...state.streamingText };
       delete newStreamingText[sessionId];
-      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, todos: newTodos, streamingThinking: newStreaming, streamingText: newStreamingText };
+      const newForceStopped = { ...state.forceStopped };
+      delete newForceStopped[sessionId];
+      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, todos: newTodos, streamingThinking: newStreaming, streamingText: newStreamingText, forceStopped: newForceStopped };
     });
   },
 

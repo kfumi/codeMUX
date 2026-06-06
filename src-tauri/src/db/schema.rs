@@ -98,6 +98,14 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         let _ = conn.execute("ALTER TABLE mcp_servers ADD COLUMN subtitle TEXT DEFAULT ''", []);
     }
 
+    // Migration: add disk_path column to skills if missing
+    let has_disk_path: bool = conn
+        .prepare("SELECT disk_path FROM skills LIMIT 0")
+        .is_ok();
+    if !has_disk_path {
+        let _ = conn.execute("ALTER TABLE skills ADD COLUMN disk_path TEXT", []);
+    }
+
     // 创建索引（在所有迁移之后，确保列存在）
     conn.execute_batch(
         "

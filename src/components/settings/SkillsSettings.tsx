@@ -90,7 +90,7 @@ export function SkillsSettingsPanel() {
             {!skill.is_builtin && (
               <>
                 <div
-                  className="h-5 w-9 rounded-full bg-primary relative cursor-pointer shrink-0"
+                  className={`h-5 w-9 rounded-full relative cursor-pointer shrink-0 transition-colors ${skill.enabled ? 'bg-primary' : 'bg-muted-foreground/25'}`}
                   onClick={() => toggleSkill(skill.id, !skill.enabled)}
                 >
                   <div className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${skill.enabled ? 'left-[18px]' : 'left-0.5'}`} />

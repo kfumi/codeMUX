@@ -9,4 +9,7 @@ pub struct Skill {
     pub installed_at: String,
     pub enabled: bool,
     pub is_builtin: bool,
+    /// Absolute path to the skill directory on disk (for plugin/disk skills).
+    /// Used to read SKILL.md content from the actual location.
+    pub disk_path: Option<String>,
 }

@@ -15,12 +15,13 @@ fn row_to_skill(row: &rusqlite::Row) -> rusqlite::Result<Skill> {
         installed_at: row.get(6)?,
         enabled: enabled != 0,
         is_builtin: is_builtin != 0,
+        disk_path: row.get(7)?,
     })
 }
 
 pub fn list_skills(conn: &Connection) -> Result<Vec<Skill>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, display_name, description, enabled, is_builtin, installed_at
+        "SELECT id, name, display_name, description, enabled, is_builtin, installed_at, disk_path
          FROM skills ORDER BY is_builtin DESC, name ASC"
     )?;
     let skills = stmt.query_map([], |row| row_to_skill(row))?
@@ -30,7 +31,7 @@ pub fn list_skills(conn: &Connection) -> Result<Vec<Skill>> {
 
 pub fn get_skill(conn: &Connection, id: &str) -> Result<Option<Skill>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, display_name, description, enabled, is_builtin, installed_at
+        "SELECT id, name, display_name, description, enabled, is_builtin, installed_at, disk_path
          FROM skills WHERE id = ?1"
     )?;
     let mut rows = stmt.query_map(params![id], |row| row_to_skill(row))?;
@@ -42,7 +43,7 @@ pub fn get_skill(conn: &Connection, id: &str) -> Result<Option<Skill>> {
 
 pub fn get_skill_by_name(conn: &Connection, name: &str) -> Result<Option<Skill>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, display_name, description, enabled, is_builtin, installed_at
+        "SELECT id, name, display_name, description, enabled, is_builtin, installed_at, disk_path
          FROM skills WHERE name = ?1"
     )?;
     let mut rows = stmt.query_map(params![name], |row| row_to_skill(row))?;
@@ -54,17 +55,19 @@ pub fn get_skill_by_name(conn: &Connection, name: &str) -> Result<Option<Skill>>
 
 pub fn upsert_skill(conn: &Connection, skill: &Skill) -> Result<()> {
     conn.execute(
-        "INSERT INTO skills (id, name, display_name, description, installed_at, enabled, is_builtin)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "INSERT INTO skills (id, name, display_name, description, installed_at, enabled, is_builtin, disk_path)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT(name) DO UPDATE SET
              display_name = excluded.display_name,
              description = excluded.description,
              installed_at = excluded.installed_at,
+             disk_path = excluded.disk_path,
              enabled = CASE WHEN excluded.is_builtin = 1 THEN skills.enabled ELSE excluded.enabled END,
              is_builtin = excluded.is_builtin",
         params![
             skill.id, skill.name, skill.display_name, skill.description,
             skill.installed_at, skill.enabled as i32, skill.is_builtin as i32,
+            skill.disk_path,
         ],
     )?;
     Ok(())
@@ -113,6 +116,7 @@ pub fn register_skill_from_disk(conn: &Connection, skills_dir: &std::path::Path,
         installed_at: now,
         enabled: true,
         is_builtin: false,
+        disk_path: Some(skill_dir.to_string_lossy().to_string()),
     };
     upsert_skill(conn, &skill)?;
     Ok(skill)

@@ -8,9 +8,10 @@ import { ThinkingBlock, StreamingThinkingBlock } from './ThinkingBlock';
 /** Isolated streaming content — subscribes to streaming state directly
  *  so rapid delta updates don't re-render the entire message list. */
 function StreamingContent({ sessionId }: { sessionId: string }) {
+  const stopped = useAgentStore((s) => s.forceStopped[sessionId] ?? false);
   const thinking = useAgentStore((s) => s.streamingThinking[sessionId] ?? '');
   const text = useAgentStore((s) => s.streamingText[sessionId] ?? '');
-  if (!thinking && !text) return null;
+  if (stopped || (!thinking && !text)) return null;
   return (
     <>
       {thinking && <StreamingThinkingBlock thinking={thinking} />}

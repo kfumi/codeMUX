@@ -49,16 +49,20 @@ export function StreamingThinkingBlock({ thinking }: { thinking: string }) {
   useEffect(() => {
     const el = endRef.current;
     if (!el) return;
-    // Walk up to find the scrollable parent container
+    // Walk up to find the MAIN scrollable container (skip inner overflow divs).
+    // The main container has class "overflow-auto" and holds all messages.
     let parent: HTMLElement | null = el.parentElement;
+    let mainContainer: HTMLElement | null = null;
     while (parent && parent !== document.body) {
       const style = getComputedStyle(parent);
-      if (/(auto|scroll)/.test(style.overflowY)) break;
+      if (/(auto|scroll)/.test(style.overflowY)) {
+        mainContainer = parent; // keep going to find the outermost scrollable
+      }
       parent = parent.parentElement;
     }
-    if (!parent || parent === document.body) return;
-    // Only scroll if user is within 300px of the bottom
-    const distanceFromBottom = parent.scrollHeight - parent.scrollTop - parent.clientHeight;
+    if (!mainContainer) return;
+    // Only scroll if user is within 300px of the bottom of the main container
+    const distanceFromBottom = mainContainer.scrollHeight - mainContainer.scrollTop - mainContainer.clientHeight;
     if (distanceFromBottom < 300) {
       el.scrollIntoView({ behavior: 'smooth' });
     }
