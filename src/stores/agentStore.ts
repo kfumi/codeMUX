@@ -24,6 +24,7 @@ export type AgentMessage =
   | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string }>; multiSelect?: boolean }> } }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
   | { kind: 'mcp_status'; data: Record<string, string> }
+  | { kind: 'streaming'; data: { event: Record<string, unknown>; session_id?: string } }
   | { kind: 'done' }
   | { kind: 'raw'; data: Record<string, unknown> };
 
@@ -38,6 +39,10 @@ interface AgentState {
   error: Record<string, string | null>;
   /** Current todos per session (extracted from TodoWrite / Task tools) */
   todos: Record<string, TodoItem[]>;
+  /** Accumulated streaming thinking text per session (from stream_event deltas) */
+  streamingThinking: Record<string, string>;
+  /** Accumulated streaming text per session (from stream_event text deltas) */
+  streamingText: Record<string, string>;
 
   /** Start a new agent query */
   startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => Promise<void>;
@@ -82,6 +87,8 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'result', data };
       case 'ask_user_question':
         return { kind: 'ask_user_question', data };
+      case 'stream_event':
+        return { kind: 'streaming', data: { event: data.event, session_id: data.session_id } };
       case 'sidecar_debug':
         return { kind: 'raw', data };
       default:
@@ -233,6 +240,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   isRunning: {},
   error: {},
   todos: {},
+  streamingThinking: {},
+  streamingText: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => {
     // Auto-update session title from the first user message (skip slash commands)
@@ -265,6 +274,56 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       await agentApi.startSession(sessionId, prompt, cwd, (raw: string) => {
         const event = parseAgentEvent(raw);
         const now = Date.now();
+
+        // Handle streaming events (thinking/text deltas) separately —
+        // update streaming state, don't append to events array
+        if (event.kind === 'streaming') {
+          const streamEvent = event.data.event as Record<string, unknown>;
+          const eventType = streamEvent.type as string;
+          if (eventType === 'content_block_start') {
+            const contentBlock = streamEvent.content_block as Record<string, unknown> | undefined;
+            if (contentBlock?.type === 'thinking') {
+              set((s) => ({ streamingThinking: { ...s.streamingThinking, [sessionId]: '' } }));
+            } else if (contentBlock?.type === 'text') {
+              set((s) => ({ streamingText: { ...s.streamingText, [sessionId]: '' } }));
+            }
+          } else if (eventType === 'content_block_delta') {
+            const delta = streamEvent.delta as Record<string, unknown> | undefined;
+            if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+              set((s) => ({
+                streamingThinking: {
+                  ...s.streamingThinking,
+                  [sessionId]: (s.streamingThinking[sessionId] || '') + delta.thinking,
+                },
+              }));
+            } else if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
+              set((s) => ({
+                streamingText: {
+                  ...s.streamingText,
+                  [sessionId]: (s.streamingText[sessionId] || '') + delta.text,
+                },
+              }));
+            }
+          } else if (eventType === 'content_block_stop') {
+            // Block complete — the full assistant message will arrive next
+            set((s) => ({
+              streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+              streamingText: { ...s.streamingText, [sessionId]: '' },
+            }));
+          }
+          return; // Don't append streaming events to the events array
+        }
+
+        // Clear streaming state when the complete assistant message arrives
+        if (event.kind === 'assistant') {
+          set((s) => {
+            const updates: Partial<AgentState> = {};
+            if (s.streamingThinking[sessionId]) updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
+            if (s.streamingText[sessionId]) updates.streamingText = { ...s.streamingText, [sessionId]: '' };
+            return updates;
+          });
+        }
+
         set((s) => {
           const prev = s.events[sessionId] || [];
           const newEvents = [...prev, event];
@@ -374,7 +433,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       delete newError[sessionId];
       const newTodos = { ...state.todos };
       delete newTodos[sessionId];
-      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, todos: newTodos };
+      const newStreaming = { ...state.streamingThinking };
+      delete newStreaming[sessionId];
+      const newStreamingText = { ...state.streamingText };
+      delete newStreamingText[sessionId];
+      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, todos: newTodos, streamingThinking: newStreaming, streamingText: newStreamingText };
     });
   },
 

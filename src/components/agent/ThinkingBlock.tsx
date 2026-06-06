@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { ChevronDown, ChevronRight, Brain } from 'lucide-react';
 
 interface ThinkingBlockProps {
   thinking: string;
@@ -37,6 +37,31 @@ export function ThinkingBlock({ thinking, durationMs }: ThinkingBlockProps) {
           {thinking}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Streaming thinking block — auto-expands, auto-scrolls, shows pulsing indicator */
+export function StreamingThinkingBlock({ thinking }: { thinking: string }) {
+  const endRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom as new thinking text arrives
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [thinking]);
+
+  if (!thinking) return null;
+
+  return (
+    <div className="border rounded-md bg-muted/30 my-2 animate-fade-in">
+      <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
+        <Brain className="h-4 w-4 animate-pulse text-[hsl(var(--primary)/0.7)]" />
+        <span>思考中...</span>
+      </div>
+      <div className="px-3 pb-3 text-sm text-muted-foreground whitespace-pre-wrap border-t pt-2 max-h-96 overflow-y-auto">
+        {thinking}
+        <div ref={endRef} />
+      </div>
     </div>
   );
 }

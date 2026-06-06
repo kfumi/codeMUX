@@ -204,6 +204,8 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       ],
       env: subprocessEnv,
       mcpServers: cmd.mcpServers || undefined,
+      // Emit streaming events (thinking deltas, text deltas) for real-time UI updates
+      includePartialMessages: true,
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',

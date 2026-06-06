@@ -3,7 +3,26 @@ import { useAgentStore, type AgentMessage } from '../../stores/agentStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { calculateCost } from '../../lib/pricing';
 import type { Provider } from '../../types/provider';
-import { ThinkingBlock } from './ThinkingBlock';
+import { ThinkingBlock, StreamingThinkingBlock } from './ThinkingBlock';
+
+/** Isolated streaming content — subscribes to streaming state directly
+ *  so rapid delta updates don't re-render the entire message list. */
+function StreamingContent({ sessionId }: { sessionId: string }) {
+  const thinking = useAgentStore((s) => s.streamingThinking[sessionId] ?? '');
+  const text = useAgentStore((s) => s.streamingText[sessionId] ?? '');
+  if (!thinking && !text) return null;
+  return (
+    <>
+      {thinking && <StreamingThinkingBlock thinking={thinking} />}
+      {text && (
+        <div className="animate-fade-in">
+          <MarkdownRenderer content={text} />
+          <span className="inline-block w-0.5 h-4 bg-foreground/70 animate-pulse ml-0.5 align-text-bottom" />
+        </div>
+      )}
+    </>
+  );
+}
 import { ToolCallCard } from './ToolCallCard';
 import { AskUserQuestionCard } from './AskUserQuestionCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -20,6 +39,17 @@ function formatElapsed(ms: number): string {
   const seconds = totalSeconds % 60;
   if (minutes > 0) return `${minutes}m${seconds.toString().padStart(2, '0')}s`;
   return `${seconds}s`;
+}
+
+/** Self-contained elapsed timer — manages its own interval to avoid re-rendering the parent. */
+function ElapsedTimer() {
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setElapsed(Date.now() - startRef.current), 200);
+    return () => clearInterval(timer);
+  }, []);
+  return <span>Agent 执行中 · {formatElapsed(elapsed)}</span>;
 }
 
 function formatTokenCount(count: number): string {
@@ -589,13 +619,9 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
-  // 用户主动点击回到底部后，恢复自动滚动
-  const [autoScroll, setAutoScroll] = useState(true);
   // 跟踪上一次事件数量，用于区分历史加载和实时消息
   const prevCountRef = useRef(0);
-  // 执行计时器
-  const [elapsed, setElapsed] = useState(0);
-  const startTimeRef = useRef<number>(0);
+  const prevUserMsgCount = useRef(0);
   const openFile = usePreviewStore((s) => s.openFile);
   const handleFileClick = useCallback(
     (path: string, originalContent?: string) => {
@@ -604,7 +630,7 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
     [openFile]
   );
 
-  // 监听滚动位置 - 只在有内容、内容溢出、且用户上滚时才显示按钮
+  // 监听滚动位置 — 只控制"回到底部"按钮的显示
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -614,41 +640,46 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
       return;
     }
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const isAtBottom = distanceFromBottom < 50;
     const hasOverflow = el.scrollHeight > el.clientHeight;
     setShowScrollBtn(hasOverflow && distanceFromBottom > 200);
-    setAutoScroll(isAtBottom);
   }, [events.length, isRunning]);
 
-  // 切换会话时重置状态
+  // 控制内容可见性：历史消息加载时先隐藏，等滚动位置设好再显示，避免闪顶部
+  const [contentVisible, setContentVisible] = useState(true);
+
+  // 切换会话时重置状态并隐藏内容
   useEffect(() => {
     prevCountRef.current = 0;
-    setAutoScroll(true);
+    prevUserMsgCount.current = 0;
+    prevEventCount.current = 0;
     setShowScrollBtn(false);
+    setContentVisible(false); // 隐藏，等滚动到位再显示
   }, [sessionId]);
+
+  // 历史消息加载完成后：先设滚动位置，再显示内容
+  const prevEventCount = useRef(0);
+  useEffect(() => {
+    if (prevEventCount.current === 0 && events.length > 0) {
+      prevUserMsgCount.current = events.filter(e => e.kind === 'user').length;
+      prevEventCount.current = events.length;
+      // 内容已渲染但 display:none，直接设 scrollTop，无任何视觉跳动
+      requestAnimationFrame(() => {
+        const el = scrollRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+        setContentVisible(true); // 滚动到位了，显示内容
+      });
+      return;
+    }
+    prevEventCount.current = events.length;
+  }, [events.length]);
 
   // 内容为空时隐藏滚动按钮
   useEffect(() => {
     if (events.length === 0 && !isRunning) {
       setShowScrollBtn(false);
-      setAutoScroll(true);
       prevCountRef.current = 0;
     }
   }, [events.length, isRunning]);
-
-  // 执行计时器
-  useEffect(() => {
-    if (isRunning) {
-      startTimeRef.current = Date.now();
-      setElapsed(0);
-      const timer = setInterval(() => {
-        setElapsed(Date.now() - startTimeRef.current);
-      }, 100);
-      return () => clearInterval(timer);
-    } else {
-      setElapsed(0);
-    }
-  }, [isRunning]);
 
   // 计算工具调用和思考过程的执行时长
   const toolDurations = useMemo(() => buildToolDurationMap(events, eventTimestamps), [events, eventTimestamps]);
@@ -664,27 +695,26 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
     [events]
   );
 
-  // 滚动到底部：历史加载用 instant，实时消息用 smooth
-  useEffect(() => {
-    if (!autoScroll) return;
-    const prevCount = prevCountRef.current;
-    const isHistoryLoad = prevCount === 0 && events.length > 1;
-    const behavior: ScrollBehavior = isHistoryLoad ? 'instant' : 'smooth';
-    prevCountRef.current = events.length;
-    bottomRef.current?.scrollIntoView({ behavior });
-  }, [events, autoScroll]);
-
   const scrollToBottom = () => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    setAutoScroll(true);
   };
+
+  // 用户发送消息后自动滚到底部（不干扰 AI 生成过程中的滚动）
+  const userMsgCount = useMemo(() => events.filter(e => e.kind === 'user').length, [events]);
+  useEffect(() => {
+    if (userMsgCount > prevUserMsgCount.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+    prevUserMsgCount.current = userMsgCount;
+  }, [userMsgCount]);
 
   return (
     <div className="flex-1 relative overflow-hidden">
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="h-full overflow-auto px-5 py-6 scroll-smooth"
+        className="h-full overflow-auto px-5 py-6"
+        style={{ visibility: contentVisible ? 'visible' : 'hidden' }}
       >
         <div className="max-w-3xl mx-auto space-y-5">
           {events.length === 0 && !isRunning && (
@@ -702,10 +732,12 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
               <AgentEventItem sessionId={sessionId} msg={msg} prevMsg={i > 0 ? events[i - 1] : undefined} resultMap={resultMap} provider={provider} onFileClick={handleFileClick} toolDurations={toolDurations} thinkingDurations={thinkingDurations} eventIndex={i} timestamp={eventTimestamps[i]} assistantTextMap={assistantTextMap} events={events} />
             </div>
           ))}
+          {/* Streaming content — isolated component to avoid re-rendering the entire list */}
+          <StreamingContent sessionId={sessionId} />
           {isRunning && (
             <div className="flex items-center gap-2.5 text-sm text-muted-foreground/60 py-2 animate-fade-in">
               <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.8)]" />
-              <span>Agent 执行中 · {formatElapsed(elapsed)}</span>
+              <ElapsedTimer />
             </div>
           )}
           <div ref={bottomRef} />
