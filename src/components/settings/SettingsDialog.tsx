@@ -3,7 +3,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { ThemeToggle } from './ThemeToggle';
 import { ProviderConfigPanel } from './ProviderConfig';
 import { McpSettingsPanel } from './McpSettings';
-import { Settings, Palette, Plug, Server } from 'lucide-react';
+import { SkillsSettingsPanel } from './SkillsSettings';
+import { Settings, Palette, Plug, Server, Puzzle } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 interface SettingsDialogProps {
@@ -11,7 +12,7 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type SettingsTab = 'general' | 'appearance' | 'provider' | 'mcp';
+type SettingsTab = 'general' | 'appearance' | 'provider' | 'mcp' | 'skills';
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('provider');
@@ -19,6 +20,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const tabs = [
     { id: 'provider' as SettingsTab, label: '供应商配置', icon: Plug },
     { id: 'mcp' as SettingsTab, label: 'MCP', icon: Server },
+    { id: 'skills' as SettingsTab, label: 'Skills', icon: Puzzle },
     { id: 'appearance' as SettingsTab, label: '外观', icon: Palette },
     { id: 'general' as SettingsTab, label: '常规', icon: Settings },
   ];
@@ -58,6 +60,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             {activeTab === 'appearance' && <ThemeToggle />}
             {activeTab === 'provider' && <ProviderConfigPanel />}
             {activeTab === 'mcp' && <McpSettingsPanel />}
+            {activeTab === 'skills' && <SkillsSettingsPanel />}
           </div>
         </div>
       </DialogContent>
