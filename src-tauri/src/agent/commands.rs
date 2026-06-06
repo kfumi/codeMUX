@@ -125,6 +125,16 @@ pub async fn start_agent_session(
         }
     }
 
+    // 读取启用的 skills
+    let enabled_skills = {
+        let db = state.db.lock().unwrap();
+        crate::skills::db::get_enabled_skill_names(&db).unwrap_or_default()
+    };
+
+    if !enabled_skills.is_empty() {
+        cmd["skills"] = serde_json::json!(enabled_skills);
+    }
+
     let sidecars = agent_state.sidecars.lock().await;
     if let Some(handle) = sidecars.get(&session_id) {
         handle.send_command(&cmd.to_string()).await?;

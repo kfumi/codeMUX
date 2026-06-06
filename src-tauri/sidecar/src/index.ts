@@ -215,7 +215,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       allowedTools: [
         'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep',
         'WebSearch', 'WebFetch', 'AskUserQuestion', 'TodoWrite',
-        'WaitForMcpServers',
+        'WaitForMcpServers', 'Skill',
         ...Object.keys(cmd.mcpServers || {}).map(name => `mcp__${name}__*`),
       ],
       env: subprocessEnv,
@@ -271,6 +271,12 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       },
     };
     if (claudePath) options.pathToClaudeCodeExecutable = claudePath;
+
+    // Pass enabled skills filter to SDK
+    if (cmd.skills && cmd.skills.length > 0) {
+      options.skills = cmd.skills;
+    }
+
     if (cmd.model) options.model = cmd.model;
 
     // Resume existing conversation if we have a captured Claude session ID
