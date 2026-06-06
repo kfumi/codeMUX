@@ -5,17 +5,14 @@ use chrono::Utc;
 use super::types::Skill;
 
 fn row_to_skill(row: &rusqlite::Row) -> rusqlite::Result<Skill> {
-    let enabled: i32 = row.get(8)?;
-    let is_builtin: i32 = row.get(9)?;
+    let enabled: i32 = row.get(4)?;
+    let is_builtin: i32 = row.get(5)?;
     Ok(Skill {
         id: row.get(0)?,
         name: row.get(1)?,
         display_name: row.get(2)?,
         description: row.get(3)?,
-        source_repo: row.get(4)?,
-        source_path: row.get(5)?,
-        version: row.get(6)?,
-        installed_at: row.get(7)?,
+        installed_at: row.get(6)?,
         enabled: enabled != 0,
         is_builtin: is_builtin != 0,
     })
@@ -23,7 +20,7 @@ fn row_to_skill(row: &rusqlite::Row) -> rusqlite::Result<Skill> {
 
 pub fn list_skills(conn: &Connection) -> Result<Vec<Skill>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, display_name, description, source_repo, source_path, version, installed_at, enabled, is_builtin
+        "SELECT id, name, display_name, description, enabled, is_builtin, installed_at
          FROM skills ORDER BY is_builtin DESC, name ASC"
     )?;
     let skills = stmt.query_map([], |row| row_to_skill(row))?
@@ -33,7 +30,7 @@ pub fn list_skills(conn: &Connection) -> Result<Vec<Skill>> {
 
 pub fn get_skill(conn: &Connection, id: &str) -> Result<Option<Skill>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, display_name, description, source_repo, source_path, version, installed_at, enabled, is_builtin
+        "SELECT id, name, display_name, description, enabled, is_builtin, installed_at
          FROM skills WHERE id = ?1"
     )?;
     let mut rows = stmt.query_map(params![id], |row| row_to_skill(row))?;
@@ -45,7 +42,7 @@ pub fn get_skill(conn: &Connection, id: &str) -> Result<Option<Skill>> {
 
 pub fn get_skill_by_name(conn: &Connection, name: &str) -> Result<Option<Skill>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, display_name, description, source_repo, source_path, version, installed_at, enabled, is_builtin
+        "SELECT id, name, display_name, description, enabled, is_builtin, installed_at
          FROM skills WHERE name = ?1"
     )?;
     let mut rows = stmt.query_map(params![name], |row| row_to_skill(row))?;
@@ -57,20 +54,16 @@ pub fn get_skill_by_name(conn: &Connection, name: &str) -> Result<Option<Skill>>
 
 pub fn upsert_skill(conn: &Connection, skill: &Skill) -> Result<()> {
     conn.execute(
-        "INSERT INTO skills (id, name, display_name, description, source_repo, source_path, version, installed_at, enabled, is_builtin)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        "INSERT INTO skills (id, name, display_name, description, installed_at, enabled, is_builtin)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
          ON CONFLICT(name) DO UPDATE SET
              display_name = excluded.display_name,
              description = excluded.description,
-             source_repo = excluded.source_repo,
-             source_path = excluded.source_path,
-             version = excluded.version,
              installed_at = excluded.installed_at,
              enabled = CASE WHEN excluded.is_builtin = 1 THEN skills.enabled ELSE excluded.enabled END,
              is_builtin = excluded.is_builtin",
         params![
             skill.id, skill.name, skill.display_name, skill.description,
-            skill.source_repo, skill.source_path, skill.version,
             skill.installed_at, skill.enabled as i32, skill.is_builtin as i32,
         ],
     )?;
@@ -117,9 +110,6 @@ pub fn register_skill_from_disk(conn: &Connection, skills_dir: &std::path::Path,
         name: name.to_string(),
         display_name,
         description,
-        source_repo: None,
-        source_path: None,
-        version: None,
         installed_at: now,
         enabled: true,
         is_builtin: false,

@@ -104,9 +104,6 @@ pub fn sync_builtin_skills(state: State<'_, AppState>) -> Result<Vec<Skill>, Str
             name: name.to_string(),
             display_name,
             description,
-            source_repo: None,
-            source_path: None,
-            version: None,
             installed_at: existing.as_ref().map(|s| s.installed_at.clone()).unwrap_or_else(|| now.clone()),
             enabled: true,  // Builtins are always enabled
             is_builtin: true,
