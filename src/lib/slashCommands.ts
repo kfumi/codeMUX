@@ -3,7 +3,7 @@
  * 定义所有可用的斜杠命令，包括本地命令和 Claude Code 内置命令
  */
 
-export type CommandCategory = 'session' | 'info' | 'builtin' | 'custom';
+export type CommandCategory = 'session' | 'info' | 'builtin' | 'custom' | 'skill';
 export type CommandHandler = 'local' | 'prompt';
 
 export interface CommandContext {
@@ -178,26 +178,53 @@ const commands: SlashCommand[] = [
   },
 ];
 
+// ─── Skill 命令 (动态注册) ─────────────────────────────
+
+interface SkillInfo {
+  name: string;
+  description: string;
+  is_builtin: boolean;
+}
+
+const skillCommands: SlashCommand[] = [];
+
+/** 注册 skill 命令（应用启动时和 skill 变更时调用） */
+export function registerSkillCommands(skills: SkillInfo[]): void {
+  skillCommands.length = 0;
+  for (const skill of skills) {
+    skillCommands.push({
+      name: skill.name,
+      description: skill.description || skill.name,
+      alias: [],
+      category: 'skill',
+      handler: 'prompt',
+      prompt: `Use the ${skill.name} skill.`,
+    });
+  }
+}
+
 // ─── 公开 API ─────────────────────────────────────────
 
 /** 获取所有命令 */
 export function getAllCommands(): SlashCommand[] {
-  return commands;
+  return [...commands, ...skillCommands];
 }
 
 /** 按名称或别名查找命令 */
 export function findCommand(name: string): SlashCommand | undefined {
   const lower = name.toLowerCase();
-  return commands.find(
+  const all = [...commands, ...skillCommands];
+  return all.find(
     (c) => c.name === lower || c.alias?.some((a) => a === lower)
   );
 }
 
 /** 按前缀过滤命令 (用于自动补全) */
 export function filterCommands(prefix: string): SlashCommand[] {
-  if (!prefix) return commands;
+  const all = [...commands, ...skillCommands];
+  if (!prefix) return all;
   const lower = prefix.toLowerCase();
-  return commands.filter(
+  return all.filter(
     (c) =>
       c.name.startsWith(lower) ||
       c.description.includes(lower) ||

@@ -8,6 +8,8 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { useSessionStore } from './stores/sessionStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useTheme } from './hooks/useTheme';
+import { useSkillStore } from './stores/skillStore';
+import { registerSkillCommands } from './lib/slashCommands';
 import { Sparkles } from 'lucide-react';
 import { TooltipProvider } from './components/ui/tooltip';
 import { Toaster } from 'sonner';
@@ -22,6 +24,23 @@ function App() {
   useEffect(() => {
     fetchConfig();
   }, [fetchConfig]);
+
+  // Sync builtin skills and register skill commands
+  useEffect(() => {
+    const skillStore = useSkillStore.getState();
+    skillStore.syncBuiltins().then(() => {
+      skillStore.fetchInstalled().then(() => {
+        const skills = useSkillStore.getState().installedSkills;
+        registerSkillCommands(
+          skills.filter(s => s.enabled).map(s => ({
+            name: s.name,
+            description: s.description || s.display_name || s.name,
+            is_builtin: s.is_builtin,
+          }))
+        );
+      });
+    });
+  }, []);
 
   const handleNewSession = async (projectId?: string) => {
     try {
