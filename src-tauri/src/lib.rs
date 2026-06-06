@@ -3,6 +3,7 @@ mod config;
 mod commands;
 mod agent;
 mod mcp;
+mod skills;
 
 use tauri::Manager;
 use std::sync::Mutex;

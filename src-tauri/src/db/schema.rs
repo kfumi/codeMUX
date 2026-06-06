@@ -56,6 +56,21 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_servers_name ON mcp_servers(name);
+
+        CREATE TABLE IF NOT EXISTS skills (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            display_name TEXT,
+            description TEXT,
+            source_repo TEXT,
+            source_path TEXT,
+            version TEXT,
+            installed_at TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            is_builtin INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
         "
     )?;
 
