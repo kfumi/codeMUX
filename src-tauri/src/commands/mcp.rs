@@ -7,6 +7,14 @@ use std::collections::HashMap;
 use tokio::io::AsyncWriteExt;
 use tokio::io::AsyncBufReadExt;
 
+/// Result of probing a single MCP server.
+/// Distinguishes "connected but no instructions" from "probe failed".
+#[derive(Debug, Clone)]
+pub struct ProbeResult {
+    pub connected: bool,
+    pub instructions: Option<String>,
+}
+
 #[tauri::command]
 pub fn get_mcp_servers(state: State<'_, AppState>) -> Result<Vec<McpServer>, String> {
     let db = state.db.lock().unwrap();
@@ -74,7 +82,19 @@ fn mcp_initialize_request() -> String {
     format!("{}\n", req)
 }
 
-async fn probe_stdio(transport: &McpTransport) -> Result<bool, String> {
+/// Extract the `instructions` field from an MCP initialize response JSON.
+/// Returns `Some(instructions)` if the server provided them, `None` otherwise.
+fn extract_instructions(json_str: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    let instructions = parsed.get("result")?.get("instructions")?.as_str()?;
+    if instructions.is_empty() {
+        None
+    } else {
+        Some(instructions.to_string())
+    }
+}
+
+async fn probe_stdio(transport: &McpTransport) -> Result<ProbeResult, String> {
     let McpTransport::Stdio { command, args, env } = transport else {
         return Err("Not a stdio transport".into());
     };
@@ -136,11 +156,12 @@ async fn probe_stdio(transport: &McpTransport) -> Result<bool, String> {
                 }
                 let trimmed = line.trim();
                 if trimmed.is_empty() { continue; }
-                println!("[mcp-probe] stdio: read {} bytes: {}", n, trimmed);
+                println!("[mcp-probe] stdio: read {} bytes: {}", n, &trimmed[..trimmed.len().min(200)]);
                 // Handle both newline-delimited JSON and Content-Length framing
                 if trimmed.starts_with('{') && trimmed.contains("\"result\"") {
                     println!("[mcp-probe] stdio: got initialize response ✓");
-                    return Ok(true);
+                    let instructions = extract_instructions(trimmed);
+                    return Ok(ProbeResult { connected: true, instructions });
                 }
                 if trimmed.starts_with("Content-Length") {
                     // Read the empty line after header, then the JSON body
@@ -149,27 +170,27 @@ async fn probe_stdio(transport: &McpTransport) -> Result<bool, String> {
                     line.clear();
                     let n2 = reader.read_line(&mut line).await.map_err(|e| format!("body read: {}", e))?;
                     if n2 > 0 {
-                        println!("[mcp-probe] stdio: read body {} bytes: {}", n2, line.trim());
-                        if line.contains("\"result\"") {
+                        let body = line.trim();
+                        println!("[mcp-probe] stdio: read body {} bytes: {}", n2, &body[..body.len().min(200)]);
+                        if body.contains("\"result\"") {
                             println!("[mcp-probe] stdio: got initialize response ✓");
-                            return Ok(true);
+                            let instructions = extract_instructions(body);
+                            return Ok(ProbeResult { connected: true, instructions });
                         }
                     }
                 }
             }
         }
-        Ok(false) as Result<bool, String>
+        Ok(ProbeResult { connected: false, instructions: None }) as Result<ProbeResult, String>
     }).await;
 
     let _ = child.kill().await;
     match result {
-        Ok(Ok(true)) => {
-            println!("[mcp-probe] stdio: CONNECTED pid={}", pid);
-            Ok(true)
-        }
-        Ok(Ok(false)) => {
-            println!("[mcp-probe] stdio: FAILED pid={} (no valid response)", pid);
-            Ok(false)
+        Ok(Ok(probe_result)) => {
+            println!("[mcp-probe] stdio: {} pid={} instructions={}",
+                if probe_result.connected { "CONNECTED" } else { "FAILED" },
+                pid, probe_result.instructions.is_some());
+            Ok(probe_result)
         }
         Ok(Err(e)) => {
             println!("[mcp-probe] stdio: ERROR pid={}: {}", pid, e);
@@ -182,7 +203,7 @@ async fn probe_stdio(transport: &McpTransport) -> Result<bool, String> {
     }
 }
 
-async fn probe_http(transport: &McpTransport) -> Result<bool, String> {
+async fn probe_http(transport: &McpTransport) -> Result<ProbeResult, String> {
     let McpTransport::Http { url, headers } = transport else {
         return Err("Not http".into());
     };
@@ -205,6 +226,7 @@ async fn probe_http(transport: &McpTransport) -> Result<bool, String> {
     for (k, v) in &headers {
         req = req.header(k.as_str(), v.as_str());
     }
+    let not_connected = ProbeResult { connected: false, instructions: None };
     let resp = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         req.send()
@@ -221,36 +243,54 @@ async fn probe_http(transport: &McpTransport) -> Result<bool, String> {
     let content_type = resp.headers().get("content-type").map(|v| v.to_str().unwrap_or("").to_string()).unwrap_or_default();
     println!("[mcp-probe] {}: HTTP {} (Content-Type: {})", transport_type, status, content_type);
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
+        let body = tokio::time::timeout(std::time::Duration::from_secs(5), resp.text())
+            .await.unwrap_or_else(|_| Ok(String::new())).unwrap_or_default();
         println!("[mcp-probe] {}: FAILED body: {}", transport_type, body);
         return Err(format!("HTTP {} {}", status, body));
     }
 
-    let body = resp.text().await.map_err(|e| format!("Read body: {}", e))?;
+    // Wrap body read in timeout to prevent indefinite blocking on slow servers
+    let body = tokio::time::timeout(std::time::Duration::from_secs(10), resp.text())
+        .await
+        .map_err(|_| {
+            println!("[mcp-probe] {}: TIMEOUT reading body", transport_type);
+            "Timed out reading response body".to_string()
+        })?
+        .map_err(|e| format!("Read body: {}", e))?;
     println!("[mcp-probe] {}: response ({} bytes): {}", transport_type, body.len(), body.chars().take(200).collect::<String>());
 
     // Response could be plain JSON or SSE format
-    let ok = if body.contains("\"result\"") {
-        true
-    } else if content_type.contains("text/event-stream") {
+    // Check SSE FIRST — SSE bodies also contain "result" but are not valid JSON
+    let json_str = if content_type.contains("text/event-stream") {
         // Parse SSE: look for "data: {json}" lines containing "result"
-        body.lines().any(|line| {
+        body.lines().find_map(|line| {
             let trimmed = line.trim();
-            trimmed.starts_with("data:") && trimmed.contains("\"result\"")
+            if trimmed.starts_with("data:") && trimmed.contains("\"result\"") {
+                trimmed.strip_prefix("data:").map(|s| s.trim())
+            } else {
+                None
+            }
         })
+    } else if body.contains("\"result\"") {
+        Some(body.as_str())
     } else {
-        false
+        None
     };
 
-    if ok {
-        println!("[mcp-probe] {}: CONNECTED ✓", transport_type);
-    } else {
-        println!("[mcp-probe] {}: FAILED (no result in response)", transport_type);
+    match json_str {
+        Some(json) => {
+            let instructions = extract_instructions(json);
+            println!("[mcp-probe] {}: CONNECTED ✓ instructions={}", transport_type, instructions.is_some());
+            Ok(ProbeResult { connected: true, instructions })
+        }
+        None => {
+            println!("[mcp-probe] {}: FAILED (no result in response)", transport_type);
+            Ok(not_connected)
+        }
     }
-    Ok(ok)
 }
 
-async fn probe_sse(transport: &McpTransport) -> Result<bool, String> {
+async fn probe_sse(transport: &McpTransport) -> Result<ProbeResult, String> {
     let McpTransport::Sse { url, headers } = transport else {
         return Err("Not an SSE transport".into());
     };
@@ -278,23 +318,27 @@ async fn probe_sse(transport: &McpTransport) -> Result<bool, String> {
     println!("[mcp-probe] sse: HTTP {} (Content-Type: {})", status, content_type);
 
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
+        let body = tokio::time::timeout(std::time::Duration::from_secs(5), resp.text())
+            .await.unwrap_or_else(|_| Ok(String::new())).unwrap_or_default();
         println!("[mcp-probe] sse: FAILED body: {}", body.chars().take(200).collect::<String>());
         return Err(format!("HTTP {} {}", status, body));
     }
 
     // SSE endpoint should return text/event-stream
-    let ok = content_type.contains("text/event-stream") || content_type.contains("application/json");
-    if ok {
+    let connected = content_type.contains("text/event-stream") || content_type.contains("application/json");
+    if connected {
         println!("[mcp-probe] sse: CONNECTED ✓ (SSE stream available)");
     } else {
         println!("[mcp-probe] sse: FAILED (unexpected Content-Type: {})", content_type);
     }
-    Ok(ok)
+    // SSE probes only verify endpoint reachability; instructions come from
+    // the full MCP handshake which the SDK handles via startup().
+    Ok(ProbeResult { connected, instructions: None })
 }
 
-/// Probe a list of MCP servers concurrently. Returns name → connected?
-pub async fn probe_servers(servers: &[McpServer]) -> HashMap<String, bool> {
+/// Probe a list of MCP servers concurrently.
+/// Returns name → ProbeResult (connected status + optional instructions).
+pub async fn probe_servers(servers: &[McpServer]) -> HashMap<String, ProbeResult> {
     if servers.is_empty() {
         return HashMap::new();
     }
@@ -304,24 +348,27 @@ pub async fn probe_servers(servers: &[McpServer]) -> HashMap<String, bool> {
         let name = server.name.clone();
         println!("[mcp-probe] Queueing probe: {} ({})", name, transport.transport_type());
         handles.push(tokio::spawn(async move {
-            let ok = match &transport {
+            let result = match &transport {
                 McpTransport::Stdio { .. } => probe_stdio(&transport).await,
                 McpTransport::Http { .. } => probe_http(&transport).await,
                 McpTransport::Sse { .. } => probe_sse(&transport).await,
             };
-            let success = ok.unwrap_or(false);
-            println!("[mcp-probe] Result: {} => {}", name, if success { "CONNECTED" } else { "FAILED" });
-            (name, success)
+            let probe_result = result.unwrap_or(ProbeResult { connected: false, instructions: None });
+            println!("[mcp-probe] Result: {} => {} instructions={}", name,
+                if probe_result.connected { "CONNECTED" } else { "FAILED" },
+                probe_result.instructions.is_some());
+            (name, probe_result)
         }));
     }
 
     let mut results = HashMap::new();
     for handle in handles {
-        if let Ok((name, ok)) = handle.await {
-            results.insert(name, ok);
+        let (name, probe_result) = handle.await.unwrap_or_else(|_| (String::new(), ProbeResult { connected: false, instructions: None }));
+        if !name.is_empty() {
+            results.insert(name, probe_result);
         }
     }
-    let connected = results.values().filter(|v| **v).count();
+    let connected = results.values().filter(|r| r.connected).count();
     let total = results.len();
     println!("[mcp-probe] Summary: {}/{} connected", connected, total);
     results
@@ -333,5 +380,7 @@ pub async fn probe_all_mcp_servers(state: State<'_, AppState>) -> Result<HashMap
         let db = state.db.lock().unwrap();
         db::get_enabled_mcp_servers(&db).map_err(|e| format!("Failed to get servers: {}", e))?
     };
-    Ok(probe_servers(&servers).await)
+    let results = probe_servers(&servers).await;
+    // Tauri command returns bool for UI — now uses ProbeResult.connected
+    Ok(results.into_iter().map(|(k, v)| (k, v.connected)).collect())
 }

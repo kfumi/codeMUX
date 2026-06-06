@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { execSync } from 'node:child_process';
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query, startup } from '@anthropic-ai/claude-agent-sdk';
 import type { SidecarCommand } from './types.js';
 
 /** Pending tool responses waiting for user input */
@@ -42,6 +42,43 @@ function loadClaudeSettingsEnv(): void {
 }
 
 let activeQuery: ReturnType<typeof query> | null = null;
+
+/**
+ * Build MCP tool instructions from server names and server-provided instructions.
+ * This replicates Claude Code Desktop's mcp_instructions_delta mechanism,
+ * ensuring the model always knows what MCP tools are available and when to use them.
+ */
+function buildMcpInstructions(
+  mcpServers?: Record<string, unknown>,
+  serverInstructions?: Record<string, string>,
+): string | undefined {
+  if (!mcpServers || Object.keys(mcpServers).length === 0) return undefined;
+
+  const lines: string[] = [];
+  const serverNames = Object.keys(mcpServers);
+
+  // Per-server instructions (from MCP initialize response)
+  if (serverInstructions && Object.keys(serverInstructions).length > 0) {
+    for (const name of serverNames) {
+      const instr = serverInstructions[name];
+      if (instr) {
+        lines.push(`## ${name}`);
+        lines.push(instr);
+        lines.push('');
+      }
+    }
+  }
+
+  // WaitForMcpServers: startup() pre-warms but doesn't guarantee all MCP servers
+  // are connected by the time the model starts. The model must call
+  // WaitForMcpServers before using any MCP tool.
+  // Keep the instruction short to avoid verbose "let me wait" responses.
+  lines.push(`MCP servers: ${serverNames.join(', ')}.`);
+  lines.push('Before using any MCP tool, call WaitForMcpServers first.');
+
+  return lines.join('\n');
+}
+
 let abortController: AbortController | null = null;
 
 /**
@@ -146,6 +183,14 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       }
     }
 
+    // Build MCP instructions from server names + descriptions (replicates
+    // Claude Code Desktop's mcp_instructions_delta mechanism)
+    const mcpInstructions = buildMcpInstructions(cmd.mcpServers, cmd.mcpServerInstructions);
+    process.stderr.write(`[sidecar] MCP instructions built: ${mcpInstructions ? `${mcpInstructions.length} chars` : 'none'}\n`);
+    if (mcpInstructions) {
+      process.stderr.write(`[sidecar] MCP instructions preview: ${mcpInstructions.slice(0, 200)}...\n`);
+    }
+
     const options: Record<string, unknown> = {
       cwd: cmd.cwd === '.' ? os.homedir() : cmd.cwd,
       abortController,
@@ -162,10 +207,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
-        append: `You have MCP servers configured. Some may still be connecting (status "pending").
-You MUST call the WaitForMcpServers tool FIRST before answering ANY question.
-Do NOT list your tools, do NOT explain what you can do, do NOT answer the user — just call WaitForMcpServers immediately.
-After WaitForMcpServers returns, you will have access to MCP tools. Then answer the user normally.`,
+        append: mcpInstructions || '',
       },
       // Capture stderr from the Claude Code subprocess for debugging
       stderr: (data: string) => {
@@ -220,12 +262,28 @@ After WaitForMcpServers returns, you will have access to MCP tools. Then answer 
 
     process.stderr.write(`[sidecar] query options: ${JSON.stringify({ ...options, abortController: '[object]' })}\n`);
 
-    process.stderr.write(`[sidecar] Calling query()...\n`);
-    activeQuery = query({
-      prompt: cmd.prompt,
-      options: options as any,
-    });
-    process.stderr.write(`[sidecar] query() returned, starting iteration...\n`);
+    // Emit progress event so the frontend knows we're initializing MCP connections
+    emit({ type: 'mcp_status_update', servers: {}, status: 'initializing' });
+
+    // Use startup() to pre-warm the CLI subprocess and MCP connections.
+    // Falls back to direct query() if startup() fails (e.g., MCP timeout).
+    process.stderr.write(`[sidecar] Calling startup() to pre-warm MCP connections...\n`);
+    try {
+      const warm = await startup({
+        options: options as any,
+        initializeTimeoutMs: 30_000,
+      });
+      process.stderr.write(`[sidecar] startup() complete. Sending prompt...\n`);
+      activeQuery = warm.query(cmd.prompt);
+    } catch (startupErr) {
+      process.stderr.write(`[sidecar] startup() failed: ${startupErr}. Falling back to query()...\n`);
+      emit({ type: 'mcp_status_update', servers: {}, status: 'startup_failed_fallback' });
+      activeQuery = query({
+        prompt: cmd.prompt,
+        options: options as any,
+      });
+    }
+    process.stderr.write(`[sidecar] query ready, starting iteration...\n`);
 
     let msgCount = 0;
     const MESSAGE_TIMEOUT_MS = 120_000; // 2 minutes per message

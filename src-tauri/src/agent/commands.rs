@@ -99,6 +99,30 @@ pub async fn start_agent_session(
         if !mcp_config.as_object().map_or(true, |o| o.is_empty()) {
             cmd["mcpServers"] = mcp_config;
         }
+
+        // Use cached MCP instructions from the startup probe.
+        // This avoids re-probing (spawning+killing) every MCP server on each session start.
+        // If the startup probe hasn't finished yet, instructions will be empty —
+        // the model can still use WaitForMcpServers as a fallback.
+        let cached_instructions = {
+            let cache = state.mcp_instructions.lock().unwrap();
+            cache.clone()
+        };
+        let instructions: serde_json::Map<String, serde_json::Value> = cached_instructions
+            .into_iter()
+            .filter_map(|(name, instr)| {
+                // Only include instructions for servers that are in the current config
+                if mcp_servers.iter().any(|s| s.name == name) && !instr.is_empty() {
+                    Some((name, serde_json::Value::String(instr)))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !instructions.is_empty() {
+            eprintln!("[agent] MCP server instructions from cache: {} servers", instructions.len());
+            cmd["mcpServerInstructions"] = serde_json::Value::Object(instructions);
+        }
     }
 
     let sidecars = agent_state.sidecars.lock().await;
