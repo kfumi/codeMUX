@@ -20,7 +20,6 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
     return () => observer.disconnect();
   }, []);
 
-  // 动态加载对应的 highlight.js 主题
   useEffect(() => {
     const id = 'hljs-theme';
     let link = document.getElementById(id) as HTMLLinkElement;
@@ -46,15 +45,22 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
       components={{
         pre({ children, ...props }) {
           const codeText = extractCodeText(children);
+          const lang = extractLanguage(children);
           return (
-            <div className="relative group my-3">
+            <div className="relative group my-3 rounded-xl overflow-hidden border border-border/25">
+              {lang && (
+                <div className="code-lang-badge">
+                  {lang}
+                </div>
+              )}
               <button
                 onClick={() => handleCopy(codeText)}
-                className="absolute top-2 right-2 px-2 py-1 text-xs bg-muted hover:bg-muted/80 text-muted-foreground rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute top-2 right-2 px-2 py-1 text-[11px] font-medium bg-muted/60 hover:bg-muted text-muted-foreground/60 hover:text-muted-foreground rounded-md opacity-0 group-hover:opacity-100 transition-all duration-200 backdrop-blur-sm"
+                style={{ fontFamily: "'JetBrains Mono', monospace" }}
               >
                 复制
               </button>
-              <pre {...props} className="overflow-x-auto rounded-lg bg-muted p-4 text-sm">
+              <pre {...props} className="overflow-x-auto bg-muted/40 p-4 text-sm leading-relaxed !rounded-none !border-0 !m-0">
                 {children}
               </pre>
             </div>
@@ -64,7 +70,7 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
           const isInline = !className;
           if (isInline) {
             return (
-              <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
+              <code className="bg-muted/50 px-1.5 py-0.5 rounded-md text-[13px] font-mono border border-border/20" {...props}>
                 {children}
               </code>
             );
@@ -72,11 +78,15 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
           return <code className={className} {...props}>{children}</code>;
         },
         hr() {
-          return <hr className="my-6 border-border" />;
+          return (
+            <div className="my-6 flex items-center gap-3">
+              <div className="flex-1 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+            </div>
+          );
         },
         table({ children, ...props }) {
           return (
-            <div className="my-4 overflow-x-auto rounded-lg border border-border">
+            <div className="my-4 overflow-x-auto rounded-xl border border-border/30">
               <table className="w-full text-sm" {...props}>
                 {children}
               </table>
@@ -84,26 +94,40 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
           );
         },
         thead({ children, ...props }) {
-          return <thead className="bg-muted/50" {...props}>{children}</thead>;
+          return <thead className="bg-muted/30" {...props}>{children}</thead>;
         },
         tbody({ children, ...props }) {
-          return <tbody className="divide-y divide-border" {...props}>{children}</tbody>;
+          return <tbody className="divide-y divide-border/30" {...props}>{children}</tbody>;
         },
         tr({ children, ...props }) {
-          return <tr className="hover:bg-muted/30 transition-colors" {...props}>{children}</tr>;
+          return <tr className="hover:bg-muted/20 transition-colors" {...props}>{children}</tr>;
         },
         th({ children, ...props }) {
           return (
-            <th className="px-4 py-2.5 text-left font-semibold text-foreground/80 border-b border-border" {...props}>
+            <th className="px-4 py-2.5 text-left font-semibold text-foreground/70 text-xs uppercase tracking-wider border-b border-border/30" {...props}>
               {children}
             </th>
           );
         },
         td({ children, ...props }) {
           return (
-            <td className="px-4 py-2.5 text-foreground/70 border-r border-border last:border-r-0" {...props}>
+            <td className="px-4 py-2.5 text-foreground/70 border-r border-border/20 last:border-r-0" {...props}>
               {children}
             </td>
+          );
+        },
+        a({ children, href, ...props }) {
+          return (
+            <a href={href} className="text-[hsl(var(--primary))] hover:underline underline-offset-2" target="_blank" rel="noopener noreferrer" {...props}>
+              {children}
+            </a>
+          );
+        },
+        blockquote({ children, ...props }) {
+          return (
+            <blockquote className="border-l-2 border-[hsl(var(--primary)/0.3)] pl-4 py-1 my-3 text-muted-foreground/70 italic" {...props}>
+              {children}
+            </blockquote>
           );
         },
       }}
@@ -120,4 +144,15 @@ function extractCodeText(children: React.ReactNode): string {
     return extractCodeText((children as React.ReactElement).props.children);
   }
   return '';
+}
+
+function extractLanguage(children: React.ReactNode): string | null {
+  if (children && typeof children === 'object' && 'props' in children) {
+    const props = (children as React.ReactElement).props;
+    if (props.className) {
+      const match = props.className.match(/language-(\w+)/);
+      if (match) return match[1];
+    }
+  }
+  return null;
 }

@@ -18,7 +18,7 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
       {text && (
         <div className="animate-fade-in">
           <MarkdownRenderer content={text} />
-          <span className="inline-block w-0.5 h-4 bg-foreground/70 animate-pulse ml-0.5 align-text-bottom" />
+          <span className="inline-block w-0.5 h-4 bg-foreground/60 animate-pulse ml-0.5 align-text-bottom rounded-full" />
         </div>
       )}
     </>
@@ -63,7 +63,7 @@ function AgentEventItem({ sessionId, msg, prevMsg, resultMap, provider, onFileCl
     return renderEvent(sessionId, msg, prevMsg, resultMap, provider, onFileClick, toolDurations, thinkingDurations, eventIndex, timestamp, assistantTextMap, events);
   } catch (err) {
     return (
-      <div className="text-xs text-red-500 bg-red-500/[0.06] rounded-xl p-3 my-1 border border-red-500/15">
+      <div className="text-xs text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] rounded-xl p-3 my-1 border border-[hsl(var(--destructive)/0.12)]">
         渲染错误: {String(err)}
         <pre className="mt-1 text-[10px] opacity-50">{JSON.stringify(msg, null, 2).slice(0, 200)}</pre>
       </div>
@@ -125,7 +125,6 @@ function buildAssistantTextMap(
 function buildToolDurationMap(events: AgentMessage[], eventTimestamps: number[]): Record<string, number> {
   const durations: Record<string, number> = {};
 
-  // 1. Frontend timestamps for all tools (tool_use -> tool_result)
   const startTimes: Record<string, number> = {};
   for (let i = 0; i < events.length; i++) {
     const evt = events[i];
@@ -160,7 +159,6 @@ function buildToolDurationMap(events: AgentMessage[], eventTimestamps: number[])
     }
   }
 
-  // 2. SDK tool_progress events (override frontend timestamps)
   for (const evt of events) {
     if (evt.kind !== 'raw') continue;
     const data = evt.data;
@@ -172,7 +170,6 @@ function buildToolDurationMap(events: AgentMessage[], eventTimestamps: number[])
     }
   }
 
-  // 3. SDK task_notification events (override for Agent tools)
   for (const evt of events) {
     if (evt.kind !== 'raw' && evt.kind !== 'system') continue;
     const data: any = evt.data;
@@ -202,7 +199,6 @@ function buildThinkingDurationMap(
     if (!hasThinking) continue;
 
     const startTs = eventTimestamps[i];
-    // Find the next event with a valid timestamp
     for (let j = i + 1; j < events.length; j++) {
       if (eventTimestamps[j]) {
         durations[i] = eventTimestamps[j] - startTs;
@@ -260,7 +256,7 @@ function CopyButton({ content }: { content: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="inline-flex items-center text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors"
+      className="inline-flex items-center text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors"
       title="复制"
     >
       {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -268,25 +264,25 @@ function CopyButton({ content }: { content: string }) {
   );
 }
 
-function renderEvent(sessionId: string, msg: AgentMessage, prevMsg: AgentMessage | undefined, resultMap: Record<string, ToolResultEntry>, provider: Provider | null, onFileClick: (path: string, originalContent?: string) => void, toolDurations: Record<string, number>, thinkingDurations: Record<number, number>, eventIndex: number, timestamp?: number, assistantTextMap?: Record<number, { text: string; timestamp?: number }>, events?: AgentMessage[]) {
+function renderEvent(sessionId: string, msg: AgentMessage, _prevMsg: AgentMessage | undefined, resultMap: Record<string, ToolResultEntry>, provider: Provider | null, onFileClick: (path: string, originalContent?: string) => void, toolDurations: Record<string, number>, thinkingDurations: Record<number, number>, eventIndex: number, timestamp?: number, assistantTextMap?: Record<number, { text: string; timestamp?: number }>, events?: AgentMessage[]) {
   switch (msg.kind) {
     case 'user': {
       const content = msg.data.content;
       if (content === '[Request interrupted by user for tool use]') {
         return (
-          <div className="text-xs text-muted-foreground/50 py-2 px-1 animate-fade-in">
+          <div className="text-xs text-muted-foreground/40 py-2 px-1 animate-fade-in">
             工具运行中断
           </div>
         );
       }
       return (
         <div className="flex flex-col items-end animate-fade-in-up">
-          <div className="max-w-[80%] bg-primary/10 text-foreground rounded-2xl rounded-tr-md px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-all">
+          <div className="max-w-[80%] bg-gradient-to-br from-[hsl(var(--primary)/0.1)] to-[hsl(var(--primary)/0.05)] text-foreground rounded-2xl rounded-tr-md px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-all border border-[hsl(var(--primary)/0.08)]">
             {content}
           </div>
           <div className="flex items-center gap-1.5 mt-1">
             {timestamp != null && timestamp > 0 && (
-              <span className="text-xs text-muted-foreground/40 tabular-nums"
+              <span className="text-xs text-muted-foreground/30 tabular-nums"
                 style={{ fontFamily: "'JetBrains Mono', monospace" }}
               >
                 {formatTime(timestamp)}
@@ -307,7 +303,6 @@ function renderEvent(sessionId: string, msg: AgentMessage, prevMsg: AgentMessage
     case 'assistant': {
       const rawBlocks = msg.data.message?.content;
       const blocks = Array.isArray(rawBlocks) ? rawBlocks : typeof rawBlocks === 'string' ? [{ type: 'text', text: rawBlocks }] : [];
-      // Filter out "No response requested." — useless message from interrupted queries
       const filteredBlocks = blocks.filter((b: any) =>
         !(b?.type === 'text' && b.text?.trim() === 'No response requested.')
       );
@@ -349,7 +344,6 @@ function renderEvent(sessionId: string, msg: AgentMessage, prevMsg: AgentMessage
     }
 
     case 'tool_result':
-      // 已在 assistant 的 tool_use 中内联展示，跳过
       return null;
 
     case 'ask_user_question': {
@@ -366,38 +360,36 @@ function renderEvent(sessionId: string, msg: AgentMessage, prevMsg: AgentMessage
     }
 
     case 'result': {
-      // Hide result stats after compact — they're meaningless (0 turns, 0 tokens)
-      // Look backwards through events to find if there was a compact message
       if (events) {
         for (let i = eventIndex - 1; i >= 0; i--) {
           if (events[i].kind === 'compact') return null;
-          if (events[i].kind === 'result') break; // Stop at previous result
+          if (events[i].kind === 'result') break;
         }
       }
       const cost = calculateCost(msg.data.usage, provider);
       const assistantData = assistantTextMap?.[eventIndex];
       return (
-        <div className="border-t border-border/20 pt-3 mt-4 animate-fade-in-up">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/60"
+        <div className="border-t border-border/15 pt-3 mt-4 animate-fade-in-up">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground/40"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             {assistantData && <CopyButton content={assistantData.text} />}
             {assistantData?.timestamp != null && assistantData.timestamp > 0 && (
               <>
                 <span className="tabular-nums">{formatTime(assistantData.timestamp)}</span>
-                <span className="text-muted-foreground/30">|</span>
+                <span className="text-muted-foreground/20">·</span>
               </>
             )}
             <span>耗时 {(msg.data.duration_ms / 1000).toFixed(1)}s</span>
-            <span className="text-muted-foreground/30">|</span>
+            <span className="text-muted-foreground/20">·</span>
             <span>轮次 {msg.data.num_turns}</span>
             {cost != null && (
               <>
-                <span className="text-muted-foreground/30">|</span>
+                <span className="text-muted-foreground/20">·</span>
                 <span>${cost.toFixed(4)}</span>
               </>
             )}
-            <span className="text-muted-foreground/30">|</span>
+            <span className="text-muted-foreground/20">·</span>
             <span>{(msg.data.usage?.input_tokens || 0) + (msg.data.usage?.cache_read_input_tokens || 0) + (msg.data.usage?.cache_creation_input_tokens || 0)}+{msg.data.usage?.output_tokens} token</span>
             {(() => {
               const totalInput = (msg.data.usage?.input_tokens || 0) + (msg.data.usage?.cache_read_input_tokens || 0) + (msg.data.usage?.cache_creation_input_tokens || 0);
@@ -405,7 +397,7 @@ function renderEvent(sessionId: string, msg: AgentMessage, prevMsg: AgentMessage
               if (totalInput > 0 && cacheRead > 0) {
                 return (
                   <>
-                    <span className="text-muted-foreground/30">|</span>
+                    <span className="text-muted-foreground/20">·</span>
                     <span>缓存命中 {((cacheRead / totalInput) * 100).toFixed(0)}%</span>
                   </>
                 );
@@ -419,7 +411,7 @@ function renderEvent(sessionId: string, msg: AgentMessage, prevMsg: AgentMessage
 
     case 'error':
       return (
-        <div className="text-sm text-red-500 bg-red-500/[0.06] rounded-xl p-3 border border-red-500/15 animate-fade-in">
+        <div className="text-sm text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] rounded-xl p-3 border border-[hsl(var(--destructive)/0.12)] animate-fade-in">
           错误: {msg.data.error}
         </div>
       );
@@ -430,8 +422,8 @@ function renderEvent(sessionId: string, msg: AgentMessage, prevMsg: AgentMessage
       return (
         <div className={`text-xs rounded-xl p-3 my-1 border animate-fade-in ${
           isLastRetry
-            ? 'text-red-500 bg-red-500/[0.06] border-red-500/15'
-            : 'text-amber-500 bg-amber-500/[0.06] border-amber-500/15'
+            ? 'text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]'
+            : 'text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]'
         }`}>
           {isLastRetry ? '请求失败' : `请求重试 ${attempt}/${max_retries}`} · {error_status}: {error}
         </div>
@@ -443,8 +435,8 @@ function renderEvent(sessionId: string, msg: AgentMessage, prevMsg: AgentMessage
       const tokenText = preTokens ? ` · 节省 ${formatTokenCount(preTokens)} tokens` : '';
       return (
         <div className="text-center py-3">
-          <span className="text-xs text-muted-foreground/50 tracking-wider">
-            - 上下文已压缩{tokenText} -
+          <span className="text-[11px] text-muted-foreground/35 tracking-wider font-medium">
+            — 上下文已压缩{tokenText} —
           </span>
         </div>
       );
@@ -454,16 +446,15 @@ function renderEvent(sessionId: string, msg: AgentMessage, prevMsg: AgentMessage
       return null;
 
     case 'raw':
-      // 隐藏 sidecar 调试信息和 SDK 内部系统消息，不在对话中展示
       if (msg.data.type === 'sidecar_debug' || msg.data.type === 'system') {
         return null;
       }
       return (
-        <details className="text-xs text-muted-foreground/50 group">
-          <summary className="cursor-pointer hover:text-muted-foreground transition-colors">
+        <details className="text-xs text-muted-foreground/35 group">
+          <summary className="cursor-pointer hover:text-muted-foreground/60 transition-colors">
             原始事件: {String(msg.data.type)}
           </summary>
-          <pre className="mt-1.5 bg-muted/20 rounded-xl p-3 overflow-auto max-h-32 border border-border/15"
+          <pre className="mt-1.5 bg-muted/20 rounded-xl p-3 overflow-auto max-h-32 border border-border/10"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             {JSON.stringify(msg.data, null, 2)}
@@ -493,14 +484,13 @@ function MessageNav({
   const [hoveredBar, setHoveredBar] = useState<number | null>(null);
   const [activeIdx, setActiveIdx] = useState(-1);
 
-  // 监听滚动，计算当前可视区域顶部附近的用户消息
   useEffect(() => {
     const container = scrollContainer.current;
     if (!container || userIdxes.length === 0) return;
 
     const updateActive = () => {
       const containerRect = container.getBoundingClientRect();
-      const containerTop = containerRect.top + 40; // 留一点顶部边距
+      const containerTop = containerRect.top + 40;
 
       let closest = -1;
       let minDist = Infinity;
@@ -510,14 +500,12 @@ function MessageNav({
         if (!el) continue;
         const rect = el.getBoundingClientRect();
         const dist = rect.top - containerTop;
-        // 找到距离顶部最近且在可视区域内的消息
         if (dist >= -20 && dist < minDist) {
           minDist = dist;
           closest = idx;
         }
       }
 
-      // 如果没有找到，在顶部上方的消息中找最近的
       if (closest === -1) {
         for (const idx of userIdxes) {
           const el = document.getElementById(`msg-${idx}`);
@@ -546,14 +534,13 @@ function MessageNav({
     if (container) {
       const containerTop = container.getBoundingClientRect().top;
       const elTop = el.getBoundingClientRect().top;
-      const offset = 22; // 消息顶部留出间距
+      const offset = 22;
       container.scrollTo({ top: container.scrollTop + (elTop - containerTop) - offset, behavior: 'smooth' });
     } else {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
 
-  // 截取消息预览文本
   const getPreview = (msg: AgentMessage): string => {
     if (msg.kind === 'user') {
       const text = msg.data.content;
@@ -586,17 +573,16 @@ function MessageNav({
               className={`
                 w-4 h-1.5 rounded-full transition-all duration-150
                 ${idx === activeIdx
-                  ? 'bg-primary scale-125'
-                  : 'bg-muted-foreground/25 hover:bg-muted-foreground/50'
+                  ? 'bg-[hsl(var(--primary))] scale-125'
+                  : 'bg-muted-foreground/20 hover:bg-muted-foreground/40'
                 }
               `}
             />
-            {/* 消息预览气泡 */}
             {hoveredBar === idx && (
               <div className="
                 absolute right-full top-1/2 -translate-y-1/2 mr-2
                 max-w-[220px] px-3 py-1.5 rounded-lg
-                bg-popover border border-border shadow-lg
+                bg-[hsl(var(--popover))] border border-border/30 shadow-lg
                 text-xs text-popover-foreground whitespace-nowrap overflow-hidden text-ellipsis
                 animate-fade-in pointer-events-none
               ">
@@ -620,7 +606,6 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
-  // 跟踪上一次事件数量，用于区分历史加载和实时消息
   const prevCountRef = useRef(0);
   const prevUserMsgCount = useRef(0);
   const openFile = usePreviewStore((s) => s.openFile);
@@ -631,7 +616,6 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
     [openFile]
   );
 
-  // 监听滚动位置 — 只控制"回到底部"按钮的显示
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -645,36 +629,31 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
     setShowScrollBtn(hasOverflow && distanceFromBottom > 200);
   }, [events.length, isRunning]);
 
-  // 控制内容可见性：历史消息加载时先隐藏，等滚动位置设好再显示，避免闪顶部
   const [contentVisible, setContentVisible] = useState(true);
 
-  // 切换会话时重置状态并隐藏内容
   useEffect(() => {
     prevCountRef.current = 0;
     prevUserMsgCount.current = 0;
     prevEventCount.current = 0;
     setShowScrollBtn(false);
-    setContentVisible(false); // 隐藏，等滚动到位再显示
+    setContentVisible(false);
   }, [sessionId]);
 
-  // 历史消息加载完成后：先设滚动位置，再显示内容
   const prevEventCount = useRef(0);
   useEffect(() => {
     if (prevEventCount.current === 0 && events.length > 0) {
       prevUserMsgCount.current = events.filter(e => e.kind === 'user').length;
       prevEventCount.current = events.length;
-      // 内容已渲染但 display:none，直接设 scrollTop，无任何视觉跳动
       requestAnimationFrame(() => {
         const el = scrollRef.current;
         if (el) el.scrollTop = el.scrollHeight;
-        setContentVisible(true); // 滚动到位了，显示内容
+        setContentVisible(true);
       });
       return;
     }
     prevEventCount.current = events.length;
   }, [events.length]);
 
-  // 内容为空时隐藏滚动按钮
   useEffect(() => {
     if (events.length === 0 && !isRunning) {
       setShowScrollBtn(false);
@@ -682,12 +661,10 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
     }
   }, [events.length, isRunning]);
 
-  // 计算工具调用和思考过程的执行时长
   const toolDurations = useMemo(() => buildToolDurationMap(events, eventTimestamps), [events, eventTimestamps]);
   const thinkingDurations = useMemo(() => buildThinkingDurationMap(events, eventTimestamps), [events, eventTimestamps]);
   const assistantTextMap = useMemo(() => buildAssistantTextMap(events, eventTimestamps), [events, eventTimestamps]);
 
-  // 提取用户消息的事件索引，用于右侧导航（排除中断消息）
   const userIdxes = useMemo(
     () => events.reduce<number[]>((acc, msg, i) => {
       if (msg.kind === 'user' && msg.data.content !== '[Request interrupted by user for tool use]') acc.push(i);
@@ -700,7 +677,6 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // 用户发送消息后自动滚到底部（不干扰 AI 生成过程中的滚动）
   const userMsgCount = useMemo(() => events.filter(e => e.kind === 'user').length, [events]);
   useEffect(() => {
     if (userMsgCount > prevUserMsgCount.current) {
@@ -720,10 +696,10 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
         <div className="max-w-3xl mx-auto space-y-5">
           {events.length === 0 && !isRunning && (
             <div className="flex flex-col items-center justify-center py-24 text-center animate-fade-in">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[hsl(var(--primary)/0.12)] to-[hsl(var(--primary)/0.03)] flex items-center justify-center mb-4 border border-[hsl(var(--primary)/0.1)]">
-                <Sparkles className="h-5 w-5 text-[hsl(var(--primary)/0.5)]" />
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[hsl(var(--primary)/0.1)] to-[hsl(var(--primary)/0.03)] flex items-center justify-center mb-5 border border-[hsl(var(--primary)/0.08)] shadow-[0_0_20px_hsl(var(--primary)/0.06)]">
+                <Sparkles className="h-6 w-6 text-[hsl(var(--primary)/0.4)]" />
               </div>
-              <p className="text-sm text-foreground/70 leading-relaxed max-w-[240px]">
+              <p className="text-sm text-foreground/50 leading-relaxed max-w-[260px]">
                 输入任务描述，让 Claude Agent<br />自主完成编码工作
               </p>
             </div>
@@ -736,8 +712,8 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
           {/* Streaming content — isolated component to avoid re-rendering the entire list */}
           <StreamingContent sessionId={sessionId} />
           {isRunning && (
-            <div className="flex items-center gap-2.5 text-sm text-muted-foreground/60 py-2 animate-fade-in">
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.8)]" />
+            <div className="flex items-center gap-2.5 text-sm text-muted-foreground/40 py-2 animate-fade-in">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
               <ElapsedTimer />
             </div>
           )}
@@ -755,9 +731,9 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
           className={`
             pointer-events-auto
             h-9 w-9 rounded-full
-            bg-background border border-border shadow-md
+            bg-[hsl(var(--card))] border border-border/30 shadow-[0_2px_10px_-2px_hsl(var(--foreground)/0.08)]
             flex items-center justify-center
-            text-foreground/60 hover:text-foreground hover:shadow-lg
+            text-foreground/50 hover:text-foreground hover:shadow-[0_4px_16px_-2px_hsl(var(--foreground)/0.12)]
             transition-all duration-200
             ${showScrollBtn ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'}
           `}

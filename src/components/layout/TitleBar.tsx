@@ -73,10 +73,10 @@ export function TitleBar() {
       onContextMenu={handleContextMenu}
     >
       {/* App brand */}
-      <div className="flex items-center gap-2">
-        <div className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--sidebar-glow))] shadow-[0_0_6px_hsl(var(--sidebar-glow)/0.5)]" />
+      <div className="flex items-center gap-2.5">
+        <div className="relative w-2 h-2 rounded-full bg-gradient-to-br from-[hsl(180_80%_50%)] to-[hsl(215_100%_60%)] shadow-[0_0_8px_hsl(215_100%_60%/0.4)]" />
         <span
-          className="text-[11px] font-semibold tracking-[0.15em] uppercase text-[hsl(var(--sidebar-fg))]"
+          className="text-[11px] font-semibold tracking-[0.18em] uppercase text-[hsl(var(--sidebar-fg))]"
           style={{ fontFamily: "'JetBrains Mono', monospace" }}
         >
           codeMUX
@@ -89,19 +89,19 @@ export function TitleBar() {
       {/* Window controls — far right */}
       <div className="flex items-center -mr-2">
         <button
-          className="h-[38px] w-[46px] flex items-center justify-center text-[hsl(var(--sidebar-fg))]/50 hover:text-[hsl(var(--sidebar-fg))] hover:bg-[hsl(var(--sidebar-accent))] transition-all duration-150"
+          className="h-[38px] w-[46px] flex items-center justify-center text-[hsl(var(--sidebar-fg))]/40 hover:text-[hsl(var(--sidebar-fg))] hover:bg-[hsl(var(--sidebar-accent))] transition-all duration-150"
           onClick={() => appWindow.minimize()}
         >
           <Minus className="h-3.5 w-3.5" />
         </button>
         <button
-          className="h-[38px] w-[46px] flex items-center justify-center text-[hsl(var(--sidebar-fg))]/50 hover:text-[hsl(var(--sidebar-fg))] hover:bg-[hsl(var(--sidebar-accent))] transition-all duration-150"
+          className="h-[38px] w-[46px] flex items-center justify-center text-[hsl(var(--sidebar-fg))]/40 hover:text-[hsl(var(--sidebar-fg))] hover:bg-[hsl(var(--sidebar-accent))] transition-all duration-150"
           onClick={() => appWindow.toggleMaximize()}
         >
           <MaximizeIcon restored={maximized} />
         </button>
         <button
-          className="h-[38px] w-[46px] flex items-center justify-center text-[hsl(var(--sidebar-fg))]/50 hover:text-white hover:bg-red-500/80 transition-all duration-150"
+          className="h-[38px] w-[46px] flex items-center justify-center text-[hsl(var(--sidebar-fg))]/40 hover:text-white hover:bg-[hsl(var(--destructive)/0.85)] transition-all duration-150"
           onClick={() => appWindow.close()}
         >
           <X className="h-3.5 w-3.5" />

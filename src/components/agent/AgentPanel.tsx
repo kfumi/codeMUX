@@ -72,20 +72,16 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
   }, [project?.path, setProjectPath, loadFileTree]);
 
-  // Reset cwd when switching sessions
   useEffect(() => {
     if (project?.path) {
-      // Project session: use project path
       setCwd(project.path);
     } else {
-      // Non-project session: restore user's last manually-set cwd
       setCwd(localStorage.getItem('agent-user-cwd') || '.');
     }
   }, [sessionId, project?.path]);
 
   const events = useAgentStore((s) => s.events[sessionId] ?? EMPTY_EVENTS);
 
-  // Compute context usage from events
   const contextUsage = useMemo(() => {
     let usedTokens = 0;
 
@@ -116,7 +112,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       if (usedTokens > 0) break;
     }
 
-    // 1M context if provider has context_1m enabled, otherwise 200k
     const totalTokens = activeProvider?.context_1m ? 1_000_000 : 200_000;
 
     return { usedTokens, totalTokens };
@@ -125,9 +120,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const running = isRunning[sessionId] || false;
 
   const handleSend = async (content: string) => {
-    // Determine which provider to use:
-    // - Existing session with stored provider_id → use that provider (model consistency)
-    // - New session or old session without provider_id → use active provider, then save it
     let provider = activeProvider;
     if (session?.provider_id) {
       const storedProvider = config?.providers.find((p) => p.id === session.provider_id);
@@ -141,10 +133,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       model = model + '[1m]';
     }
 
-    // Save provider_id and model to session on first message (for future consistency)
     if (session && !session.provider_id && provider?.id && model) {
       sessionApi.updateProvider(sessionId, provider.id, model).catch(() => {});
-      // Update local session state
       useSessionStore.setState((s) => ({
         sessions: s.sessions.map(sess =>
           sess.id === sessionId ? { ...sess, provider_id: provider!.id, model } : sess
@@ -161,14 +151,12 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
   };
 
-  // 弹窗展示信息
   const showInfoDialog = useCallback((title: string, content: string) => {
     setInfoTitle(title);
     setInfoContent(content);
     setInfoOpen(true);
   }, []);
 
-  // 从 events 中提取费用信息
   const getCostInfo = useCallback((): string => {
     for (let i = events.length - 1; i >= 0; i--) {
       const evt = events[i];
@@ -199,7 +187,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     return '暂无费用信息（当前会话还没有完成过对话）';
   }, [events]);
 
-  // 斜杠命令处理
   const handleCommand = useCallback(async (command: SlashCommand, args: string) => {
     if (command.handler === 'local' && command.action) {
       const ctx: CommandContext = {
@@ -225,13 +212,13 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-3 border-b border-border/40 bg-background/80 backdrop-blur-sm shrink-0">
-        <h2 className="text-[13px] font-medium text-foreground/80 truncate">
+      <div className="flex items-center gap-3 px-6 py-3 border-b border-border/30 bg-background/80 backdrop-blur-sm shrink-0">
+        <h2 className="text-[13px] font-medium text-foreground/70 truncate">
           {session?.title || '新对话'}
         </h2>
         <DropdownMenu
           trigger={
-            <button className="p-1 rounded-md hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors">
+            <button className="p-1 rounded-lg hover:bg-muted/40 text-muted-foreground/50 hover:text-muted-foreground transition-colors">
               <MoreHorizontal className="h-4 w-4" />
             </button>
           }
@@ -245,20 +232,20 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           <ContextProgress usedTokens={contextUsage.usedTokens} totalTokens={contextUsage.totalTokens} />
         )}
         {project && (
-          <div className="flex items-center gap-1.5 text-[12px] text-foreground bg-muted/40 rounded-lg px-2.5 py-1.5 border border-border/30 min-w-0 max-w-[300px]"
+          <div className="flex items-center gap-1.5 text-[12px] text-foreground/60 bg-muted/30 rounded-lg px-2.5 py-1.5 border border-border/20 min-w-0 max-w-[300px]"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
-            <FolderOpen className="h-3 w-3 text-foreground/70 shrink-0" />
+            <FolderOpen className="h-3 w-3 text-foreground/40 shrink-0" />
             <span className="truncate">{project.path}</span>
           </div>
         )}
         <button
           onClick={togglePreview}
           className={cn(
-            'p-1.5 rounded-md transition-colors shrink-0',
+            'p-1.5 rounded-lg transition-all duration-200',
             previewOpen
               ? 'bg-muted text-foreground'
-              : 'text-muted-foreground hover:text-foreground'
+              : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/30'
           )}
           title={previewOpen ? '收起预览面板' : '展开预览面板'}
         >
@@ -311,13 +298,13 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Info dialog (斜杠命令结果) */}
+      {/* Info dialog */}
       <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
         <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
             <DialogTitle>{infoTitle}</DialogTitle>
           </DialogHeader>
-          <div className="text-sm leading-relaxed max-h-[60vh] overflow-y-auto [&_p]:my-1.5 [&_strong]:text-foreground [&_strong]:font-semibold [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded-md [&_code]:bg-muted [&_code]:text-[13px] [&_code]:font-mono [&_blockquote]:border-l-2 [&_blockquote]:border-primary/40 [&_blockquote]:pl-3 [&_blockquote]:py-1 [&_blockquote]:my-2 [&_blockquote]:text-muted-foreground [&_blockquote]:text-xs [&_ul]:my-1 [&_ul]:pl-4 [&_ul]:list-disc [&_li]:my-0.5 [&_hr]:my-3 [&_hr]:border-border">
+          <div className="text-sm leading-relaxed max-h-[60vh] overflow-y-auto [&_p]:my-1.5 [&_strong]:text-foreground [&_strong]:font-semibold [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded-md [&_code]:bg-muted [&_code]:text-[13px] [&_code]:font-mono [&_blockquote]:border-l-2 [&_blockquote]:border-[hsl(var(--primary)/0.3)] [&_blockquote]:pl-3 [&_blockquote]:py-1 [&_blockquote]:my-2 [&_blockquote]:text-muted-foreground [&_blockquote]:text-xs [&_ul]:my-1 [&_ul]:pl-4 [&_ul]:list-disc [&_li]:my-0.5 [&_hr]:my-3">
             <MarkdownRenderer content={infoContent} />
           </div>
           <DialogFooter>

@@ -24,7 +24,6 @@ function normalizePath(p: string): string {
 }
 
 function getToolSummaryData(toolName: string, input: Record<string, unknown>): ToolSummaryPart[] {
-  // MCP tools: mcp__<server>__<method>
   if (toolName.startsWith('mcp__')) {
     const parts = toolName.split('__');
     const server = parts[1] || toolName;
@@ -67,7 +66,7 @@ function getToolSummaryData(toolName: string, input: Record<string, unknown>): T
     case 'Skill':
       return [{ type: 'text', content: String(input.skill || '') }];
     case 'TaskList':
-      return []; // 仅展示工具名
+      return [];
     case 'TaskGet':
       return [{ type: 'text', content: String(input.taskId || '') }];
     case 'TaskCreate':
@@ -80,11 +79,11 @@ function getToolSummaryData(toolName: string, input: Record<string, unknown>): T
       return [{ type: 'text', content: parts.join(' ') || '' }];
     }
     case 'AskUserQuestion':
-      return []; // 参数由 AskUserQuestionCard 展示
+      return [];
     case 'EnterPlanMode':
     case 'ExitPlanMode':
     case 'WaitForMcpServers':
-      return []; // 无有意义的参数，仅展示工具名
+      return [];
     default:
       return [{ type: 'text', content: String(input.description || input.prompt || JSON.stringify(input).slice(0, 80)) }];
   }
@@ -95,37 +94,39 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+const STATUS_DOT = {
+  pending: 'bg-muted-foreground/30',
+  running: 'bg-[hsl(var(--warning))] animate-pulse-soft',
+  done: 'bg-[hsl(var(--success))]',
+  error: 'bg-[hsl(var(--destructive))]',
+};
+
 export function ToolCallCard({ toolName, input, result, status, durationMs, onFileClick }: ToolCallCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const summaryParts = getToolSummaryData(toolName, input);
   const displayName = summaryParts[0]?.displayAs || toolName;
 
-  const dotColor = {
-    pending: 'bg-muted-foreground/40',
-    running: 'bg-yellow-500 animate-pulse',
-    done: 'bg-green-500',
-    error: 'bg-red-500',
-  };
-
   return (
-    <div className="border rounded-md my-2 bg-muted/20">
+    <div className={`rounded-xl my-2 bg-muted/25 hover:bg-muted/35 transition-colors duration-200 overflow-hidden`}>
       <div
         role="button"
         tabIndex={0}
-        className="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-muted/40 transition-colors"
+        className="flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors"
         onClick={() => setIsExpanded(!isExpanded)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsExpanded(!isExpanded); }}
       >
-        {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        {status && <span className={`h-2 w-2 rounded-full shrink-0 ${dotColor[status]}`} />}
-        <span className="font-medium">{displayName}</span>
+        <span className="text-muted-foreground/50">
+          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </span>
+        {status && <span className={`h-2 w-2 rounded-full shrink-0 ${STATUS_DOT[status]}`} />}
+        <span className="font-medium text-[13px]">{displayName}</span>
         <span className="text-muted-foreground truncate flex-1 text-left text-xs">
           {summaryParts.map((part, i) => {
             if (part.type === 'mcp') {
               const { method, query } = part.content as { method: string; query: string };
               return (
                 <span key={i}>
-                  <span className="font-medium text-foreground">{method}</span>
+                  <span className="font-medium text-foreground/80">{method}</span>
                   <span>{query}</span>
                 </span>
               );
@@ -134,7 +135,7 @@ export function ToolCallCard({ toolName, input, result, status, durationMs, onFi
               return (
                 <button
                   key={i}
-                  className="text-primary hover:underline cursor-pointer"
+                  className="text-[hsl(var(--primary))] hover:underline cursor-pointer"
                   onClick={(e) => {
                     e.stopPropagation();
                     onFileClick?.(part.filePath!, part.originalContent);
@@ -148,7 +149,7 @@ export function ToolCallCard({ toolName, input, result, status, durationMs, onFi
           })}
         </span>
         {durationMs != null && (
-          <span className="text-xs text-muted-foreground/50 shrink-0 tabular-nums"
+          <span className="text-[11px] text-muted-foreground/40 shrink-0 tabular-nums px-1.5 py-0.5 rounded-md bg-muted/40"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             {formatDuration(durationMs)}
@@ -156,17 +157,21 @@ export function ToolCallCard({ toolName, input, result, status, durationMs, onFi
         )}
       </div>
       {isExpanded && (
-        <div className="border-t px-3 py-2 space-y-2">
+        <div className="border-t border-border/30 px-3 py-2.5 space-y-2.5 animate-fade-in">
           <div>
-            <div className="text-xs text-muted-foreground mb-1">参数</div>
-            <pre className="text-xs bg-muted/50 rounded p-2 overflow-auto max-h-40">
+            <div className="text-[11px] text-muted-foreground/60 font-medium uppercase tracking-wider mb-1.5">参数</div>
+            <pre className="text-xs bg-muted/40 rounded-lg p-3 overflow-auto max-h-40 border border-border/20"
+              style={{ fontFamily: "'JetBrains Mono', monospace" }}
+            >
               {JSON.stringify(input, null, 2)}
             </pre>
           </div>
           {result && (
             <div>
-              <div className="text-xs text-muted-foreground mb-1">结果</div>
-              <pre className="text-xs bg-muted/50 rounded p-2 overflow-auto max-h-40 whitespace-pre-wrap">
+              <div className="text-[11px] text-muted-foreground/60 font-medium uppercase tracking-wider mb-1.5">结果</div>
+              <pre className="text-xs bg-muted/40 rounded-lg p-3 overflow-auto max-h-40 whitespace-pre-wrap border border-border/20"
+                style={{ fontFamily: "'JetBrains Mono', monospace" }}
+              >
                 {result}
               </pre>
             </div>

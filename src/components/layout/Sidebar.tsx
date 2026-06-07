@@ -41,10 +41,11 @@ export function Sidebar({ onNewSession, onNewSessionInProject, onOpenSettings, o
       <div className="px-3 pt-2 pb-2.5 flex items-center gap-1">
         <button
           onClick={onNewSession}
-          className="flex-1 flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium
+          className="flex-1 flex items-center gap-2.5 px-3 py-2 rounded-xl text-[13px] font-medium
             text-[hsl(var(--sidebar-fg))]/80
             hover:text-[hsl(var(--sidebar-glow))]
-            hover:bg-[hsl(var(--sidebar-glow)/0.08)]
+            hover:bg-[hsl(var(--sidebar-glow)/0.06)]
+            hover:shadow-[inset_0_0_0_1px_hsl(var(--sidebar-glow)/0.1)]
             active:scale-[0.98]
             transition-all duration-200"
         >
@@ -54,9 +55,9 @@ export function Sidebar({ onNewSession, onNewSessionInProject, onOpenSettings, o
         {onToggleCollapse && (
           <button
             onClick={onToggleCollapse}
-            className="p-1.5 rounded-md text-[hsl(var(--sidebar-fg))]/50
+            className="p-1.5 rounded-lg text-[hsl(var(--sidebar-fg))]/40
               hover:text-[hsl(var(--sidebar-glow))]
-              hover:bg-[hsl(var(--sidebar-glow)/0.08)]
+              hover:bg-[hsl(var(--sidebar-glow)/0.06)]
               transition-all duration-200 shrink-0"
             title="收起侧边栏"
           >
@@ -77,8 +78,9 @@ export function Sidebar({ onNewSession, onNewSessionInProject, onOpenSettings, o
       <div className="p-3 border-t border-[hsl(var(--sidebar-border))]">
         <button
           onClick={onOpenSettings}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px]
-            text-[hsl(var(--sidebar-fg))]
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-[13px]
+            text-[hsl(var(--sidebar-fg))]/70
+            hover:text-[hsl(var(--sidebar-fg))]
             hover:bg-[hsl(var(--sidebar-accent))]
             transition-all duration-200"
         >

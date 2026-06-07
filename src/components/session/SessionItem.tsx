@@ -18,24 +18,32 @@ export function SessionItem({ session, isActive, onClick, onDelete }: SessionIte
     <>
       <div
         className={cn(
-          'group flex items-center gap-2.5 px-2.5 py-[7px] rounded-md cursor-pointer transition-all duration-200 text-[13px]',
-          'text-[hsl(var(--sidebar-fg))]/70',
+          'group flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg cursor-pointer transition-all duration-200 text-[13px] relative',
+          'text-[hsl(var(--sidebar-fg))]/60',
           'hover:text-[hsl(var(--sidebar-fg))] hover:bg-[hsl(var(--sidebar-accent))]',
           isActive && [
             'bg-[hsl(var(--sidebar-accent))]',
             'text-[hsl(var(--sidebar-fg))]',
-            'shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border))]'
           ]
         )}
         onClick={onClick}
       >
+        {/* Active indicator bar */}
+        {isActive && (
+          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full bg-[hsl(var(--sidebar-glow))] opacity-80" />
+        )}
         <MessageSquare className={cn(
           'h-3.5 w-3.5 shrink-0 transition-colors duration-200',
-          isActive ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/50'
+          isActive ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/40'
         )} />
-        <span className="flex-1 truncate">{session.title || '未命名对话'}</span>
+        <span className={cn(
+          'flex-1 truncate transition-colors duration-200',
+          isActive && 'font-medium'
+        )}>
+          {session.title || '未命名对话'}
+        </span>
         <button
-          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-black/[0.06] dark:hover:bg-white/[0.06] text-[hsl(var(--sidebar-fg))]/60 hover:text-[hsl(var(--sidebar-fg))] transition-all duration-200"
+          className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-[hsl(var(--destructive)/0.1)] hover:text-[hsl(var(--destructive))] text-[hsl(var(--sidebar-fg))]/40 transition-all duration-200"
           onClick={(e) => {
             e.stopPropagation();
             setConfirmOpen(true);

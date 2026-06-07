@@ -17,15 +17,16 @@ export function ThinkingBlock({ thinking, durationMs }: ThinkingBlockProps) {
   if (!thinking.trim()) return null;
 
   return (
-    <div className="border rounded-md bg-muted/30 my-2">
+    <div className="rounded-xl bg-gradient-to-br from-[hsl(var(--primary)/0.04)] to-transparent border border-[hsl(var(--primary)/0.08)] my-2 overflow-hidden">
       <button
-        className="flex items-center gap-2 w-full px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+        className="flex items-center gap-2 w-full px-3 py-2 text-sm text-muted-foreground hover:bg-[hsl(var(--primary)/0.04)] transition-colors duration-200"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        <span>思考过程</span>
+        <Brain className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.5)]" />
+        <span className="text-[13px]">思考过程</span>
         {durationMs != null && (
-          <span className="ml-auto text-xs text-muted-foreground/50 tabular-nums"
+          <span className="ml-auto text-[11px] text-muted-foreground/40 tabular-nums px-1.5 py-0.5 rounded-md bg-muted/30"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             {formatDuration(durationMs)}
@@ -33,7 +34,7 @@ export function ThinkingBlock({ thinking, durationMs }: ThinkingBlockProps) {
         )}
       </button>
       {isExpanded && (
-        <div className="px-3 pb-3 text-sm text-muted-foreground whitespace-pre-wrap border-t pt-2">
+        <div className="px-3 pb-3 text-sm text-muted-foreground/80 whitespace-pre-wrap border-t border-[hsl(var(--primary)/0.06)] pt-2.5 animate-fade-in leading-relaxed">
           {thinking}
         </div>
       )}
@@ -45,23 +46,19 @@ export function ThinkingBlock({ thinking, durationMs }: ThinkingBlockProps) {
 export function StreamingThinkingBlock({ thinking }: { thinking: string }) {
   const endRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom only if user is already near the bottom
   useEffect(() => {
     const el = endRef.current;
     if (!el) return;
-    // Walk up to find the MAIN scrollable container (skip inner overflow divs).
-    // The main container has class "overflow-auto" and holds all messages.
     let parent: HTMLElement | null = el.parentElement;
     let mainContainer: HTMLElement | null = null;
     while (parent && parent !== document.body) {
       const style = getComputedStyle(parent);
       if (/(auto|scroll)/.test(style.overflowY)) {
-        mainContainer = parent; // keep going to find the outermost scrollable
+        mainContainer = parent;
       }
       parent = parent.parentElement;
     }
     if (!mainContainer) return;
-    // Only scroll if user is within 300px of the bottom of the main container
     const distanceFromBottom = mainContainer.scrollHeight - mainContainer.scrollTop - mainContainer.clientHeight;
     if (distanceFromBottom < 300) {
       el.scrollIntoView({ behavior: 'smooth' });
@@ -71,12 +68,15 @@ export function StreamingThinkingBlock({ thinking }: { thinking: string }) {
   if (!thinking) return null;
 
   return (
-    <div className="border rounded-md bg-muted/30 my-2 animate-fade-in">
+    <div className="rounded-xl bg-gradient-to-br from-[hsl(var(--primary)/0.04)] to-transparent border border-[hsl(var(--primary)/0.08)] my-2 overflow-hidden animate-fade-in">
       <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
-        <Brain className="h-4 w-4 animate-pulse text-[hsl(var(--primary)/0.7)]" />
-        <span>思考中...</span>
+        <Brain className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.6)] animate-pulse-soft" />
+        <span className="text-[13px]">思考中...</span>
+        <div className="ml-auto h-1 w-16 rounded-full bg-[hsl(var(--primary)/0.1)] overflow-hidden">
+          <div className="h-full w-1/3 rounded-full bg-[hsl(var(--primary)/0.3)]" style={{ animation: 'shimmer 1.5s ease-in-out infinite', backgroundSize: '200% 100%' }} />
+        </div>
       </div>
-      <div className="px-3 pb-3 text-sm text-muted-foreground whitespace-pre-wrap border-t pt-2 max-h-96 overflow-y-auto">
+      <div className="px-3 pb-3 text-sm text-muted-foreground/70 whitespace-pre-wrap border-t border-[hsl(var(--primary)/0.06)] pt-2.5 max-h-96 overflow-y-auto leading-relaxed">
         {thinking}
         <div ref={endRef} />
       </div>

@@ -176,7 +176,7 @@ export function ProviderConfigPanel() {
     }
   };
 
-  const updateField = (field: keyof Provider, value: string | number | undefined) => {
+  const updateField = (field: keyof Provider, value: string | number | boolean | undefined) => {
     if (!editingProvider) return;
     setEditingProvider({ ...editingProvider, [field]: value });
   };
@@ -336,7 +336,7 @@ export function ProviderConfigPanel() {
                     <input
                       type="checkbox"
                       checked={!!editingProvider.context_1m}
-                      onChange={(e) => updateField('context_1m', e.target.checked || undefined)}
+                      onChange={(e) => updateField('context_1m', e.target.checked ? true : undefined)}
                       className="accent-primary w-3.5 h-3.5"
                     />
                     <span className="text-muted-foreground">1M</span>

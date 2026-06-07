@@ -88,7 +88,7 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
         {sidebarCollapsed && (
           <button
             onClick={toggleSidebar}
-            className="p-1.5 m-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors self-start"
+            className="p-1.5 m-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all duration-200 self-start"
             title="展开侧边栏"
           >
             <PanelLeftOpen className="h-4 w-4" />
@@ -112,10 +112,11 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
               className="w-1 shrink-0 cursor-col-resize group relative"
               onMouseDown={handleSidebarMouseDown}
             >
-              <div className="absolute inset-y-0 -left-0.5 w-2 group-hover:bg-primary/20 transition-colors" />
+              <div className="absolute inset-y-0 -left-0.5 w-2 group-hover:bg-primary/15 transition-colors duration-200" />
+              <div className="absolute inset-y-2 left-0 w-[2px] rounded-full bg-transparent group-hover:bg-primary/30 transition-all duration-300" />
               <button
                 onClick={toggleSidebar}
-                className="absolute top-1 -left-3 p-0.5 rounded bg-background border border-border shadow-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors opacity-0 group-hover:opacity-100"
+                className="absolute top-1 -left-3 p-0.5 rounded-md bg-background border border-border shadow-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all duration-200 opacity-0 group-hover:opacity-100"
                 title="收起侧边栏"
               >
                 <PanelLeftClose className="h-3 w-3" />
@@ -136,7 +137,8 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
                 className="w-1 shrink-0 cursor-col-resize group relative"
                 onMouseDown={handlePreviewMouseDown}
               >
-                <div className="absolute inset-y-0 -left-0.5 w-2 group-hover:bg-primary/20 transition-colors" />
+                <div className="absolute inset-y-0 -left-0.5 w-2 group-hover:bg-primary/15 transition-colors duration-200" />
+                <div className="absolute inset-y-2 left-0 w-[2px] rounded-full bg-transparent group-hover:bg-primary/30 transition-all duration-300" />
               </div>
               {preview}
             </>

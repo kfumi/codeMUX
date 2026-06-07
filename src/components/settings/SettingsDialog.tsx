@@ -27,33 +27,38 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[700px] h-[520px] p-0 flex flex-col">
+      <DialogContent className="sm:max-w-[700px] h-[520px] p-0 flex flex-col overflow-hidden">
         <div className="flex flex-1 overflow-hidden">
-          <div className="w-40 border-r p-2 shrink-0">
-            <DialogHeader className="p-2">
-              <DialogTitle className="text-sm">设置</DialogTitle>
+          <div className="w-44 border-r border-border/40 p-2 shrink-0 bg-muted/20">
+            <DialogHeader className="p-2 pb-3">
+              <DialogTitle className="text-sm font-semibold">设置</DialogTitle>
             </DialogHeader>
-            <nav className="space-y-1 mt-2">
+            <nav className="space-y-0.5">
               {tabs.map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}
                   onClick={() => setActiveTab(id)}
                   className={cn(
-                    'w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-left',
-                    activeTab === id ? 'bg-accent text-accent-foreground' : 'hover:bg-accent'
+                    'w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-left transition-all duration-200 relative',
+                    activeTab === id
+                      ? 'bg-background text-foreground shadow-sm font-medium'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
                   )}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className={cn(
+                    'h-4 w-4 transition-colors',
+                    activeTab === id ? 'text-[hsl(var(--primary))]' : ''
+                  )} />
                   {label}
                 </button>
               ))}
             </nav>
           </div>
 
-          <div className="flex-1 p-4 overflow-auto">
+          <div className="flex-1 p-5 overflow-auto">
             {activeTab === 'general' && (
               <div className="space-y-4">
-                <h3 className="font-medium">常规设置</h3>
+                <h3 className="font-semibold text-sm">常规设置</h3>
                 <p className="text-sm text-muted-foreground">管理应用的基本设置。</p>
               </div>
             )}

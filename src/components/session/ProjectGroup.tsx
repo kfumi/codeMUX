@@ -48,22 +48,26 @@ export function ProjectGroup({
     <div className="mb-0.5">
       <div
         className={cn(
-          'flex items-center gap-2 px-2.5 py-[7px] rounded-md cursor-pointer transition-all duration-200 group',
-          'text-[hsl(var(--sidebar-fg))]/70',
+          'flex items-center gap-2 px-2.5 py-[7px] rounded-lg cursor-pointer transition-all duration-200 group relative',
+          'text-[hsl(var(--sidebar-fg))]/60',
           'hover:text-[hsl(var(--sidebar-fg))] hover:bg-[hsl(var(--sidebar-accent))]',
           isActiveProject && 'bg-[hsl(var(--sidebar-accent))]/50'
         )}
         onClick={() => !renaming && setExpanded(!expanded)}
       >
+        {/* Active indicator for project */}
+        {isActiveProject && (
+          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full bg-[hsl(var(--sidebar-glow))] opacity-60" />
+        )}
         <ChevronRight
           className={cn(
-            'h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/60 transition-transform duration-200',
+            'h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/40 transition-transform duration-200',
             expanded && 'rotate-90'
           )}
         />
         <Folder className={cn(
           'h-3.5 w-3.5 shrink-0 transition-colors duration-200',
-          isActiveProject ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/50'
+          isActiveProject ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/40'
         )} />
         {renaming ? (
           <input
@@ -75,16 +79,16 @@ export function ProjectGroup({
               if (e.key === 'Enter') handleRename();
               if (e.key === 'Escape') setRenaming(false);
             }}
-            className="flex-1 text-[13px] bg-[hsl(var(--sidebar-muted))] border border-[hsl(var(--sidebar-border))] px-1.5 py-0.5 rounded text-[hsl(var(--sidebar-fg))] outline-none focus:border-[hsl(var(--sidebar-glow))]/30"
+            className="flex-1 text-[13px] bg-[hsl(var(--sidebar-muted))] border border-[hsl(var(--sidebar-border))] px-1.5 py-0.5 rounded-md text-[hsl(var(--sidebar-fg))] outline-none focus:border-[hsl(var(--sidebar-glow))]/30 transition-colors"
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
           <span className="flex-1 truncate text-[13px] font-medium">{project.name}</span>
         )}
-        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity duration-200" onClick={(e) => e.stopPropagation()}>
           <DropdownMenu
             trigger={
-              <Button variant="ghost" size="icon" className="h-5 w-5 hover:bg-black/[0.06] dark:hover:bg-white/[0.06]">
+              <Button variant="ghost" size="icon" className="h-5 w-5 hover:bg-[hsl(var(--sidebar-accent))]">
                 <MoreHorizontal className="h-3 w-3" />
               </Button>
             }
@@ -114,7 +118,7 @@ export function ProjectGroup({
             </DropdownMenuItem>
           </DropdownMenu>
           <button
-            className="p-1 rounded hover:bg-black/[0.06] dark:hover:bg-white/[0.06] text-[hsl(var(--sidebar-fg))]/60 hover:text-[hsl(var(--sidebar-glow))] transition-all duration-200"
+            className="p-1 rounded-md hover:bg-[hsl(var(--sidebar-glow)/0.08)] text-[hsl(var(--sidebar-fg))]/40 hover:text-[hsl(var(--sidebar-glow))] transition-all duration-200"
             title={`在 ${project.name} 中开始对话`}
             onClick={() => onNewSessionInProject(project.id)}
           >
@@ -123,7 +127,7 @@ export function ProjectGroup({
         </div>
       </div>
       {expanded && (
-        <div className="ml-4 pl-2.5 border-l border-[hsl(var(--sidebar-border))]">
+        <div className="ml-4 pl-2.5 border-l border-[hsl(var(--sidebar-border))]/60">
           {sessions.map((session) => (
             <SessionItem
               key={session.id}

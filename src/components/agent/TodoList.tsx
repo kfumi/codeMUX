@@ -10,16 +10,22 @@ interface TodoListProps {
 function getStatusIcon(status: TodoItem['status']) {
   switch (status) {
     case 'completed':
-      return <span className="text-green-500 text-xs leading-none mt-px">✓</span>;
+      return (
+        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[hsl(var(--success)/0.12)] text-[hsl(var(--success))]">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="2 5.5 4 7.5 8 3" />
+          </svg>
+        </span>
+      );
     case 'in_progress':
       return (
-        <span className="relative flex h-2 w-2 mt-0.5">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-yellow-500" />
+        <span className="relative flex h-4 w-4 items-center justify-center">
+          <span className="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-[hsl(var(--warning)/0.4)]" />
+          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[hsl(var(--warning))]" />
         </span>
       );
     case 'pending':
-      return <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30 mt-0.5" />;
+      return <span className="h-2 w-2 rounded-full bg-muted-foreground/20" />;
   }
 }
 
@@ -29,24 +35,25 @@ export function TodoList({ todos, className }: TodoListProps) {
   if (todos.length === 0) return null;
 
   const completed = todos.filter((t) => t.status === 'completed').length;
+  const inProgress = todos.filter((t) => t.status === 'in_progress').length;
   const total = todos.length;
+  const progressPct = total > 0 ? (completed / total) * 100 : 0;
 
   return (
     <div className={`relative ${className ?? ''}`}>
-      {/* Expandable list — positioned above, expands upward */}
+      {/* Expandable list */}
       {isExpanded && (
-        <div className="absolute bottom-full left-0 mb-1 w-[320px] max-h-[300px] overflow-auto border border-border/40 rounded-xl bg-background shadow-lg z-50 animate-fade-in-up">
-          {/* Todo list */}
+        <div className="absolute bottom-full left-0 mb-2 w-[340px] max-h-[300px] overflow-auto rounded-xl border border-border/40 bg-[hsl(var(--card))] shadow-[0_-4px_24px_-4px_hsl(var(--foreground)/0.06)] z-50 animate-scale-in">
           <div className="px-3 py-2.5 space-y-0.5 stagger-children">
             {todos.map((todo, i) => (
-              <div key={i} className="flex items-center gap-2 py-1 text-xs leading-relaxed">
-                {getStatusIcon(todo.status)}
+              <div key={i} className="flex items-start gap-2.5 py-1.5 text-xs leading-relaxed">
+                <span className="mt-0.5 shrink-0">{getStatusIcon(todo.status)}</span>
                 <span className={
                   todo.status === 'completed'
-                    ? 'text-muted-foreground/50 line-through'
+                    ? 'text-muted-foreground/40 line-through'
                     : todo.status === 'in_progress'
-                      ? 'text-foreground/90'
-                      : 'text-foreground/70'
+                      ? 'text-foreground/90 font-medium'
+                      : 'text-foreground/60'
                 }>
                   {todo.status === 'in_progress' && todo.activeForm
                     ? todo.activeForm
@@ -55,26 +62,40 @@ export function TodoList({ todos, className }: TodoListProps) {
               </div>
             ))}
           </div>
+          {/* Progress bar at bottom */}
+          <div className="px-3 pb-2.5 pt-1">
+            <div className="h-1 w-full rounded-full bg-muted/40 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-[hsl(var(--primary)/0.6)] to-[hsl(var(--primary))] transition-all duration-500"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+          </div>
         </div>
       )}
 
       {/* Trigger button */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border/40 bg-muted/20 hover:bg-muted/40 transition-colors text-left"
+        className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/30 bg-[hsl(var(--card))]/50 hover:bg-muted/30 transition-all duration-200 text-left"
       >
         {isExpanded ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
         ) : (
-          <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
         )}
-        <ListTodo className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        <span className="text-xs font-medium text-foreground/80">任务进度</span>
-        <span className="text-xs text-muted-foreground/60 tabular-nums"
+        <ListTodo className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.5)] shrink-0" />
+        <span className="text-xs font-medium text-foreground/70">任务进度</span>
+        <span className="text-xs text-muted-foreground/50 tabular-nums ml-auto"
           style={{ fontFamily: "'JetBrains Mono', monospace" }}
         >
           {completed}/{total}
         </span>
+        {inProgress > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[hsl(var(--warning)/0.1)] text-[hsl(var(--warning))] font-medium">
+            {inProgress} 进行中
+          </span>
+        )}
       </button>
     </div>
   );

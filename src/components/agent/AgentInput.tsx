@@ -21,15 +21,13 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
 
   // 检测斜杠命令并更新菜单
   const updateMenu = useCallback((value: string) => {
-    // 只在输入以 / 开头且在行首时触发
     if (value.startsWith('/')) {
       const spaceIdx = value.indexOf(' ');
-      // 如果已经有空格 (命令+参数)，隐藏菜单
       if (spaceIdx > 0) {
         setMenuVisible(false);
         return;
       }
-      const prefix = value.slice(1); // 去掉 /
+      const prefix = value.slice(1);
       const filtered = filterCommands(prefix);
       if (filtered.length > 0) {
         setMenuCommands(filtered);
@@ -47,7 +45,6 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
     const content = input.trim();
     if (!content || isLoading) return;
 
-    // 检查是否是斜杠命令
     if (content.startsWith('/')) {
       const spaceIdx = content.indexOf(' ');
       const cmdName = spaceIdx > 0 ? content.slice(1, spaceIdx) : content.slice(1);
@@ -62,7 +59,6 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
         await onCommand(command, args);
         return;
       }
-      // 未匹配的 / 命令当作普通消息发送给 agent
     }
 
     setInput('');
@@ -74,11 +70,9 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
   };
 
   const handleSelectCommand = (command: SlashCommand) => {
-    // 填入命令名 + 空格 (方便输入参数)
     const value = `/${command.name} `;
     setInput(value);
     setMenuVisible(false);
-    // 聚焦 textarea，光标移到末尾
     setTimeout(() => {
       if (textareaRef.current) {
         textareaRef.current.focus();
@@ -88,7 +82,6 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // 菜单可见时处理导航
     if (menuVisible && menuCommands.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -112,7 +105,6 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
       }
     }
 
-    // 正常发送
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -147,11 +139,11 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
 
         <div className={cn(
           'composer-glow rounded-2xl border transition-all duration-300',
-          'bg-[hsl(var(--card))] shadow-[0_0_0_1px_hsl(var(--border)),0_2px_8px_-2px_hsl(var(--foreground)/0.05)]',
-          'focus-within:shadow-[0_0_0_1px_hsl(var(--primary)/0.3),0_4px_16px_-4px_hsl(var(--primary)/0.1)]',
-          'focus-within:border-[hsl(var(--primary)/0.3)]'
+          'bg-[hsl(var(--card))] shadow-[0_0_0_1px_hsl(var(--border)/0.6),0_2px_8px_-2px_hsl(var(--foreground)/0.04)]',
+          'focus-within:shadow-[0_0_0_1px_hsl(var(--primary)/0.25),0_4px_20px_-4px_hsl(var(--primary)/0.12)]',
+          'focus-within:border-[hsl(var(--primary)/0.25)]'
         )}>
-          <div className="px-4 pt-3 pb-1">
+          <div className="px-4 pt-3.5 pb-1">
             <textarea
               ref={textareaRef}
               value={input}
@@ -159,7 +151,7 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
               onKeyDown={handleKeyDown}
               onInput={handleInput}
               placeholder="输入任务描述... (/ 查看命令, Enter 发送, Shift+Enter 换行)"
-              className="w-full resize-none bg-transparent text-[14px] leading-[1.6] focus:outline-none placeholder:text-muted-foreground min-h-[48px] max-h-[200px]"
+              className="w-full resize-none bg-transparent text-[14px] leading-[1.65] focus:outline-none placeholder:text-muted-foreground/50 min-h-[48px] max-h-[200px]"
               rows={2}
               disabled={isLoading}
             />
@@ -178,8 +170,8 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
                   }
                 }}
                 className={cn(
-                  'px-2 py-1 rounded-md text-[12px] font-medium transition-colors',
-                  'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50'
+                  'px-2.5 py-1 rounded-lg text-[12px] font-medium transition-all duration-200',
+                  'text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50'
                 )}
                 title="斜杠命令"
                 style={{ fontFamily: "'JetBrains Mono', monospace" }}
@@ -192,21 +184,21 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
               {/* Read-only model display */}
               {modelName && (
                 <span
-                  className="px-2 py-1.5 text-[12px] font-medium text-foreground/50"
+                  className="px-2.5 py-1 text-[11px] font-medium text-muted-foreground/40 rounded-md bg-muted/30"
                   style={{ fontFamily: "'JetBrains Mono', monospace" }}
                 >
                   {modelName}
                 </span>
               )}
 
-              <div className="w-px h-4 bg-border/60" />
+              <div className="w-px h-4 bg-border/40 mx-0.5" />
 
               {isLoading ? (
                 <button
                   onClick={onStop}
                   className={cn(
                     'shrink-0 h-8 w-8 rounded-xl flex items-center justify-center transition-all duration-200',
-                    'bg-red-500/10 text-red-500 hover:bg-red-500/20 hover:scale-105 active:scale-95'
+                    'bg-[hsl(var(--destructive)/0.1)] text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive)/0.18)] hover:scale-105 active:scale-95'
                   )}
                   title="停止"
                 >
@@ -219,8 +211,8 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
                   className={cn(
                     'shrink-0 h-8 w-8 rounded-xl flex items-center justify-center transition-all duration-300',
                     hasContent
-                      ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-[0_2px_8px_-2px_hsl(var(--primary)/0.4)] hover:shadow-[0_4px_12px_-2px_hsl(var(--primary)/0.5)] hover:scale-105 active:scale-95'
-                      : 'bg-muted/60 text-muted-foreground/50 cursor-not-allowed'
+                      ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-[0_2px_10px_-2px_hsl(var(--primary)/0.4)] hover:shadow-[0_4px_16px_-2px_hsl(var(--primary)/0.5)] hover:scale-105 active:scale-95'
+                      : 'bg-muted/40 text-muted-foreground/30 cursor-not-allowed'
                   )}
                   title="发送"
                 >

@@ -6,62 +6,68 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 210 15% 11%;
+    --background: 40 20% 98%;
+    --foreground: 220 15% 13%;
     --card: 0 0% 100%;
-    --card-foreground: 210 15% 11%;
+    --card-foreground: 220 15% 13%;
     --popover: 0 0% 100%;
-    --popover-foreground: 210 15% 11%;
-    --primary: 210 100% 60%;
+    --popover-foreground: 220 15% 13%;
+    --primary: 215 100% 56%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 210 15% 15%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 210 12% 46%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 210 15% 15%;
-    --destructive: 0 84.2% 60.2%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 15% 18%;
+    --muted: 220 14% 95%;
+    --muted-foreground: 220 10% 46%;
+    --accent: 220 14% 93%;
+    --accent-foreground: 220 15% 18%;
+    --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 210 20% 90%;
-    --input: 210 20% 90%;
-    --ring: 210 100% 60%;
+    --success: 152 60% 40%;
+    --warning: 38 92% 50%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 215 100% 56%;
     --radius: 0.625rem;
-    /* Sidebar — light mode: follows theme */
-    --sidebar-bg: 0 0% 97%;
-    --sidebar-fg: 210 15% 25%;
-    --sidebar-border: 210 20% 90%;
-    --sidebar-muted: 210 40% 96%;
-    --sidebar-accent: 210 40% 93%;
-    --sidebar-glow: 210 100% 60%;
+    --glow: 215 100% 56%;
+    /* Sidebar — light mode */
+    --sidebar-bg: 40 10% 96%;
+    --sidebar-fg: 220 12% 28%;
+    --sidebar-border: 220 13% 90%;
+    --sidebar-muted: 40 8% 94%;
+    --sidebar-accent: 220 12% 92%;
+    --sidebar-glow: 215 100% 56%;
   }
 
   .dark {
-    --background: 0 0% 9%;
-    --foreground: 0 0% 100%;
-    --card: 0 0% 10%;
-    --card-foreground: 0 0% 100%;
-    --popover: 0 0% 11%;
-    --popover-foreground: 0 0% 100%;
-    --primary: 210 100% 61%;
+    --background: 220 14% 7%;
+    --foreground: 220 10% 92%;
+    --card: 220 13% 11%;
+    --card-foreground: 220 10% 92%;
+    --popover: 220 13% 13%;
+    --popover-foreground: 220 10% 92%;
+    --primary: 215 100% 60%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 14%;
-    --secondary-foreground: 0 0% 85%;
-    --muted: 0 0% 14%;
-    --muted-foreground: 0 0% 55%;
-    --accent: 0 0% 14%;
-    --accent-foreground: 0 0% 85%;
-    --destructive: 0 62.8% 45%;
+    --secondary: 220 12% 15%;
+    --secondary-foreground: 220 10% 82%;
+    --muted: 220 12% 14%;
+    --muted-foreground: 220 8% 52%;
+    --accent: 220 12% 16%;
+    --accent-foreground: 220 10% 82%;
+    --destructive: 0 60% 48%;
     --destructive-foreground: 0 0% 95%;
-    --border: 0 0% 16%;
-    --input: 0 0% 16%;
-    --ring: 210 100% 61%;
+    --success: 152 55% 45%;
+    --warning: 38 85% 55%;
+    --border: 220 12% 16%;
+    --input: 220 12% 16%;
+    --ring: 215 100% 60%;
+    --glow: 215 100% 60%;
     /* Sidebar — dark mode */
-    --sidebar-bg: 0 0% 7%;
-    --sidebar-fg: 0 0% 80%;
-    --sidebar-border: 0 0% 11%;
-    --sidebar-muted: 0 0% 9%;
-    --sidebar-accent: 0 0% 13%;
-    --sidebar-glow: 210 100% 61%;
+    --sidebar-bg: 220 14% 6%;
+    --sidebar-fg: 220 8% 78%;
+    --sidebar-border: 220 12% 12%;
+    --sidebar-muted: 220 14% 8%;
+    --sidebar-accent: 220 12% 14%;
+    --sidebar-glow: 215 100% 60%;
   }
 }
 
@@ -97,8 +103,20 @@ input[type="password"]::-ms-reveal {
   content: '';
   position: absolute;
   inset: 0;
-  opacity: 0.025;
+  opacity: 0.02;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+  background-size: 128px 128px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ——— Light mode subtle texture ——— */
+.sidebar-grain::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.015;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
   background-size: 128px 128px;
   pointer-events: none;
   z-index: 1;
@@ -111,11 +129,17 @@ input[type="password"]::-ms-reveal {
 .composer-glow::before {
   content: '';
   position: absolute;
-  inset: -1px;
+  inset: -1.5px;
   border-radius: inherit;
-  background: linear-gradient(135deg, hsl(210 100% 61% / 0.15), hsl(210 100% 61% / 0.05), transparent);
+  background: linear-gradient(
+    135deg,
+    hsl(215 100% 60% / 0.18),
+    hsl(180 80% 50% / 0.08),
+    hsl(215 100% 60% / 0.05),
+    transparent 60%
+  );
   opacity: 0;
-  transition: opacity 0.4s ease;
+  transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: none;
   z-index: -1;
 }
@@ -125,18 +149,24 @@ input[type="password"]::-ms-reveal {
 
 /* ——— Smooth scrollbar ——— */
 *::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 *::-webkit-scrollbar-track {
   background: transparent;
 }
+.dark *::-webkit-scrollbar-track {
+  background: hsl(var(--background) / 0.3);
+}
 *::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.2);
+  background: hsl(var(--muted-foreground) / 0.15);
   border-radius: 50px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.4);
+  background: hsl(var(--muted-foreground) / 0.3);
+  background-clip: content-box;
 }
 *::-webkit-scrollbar-corner {
   background: transparent;
@@ -146,7 +176,7 @@ input[type="password"]::-ms-reveal {
 @keyframes fadeInUp {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -159,12 +189,65 @@ input[type="password"]::-ms-reveal {
   to { opacity: 1; }
 }
 
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideInFromBottom {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 8px hsl(var(--primary) / 0.2); }
+  50% { box-shadow: 0 0 16px hsl(var(--primary) / 0.35); }
+}
+
 .animate-fade-in-up {
   animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.3s ease forwards;
+  animation: fadeIn 0.35s ease forwards;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-up {
+  animation: slideInFromBottom 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 2s ease-in-out infinite;
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
 }
 
 /* ——— Staggered children animation ——— */
@@ -183,12 +266,17 @@ input[type="password"]::-ms-reveal {
 
 /* ——— Selection color ——— */
 ::selection {
-  background: hsl(210 100% 61% / 0.25);
+  background: hsl(215 100% 60% / 0.2);
   color: inherit;
 }
 
+/* ——— Focus visible ——— */
+*:focus-visible {
+  outline: 2px solid hsl(var(--ring) / 0.4);
+  outline-offset: 2px;
+}
+
 /* ——— Prose code overrides ——— */
-/* Override typography plugin's code color to let highlight.js work */
 .prose {
   --tw-prose-pre-code: currentColor;
   --tw-prose-invert-pre-code: currentColor;
@@ -196,4 +284,28 @@ input[type="password"]::-ms-reveal {
 .prose :where(code):not(:where([class~="not-prose"] *))::before,
 .prose :where(code):not(:where([class~="not-prose"] *))::after {
   content: none;
+}
+
+/* ——— Glass effect utility ——— */
+.glass {
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+}
+
+/* ——— Code block language badge ——— */
+.code-lang-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground) / 0.5);
+  border-bottom-left-radius: 6px;
+  border-top-right-radius: inherit;
+  background: hsl(var(--muted) / 0.5);
+  pointer-events: none;
 }
