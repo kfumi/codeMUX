@@ -9,6 +9,7 @@ import { AgentMessageList } from './AgentMessageList';
 import { AgentInput } from './AgentInput';
 import { ContextProgress } from './ContextProgress';
 import { TodoList } from './TodoList';
+import { ChangedFilesList } from './ChangedFilesList';
 import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { Button } from '../ui/button';
@@ -260,15 +261,15 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       {/* Message area */}
       <AgentMessageList sessionId={sessionId} />
 
-      {/* Todo list + Input composer */}
+      {/* Todo list + Changed files + Input composer */}
       <div className="relative">
-        {todos.length > 0 && (
-          <div className="px-5 pb-1">
-            <div className="max-w-3xl mx-auto">
-              <TodoList todos={todos} />
+        <div className="px-5 pb-1">
+            <div className="max-w-3xl mx-auto flex items-end justify-between gap-3">
+              {todos.length > 0 && <TodoList todos={todos} />}
+              <div className="flex-1" />
+              <ChangedFilesList sessionId={sessionId} projectPath={project?.path} />
             </div>
           </div>
-        )}
         <AgentInput
           onSend={handleSend}
           onCommand={handleCommand}

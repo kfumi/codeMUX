@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+﻿import { create } from 'zustand';
 import { fileApi, type FileTreeNode } from '../lib/tauri';
 
 export interface OpenFile {
@@ -65,7 +65,7 @@ function convertTree(nodes: FileTreeNode[]): FileTreeNodeData[] {
 }
 
 /** Normalize file paths from various formats to OS-native paths */
-function normalizeFilePath(p: string): string {
+export function normalizeFilePath(p: string): string {
   // Strip Windows extended-length prefix: //?/ or \\?\
   let path = p.replace(/^\/\/\?\//, '').replace(/^\\\\\?\\/, '');
   // Unix-style drive path: /d/project/... → D:\project\...
@@ -108,7 +108,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
     if (existing) {
       const hasOriginal = originalContent ?? existing.originalContent;
       const currentContent = existing.currentContent;
-      const shouldDiff = hasOriginal && currentContent && hasOriginal !== currentContent;
+      const shouldDiff = hasOriginal != null && currentContent != null && hasOriginal !== currentContent;
       set({
         activeFilePath: normalizedPath,
         viewMode: shouldDiff ? 'diff' : 'file',
@@ -136,7 +136,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
     // Load file content from disk
     try {
       const content = await fileApi.readFile(normalizedPath, state.projectPath ?? undefined);
-      const shouldDiff = originalContent && originalContent !== content;
+      const shouldDiff = originalContent != null && originalContent !== content;
       set((s) => ({
         openFiles: s.openFiles.map((f) =>
           normalizeFilePath(f.path) === normalizedPath ? { ...f, currentContent: content, isLoading: false } : f
@@ -190,8 +190,8 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
     const file = state.openFiles.find((f) => normalizeFilePath(f.path) === normalizedPath);
     if (!file) return;
 
-    const hasOriginal = !!file.originalContent;
-    const isModified = hasOriginal && file.currentContent && file.originalContent !== file.currentContent;
+    const hasOriginal = file.originalContent !== undefined;
+    const isModified = hasOriginal && file.currentContent !== undefined && file.originalContent !== file.currentContent;
 
     set({
       activeFilePath: file.path,  // Use the path already stored (normalized)

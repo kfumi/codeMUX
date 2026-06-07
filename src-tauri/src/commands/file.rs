@@ -1,6 +1,65 @@
 use serde::Serialize;
 use tauri::AppHandle;
 
+/// Resolve a file path against an optional base path, with security validation.
+/// Returns the canonical path if it passes the security check.
+fn resolve_secure_path(path: &str, base_path: Option<String>) -> Result<std::path::PathBuf, String> {
+    let base = if let Some(bp) = base_path {
+        std::path::PathBuf::from(bp)
+    } else {
+        std::env::current_dir().map_err(|e| e.to_string())?
+    };
+
+    let full_path = if std::path::Path::new(path).is_absolute() {
+        std::path::PathBuf::from(path)
+    } else {
+        base.join(path)
+    };
+
+    // Security: ensure the resolved path is under the base directory
+    let canonical = full_path
+        .canonicalize()
+        .map_err(|e| format!("File not found: {} (path: {})", e, full_path.display()))?;
+    let canonical_base = base
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    if !canonical.starts_with(&canonical_base) {
+        return Err("Access denied: path outside project directory".to_string());
+    }
+
+    Ok(canonical)
+}
+
+/// Resolve a file path for write/delete operations.
+/// For new files, the parent directory must exist and be within the base path.
+fn resolve_secure_path_for_write(path: &str, base_path: Option<String>) -> Result<std::path::PathBuf, String> {
+    let base = if let Some(bp) = base_path {
+        std::path::PathBuf::from(bp)
+    } else {
+        std::env::current_dir().map_err(|e| e.to_string())?
+    };
+
+    let full_path = if std::path::Path::new(path).is_absolute() {
+        std::path::PathBuf::from(path)
+    } else {
+        base.join(path)
+    };
+
+    // For write operations, check the parent directory exists and is within base
+    let parent = full_path.parent().ok_or("Invalid path: no parent directory")?;
+    let canonical_parent = parent
+        .canonicalize()
+        .map_err(|e| format!("Parent directory not found: {} (path: {})", e, parent.display()))?;
+    let canonical_base = base
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    if !canonical_parent.starts_with(&canonical_base) {
+        return Err("Access denied: path outside project directory".to_string());
+    }
+
+    Ok(full_path)
+}
+
 /// Open a directory in the system file explorer.
 #[tauri::command]
 pub fn open_in_explorer(path: String) -> Result<(), String> {
@@ -30,31 +89,29 @@ pub fn open_in_explorer(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn read_file(_app: AppHandle, path: String, base_path: Option<String>) -> Result<String, String> {
-    // Use provided base_path or fall back to current_dir
-    let base = if let Some(bp) = base_path {
-        std::path::PathBuf::from(bp)
-    } else {
-        std::env::current_dir().map_err(|e| e.to_string())?
-    };
-
-    let full_path = if std::path::Path::new(&path).is_absolute() {
-        std::path::PathBuf::from(&path)
-    } else {
-        base.join(&path)
-    };
-
-    // Security: ensure the resolved path is under the base directory
-    let canonical = full_path
-        .canonicalize()
-        .map_err(|e| format!("File not found: {} (path: {})", e, full_path.display()))?;
-    let canonical_base = base
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
-    if !canonical.starts_with(&canonical_base) {
-        return Err("Access denied: path outside project directory".to_string());
-    }
-
+    let canonical = resolve_secure_path(&path, base_path)?;
     std::fs::read_to_string(&canonical).map_err(|e| format!("Failed to read file: {}", e))
+}
+
+/// Write content to a file. Creates the file if it doesn't exist.
+#[tauri::command]
+pub fn write_file(_app: AppHandle, path: String, content: String, base_path: Option<String>) -> Result<(), String> {
+    let full_path = resolve_secure_path_for_write(&path, base_path)?;
+    // Create parent directories if they don't exist
+    if let Some(parent) = full_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    std::fs::write(&full_path, content).map_err(|e| format!("Failed to write file: {}", e))
+}
+
+/// Delete a file from disk.
+#[tauri::command]
+pub fn delete_file(_app: AppHandle, path: String, base_path: Option<String>) -> Result<(), String> {
+    let canonical = resolve_secure_path(&path, base_path)?;
+    if !canonical.is_file() {
+        return Err(format!("Not a file: {}", canonical.display()));
+    }
+    std::fs::remove_file(&canonical).map_err(|e| format!("Failed to delete file: {}", e))
 }
 
 #[derive(Serialize, Clone)]

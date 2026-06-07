@@ -121,13 +121,15 @@ async fn probe_stdio(transport: &McpTransport) -> Result<ProbeResult, String> {
     let (command, args) = (command.clone(), args.clone());
 
     println!("[mcp-probe] stdio: spawning {} {}", command, args.join(" "));
-    let mut child = tokio::process::Command::new(&command)
-        .args(&args)
+    let mut cmd = tokio::process::Command::new(&command);
+    cmd.args(&args)
         .envs(env)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
+        .stderr(std::process::Stdio::null());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    let mut child = cmd.spawn()
         .map_err(|e| {
             println!("[mcp-probe] stdio: spawn failed: {}", e);
             format!("Failed to spawn: {}", e)

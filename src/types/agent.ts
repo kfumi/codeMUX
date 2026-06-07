@@ -1,4 +1,4 @@
-/** Mode for a session */
+﻿/** Mode for a session */
 export type SessionMode = 'chat' | 'agent';
 
 /** Minimal representation of an SDKMessage from the sidecar */
@@ -100,4 +100,15 @@ export interface SidecarErrorEvent {
 
 export interface SidecarQueryDoneEvent {
   type: 'sidecar_query_done';
+}
+
+/** Changed file tracked by Write/Edit tools */
+export interface ChangedFile {
+  path: string;
+  isNew: boolean;
+  originalContent?: string;
+  currentContent: string;
+  additions: number;
+  deletions: number;
+  _pendingEdits?: Array<{ oldString: string; newString: string }>;
 }

@@ -1,9 +1,7 @@
 ﻿import { create } from 'zustand';
-import { diffLines } from 'diff';
 import { agentApi } from '../lib/tauri';
 import { useSessionStore } from './sessionStore';
 import { useMcpStore } from './mcpStore';
-import { normalizeFilePath } from './previewStore';
 import type {
   AgentAssistantMessage,
   AgentToolResult,
@@ -12,7 +10,6 @@ import type {
   SidecarReadyEvent,
   SidecarErrorEvent,
   TodoItem,
-  ChangedFile,
 } from '../types/agent';
 
 export type AgentMessage =
@@ -28,7 +25,6 @@ export type AgentMessage =
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
   | { kind: 'mcp_status'; data: Record<string, string> }
   | { kind: 'streaming'; data: { event: Record<string, unknown>; session_id?: string } }
-  | { kind: 'file_snapshot'; data: { file_path: string; original_content: string; is_new: boolean; tool_use_id: string } }
   | { kind: 'done' }
   | { kind: 'raw'; data: Record<string, unknown> };
 
@@ -49,13 +45,6 @@ interface AgentState {
   streamingText: Record<string, string>;
   /** Sessions that were force-stopped (interrupt) — suppress streaming UI immediately */
   forceStopped: Record<string, boolean>;
-  streamingToolInputs: Record<string, Record<string, string>>;
-  streamingToolMeta: Record<string, Record<string, { name: string; index: number }>>;
-  streamingToolIndexMap: Record<string, Record<number, string>>;
-  streamedToolUseIds: Record<string, Set<string>>;
-  changedFiles: Record<string, ChangedFile[]>;
-  fileOriginals: Record<string, Record<string, { content: string; isNew: boolean; toolUseId?: string }>>;
-  acknowledgedFiles: Record<string, Set<string>>;
 
   /** Start a new agent query */
   startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => Promise<void>;
@@ -67,8 +56,6 @@ interface AgentState {
   clearSavedEvents: (sessionId: string) => Promise<void>;
   /** Load historical messages for a session */
   loadSessionMessages: (sessionId: string) => Promise<void>;
-  /** Clear changed files for a session */
-  clearChangedFiles: (sessionId: string) => void;
 }
 
 function parseAgentEvent(raw: string): AgentMessage {
@@ -102,8 +89,6 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'result', data };
       case 'ask_user_question':
         return { kind: 'ask_user_question', data };
-      case 'file_snapshot':
-        return { kind: 'file_snapshot', data };
       case 'stream_event':
         return { kind: 'streaming', data: { event: data.event, session_id: data.session_id } };
       case 'sidecar_debug':
@@ -251,146 +236,6 @@ function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
   return todos;
 }
 
-function countDiff(oldStr: string, newStr: string): { additions: number; deletions: number } {
-  const changes = diffLines(oldStr, newStr);
-  let additions = 0;
-  let deletions = 0;
-  for (const change of changes) {
-    const lines = change.value.split('\n').filter((_l, i, arr) =>
-      i < arr.length - 1 || arr[arr.length - 1] !== ''
-    );
-    if (change.added) additions += lines.length;
-    if (change.removed) deletions += lines.length;
-  }
-  return { additions, deletions };
-}
-
-export function extractChangedFilesFromEvents(
-  events: AgentMessage[],
-  acknowledged?: Set<string>,
-  originals?: Record<string, { content: string; isNew: boolean; toolUseId?: string }>,
-): ChangedFile[] {
-  const fileMap = new Map<string, ChangedFile>();
-
-  // Build a normalized lookup for originals (snapshot paths may differ from tool input paths)
-  const normalizedOriginals = new Map<string, { content: string; isNew: boolean; toolUseId?: string }>();
-  // Also build a lookup by tool_use_id for matching when paths differ (relative vs absolute)
-  const originalsByToolId = new Map<string, { content: string; isNew: boolean }>();
-  if (originals) {
-    for (const [k, v] of Object.entries(originals)) {
-      normalizedOriginals.set(normalizeFilePath(k), v);
-      if (v.toolUseId) {
-        originalsByToolId.set(v.toolUseId, v);
-      }
-    }
-  }
-
-  for (const evt of events) {
-    if (evt.kind !== 'assistant') continue;
-    const blocks = Array.isArray(evt.data?.message?.content) ? evt.data.message.content : [];
-
-    for (const block of blocks) {
-      if (block?.type !== 'tool_use' || !block.name) continue;
-      const input = block.input as Record<string, unknown>;
-
-      if (block.name === 'Write') {
-        const rawPath = input?.file_path as string;
-        const fileContent = input?.content as string;
-        if (!rawPath || typeof fileContent !== 'string') continue;
-        const filePath = normalizeFilePath(rawPath);
-        const toolUseId = block.id as string | undefined;
-
-        const existing = fileMap.get(filePath);
-        if (existing) {
-          existing.currentContent = fileContent;
-          existing._pendingEdits = undefined;
-          const orig = existing.originalContent ?? '';
-          const { additions, deletions } = countDiff(orig, fileContent);
-          existing.additions = additions;
-          existing.deletions = deletions;
-        } else {
-          const snapshot = normalizedOriginals.get(filePath) || (toolUseId ? originalsByToolId.get(toolUseId) : undefined);
-          const origContent = snapshot?.content ?? '';
-          const isNew = snapshot?.isNew ?? true;
-          const { additions, deletions } = countDiff(origContent, fileContent);
-          fileMap.set(filePath, {
-            path: filePath,
-            isNew,
-            originalContent: isNew ? undefined : origContent,
-            currentContent: fileContent,
-            additions,
-            deletions,
-          });
-        }
-      }
-
-      if (block.name === 'Edit') {
-        const rawPath = input?.file_path as string;
-        const oldString = input?.old_string as string;
-        const newString = input?.new_string as string;
-        if (!rawPath || typeof oldString !== 'string' || typeof newString !== 'string') continue;
-        const filePath = normalizeFilePath(rawPath);
-        const toolUseId = block.id as string | undefined;
-
-        const existing = fileMap.get(filePath);
-        if (existing) {
-          if (existing.currentContent) {
-            const idx = existing.currentContent.indexOf(oldString);
-            if (idx !== -1) {
-              existing.currentContent =
-                existing.currentContent.slice(0, idx) +
-                newString +
-                existing.currentContent.slice(idx + oldString.length);
-            }
-            const orig = existing.originalContent ?? '';
-            const { additions, deletions } = countDiff(orig, existing.currentContent);
-            existing.additions = additions;
-            existing.deletions = deletions;
-          } else {
-            (existing._pendingEdits ||= []).push({ oldString, newString });
-          }
-        } else {
-          const snapshot = normalizedOriginals.get(filePath) || (toolUseId ? originalsByToolId.get(toolUseId) : undefined);
-          if (snapshot) {
-            let current = snapshot.content;
-            const idx = current.indexOf(oldString);
-            if (idx !== -1) {
-              current = current.slice(0, idx) + newString + current.slice(idx + oldString.length);
-            }
-            const { additions, deletions } = countDiff(snapshot.content, current);
-            fileMap.set(filePath, {
-              path: filePath,
-              isNew: false,
-              originalContent: snapshot.content,
-              currentContent: current,
-              additions,
-              deletions,
-            });
-          } else {
-            fileMap.set(filePath, {
-              path: filePath,
-              isNew: false,
-              originalContent: undefined,
-              currentContent: '',
-              additions: 0,
-              deletions: 0,
-              _pendingEdits: [{ oldString, newString }],
-            });
-          }
-        }
-      }
-    }
-  }
-
-  const allFiles = Array.from(fileMap.values());
-
-  if (acknowledged && acknowledged.size > 0) {
-    return allFiles.filter((f) => !acknowledged.has(f.path));
-  }
-
-  return allFiles;
-}
-
 export const useAgentStore = create<AgentState>((set, get) => ({
   events: {},
   eventTimestamps: {},
@@ -400,13 +245,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   streamingThinking: {},
   streamingText: {},
   forceStopped: {},
-  streamingToolInputs: {},
-  streamingToolMeta: {},
-  streamingToolIndexMap: {},
-  streamedToolUseIds: {},
-  changedFiles: {},
-  fileOriginals: {},
-  acknowledgedFiles: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => {
     // Clear force-stopped flag when starting a new query
@@ -439,88 +277,26 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     try {
       await agentApi.startSession(sessionId, prompt, cwd, (raw: string) => {
-        let event = parseAgentEvent(raw);
+        const event = parseAgentEvent(raw);
         const now = Date.now();
 
-        // Handle file_snapshot events: store original content captured before
-        // Write/Edit tool execution, then re-extract changed files.
-        if (event.kind === 'file_snapshot') {
-          const { file_path, original_content, is_new, tool_use_id } = event.data;
-          set((s) => {
-            const sessionOriginals = { ...(s.fileOriginals[sessionId] || {}) };
-            sessionOriginals[file_path] = { content: original_content, isNew: is_new, toolUseId: tool_use_id };
-            const updatedOriginals = { ...s.fileOriginals, [sessionId]: sessionOriginals };
-            const prev = s.events[sessionId] || [];
-            const newEvents = [...prev, event];
-            return {
-              events: { ...s.events, [sessionId]: newEvents },
-              eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
-              fileOriginals: updatedOriginals,
-              changedFiles: {
-                ...s.changedFiles,
-                [sessionId]: extractChangedFilesFromEvents(newEvents, s.acknowledgedFiles[sessionId], sessionOriginals),
-              },
-            };
-          });
-          return;
-        }
-
-        // Handle streaming events (thinking/text deltas + tool_use) separately
+        // Handle streaming events (thinking/text deltas) separately —
+        // update streaming state, don't append to events array
+        // Skip if session was interrupted (isRunning already false)
         if (event.kind === 'streaming') {
           if (!get().isRunning[sessionId]) return;
           const streamEvent = event.data.event as Record<string, unknown>;
           const eventType = streamEvent.type as string;
-          const findToolId = (idx: number | undefined): string | undefined => {
-            if (idx !== undefined) {
-              const byIndex = get().streamingToolIndexMap[sessionId]?.[idx];
-              if (byIndex) return byIndex;
-            }
-            const meta = get().streamingToolMeta[sessionId];
-            if (!meta) return undefined;
-            const entries = Object.entries(meta);
-            return entries.length > 0 ? entries[entries.length - 1][0] : undefined;
-          };
-
           if (eventType === 'content_block_start') {
             const contentBlock = streamEvent.content_block as Record<string, unknown> | undefined;
             if (contentBlock?.type === 'thinking') {
               set((s) => ({ streamingThinking: { ...s.streamingThinking, [sessionId]: '' } }));
             } else if (contentBlock?.type === 'text') {
               set((s) => ({ streamingText: { ...s.streamingText, [sessionId]: '' } }));
-            } else if (contentBlock?.type === 'tool_use') {
-              const toolId = contentBlock.id as string;
-              const toolName = contentBlock.name as string;
-              const blockIndex = streamEvent.index as number | undefined;
-              set((s) => ({
-                streamingToolMeta: {
-                  ...s.streamingToolMeta,
-                  [sessionId]: { ...(s.streamingToolMeta[sessionId] || {}), [toolId]: { name: toolName, index: blockIndex ?? -1 } },
-                },
-                streamingToolInputs: {
-                  ...s.streamingToolInputs,
-                  [sessionId]: { ...(s.streamingToolInputs[sessionId] || {}), [toolId]: '' },
-                },
-                streamingToolIndexMap: blockIndex !== undefined
-                  ? { ...s.streamingToolIndexMap, [sessionId]: { ...(s.streamingToolIndexMap[sessionId] || {}), [blockIndex]: toolId } }
-                  : s.streamingToolIndexMap,
-              }));
             }
           } else if (eventType === 'content_block_delta') {
             const delta = streamEvent.delta as Record<string, unknown> | undefined;
-            if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
-              const toolId = findToolId(streamEvent.index as number | undefined);
-              if (toolId) {
-                set((s) => ({
-                  streamingToolInputs: {
-                    ...s.streamingToolInputs,
-                    [sessionId]: {
-                      ...(s.streamingToolInputs[sessionId] || {}),
-                      [toolId]: ((s.streamingToolInputs[sessionId] || {})[toolId] || '') + delta.partial_json,
-                    },
-                  },
-                }));
-              }
-            } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+            if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
               set((s) => ({
                 streamingThinking: {
                   ...s.streamingThinking,
@@ -536,68 +312,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               }));
             }
           } else if (eventType === 'content_block_stop') {
-            const blockIndex = streamEvent.index as number | undefined;
-            const toolId = findToolId(blockIndex);
-            const toolMeta = toolId ? get().streamingToolMeta[sessionId]?.[toolId] : undefined;
-            if (toolId && toolMeta) {
-              const rawJson = get().streamingToolInputs[sessionId]?.[toolId] || '{}';
-              let parsedInput: Record<string, unknown> = {};
-              try { parsedInput = JSON.parse(rawJson); } catch {}
-              const toolUseBlock: import('../types/agent').ContentBlock = {
-                type: 'tool_use',
-                id: toolId,
-                name: toolMeta.name,
-                input: parsedInput,
-              };
-              const syntheticAssistant: import('../types/agent').AgentAssistantMessage = {
-                type: 'assistant',
-                uuid: `stream-${toolId}`,
-                session_id: sessionId,
-                message: { role: 'assistant', content: [toolUseBlock] },
-                parent_tool_use_id: null,
-              };
-              const syntheticEvent: AgentMessage = { kind: 'assistant', data: syntheticAssistant };
-              set((s) => {
-                const prev = s.events[sessionId] || [];
-                const newEvents = [...prev, syntheticEvent];
-                const prevIds = s.streamedToolUseIds[sessionId] || new Set<string>();
-                const newIds = new Set(prevIds);
-                newIds.add(toolId);
-                return {
-                  events: { ...s.events, [sessionId]: newEvents },
-                  eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
-                  todos: { ...s.todos, [sessionId]: extractTodosFromEvents(newEvents) },
-                  changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, s.acknowledgedFiles[sessionId], s.fileOriginals[sessionId]) },
-                  streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
-                  streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
-                  streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
-                  streamedToolUseIds: { ...s.streamedToolUseIds, [sessionId]: newIds },
-                };
-              });
-            } else {
-              set((s) => ({
-                streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
-                streamingText: { ...s.streamingText, [sessionId]: '' },
-              }));
-            }
+            // Block complete — the full assistant message will arrive next
+            set((s) => ({
+              streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+              streamingText: { ...s.streamingText, [sessionId]: '' },
+            }));
           }
-          return;
+          return; // Don't append streaming events to the events array
         }
 
-        // When the complete assistant message arrives, filter out tool_use blocks
-        // that were already streamed as synthetic events to avoid duplicate display.
+        // Clear streaming state when the complete assistant message arrives
         if (event.kind === 'assistant') {
-          const streamedIds = get().streamedToolUseIds[sessionId];
-          if (streamedIds && streamedIds.size > 0) {
-            const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
-            const filtered = blocks.filter((b: any) => b?.type !== 'tool_use' || !streamedIds.has(b.id));
-            if (filtered.length !== blocks.length) {
-              event = {
-                ...event,
-                data: { ...event.data, message: { ...event.data.message, content: filtered } },
-              };
-            }
-          }
           set((s) => {
             const updates: Partial<AgentState> = {};
             if (s.streamingThinking[sessionId]) updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
@@ -609,38 +334,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         set((s) => {
           const prev = s.events[sessionId] || [];
           const newEvents = [...prev, event];
-
-          // Un-acknowledge files that have new edits/writes since last save
-          let acknowledged = s.acknowledgedFiles[sessionId];
-          if (acknowledged && acknowledged.size > 0 && event.kind === 'assistant') {
-            const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
-            const newAcknowledged = new Set(acknowledged);
-            let changed = false;
-            for (const block of blocks) {
-              if (block?.type === 'tool_use' && (block.name === 'Write' || block.name === 'Edit')) {
-                const rawPath = block.input?.file_path as string;
-                if (rawPath && newAcknowledged.has(normalizeFilePath(rawPath))) {
-                  newAcknowledged.delete(normalizeFilePath(rawPath));
-                  changed = true;
-                }
-              }
-            }
-            if (changed) {
-              acknowledged = newAcknowledged;
-              try {
-                localStorage.setItem(`acknowledged-files-${sessionId}`, JSON.stringify(Array.from(newAcknowledged)));
-              } catch {}
-            }
-          }
-
           return {
-            events: { ...s.events, [sessionId]: newEvents },
-            eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
-            todos: { ...s.todos, [sessionId]: extractTodosFromEvents(newEvents) },
-            changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
-            ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
+            events: {
+              ...s.events,
+              [sessionId]: newEvents,
+            },
+            eventTimestamps: {
+              ...s.eventTimestamps,
+              [sessionId]: [...(s.eventTimestamps[sessionId] || []), now],
+            },
+            todos: {
+              ...s.todos,
+              [sessionId]: extractTodosFromEvents(newEvents),
+            },
           };
         });
+
         // Extract MCP server connection status from init messages
         if (event.kind === 'system' && event.data?.mcp_servers) {
           const statuses: Record<string, string> = {};
@@ -755,34 +464,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   loadSessionMessages: async (sessionId: string) => {
-    // Restore acknowledgedFiles from localStorage
-    let restoredAcknowledged: Set<string> | undefined;
-    try {
-      const stored = localStorage.getItem(`acknowledged-files-${sessionId}`);
-      if (stored) {
-        const arr = JSON.parse(stored);
-        if (Array.isArray(arr)) restoredAcknowledged = new Set(arr);
-      }
-    } catch {}
-
     // Don't reload if we already have events for this session
     const existing = get().events[sessionId];
-    if (existing && existing.length > 0) {
-      // But ensure changedFiles are extracted (may be missing after clearChangedFiles)
-      const acknowledged = restoredAcknowledged ?? get().acknowledgedFiles[sessionId];
-      if (!get().changedFiles[sessionId] || get().changedFiles[sessionId]!.length === 0) {
-        const sessionOriginals = get().fileOriginals[sessionId];
-        set((s) => ({
-          acknowledgedFiles: restoredAcknowledged ? { ...s.acknowledgedFiles, [sessionId]: restoredAcknowledged } : s.acknowledgedFiles,
-          changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(existing, acknowledged, sessionOriginals) },
-        }));
-      } else if (restoredAcknowledged) {
-        set((s) => ({
-          acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: restoredAcknowledged! },
-        }));
-      }
-      return;
-    }
+    if (existing && existing.length > 0) return;
 
     try {
       const eventsJson = await agentApi.getEvents(sessionId);
@@ -800,45 +484,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           events = parsed.events || [];
           timestamps = parsed.timestamps || new Array(events.length).fill(0);
         }
-        // Reconstruct fileOriginals from persisted file_snapshot events
-        const sessionOriginals: Record<string, { content: string; isNew: boolean; toolUseId?: string }> = {};
-        for (const evt of events) {
-          if (evt.kind === 'file_snapshot') {
-            const { file_path, original_content, is_new, tool_use_id } = evt.data;
-            sessionOriginals[file_path] = { content: original_content, isNew: is_new, toolUseId: tool_use_id };
-          }
-        }
         set((state) => ({
           events: { ...state.events, [sessionId]: events },
           eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
           todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
-          fileOriginals: { ...state.fileOriginals, [sessionId]: sessionOriginals },
-          acknowledgedFiles: restoredAcknowledged ? { ...state.acknowledgedFiles, [sessionId]: restoredAcknowledged } : state.acknowledgedFiles,
-          changedFiles: { ...state.changedFiles, [sessionId]: extractChangedFilesFromEvents(events, restoredAcknowledged, sessionOriginals) },
         }));
       }
     } catch (err) {
       console.error('Failed to load agent events:', err);
     }
   },
-
-  clearChangedFiles: (sessionId: string) => {
-    set((state) => {
-      const currentFiles = state.changedFiles[sessionId] || [];
-      const prevAcknowledged = state.acknowledgedFiles[sessionId] || new Set<string>();
-      const newAcknowledged = new Set(prevAcknowledged);
-      for (const f of currentFiles) {
-        newAcknowledged.add(f.path);
-      }
-      try {
-        localStorage.setItem(`acknowledged-files-${sessionId}`, JSON.stringify(Array.from(newAcknowledged)));
-      } catch {}
-      const newChangedFiles = { ...state.changedFiles };
-      delete newChangedFiles[sessionId];
-      return {
-        changedFiles: newChangedFiles,
-        acknowledgedFiles: { ...state.acknowledgedFiles, [sessionId]: newAcknowledged },
-      };
-    });
-  },
 }));
+

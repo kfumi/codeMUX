@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+﻿import { useState, useCallback, useRef, useEffect } from 'react';
 import { usePreviewStore } from '../../stores/previewStore';
 import { DiffView } from './DiffView';
 import { FileView } from './FileView';
@@ -58,7 +58,7 @@ export function PreviewPanel() {
   } = usePreviewStore();
 
   const activeFile = openFiles.find((f) => f.path === activeFilePath);
-  const hasOriginal = !!activeFile?.originalContent;
+  const hasOriginal = activeFile?.originalContent !== undefined;
 
   const [contextMenu, setContextMenu] = useState<{ path: string; x: number; y: number } | null>(null);
 
@@ -236,7 +236,7 @@ export function PreviewPanel() {
                   {activeFile.error}
                 </div>
               ) : activeFile.currentContent ? (
-                viewMode === 'diff' && activeFile.originalContent ? (
+                viewMode === 'diff' && activeFile.originalContent != null ? (
                   <DiffView oldContent={activeFile.originalContent} newContent={activeFile.currentContent} />
                 ) : (
                   <FileView content={activeFile.currentContent} filePath={activeFile.path} />

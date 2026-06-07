@@ -88,6 +88,8 @@ pub fn run() {
             commands::project::delete_project,
             commands::project::rename_project,
             commands::file::read_file,
+            commands::file::write_file,
+            commands::file::delete_file,
             commands::file::open_in_explorer,
             commands::file::list_directory,
             commands::mcp::get_mcp_servers,

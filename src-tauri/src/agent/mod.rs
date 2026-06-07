@@ -65,14 +65,15 @@ pub async fn spawn_sidecar(
         "node"
     };
 
-    // Use cmd.exe on Windows to inherit full user environment (PATH, HOME, etc.)
+    // Spawn node directly on all platforms (no cmd.exe wrapper to avoid console window flash)
     let mut child = if cfg!(target_os = "windows") {
-        Command::new("cmd.exe")
-            .args(["/c", "node", script_path.to_str().unwrap()])
+        let mut cmd = Command::new(node_cmd);
+        cmd.arg(script_path.to_str().unwrap())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()
+            .creation_flags(0x08000000); // CREATE_NO_WINDOW
+        cmd.spawn()
             .map_err(|e| format!("Failed to spawn sidecar: {}. Is Node.js installed?", e))?
     } else {
         Command::new(node_cmd)
