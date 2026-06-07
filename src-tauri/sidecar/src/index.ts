@@ -232,37 +232,44 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       stderr: (data: string) => {
         process.stderr.write(`[claude-stderr] ${data}`);
       },
+      // PreToolUse hook: captures file snapshots before Write/Edit execution.
+      // Unlike canUseTool, hooks run regardless of permissionMode (including bypassPermissions).
+      hooks: {
+        PreToolUse: [{
+          hooks: [async (input: any, toolUseID: string | undefined) => {
+            const toolName = input.tool_name as string;
+            const toolInput = input.tool_input as Record<string, unknown> | undefined;
+            if ((toolName === 'Write' || toolName === 'Edit') && toolInput) {
+              const filePath = toolInput.file_path as string;
+              if (filePath) {
+                try {
+                  const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(cmd.cwd, filePath);
+                  const original = fs.readFileSync(absolutePath, 'utf-8');
+                  emit({
+                    type: 'file_snapshot',
+                    file_path: absolutePath,
+                    original_content: original,
+                    is_new: false,
+                    tool_use_id: toolUseID || '',
+                  });
+                } catch {
+                  const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(cmd.cwd, filePath);
+                  emit({
+                    type: 'file_snapshot',
+                    file_path: absolutePath,
+                    original_content: '',
+                    is_new: true,
+                    tool_use_id: toolUseID || '',
+                  });
+                }
+              }
+            }
+            return { continue: true };
+          }],
+        }],
+      },
       // Intercept interactive tools that need user input
       canUseTool: async (toolName: string, input: Record<string, unknown>, opts: { toolUseID: string; signal: AbortSignal }) => {
-        // Capture original file content before Write/Edit tools execute.
-        // The SDK calls canUseTool BEFORE executing the tool, so the file
-        // on disk still has the original content at this point.
-        if (toolName === 'Write' || toolName === 'Edit') {
-          const filePath = input.file_path as string;
-          if (filePath) {
-            try {
-              const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(cmd.cwd, filePath);
-              const original = fs.readFileSync(absolutePath, 'utf-8');
-              emit({
-                type: 'file_snapshot',
-                file_path: absolutePath,
-                original_content: original,
-                is_new: false,
-                tool_use_id: opts.toolUseID,
-              });
-            } catch {
-              // File doesn't exist yet (new file being created by Write)
-              const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(cmd.cwd, filePath);
-              emit({
-                type: 'file_snapshot',
-                file_path: absolutePath,
-                original_content: '',
-                is_new: true,
-                tool_use_id: opts.toolUseID,
-              });
-            }
-          }
-        }
         if (toolName === 'AskUserQuestion') {
           const toolUseId = opts.toolUseID;
           // questions may come as a JSON string or array

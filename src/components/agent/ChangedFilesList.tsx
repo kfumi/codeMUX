@@ -115,8 +115,8 @@ export function ChangedFilesList({ sessionId, projectPath, className }: ChangedF
   const totalDeletions = resolvedFiles.reduce((sum, f) => sum + f.deletions, 0);
 
   const handleViewDiff = useCallback((file: ChangedFile) => {
-    // For new files, originalContent is undefined; pass empty string so the diff view shows all content as added
-    openFile(file.path, file.originalContent ?? '');
+    // Only pass originalContent when it's actually available; undefined means genuinely new or snapshot not yet received
+    openFile(file.path, file.originalContent);
   }, [openFile]);
 
   const handleOpenFile = useCallback((file: ChangedFile) => {

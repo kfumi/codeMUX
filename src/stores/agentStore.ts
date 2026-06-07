@@ -1,9 +1,9 @@
 ﻿import { create } from 'zustand';
 import { diffLines } from 'diff';
-import { agentApi } from '../lib/tauri';
+import { agentApi, fileApi } from '../lib/tauri';
 import { useSessionStore } from './sessionStore';
 import { useMcpStore } from './mcpStore';
-import { normalizeFilePath } from './previewStore';
+import { normalizeFilePath, usePreviewStore } from './previewStore';
 import type {
   AgentAssistantMessage,
   AgentToolResult,
@@ -276,14 +276,41 @@ export function extractChangedFilesFromEvents(
   const normalizedOriginals = new Map<string, { content: string; isNew: boolean; toolUseId?: string }>();
   // Also build a lookup by tool_use_id for matching when paths differ (relative vs absolute)
   const originalsByToolId = new Map<string, { content: string; isNew: boolean }>();
+  // Also build a suffix lookup for relative-vs-absolute path matching
+  const originalsBySuffix = new Map<string, { content: string; isNew: boolean; toolUseId?: string }>();
   if (originals) {
     for (const [k, v] of Object.entries(originals)) {
-      normalizedOriginals.set(normalizeFilePath(k), v);
+      const normalized = normalizeFilePath(k);
+      normalizedOriginals.set(normalized, v);
       if (v.toolUseId) {
         originalsByToolId.set(v.toolUseId, v);
       }
+      // Store lowercase suffix keys for relative path matching (strip drive letter)
+      const lower = normalized.toLowerCase();
+      originalsBySuffix.set(lower, v);
+      const driveMatch = lower.match(/^[a-z]:\\(.+)$/);
+      if (driveMatch) {
+        originalsBySuffix.set(driveMatch[1], v);
+      }
     }
   }
+
+  // Helper: find snapshot by normalized path, tool ID, or suffix match
+  const findSnapshot = (filePath: string, toolUseId?: string) => {
+    const normalized = normalizeFilePath(filePath);
+    const exact = normalizedOriginals.get(normalized);
+    if (exact) return exact;
+    if (toolUseId) {
+      const byId = originalsByToolId.get(toolUseId);
+      if (byId) return byId;
+    }
+    // Suffix match: tool input "src/foo.ts" matches snapshot "D:\project\src\foo.ts"
+    const lower = normalized.toLowerCase();
+    for (const [suffix, val] of originalsBySuffix) {
+      if (suffix.endsWith(lower) || lower.endsWith(suffix)) return val;
+    }
+    return undefined;
+  };
 
   for (const evt of events) {
     if (evt.kind !== 'assistant') continue;
@@ -309,14 +336,14 @@ export function extractChangedFilesFromEvents(
           existing.additions = additions;
           existing.deletions = deletions;
         } else {
-          const snapshot = normalizedOriginals.get(filePath) || (toolUseId ? originalsByToolId.get(toolUseId) : undefined);
+          const snapshot = findSnapshot(rawPath, toolUseId);
           const origContent = snapshot?.content ?? '';
           const isNew = snapshot?.isNew ?? true;
           const { additions, deletions } = countDiff(origContent, fileContent);
           fileMap.set(filePath, {
             path: filePath,
             isNew,
-            originalContent: isNew ? undefined : origContent,
+            originalContent: origContent,
             currentContent: fileContent,
             additions,
             deletions,
@@ -350,7 +377,7 @@ export function extractChangedFilesFromEvents(
             (existing._pendingEdits ||= []).push({ oldString, newString });
           }
         } else {
-          const snapshot = normalizedOriginals.get(filePath) || (toolUseId ? originalsByToolId.get(toolUseId) : undefined);
+          const snapshot = findSnapshot(rawPath, toolUseId);
           if (snapshot) {
             let current = snapshot.content;
             const idx = current.indexOf(oldString);
@@ -450,15 +477,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             const sessionOriginals = { ...(s.fileOriginals[sessionId] || {}) };
             sessionOriginals[file_path] = { content: original_content, isNew: is_new, toolUseId: tool_use_id };
             const updatedOriginals = { ...s.fileOriginals, [sessionId]: sessionOriginals };
-            const prev = s.events[sessionId] || [];
-            const newEvents = [...prev, event];
+            const existingEvents = s.events[sessionId] || [];
             return {
-              events: { ...s.events, [sessionId]: newEvents },
-              eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
               fileOriginals: updatedOriginals,
               changedFiles: {
                 ...s.changedFiles,
-                [sessionId]: extractChangedFilesFromEvents(newEvents, s.acknowledgedFiles[sessionId], sessionOriginals),
+                [sessionId]: extractChangedFilesFromEvents(existingEvents, s.acknowledgedFiles[sessionId], sessionOriginals),
               },
             };
           });
@@ -540,9 +564,54 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             const toolId = findToolId(blockIndex);
             const toolMeta = toolId ? get().streamingToolMeta[sessionId]?.[toolId] : undefined;
             if (toolId && toolMeta) {
+              // Skip if this tool_use block already exists in events (real event arrived first)
+              const alreadyExists = (get().events[sessionId] || []).some((evt) =>
+                evt.kind === 'assistant' && (evt.data?.message?.content || []).some((b: any) => b?.type === 'tool_use' && b.id === toolId)
+              );
+              if (alreadyExists) {
+                set((s) => ({
+                  streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
+                  streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
+                  streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
+                }));
+                return;
+              }
               const rawJson = get().streamingToolInputs[sessionId]?.[toolId] || '{}';
               let parsedInput: Record<string, unknown> = {};
               try { parsedInput = JSON.parse(rawJson); } catch {}
+
+              // Capture original file content from disk BEFORE the tool executes.
+              // At content_block_stop time the file is still unmodified on disk.
+              // Fire-and-forget: snapshot is stored async, re-extraction happens on next event.
+              if ((toolMeta.name === 'Write' || toolMeta.name === 'Edit') && parsedInput.file_path) {
+                const filePath = parsedInput.file_path as string;
+                const projectPath = usePreviewStore.getState().projectPath || undefined;
+                fileApi.readFile(filePath, projectPath).then((original) => {
+                  set((s) => {
+                    const sessionOriginals = { ...(s.fileOriginals[sessionId] || {}) };
+                    // Don't overwrite an existing snapshot -- the sidecar's PreToolUse
+                    // snapshot is the authoritative pre-edit content; a later readFile
+                    // may return post-edit content due to the race with tool execution.
+                    if (!sessionOriginals[filePath]) {
+                      sessionOriginals[filePath] = { content: original, isNew: false, toolUseId: toolId };
+                    }
+                    const events = s.events[sessionId] || [];
+                    return {
+                      fileOriginals: { ...s.fileOriginals, [sessionId]: sessionOriginals },
+                      changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(events, s.acknowledgedFiles[sessionId], sessionOriginals) },
+                    };
+                  });
+                }).catch(() => {
+                  set((s) => {
+                    const sessionOriginals = { ...(s.fileOriginals[sessionId] || {}) };
+                    if (!sessionOriginals[filePath]) {
+                      sessionOriginals[filePath] = { content: '', isNew: true, toolUseId: toolId };
+                    }
+                    return { fileOriginals: { ...s.fileOriginals, [sessionId]: sessionOriginals } };
+                  });
+                });
+              }
+
               const toolUseBlock: import('../types/agent').ContentBlock = {
                 type: 'tool_use',
                 id: toolId,
@@ -563,15 +632,29 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 const prevIds = s.streamedToolUseIds[sessionId] || new Set<string>();
                 const newIds = new Set(prevIds);
                 newIds.add(toolId);
+                // Un-acknowledge files that have new edits/writes since last save
+                let acknowledged = s.acknowledgedFiles[sessionId];
+                if (acknowledged && acknowledged.size > 0) {
+                  const rawPath = parsedInput.file_path as string;
+                  if (rawPath && acknowledged.has(normalizeFilePath(rawPath))) {
+                    const newAcknowledged = new Set(acknowledged);
+                    newAcknowledged.delete(normalizeFilePath(rawPath));
+                    acknowledged = newAcknowledged;
+                    try {
+                      localStorage.setItem(`acknowledged-files-${sessionId}`, JSON.stringify(Array.from(newAcknowledged)));
+                    } catch {}
+                  }
+                }
                 return {
                   events: { ...s.events, [sessionId]: newEvents },
                   eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
                   todos: { ...s.todos, [sessionId]: extractTodosFromEvents(newEvents) },
-                  changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, s.acknowledgedFiles[sessionId], s.fileOriginals[sessionId]) },
+                  changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
                   streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
                   streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
                   streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
                   streamedToolUseIds: { ...s.streamedToolUseIds, [sessionId]: newIds },
+                  ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
                 };
               });
             } else {
@@ -584,19 +667,39 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           return;
         }
 
-        // When the complete assistant message arrives, filter out tool_use blocks
-        // that were already streamed as synthetic events to avoid duplicate display.
+        // When the complete assistant message arrives, filter out blocks
+        // that were already displayed via streaming to avoid duplicate display.
         if (event.kind === 'assistant') {
+          const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
           const streamedIds = get().streamedToolUseIds[sessionId];
-          if (streamedIds && streamedIds.size > 0) {
-            const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
-            const filtered = blocks.filter((b: any) => b?.type !== 'tool_use' || !streamedIds.has(b.id));
-            if (filtered.length !== blocks.length) {
-              event = {
-                ...event,
-                data: { ...event.data, message: { ...event.data.message, content: filtered } },
-              };
+          const hasStreamedTools = streamedIds && streamedIds.size > 0;
+          // Collect all tool_use IDs already present in events (covers race condition)
+          const existingToolIds = new Set<string>();
+          // Collect thinking text already displayed in previous assistant events
+          const seenThinkingTexts = new Set<string>();
+          for (const prevEvt of (get().events[sessionId] || [])) {
+            if (prevEvt.kind === 'assistant') {
+              for (const b of (prevEvt.data?.message?.content || [])) {
+                if (b?.type === 'tool_use' && b.id) existingToolIds.add(b.id);
+                if (b?.type === 'thinking' && b.thinking) seenThinkingTexts.add(b.thinking);
+              }
             }
+          }
+          const filtered = blocks.filter((b: any) => {
+            if (b?.type === 'tool_use' && (existingToolIds.has(b.id) || streamedIds?.has(b.id))) return false;
+            // Dedup thinking blocks: skip if already shown via streaming or in a previous assistant event
+            if (b?.type === 'thinking') {
+              if (hasStreamedTools || seenThinkingTexts.has(b.thinking)) return false;
+            }
+            // Dedup text blocks: skip if already shown via streaming
+            if (b?.type === 'text' && hasStreamedTools) return false;
+            return true;
+          });
+          if (filtered.length !== blocks.length) {
+            event = {
+              ...event,
+              data: { ...event.data, message: { ...event.data.message, content: filtered } },
+            };
           }
           set((s) => {
             const updates: Partial<AgentState> = {};
