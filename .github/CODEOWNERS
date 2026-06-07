@@ -1,0 +1,21 @@
+# 代码审查分配
+# 文档：https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# 默认所有文件
+* @vzi777
+
+# Rust 后端
+src-tauri/src/ @vzi777
+
+# Sidecar
+src-tauri/sidecar/ @vzi777
+
+# 前端组件
+src/components/ @vzi777
+
+# 文档
+docs/ @vzi777
+*.md @vzi777
+
+# CI/CD
+.github/ @vzi777
