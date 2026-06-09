@@ -17,16 +17,16 @@ const isTauriWindowAvailable = () =>
 function MaximizeIcon({ restored }: { restored: boolean }) {
   if (restored) {
     return (
-      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2">
-        <rect x="2.5" y="0.5" width="7" height="7" rx="1" />
-        <rect x="0.5" y="2.5" width="7" height="7" rx="1" fill="currentColor" fillOpacity="0.08" />
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1">
+        <path d="M3 1.5H8.5V7" />
+        <path d="M1.5 3H7V8.5H1.5Z" />
       </svg>
     );
   }
 
   return (
-    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2">
-      <rect x="0.5" y="0.5" width="9" height="9" rx="1" />
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1">
+      <rect x="1.5" y="1.5" width="7" height="7" />
     </svg>
   );
 }
@@ -126,7 +126,7 @@ export function TitleBar() {
   return (
     <div
       data-tauri-drag-region
-      className="flex h-[38px] shrink-0 select-none items-center border-b border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-bg))] px-4"
+      className="flex h-[38px] shrink-0 select-none items-center border-b border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-bg))] pl-4 pr-0"
       onContextMenu={handleContextMenu}
     >
       <div className="flex items-center gap-2.5">
@@ -142,24 +142,24 @@ export function TitleBar() {
       <div className="flex-1" />
 
       {appWindow && (
-        <div className="-mr-2 flex items-center">
+        <div className="flex h-full items-stretch self-stretch">
           <button
-            className="flex h-[38px] w-[46px] items-center justify-center text-[hsl(var(--sidebar-fg))]/40 transition-all duration-150 hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-fg))]"
+            className="flex h-full w-[46px] items-center justify-center rounded-none text-[hsl(var(--sidebar-fg))]/55 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-fg))]"
             onClick={() => appWindow.minimize()}
           >
-            <Minus className="h-3.5 w-3.5" />
+            <Minus className="h-3.5 w-3.5" strokeWidth={1.5} />
           </button>
           <button
-            className="flex h-[38px] w-[46px] items-center justify-center text-[hsl(var(--sidebar-fg))]/40 transition-all duration-150 hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-fg))]"
+            className="flex h-full w-[46px] items-center justify-center rounded-none text-[hsl(var(--sidebar-fg))]/55 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-fg))]"
             onClick={() => appWindow.toggleMaximize()}
           >
             <MaximizeIcon restored={maximized} />
           </button>
           <button
-            className="flex h-[38px] w-[46px] items-center justify-center text-[hsl(var(--sidebar-fg))]/40 transition-all duration-150 hover:bg-[hsl(var(--destructive)/0.85)] hover:text-white"
+            className="flex h-full w-[50px] items-center justify-center rounded-none text-[hsl(var(--sidebar-fg))]/55 transition-colors duration-150 hover:bg-[hsl(var(--destructive)/0.92)] hover:text-white"
             onClick={() => appWindow.close()}
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-3.5 w-3.5" strokeWidth={1.5} />
           </button>
         </div>
       )}
