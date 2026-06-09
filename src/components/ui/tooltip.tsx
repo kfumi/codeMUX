@@ -1,5 +1,6 @@
 import * as React from 'react';
 import * as TooltipPrimitive from '@radix-ui/react-tooltip';
+import { cn } from '@/lib/utils';
 
 const TooltipProvider = TooltipPrimitive.Provider;
 const Tooltip = TooltipPrimitive.Root;
@@ -13,8 +14,10 @@ const TooltipContent = React.forwardRef<
     <TooltipPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
-      className="z-50 rounded-md bg-foreground px-2.5 py-1.5 text-[11px] text-background shadow-lg animate-fade-in"
-      style={{ fontFamily: "'JetBrains Mono', monospace" }}
+      className={cn(
+        'z-50 overflow-hidden rounded-md border border-border/60 bg-popover px-2.5 py-1.5 text-[11px] text-popover-foreground shadow-md animate-fade-in',
+        className
+      )}
       {...props}
     />
   </TooltipPrimitive.Portal>

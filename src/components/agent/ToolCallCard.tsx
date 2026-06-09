@@ -18,9 +18,8 @@ interface ToolSummaryPart {
   displayAs?: string;
 }
 
-/** Normalize double backslashes to single */
-function normalizePath(p: string): string {
-  return p.replace(/\\\\/g, '\\');
+function normalizePath(path: string): string {
+  return path.replace(/\\\\/g, '\\');
 }
 
 function getToolSummaryData(toolName: string, input: Record<string, unknown>): ToolSummaryPart[] {
@@ -79,7 +78,6 @@ function getToolSummaryData(toolName: string, input: Record<string, unknown>): T
       return [{ type: 'text', content: parts.join(' ') || '' }];
     }
     case 'AskUserQuestion':
-      return [];
     case 'EnterPlanMode':
     case 'ExitPlanMode':
     case 'WaitForMcpServers':
@@ -101,43 +99,55 @@ const STATUS_DOT = {
   error: 'bg-[hsl(var(--destructive))]',
 };
 
-export function ToolCallCard({ toolName, input, result, status, durationMs, onFileClick }: ToolCallCardProps) {
+export function ToolCallCard({
+  toolName,
+  input,
+  result,
+  status,
+  durationMs,
+  onFileClick,
+}: ToolCallCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const summaryParts = getToolSummaryData(toolName, input);
   const displayName = summaryParts[0]?.displayAs || toolName;
 
   return (
-    <div className={`rounded-xl my-2 bg-muted/25 hover:bg-muted/35 transition-colors duration-200 overflow-hidden`}>
+    <div className="my-2 overflow-hidden rounded-2xl border border-border/60 bg-background shadow-sm transition-colors duration-200 hover:bg-muted/10">
       <div
         role="button"
         tabIndex={0}
-        className="flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors"
+        className="flex w-full items-center gap-2 px-3.5 py-2.5 text-sm transition-colors"
         onClick={() => setIsExpanded(!isExpanded)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsExpanded(!isExpanded); }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            setIsExpanded(!isExpanded);
+          }
+        }}
       >
         <span className="text-muted-foreground/50">
           {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </span>
-        {status && <span className={`h-2 w-2 rounded-full shrink-0 ${STATUS_DOT[status]}`} />}
-        <span className="font-medium text-[13px]">{displayName}</span>
-        <span className="text-muted-foreground truncate flex-1 text-left text-xs">
-          {summaryParts.map((part, i) => {
+        {status && <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[status]}`} />}
+        <span className="text-[13px] font-medium text-foreground">{displayName}</span>
+        <span className="flex-1 truncate text-left text-xs text-muted-foreground">
+          {summaryParts.map((part, index) => {
             if (part.type === 'mcp') {
               const { method, query } = part.content as { method: string; query: string };
               return (
-                <span key={i}>
+                <span key={index}>
                   <span className="font-medium text-foreground/80">{method}</span>
                   <span>{query}</span>
                 </span>
               );
             }
+
             if (part.type === 'file-link') {
               return (
                 <button
-                  key={i}
-                  className="text-[hsl(var(--primary))] hover:underline cursor-pointer"
-                  onClick={(e) => {
-                    e.stopPropagation();
+                  key={index}
+                  className="cursor-pointer text-[hsl(var(--primary))] hover:underline"
+                  onClick={(event) => {
+                    event.stopPropagation();
                     onFileClick?.(part.filePath!, part.originalContent);
                   }}
                 >
@@ -145,31 +155,41 @@ export function ToolCallCard({ toolName, input, result, status, durationMs, onFi
                 </button>
               );
             }
-            return <span key={i}>{String(part.content)}</span>;
+
+            return <span key={index}>{String(part.content)}</span>;
           })}
         </span>
         {durationMs != null && (
-          <span className="text-[11px] text-muted-foreground/40 shrink-0 tabular-nums px-1.5 py-0.5 rounded-md bg-muted/40"
+          <span
+            className="shrink-0 rounded-md bg-muted/60 px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground/70"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             {formatDuration(durationMs)}
           </span>
         )}
       </div>
+
       {isExpanded && (
-        <div className="border-t border-border/30 px-3 py-2.5 space-y-2.5 animate-fade-in">
+        <div className="animate-fade-in space-y-2.5 border-t border-border/40 px-3.5 py-3">
           <div>
-            <div className="text-[11px] text-muted-foreground/60 font-medium uppercase tracking-wider mb-1.5">参数</div>
-            <pre className="text-xs bg-muted/40 rounded-lg p-3 overflow-auto max-h-40 border border-border/20"
+            <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+              参数
+            </div>
+            <pre
+              className="max-h-40 overflow-auto rounded-xl border border-border/30 bg-muted/25 p-3 text-xs"
               style={{ fontFamily: "'JetBrains Mono', monospace" }}
             >
               {JSON.stringify(input, null, 2)}
             </pre>
           </div>
+
           {result && (
             <div>
-              <div className="text-[11px] text-muted-foreground/60 font-medium uppercase tracking-wider mb-1.5">结果</div>
-              <pre className="text-xs bg-muted/40 rounded-lg p-3 overflow-auto max-h-40 whitespace-pre-wrap border border-border/20"
+              <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                结果
+              </div>
+              <pre
+                className="max-h-40 overflow-auto whitespace-pre-wrap rounded-xl border border-border/30 bg-muted/25 p-3 text-xs"
                 style={{ fontFamily: "'JetBrains Mono', monospace" }}
               >
                 {result}

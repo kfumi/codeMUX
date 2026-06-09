@@ -5,9 +5,10 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { usePreviewStore } from '../../stores/previewStore';
 import { cn } from '../../lib/utils';
-import { AgentMessageList } from './AgentMessageList';
-import { AgentInput } from './AgentInput';
-import { ContextProgress } from './ContextProgress';
+import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
+import { CodeMuxThread } from './assistant-ui/CodeMuxThread';
+import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
+import { ContextDisplay } from '../assistant-ui/context-display';
 import { TodoList } from './TodoList';
 import { ChangedFilesList } from './ChangedFilesList';
 import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
@@ -29,7 +30,7 @@ const EMPTY_TODOS: import('../../types/agent').TodoItem[] = [];
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, updateSessionTitle, createSession } = useSessionStore();
   const { projects } = useProjectStore();
-  const { startQuery, isRunning, interrupt, loadSessionMessages, clearEvents, clearSavedEvents } = useAgentStore();
+  const { startQuery, interrupt, loadSessionMessages, clearEvents, clearSavedEvents } = useAgentStore();
   const { config, getActiveProvider } = useSettingsStore();
   const { isOpen: previewOpen, togglePanel: togglePreview, loadFileTree, setProjectPath } = usePreviewStore();
 
@@ -38,6 +39,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const session = sessions.find((s) => s.id === sessionId);
   const project = session?.project_id ? projects.find((p) => p.id === session.project_id) : null;
   const activeProvider = config?.providers.find((p) => p.id === config.active_provider_id) ?? null;
+  const sessionProvider =
+    session?.provider_id
+      ? config?.providers.find((provider) => provider.id === session.provider_id) ?? null
+      : null;
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
@@ -85,6 +90,9 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   const contextUsage = useMemo(() => {
     let usedTokens = 0;
+    let inputTokens = 0;
+    let cachedTokens = 0;
+    let outputTokens = 0;
 
     for (let i = events.length - 1; i >= 0; i--) {
       const evt = events[i];
@@ -95,8 +103,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           const input = usage.input_tokens || 0;
           const cacheRead = usage.cache_read_input_tokens || 0;
           const cacheCreation = usage.cache_creation_input_tokens || 0;
+          const output = usage.output_tokens || 0;
           const total = input + cacheRead + cacheCreation;
-          if (total > 0) usedTokens = total;
+          if (total > 0 || output > 0) {
+            inputTokens = input;
+            cachedTokens = cacheRead + cacheCreation;
+            outputTokens = output;
+            usedTokens = total;
+          }
         }
       }
       if (usedTokens === 0 && evt.kind === 'result') {
@@ -106,8 +120,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           const input = usage.input_tokens || 0;
           const cacheRead = usage.cache_read_input_tokens || 0;
           const cacheCreation = usage.cache_creation_input_tokens || 0;
+          const output = usage.output_tokens || 0;
           const total = input + cacheRead + cacheCreation;
-          if (total > 0) usedTokens = total;
+          if (total > 0 || output > 0) {
+            inputTokens = input;
+            cachedTokens = cacheRead + cacheCreation;
+            outputTokens = output;
+            usedTokens = total;
+          }
         }
       }
       if (usedTokens > 0) break;
@@ -115,10 +135,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
     const totalTokens = activeProvider?.context_1m ? 1_000_000 : 200_000;
 
-    return { usedTokens, totalTokens };
+    return { usedTokens, totalTokens, inputTokens, cachedTokens, outputTokens };
   }, [events, activeProvider]);
-
-  const running = isRunning[sessionId] || false;
 
   const handleSend = async (content: string) => {
     let provider = activeProvider;
@@ -230,7 +248,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         </DropdownMenu>
         <div className="flex-1" />
         {contextUsage.usedTokens > 0 && (
-          <ContextProgress usedTokens={contextUsage.usedTokens} totalTokens={contextUsage.totalTokens} />
+          <ContextDisplay
+            usedTokens={contextUsage.usedTokens}
+            totalTokens={contextUsage.totalTokens}
+            modelName={session?.model || activeProvider?.default_model}
+            inputTokens={contextUsage.inputTokens}
+            cachedTokens={contextUsage.cachedTokens}
+            outputTokens={contextUsage.outputTokens}
+          />
         )}
         {project && (
           <div className="flex items-center gap-1.5 text-[12px] text-foreground/60 bg-muted/30 rounded-lg px-2.5 py-1.5 border border-border/20 min-w-0 max-w-[300px]"
@@ -258,26 +283,27 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         </button>
       </div>
 
-      {/* Message area */}
-      <AgentMessageList sessionId={sessionId} />
-
-      {/* Todo list + Changed files + Input composer */}
-      <div className="relative">
-        <div className="px-5 pb-1">
-            <div className="max-w-3xl mx-auto flex items-end justify-between gap-3">
-              {todos.length > 0 && <TodoList todos={todos} />}
-              <div className="flex-1" />
-              <ChangedFilesList sessionId={sessionId} projectPath={project?.path} />
+      <CodeMuxAssistantRuntimeProvider
+        sessionId={sessionId}
+        onSend={handleSend}
+        onCommand={handleCommand}
+        onStop={() => interrupt(sessionId)}
+      >
+        <CodeMuxThread
+          sessionId={sessionId}
+          provider={sessionProvider ?? activeProvider}
+          footer={
+            <div className="flex w-full flex-col gap-3">
+              <div className="flex items-end justify-between gap-3">
+                {todos.length > 0 && <TodoList todos={todos} />}
+                <div className="flex-1" />
+                <ChangedFilesList sessionId={sessionId} projectPath={project?.path} />
+              </div>
+              <CodeMuxComposer sessionId={sessionId} modelName={session?.model || activeProvider?.default_model} />
             </div>
-          </div>
-        <AgentInput
-          onSend={handleSend}
-          onCommand={handleCommand}
-          onStop={() => interrupt(sessionId)}
-          isLoading={running}
-          modelName={session?.model || activeProvider?.default_model}
+          }
         />
-      </div>
+      </CodeMuxAssistantRuntimeProvider>
 
       {/* Rename dialog */}
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>

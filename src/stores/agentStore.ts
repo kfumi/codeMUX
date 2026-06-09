@@ -71,6 +71,123 @@ interface AgentState {
   clearChangedFiles: (sessionId: string) => void;
 }
 
+type StreamingBuffer = {
+  thinking: string;
+  text: string;
+};
+
+const STREAMING_FRAME_FALLBACK_MS = 16;
+const pendingStreamingBuffers = new Map<string, StreamingBuffer>();
+const pendingStreamingFlushHandles = new Map<string, number>();
+
+function scheduleStreamingFlush(callback: FrameRequestCallback) {
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    return window.requestAnimationFrame(callback);
+  }
+
+  return window.setTimeout(() => callback(Date.now()), STREAMING_FRAME_FALLBACK_MS);
+}
+
+function cancelScheduledStreamingFlush(handle: number) {
+  if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+    window.cancelAnimationFrame(handle);
+    return;
+  }
+
+  clearTimeout(handle);
+}
+
+function applyStreamingBuffer(
+  sessionId: string,
+  buffer: StreamingBuffer,
+  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
+) {
+  if (!buffer.thinking && !buffer.text) {
+    return;
+  }
+
+  set((state) => {
+    const updates: Partial<AgentState> = {};
+
+    if (buffer.thinking) {
+      updates.streamingThinking = {
+        ...state.streamingThinking,
+        [sessionId]: (state.streamingThinking[sessionId] || '') + buffer.thinking,
+      };
+    }
+
+    if (buffer.text) {
+      updates.streamingText = {
+        ...state.streamingText,
+        [sessionId]: (state.streamingText[sessionId] || '') + buffer.text,
+      };
+    }
+
+    return updates;
+  });
+}
+
+function flushPendingStreaming(
+  sessionId: string,
+  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
+) {
+  const handle = pendingStreamingFlushHandles.get(sessionId);
+  if (handle !== undefined) {
+    cancelScheduledStreamingFlush(handle);
+    pendingStreamingFlushHandles.delete(sessionId);
+  }
+
+  const buffer = pendingStreamingBuffers.get(sessionId);
+  if (!buffer) {
+    return;
+  }
+
+  pendingStreamingBuffers.delete(sessionId);
+  applyStreamingBuffer(sessionId, buffer, set);
+}
+
+function clearPendingStreaming(sessionId: string) {
+  const handle = pendingStreamingFlushHandles.get(sessionId);
+  if (handle !== undefined) {
+    cancelScheduledStreamingFlush(handle);
+    pendingStreamingFlushHandles.delete(sessionId);
+  }
+
+  pendingStreamingBuffers.delete(sessionId);
+}
+
+function queueStreamingDelta(
+  sessionId: string,
+  key: keyof StreamingBuffer,
+  chunk: string,
+  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
+) {
+  if (!chunk) {
+    return;
+  }
+
+  const buffer = pendingStreamingBuffers.get(sessionId) ?? { thinking: '', text: '' };
+  buffer[key] += chunk;
+  pendingStreamingBuffers.set(sessionId, buffer);
+
+  if (pendingStreamingFlushHandles.has(sessionId)) {
+    return;
+  }
+
+  const handle = scheduleStreamingFlush(() => {
+    pendingStreamingFlushHandles.delete(sessionId);
+    const pending = pendingStreamingBuffers.get(sessionId);
+    if (!pending) {
+      return;
+    }
+
+    pendingStreamingBuffers.delete(sessionId);
+    applyStreamingBuffer(sessionId, pending, set);
+  });
+
+  pendingStreamingFlushHandles.set(sessionId, handle);
+}
+
 function parseAgentEvent(raw: string): AgentMessage {
   try {
     const data = JSON.parse(raw);
@@ -436,6 +553,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   acknowledgedFiles: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => {
+    clearPendingStreaming(sessionId);
     // Clear force-stopped flag when starting a new query
     set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     // Auto-update session title from the first user message (skip slash commands)
@@ -508,8 +626,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           if (eventType === 'content_block_start') {
             const contentBlock = streamEvent.content_block as Record<string, unknown> | undefined;
             if (contentBlock?.type === 'thinking') {
+              flushPendingStreaming(sessionId, set);
               set((s) => ({ streamingThinking: { ...s.streamingThinking, [sessionId]: '' } }));
             } else if (contentBlock?.type === 'text') {
+              flushPendingStreaming(sessionId, set);
               set((s) => ({ streamingText: { ...s.streamingText, [sessionId]: '' } }));
             } else if (contentBlock?.type === 'tool_use') {
               const toolId = contentBlock.id as string;
@@ -545,19 +665,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 }));
               }
             } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-              set((s) => ({
-                streamingThinking: {
-                  ...s.streamingThinking,
-                  [sessionId]: (s.streamingThinking[sessionId] || '') + delta.thinking,
-                },
-              }));
+              queueStreamingDelta(sessionId, 'thinking', delta.thinking, set);
             } else if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
-              set((s) => ({
-                streamingText: {
-                  ...s.streamingText,
-                  [sessionId]: (s.streamingText[sessionId] || '') + delta.text,
-                },
-              }));
+              queueStreamingDelta(sessionId, 'text', delta.text, set);
             }
           } else if (eventType === 'content_block_stop') {
             const blockIndex = streamEvent.index as number | undefined;
@@ -658,10 +768,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 };
               });
             } else {
-              set((s) => ({
-                streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
-                streamingText: { ...s.streamingText, [sessionId]: '' },
-              }));
+              flushPendingStreaming(sessionId, set);
             }
           }
           return;
@@ -670,29 +777,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         // When the complete assistant message arrives, filter out blocks
         // that were already displayed via streaming to avoid duplicate display.
         if (event.kind === 'assistant') {
+          flushPendingStreaming(sessionId, set);
           const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
           const streamedIds = get().streamedToolUseIds[sessionId];
-          const hasStreamedTools = streamedIds && streamedIds.size > 0;
           // Collect all tool_use IDs already present in events (covers race condition)
           const existingToolIds = new Set<string>();
-          // Collect thinking text already displayed in previous assistant events
-          const seenThinkingTexts = new Set<string>();
           for (const prevEvt of (get().events[sessionId] || [])) {
             if (prevEvt.kind === 'assistant') {
               for (const b of (prevEvt.data?.message?.content || [])) {
                 if (b?.type === 'tool_use' && b.id) existingToolIds.add(b.id);
-                if (b?.type === 'thinking' && b.thinking) seenThinkingTexts.add(b.thinking);
               }
             }
           }
           const filtered = blocks.filter((b: any) => {
             if (b?.type === 'tool_use' && (existingToolIds.has(b.id) || streamedIds?.has(b.id))) return false;
-            // Dedup thinking blocks: skip if already shown via streaming or in a previous assistant event
-            if (b?.type === 'thinking') {
-              if (hasStreamedTools || seenThinkingTexts.has(b.thinking)) return false;
-            }
-            // Dedup text blocks: skip if already shown via streaming
-            if (b?.type === 'text' && hasStreamedTools) return false;
             return true;
           });
           if (filtered.length !== blocks.length) {
@@ -705,6 +803,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             const updates: Partial<AgentState> = {};
             if (s.streamingThinking[sessionId]) updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
             if (s.streamingText[sessionId]) updates.streamingText = { ...s.streamingText, [sessionId]: '' };
+            if (s.streamedToolUseIds[sessionId]?.size) {
+              updates.streamedToolUseIds = { ...s.streamedToolUseIds, [sessionId]: new Set<string>() };
+            }
             return updates;
           });
         }
@@ -758,6 +859,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
 
         if (event.kind === 'done' || event.kind === 'error' || (event.kind === 'result' && event.data?.is_error)) {
+          clearPendingStreaming(sessionId);
           set((s) => ({
             isRunning: { ...s.isRunning, [sessionId]: false },
             error: event.kind === 'error'
@@ -792,6 +894,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   interrupt: async (sessionId: string) => {
+    clearPendingStreaming(sessionId);
     // 1. Immediately update UI — BEFORE sending command to sidecar
     set((s) => ({
       isRunning: { ...s.isRunning, [sessionId]: false },
@@ -831,6 +934,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   clearEvents: (sessionId: string) => {
+    clearPendingStreaming(sessionId);
     set((state) => {
       const newEvents = { ...state.events };
       delete newEvents[sessionId];

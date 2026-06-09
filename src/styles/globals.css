@@ -216,6 +216,16 @@ input[type="password"]::-ms-reveal {
   100% { background-position: 200% 0; }
 }
 
+@keyframes collapsible-down {
+  from { height: 0; }
+  to { height: var(--radix-collapsible-content-height); }
+}
+
+@keyframes collapsible-up {
+  from { height: var(--radix-collapsible-content-height); }
+  to { height: 0; }
+}
+
 @keyframes pulse-soft {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
@@ -248,6 +258,23 @@ input[type="password"]::-ms-reveal {
 
 .animate-glow-pulse {
   animation: glow-pulse 2s ease-in-out infinite;
+}
+
+.animate-collapsible-down {
+  animation: collapsible-down var(--animation-duration, 200ms) ease-out;
+}
+
+.animate-collapsible-up {
+  animation: collapsible-up var(--animation-duration, 200ms) ease-out;
+}
+
+.shimmer {
+  color: transparent;
+  background: linear-gradient(90deg, currentColor 0%, hsl(var(--foreground) / 0.95) 50%, currentColor 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: shimmer 1.5s linear infinite;
 }
 
 /* ——— Staggered children animation ——— */
