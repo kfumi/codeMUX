@@ -876,26 +876,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               ? { ...s.error, [sessionId]: event.data.error }
               : s.error,
           }));
-
-          // Persist agent events to database (with timestamps)
-          // Delay slightly to catch late-arriving events (e.g. compact_boundary after sidecar_query_done)
-          setTimeout(() => {
-            const currentEvents = get().events[sessionId];
-            const currentTimestamps = get().eventTimestamps[sessionId];
-            if (currentEvents && currentEvents.length > 0) {
-              const eventsToSave = currentEvents.filter((e) => e.kind !== 'done');
-              const timestampsToSave = currentEvents
-                .map((e, i) => (e.kind !== 'done' ? currentTimestamps?.[i] ?? 0 : null))
-                .filter((t): t is number => t !== null);
-              const payload = JSON.stringify({ events: eventsToSave, timestamps: timestampsToSave });
-              agentApi.saveEvents(sessionId, payload).catch((err) => {
-                logger.error('Failed to persist agent events after query completion', {
-                  sessionId,
-                  eventCount: eventsToSave.length,
-                }, serializeError(err));
-              });
-            }
-          }, 1000);
           logger.info('Agent query finished', {
             sessionId,
             terminalEvent: event.kind,
@@ -925,35 +905,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     // 2. Then tell sidecar to stop (async, non-blocking for UI)
     await agentApi.interrupt(sessionId);
-
-    // 3. Add interrupt marker and persist events
-    set((s) => {
-      const events = { ...s.events };
-      const eventTimestamps = { ...s.eventTimestamps };
-      // Add interrupt marker message
-      const interruptMsg: AgentMessage = {
-        kind: 'user',
-        data: { content: '[Request interrupted by user for tool use]' },
-      };
-      events[sessionId] = [...(events[sessionId] || []), interruptMsg];
-      eventTimestamps[sessionId] = [...(eventTimestamps[sessionId] || []), Date.now()];
-      // Save events for interrupted session
-      if (events[sessionId].length > 0) {
-        const eventsToSave = events[sessionId].filter((e) => e.kind !== 'done');
-        const tsArr = eventTimestamps[sessionId] || [];
-        const timestampsToSave = events[sessionId]
-          .map((e, i) => (e.kind !== 'done' ? tsArr[i] ?? 0 : null))
-          .filter((t): t is number => t !== null);
-        const payload = JSON.stringify({ events: eventsToSave, timestamps: timestampsToSave });
-        agentApi.saveEvents(sessionId, payload).catch((err) => {
-          logger.error('Failed to persist agent events after interrupt', {
-            sessionId,
-            eventCount: eventsToSave.length,
-          }, serializeError(err));
-        });
-      }
-      return { events, eventTimestamps };
-    });
+    // No synthetic marker message — history comes from Claude's JSONL, not our events.
+    // No SQLite save — the JSONL file written by the SDK is the source of truth.
   },
 
   clearEvents: (sessionId: string) => {
@@ -999,7 +952,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // Don't reload if we already have events for this session
     const existing = get().events[sessionId];
     if (existing && existing.length > 0) {
-      // But ensure changedFiles are extracted (may be missing after clearChangedFiles)
       const acknowledged = restoredAcknowledged ?? get().acknowledgedFiles[sessionId];
       if (!get().changedFiles[sessionId] || get().changedFiles[sessionId]!.length === 0) {
         const sessionOriginals = get().fileOriginals[sessionId];
@@ -1016,22 +968,69 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
 
     try {
+      // Load directly from Claude Code's JSONL session file
+      const jsonlMessages = await agentApi.loadClaudeSessionEvents(sessionId);
+      if (jsonlMessages && jsonlMessages.length > 0) {
+        const events: AgentMessage[] = [];
+        for (const raw of jsonlMessages) {
+          const msgType = (raw as Record<string, unknown>).type as string;
+          if (msgType === 'assistant') {
+            events.push({ kind: 'assistant', data: raw as unknown as AgentAssistantMessage });
+          } else if (msgType === 'user') {
+            // JSONL user messages contain tool_result blocks or plain text content.
+            // Convert to the format the frontend expects.
+            const rawMsg = raw as Record<string, unknown>;
+            const msgContent = (rawMsg as any)?.message?.content;
+            if (Array.isArray(msgContent) && msgContent.some((c: any) => c?.type === 'tool_result')) {
+              // Tool result message
+              events.push({ kind: 'tool_result', data: raw as unknown as AgentToolResult });
+            } else if (typeof msgContent === 'string') {
+              // Plain user text message — convert to our user message format
+              events.push({ kind: 'user', data: { content: msgContent } });
+            } else if (Array.isArray(msgContent)) {
+              // Array of content blocks — try to extract text
+              const textParts = msgContent
+                .filter((c: any) => c?.type === 'text')
+                .map((c: any) => c.text || '');
+              if (textParts.length > 0) {
+                events.push({ kind: 'user', data: { content: textParts.join('\n') } });
+              }
+            }
+          }
+        }
+
+        const timestamps = new Array(events.length).fill(0);
+        set((state) => ({
+          events: { ...state.events, [sessionId]: events },
+          eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
+          todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
+          acknowledgedFiles: restoredAcknowledged ? { ...state.acknowledgedFiles, [sessionId]: restoredAcknowledged } : state.acknowledgedFiles,
+          changedFiles: { ...state.changedFiles, [sessionId]: extractChangedFilesFromEvents(events, restoredAcknowledged) },
+        }));
+        logger.info('Loaded session events from Claude JSONL', {
+          sessionId,
+          eventCount: events.length,
+        });
+        return;
+      }
+    } catch (err) {
+      logger.warn('Failed to load from Claude JSONL, falling back to SQLite', { sessionId }, serializeError(err));
+    }
+
+    // Fallback: try loading from SQLite (for old sessions that may not have JSONL)
+    try {
       const eventsJson = await agentApi.getEvents(sessionId);
       if (eventsJson) {
         const parsed = JSON.parse(eventsJson);
-        // Support both old format (plain array) and new format (object with timestamps)
         let events: AgentMessage[];
         let timestamps: number[];
         if (Array.isArray(parsed)) {
-          // Old format: plain array of events
           events = parsed;
           timestamps = new Array(events.length).fill(0);
         } else {
-          // New format: { events, timestamps }
           events = parsed.events || [];
           timestamps = parsed.timestamps || new Array(events.length).fill(0);
         }
-        // Reconstruct fileOriginals from persisted file_snapshot events
         const sessionOriginals: Record<string, { content: string; isNew: boolean; toolUseId?: string }> = {};
         for (const evt of events) {
           if (evt.kind === 'file_snapshot') {
@@ -1047,13 +1046,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           acknowledgedFiles: restoredAcknowledged ? { ...state.acknowledgedFiles, [sessionId]: restoredAcknowledged } : state.acknowledgedFiles,
           changedFiles: { ...state.changedFiles, [sessionId]: extractChangedFilesFromEvents(events, restoredAcknowledged, sessionOriginals) },
         }));
-        logger.info('Loaded persisted agent events', {
+        logger.info('Loaded persisted agent events from SQLite fallback', {
           sessionId,
           eventCount: events.length,
         });
       }
     } catch (err) {
-      logger.error('Failed to load persisted agent events', { sessionId }, serializeError(err));
+      logger.error('Failed to load session messages', { sessionId }, serializeError(err));
     }
   },
 

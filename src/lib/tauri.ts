@@ -105,6 +105,9 @@ export const agentApi = {
     invokeLogged('save_agent_events', { sessionId, eventsJson }),
   getEvents: (sessionId: string): Promise<string> =>
     invokeLogged('get_agent_events', { sessionId }),
+  /** Load session events directly from Claude Code's JSONL session file. */
+  loadClaudeSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
+    invokeLogged('load_claude_session_events', { appSessionId }),
 };
 
 export const configApi = {

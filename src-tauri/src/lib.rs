@@ -134,6 +134,7 @@ pub fn run() {
             agent::commands::reset_agent_session,
             agent::commands::send_tool_response,
             agent::commands::delete_claude_session_files,
+            agent::commands::load_claude_session_events,
             skills::commands::list_installed_skills,
             skills::commands::uninstall_skill,
             skills::commands::toggle_skill,

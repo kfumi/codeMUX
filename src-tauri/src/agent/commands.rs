@@ -6,6 +6,104 @@ use tokio::sync::Mutex;
 
 use super::{SidecarHandle, spawn_sidecar};
 
+/// Helper: read session-id-map.json and return the Claude session ID for the given app session.
+fn get_claude_session_id(app_session_id: &str) -> Result<(std::path::PathBuf, String), String> {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| "Cannot determine home directory".to_string())?;
+    let claude_dir = PathBuf::from(&home).join(".claude");
+
+    let map_file = claude_dir.join("session-id-map.json");
+    if !map_file.exists() {
+        return Err("session-id-map.json not found".to_string());
+    }
+    let map_content = fs::read_to_string(&map_file)
+        .map_err(|e| format!("Failed to read session-id-map.json: {}", e))?;
+    let map: serde_json::Value = serde_json::from_str(&map_content)
+        .map_err(|e| format!("Failed to parse session-id-map.json: {}", e))?;
+
+    let claude_session_id = map
+        .get(app_session_id)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("No Claude session mapping for {}", app_session_id))?;
+
+    Ok((claude_dir, claude_session_id.to_string()))
+}
+
+/// Find the JSONL file for a given Claude session ID across all project directories.
+fn find_session_jsonl(claude_dir: &std::path::Path, claude_session_id: &str) -> Option<std::path::PathBuf> {
+    use std::fs;
+    let projects_dir = claude_dir.join("projects");
+    if !projects_dir.exists() {
+        return None;
+    }
+    for entry in fs::read_dir(&projects_dir).ok()?.flatten() {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let jsonl = entry.path().join(format!("{}.jsonl", claude_session_id));
+        if jsonl.exists() {
+            return Some(jsonl);
+        }
+    }
+    None
+}
+
+/// Load session events directly from Claude Code's JSONL session file.
+///
+/// Reads `~/.claude/session-id-map.json` to find the Claude session ID,
+/// then locates and parses `~/.claude/projects/{project}/{sessionId}.jsonl`.
+/// Returns a JSON array of raw SDK message objects (user/assistant types only).
+#[tauri::command]
+pub async fn load_claude_session_events(
+    app_session_id: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    use std::fs;
+    use std::io::{BufRead, BufReader};
+
+    debug!(target: "agent", "Loading Claude session events for app_session_id={}", app_session_id);
+
+    let (claude_dir, claude_session_id) = get_claude_session_id(&app_session_id)?;
+
+    let jsonl_path = find_session_jsonl(&claude_dir, &claude_session_id)
+        .ok_or_else(|| format!("JSONL file not found for Claude session {}", claude_session_id))?;
+
+    debug!(target: "agent", "Reading JSONL from {}", jsonl_path.display());
+
+    let file = fs::File::open(&jsonl_path)
+        .map_err(|e| format!("Failed to open JSONL: {}", e))?;
+    let reader = BufReader::new(file);
+
+    let mut messages = Vec::new();
+    for line_result in reader.lines() {
+        let line = match line_result {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let val: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let msg_type = val.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        // Only include user and assistant messages (skip queue-operation, attachment, etc.)
+        if msg_type == "user" || msg_type == "assistant" {
+            messages.push(val);
+        }
+    }
+
+    info!(target: "agent", "Loaded {} messages from Claude JSONL for app_session_id={}", messages.len(), app_session_id);
+    Ok(messages)
+}
+
 /// Managed state for the agent sidecar.
 /// Each session gets its own sidecar process, enabling concurrent execution.
 pub struct AgentState {
