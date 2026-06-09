@@ -15,6 +15,7 @@
     "core:window:allow-is-maximized",
     "core:menu:default",
     "core:menu:allow-popup",
+    "log:default",
     "shell:allow-open",
     "dialog:allow-open",
     "dialog:allow-confirm",

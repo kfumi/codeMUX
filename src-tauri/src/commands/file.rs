@@ -1,3 +1,4 @@
+use log::{debug, info};
 use serde::Serialize;
 use tauri::AppHandle;
 
@@ -63,6 +64,7 @@ fn resolve_secure_path_for_write(path: &str, base_path: Option<String>) -> Resul
 /// Open a directory in the system file explorer.
 #[tauri::command]
 pub fn open_in_explorer(path: String) -> Result<(), String> {
+    info!(target: "file", "Opening in explorer path={}", path);
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("explorer")
@@ -90,6 +92,7 @@ pub fn open_in_explorer(path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn read_file(_app: AppHandle, path: String, base_path: Option<String>) -> Result<String, String> {
     let canonical = resolve_secure_path(&path, base_path)?;
+    debug!(target: "file", "Reading file path={}", canonical.display());
     std::fs::read_to_string(&canonical).map_err(|e| format!("Failed to read file: {}", e))
 }
 
@@ -97,6 +100,7 @@ pub fn read_file(_app: AppHandle, path: String, base_path: Option<String>) -> Re
 #[tauri::command]
 pub fn write_file(_app: AppHandle, path: String, content: String, base_path: Option<String>) -> Result<(), String> {
     let full_path = resolve_secure_path_for_write(&path, base_path)?;
+    info!(target: "file", "Writing file path={} bytes={}", full_path.display(), content.len());
     // Create parent directories if they don't exist
     if let Some(parent) = full_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
@@ -111,6 +115,7 @@ pub fn delete_file(_app: AppHandle, path: String, base_path: Option<String>) -> 
     if !canonical.is_file() {
         return Err(format!("Not a file: {}", canonical.display()));
     }
+    info!(target: "file", "Deleting file path={}", canonical.display());
     std::fs::remove_file(&canonical).map_err(|e| format!("Failed to delete file: {}", e))
 }
 
@@ -126,6 +131,7 @@ pub struct FileNode {
 /// Excludes common large/hidden directories. Default depth = 2, max depth = 5.
 #[tauri::command]
 pub fn list_directory(_app: AppHandle, path: String, base_path: Option<String>, depth: Option<u32>) -> Result<Vec<FileNode>, String> {
+    debug!(target: "file", "Listing directory path={} depth={}", path, depth.unwrap_or(2));
     // Use provided base_path as security base, or fall back to current_dir
     let base = if let Some(bp) = base_path {
         std::path::PathBuf::from(bp)

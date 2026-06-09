@@ -1,5 +1,8 @@
 ﻿import { create } from 'zustand';
 import { fileApi, type FileTreeNode } from '../lib/tauri';
+import { createLogger, serializeError } from '../lib/logger';
+
+const logger = createLogger('previewStore');
 
 export interface OpenFile {
   path: string;
@@ -221,7 +224,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
       const nodes = await fileApi.listDirectory(rootPath, 5, rootPath);
       set({ treeRoot: convertTree(nodes), treeRootPath: rootPath });
     } catch (error) {
-      console.error('Failed to load file tree:', error);
+      logger.error('Failed to load file tree', { rootPath }, serializeError(error));
       set({ treeRoot: null });
     }
   },

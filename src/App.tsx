@@ -13,6 +13,9 @@ import { registerSkillCommands } from './lib/slashCommands';
 import { Sparkles } from 'lucide-react';
 import { TooltipProvider } from './components/ui/tooltip';
 import { Toaster } from 'sonner';
+import { createLogger, serializeError } from './lib/logger';
+
+const logger = createLogger('App');
 
 function App() {
   const { createSession, activeSessionId } = useSessionStore();
@@ -22,14 +25,17 @@ function App() {
   useTheme();
 
   useEffect(() => {
-    fetchConfig();
+    fetchConfig().catch((error) => {
+      logger.error('Failed to fetch initial config', undefined, serializeError(error));
+    });
   }, [fetchConfig]);
 
   // Sync builtin skills and register skill commands
   useEffect(() => {
     const skillStore = useSkillStore.getState();
-    skillStore.syncBuiltins().then(() => {
-      skillStore.fetchInstalled().then(() => {
+    skillStore.syncBuiltins()
+      .then(() => skillStore.fetchInstalled())
+      .then(() => {
         const skills = useSkillStore.getState().installedSkills;
         registerSkillCommands(
           skills.filter(s => s.enabled).map(s => ({
@@ -38,15 +44,21 @@ function App() {
             is_builtin: s.is_builtin,
           }))
         );
+        logger.info('Skill commands registered', {
+          totalSkills: skills.length,
+          enabledSkills: skills.filter((skill) => skill.enabled).length,
+        });
+      })
+      .catch((error) => {
+        logger.error('Failed to initialize skill commands', undefined, serializeError(error));
       });
-    });
   }, []);
 
   const handleNewSession = async (projectId?: string) => {
     try {
       await createSession('新对话', 'agent', projectId);
     } catch (err) {
-      console.error('Failed to create session:', err);
+      logger.error('Failed to create session', { projectId }, serializeError(err));
     }
   };
 

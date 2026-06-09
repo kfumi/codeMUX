@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Check } from 'lucide-react';
 import { agentApi } from '../../lib/tauri';
+import { createLogger, serializeError } from '../../lib/logger';
+
+const logger = createLogger('AskUserQuestionCard');
 
 interface Question {
   question: string;
@@ -92,7 +95,7 @@ export function AskUserQuestionCard({ sessionId, toolUseId, questions, submitted
       setSubmittedAnswers(answers.map((a) => Array.isArray(a) ? a.join(', ') : a));
       setSubmitted(true);
     } catch (err) {
-      console.error('Failed to send tool response:', err);
+      logger.error('Failed to send tool response', { sessionId, toolUseId }, serializeError(err));
     } finally {
       setSubmitting(false);
     }

@@ -3,6 +3,9 @@ import { SessionList } from '../session/SessionList';
 import { Settings, MessageSquarePlus, PanelLeftClose } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { open } from '@tauri-apps/plugin-dialog';
+import { createLogger, serializeError } from '../../lib/logger';
+
+const logger = createLogger('Sidebar');
 
 interface SidebarProps {
   onNewSession: () => void;
@@ -31,7 +34,7 @@ export function Sidebar({ onNewSession, onNewSessionInProject, onOpenSettings, o
         await useProjectStore.getState().createProject(name, path);
       }
     } catch (err) {
-      console.error('Failed to add project:', err);
+      logger.error('Failed to add project from dialog', undefined, serializeError(err));
     }
   };
 

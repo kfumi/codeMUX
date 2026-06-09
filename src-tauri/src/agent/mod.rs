@@ -1,5 +1,6 @@
 pub mod commands;
 
+use log::{debug, info, warn};
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -57,6 +58,7 @@ pub async fn spawn_sidecar(
     app_handle: &tauri::AppHandle,
 ) -> Result<(SidecarHandle, mpsc::Receiver<String>), String> {
     let script_path = sidecar_script_path(app_handle);
+    info!(target: "agent", "Spawning sidecar from {}", script_path.display());
 
     // Try to find node executable
     let node_cmd = if cfg!(target_os = "windows") {
@@ -132,7 +134,9 @@ pub async fn spawn_sidecar(
 
     // Wait for sidecar to signal ready
     match ready_rx.await {
-        Ok(Ok(())) => {}
+        Ok(Ok(())) => {
+            info!(target: "agent", "Sidecar reported ready");
+        }
         Ok(Err(e)) => return Err(e),
         Err(_) => return Err("Sidecar died before signaling ready".to_string()),
     }
@@ -143,7 +147,7 @@ pub async fn spawn_sidecar(
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                eprintln!("[sidecar stderr] {}", line);
+                warn!(target: "sidecar_stderr", "{}", line);
                 // Also send stderr to frontend as a debug event
                 let debug_msg = serde_json::json!({
                     "type": "sidecar_debug",
@@ -154,6 +158,7 @@ pub async fn spawn_sidecar(
         });
     }
 
+    debug!(target: "agent", "Sidecar spawn completed successfully");
     let handle = SidecarHandle { child, stdin_tx };
     Ok((handle, event_rx))
 }

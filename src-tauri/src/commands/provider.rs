@@ -3,14 +3,17 @@ use crate::AppState;
 use crate::config::types::{AppConfig, Provider, Theme};
 use crate::config;
 use futures::StreamExt;
+use log::{debug, info};
 
 #[tauri::command]
 pub fn get_config(state: State<'_, AppState>) -> AppConfig {
+    debug!(target: "provider", "Loading app config");
     state.config.lock().unwrap().clone()
 }
 
 #[tauri::command]
 pub fn update_provider(state: State<'_, AppState>, app: AppHandle, provider: Provider) -> Result<(), String> {
+    info!(target: "provider", "Upserting provider provider_id={} name={}", provider.id, provider.name);
     let mut config = state.config.lock().unwrap();
 
     if let Some(existing) = config.providers.iter_mut().find(|p| p.id == provider.id) {
@@ -25,6 +28,7 @@ pub fn update_provider(state: State<'_, AppState>, app: AppHandle, provider: Pro
 
 #[tauri::command]
 pub fn delete_provider(state: State<'_, AppState>, app: AppHandle, provider_id: String) -> Result<(), String> {
+    info!(target: "provider", "Deleting provider provider_id={}", provider_id);
     let mut config = state.config.lock().unwrap();
     config.providers.retain(|p| p.id != provider_id);
 
@@ -39,6 +43,7 @@ pub fn delete_provider(state: State<'_, AppState>, app: AppHandle, provider_id: 
 
 #[tauri::command]
 pub fn set_active_provider(state: State<'_, AppState>, app: AppHandle, provider_id: String) -> Result<(), String> {
+    info!(target: "provider", "Setting active provider provider_id={}", provider_id);
     let mut config = state.config.lock().unwrap();
     config.active_provider_id = Some(provider_id);
     config::save_config(&app, &config)?;
@@ -47,6 +52,7 @@ pub fn set_active_provider(state: State<'_, AppState>, app: AppHandle, provider_
 
 #[tauri::command]
 pub fn set_theme(state: State<'_, AppState>, app: AppHandle, theme: String) -> Result<(), String> {
+    info!(target: "provider", "Setting theme theme={}", theme);
     let mut config = state.config.lock().unwrap();
     config.theme = match theme.as_str() {
         "light" => Theme::Light,
@@ -96,6 +102,7 @@ fn build_model_urls(base_url: &str) -> Vec<String> {
 
 #[tauri::command]
 pub async fn fetch_provider_models(api_key: String, base_url: String) -> Result<Vec<ModelInfo>, String> {
+    info!(target: "provider", "Fetching provider models base_url={}", base_url);
     if base_url.trim().is_empty() {
         return Err("请填写 Base URL".to_string());
     }
@@ -182,6 +189,7 @@ pub async fn fetch_provider_models(api_key: String, base_url: String) -> Result<
 /// Test a provider by sending a streaming request. Returns model name on success.
 #[tauri::command]
 pub async fn test_provider(state: State<'_, AppState>, provider_id: String) -> Result<String, String> {
+    info!(target: "provider", "Testing provider provider_id={}", provider_id);
     let provider = {
         let config = state.config.lock().unwrap();
         config.providers.iter().find(|p| p.id == provider_id).cloned()

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use log::{debug, info, warn};
 use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
 
@@ -34,10 +35,21 @@ pub async fn start_agent_session(
     base_url: Option<String>,
     model: Option<String>,
 ) -> Result<(), String> {
+    info!(
+        target: "agent",
+        "Starting agent session session_id={} cwd={} model={} has_api_key={} has_base_url={}",
+        session_id,
+        cwd,
+        model.as_deref().unwrap_or("default"),
+        api_key.as_ref().map(|key| !key.is_empty()).unwrap_or(false),
+        base_url.as_ref().map(|url| !url.is_empty()).unwrap_or(false)
+    );
+
     // If this session already has a sidecar, shut it down first
     {
         let mut sidecars = agent_state.sidecars.lock().await;
         if let Some(mut old_handle) = sidecars.remove(&session_id) {
+            warn!(target: "agent", "Replacing existing sidecar for session_id={}", session_id);
             old_handle.shutdown().await;
         }
     }
@@ -60,7 +72,7 @@ pub async fn start_agent_session(
         // Sidecar stdout closed — the process likely exited.
         // Remove from sidecar map if still present.
         // (We can't access agent_state here, so cleanup happens on next start/shutdown)
-        eprintln!("[agent] Sidecar for session {} exited", session_id_clone);
+        info!(target: "agent", "Sidecar stream closed for session_id={}", session_id_clone);
     });
 
     // 读取启用的 MCP servers
@@ -95,6 +107,7 @@ pub async fn start_agent_session(
     }
 
     if !mcp_servers.is_empty() {
+        debug!(target: "agent", "Attaching {} enabled MCP server(s) to session_id={}", mcp_servers.len(), session_id);
         let mcp_config = crate::mcp::adapters::claude::to_sdk_config(&mcp_servers);
         if !mcp_config.as_object().map_or(true, |o| o.is_empty()) {
             cmd["mcpServers"] = mcp_config;
@@ -120,7 +133,7 @@ pub async fn start_agent_session(
             })
             .collect();
         if !instructions.is_empty() {
-            eprintln!("[agent] MCP server instructions from cache: {} servers", instructions.len());
+            info!(target: "agent", "Using cached MCP instructions for {} server(s) in session_id={}", instructions.len(), session_id);
             cmd["mcpServerInstructions"] = serde_json::Value::Object(instructions);
         }
     }
@@ -132,12 +145,16 @@ pub async fn start_agent_session(
     };
 
     if !enabled_skills.is_empty() {
+        debug!(target: "agent", "Attaching {} enabled skill(s) to session_id={}", enabled_skills.len(), session_id);
         cmd["skills"] = serde_json::json!(enabled_skills);
     }
 
     let sidecars = agent_state.sidecars.lock().await;
     if let Some(handle) = sidecars.get(&session_id) {
         handle.send_command(&cmd.to_string()).await?;
+        info!(target: "agent", "Agent start command sent for session_id={}", session_id);
+    } else {
+        warn!(target: "agent", "Failed to locate sidecar after spawn for session_id={}", session_id);
     }
 
     Ok(())
@@ -149,12 +166,15 @@ pub async fn interrupt_agent_session(
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
+    info!(target: "agent", "Interrupt requested for session_id={}", session_id);
     let mut sidecars = agent_state.sidecars.lock().await;
     if let Some(handle) = sidecars.remove(&session_id) {
         // Send interrupt first, then shut down
         let _ = handle.send_command(r#"{"type":"interrupt"}"#).await;
         // Note: we intentionally don't call shutdown here — the sidecar will
         // exit after the interrupt. The cleanup happens via the forwarder task.
+    } else {
+        debug!(target: "agent", "Interrupt skipped; no active sidecar for session_id={}", session_id);
     }
     Ok(())
 }
@@ -165,9 +185,12 @@ pub async fn shutdown_agent(
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
+    info!(target: "agent", "Shutdown requested for session_id={}", session_id);
     let mut sidecars = agent_state.sidecars.lock().await;
     if let Some(mut handle) = sidecars.remove(&session_id) {
         handle.shutdown().await;
+    } else {
+        debug!(target: "agent", "Shutdown skipped; no active sidecar for session_id={}", session_id);
     }
     Ok(())
 }
@@ -181,6 +204,7 @@ pub async fn send_tool_response(
     tool_use_id: String,
     response: serde_json::Value,
 ) -> Result<(), String> {
+    info!(target: "agent", "Sending tool response for session_id={} tool_use_id={}", session_id, tool_use_id);
     let cmd = serde_json::json!({
         "type": "tool_response",
         "toolUseId": tool_use_id,
@@ -190,6 +214,8 @@ pub async fn send_tool_response(
     let sidecars = agent_state.sidecars.lock().await;
     if let Some(handle) = sidecars.get(&session_id) {
         handle.send_command(&cmd.to_string()).await?;
+    } else {
+        warn!(target: "agent", "Tool response skipped because no sidecar was found for session_id={} tool_use_id={}", session_id, tool_use_id);
     }
 
     Ok(())
@@ -202,6 +228,7 @@ pub async fn reset_agent_session(
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
+    info!(target: "agent", "Reset requested for session_id={}", session_id);
     let cmd = serde_json::json!({
         "type": "reset_session",
         "sessionId": session_id,
@@ -210,6 +237,8 @@ pub async fn reset_agent_session(
     let sidecars = agent_state.sidecars.lock().await;
     if let Some(handle) = sidecars.get(&session_id) {
         handle.send_command(&cmd.to_string()).await?;
+    } else {
+        debug!(target: "agent", "Reset skipped; no active sidecar for session_id={}", session_id);
     }
 
     Ok(())
@@ -246,8 +275,18 @@ pub async fn delete_claude_session_files(
 
     let claude_session_id = match map.get(&app_session_id).and_then(|v| v.as_str()) {
         Some(id) => id.to_string(),
-        None => return Ok(vec![]), // No mapping found, nothing to clean up
+        None => {
+            debug!(target: "agent", "No Claude session mapping found for session_id={}", app_session_id);
+            return Ok(vec![]);
+        }
     };
+
+    info!(
+        target: "agent",
+        "Deleting Claude session files for app_session_id={} claude_session_id={}",
+        app_session_id,
+        claude_session_id
+    );
 
     let mut deleted = Vec::new();
     let projects_dir = claude_dir.join("projects");
@@ -327,6 +366,13 @@ pub async fn delete_claude_session_files(
         map_obj.remove(&app_session_id);
         let _ = fs::write(&map_file, serde_json::to_string_pretty(&map_obj).unwrap_or_default());
     }
+
+    info!(
+        target: "agent",
+        "Deleted {} Claude session file entries for app_session_id={}",
+        deleted.len(),
+        app_session_id
+    );
 
     Ok(deleted)
 }

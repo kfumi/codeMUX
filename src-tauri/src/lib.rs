@@ -5,7 +5,9 @@ mod agent;
 mod mcp;
 mod skills;
 
+use log::{info, warn};
 use tauri::Manager;
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 use std::sync::Mutex;
 
 pub struct AppState {
@@ -21,11 +23,37 @@ pub struct AppState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .clear_targets()
+                .targets([
+                    Target::new(TargetKind::Stdout),
+                    Target::new(TargetKind::LogDir {
+                        file_name: Some("codemux".into()),
+                    }),
+                    Target::new(TargetKind::Webview),
+                ])
+                .level(log::LevelFilter::Info)
+                .level_for("codemux_lib", log::LevelFilter::Info)
+                .rotation_strategy(RotationStrategy::KeepSome(10))
+                .max_file_size(1_048_576)
+                .timezone_strategy(TimezoneStrategy::UseLocal)
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            let log_dir = app.path().app_log_dir()?;
+            info!(target: "app", "Application starting; log directory={}", log_dir.display());
+
             let conn = db::initialize(&app.handle()).expect("Failed to initialize database");
             let config = config::load_config(&app.handle());
+            info!(
+                target: "app",
+                "Runtime initialized; providers={} theme={:?}",
+                config.providers.len(),
+                config.theme
+            );
 
             let mcp_instructions_cache = std::sync::Arc::new(Mutex::new(std::collections::HashMap::<String, String>::new()));
             let mcp_instructions_for_probe = mcp_instructions_cache.clone();
@@ -36,13 +64,13 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let servers = mcp::db::get_enabled_mcp_servers(&probe_conn).unwrap_or_default();
                 if servers.is_empty() {
-                    println!("[mcp-probe] Startup: no enabled MCP servers");
+                    info!(target: "mcp_probe", "Startup probe skipped: no enabled MCP servers");
                     return;
                 }
-                println!("[mcp-probe] Startup: probing {} MCP server(s)...", servers.len());
+                info!(target: "mcp_probe", "Startup probe beginning for {} MCP server(s)", servers.len());
                 let results = commands::mcp::probe_servers(&servers).await;
                 let connected = results.values().filter(|r| r.connected).count();
-                println!("[mcp-probe] Startup: {}/{} connected", connected, results.len());
+                info!(target: "mcp_probe", "Startup probe finished: {}/{} connected", connected, results.len());
                 // Cache instructions from connected servers
                 let mut cache = mcp_instructions_for_probe.lock().unwrap();
                 for (name, probe_result) in results {
@@ -53,7 +81,9 @@ pub fn run() {
                     }
                 }
                 if !cache.is_empty() {
-                    println!("[mcp-probe] Startup: cached instructions for {} server(s)", cache.len());
+                    info!(target: "mcp_probe", "Cached MCP instructions for {} server(s)", cache.len());
+                } else {
+                    warn!(target: "mcp_probe", "No MCP server instructions were cached during startup probe");
                 }
             });
 
@@ -75,6 +105,7 @@ pub fn run() {
             commands::provider::set_theme,
             commands::provider::fetch_provider_models,
             commands::provider::test_provider,
+            commands::app::get_log_directory,
             commands::session::create_session,
             commands::session::get_all_sessions,
             commands::session::delete_session,

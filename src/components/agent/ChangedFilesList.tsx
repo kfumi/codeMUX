@@ -7,8 +7,10 @@ import { usePreviewStore } from '../../stores/previewStore';
 import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
 import { diffLines } from 'diff';
 import type { ChangedFile } from '../../types/agent';
+import { createLogger, serializeError } from '../../lib/logger';
 
 const EMPTY_FILES: ChangedFile[] = [];
+const logger = createLogger('ChangedFilesList');
 
 interface ChangedFilesListProps {
   sessionId: string;
@@ -135,7 +137,7 @@ export function ChangedFilesList({ sessionId, projectPath, className }: ChangedF
         changedFiles: { ...s.changedFiles, [sessionId]: updated },
       }));
     } catch (err) {
-      console.error('Failed to revert file:', err);
+      logger.error('Failed to revert file', { sessionId, path: file.path, isNew: file.isNew }, serializeError(err));
     }
     setConfirmAction(null);
   }, [resolvedFiles, sessionId, projectPath]);
@@ -149,7 +151,7 @@ export function ChangedFilesList({ sessionId, projectPath, className }: ChangedF
           await fileApi.writeFile(file.path, file.originalContent, projectPath);
         }
       } catch (err) {
-        console.error('Failed to revert file:', err);
+        logger.error('Failed to revert file during bulk revert', { sessionId, path: file.path, isNew: file.isNew }, serializeError(err));
       }
     }
     clearChangedFiles(sessionId);

@@ -1,6 +1,7 @@
 ﻿import { create } from 'zustand';
 import { diffLines } from 'diff';
 import { agentApi, fileApi } from '../lib/tauri';
+import { createLogger, serializeError } from '../lib/logger';
 import { useSessionStore } from './sessionStore';
 import { useMcpStore } from './mcpStore';
 import { normalizeFilePath, usePreviewStore } from './previewStore';
@@ -77,6 +78,7 @@ type StreamingBuffer = {
 };
 
 const STREAMING_FRAME_FALLBACK_MS = 16;
+const logger = createLogger('agentStore');
 const pendingStreamingBuffers = new Map<string, StreamingBuffer>();
 const pendingStreamingFlushHandles = new Map<string, number>();
 
@@ -554,6 +556,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => {
     clearPendingStreaming(sessionId);
+    logger.info('Starting agent query', {
+      sessionId,
+      cwd,
+      model: model || 'default',
+      promptLength: prompt.length,
+      hasApiKey: Boolean(apiKey),
+      hasBaseUrl: Boolean(baseUrl),
+    });
     // Clear force-stopped flag when starting a new query
     set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     // Auto-update session title from the first user message (skip slash commands)
@@ -879,13 +889,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 .filter((t): t is number => t !== null);
               const payload = JSON.stringify({ events: eventsToSave, timestamps: timestampsToSave });
               agentApi.saveEvents(sessionId, payload).catch((err) => {
-                console.error('Failed to save agent events:', err);
+                logger.error('Failed to persist agent events after query completion', {
+                  sessionId,
+                  eventCount: eventsToSave.length,
+                }, serializeError(err));
               });
             }
           }, 1000);
+          logger.info('Agent query finished', {
+            sessionId,
+            terminalEvent: event.kind,
+            isError: event.kind === 'error' || (event.kind === 'result' && Boolean(event.data?.is_error)),
+          });
         }
       }, apiKey, baseUrl, model);
     } catch (err) {
+      logger.error('Agent query failed to start or stream', { sessionId, cwd, model }, serializeError(err));
       set((s) => ({
         isRunning: { ...s.isRunning, [sessionId]: false },
         error: { ...s.error, [sessionId]: String(err) },
@@ -895,6 +914,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   interrupt: async (sessionId: string) => {
     clearPendingStreaming(sessionId);
+    logger.info('Interrupting agent query', { sessionId });
     // 1. Immediately update UI — BEFORE sending command to sidecar
     set((s) => ({
       isRunning: { ...s.isRunning, [sessionId]: false },
@@ -926,7 +946,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           .filter((t): t is number => t !== null);
         const payload = JSON.stringify({ events: eventsToSave, timestamps: timestampsToSave });
         agentApi.saveEvents(sessionId, payload).catch((err) => {
-          console.error('Failed to save agent events on interrupt:', err);
+          logger.error('Failed to persist agent events after interrupt', {
+            sessionId,
+            eventCount: eventsToSave.length,
+          }, serializeError(err));
         });
       }
       return { events, eventTimestamps };
@@ -958,6 +981,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   clearSavedEvents: async (sessionId: string) => {
     // Overwrite with empty array to clear persisted events
+    logger.info('Clearing persisted agent events', { sessionId });
     await agentApi.saveEvents(sessionId, JSON.stringify({ events: [], timestamps: [] }));
   },
 
@@ -1023,9 +1047,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           acknowledgedFiles: restoredAcknowledged ? { ...state.acknowledgedFiles, [sessionId]: restoredAcknowledged } : state.acknowledgedFiles,
           changedFiles: { ...state.changedFiles, [sessionId]: extractChangedFilesFromEvents(events, restoredAcknowledged, sessionOriginals) },
         }));
+        logger.info('Loaded persisted agent events', {
+          sessionId,
+          eventCount: events.length,
+        });
       }
     } catch (err) {
-      console.error('Failed to load agent events:', err);
+      logger.error('Failed to load persisted agent events', { sessionId }, serializeError(err));
     }
   },
 
