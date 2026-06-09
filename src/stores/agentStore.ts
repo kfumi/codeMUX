@@ -905,8 +905,24 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     // 2. Then tell sidecar to stop (async, non-blocking for UI)
     await agentApi.interrupt(sessionId);
-    // No synthetic marker message — history comes from Claude's JSONL, not our events.
-    // No SQLite save — the JSONL file written by the SDK is the source of truth.
+
+    // 3. Add interrupt marker to in-memory events for UI display.
+    // This is NOT persisted to SQLite or JSONL — it only lives in the current session's
+    // event array for visual feedback. When the session is reloaded from JSONL, the
+    // marker won't appear (which is correct — the AI context comes from the JSONL).
+    set((s) => {
+      const prev = s.events[sessionId] || [];
+      // Don't add duplicate marker if query already finished
+      if (prev.length > 0 && prev[prev.length - 1]?.kind === 'done') return {};
+      const interruptMsg: AgentMessage = {
+        kind: 'user',
+        data: { content: '[Request interrupted by user]' },
+      };
+      return {
+        events: { ...s.events, [sessionId]: [...prev, interruptMsg] },
+        eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), Date.now()] },
+      };
+    });
   },
 
   clearEvents: (sessionId: string) => {
