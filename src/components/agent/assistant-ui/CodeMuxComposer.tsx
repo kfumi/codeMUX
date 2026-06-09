@@ -219,7 +219,7 @@ export function CodeMuxComposer({ sessionId, modelName }: CodeMuxComposerProps) 
               maxRows={8}
               placeholder="输入消息..."
               className={cn(
-                'max-h-32 min-h-10 w-full resize-none border-0 px-2 py-1 text-sm leading-6 text-foreground outline-none ring-0 shadow-none placeholder:text-muted-foreground/80',
+                'max-h-32 min-h-10 w-full resize-none border-0 px-2 py-1 text-sm leading-6 text-foreground outline-none ring-0 shadow-none placeholder:text-muted-foreground/95',
                 'rounded-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none',
                 'focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none',
                 '[box-shadow:none] [-webkit-appearance:none] [appearance:none]',
@@ -232,7 +232,7 @@ export function CodeMuxComposer({ sessionId, modelName }: CodeMuxComposerProps) 
                 <button
                   type="button"
                   onClick={insertSlash}
-                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-medium leading-none text-muted-foreground/50 transition-all duration-200 hover:bg-muted/40 hover:text-foreground"
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-medium leading-none text-muted-foreground/78 transition-all duration-200 hover:bg-muted/40 hover:text-foreground"
                   style={{ fontFamily: "'JetBrains Mono', monospace" }}
                   title="插入斜杠命令"
                 >
@@ -241,7 +241,7 @@ export function CodeMuxComposer({ sessionId, modelName }: CodeMuxComposerProps) 
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="text-[11px] text-muted-foreground/50">
+                <span className="text-[11px] text-muted-foreground/74">
                   {isRunning ? '运行中' : modelName ?? '就绪'}
                 </span>
 
@@ -258,7 +258,7 @@ export function CodeMuxComposer({ sessionId, modelName }: CodeMuxComposerProps) 
                       'flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-300 active:scale-95',
                       hasInput
                         ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-[0_6px_20px_-10px_hsl(var(--primary)/0.55)] hover:scale-105 hover:shadow-[0_10px_28px_-12px_hsl(var(--primary)/0.6)]'
-                        : 'cursor-not-allowed bg-muted/40 text-muted-foreground/30',
+                        : 'cursor-not-allowed bg-muted/40 text-muted-foreground/45',
                     )}
                     title="发送"
                   >

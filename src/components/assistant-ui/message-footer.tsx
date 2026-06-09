@@ -32,7 +32,7 @@ export function MessageFooter({ timestamp, stats, className }: MessageFooterProp
 
   if (!timestamp && !hasStats) {
     return (
-      <div className={cn('mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground/40', className)}>
+      <div className={cn('mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground/68', className)}>
         <ActionBarPrimitive.Root autohide="never" className="flex items-center gap-1">
           <MessageCopyButton />
         </ActionBarPrimitive.Root>
@@ -50,7 +50,7 @@ export function MessageFooter({ timestamp, stats, className }: MessageFooterProp
   return (
     <div
       className={cn(
-        'mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground/40',
+        'mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground/68',
         className,
       )}
       style={{ fontFamily: "'JetBrains Mono', monospace" }}
@@ -81,7 +81,7 @@ function MessageCopyButton() {
       copiedDuration={1500}
       className={cn(
         'inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors',
-        'text-muted-foreground/35 hover:bg-muted/40 hover:text-muted-foreground',
+        'text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground',
       )}
       title="复制"
       aria-label="复制"
@@ -94,7 +94,7 @@ function MessageCopyButton() {
 function FooterItem({ children }: { children: React.ReactNode }) {
   return (
     <>
-      <span className="text-muted-foreground/20">·</span>
+      <span className="text-muted-foreground/35">·</span>
       <span className="tabular-nums">{children}</span>
     </>
   );

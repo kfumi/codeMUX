@@ -46,7 +46,7 @@ export function ContextDisplay({
         >
           <UsageRing percentage={percentage} />
           <span
-            className="text-[12px] font-medium leading-none text-muted-foreground"
+            className="text-[12px] font-medium leading-none text-muted-foreground/78"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             {percentageLabel}
@@ -130,7 +130,7 @@ function UsageRing({ percentage }: { percentage: number }) {
 function StatRow({ label, value }: { label: string; value: number }) {
   return (
     <div className="flex items-center justify-between gap-3 text-sm">
-      <span className="text-muted-foreground">{label}</span>
+      <span className="text-muted-foreground/82">{label}</span>
       <span
         className={cn('font-medium text-foreground')}
         style={{ fontFamily: "'JetBrains Mono', monospace" }}

@@ -217,7 +217,7 @@ const ReasoningGroupImpl: ReasoningGroupComponent = ({ children, startIndex, end
   }, [isReasoningStreaming]);
 
   return (
-    <ReasoningRoot open={isOpen} onOpenChange={setIsOpen}>
+    <ReasoningRoot open={isOpen} onOpenChange={setIsOpen} variant="ghost">
       <ReasoningTrigger active={isReasoningStreaming} />
       <ReasoningContent aria-busy={isReasoningStreaming}>
         <ReasoningText>{children}</ReasoningText>

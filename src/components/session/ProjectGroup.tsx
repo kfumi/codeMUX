@@ -49,7 +49,7 @@ export function ProjectGroup({
       <div
         className={cn(
           'flex items-center gap-2 px-2.5 py-[7px] rounded-lg cursor-pointer transition-all duration-200 group relative',
-          'text-[hsl(var(--sidebar-fg))]/60',
+          'text-[hsl(var(--sidebar-fg))]/82',
           'hover:text-[hsl(var(--sidebar-fg))] hover:bg-[hsl(var(--sidebar-accent))]',
           isActiveProject && 'bg-[hsl(var(--sidebar-accent))]/50'
         )}
@@ -61,13 +61,13 @@ export function ProjectGroup({
         )}
         <ChevronRight
           className={cn(
-            'h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/40 transition-transform duration-200',
+            'h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/64 transition-transform duration-200',
             expanded && 'rotate-90'
           )}
         />
         <Folder className={cn(
           'h-3.5 w-3.5 shrink-0 transition-colors duration-200',
-          isActiveProject ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/40'
+          isActiveProject ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64'
         )} />
         {renaming ? (
           <input

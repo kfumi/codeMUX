@@ -351,7 +351,7 @@ function CodeMuxReasoningGroup({
   }, [isRunning]);
 
   return (
-    <ReasoningRoot open={isOpen} onOpenChange={setIsOpen}>
+    <ReasoningRoot open={isOpen} onOpenChange={setIsOpen} variant="ghost">
       <ReasoningTrigger
         active={isRunning}
         duration={durationMs != null && !isRunning ? Number((durationMs / 1000).toFixed(1)) : undefined}
@@ -377,7 +377,7 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
     <div className="mb-5 flex w-full justify-start">
       <div className="w-full min-w-0 space-y-2 text-sm leading-relaxed">
         {thinking && (
-          <ReasoningRoot defaultOpen>
+          <ReasoningRoot defaultOpen variant="ghost">
             <ReasoningTrigger active />
             <ReasoningContent aria-busy>
               <ReasoningText>

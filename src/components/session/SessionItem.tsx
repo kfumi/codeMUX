@@ -19,7 +19,7 @@ export function SessionItem({ session, isActive, onClick, onDelete }: SessionIte
       <div
         className={cn(
           'group flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg cursor-pointer transition-all duration-200 text-[13px] relative',
-          'text-[hsl(var(--sidebar-fg))]/60',
+          'text-[hsl(var(--sidebar-fg))]/82',
           'hover:text-[hsl(var(--sidebar-fg))] hover:bg-[hsl(var(--sidebar-accent))]',
           isActive && [
             'bg-[hsl(var(--sidebar-accent))]',
@@ -34,7 +34,7 @@ export function SessionItem({ session, isActive, onClick, onDelete }: SessionIte
         )}
         <MessageSquare className={cn(
           'h-3.5 w-3.5 shrink-0 transition-colors duration-200',
-          isActive ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/40'
+          isActive ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64'
         )} />
         <span className={cn(
           'flex-1 truncate transition-colors duration-200',
@@ -43,7 +43,7 @@ export function SessionItem({ session, isActive, onClick, onDelete }: SessionIte
           {session.title || '未命名对话'}
         </span>
         <button
-          className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-[hsl(var(--destructive)/0.1)] hover:text-[hsl(var(--destructive))] text-[hsl(var(--sidebar-fg))]/40 transition-all duration-200"
+          className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-[hsl(var(--destructive)/0.1)] hover:text-[hsl(var(--destructive))] text-[hsl(var(--sidebar-fg))]/68 transition-all duration-200"
           onClick={(e) => {
             e.stopPropagation();
             setConfirmOpen(true);

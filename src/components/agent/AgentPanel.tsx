@@ -239,12 +239,12 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center gap-3 px-6 py-3 border-b border-border/30 bg-background/80 backdrop-blur-sm shrink-0">
-        <h2 className="text-[13px] font-medium text-foreground/70 truncate">
+        <h2 className="text-[13px] font-medium text-foreground/86 truncate">
           {session?.title || '新对话'}
         </h2>
         <DropdownMenu
           trigger={
-            <button className="p-1 rounded-lg hover:bg-muted/40 text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+            <button className="p-1 rounded-lg hover:bg-muted/40 text-muted-foreground/72 hover:text-foreground transition-colors">
               <MoreHorizontal className="h-4 w-4" />
             </button>
           }
@@ -265,10 +265,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           />
         )}
         {project && (
-          <div className="flex items-center gap-1.5 text-[12px] text-foreground/60 bg-muted/30 rounded-lg px-2.5 py-1.5 border border-border/20 min-w-0 max-w-[300px]"
+          <div className="flex items-center gap-1.5 text-[12px] text-foreground/78 bg-muted/30 rounded-lg px-2.5 py-1.5 border border-border/20 min-w-0 max-w-[300px]"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
-            <FolderOpen className="h-3 w-3 text-foreground/40 shrink-0" />
+            <FolderOpen className="h-3 w-3 text-foreground/62 shrink-0" />
             <span className="truncate">{project.path}</span>
           </div>
         )}
@@ -278,7 +278,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
             'p-1.5 rounded-lg transition-all duration-200',
             previewOpen
               ? 'bg-muted text-foreground'
-              : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/30'
+              : 'text-muted-foreground/72 hover:text-foreground hover:bg-muted/30'
           )}
           title={previewOpen ? '收起预览面板' : '展开预览面板'}
         >

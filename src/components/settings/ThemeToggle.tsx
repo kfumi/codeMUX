@@ -1,7 +1,8 @@
+import { Moon, Monitor, Sun } from 'lucide-react';
+
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Theme } from '../../types/provider';
 import { Button } from '../ui/button';
-import { Sun, Moon, Monitor } from 'lucide-react';
 
 export function ThemeToggle() {
   const { config, setTheme } = useSettingsStore();
@@ -17,7 +18,7 @@ export function ThemeToggle() {
     <div className="space-y-4">
       <h3 className="font-medium">外观</h3>
       <div className="space-y-2">
-        <label className="text-sm text-muted-foreground">主题</label>
+        <label className="text-sm text-foreground/74">主题</label>
         <div className="flex gap-2">
           {themes.map(({ value, label, icon: Icon }) => (
             <Button
