@@ -101,7 +101,7 @@ function UsageRing({ percentage }: { percentage: number }) {
   const stroke = getProgressColor(percentage);
 
   return (
-    <div className="relative flex h-6 w-6 items-center justify-center">
+    <div className="relative flex h-5 w-5 items-center justify-center">
       <svg className="-rotate-90" width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
         <circle
           cx={size / 2}

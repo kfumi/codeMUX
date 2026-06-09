@@ -344,9 +344,14 @@ function CodeMuxReasoningGroup({
   durationMs?: number;
 }) {
   const isRunning = useAuiState((state) => state.message.status?.type === 'running');
+  const [isOpen, setIsOpen] = useState(isRunning);
+
+  useEffect(() => {
+    setIsOpen(isRunning);
+  }, [isRunning]);
 
   return (
-    <ReasoningRoot defaultOpen={isRunning}>
+    <ReasoningRoot open={isOpen} onOpenChange={setIsOpen}>
       <ReasoningTrigger
         active={isRunning}
         duration={durationMs != null && !isRunning ? Number((durationMs / 1000).toFixed(1)) : undefined}

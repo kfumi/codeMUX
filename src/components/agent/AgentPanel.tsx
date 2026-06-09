@@ -26,6 +26,9 @@ interface AgentPanelProps {
 
 const EMPTY_EVENTS: import('../../stores/agentStore').AgentMessage[] = [];
 const EMPTY_TODOS: import('../../types/agent').TodoItem[] = [];
+const DEFAULT_CONTEXT_TOKENS = 200_000;
+const LARGE_CONTEXT_TOKENS = 1_000_000;
+const LARGE_CONTEXT_MODEL_SUFFIX = '[1m]';
 
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, updateSessionTitle, createSession } = useSessionStore();
@@ -133,10 +136,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       if (usedTokens > 0) break;
     }
 
-    const totalTokens = activeProvider?.context_1m ? 1_000_000 : 200_000;
+    const totalTokens = getSessionContextLimit({
+      model: session?.model,
+      sessionProviderUsesLargeContext: !!sessionProvider?.context_1m,
+      activeProviderUsesLargeContext: !!activeProvider?.context_1m,
+    });
 
     return { usedTokens, totalTokens, inputTokens, cachedTokens, outputTokens };
-  }, [events, activeProvider]);
+  }, [events, session?.model, sessionProvider?.context_1m, activeProvider?.context_1m]);
 
   const handleSend = async (content: string) => {
     let provider = activeProvider;
@@ -341,4 +348,24 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       </Dialog>
     </div>
   );
+}
+
+function getSessionContextLimit({
+  model,
+  sessionProviderUsesLargeContext,
+  activeProviderUsesLargeContext,
+}: {
+  model?: string | null;
+  sessionProviderUsesLargeContext: boolean;
+  activeProviderUsesLargeContext: boolean;
+}) {
+  if (typeof model === 'string' && model.trim().length > 0) {
+    return model.includes(LARGE_CONTEXT_MODEL_SUFFIX) ? LARGE_CONTEXT_TOKENS : DEFAULT_CONTEXT_TOKENS;
+  }
+
+  if (sessionProviderUsesLargeContext) {
+    return LARGE_CONTEXT_TOKENS;
+  }
+
+  return activeProviderUsesLargeContext ? LARGE_CONTEXT_TOKENS : DEFAULT_CONTEXT_TOKENS;
 }

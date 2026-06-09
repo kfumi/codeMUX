@@ -1,12 +1,12 @@
 "use client";
 
-import { createContext, memo, useCallback, useContext, useState } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useState } from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import {
   useAuiState,
-  type ReasoningMessagePartComponent,
   type ReasoningGroupComponent,
+  type ReasoningMessagePartComponent,
 } from '@assistant-ui/react';
 import { MarkdownText } from '@/components/assistant-ui/markdown-text';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -111,7 +111,8 @@ function ReasoningTrigger({
   duration?: number;
 }) {
   const isOpen = useContext(ReasoningOpenContext);
-  const durationText = duration ? ` (${duration}s)` : '';
+  const durationText = duration != null ? ` (${duration}s)` : '';
+  const label = `深度思考${durationText}`;
   const ChevronIcon = isOpen ? ChevronDownIcon : ChevronRightIcon;
 
   return (
@@ -134,14 +135,14 @@ function ReasoningTrigger({
         data-slot="reasoning-trigger-label"
         className="aui-reasoning-trigger-label-wrapper relative inline-block leading-none"
       >
-        <span>深度思考{durationText}</span>
+        <span>{label}</span>
         {active ? (
           <span
             aria-hidden
             data-slot="reasoning-trigger-shimmer"
             className="aui-reasoning-trigger-shimmer shimmer pointer-events-none absolute inset-0 motion-reduce:animate-none"
           >
-            深度思考{durationText}
+            {label}
           </span>
         ) : null}
       </span>
@@ -209,9 +210,14 @@ const ReasoningGroupImpl: ReasoningGroupComponent = ({ children, startIndex, end
     if (lastType !== 'reasoning') return false;
     return lastIndex >= startIndex && lastIndex <= endIndex;
   });
+  const [isOpen, setIsOpen] = useState(isReasoningStreaming);
+
+  useEffect(() => {
+    setIsOpen(isReasoningStreaming);
+  }, [isReasoningStreaming]);
 
   return (
-    <ReasoningRoot defaultOpen={isReasoningStreaming}>
+    <ReasoningRoot open={isOpen} onOpenChange={setIsOpen}>
       <ReasoningTrigger active={isReasoningStreaming} />
       <ReasoningContent aria-busy={isReasoningStreaming}>
         <ReasoningText>{children}</ReasoningText>
@@ -240,11 +246,11 @@ ReasoningGroup.displayName = 'ReasoningGroup';
 
 export {
   Reasoning,
+  ReasoningContent,
+  ReasoningFade,
   ReasoningGroup,
   ReasoningRoot,
-  ReasoningTrigger,
-  ReasoningContent,
   ReasoningText,
-  ReasoningFade,
+  ReasoningTrigger,
   reasoningVariants,
 };
