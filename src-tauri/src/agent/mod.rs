@@ -3,15 +3,19 @@ pub mod commands;
 use log::{debug, info, warn};
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tauri::Manager;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex as AsyncMutex};
 
 /// Handle to a running sidecar process.
 pub struct SidecarHandle {
     child: Child,
     stdin_tx: mpsc::Sender<String>,
+    /// The Tauri channel used by the forwarding task. Updated when the sidecar
+    /// is reused for a new `start` command so events reach the new frontend channel.
+    channel: Arc<AsyncMutex<tauri::ipc::Channel<String>>>,
 }
 
 impl SidecarHandle {
@@ -21,6 +25,13 @@ impl SidecarHandle {
             .send(cmd.to_string())
             .await
             .map_err(|_| "Failed to send command to sidecar".to_string())
+    }
+
+    /// Update the Tauri channel that the forwarding task sends events to.
+    /// Called when the sidecar is reused for a new `start` command.
+    pub async fn update_channel(&self, new_channel: tauri::ipc::Channel<String>) {
+        let mut ch = self.channel.lock().await;
+        *ch = new_channel;
     }
 
     /// Kill the sidecar process.
@@ -56,6 +67,7 @@ fn sidecar_script_path(app_handle: &tauri::AppHandle) -> PathBuf {
 /// The first event MUST be `{"type":"sidecar_ready"}`.
 pub async fn spawn_sidecar(
     app_handle: &tauri::AppHandle,
+    channel: tauri::ipc::Channel<String>,
 ) -> Result<(SidecarHandle, mpsc::Receiver<String>), String> {
     let script_path = sidecar_script_path(app_handle);
     info!(target: "agent", "Spawning sidecar from {}", script_path.display());
@@ -159,6 +171,7 @@ pub async fn spawn_sidecar(
     }
 
     debug!(target: "agent", "Sidecar spawn completed successfully");
-    let handle = SidecarHandle { child, stdin_tx };
+    let channel = Arc::new(AsyncMutex::new(channel));
+    let handle = SidecarHandle { child, stdin_tx, channel };
     Ok((handle, event_rx))
 }

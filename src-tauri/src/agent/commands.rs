@@ -143,35 +143,44 @@ pub async fn start_agent_session(
         base_url.as_ref().map(|url| !url.is_empty()).unwrap_or(false)
     );
 
-    // If this session already has a sidecar, shut it down first
+    // Check if a sidecar already exists for this session (e.g. after interrupt).
+    // If so, reuse it — just update the channel and send the new start command.
+    // Only spawn a new sidecar if one doesn't exist.
+    let mut needs_new_sidecar = false;
     {
-        let mut sidecars = agent_state.sidecars.lock().await;
-        if let Some(mut old_handle) = sidecars.remove(&session_id) {
-            warn!(target: "agent", "Replacing existing sidecar for session_id={}", session_id);
-            old_handle.shutdown().await;
+        let sidecars = agent_state.sidecars.lock().await;
+        if let Some(handle) = sidecars.get(&session_id) {
+            // Reuse existing sidecar — update the channel so the forwarding task
+            // sends events to the new frontend channel
+            handle.update_channel(channel.clone()).await;
+            info!(target: "agent", "Reusing existing sidecar for session_id={}", session_id);
+        } else {
+            needs_new_sidecar = true;
         }
     }
 
-    // Spawn a new sidecar for this session
-    let (handle, mut rx) = spawn_sidecar(&app).await?;
+    if needs_new_sidecar {
+        // Spawn a new sidecar for this session
+        let (handle, mut rx) = spawn_sidecar(&app, channel).await?;
 
-    // Store the new sidecar
-    {
-        let mut sidecars = agent_state.sidecars.lock().await;
-        sidecars.insert(session_id.clone(), handle);
-    }
+        // Spawn a dedicated event forwarding task for this session's sidecar.
+        // Reads from the sidecar's stdout receiver and forwards to the shared channel.
+        let shared_channel = handle.channel.clone();
+        let session_id_clone = session_id.clone();
+        tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                let ch = shared_channel.lock().await;
+                let _ = ch.send(event);
+            }
+            info!(target: "agent", "Sidecar stream closed for session_id={}", session_id_clone);
+        });
 
-    // Spawn a dedicated event forwarding task for this session's sidecar
-    let session_id_clone = session_id.clone();
-    tokio::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            let _ = channel.send(event);
+        // Store the new sidecar
+        {
+            let mut sidecars = agent_state.sidecars.lock().await;
+            sidecars.insert(session_id.clone(), handle);
         }
-        // Sidecar stdout closed — the process likely exited.
-        // Remove from sidecar map if still present.
-        // (We can't access agent_state here, so cleanup happens on next start/shutdown)
-        info!(target: "agent", "Sidecar stream closed for session_id={}", session_id_clone);
-    });
+    }
 
     // 读取启用的 MCP servers
     let mcp_servers = {
@@ -259,18 +268,20 @@ pub async fn start_agent_session(
 }
 
 /// Interrupt the currently running agent query for a specific session.
+///
+/// Unlike before, the sidecar handle is kept in the map so the process can be
+/// reused for subsequent queries without re-spawning. The sidecar itself handles
+/// the interrupt by aborting its AbortController and returning to idle state.
 #[tauri::command]
 pub async fn interrupt_agent_session(
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
     info!(target: "agent", "Interrupt requested for session_id={}", session_id);
-    let mut sidecars = agent_state.sidecars.lock().await;
-    if let Some(handle) = sidecars.remove(&session_id) {
-        // Send interrupt first, then shut down
+    let sidecars = agent_state.sidecars.lock().await;
+    if let Some(handle) = sidecars.get(&session_id) {
         let _ = handle.send_command(r#"{"type":"interrupt"}"#).await;
-        // Note: we intentionally don't call shutdown here — the sidecar will
-        // exit after the interrupt. The cleanup happens via the forwarder task.
+        info!(target: "agent", "Interrupt command sent, sidecar kept alive for session_id={}", session_id);
     } else {
         debug!(target: "agent", "Interrupt skipped; no active sidecar for session_id={}", session_id);
     }
