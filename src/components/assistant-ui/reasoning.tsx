@@ -1,10 +1,9 @@
 "use client";
 
-import { createContext, memo, useCallback, useContext, useRef, useState } from 'react';
+import { createContext, memo, useCallback, useContext, useState } from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import {
-  useScrollLock,
   useAuiState,
   type ReasoningMessagePartComponent,
   type ReasoningGroupComponent,
@@ -48,30 +47,24 @@ function ReasoningRoot({
   children,
   ...props
 }: ReasoningRootProps) {
-  const collapsibleRef = useRef<HTMLDivElement>(null);
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
-  const lockScroll = useScrollLock(collapsibleRef, ANIMATION_DURATION);
 
   const isControlled = controlledOpen !== undefined;
   const isOpen = isControlled ? controlledOpen : uncontrolledOpen;
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
-      if (!open) {
-        lockScroll();
-      }
       if (!isControlled) {
         setUncontrolledOpen(open);
       }
       controlledOnOpenChange?.(open);
     },
-    [lockScroll, isControlled, controlledOnOpenChange],
+    [isControlled, controlledOnOpenChange],
   );
 
   return (
     <ReasoningOpenContext.Provider value={isOpen}>
       <Collapsible
-        ref={collapsibleRef}
         data-slot="reasoning-root"
         data-variant={variant}
         open={isOpen}
@@ -188,7 +181,7 @@ function ReasoningText({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="reasoning-text"
       className={cn(
-        'aui-reasoning-text relative z-0 max-h-64 space-y-3 overflow-y-auto ps-6 pt-1.5 pb-1 leading-relaxed',
+        'aui-reasoning-text relative z-0 max-h-64 space-y-3 overflow-y-auto ps-6 pe-2 pt-1.5 pb-1 leading-relaxed [scrollbar-gutter:stable]',
         'transform-gpu transition-[transform,opacity]',
         'group-data-[state=open]/collapsible-content:animate-in',
         'group-data-[state=closed]/collapsible-content:animate-out',

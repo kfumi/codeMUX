@@ -47,7 +47,11 @@ type AskUserQuestionCardData = {
 };
 
 export function CodeMuxTextMessagePart() {
-  return <MarkdownText />;
+  return (
+    <div className="pl-1">
+      <MarkdownText />
+    </div>
+  );
 }
 
 export function CodeMuxReasoningMessagePart() {

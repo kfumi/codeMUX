@@ -34,6 +34,7 @@ export function CodeMuxAssistantRuntimeProvider({
 }: CodeMuxAssistantRuntimeProviderProps) {
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
+  const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
 
   const messages = useMemo(
     () => convertAgentEventsToAssistantMessages(events),
@@ -65,6 +66,7 @@ export function CodeMuxAssistantRuntimeProvider({
 
   const runtime = useExternalStoreRuntime<CodeMuxAssistantMessage>({
     messages,
+    isRunning,
     convertMessage: (message) => convertCodeMuxMessageToThreadMessageLike(message, eventTimestamps),
     onNew: handleNew,
     onCancel: onStop

@@ -149,8 +149,8 @@ input[type="password"]::-ms-reveal {
 
 /* ——— Smooth scrollbar ——— */
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 11px;
+  height: 11px;
 }
 *::-webkit-scrollbar-track {
   background: transparent;

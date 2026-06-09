@@ -127,11 +127,11 @@ export function CodeMuxComposer({ sessionId, modelName }: CodeMuxComposerProps) 
         <ComposerPrimitive.Unstable_TriggerPopover
           char="/"
           adapter={slashAdapter}
-          className="absolute bottom-full left-0 right-0 z-50 mb-3 overflow-hidden rounded-2xl border border-border/60 bg-background/95 shadow-2xl backdrop-blur-xl"
+          className="absolute bottom-full left-0 right-0 z-50 mb-3 flex max-h-[min(28rem,calc(100vh-6rem))] flex-col overflow-hidden rounded-2xl border border-border/60 bg-background/95 shadow-2xl backdrop-blur-xl"
         >
           <ComposerPrimitive.Unstable_TriggerPopover.Directive formatter={COMMAND_FORMATTER} />
 
-          <ComposerPrimitive.Unstable_TriggerPopoverCategories className="py-2">
+          <ComposerPrimitive.Unstable_TriggerPopoverCategories className="min-h-0 overflow-y-auto py-2">
             {(categories) =>
               categories.map((category) => (
                 <ComposerPrimitive.Unstable_TriggerPopoverCategoryItem
@@ -152,7 +152,7 @@ export function CodeMuxComposer({ sessionId, modelName }: CodeMuxComposerProps) 
             }
           </ComposerPrimitive.Unstable_TriggerPopoverCategories>
 
-          <ComposerPrimitive.Unstable_TriggerPopoverItems className="py-2">
+          <ComposerPrimitive.Unstable_TriggerPopoverItems className="min-h-0 flex-1 overflow-y-auto py-2">
             {(items) => (
               <>
                 <div className="flex items-center gap-2 px-3 pb-1.5">
@@ -206,7 +206,7 @@ export function CodeMuxComposer({ sessionId, modelName }: CodeMuxComposerProps) 
               });
             }}
             className={cn(
-              'flex w-full flex-col gap-2 rounded-[24px] border p-[10px] transition-all duration-200',
+              'flex w-full flex-col gap-2 overflow-hidden rounded-[24px] border p-[10px] transition-all duration-200',
               isFocused
                 ? 'border-[hsl(var(--primary)/0.28)] bg-background shadow-[0_18px_50px_-28px_hsl(var(--foreground)/0.28)] ring-2 ring-[hsl(var(--primary)/0.08)]'
                 : 'border-border/70 bg-background',
@@ -227,12 +227,12 @@ export function CodeMuxComposer({ sessionId, modelName }: CodeMuxComposerProps) 
               )}
             />
 
-            <div className="relative flex items-center justify-between">
+            <div className="relative flex items-center justify-between pl-1">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={insertSlash}
-                  className="rounded-full px-2.5 py-1 text-[12px] font-medium text-muted-foreground/50 transition-all duration-200 hover:bg-muted/40 hover:text-foreground"
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-medium leading-none text-muted-foreground/50 transition-all duration-200 hover:bg-muted/40 hover:text-foreground"
                   style={{ fontFamily: "'JetBrains Mono', monospace" }}
                   title="插入斜杠命令"
                 >

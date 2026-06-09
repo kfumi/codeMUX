@@ -25,6 +25,7 @@ import {
   CodeMuxTextMessagePart,
   CodeMuxToolCallMessagePart,
 } from './CodeMuxMessageParts';
+import { RunningElapsedTimer } from './running-elapsed';
 
 type CodeMuxThreadProps = {
   sessionId: string;
@@ -56,7 +57,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
   return (
     <ThreadPrimitive.Root className="flex h-full min-h-0 flex-col text-sm">
       <ThreadPrimitive.Viewport
-        className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scroll-smooth"
+        className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scroll-smooth [scrollbar-gutter:stable]"
         autoScroll
       >
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 pt-4">
@@ -79,8 +80,8 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
           <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-background pb-4 pt-4 md:pb-6">
             <ThreadPrimitive.ScrollToBottom
               className="absolute -top-12 left-1/2 inline-flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-background text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--foreground)/0.35)] transition-all hover:-translate-y-0.5 hover:text-foreground disabled:invisible"
-              aria-label="滚动到最新"
-              title="滚动到最新"
+              aria-label="婊氬姩鍒版渶鏂?"
+              title="婊氬姩鍒版渶鏂?"
               behavior="smooth"
             >
               <ArrowDown className="h-4 w-4" />
@@ -247,14 +248,20 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
             {text}
             <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse rounded-full bg-foreground/60 align-text-bottom" />
           </div>
-        ) : (
-          isRunning && (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Agent执行中...</span>
-            </div>
-          )
-        )}
+        ) : null}
+
+        {isRunning ? (
+          <div
+            className={cn(
+              'flex items-center gap-2.5 py-1 text-sm text-muted-foreground/60 animate-fade-in',
+              !thinking && !text && 'text-muted-foreground',
+            )}
+            style={{ fontFamily: "'JetBrains Mono', monospace" }}
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
+            <RunningElapsedTimer />
+          </div>
+        ) : null}
       </div>
     </div>
   );
