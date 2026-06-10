@@ -6,9 +6,15 @@ mod mcp;
 mod skills;
 
 use log::{info, warn};
-use tauri::Manager;
+use tauri::menu::MenuBuilder;
+use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+use tauri::{Manager, Window, WindowEvent};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 use std::sync::Mutex;
+
+const MAIN_WINDOW_LABEL: &str = "main";
+const TRAY_OPEN_ID: &str = "tray_open";
+const TRAY_QUIT_ID: &str = "tray_quit";
 
 pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
@@ -20,9 +26,43 @@ pub struct AppState {
     pub mcp_instructions: std::sync::Arc<Mutex<std::collections::HashMap<String, String>>>,
 }
 
+fn should_hide_to_tray(window_label: &str) -> bool {
+    window_label == MAIN_WINDOW_LABEL
+}
+
+fn show_main_window<R: tauri::Runtime, M: Manager<R>>(manager: &M) {
+    if let Some(window) = manager.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn hide_window_to_tray<R: tauri::Runtime>(window: &Window<R>) {
+    let _ = window.hide();
+}
+
+fn handle_tray_menu_event<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event_id: &str) {
+    match event_id {
+        TRAY_OPEN_ID => show_main_window(app),
+        TRAY_QUIT_ID => app.exit(0),
+        _ => {}
+    }
+}
+
+fn handle_global_window_event<R: tauri::Runtime>(window: &Window<R>, event: &WindowEvent) {
+    if let WindowEvent::CloseRequested { api, .. } = event {
+        if should_hide_to_tray(window.label()) {
+            api.prevent_close();
+            hide_window_to_tray(window);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .on_window_event(handle_global_window_event)
         .plugin(
             tauri_plugin_log::Builder::new()
                 .clear_targets()
@@ -42,6 +82,11 @@ pub fn run() {
         )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .on_tray_icon_event(|app, event| {
+            if let TrayIconEvent::DoubleClick { .. } = event {
+                show_main_window(app);
+            }
+        })
         .setup(|app| {
             let log_dir = app.path().app_log_dir()?;
             info!(target: "app", "Application starting; log directory={}", log_dir.display());
@@ -95,6 +140,24 @@ pub fn run() {
             });
             app.manage(agent::commands::AgentState::default());
 
+            let tray_menu = MenuBuilder::new(app)
+                .text(TRAY_OPEN_ID, "打开 codeMUX")
+                .separator()
+                .text(TRAY_QUIT_ID, "退出")
+                .build()?;
+
+            let mut tray_builder = TrayIconBuilder::with_id("main-tray")
+                .menu(&tray_menu)
+                .tooltip("codeMUX")
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| handle_tray_menu_event(app, event.id().as_ref()));
+
+            if let Some(icon) = app.default_window_icon().cloned() {
+                tray_builder = tray_builder.icon(icon);
+            }
+
+            let _tray = tray_builder.build(app)?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -147,4 +210,15 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_hide_to_tray;
+
+    #[test]
+    fn hides_only_the_main_window_to_tray() {
+        assert!(should_hide_to_tray("main"));
+        assert!(!should_hide_to_tray("settings"));
+    }
 }
