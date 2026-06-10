@@ -174,6 +174,7 @@ function MessageNav({
   const [hovered, setHovered] = useState(false);
   const [hoveredBar, setHoveredBar] = useState<number | null>(null);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const [navHeight, setNavHeight] = useState(0);
 
   useEffect(() => {
     const container = scrollContainer.current;
@@ -213,6 +214,74 @@ function MessageNav({
     return () => container.removeEventListener('scroll', updateActive);
   }, [items, scrollContainer]);
 
+  useEffect(() => {
+    const container = scrollContainer.current;
+    if (!container) {
+      setNavHeight(0);
+      return;
+    }
+
+    const updateNavHeight = () => {
+      setNavHeight(container.clientHeight);
+    };
+
+    updateNavHeight();
+
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateNavHeight) : null;
+
+    resizeObserver?.observe(container);
+    window.addEventListener('resize', updateNavHeight);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updateNavHeight);
+    };
+  }, [scrollContainer]);
+
+  const navMetrics = useMemo(() => {
+    const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+    const count = items.length;
+    const railPadding = count >= 28 ? 10 : 12;
+    const availableHeight = Math.max(navHeight - railPadding * 2, 48);
+    const nodeSize = 10;
+    const minSpacing = nodeSize + 2;
+    const usableHeight = Math.max(availableHeight - nodeSize, 0);
+    const maxVisibleCount =
+      availableHeight > 0
+        ? Math.max(1, Math.floor(usableHeight / minSpacing) + 1)
+        : count;
+    const visibleCount = Math.min(count, maxVisibleCount);
+    const hiddenCount = Math.max(count - visibleCount, 0);
+    const spacing =
+      visibleCount <= 1
+        ? 0
+        : Math.max(usableHeight / Math.max(visibleCount - 1, 1), minSpacing);
+
+    return {
+      hiddenCount,
+      railPadding,
+      nodeSize: clamp(nodeSize, 10, 10),
+      spacing,
+      topInset: railPadding + nodeSize / 2,
+      usableHeight,
+      visibleCount,
+    };
+  }, [items.length, navHeight]);
+
+  const visibleItems = navMetrics.visibleCount >= items.length ? items : items.slice(-navMetrics.visibleCount);
+  const positionedItems = useMemo(
+    () =>
+      visibleItems.map((item, index) => ({
+        ...item,
+        top:
+          visibleItems.length <= 1
+            ? navMetrics.topInset + navMetrics.usableHeight
+            : navMetrics.topInset + index * navMetrics.spacing,
+      })),
+    [navMetrics.spacing, navMetrics.topInset, navMetrics.usableHeight, visibleItems],
+  );
+
   if (items.length <= 1) {
     return null;
   }
@@ -235,7 +304,7 @@ function MessageNav({
   return (
     <div
       data-testid="message-nav"
-      className="pointer-events-none absolute right-2 top-0 bottom-0 z-10 flex w-8 items-center justify-center"
+      className="pointer-events-none absolute right-1.5 top-0 bottom-0 z-10 flex w-12 items-stretch justify-center"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => {
         setHovered(false);
@@ -244,12 +313,28 @@ function MessageNav({
     >
       <div
         className={cn(
-          'pointer-events-auto flex flex-col items-center gap-2.5 py-4 transition-opacity duration-200',
-          hovered ? 'opacity-100' : 'opacity-35',
+          'pointer-events-auto relative h-full w-full transition-opacity duration-200',
+          hovered ? 'opacity-100' : 'opacity-55',
         )}
       >
-        {items.map((item) => (
-          <div key={item.eventIndex} className="relative">
+        <div
+          className="absolute left-1/2 w-px -translate-x-1/2 rounded-full bg-gradient-to-b from-border/20 via-muted-foreground/55 to-border/20 dark:from-border/40 dark:via-muted-foreground/50 dark:to-border/40"
+          style={{
+            top: `${navMetrics.railPadding}px`,
+            bottom: `${navMetrics.railPadding}px`,
+          }}
+        />
+        {navMetrics.hiddenCount > 0 ? (
+          <div className="absolute left-1/2 top-1.5 -translate-x-1/2 rounded-full border border-border/40 bg-background/90 px-1.5 py-0.5 text-[9px] font-medium leading-none text-muted-foreground shadow-sm backdrop-blur">
+            +{navMetrics.hiddenCount}
+          </div>
+        ) : null}
+        {positionedItems.map((item) => (
+          <div
+            key={item.eventIndex}
+            className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2"
+            style={{ top: `${item.top}px` }}
+          >
             <button
               type="button"
               aria-label={`跳转到消息 ${item.preview}`}
@@ -257,14 +342,19 @@ function MessageNav({
               onMouseLeave={() => setHoveredBar(null)}
               onClick={() => scrollToMessage(item.eventIndex)}
               className={cn(
-                'h-1.5 w-4 rounded-full transition-all duration-150',
+                'rounded-full border transition-all duration-150 hover:scale-105',
                 item.eventIndex === activeIdx
-                  ? 'scale-125 bg-[hsl(var(--primary))]'
-                  : 'bg-muted-foreground/20 hover:bg-muted-foreground/40',
+                  ? 'border-white/85 bg-[hsl(var(--primary))] shadow-[0_0_0_3px_hsl(var(--background)),0_0_0_4px_hsl(var(--primary)/0.26),0_10px_18px_-10px_hsl(var(--primary)/0.65)] dark:border-white/75'
+                  : 'border-border/70 bg-[hsl(var(--muted-foreground)/0.34)] shadow-[0_0_0_2px_hsl(var(--background)/0.96)] hover:border-[hsl(var(--primary)/0.3)] hover:bg-[hsl(var(--muted-foreground)/0.42)] dark:border-white/45 dark:bg-[hsl(var(--muted-foreground)/0.52)]',
               )}
+              style={{
+                width: `${navMetrics.nodeSize}px`,
+                height: `${navMetrics.nodeSize}px`,
+                transform: item.eventIndex === activeIdx ? 'scale(1.08)' : 'scale(1)',
+              }}
             />
             {hoveredBar === item.eventIndex ? (
-              <div className="pointer-events-none absolute right-full top-1/2 mr-2 max-w-[220px] -translate-y-1/2 overflow-hidden text-ellipsis whitespace-nowrap rounded-lg border border-border/30 bg-[hsl(var(--popover))] px-3 py-1.5 text-xs text-popover-foreground shadow-lg animate-fade-in">
+              <div className="pointer-events-none absolute right-full top-1/2 mr-3 max-w-[220px] -translate-y-1/2 overflow-hidden text-ellipsis whitespace-nowrap rounded-xl border border-border/35 bg-[hsl(var(--popover))]/95 px-3 py-1.5 text-xs text-popover-foreground shadow-[0_12px_32px_-18px_hsl(var(--foreground)/0.45)] backdrop-blur animate-fade-in">
                 {item.preview}
               </div>
             ) : null}

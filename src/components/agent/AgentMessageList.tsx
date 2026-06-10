@@ -484,6 +484,7 @@ function MessageNav({
   const [hovered, setHovered] = useState(false);
   const [hoveredBar, setHoveredBar] = useState<number | null>(null);
   const [activeIdx, setActiveIdx] = useState(-1);
+  const [navHeight, setNavHeight] = useState(0);
 
   useEffect(() => {
     const container = scrollContainer.current;
@@ -528,6 +529,30 @@ function MessageNav({
     return () => container.removeEventListener('scroll', updateActive);
   }, [userIdxes, scrollContainer]);
 
+  useEffect(() => {
+    const container = scrollContainer.current;
+    if (!container) return;
+
+    const updateNavHeight = () => {
+      setNavHeight(container.clientHeight);
+    };
+
+    updateNavHeight();
+
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => updateNavHeight())
+        : null;
+
+    resizeObserver?.observe(container);
+    window.addEventListener('resize', updateNavHeight);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updateNavHeight);
+    };
+  }, [scrollContainer]);
+
   const handleClick = (idx: number) => {
     const el = document.getElementById(`msg-${idx}`);
     if (!el) return;
@@ -552,32 +577,129 @@ function MessageNav({
 
   if (userIdxes.length <= 1) return null;
 
+  const navMetrics = useMemo(() => {
+    const markerCount = userIdxes.length;
+    const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+    const baseGap = 6;
+    const minGap = 0.5;
+    const basePadding = 8;
+    const minPadding = 1;
+    const baseBarHeight = 4;
+    const minBarHeight = 1;
+    const barWidth = 16;
+    const availableHeight = Math.max(navHeight - 4, 0);
+    const maxVisibleCount =
+      availableHeight > 0
+        ? Math.max(
+            1,
+            Math.floor((availableHeight - minPadding * 2 + minGap) / (minBarHeight + minGap)),
+          )
+        : markerCount;
+    const visibleCount = Math.min(markerCount, maxVisibleCount);
+    const effectiveCount = Math.max(visibleCount, 1);
+    const compactRatio = clamp((markerCount - 6) / 10, 0, 1);
+    const ultraCompactRatio = clamp((markerCount - 14) / 10, 0, 1);
+
+    let gap = clamp(baseGap - compactRatio * 4.5 - ultraCompactRatio, minGap, baseGap);
+    let paddingY = clamp(basePadding - compactRatio * 5.5 - ultraCompactRatio * 1.5, minPadding, basePadding);
+    let barHeight = clamp(baseBarHeight - compactRatio * 2 - ultraCompactRatio, minBarHeight, baseBarHeight);
+
+    if (markerCount >= 14) {
+      gap = Math.min(gap, 1);
+      paddingY = Math.min(paddingY, 2);
+      barHeight = Math.min(barHeight, 2);
+    }
+
+    if (markerCount >= 22) {
+      gap = minGap;
+      paddingY = minPadding;
+      barHeight = Math.min(barHeight, 1.4);
+    }
+
+    if (availableHeight > 0) {
+      const markersHeight = effectiveCount * barHeight;
+      const gapsCount = Math.max(effectiveCount - 1, 0);
+      const totalHeight = markersHeight + gapsCount * gap + paddingY * 2;
+
+      if (totalHeight > availableHeight && gapsCount > 0) {
+        gap = clamp(
+          (availableHeight - markersHeight - minPadding * 2) / gapsCount,
+          minGap,
+          gap,
+        );
+      }
+
+      const compactHeight = markerCount * barHeight + gapsCount * gap;
+      if (compactHeight + paddingY * 2 > availableHeight) {
+        paddingY = clamp((availableHeight - compactHeight) / 2, minPadding, paddingY);
+      }
+
+      const stillTooTall = effectiveCount * barHeight + gapsCount * gap + paddingY * 2 - availableHeight;
+      if (stillTooTall > 0) {
+        barHeight = clamp(
+          (availableHeight - gapsCount * gap - minPadding * 2) / effectiveCount,
+          minBarHeight,
+          barHeight,
+        );
+      }
+    }
+
+    return {
+      barHeight,
+      barWidth,
+      gap,
+      hiddenCount: Math.max(markerCount - visibleCount, 0),
+      paddingY,
+      activeScale: gap <= 2 ? 1.04 : gap <= 4 ? 1.08 : 1.14,
+      visibleCount,
+    };
+  }, [navHeight, userIdxes.length]);
+
+  const visibleUserIdxes = useMemo(
+    () =>
+      navMetrics.visibleCount >= userIdxes.length
+        ? userIdxes
+        : userIdxes.slice(-navMetrics.visibleCount),
+    [navMetrics.visibleCount, userIdxes],
+  );
+
   return (
     <div
-      className="absolute right-2 top-0 bottom-0 w-8 flex items-center justify-center z-10"
+      className="absolute right-2 top-0 bottom-0 w-8 flex items-end justify-center z-10"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); setHoveredBar(null); }}
     >
       <div
         className={`
-          flex flex-col items-center gap-2.5 py-4
+          flex flex-col items-center
           transition-opacity duration-200
           ${hovered ? 'opacity-100' : 'opacity-0'}
         `}
+        style={{
+          gap: `${navMetrics.gap}px`,
+          paddingTop: `${navMetrics.paddingY}px`,
+          paddingBottom: `${navMetrics.paddingY}px`,
+        }}
       >
-        {userIdxes.map((idx) => (
+        {visibleUserIdxes.map((idx) => (
           <div key={idx} className="relative group">
             <button
               onMouseEnter={() => setHoveredBar(idx)}
               onMouseLeave={() => setHoveredBar(null)}
               onClick={() => handleClick(idx)}
               className={`
-                w-4 h-1.5 rounded-full transition-all duration-150
+                rounded-full transition-all duration-150 origin-center
                 ${idx === activeIdx
-                  ? 'bg-[hsl(var(--primary))] scale-125'
+                  ? 'bg-[hsl(var(--primary))]'
                   : 'bg-muted-foreground/20 hover:bg-muted-foreground/40'
                 }
               `}
+              style={{
+                width: `${navMetrics.barWidth}px`,
+                height: `${navMetrics.barHeight}px`,
+                transform: idx === activeIdx ? `scaleX(${navMetrics.activeScale})` : 'scaleX(1)',
+              }}
             />
             {hoveredBar === idx && (
               <div className="
