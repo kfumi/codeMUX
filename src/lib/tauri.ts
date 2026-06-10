@@ -1,5 +1,5 @@
 import { invoke, Channel } from '@tauri-apps/api/core';
-import type { Session } from '../types/session';
+import type { AgentKind, Session } from '../types/session';
 import type { AppConfig, Provider, Theme } from '../types/provider';
 import type { Project } from '../types/project';
 import type { McpServer } from '../types/mcp';
@@ -100,8 +100,8 @@ export const projectApi = {
 };
 
 export const sessionApi = {
-  create: (title: string, mode?: string, projectId?: string): Promise<Session> =>
-    invokeLogged('create_session', { title, mode, projectId: projectId ?? null }),
+  create: (title: string, agentKind: AgentKind, mode?: string, projectId?: string): Promise<Session> =>
+    invokeLogged('create_session', { title, agentKind, mode, projectId: projectId ?? null }),
   getAll: (): Promise<Session[]> => invokeLogged('get_all_sessions'),
   delete: (sessionId: string): Promise<void> => invokeLogged('delete_session', { sessionId }),
   updateTitle: (sessionId: string, title: string): Promise<void> => invokeLogged('update_session_title', { sessionId, title }),

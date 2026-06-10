@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { AppConfig, Provider, Theme } from '../types/provider';
 import type { ModelInfo } from '../lib/tauri';
 import { configApi } from '../lib/tauri';
+import { getDefaultAgentKind } from '../types/agentRegistry';
+import type { AgentKind } from '../types/session';
 
 interface SettingsState {
   config: AppConfig | null;
@@ -15,6 +17,7 @@ interface SettingsState {
   fetchModels: (apiKey: string, baseUrl: string) => Promise<ModelInfo[]>;
   testProvider: (providerId: string) => Promise<string>;
   getActiveProvider: () => Provider | null;
+  getDefaultAgentKind: () => AgentKind;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -101,5 +104,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const config = get().config;
     if (!config) return null;
     return config.providers.find((p) => p.id === config.active_provider_id) ?? null;
+  },
+
+  getDefaultAgentKind: () => {
+    const config = get().config;
+    return config?.agent_defaults.default_agent_kind ?? getDefaultAgentKind();
   },
 }));

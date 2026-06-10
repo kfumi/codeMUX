@@ -16,6 +16,7 @@ pub struct Project {
 pub struct Session {
     pub id: String,
     pub title: String,
+    pub agent_kind: String,
     pub provider_id: Option<String>,
     pub model: Option<String>,
     pub mode: Option<String>,
@@ -83,18 +84,19 @@ pub fn rename_project(conn: &Connection, project_id: &str, name: &str) -> Result
 }
 
 // 会话操作
-pub fn create_session_with_mode(conn: &Connection, title: &str, mode: &str) -> Result<Session> {
+pub fn create_session_with_mode(conn: &Connection, title: &str, agent_kind: &str, mode: &str) -> Result<Session> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
 
     conn.execute(
-        "INSERT INTO sessions (id, title, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![id, title, mode, now, now],
+        "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![id, title, agent_kind, mode, now, now],
     )?;
 
     Ok(Session {
         id,
         title: title.to_string(),
+        agent_kind: agent_kind.to_string(),
         provider_id: None,
         model: None,
         mode: Some(mode.to_string()),
@@ -104,18 +106,19 @@ pub fn create_session_with_mode(conn: &Connection, title: &str, mode: &str) -> R
     })
 }
 
-pub fn create_session_for_project(conn: &Connection, title: &str, mode: &str, project_id: &str) -> Result<Session> {
+pub fn create_session_for_project(conn: &Connection, title: &str, agent_kind: &str, mode: &str, project_id: &str) -> Result<Session> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
 
     conn.execute(
-        "INSERT INTO sessions (id, title, mode, project_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![id, title, mode, project_id, now, now],
+        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![id, title, agent_kind, mode, project_id, now, now],
     )?;
 
     Ok(Session {
         id,
         title: title.to_string(),
+        agent_kind: agent_kind.to_string(),
         provider_id: None,
         model: None,
         mode: Some(mode.to_string()),
@@ -126,18 +129,19 @@ pub fn create_session_for_project(conn: &Connection, title: &str, mode: &str, pr
 }
 
 pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare("SELECT id, title, provider_id, model, mode, project_id, created_at, updated_at FROM sessions ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, mode, project_id, created_at, updated_at FROM sessions ORDER BY updated_at DESC")?;
 
     let sessions = stmt.query_map([], |row| {
         Ok(Session {
             id: row.get(0)?,
             title: row.get(1)?,
-            provider_id: row.get(2)?,
-            model: row.get(3)?,
-            mode: row.get(4)?,
-            project_id: row.get(5)?,
-            created_at: row.get(6)?,
-            updated_at: row.get(7)?,
+            agent_kind: row.get(2)?,
+            provider_id: row.get(3)?,
+            model: row.get(4)?,
+            mode: row.get(5)?,
+            project_id: row.get(6)?,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
         })
     })?.collect::<Result<Vec<_>>>()?;
 

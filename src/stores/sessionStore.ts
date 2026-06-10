@@ -1,7 +1,16 @@
 import { create } from 'zustand';
-import type { Session } from '../types/session';
+import type { AgentKind, Session } from '../types/session';
 import { sessionApi, agentApi } from '../lib/tauri';
 import { useAgentStore } from './agentStore';
+import { getAgentDefinition, getDefaultAgentKind } from '../types/agentRegistry';
+
+function isAgentKind(value: string | undefined): value is AgentKind {
+  if (!value) {
+    return false;
+  }
+
+  return getAgentDefinition(value as AgentKind) !== undefined;
+}
 
 interface SessionState {
   sessions: Session[];
@@ -9,7 +18,7 @@ interface SessionState {
   isLoading: boolean;
   error: string | null;
   fetchSessions: () => Promise<void>;
-  createSession: (title: string, mode?: string, projectId?: string) => Promise<Session>;
+  createSession: (title: string, agentKindOrMode?: AgentKind | string, modeOrProjectId?: string, projectId?: string) => Promise<Session>;
   deleteSession: (sessionId: string) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
@@ -29,10 +38,14 @@ export const useSessionStore = create<SessionState>((set) => ({
       set({ error: String(error), isLoading: false });
     }
   },
-  createSession: async (title: string, mode?: string, projectId?: string) => {
+  createSession: async (title: string, agentKindOrMode?: AgentKind | string, modeOrProjectId?: string, projectId?: string) => {
     set({ isLoading: true, error: null });
     try {
-      const session = await sessionApi.create(title, mode, projectId);
+      const agentKind = isAgentKind(agentKindOrMode) ? agentKindOrMode : getDefaultAgentKind();
+      const mode = isAgentKind(agentKindOrMode) ? modeOrProjectId : agentKindOrMode;
+      const resolvedProjectId = isAgentKind(agentKindOrMode) ? projectId : modeOrProjectId;
+
+      const session = await sessionApi.create(title, agentKind, mode, resolvedProjectId);
       set((state) => ({
         sessions: [session, ...state.sessions],
         activeSessionId: session.id,

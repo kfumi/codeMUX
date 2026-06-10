@@ -41,16 +41,18 @@ pub fn get_agent_events(
 pub fn create_session(
     state: State<'_, AppState>,
     title: String,
+    agent_kind: Option<String>,
     mode: Option<String>,
     project_id: Option<String>,
 ) -> Result<operations::Session, String> {
-    info!(target: "session", "Creating session title={} mode={} project_id={}", title, mode.as_deref().unwrap_or("chat"), project_id.as_deref().unwrap_or("none"));
+    let agent_kind = agent_kind.unwrap_or_else(|| "claude_code".to_string());
+    info!(target: "session", "Creating session title={} agent_kind={} mode={} project_id={}", title, agent_kind, mode.as_deref().unwrap_or("chat"), project_id.as_deref().unwrap_or("none"));
     let db = state.db.lock().unwrap();
     let mode_str = mode.as_deref().unwrap_or("chat");
     match project_id.as_deref() {
-        Some(pid) => operations::create_session_for_project(&db, &title, mode_str, pid)
+        Some(pid) => operations::create_session_for_project(&db, &title, &agent_kind, mode_str, pid)
             .map_err(|e| e.to_string()),
-        None => operations::create_session_with_mode(&db, &title, mode_str)
+        None => operations::create_session_with_mode(&db, &title, &agent_kind, mode_str)
             .map_err(|e| e.to_string()),
     }
 }

@@ -17,8 +17,10 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
+            agent_kind TEXT NOT NULL DEFAULT 'claude_code',
             provider_id TEXT,
             model TEXT,
+            mode TEXT NOT NULL DEFAULT 'chat',
             project_id TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -91,6 +93,17 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         let _ = conn.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL", []);
     }
 
+    // Migration: add agent_kind column if missing
+    let has_agent_kind: bool = conn
+        .prepare("SELECT agent_kind FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_agent_kind {
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN agent_kind TEXT NOT NULL DEFAULT 'claude_code'",
+            [],
+        );
+    }
+
     // Migration: add subtitle column to mcp_servers if missing
     let has_subtitle: bool = conn
         .prepare("SELECT subtitle FROM mcp_servers LIMIT 0")
@@ -125,4 +138,55 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
     )?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::initialize_database;
+    use rusqlite::Connection;
+
+    #[test]
+    fn migrates_sessions_agent_kind_with_default() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                provider_id TEXT,
+                model TEXT,
+                project_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            ",
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO sessions (id, title, provider_id, model, project_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                "session-1",
+                "Test Session",
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+
+        initialize_database(&conn).unwrap();
+
+        let agent_kind: String = conn
+            .query_row(
+                "SELECT agent_kind FROM sessions WHERE id = ?1",
+                ["session-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(agent_kind, "claude_code");
+    }
 }

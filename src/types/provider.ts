@@ -1,4 +1,23 @@
+import type { AgentKind } from './session';
+
 export type Theme = 'Light' | 'Dark' | 'System';
+
+export interface AgentDefaults {
+  default_agent_kind: AgentKind;
+}
+
+export interface AgentConfigMap {
+  claude_code: {
+    executable_mode?: 'auto' | 'bundled' | 'path';
+    resume_sessions?: boolean;
+  };
+  codex: {
+    sdk_mode?: 'responses' | 'agent';
+    default_provider_id?: string | null;
+  };
+  gemini_cli: Record<string, never>;
+  opencode: Record<string, never>;
+}
 
 export interface Provider {
   id: string;
@@ -20,5 +39,7 @@ export interface Provider {
 export interface AppConfig {
   providers: Provider[];
   active_provider_id: string | null;
+  agent_defaults: AgentDefaults;
+  agent_configs: AgentConfigMap;
   theme: Theme;
 }
