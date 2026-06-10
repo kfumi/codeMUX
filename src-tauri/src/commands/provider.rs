@@ -32,13 +32,24 @@ fn apply_agent_config_update(
             let update: CodexAgentConfigUpdate = serde_json::from_value(config)
                 .map_err(|e| format!("Invalid Codex config: {}", e))?;
 
+            let validated_default_provider_id = match update.default_provider_id {
+                OptionalField::Missing => OptionalField::Missing,
+                OptionalField::Null => OptionalField::Null,
+                OptionalField::Value(default_provider_id) => {
+                    if !app_config.providers.iter().any(|provider| provider.id == default_provider_id) {
+                        return Err(format!("Unknown Codex default_provider_id: {}", default_provider_id));
+                    }
+                    OptionalField::Value(default_provider_id)
+                }
+            };
+
             if let Some(sdk_mode) = update.sdk_mode {
                 if !matches!(sdk_mode.as_str(), "responses" | "agent") {
                     return Err(format!("Unsupported Codex sdk_mode: {}", sdk_mode));
                 }
                 app_config.agent_configs.codex.sdk_mode = sdk_mode;
             }
-            match update.default_provider_id {
+            match validated_default_provider_id {
                 OptionalField::Missing => {}
                 OptionalField::Null => {
                     app_config.agent_configs.codex.default_provider_id = None;
@@ -133,7 +144,40 @@ pub fn update_agent_config(
 #[cfg(test)]
 mod tests {
     use super::{apply_agent_config_update, cleanup_provider_references};
-    use crate::config::types::{AgentKind, AppConfig};
+    use crate::config::types::{AgentKind, AppConfig, Provider};
+
+    fn provider(id: &str) -> Provider {
+        Provider {
+            id: id.to_string(),
+            name: format!("Provider {}", id),
+            api_key: String::new(),
+            anthropic_base_url: String::new(),
+            openai_base_url: String::new(),
+            default_model: String::new(),
+            input_price: None,
+            cache_read_price: None,
+            output_price: None,
+            context_1m: None,
+        }
+    }
+
+    #[test]
+    fn codex_default_provider_id_can_be_set_to_known_provider() {
+        let mut app_config = AppConfig::default();
+        app_config.providers = vec![provider("provider-1")];
+
+        apply_agent_config_update(
+            &mut app_config,
+            AgentKind::Codex,
+            serde_json::json!({ "default_provider_id": "provider-1" }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            app_config.agent_configs.codex.default_provider_id,
+            Some("provider-1".to_string())
+        );
+    }
 
     #[test]
     fn codex_default_provider_id_can_be_cleared_with_null_update() {
@@ -148,6 +192,31 @@ mod tests {
         .unwrap();
 
         assert_eq!(app_config.agent_configs.codex.default_provider_id, None);
+    }
+
+    #[test]
+    fn codex_default_provider_id_rejects_unknown_provider_without_changing_config() {
+        let mut app_config = AppConfig::default();
+        app_config.providers = vec![provider("provider-1")];
+        app_config.agent_configs.codex.sdk_mode = "responses".to_string();
+        app_config.agent_configs.codex.default_provider_id = Some("provider-1".to_string());
+
+        let error = apply_agent_config_update(
+            &mut app_config,
+            AgentKind::Codex,
+            serde_json::json!({
+                "sdk_mode": "agent",
+                "default_provider_id": "missing-provider"
+            }),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "Unknown Codex default_provider_id: missing-provider");
+        assert_eq!(app_config.agent_configs.codex.sdk_mode, "responses");
+        assert_eq!(
+            app_config.agent_configs.codex.default_provider_id,
+            Some("provider-1".to_string())
+        );
     }
 
     #[test]
