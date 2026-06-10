@@ -77,4 +77,31 @@ describe('settings store agent config actions', () => {
       default_provider_id: 'provider-1',
     });
   });
+
+  it('keeps clear-to-null codex config updates in local state', async () => {
+    const { useSettingsStore } = await import('./settingsStore');
+    useSettingsStore.setState((state) => ({
+      config: state.config
+        ? {
+            ...state.config,
+            agent_configs: {
+              ...state.config.agent_configs,
+              codex: {
+                ...state.config.agent_configs.codex,
+                default_provider_id: 'provider-1',
+              },
+            },
+          }
+        : null,
+    }));
+
+    await useSettingsStore.getState().updateAgentConfig('codex', {
+      default_provider_id: null,
+    });
+
+    expect(updateAgentConfigMock).toHaveBeenCalledWith('codex', {
+      default_provider_id: null,
+    });
+    expect(useSettingsStore.getState().config?.agent_configs.codex.default_provider_id).toBeNull();
+  });
 });

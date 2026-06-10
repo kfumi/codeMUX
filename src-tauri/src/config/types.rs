@@ -1,6 +1,29 @@
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum OptionalField<T> {
+    #[default]
+    Missing,
+    Null,
+    Value(T),
+}
+
+impl<'de, T> Deserialize<'de> for OptionalField<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        match Option::<T>::deserialize(deserializer)? {
+            Some(value) => Ok(Self::Value(value)),
+            None => Ok(Self::Null),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentKind {
@@ -127,7 +150,8 @@ pub struct ClaudeCodeAgentConfigUpdate {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CodexAgentConfigUpdate {
     pub sdk_mode: Option<String>,
-    pub default_provider_id: Option<Option<String>>,
+    #[serde(default)]
+    pub default_provider_id: OptionalField<String>,
 }
 
 impl Default for CodexAgentConfig {
@@ -141,7 +165,7 @@ impl Default for CodexAgentConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentKind, AppConfig};
+    use super::{AgentKind, AppConfig, CodexAgentConfigUpdate, OptionalField};
 
     #[test]
     fn old_config_json_deserializes_with_agent_defaults() {
@@ -158,6 +182,23 @@ mod tests {
         assert!(config.agent_configs.claude_code.resume_sessions);
         assert_eq!(config.agent_configs.codex.sdk_mode, "responses");
         assert_eq!(config.agent_configs.codex.default_provider_id, None);
+    }
+
+    #[test]
+    fn codex_update_distinguishes_missing_null_and_value() {
+        let missing: CodexAgentConfigUpdate = serde_json::from_value(serde_json::json!({})).unwrap();
+        let clear: CodexAgentConfigUpdate = serde_json::from_value(serde_json::json!({
+            "default_provider_id": null
+        }))
+        .unwrap();
+        let set: CodexAgentConfigUpdate = serde_json::from_value(serde_json::json!({
+            "default_provider_id": "provider-1"
+        }))
+        .unwrap();
+
+        assert!(matches!(missing.default_provider_id, OptionalField::Missing));
+        assert!(matches!(clear.default_provider_id, OptionalField::Null));
+        assert!(matches!(set.default_provider_id, OptionalField::Value(ref value) if value == "provider-1"));
     }
 }
 
