@@ -1,16 +1,8 @@
 import { create } from 'zustand';
-import type { AgentKind, Session } from '../types/session';
+import type { AgentKind, Session, SessionMode } from '../types/session';
 import { sessionApi, agentApi } from '../lib/tauri';
 import { useAgentStore } from './agentStore';
-import { getAgentDefinition, getDefaultAgentKind } from '../types/agentRegistry';
-
-function isAgentKind(value: string | undefined): value is AgentKind {
-  if (!value) {
-    return false;
-  }
-
-  return getAgentDefinition(value as AgentKind) !== undefined;
-}
+import { getDefaultAgentKind } from '../types/agentRegistry';
 
 interface SessionState {
   sessions: Session[];
@@ -18,10 +10,69 @@ interface SessionState {
   isLoading: boolean;
   error: string | null;
   fetchSessions: () => Promise<void>;
-  createSession: (title: string, agentKindOrMode?: AgentKind | string, modeOrProjectId?: string, projectId?: string) => Promise<Session>;
+  createSession: CreateSessionAction;
   deleteSession: (sessionId: string) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
+}
+
+type CreateSessionAction = {
+  (title: string, mode?: SessionMode, projectId?: string): Promise<Session>;
+  (title: string, agentKind: AgentKind, mode?: SessionMode, projectId?: string): Promise<Session>;
+};
+
+function normalizeCreateSessionArgs(
+  title: string,
+  agentKindOrMode?: AgentKind | SessionMode,
+  modeOrProjectId?: SessionMode | string,
+  projectId?: string,
+): [string, AgentKind, SessionMode | undefined, string | undefined] {
+  if (
+    agentKindOrMode === 'claude_code' ||
+    agentKindOrMode === 'codex' ||
+    agentKindOrMode === 'gemini_cli' ||
+    agentKindOrMode === 'opencode'
+  ) {
+    return [title, agentKindOrMode, modeOrProjectId as SessionMode | undefined, projectId];
+  }
+
+  const legacyMode = agentKindOrMode;
+  return [title, getDefaultAgentKind(), legacyMode, modeOrProjectId as string | undefined];
+}
+
+function createSessionAction(
+  set: (partial: Partial<SessionState> | ((state: SessionState) => Partial<SessionState>)) => void,
+): CreateSessionAction {
+  function createSession(title: string, mode?: SessionMode, projectId?: string): Promise<Session>;
+  function createSession(title: string, agentKind: AgentKind, mode?: SessionMode, projectId?: string): Promise<Session>;
+  async function createSession(
+    title: string,
+    agentKindOrMode?: AgentKind | SessionMode,
+    modeOrProjectId?: SessionMode | string,
+    projectId?: string,
+  ): Promise<Session> {
+    set({ isLoading: true, error: null });
+    try {
+      const [, agentKind, mode, resolvedProjectId] = normalizeCreateSessionArgs(
+        title,
+        agentKindOrMode,
+        modeOrProjectId,
+        projectId,
+      );
+      const session = await sessionApi.create(title, agentKind, mode, resolvedProjectId);
+      set((state) => ({
+        sessions: [session, ...state.sessions],
+        activeSessionId: session.id,
+        isLoading: false,
+      }));
+      return session;
+    } catch (error) {
+      set({ error: String(error), isLoading: false });
+      throw error;
+    }
+  }
+
+  return createSession;
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -38,25 +89,7 @@ export const useSessionStore = create<SessionState>((set) => ({
       set({ error: String(error), isLoading: false });
     }
   },
-  createSession: async (title: string, agentKindOrMode?: AgentKind | string, modeOrProjectId?: string, projectId?: string) => {
-    set({ isLoading: true, error: null });
-    try {
-      const agentKind = isAgentKind(agentKindOrMode) ? agentKindOrMode : getDefaultAgentKind();
-      const mode = isAgentKind(agentKindOrMode) ? modeOrProjectId : agentKindOrMode;
-      const resolvedProjectId = isAgentKind(agentKindOrMode) ? projectId : modeOrProjectId;
-
-      const session = await sessionApi.create(title, agentKind, mode, resolvedProjectId);
-      set((state) => ({
-        sessions: [session, ...state.sessions],
-        activeSessionId: session.id,
-        isLoading: false,
-      }));
-      return session;
-    } catch (error) {
-      set({ error: String(error), isLoading: false });
-      throw error;
-    }
-  },
+  createSession: createSessionAction(set),
   deleteSession: async (sessionId: string) => {
     set({ isLoading: true, error: null });
     try {

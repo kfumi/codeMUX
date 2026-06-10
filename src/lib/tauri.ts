@@ -1,6 +1,6 @@
 import { invoke, Channel } from '@tauri-apps/api/core';
-import type { AgentKind, Session } from '../types/session';
-import type { AppConfig, Provider, Theme } from '../types/provider';
+import type { AgentKind, Session, SessionMode } from '../types/session';
+import type { AgentConfigUpdateMap, AppConfig, Provider, Theme } from '../types/provider';
 import type { Project } from '../types/project';
 import type { McpServer } from '../types/mcp';
 import type { Skill } from '../types/skill';
@@ -100,7 +100,7 @@ export const projectApi = {
 };
 
 export const sessionApi = {
-  create: (title: string, agentKind: AgentKind, mode?: string, projectId?: string): Promise<Session> =>
+  create: (title: string, agentKind: AgentKind, mode?: SessionMode, projectId?: string): Promise<Session> =>
     invokeLogged('create_session', { title, agentKind, mode, projectId: projectId ?? null }),
   getAll: (): Promise<Session[]> => invokeLogged('get_all_sessions'),
   delete: (sessionId: string): Promise<void> => invokeLogged('delete_session', { sessionId }),
@@ -162,6 +162,12 @@ export const configApi = {
   updateProvider: (provider: Provider): Promise<void> => invokeLogged('update_provider', { provider }),
   deleteProvider: (providerId: string): Promise<void> => invokeLogged('delete_provider', { providerId }),
   setActiveProvider: (providerId: string): Promise<void> => invokeLogged('set_active_provider', { providerId }),
+  setDefaultAgentKind: (agentKind: AgentKind): Promise<void> =>
+    invokeLogged('set_default_agent_kind', { agentKind }),
+  updateAgentConfig: <T extends keyof AgentConfigUpdateMap>(
+    agentKind: T,
+    config: AgentConfigUpdateMap[T],
+  ): Promise<void> => invokeLogged('update_agent_config', { agentKind, config }),
   setTheme: (theme: Theme): Promise<void> => invokeLogged('set_theme', { theme: theme.toLowerCase() }),
   fetchModels: (apiKey: string, baseUrl: string): Promise<ModelInfo[]> =>
     invokeLogged('fetch_provider_models', { apiKey, baseUrl }),

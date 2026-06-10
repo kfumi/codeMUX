@@ -1,4 +1,5 @@
 export type AgentKind = 'claude_code' | 'codex' | 'gemini_cli' | 'opencode';
+export type SessionMode = 'chat' | 'agent';
 
 export interface Session {
   id: string;
@@ -15,6 +16,6 @@ export interface Session {
 export interface CreateSessionRequest {
   title: string;
   agent_kind: AgentKind;
-  mode?: string;
+  mode?: SessionMode;
   project_id?: string;
 }

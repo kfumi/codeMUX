@@ -19,6 +19,13 @@ export interface AgentConfigMap {
   opencode: Record<string, never>;
 }
 
+export type AgentConfigUpdateMap = {
+  claude_code: Partial<AgentConfigMap['claude_code']>;
+  codex: Partial<AgentConfigMap['codex']>;
+  gemini_cli: Partial<AgentConfigMap['gemini_cli']>;
+  opencode: Partial<AgentConfigMap['opencode']>;
+};
+
 export interface Provider {
   id: string;
   name: string;

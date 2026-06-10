@@ -2,6 +2,18 @@ use rusqlite::{Connection, Result, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use chrono::Utc;
+use crate::config::types::AgentKind;
+use std::str::FromStr;
+
+fn validate_agent_kind(value: &str) -> Result<AgentKind> {
+    AgentKind::from_str(value).map_err(|message| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, message)),
+        )
+    })
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Project {
@@ -16,7 +28,7 @@ pub struct Project {
 pub struct Session {
     pub id: String,
     pub title: String,
-    pub agent_kind: String,
+    pub agent_kind: AgentKind,
     pub provider_id: Option<String>,
     pub model: Option<String>,
     pub mode: Option<String>,
@@ -84,19 +96,19 @@ pub fn rename_project(conn: &Connection, project_id: &str, name: &str) -> Result
 }
 
 // 会话操作
-pub fn create_session_with_mode(conn: &Connection, title: &str, agent_kind: &str, mode: &str) -> Result<Session> {
+pub fn create_session_with_mode(conn: &Connection, title: &str, agent_kind: AgentKind, mode: &str) -> Result<Session> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
 
     conn.execute(
         "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![id, title, agent_kind, mode, now, now],
+        params![id, title, agent_kind.as_str(), mode, now, now],
     )?;
 
     Ok(Session {
         id,
         title: title.to_string(),
-        agent_kind: agent_kind.to_string(),
+        agent_kind,
         provider_id: None,
         model: None,
         mode: Some(mode.to_string()),
@@ -106,19 +118,19 @@ pub fn create_session_with_mode(conn: &Connection, title: &str, agent_kind: &str
     })
 }
 
-pub fn create_session_for_project(conn: &Connection, title: &str, agent_kind: &str, mode: &str, project_id: &str) -> Result<Session> {
+pub fn create_session_for_project(conn: &Connection, title: &str, agent_kind: AgentKind, mode: &str, project_id: &str) -> Result<Session> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
 
     conn.execute(
         "INSERT INTO sessions (id, title, agent_kind, mode, project_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![id, title, agent_kind, mode, project_id, now, now],
+        params![id, title, agent_kind.as_str(), mode, project_id, now, now],
     )?;
 
     Ok(Session {
         id,
         title: title.to_string(),
-        agent_kind: agent_kind.to_string(),
+        agent_kind,
         provider_id: None,
         model: None,
         mode: Some(mode.to_string()),
@@ -135,7 +147,7 @@ pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
         Ok(Session {
             id: row.get(0)?,
             title: row.get(1)?,
-            agent_kind: row.get(2)?,
+            agent_kind: validate_agent_kind(&row.get::<_, String>(2)?)?,
             provider_id: row.get(3)?,
             model: row.get(4)?,
             mode: row.get(5)?,
@@ -230,4 +242,26 @@ pub fn update_session_provider(conn: &Connection, session_id: &str, provider_id:
         params![provider_id, model, now, session_id],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::get_all_sessions;
+    use crate::db::schema::initialize_database;
+    use rusqlite::Connection;
+
+    #[test]
+    fn rejects_invalid_agent_kind_when_loading_sessions() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-1", "Broken", "invalid_agent", "chat", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+
+        let error = get_all_sessions(&conn).unwrap_err();
+
+        assert!(error.to_string().contains("Unsupported agent kind"));
+    }
 }

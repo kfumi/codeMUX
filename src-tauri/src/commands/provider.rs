@@ -1,9 +1,12 @@
 use tauri::{AppHandle, State};
 use crate::AppState;
-use crate::config::types::{AppConfig, Provider, Theme};
+use crate::config::types::{
+    AgentKind, ClaudeCodeAgentConfigUpdate, CodexAgentConfigUpdate, AppConfig, Provider, Theme,
+};
 use crate::config;
 use futures::StreamExt;
 use log::{debug, info};
+use std::str::FromStr;
 
 #[tauri::command]
 pub fn get_config(state: State<'_, AppState>) -> AppConfig {
@@ -47,6 +50,62 @@ pub fn set_active_provider(state: State<'_, AppState>, app: AppHandle, provider_
     let mut config = state.config.lock().unwrap();
     config.active_provider_id = Some(provider_id);
     config::save_config(&app, &config)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_default_agent_kind(state: State<'_, AppState>, app: AppHandle, agent_kind: String) -> Result<(), String> {
+    info!(target: "provider", "Setting default agent kind agent_kind={}", agent_kind);
+    let mut config = state.config.lock().unwrap();
+    config.agent_defaults.default_agent_kind = AgentKind::from_str(&agent_kind)?;
+    config::save_config(&app, &config)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_agent_config(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    agent_kind: String,
+    config: serde_json::Value,
+) -> Result<(), String> {
+    info!(target: "provider", "Updating agent config agent_kind={}", agent_kind);
+    let mut app_config = state.config.lock().unwrap();
+
+    match AgentKind::from_str(&agent_kind)? {
+        AgentKind::ClaudeCode => {
+            let update: ClaudeCodeAgentConfigUpdate = serde_json::from_value(config)
+                .map_err(|e| format!("Invalid Claude Code config: {}", e))?;
+
+            if let Some(executable_mode) = update.executable_mode {
+                if !matches!(executable_mode.as_str(), "auto" | "bundled" | "path") {
+                    return Err(format!("Unsupported Claude Code executable_mode: {}", executable_mode));
+                }
+                app_config.agent_configs.claude_code.executable_mode = executable_mode;
+            }
+            if let Some(resume_sessions) = update.resume_sessions {
+                app_config.agent_configs.claude_code.resume_sessions = resume_sessions;
+            }
+        }
+        AgentKind::Codex => {
+            let update: CodexAgentConfigUpdate = serde_json::from_value(config)
+                .map_err(|e| format!("Invalid Codex config: {}", e))?;
+
+            if let Some(sdk_mode) = update.sdk_mode {
+                if !matches!(sdk_mode.as_str(), "responses" | "agent") {
+                    return Err(format!("Unsupported Codex sdk_mode: {}", sdk_mode));
+                }
+                app_config.agent_configs.codex.sdk_mode = sdk_mode;
+            }
+            if let Some(default_provider_id) = update.default_provider_id {
+                app_config.agent_configs.codex.default_provider_id = default_provider_id;
+            }
+        }
+        AgentKind::GeminiCli => {}
+        AgentKind::Opencode => {}
+    }
+
+    config::save_config(&app, &app_config)?;
     Ok(())
 }
 

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AppConfig, Provider, Theme } from '../types/provider';
+import type { AgentConfigMap, AgentConfigUpdateMap, AppConfig, Provider, Theme } from '../types/provider';
 import type { ModelInfo } from '../lib/tauri';
 import { configApi } from '../lib/tauri';
 import { getDefaultAgentKind } from '../types/agentRegistry';
@@ -18,6 +18,8 @@ interface SettingsState {
   testProvider: (providerId: string) => Promise<string>;
   getActiveProvider: () => Provider | null;
   getDefaultAgentKind: () => AgentKind;
+  setDefaultAgentKind: (agentKind: AgentKind) => Promise<void>;
+  updateAgentConfig: <T extends keyof AgentConfigMap>(agentKind: T, config: AgentConfigUpdateMap[T]) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -109,5 +111,46 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   getDefaultAgentKind: () => {
     const config = get().config;
     return config?.agent_defaults.default_agent_kind ?? getDefaultAgentKind();
+  },
+
+  setDefaultAgentKind: async (agentKind: AgentKind) => {
+    try {
+      await configApi.setDefaultAgentKind(agentKind);
+      set((state) => ({
+        config: state.config
+          ? {
+              ...state.config,
+              agent_defaults: {
+                ...state.config.agent_defaults,
+                default_agent_kind: agentKind,
+              },
+            }
+          : null,
+      }));
+    } catch (error) {
+      set({ error: String(error) });
+    }
+  },
+
+  updateAgentConfig: async <T extends keyof AgentConfigMap>(agentKind: T, config: AgentConfigUpdateMap[T]) => {
+    try {
+      await configApi.updateAgentConfig(agentKind, config);
+      set((state) => ({
+        config: state.config
+          ? {
+              ...state.config,
+              agent_configs: {
+                ...state.config.agent_configs,
+                [agentKind]: {
+                  ...state.config.agent_configs[agentKind],
+                  ...config,
+                },
+              },
+            }
+          : null,
+      }));
+    } catch (error) {
+      set({ error: String(error) });
+    }
   },
 }));

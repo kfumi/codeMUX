@@ -1,7 +1,48 @@
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
-fn default_agent_kind() -> String {
-    "claude_code".to_string()
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentKind {
+    ClaudeCode,
+    Codex,
+    GeminiCli,
+    Opencode,
+}
+
+impl AgentKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude_code",
+            Self::Codex => "codex",
+            Self::GeminiCli => "gemini_cli",
+            Self::Opencode => "opencode",
+        }
+    }
+}
+
+impl Default for AgentKind {
+    fn default() -> Self {
+        Self::ClaudeCode
+    }
+}
+
+impl FromStr for AgentKind {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "claude_code" => Ok(Self::ClaudeCode),
+            "codex" => Ok(Self::Codex),
+            "gemini_cli" => Ok(Self::GeminiCli),
+            "opencode" => Ok(Self::Opencode),
+            _ => Err(format!("Unsupported agent kind: {}", value)),
+        }
+    }
+}
+
+fn default_agent_kind() -> AgentKind {
+    AgentKind::ClaudeCode
 }
 
 fn default_claude_executable_mode() -> String {
@@ -41,7 +82,7 @@ pub struct Provider {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentDefaults {
     #[serde(default = "default_agent_kind")]
-    pub default_agent_kind: String,
+    pub default_agent_kind: AgentKind,
 }
 
 impl Default for AgentDefaults {
@@ -77,12 +118,46 @@ pub struct CodexAgentConfig {
     pub default_provider_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClaudeCodeAgentConfigUpdate {
+    pub executable_mode: Option<String>,
+    pub resume_sessions: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CodexAgentConfigUpdate {
+    pub sdk_mode: Option<String>,
+    pub default_provider_id: Option<Option<String>>,
+}
+
 impl Default for CodexAgentConfig {
     fn default() -> Self {
         Self {
             sdk_mode: default_codex_sdk_mode(),
             default_provider_id: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AgentKind, AppConfig};
+
+    #[test]
+    fn old_config_json_deserializes_with_agent_defaults() {
+        let raw = serde_json::json!({
+            "providers": [],
+            "active_provider_id": null,
+            "theme": "System"
+        });
+
+        let config: AppConfig = serde_json::from_value(raw).unwrap();
+
+        assert_eq!(config.agent_defaults.default_agent_kind, AgentKind::ClaudeCode);
+        assert_eq!(config.agent_configs.claude_code.executable_mode, "auto");
+        assert!(config.agent_configs.claude_code.resume_sessions);
+        assert_eq!(config.agent_configs.codex.sdk_mode, "responses");
+        assert_eq!(config.agent_configs.codex.default_provider_id, None);
     }
 }
 

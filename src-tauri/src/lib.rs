@@ -165,6 +165,8 @@ pub fn run() {
             commands::provider::update_provider,
             commands::provider::delete_provider,
             commands::provider::set_active_provider,
+            commands::provider::set_default_agent_kind,
+            commands::provider::update_agent_config,
             commands::provider::set_theme,
             commands::provider::fetch_provider_models,
             commands::provider::test_provider,
