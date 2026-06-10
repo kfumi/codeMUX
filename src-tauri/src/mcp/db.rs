@@ -20,6 +20,7 @@ fn row_to_mcp_server(row: &rusqlite::Row) -> rusqlite::Result<McpServer> {
         name: row.get(1)?,
         description: row.get(2)?,
         subtitle: row.get(8).unwrap_or_default(),
+        always_load: row.get::<_, i32>(9).unwrap_or(0) != 0,
         transport,
         enabled: enabled != 0,
         created_at: row.get(6)?,
@@ -30,6 +31,7 @@ fn row_to_mcp_server(row: &rusqlite::Row) -> rusqlite::Result<McpServer> {
 pub fn get_all_mcp_servers(conn: &Connection) -> Result<Vec<McpServer>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, description, transport_type, transport_config, enabled, created_at, updated_at, subtitle
+                , always_load
          FROM mcp_servers ORDER BY name ASC"
     )?;
 
@@ -41,6 +43,7 @@ pub fn get_all_mcp_servers(conn: &Connection) -> Result<Vec<McpServer>> {
 pub fn get_enabled_mcp_servers(conn: &Connection) -> Result<Vec<McpServer>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, description, transport_type, transport_config, enabled, created_at, updated_at, subtitle
+                , always_load
          FROM mcp_servers WHERE enabled = 1 ORDER BY name ASC"
     )?;
 
@@ -53,20 +56,22 @@ pub fn upsert_mcp_server(conn: &Connection, server: &McpServer) -> Result<()> {
     let now = Utc::now().to_rfc3339();
     let transport_config = server.transport.to_config_json().to_string();
     let transport_type = server.transport.transport_type();
+    let always_load: i32 = if server.always_load { 1 } else { 0 };
     let enabled: i32 = if server.enabled { 1 } else { 0 };
 
     conn.execute(
-        "INSERT INTO mcp_servers (id, name, description, transport_type, transport_config, enabled, created_at, updated_at, subtitle)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "INSERT INTO mcp_servers (id, name, description, transport_type, transport_config, always_load, enabled, created_at, updated_at, subtitle)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
          ON CONFLICT(id) DO UPDATE SET
              name = excluded.name,
              description = excluded.description,
              transport_type = excluded.transport_type,
              transport_config = excluded.transport_config,
+             always_load = excluded.always_load,
              enabled = excluded.enabled,
              updated_at = excluded.updated_at,
              subtitle = excluded.subtitle",
-        params![server.id, server.name, server.description, transport_type, transport_config, enabled,
+        params![server.id, server.name, server.description, transport_type, transport_config, always_load, enabled,
                 server.created_at, now, server.subtitle],
     )?;
     Ok(())
@@ -98,6 +103,7 @@ pub fn toggle_mcp_server(conn: &Connection, id: &str) -> Result<bool> {
 pub fn get_mcp_server(conn: &Connection, id: &str) -> Result<Option<McpServer>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, description, transport_type, transport_config, enabled, created_at, updated_at, subtitle
+                , always_load
          FROM mcp_servers WHERE id = ?1"
     )?;
 
@@ -116,6 +122,7 @@ pub fn create_mcp_server(conn: &Connection, name: &str, description: &str, trans
         name: name.to_string(),
         description: description.to_string(),
         subtitle: String::new(),
+        always_load: false,
         transport: transport.clone(),
         enabled: true,
         created_at: now.clone(),

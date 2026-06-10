@@ -26,6 +26,7 @@ export interface McpServer {
   name: string;
   description: string;
   subtitle: string;
+  alwaysLoad?: boolean;
   transport: McpTransport;
   enabled: boolean;
   created_at: string;

@@ -4,8 +4,35 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { execSync } from 'node:child_process';
 import { query, startup } from '@anthropic-ai/claude-agent-sdk';
-import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type {
+  Query,
+  SDKUserMessage,
+  WarmQuery,
+} from '@anthropic-ai/claude-agent-sdk';
 import type { SidecarCommand } from './types.js';
+import { buildMcpInstructions, getProviderMode } from './sessionRuntimeHelpers.js';
+
+const WARM_START_TIMEOUT_MS = 30_000;
+const WARM_QUERY_WAIT_WINDOW_MS = 500;
+const MESSAGE_TIMEOUT_MS = 300_000;
+const COMPACT_TIMEOUT_MS = 60_000;
+
+type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
+
+type SessionBootstrap = {
+  sessionId?: string;
+  cwd: string;
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  mcpServers?: Record<string, unknown>;
+  mcpServerInstructions?: Record<string, string>;
+  skills?: string[];
+};
+
+type QueryOptions = Record<string, unknown> & {
+  pathToClaudeCodeExecutable?: string;
+};
 
 /** Pending tool responses waiting for user input */
 const pendingToolResponses = new Map<string, { resolve: (value: unknown) => void }>();
@@ -42,57 +69,13 @@ function loadClaudeSettingsEnv(): void {
   }
 }
 
-let activeQuery: ReturnType<typeof query> | null = null;
-
-/**
- * Build MCP tool instructions from server names and server-provided instructions.
- * This replicates Claude Code Desktop's mcp_instructions_delta mechanism,
- * ensuring the model always knows what MCP tools are available and when to use them.
- */
-function buildMcpInstructions(
-  mcpServers?: Record<string, unknown>,
-  serverInstructions?: Record<string, string>,
-): string | undefined {
-  if (!mcpServers || Object.keys(mcpServers).length === 0) return undefined;
-
-  const lines: string[] = [];
-  const serverNames = Object.keys(mcpServers);
-
-  // Per-server instructions (from MCP initialize response)
-  if (serverInstructions && Object.keys(serverInstructions).length > 0) {
-    for (const name of serverNames) {
-      const instr = serverInstructions[name];
-      if (instr) {
-        lines.push(`## ${name}`);
-        lines.push(instr);
-        lines.push('');
-      }
-    }
-  }
-
-  // WaitForMcpServers: startup() pre-warms but doesn't guarantee all MCP servers
-  // are connected by the time the model starts. The model must call
-  // WaitForMcpServers before using any MCP tool.
-  // Keep the instruction short to avoid verbose "let me wait" responses.
-  lines.push(`MCP servers: ${serverNames.join(', ')}.`);
-  lines.push('Before using any MCP tool, call WaitForMcpServers first.');
-
-  return lines.join('\n');
-}
-
-let abortController: AbortController | null = null;
-
 /**
  * Maps app session ID -> Claude Code's real session ID.
  * Captured from the first SDK message that contains a session_id field.
- * Used to resume conversations with full context on subsequent queries.
  */
 const sessionIdMap = new Map<string, string>();
-
-/** Path to persist the session ID mapping so Rust can read it for cleanup. */
 const SESSION_MAP_FILE = path.join(os.homedir(), '.claude', 'session-id-map.json');
 
-/** Load persisted session ID mapping from disk on startup. */
 function loadSessionMap(): void {
   try {
     if (fs.existsSync(SESSION_MAP_FILE)) {
@@ -109,11 +92,12 @@ function loadSessionMap(): void {
   }
 }
 
-/** Persist the current session ID mapping to disk. */
 function saveSessionMap(): void {
   try {
     const obj: Record<string, string> = {};
-    sessionIdMap.forEach((v, k) => { obj[k] = v; });
+    sessionIdMap.forEach((value, key) => {
+      obj[key] = value;
+    });
     fs.writeFileSync(SESSION_MAP_FILE, JSON.stringify(obj, null, 2), 'utf-8');
   } catch (err) {
     process.stderr.write(`[sidecar] Warning: failed to save session map: ${err}\n`);
@@ -140,118 +124,349 @@ async function* createPromptStream(prompt: string): AsyncGenerator<SDKUserMessag
   };
 }
 
-async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Promise<void> {
-  if (activeQuery) {
-    emit({ type: 'sidecar_error', error: 'A query is already active' });
-    return;
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), timeoutMs);
+    if (timer.unref) timer.unref();
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        resolve(null);
+      });
+  });
+}
+
+function isMissingClaudeConversationError(err: unknown): boolean {
+  return String(err).includes('No conversation found with session ID');
+}
+
+class SessionRuntime {
+  private config: SessionBootstrap | null = null;
+  private configFingerprint: string | null = null;
+  private providerMode = getProviderMode(undefined);
+  private abortController: AbortController | null = null;
+  private queryHandle: Query | null = null;
+  private warmQuery: WarmQuery | null = null;
+  private warmPromise: Promise<WarmQuery | null> | null = null;
+  private turnActive = false;
+  private generation = 0;
+  private activeConfigGeneration = 0;
+
+  async ensure(cmd: EnsureSessionCommand): Promise<void> {
+    const normalized = this.normalizeConfig(cmd);
+    const nextFingerprint = JSON.stringify(normalized);
+    if (this.configFingerprint === nextFingerprint && this.config) {
+      return;
+    }
+
+    this.config = normalized;
+    this.configFingerprint = nextFingerprint;
+    this.providerMode = getProviderMode(normalized.baseUrl);
+    this.activeConfigGeneration += 1;
+
+    await this.resetForReconfigure();
+
+    emit({
+      type: 'mcp_status_update',
+      servers: {},
+      status: this.providerMode.supportsDeferredToolSearch ? 'warming' : 'limited_provider',
+    });
+
+    this.startWarmup(this.activeConfigGeneration);
   }
 
-  if (cmd.apiKey) {
-    process.env.ANTHROPIC_API_KEY = cmd.apiKey;
+  async sendInput(prompt: string): Promise<void> {
+    if (!this.config) {
+      throw new Error('Session has not been bootstrapped. Call ensure_session first.');
+    }
+    if (this.turnActive) {
+      throw new Error('A turn is already active for this session');
+    }
+
+    if (this.queryHandle) {
+      process.stderr.write('[sidecar] Closing previous query handle before starting a new turn\n');
+      this.closeQueryHandle('new_turn');
+    }
+
+    this.turnActive = true;
+    this.generation += 1;
+
+    await this.startPersistentQuery(prompt, this.generation, this.activeConfigGeneration);
   }
-  if (cmd.baseUrl) {
-    process.env.ANTHROPIC_BASE_URL = cmd.baseUrl;
+
+  async interrupt(): Promise<void> {
+    if (!this.queryHandle) {
+      if (this.abortController && !this.abortController.signal.aborted) {
+        this.abortController.abort('user_interrupt_no_query');
+      }
+      return;
+    }
+
+    process.stderr.write('[sidecar] Interrupt requested; sending query.interrupt()\n');
+    const controller = this.abortController;
+    const fallbackTimer = setTimeout(() => {
+      if (controller && !controller.signal.aborted) {
+        process.stderr.write('[sidecar] Interrupt fallback timeout reached; aborting transport\n');
+        controller.abort('user_interrupt_fallback');
+        this.closeQueryHandle('interrupt_fallback');
+        this.finishTurn();
+        if (this.config) {
+          this.startWarmup(this.activeConfigGeneration);
+        }
+      }
+    }, 2_000);
+    if (fallbackTimer.unref) fallbackTimer.unref();
+
+    try {
+      await this.queryHandle.interrupt();
+    } catch (err) {
+      process.stderr.write(`[sidecar] query.interrupt() failed: ${err}\n`);
+      if (controller && !controller.signal.aborted) {
+        controller.abort('user_interrupt_error');
+      }
+    } finally {
+      clearTimeout(fallbackTimer);
+      this.finishTurn();
+    }
   }
 
-  const keyPreview = cmd.apiKey ? `${cmd.apiKey.slice(0, 10)}...` : 'not set';
-  const claudePath = findClaudeExecutable();
+  async resetSession(sessionId: string): Promise<void> {
+    const deleted = sessionIdMap.delete(sessionId);
+    if (deleted) {
+      saveSessionMap();
+    }
+    await this.resetForReconfigure();
+    this.config = null;
+    this.configFingerprint = null;
+    this.providerMode = getProviderMode(undefined);
+    process.stderr.write(`[sidecar] Reset session ${sessionId}: ${deleted ? 'cleared' : 'not found'}\n`);
+  }
 
-  // Debug: verify env vars are set correctly before spawning SDK
-  const envKey = process.env.ANTHROPIC_API_KEY;
-  const envUrl = process.env.ANTHROPIC_BASE_URL;
-  process.stderr.write(`[sidecar] ENV ANTHROPIC_API_KEY=${envKey ? envKey.slice(0, 10) + '...' : 'NOT SET'}\n`);
-  process.stderr.write(`[sidecar] ENV ANTHROPIC_BASE_URL=${envUrl || 'NOT SET'}\n`);
-  process.stderr.write(`[sidecar] ENV ANTHROPIC_API_KEY length=${envKey?.length || 0}\n`);
-  // Check for other auth-related env vars that might conflict
-  const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
-  const cookie = process.env.ANTHROPIC_COOKIE;
-  if (authToken) process.stderr.write(`[sidecar] WARNING: ANTHROPIC_AUTH_TOKEN is also set! (len=${authToken.length})\n`);
-  if (cookie) process.stderr.write(`[sidecar] WARNING: ANTHROPIC_COOKIE is also set!\n`);
-  // Log all ANTHROPIC_* env vars in the environment
-  const anthropicVars = Object.keys(process.env).filter(k => k.startsWith('ANTHROPIC_'));
-  process.stderr.write(`[sidecar] All ANTHROPIC_* env vars: ${anthropicVars.join(', ') || '(none)'}\n`);
-  const appSessionId = cmd.sessionId;
-  const claudeSessionId = appSessionId ? sessionIdMap.get(appSessionId) : undefined;
+  async shutdown(): Promise<void> {
+    await this.resetForReconfigure();
+  }
 
-  process.stderr.write(`[sidecar] Starting query: cwd=${cmd.cwd}, apiKey=${keyPreview}, baseUrl=${cmd.baseUrl || 'default'}, claude=${claudePath || 'not found'}\n`);
-  process.stderr.write(`[sidecar] Session: app=${appSessionId || 'none'}, claude=${claudeSessionId || 'new'}\n`);
+  private normalizeConfig(cmd: EnsureSessionCommand): SessionBootstrap {
+    const cwd = cmd.cwd === '.' ? os.homedir() : cmd.cwd;
+    return {
+      sessionId: cmd.sessionId,
+      cwd,
+      apiKey: cmd.apiKey,
+      baseUrl: cmd.baseUrl,
+      model: cmd.model,
+      mcpServers: cmd.mcpServers,
+      mcpServerInstructions: cmd.mcpServerInstructions,
+      skills: cmd.skills,
+    };
+  }
 
-  abortController = new AbortController();
-  let activeAbortSignal: AbortSignal | null = abortController.signal;
+  private async resetForReconfigure(): Promise<void> {
+    this.finishTurn();
+    this.closeQueryHandle('reconfigure');
+    if (this.warmQuery) {
+      this.warmQuery.close();
+      this.warmQuery = null;
+    }
+    this.warmPromise = null;
+    this.abortController = null;
+  }
 
-  try {
-    // Build explicit env for the SDK subprocess 鈥?ensures provider switch
-    // picks up new ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL instead of using
-    // whatever the child process inherited at startup.
+  private clearStaleResumeMapping(reason: unknown): boolean {
+    if (!this.config?.sessionId || !isMissingClaudeConversationError(reason)) {
+      return false;
+    }
+
+    const deleted = sessionIdMap.delete(this.config.sessionId);
+    if (deleted) {
+      saveSessionMap();
+      process.stderr.write(`[sidecar] Cleared stale Claude session mapping for app session ${this.config.sessionId}\n`);
+    }
+    return deleted;
+  }
+
+  private startWarmup(configGeneration: number): void {
+    if (!this.config) return;
+
+    const warmAttempt = (label: string) => {
+      const options = this.buildOptions(this.config!);
+      process.stderr.write(`[sidecar] ${label}\n`);
+      return startup({
+        options: options as any,
+        initializeTimeoutMs: WARM_START_TIMEOUT_MS,
+      });
+    };
+
+    this.warmPromise = warmAttempt('Calling startup() to pre-warm MCP connections in the background...')
+      .then((warm) => {
+        if (configGeneration !== this.activeConfigGeneration) {
+          warm.close();
+          return null;
+        }
+        if (this.queryHandle) {
+          warm.close();
+          return null;
+        }
+        this.warmQuery = warm;
+        emit({ type: 'mcp_status_update', servers: {}, status: 'ready' });
+        process.stderr.write('[sidecar] Background startup() complete\n');
+        return warm;
+      })
+      .catch(async (startupErr) => {
+        if (configGeneration === this.activeConfigGeneration && this.clearStaleResumeMapping(startupErr)) {
+          process.stderr.write('[sidecar] Retrying background startup() without stale resume mapping...\n');
+          try {
+            const warm = await warmAttempt('Retrying startup() after clearing stale resume mapping...');
+            if (configGeneration !== this.activeConfigGeneration) {
+              warm.close();
+              return null;
+            }
+            if (this.queryHandle) {
+              warm.close();
+              return null;
+            }
+            this.warmQuery = warm;
+            emit({ type: 'mcp_status_update', servers: {}, status: 'ready' });
+            process.stderr.write('[sidecar] Background startup() recovered after clearing stale resume mapping\n');
+            return warm;
+          } catch (retryErr) {
+            startupErr = retryErr;
+          }
+        }
+
+        process.stderr.write(`[sidecar] Background startup() failed: ${startupErr}\n`);
+        if (configGeneration === this.activeConfigGeneration && this.providerMode.supportsDeferredToolSearch) {
+          emit({ type: 'mcp_status_update', servers: {}, status: 'deferred' });
+        }
+        return null;
+      });
+  }
+
+  private async startPersistentQuery(prompt: string, queryGeneration: number, configGeneration: number): Promise<void> {
+    if (!this.config) {
+      throw new Error('Missing runtime config');
+    }
+
+    const warm = this.warmPromise
+      ? await withTimeout(this.warmPromise, WARM_QUERY_WAIT_WINDOW_MS)
+      : null;
+
+    if (queryGeneration !== this.generation || configGeneration !== this.activeConfigGeneration) {
+      if (warm) {
+        warm.close();
+      }
+      return;
+    }
+
+    if (warm) {
+      process.stderr.write('[sidecar] Starting persistent query from pre-warmed session\n');
+      this.warmQuery = null;
+      this.queryHandle = warm.query(createPromptStream(prompt));
+    } else {
+      process.stderr.write('[sidecar] Starting persistent query directly via query()\n');
+      emit({
+        type: 'mcp_status_update',
+        servers: {},
+        status: this.providerMode.supportsDeferredToolSearch ? 'fallback_live' : 'limited_provider',
+      });
+      this.queryHandle = query({
+        prompt: createPromptStream(prompt),
+        options: this.buildOptions(this.config) as any,
+      });
+    }
+
+    void this.consumeQuery(this.queryHandle, this.config.sessionId);
+  }
+
+  private closeQueryHandle(reason: string): void {
+    if (!this.queryHandle) return;
+    process.stderr.write(`[sidecar] Closing persistent query (${reason})\n`);
+    try {
+      this.queryHandle.close();
+    } catch (err) {
+      process.stderr.write(`[sidecar] Failed to close query: ${err}\n`);
+    }
+    this.queryHandle = null;
+  }
+
+  private buildOptions(config: SessionBootstrap): QueryOptions {
+    if (config.apiKey) {
+      process.env.ANTHROPIC_API_KEY = config.apiKey;
+    }
+    if (config.baseUrl) {
+      process.env.ANTHROPIC_BASE_URL = config.baseUrl;
+    }
+
+    const claudePath = findClaudeExecutable();
+    const claudeSessionId = config.sessionId ? sessionIdMap.get(config.sessionId) : undefined;
+    const envKey = process.env.ANTHROPIC_API_KEY;
+    const envUrl = process.env.ANTHROPIC_BASE_URL;
+    process.stderr.write(`[sidecar] ENV ANTHROPIC_API_KEY=${envKey ? envKey.slice(0, 10) + '...' : 'NOT SET'}\n`);
+    process.stderr.write(`[sidecar] ENV ANTHROPIC_BASE_URL=${envUrl || 'NOT SET'}\n`);
+    process.stderr.write(`[sidecar] ENV ANTHROPIC_API_KEY length=${envKey?.length || 0}\n`);
+    const anthropicVars = Object.keys(process.env).filter((key) => key.startsWith('ANTHROPIC_'));
+    process.stderr.write(`[sidecar] All ANTHROPIC_* env vars: ${anthropicVars.join(', ') || '(none)'}\n`);
+    process.stderr.write(`[sidecar] Session: app=${config.sessionId || 'none'}, claude=${claudeSessionId || 'new'}\n`);
+
     const subprocessEnv: Record<string, string | undefined> = { ...process.env };
-    // Force-overwrite auth vars so stale values from settings.json can't leak through
-    if (cmd.apiKey) subprocessEnv.ANTHROPIC_API_KEY = cmd.apiKey;
-    if (cmd.baseUrl) subprocessEnv.ANTHROPIC_BASE_URL = cmd.baseUrl;
-    // Remove ANTHROPIC_AUTH_TOKEN 鈥?it's the Claude account login token from
-    // ~/.claude/settings.json. When set alongside ANTHROPIC_API_KEY, Claude Code
-    // uses the auth token (for anthropic.com) instead of the API key, causing
-    // 401 on non-Anthropic endpoints like DeepSeek.
-    // NOTE: Must set to empty string instead of delete 鈥?the CLI re-reads
-    // settings.json and picks up the token even when the env var is absent.
+    if (config.apiKey) subprocessEnv.ANTHROPIC_API_KEY = config.apiKey;
+    if (config.baseUrl) subprocessEnv.ANTHROPIC_BASE_URL = config.baseUrl;
     subprocessEnv.ANTHROPIC_AUTH_TOKEN = '';
     subprocessEnv.ANTHROPIC_COOKIE = '';
-    // Remove global model overrides from settings 鈥?the user's chosen model
-    // is passed via the SDK --model flag, these env defaults would interfere.
     for (const key of Object.keys(subprocessEnv)) {
       if (key.startsWith('ANTHROPIC_DEFAULT_')) {
         subprocessEnv[key] = '';
       }
     }
 
-    // Build MCP instructions from server names + descriptions (replicates
-    // Claude Code Desktop's mcp_instructions_delta mechanism)
-    const mcpInstructions = buildMcpInstructions(cmd.mcpServers, cmd.mcpServerInstructions);
+    const mcpInstructions = buildMcpInstructions(
+      config.mcpServers,
+      config.mcpServerInstructions,
+      !this.providerMode.supportsDeferredToolSearch,
+    );
     process.stderr.write(`[sidecar] MCP instructions built: ${mcpInstructions ? `${mcpInstructions.length} chars` : 'none'}\n`);
-    if (mcpInstructions) {
-      process.stderr.write(`[sidecar] MCP instructions preview: ${mcpInstructions.slice(0, 200)}...\n`);
-    }
 
-    // Build a clean settings object to override ~/.claude/settings.json.
-    // This prevents the CLI from picking up conflicting auth tokens or model
-    // overrides from the user's global Claude Code config.
     const cleanSettings: Record<string, unknown> = {};
-    if (cmd.apiKey || cmd.baseUrl) {
+    if (config.apiKey || config.baseUrl) {
       cleanSettings.env = {
-        ...(cmd.apiKey ? { ANTHROPIC_API_KEY: cmd.apiKey } : {}),
-        ...(cmd.baseUrl ? { ANTHROPIC_BASE_URL: cmd.baseUrl } : {}),
+        ...(config.apiKey ? { ANTHROPIC_API_KEY: config.apiKey } : {}),
+        ...(config.baseUrl ? { ANTHROPIC_BASE_URL: config.baseUrl } : {}),
         ANTHROPIC_AUTH_TOKEN: '',
         ANTHROPIC_COOKIE: '',
         DISABLE_AUTOUPDATER: '1',
       };
     }
 
-    const options: Record<string, unknown> = {
-      cwd: cmd.cwd === '.' ? os.homedir() : cmd.cwd,
-      abortController,
+    if (!this.abortController || this.abortController.signal.aborted) {
+      this.abortController = new AbortController();
+    }
+
+    const options: QueryOptions = {
+      cwd: config.cwd,
+      abortController: this.abortController,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       allowedTools: [
         'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep',
         'WebSearch', 'WebFetch', 'AskUserQuestion', 'TodoWrite',
         'WaitForMcpServers', 'Skill',
-        ...Object.keys(cmd.mcpServers || {}).map(name => `mcp__${name}__*`),
+        ...Object.keys(config.mcpServers || {}).map((name) => `mcp__${name}__*`),
       ],
       env: subprocessEnv,
       ...(Object.keys(cleanSettings).length > 0 ? { settings: cleanSettings } : {}),
-      mcpServers: cmd.mcpServers || undefined,
-      // Emit streaming events (thinking deltas, text deltas) for real-time UI updates
+      mcpServers: config.mcpServers || undefined,
       includePartialMessages: true,
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
         append: mcpInstructions || '',
       },
-      // Capture stderr from the Claude Code subprocess for debugging
       stderr: (data: string) => {
         process.stderr.write(`[claude-stderr] ${data}`);
       },
-      // PreToolUse hook: captures file snapshots before Write/Edit execution.
-      // Unlike canUseTool, hooks run regardless of permissionMode (including bypassPermissions).
       hooks: {
         PreToolUse: [{
           hooks: [async (input: any, toolUseID: string | undefined) => {
@@ -261,7 +476,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
               const filePath = toolInput.file_path as string;
               if (filePath) {
                 try {
-                  const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(cmd.cwd, filePath);
+                  const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(config.cwd, filePath);
                   const original = fs.readFileSync(absolutePath, 'utf-8');
                   emit({
                     type: 'file_snapshot',
@@ -271,7 +486,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
                     tool_use_id: toolUseID || '',
                   });
                 } catch {
-                  const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(cmd.cwd, filePath);
+                  const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(config.cwd, filePath);
                   emit({
                     type: 'file_snapshot',
                     file_path: absolutePath,
@@ -286,11 +501,9 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
           }],
         }],
       },
-      // Intercept interactive tools that need user input
-      canUseTool: async (toolName: string, input: Record<string, unknown>, opts: { toolUseID: string; signal: AbortSignal }) => {
+      canUseTool: async (toolName: string, input: Record<string, unknown>, opts: { toolUseID: string }) => {
         if (toolName === 'AskUserQuestion') {
           const toolUseId = opts.toolUseID;
-          // questions may come as a JSON string or array
           let questions: any[] = [];
           const rawQ = (input as any).questions;
           if (typeof rawQ === 'string') {
@@ -298,113 +511,80 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
           } else if (Array.isArray(rawQ)) {
             questions = rawQ;
           }
-          process.stderr.write(`[sidecar] AskUserQuestion intercepted, toolUseId=${toolUseId}, questions=${questions.length}\n`);
-          // Emit event to frontend with questions (always as parsed array)
           emit({
             type: 'ask_user_question',
             tool_use_id: toolUseId,
             questions,
           });
-          // Wait for frontend to send back the user's response (array of answers)
           const userAnswers = await new Promise<string[]>((resolve) => {
             pendingToolResponses.set(toolUseId, { resolve: resolve as (v: unknown) => void });
           });
           pendingToolResponses.delete(toolUseId);
-          // Format: Record<questionText, answerText> (multi-select joined by comma)
           const answersRecord: Record<string, string> = {};
           questions.forEach((q: any, i: number) => {
             const answer = userAnswers[i];
             answersRecord[q.question] = Array.isArray(answer) ? answer.join(', ') : String(answer ?? '');
           });
-          process.stderr.write(`[sidecar] AskUserQuestion resolved: ${JSON.stringify(answersRecord)}\n`);
-          // Ensure questions is always an array in updatedInput (not a JSON string)
           return { behavior: 'allow', updatedInput: { ...input, questions, answers: answersRecord } };
         }
-        // Auto-allow all other tools
         return { behavior: 'allow', updatedInput: input };
       },
     };
+
     if (claudePath) options.pathToClaudeCodeExecutable = claudePath;
-
-    // Pass enabled skills filter to SDK
-    if (cmd.skills && cmd.skills.length > 0) {
-      options.skills = cmd.skills;
+    if (config.skills && config.skills.length > 0) {
+      options.skills = config.skills;
     }
-
-    if (cmd.model) options.model = cmd.model;
-
-    // Resume existing conversation if we have a captured Claude session ID
+    if (config.model) {
+      options.model = config.model;
+    }
     if (claudeSessionId) {
       options.resume = claudeSessionId;
       process.stderr.write(`[sidecar] Resuming Claude session: ${claudeSessionId}\n`);
     }
 
-    process.stderr.write(`[sidecar] query options: ${JSON.stringify({ ...options, abortController: '[object]' })}\n`);
+    return options;
+  }
 
-    // Emit progress event so the frontend knows we're initializing MCP connections
-    emit({ type: 'mcp_status_update', servers: {}, status: 'initializing' });
-
-    // Use startup() to pre-warm the CLI subprocess and MCP connections.
-    // Falls back to direct query() if startup() fails (e.g., MCP timeout).
-    process.stderr.write(`[sidecar] Calling startup() to pre-warm MCP connections...\n`);
-    try {
-      const warm = await startup({
-        options: options as any,
-        initializeTimeoutMs: 30_000,
-      });
-      process.stderr.write(`[sidecar] startup() complete. Sending prompt...\n`);
-      activeQuery = warm.query(createPromptStream(cmd.prompt));
-    } catch (startupErr) {
-      process.stderr.write(`[sidecar] startup() failed: ${startupErr}. Falling back to query()...\n`);
-      emit({ type: 'mcp_status_update', servers: {}, status: 'startup_failed_fallback' });
-      activeQuery = query({
-        prompt: createPromptStream(cmd.prompt),
-        options: options as any,
-      });
-    }
-    process.stderr.write(`[sidecar] query ready, starting iteration...\n`);
-
+  private async consumeQuery(queryHandle: Query, appSessionId?: string): Promise<void> {
     let msgCount = 0;
-    const MESSAGE_TIMEOUT_MS = 300_000; // 5 minutes per message
     let compacting = false;
     let compactTimer: ReturnType<typeof setTimeout> | null = null;
-    const COMPACT_TIMEOUT_MS = 60_000; // 60s 鈥?compact can take a while on large contexts
 
-    function clearCompactTimer() {
-      if (compactTimer) { clearTimeout(compactTimer); compactTimer = null; }
-    }
+    const clearCompactTimer = () => {
+      if (compactTimer) {
+        clearTimeout(compactTimer);
+        compactTimer = null;
+      }
+    };
 
-    // Iteration with timeout detection
-    const iterator = activeQuery[Symbol.asyncIterator]();
-    const abortSignal = activeAbortSignal;
-    const ABORT_DRAIN_TIMEOUT_MS = 4_000;
-    // Promise that rejects when the user interrupts 鈥?added to Promise.race
-    // so the loop exits immediately instead of waiting for the next SDK message.
+    const iterator = queryHandle[Symbol.asyncIterator]();
 
-    async function nextMessageWithTimeout(timeoutMs: number) {
+    const nextMessage = async () => {
+      if (!this.turnActive) {
+        return iterator.next();
+      }
+
       return await Promise.race([
         iterator.next(),
         new Promise<IteratorResult<unknown>>((resolve, reject) => {
           const timer = setTimeout(() => {
-            if (abortSignal?.aborted && timeoutMs === ABORT_DRAIN_TIMEOUT_MS) {
-              process.stderr.write(`[sidecar] Abort drain timeout after ${timeoutMs}ms; treating query as complete\n`);
+            if (this.abortController?.signal.aborted) {
               resolve({ done: true, value: undefined });
               return;
             }
-            reject(new Error(`Query timed out: no message received for ${timeoutMs / 1000}s (after msg #${msgCount})`));
-          }, timeoutMs);
+            reject(new Error(`Query timed out: no message received for ${MESSAGE_TIMEOUT_MS / 1000}s (after msg #${msgCount})`));
+          }, MESSAGE_TIMEOUT_MS);
           if (timer.unref) timer.unref();
         }),
-        // When compacting, if no new message arrives within COMPACT_TIMEOUT_MS, treat as done
         ...(compacting ? [new Promise<{ done: true; value: undefined }>((resolve) => {
           compactTimer = setTimeout(() => {
-            process.stderr.write(`[sidecar] Compact timeout: no message after ${COMPACT_TIMEOUT_MS}ms, treating as complete\n`);
-            // Emit synthetic compact_boundary since SDK didn't send it
+            process.stderr.write(`[sidecar] Compact timeout: no message after ${COMPACT_TIMEOUT_MS}ms, treating turn as complete\n`);
             emit({
               type: 'system',
               subtype: 'compact_boundary',
               compact_metadata: { trigger: 'manual', pre_tokens: 0 },
-              session_id: claudeSessionId || '',
+              session_id: appSessionId || '',
               uuid: `compact-timeout-${Date.now()}`,
             });
             resolve({ done: true, value: undefined });
@@ -412,163 +592,125 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
           if (compactTimer.unref) compactTimer.unref();
         })] : []),
       ]);
-    }
+    };
 
-    function processSdkMessage(message: unknown) {
-      msgCount++;
-      const msg = message as Record<string, unknown>;
-      process.stderr.write(`[sidecar] Message #${msgCount}: type=${msg.type}, subtype=${msg.subtype || 'none'}\n`);
-      // Log full content for system messages and assistant messages (debug)
-      if (msg.type === 'system') {
-        process.stderr.write(`[sidecar]   -> ${JSON.stringify(message)}\n`);
-      }
-      // Log ALL non-assistant messages for debugging compact/status flows
-      if (msg.type !== 'assistant' && msg.type !== 'user' && msg.type !== 'system') {
-        process.stderr.write(`[sidecar]   -> [${msg.type}] ${JSON.stringify(message)}\n`);
-      }
-      // Track compacting status
-      if (msg.type === 'system' && msg.subtype === 'status' && (msg as any).status === 'compacting') {
-        compacting = true;
-        // Capture pre_tokens if available in the compacting status
-        const compactTokens = (msg as any).tokens || (msg as any).pre_tokens || (msg as any).total_tokens;
-        if (compactTokens) {
-          process.stderr.write(`[sidecar] Compact in progress, pre_tokens=${compactTokens}\n`);
-        } else {
-          process.stderr.write(`[sidecar] Compact in progress, will timeout after ${COMPACT_TIMEOUT_MS}ms of silence\n`);
+    try {
+      while (this.queryHandle === queryHandle) {
+        const result = await nextMessage();
+        clearCompactTimer();
+        if (result.done) {
+          break;
         }
-      }
-      if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
-        compacting = false;
-        process.stderr.write(`[sidecar] Received compact_boundary: ${JSON.stringify(message)}\n`);
-      }
-      if (msg.type === 'assistant') {
-        const m: any = message;
-        const usage = m?.message?.usage || m?.usage;
-        process.stderr.write(`[sidecar]   -> assistant usage: ${JSON.stringify(usage || 'NONE')}\n`);
-        // Debug: log tool_use block names to trace TodoWrite
-        const blocks = m?.message?.content;
-        if (Array.isArray(blocks)) {
-          const toolNames = blocks.filter((b: any) => b?.type === 'tool_use').map((b: any) => b.name);
-          if (toolNames.length > 0) {
-            process.stderr.write(`[sidecar]   -> tool_use blocks: ${toolNames.join(', ')}\n`);
-          }
-        }
-      }
 
-      // Capture the real Claude session ID from any SDK message
-      if (typeof appSessionId === 'string') {
-        const sessionId = appSessionId!;
-        if (!sessionIdMap.has(sessionId)) {
+        msgCount += 1;
+        const msg = result.value as Record<string, unknown>;
+        process.stderr.write(`[sidecar] Message #${msgCount}: type=${msg.type}, subtype=${String(msg.subtype || 'none')}\n`);
+
+        if (msg.type === 'system' && msg.subtype === 'status' && (msg as any).status === 'compacting') {
+          compacting = true;
+        }
+        if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
+          compacting = false;
+        }
+        if (msg.type === 'assistant') {
+          const assistant = result.value as any;
+          const usage = assistant?.message?.usage || assistant?.usage;
+          process.stderr.write(`[sidecar]   -> assistant usage: ${JSON.stringify(usage || 'NONE')}\n`);
+        }
+
+        if (typeof appSessionId === 'string' && !sessionIdMap.has(appSessionId)) {
           const sdkSessionId = typeof msg.session_id === 'string' ? String(msg.session_id) : undefined;
           if (sdkSessionId) {
-            sessionIdMap.set(sessionId, sdkSessionId!);
+            sessionIdMap.set(appSessionId, sdkSessionId);
             saveSessionMap();
-            process.stderr.write(`[sidecar] Captured Claude session ID: ${sdkSessionId} for app session: ${sessionId}\n`);
+            process.stderr.write(`[sidecar] Captured Claude session ID: ${sdkSessionId} for app session: ${appSessionId}\n`);
+          }
+        }
+
+        emit(result.value);
+
+        if (msg.type === 'system' && msg.subtype === 'init' && Array.isArray((msg as any).mcp_servers)) {
+          const mcpServers = (msg as any).mcp_servers as Array<{ name: string; status: string }>;
+          const statusMap: Record<string, string> = {};
+          for (const server of mcpServers) {
+            statusMap[server.name] = server.status;
+          }
+          emit({
+            type: 'mcp_status_update',
+            servers: statusMap,
+            status: this.providerMode.supportsDeferredToolSearch ? 'deferred' : 'limited_provider',
+          });
+          if (mcpServers.some((server) => server.status === 'pending')) {
+            void this.pollMcpServerStatus(queryHandle);
+          }
+        }
+
+        if (msg.type === 'result') {
+          this.finishTurn();
+          this.closeQueryHandle('turn_complete');
+          if (this.config) {
+            this.startWarmup(this.activeConfigGeneration);
           }
         }
       }
-      emit(message);
-
-      // After init message, poll MCP server status for UI updates
-      if (msg.type === 'system' && msg.subtype === 'init' && Array.isArray((msg as any).mcp_servers)) {
-        const mcpServers = (msg as any).mcp_servers as Array<{ name: string; status: string }>;
-        const hasPending = mcpServers.some(s => s.status === 'pending');
-        if (hasPending && activeQuery) {
-          (async () => {
-            const MAX_POLLS = 30;
-            const POLL_INTERVAL = 2000;
-            try {
-              for (let i = 0; i < MAX_POLLS; i++) {
-                await new Promise(r => setTimeout(r, POLL_INTERVAL));
-                if (!activeQuery) break;
-                const statuses = await activeQuery.mcpServerStatus();
-                const statusMap: Record<string, string> = {};
-                for (const s of statuses) {
-                  statusMap[s.name] = s.status;
-                }
-                emit({ type: 'mcp_status_update', servers: statusMap });
-                process.stderr.write(`[sidecar] MCP poll #${i + 1}: ${JSON.stringify(statusMap)}\n`);
-                const allDone = statuses.every(s => s.status === 'connected' || s.status === 'failed');
-                if (allDone) break;
-              }
-            } catch (err) {
-              process.stderr.write(`[sidecar] MCP status poll error: ${err}\n`);
-            }
-          })();
-        }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
+      const normalizedError = errorMsg.toLowerCase();
+      const isAbort = normalizedError.includes('abort');
+      const isGracefulInterruptCleanup = Boolean(
+        this.abortController?.signal.aborted &&
+        (normalizedError.includes('stream closed') || normalizedError.includes('query timed out')),
+      );
+      this.clearStaleResumeMapping(errorMsg);
+      if (!isAbort && !isGracefulInterruptCleanup) {
+        emit({ type: 'sidecar_error', error: errorMsg });
+      } else {
+        process.stderr.write(`[sidecar] Suppressed interrupt cleanup error: ${errorMsg}\n`);
       }
-    }
-
-    while (true) {
-      const result = await nextMessageWithTimeout(abortSignal.aborted ? ABORT_DRAIN_TIMEOUT_MS : MESSAGE_TIMEOUT_MS);
-
+      this.finishTurn();
+    } finally {
       clearCompactTimer();
-      if (result.done) break;
-      processSdkMessage(result.value);
-    }
-
-    process.stderr.write(`[sidecar] Query iteration done. Total messages: ${msgCount}\n`);
-    emit({ type: 'sidecar_query_done' });
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
-    const normalizedError = errorMsg.toLowerCase();
-    const isAbort = normalizedError.includes('abort');
-    const isGracefulInterruptCleanup = Boolean(
-      activeAbortSignal?.aborted &&
-      (normalizedError.includes('stream closed') || normalizedError.includes('query timed out')),
-    );
-    if (!isAbort && !isGracefulInterruptCleanup) {
-      emit({ type: 'sidecar_error', error: errorMsg });
-    } else {
-      process.stderr.write(`[sidecar] Suppressed interrupt cleanup error: ${errorMsg}\n`);
-    }
-  } finally {
-    activeQuery = null;
-    abortController = null;
-  }
-}
-
-function handleInterrupt(): void {
-  if (activeQuery) {
-    process.stderr.write('[sidecar] Interrupt requested; sending query.interrupt()\n');
-    const controller = abortController;
-    const fallbackTimer = setTimeout(() => {
-      if (controller && !controller.signal.aborted) {
-        process.stderr.write('[sidecar] Interrupt fallback timeout reached; aborting transport\n');
-        controller.abort('user_interrupt_fallback');
+      if (this.queryHandle === queryHandle && this.abortController?.signal.aborted) {
+        this.queryHandle = null;
       }
-    }, 2_000);
-    if (fallbackTimer.unref) fallbackTimer.unref();
+    }
+  }
 
-    void activeQuery.interrupt()
-      .catch((err) => {
-        process.stderr.write(`[sidecar] query.interrupt() failed: ${err}\n`);
-        if (controller && !controller.signal.aborted) {
-          controller.abort('user_interrupt_error');
+  private async pollMcpServerStatus(queryHandle: Query): Promise<void> {
+    const MAX_POLLS = 30;
+    const POLL_INTERVAL = 2_000;
+
+    try {
+      for (let i = 0; i < MAX_POLLS; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+        if (this.queryHandle !== queryHandle) break;
+        const statuses = await queryHandle.mcpServerStatus();
+        const statusMap: Record<string, string> = {};
+        for (const status of statuses) {
+          statusMap[status.name] = status.status;
         }
-      })
-      .finally(() => {
-        clearTimeout(fallbackTimer);
-      });
-    return;
+        emit({ type: 'mcp_status_update', servers: statusMap });
+        const allDone = statuses.every((status) => status.status === 'connected' || status.status === 'failed');
+        if (allDone) break;
+      }
+    } catch (err) {
+      process.stderr.write(`[sidecar] MCP status poll error: ${err}\n`);
+    }
   }
 
-  if (abortController && !abortController.signal.aborted) {
-    process.stderr.write('[sidecar] Interrupt requested without active query; aborting transport\n');
-    abortController.abort('user_interrupt_no_query');
+  private finishTurn(): void {
+    if (!this.turnActive) {
+      return;
+    }
+    this.turnActive = false;
+    emit({ type: 'sidecar_query_done' });
   }
 }
 
-function handleResetSession(cmd: Extract<SidecarCommand, { type: 'reset_session' }>): void {
-  const deleted = sessionIdMap.delete(cmd.sessionId);
-  if (deleted) saveSessionMap();
-  process.stderr.write(`[sidecar] Reset session ${cmd.sessionId}: ${deleted ? 'cleared' : 'not found'}\n`);
-}
+const runtime = new SessionRuntime();
 
 async function main(): Promise<void> {
-  // Load Claude Code settings (env vars like ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, etc.)
   loadClaudeSettingsEnv();
-  // Load persisted session ID mapping
   loadSessionMap();
 
   emit({ type: 'sidecar_ready' });
@@ -588,20 +730,35 @@ async function main(): Promise<void> {
     }
 
     switch (cmd.type) {
-      case 'start':
-        // Run async but don't await 鈥?allows interrupt to be received during execution
-        handleStart(cmd).catch((err) => {
+      case 'ensure_session':
+        try {
+          await runtime.ensure(cmd);
+        } catch (err) {
           emit({ type: 'sidecar_error', error: String(err) });
-        });
+        }
+        break;
+      case 'send_input':
+        try {
+          await runtime.sendInput(cmd.prompt);
+        } catch (err) {
+          emit({ type: 'sidecar_error', error: String(err) });
+        }
         break;
       case 'reset_session':
-        handleResetSession(cmd);
+        try {
+          await runtime.resetSession(cmd.sessionId);
+        } catch (err) {
+          emit({ type: 'sidecar_error', error: String(err) });
+        }
         break;
       case 'interrupt':
-        handleInterrupt();
+        try {
+          await runtime.interrupt();
+        } catch (err) {
+          emit({ type: 'sidecar_error', error: String(err) });
+        }
         break;
       case 'tool_response': {
-        // Resolve pending canUseTool promise with the user's response
         const pending = pendingToolResponses.get(cmd.toolUseId);
         if (pending) {
           pending.resolve(cmd.response);
@@ -612,6 +769,7 @@ async function main(): Promise<void> {
         break;
       }
       case 'shutdown':
+        await runtime.shutdown();
         process.exit(0);
         break;
     }
@@ -622,4 +780,3 @@ main().catch((err) => {
   emit({ type: 'sidecar_error', error: `Fatal: ${String(err)}` });
   process.exit(1);
 });
-

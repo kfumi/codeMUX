@@ -128,6 +128,8 @@ pub fn run() {
             commands::mcp::delete_mcp_server,
             commands::mcp::toggle_mcp_server,
             commands::mcp::probe_all_mcp_servers,
+            agent::commands::ensure_agent_session,
+            agent::commands::send_agent_input,
             agent::commands::start_agent_session,
             agent::commands::interrupt_agent_session,
             agent::commands::shutdown_agent,

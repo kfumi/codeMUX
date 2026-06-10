@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+
 use log::{debug, info, warn};
 use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
 
-use super::{SidecarHandle, spawn_sidecar};
+use super::{spawn_sidecar, SidecarHandle};
 
-/// Helper: read session-id-map.json and return the Claude session ID for the given app session.
 fn get_claude_session_id(app_session_id: &str) -> Result<(std::path::PathBuf, String), String> {
     use std::fs;
     use std::path::PathBuf;
@@ -33,9 +33,12 @@ fn get_claude_session_id(app_session_id: &str) -> Result<(std::path::PathBuf, St
     Ok((claude_dir, claude_session_id.to_string()))
 }
 
-/// Find the JSONL file for a given Claude session ID across all project directories.
-fn find_session_jsonl(claude_dir: &std::path::Path, claude_session_id: &str) -> Option<std::path::PathBuf> {
+fn find_session_jsonl(
+    claude_dir: &std::path::Path,
+    claude_session_id: &str,
+) -> Option<std::path::PathBuf> {
     use std::fs;
+
     let projects_dir = claude_dir.join("projects");
     if !projects_dir.exists() {
         return None;
@@ -52,11 +55,6 @@ fn find_session_jsonl(claude_dir: &std::path::Path, claude_session_id: &str) -> 
     None
 }
 
-/// Load session events directly from Claude Code's JSONL session file.
-///
-/// Reads `~/.claude/session-id-map.json` to find the Claude session ID,
-/// then locates and parses `~/.claude/projects/{project}/{sessionId}.jsonl`.
-/// Returns a JSON array of raw SDK message objects from Claude JSONL.
 #[tauri::command]
 pub async fn load_claude_session_events(
     app_session_id: String,
@@ -103,91 +101,74 @@ pub async fn load_claude_session_events(
     Ok(messages)
 }
 
-/// Managed state for the agent sidecar.
-/// Each session gets its own sidecar process, enabling concurrent execution.
 pub struct AgentState {
     pub sidecars: Arc<Mutex<HashMap<String, SidecarHandle>>>,
+    pub session_startup_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 impl Default for AgentState {
     fn default() -> Self {
         Self {
             sidecars: Arc::new(Mutex::new(HashMap::new())),
+            session_startup_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
 
-/// Start a new agent session. Spawns a dedicated sidecar for this session,
-/// sends the prompt, and streams SDKMessage JSON events back through the channel.
-#[tauri::command]
-pub async fn start_agent_session(
+async fn ensure_sidecar_for_session(
     app: AppHandle,
-    state: State<'_, crate::AppState>,
-    agent_state: State<'_, AgentState>,
-    session_id: String,
-    prompt: String,
-    cwd: String,
+    agent_state: &State<'_, AgentState>,
+    session_id: &str,
     channel: tauri::ipc::Channel<String>,
+) -> Result<(), String> {
+    let session_lock = {
+        let mut locks = agent_state.session_startup_locks.lock().await;
+        locks
+            .entry(session_id.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    };
+    let _startup_guard = session_lock.lock().await;
+
+    {
+        let sidecars = agent_state.sidecars.lock().await;
+        if let Some(handle) = sidecars.get(session_id) {
+            handle.update_channel(channel.clone()).await;
+            info!(target: "agent", "Reusing existing sidecar for session_id={}", session_id);
+            return Ok(());
+        }
+    }
+
+    let (handle, mut rx) = spawn_sidecar(&app, channel).await?;
+    let shared_channel = handle.channel.clone();
+    let session_id_clone = session_id.to_string();
+    tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            let ch = shared_channel.lock().await;
+            let _ = ch.send(event);
+        }
+        info!(target: "agent", "Sidecar stream closed for session_id={}", session_id_clone);
+    });
+
+    let mut sidecars = agent_state.sidecars.lock().await;
+    sidecars.insert(session_id.to_string(), handle);
+
+    Ok(())
+}
+
+fn build_ensure_session_command(
+    state: &crate::AppState,
+    session_id: &str,
+    cwd: String,
     api_key: Option<String>,
     base_url: Option<String>,
     model: Option<String>,
-) -> Result<(), String> {
-    info!(
-        target: "agent",
-        "Starting agent session session_id={} cwd={} model={} has_api_key={} has_base_url={}",
-        session_id,
-        cwd,
-        model.as_deref().unwrap_or("default"),
-        api_key.as_ref().map(|key| !key.is_empty()).unwrap_or(false),
-        base_url.as_ref().map(|url| !url.is_empty()).unwrap_or(false)
-    );
-
-    // Check if a sidecar already exists for this session (e.g. after interrupt).
-    // If so, reuse it — just update the channel and send the new start command.
-    // Only spawn a new sidecar if one doesn't exist.
-    let mut needs_new_sidecar = false;
-    {
-        let sidecars = agent_state.sidecars.lock().await;
-        if let Some(handle) = sidecars.get(&session_id) {
-            // Reuse existing sidecar — update the channel so the forwarding task
-            // sends events to the new frontend channel
-            handle.update_channel(channel.clone()).await;
-            info!(target: "agent", "Reusing existing sidecar for session_id={}", session_id);
-        } else {
-            needs_new_sidecar = true;
-        }
-    }
-
-    if needs_new_sidecar {
-        // Spawn a new sidecar for this session
-        let (handle, mut rx) = spawn_sidecar(&app, channel).await?;
-
-        // Spawn a dedicated event forwarding task for this session's sidecar.
-        // Reads from the sidecar's stdout receiver and forwards to the shared channel.
-        let shared_channel = handle.channel.clone();
-        let session_id_clone = session_id.clone();
-        tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                let ch = shared_channel.lock().await;
-                let _ = ch.send(event);
-            }
-            info!(target: "agent", "Sidecar stream closed for session_id={}", session_id_clone);
-        });
-
-        // Store the new sidecar
-        {
-            let mut sidecars = agent_state.sidecars.lock().await;
-            sidecars.insert(session_id.clone(), handle);
-        }
-    }
-
-    // 读取启用的 MCP servers
+) -> serde_json::Value {
     let mcp_servers = {
         let db = state.db.lock().unwrap();
         crate::mcp::db::get_enabled_mcp_servers(&db).unwrap_or_default()
     };
 
-    // Build and send start command
     let resolved_cwd = if cwd == "." {
         std::env::var("USERPROFILE")
             .or_else(|_| std::env::var("HOME"))
@@ -196,8 +177,7 @@ pub async fn start_agent_session(
         cwd
     };
     let mut cmd = serde_json::json!({
-        "type": "start",
-        "prompt": prompt,
+        "type": "ensure_session",
         "cwd": resolved_cwd,
         "sessionId": session_id,
     });
@@ -213,16 +193,11 @@ pub async fn start_agent_session(
     }
 
     if !mcp_servers.is_empty() {
-        debug!(target: "agent", "Attaching {} enabled MCP server(s) to session_id={}", mcp_servers.len(), session_id);
         let mcp_config = crate::mcp::adapters::claude::to_sdk_config(&mcp_servers);
         if !mcp_config.as_object().map_or(true, |o| o.is_empty()) {
             cmd["mcpServers"] = mcp_config;
         }
 
-        // Use cached MCP instructions from the startup probe.
-        // This avoids re-probing (spawning+killing) every MCP server on each session start.
-        // If the startup probe hasn't finished yet, instructions will be empty —
-        // the model can still use WaitForMcpServers as a fallback.
         let cached_instructions = {
             let cache = state.mcp_instructions.lock().unwrap();
             cache.clone()
@@ -230,7 +205,6 @@ pub async fn start_agent_session(
         let instructions: serde_json::Map<String, serde_json::Value> = cached_instructions
             .into_iter()
             .filter_map(|(name, instr)| {
-                // Only include instructions for servers that are in the current config
                 if mcp_servers.iter().any(|s| s.name == name) && !instr.is_empty() {
                     Some((name, serde_json::Value::String(instr)))
                 } else {
@@ -239,38 +213,104 @@ pub async fn start_agent_session(
             })
             .collect();
         if !instructions.is_empty() {
-            info!(target: "agent", "Using cached MCP instructions for {} server(s) in session_id={}", instructions.len(), session_id);
             cmd["mcpServerInstructions"] = serde_json::Value::Object(instructions);
         }
     }
 
-    // 读取启用的 skills
     let enabled_skills = {
         let db = state.db.lock().unwrap();
         crate::skills::db::get_enabled_skill_names(&db).unwrap_or_default()
     };
-
     if !enabled_skills.is_empty() {
-        debug!(target: "agent", "Attaching {} enabled skill(s) to session_id={}", enabled_skills.len(), session_id);
         cmd["skills"] = serde_json::json!(enabled_skills);
     }
 
-    let sidecars = agent_state.sidecars.lock().await;
-    if let Some(handle) = sidecars.get(&session_id) {
-        handle.send_command(&cmd.to_string()).await?;
-        info!(target: "agent", "Agent start command sent for session_id={}", session_id);
-    } else {
-        warn!(target: "agent", "Failed to locate sidecar after spawn for session_id={}", session_id);
-    }
+    cmd
+}
 
+async fn send_command_to_session(
+    agent_state: &State<'_, AgentState>,
+    session_id: &str,
+    cmd: serde_json::Value,
+) -> Result<(), String> {
+    let sidecars = agent_state.sidecars.lock().await;
+    if let Some(handle) = sidecars.get(session_id) {
+        handle.send_command(&cmd.to_string()).await
+    } else {
+        Err(format!("No sidecar found for session_id={}", session_id))
+    }
+}
+
+#[tauri::command]
+pub async fn ensure_agent_session(
+    app: AppHandle,
+    state: State<'_, crate::AppState>,
+    agent_state: State<'_, AgentState>,
+    session_id: String,
+    cwd: String,
+    channel: tauri::ipc::Channel<String>,
+    api_key: Option<String>,
+    base_url: Option<String>,
+    model: Option<String>,
+) -> Result<(), String> {
+    info!(
+        target: "agent",
+        "Ensuring agent session session_id={} cwd={} model={} has_api_key={} has_base_url={}",
+        session_id,
+        cwd,
+        model.as_deref().unwrap_or("default"),
+        api_key.as_ref().map(|key| !key.is_empty()).unwrap_or(false),
+        base_url.as_ref().map(|url| !url.is_empty()).unwrap_or(false)
+    );
+
+    ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
+    let cmd = build_ensure_session_command(&state, &session_id, cwd, api_key, base_url, model);
+    send_command_to_session(&agent_state, &session_id, cmd).await?;
+    info!(target: "agent", "Agent ensure command sent for session_id={}", session_id);
     Ok(())
 }
 
-/// Interrupt the currently running agent query for a specific session.
-///
-/// Unlike before, the sidecar handle is kept in the map so the process can be
-/// reused for subsequent queries without re-spawning. The sidecar itself handles
-/// the interrupt by aborting its AbortController and returning to idle state.
+#[tauri::command]
+pub async fn send_agent_input(
+    agent_state: State<'_, AgentState>,
+    session_id: String,
+    prompt: String,
+) -> Result<(), String> {
+    let cmd = serde_json::json!({
+        "type": "send_input",
+        "prompt": prompt,
+    });
+    send_command_to_session(&agent_state, &session_id, cmd).await?;
+    info!(target: "agent", "Agent input command sent for session_id={}", session_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn start_agent_session(
+    app: AppHandle,
+    state: State<'_, crate::AppState>,
+    agent_state: State<'_, AgentState>,
+    session_id: String,
+    prompt: String,
+    cwd: String,
+    channel: tauri::ipc::Channel<String>,
+    api_key: Option<String>,
+    base_url: Option<String>,
+    model: Option<String>,
+) -> Result<(), String> {
+    info!(target: "agent", "Starting agent session wrapper for session_id={}", session_id);
+
+    ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
+    let ensure_cmd = build_ensure_session_command(&state, &session_id, cwd, api_key, base_url, model);
+    send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
+
+    let input_cmd = serde_json::json!({
+        "type": "send_input",
+        "prompt": prompt,
+    });
+    send_command_to_session(&agent_state, &session_id, input_cmd).await
+}
+
 #[tauri::command]
 pub async fn interrupt_agent_session(
     agent_state: State<'_, AgentState>,
@@ -287,7 +327,6 @@ pub async fn interrupt_agent_session(
     Ok(())
 }
 
-/// Shutdown a specific session's sidecar process.
 #[tauri::command]
 pub async fn shutdown_agent(
     agent_state: State<'_, AgentState>,
@@ -303,8 +342,6 @@ pub async fn shutdown_agent(
     Ok(())
 }
 
-/// Send a tool response (e.g. AskUserQuestion answer) back to the sidecar
-/// for a specific session.
 #[tauri::command]
 pub async fn send_tool_response(
     agent_state: State<'_, AgentState>,
@@ -329,8 +366,6 @@ pub async fn send_tool_response(
     Ok(())
 }
 
-/// Reset the Claude session mapping for a given app session.
-/// This clears the captured Claude session ID so the next query starts fresh.
 #[tauri::command]
 pub async fn reset_agent_session(
     agent_state: State<'_, AgentState>,
@@ -352,16 +387,6 @@ pub async fn reset_agent_session(
     Ok(())
 }
 
-/// Delete all Claude Code session files for a given app session.
-///
-/// Reads `~/.claude/session-id-map.json` to find the Claude session ID,
-/// then removes:
-/// - `~/.claude/projects/{project}/{claudeSessionId}.jsonl` (conversation log)
-/// - `~/.claude/session-env/{claudeSessionId}/` (session environment)
-/// - `~/.claude/file-history/{claudeSessionId}/` (file edit history)
-/// - `~/.claude/todos/{claudeSessionId}*.json` (task lists)
-/// - `~/.claude/debug/{claudeSessionId}.txt` (debug logs)
-/// - Matching lines from `~/.claude/history.jsonl` (global input history)
 #[tauri::command]
 pub async fn delete_claude_session_files(
     app_session_id: String,
@@ -374,7 +399,6 @@ pub async fn delete_claude_session_files(
         .map_err(|_| "Cannot determine home directory".to_string())?;
     let claude_dir = PathBuf::from(&home).join(".claude");
 
-    // Read session ID mapping
     let map_file = claude_dir.join("session-id-map.json");
     let map_content = fs::read_to_string(&map_file)
         .map_err(|e| format!("Failed to read session-id-map.json: {}", e))?;
@@ -399,7 +423,6 @@ pub async fn delete_claude_session_files(
     let mut deleted = Vec::new();
     let projects_dir = claude_dir.join("projects");
 
-    // 1. Delete conversation JSONL files across all project directories
     if projects_dir.exists() {
         if let Ok(entries) = fs::read_dir(&projects_dir) {
             for entry in entries.flatten() {
@@ -415,21 +438,18 @@ pub async fn delete_claude_session_files(
         }
     }
 
-    // 2. Delete session-env directory
     let session_env = claude_dir.join("session-env").join(&claude_session_id);
     if session_env.exists() {
         let _ = fs::remove_dir_all(&session_env);
         deleted.push(session_env.to_string_lossy().to_string());
     }
 
-    // 3. Delete file-history directory
     let file_history = claude_dir.join("file-history").join(&claude_session_id);
     if file_history.exists() {
         let _ = fs::remove_dir_all(&file_history);
         deleted.push(file_history.to_string_lossy().to_string());
     }
 
-    // 4. Delete matching todo files
     let todos_dir = claude_dir.join("todos");
     if todos_dir.exists() {
         if let Ok(entries) = fs::read_dir(&todos_dir) {
@@ -443,25 +463,20 @@ pub async fn delete_claude_session_files(
         }
     }
 
-    // 5. Delete debug log
     let debug_file = claude_dir.join("debug").join(format!("{}.txt", claude_session_id));
     if debug_file.exists() {
         let _ = fs::remove_file(&debug_file);
         deleted.push(debug_file.to_string_lossy().to_string());
     }
 
-    // 6. Filter global history.jsonl
     let history_file = claude_dir.join("history.jsonl");
     if history_file.exists() {
         if let Ok(content) = fs::read_to_string(&history_file) {
             let filtered: String = content
                 .lines()
-                .filter(|line| {
-                    !line.contains(&format!("\"sessionId\":\"{}\"", claude_session_id))
-                })
+                .filter(|line| !line.contains(&format!("\"sessionId\":\"{}\"", claude_session_id)))
                 .collect::<Vec<_>>()
                 .join("\n");
-            // Only write back if something was actually removed
             if filtered.len() != content.len() {
                 let _ = fs::write(&history_file, filtered);
                 deleted.push(history_file.to_string_lossy().to_string());
@@ -469,7 +484,6 @@ pub async fn delete_claude_session_files(
         }
     }
 
-    // 7. Remove the mapping entry itself
     if let serde_json::Value::Object(mut map_obj) = map {
         map_obj.remove(&app_session_id);
         let _ = fs::write(&map_file, serde_json::to_string_pretty(&map_obj).unwrap_or_default());

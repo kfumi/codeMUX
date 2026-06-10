@@ -7,6 +7,8 @@ import type { Skill } from '../types/skill';
 import { createLogger, serializeError } from './logger';
 
 const logger = createLogger('tauri');
+const agentChannels = new Map<string, Channel<string>>();
+const agentEventListeners = new Map<string, (event: string) => void>();
 
 export interface ModelInfo {
   id: string;
@@ -18,6 +20,36 @@ export interface FileTreeNode {
   path: string;
   is_dir: boolean;
   children?: FileTreeNode[];
+}
+
+function getAgentChannel(sessionId: string): Channel<string> {
+  let channel = agentChannels.get(sessionId);
+  if (!channel) {
+    channel = new Channel<string>();
+    channel.onmessage = (event: string) => {
+      const listener = agentEventListeners.get(sessionId);
+      if (listener) {
+        listener(event);
+      }
+    };
+    agentChannels.set(sessionId, channel);
+  }
+  return channel;
+}
+
+function createAgentChannel(sessionId: string, onEvent?: (event: string) => void): Channel<string> {
+  const channel = new Channel<string>();
+  if (onEvent) {
+    agentEventListeners.set(sessionId, onEvent);
+  }
+  channel.onmessage = (event: string) => {
+    const listener = agentEventListeners.get(sessionId);
+    if (listener) {
+      listener(event);
+    }
+  };
+  agentChannels.set(sessionId, channel);
+  return channel;
 }
 
 function summarizeInvokeArgs(args?: Record<string, unknown>) {
@@ -78,6 +110,24 @@ export const sessionApi = {
 };
 
 export const agentApi = {
+  ensureSession: (
+    sessionId: string,
+    cwd: string,
+    onEvent?: (event: string) => void,
+    apiKey?: string,
+    baseUrl?: string,
+    model?: string,
+  ): Promise<void> => {
+    if (onEvent) {
+      agentEventListeners.set(sessionId, onEvent);
+    }
+    const channel = getAgentChannel(sessionId);
+    return invokeLogged('ensure_agent_session', { sessionId, cwd, channel, apiKey, baseUrl, model });
+  },
+  sendInput: (
+    sessionId: string,
+    prompt: string,
+  ): Promise<void> => invokeLogged('send_agent_input', { sessionId, prompt }),
   startSession: (
     sessionId: string,
     prompt: string,
@@ -87,10 +137,7 @@ export const agentApi = {
     baseUrl?: string,
     model?: string,
   ): Promise<void> => {
-    const channel = new Channel<string>();
-    channel.onmessage = (event: string) => {
-      onEvent(event);
-    };
+    const channel = createAgentChannel(sessionId, onEvent);
     return invokeLogged('start_agent_session', { sessionId, prompt, cwd, channel, apiKey, baseUrl, model });
   },
   interrupt: (sessionId: string): Promise<void> => invokeLogged('interrupt_agent_session', { sessionId }),

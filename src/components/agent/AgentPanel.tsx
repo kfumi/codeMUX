@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAgentStore } from '../../stores/agentStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -38,6 +38,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { isOpen: previewOpen, togglePanel: togglePreview, loadFileTree, setProjectPath } = usePreviewStore();
 
   const todos = useAgentStore((s) => s.todos[sessionId] ?? EMPTY_TODOS);
+  const mcpRuntimeStatus = useAgentStore((s) => s.mcpRuntimeStatus[sessionId] ?? null);
 
   const session = sessions.find((s) => s.id === sessionId);
   const project = session?.project_id ? projects.find((p) => p.id === session.project_id) : null;
@@ -52,6 +53,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const [infoOpen, setInfoOpen] = useState(false);
   const [infoTitle, setInfoTitle] = useState('');
   const [infoContent, setInfoContent] = useState('');
+  const lastEnsureKeyRef = useRef<string | null>(null);
 
   const handleRenameOpen = () => {
     setRenameValue(session?.title || '');
@@ -88,6 +90,42 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       setCwd(localStorage.getItem('agent-user-cwd') || '.');
     }
   }, [sessionId, project?.path]);
+
+  useEffect(() => {
+    let provider = activeProvider;
+    if (session?.provider_id) {
+      const storedProvider = config?.providers.find((p) => p.id === session.provider_id);
+      if (storedProvider) provider = storedProvider;
+    }
+
+    const effectiveCwd = project?.path || cwd;
+    const apiKey = provider?.api_key || undefined;
+    const baseUrl = provider?.anthropic_base_url || undefined;
+    let model = provider?.default_model || undefined;
+    if (model && provider?.context_1m && !model.includes('[1m]')) {
+      model = model + '[1m]';
+    }
+
+    const ensureKey = JSON.stringify({
+      sessionId,
+      cwd: effectiveCwd,
+      providerId: provider?.id || null,
+      model: model || null,
+      hasApiKey: Boolean(apiKey),
+      baseUrl: baseUrl || null,
+    });
+
+    if (lastEnsureKeyRef.current === ensureKey) {
+      return;
+    }
+
+    lastEnsureKeyRef.current = ensureKey;
+    agentApi.ensureSession(sessionId, effectiveCwd, undefined, apiKey, baseUrl, model).catch(() => {
+      if (lastEnsureKeyRef.current === ensureKey) {
+        lastEnsureKeyRef.current = null;
+      }
+    });
+  }, [sessionId, cwd, project?.path, session?.provider_id, activeProvider, config?.providers]);
 
   const events = useAgentStore((s) => s.events[sessionId] ?? EMPTY_EVENTS);
 
@@ -152,6 +190,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       if (storedProvider) provider = storedProvider;
     }
 
+    const effectiveCwd = project?.path || cwd;
     const apiKey = provider?.api_key || undefined;
     const baseUrl = provider?.anthropic_base_url || undefined;
     let model = provider?.default_model || undefined;
@@ -169,7 +208,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
 
     try {
-      await startQuery(sessionId, content, cwd, apiKey, baseUrl, model);
+      await startQuery(sessionId, content, effectiveCwd, apiKey, baseUrl, model);
     } catch (err) {
       useAgentStore.setState((s) => ({
         error: { ...s.error, [sessionId]: String(err) },
@@ -270,6 +309,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           >
             <FolderOpen className="h-3 w-3 text-foreground/62 shrink-0" />
             <span className="truncate">{project.path}</span>
+          </div>
+        )}
+        {mcpRuntimeStatus && mcpRuntimeStatus !== 'ready' && (
+          <div className="text-[11px] text-muted-foreground bg-muted/30 rounded-lg px-2 py-1 border border-border/20">
+            {mcpRuntimeStatus === 'warming' && 'MCP 正在后台预热'}
+            {mcpRuntimeStatus === 'deferred' && 'MCP 将按需连接'}
+            {mcpRuntimeStatus === 'fallback_live' && '对话已启动，MCP 继续后台接入'}
+            {mcpRuntimeStatus === 'limited_provider' && '当前 Provider 的 MCP 工具发现能力受限'}
           </div>
         )}
         <button

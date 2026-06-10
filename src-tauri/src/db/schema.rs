@@ -50,6 +50,7 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             description TEXT DEFAULT '',
             transport_type TEXT NOT NULL,
             transport_config TEXT NOT NULL,
+            always_load INTEGER NOT NULL DEFAULT 0,
             enabled INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -96,6 +97,14 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         .is_ok();
     if !has_subtitle {
         let _ = conn.execute("ALTER TABLE mcp_servers ADD COLUMN subtitle TEXT DEFAULT ''", []);
+    }
+
+    // Migration: add always_load column to mcp_servers if missing
+    let has_always_load: bool = conn
+        .prepare("SELECT always_load FROM mcp_servers LIMIT 0")
+        .is_ok();
+    if !has_always_load {
+        let _ = conn.execute("ALTER TABLE mcp_servers ADD COLUMN always_load INTEGER NOT NULL DEFAULT 0", []);
     }
 
     // Migration: add disk_path column to skills if missing

@@ -32,7 +32,7 @@ export type AgentMessage =
   | { kind: 'api_retry'; data: { attempt: number; max_retries: number; retry_delay_ms: number; error_status: number; error: string } }
   | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string }>; multiSelect?: boolean }> } }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
-  | { kind: 'mcp_status'; data: Record<string, string> }
+  | { kind: 'mcp_status'; data: { servers: Record<string, string>; status?: string } }
   | { kind: 'streaming'; data: { event: Record<string, unknown>; session_id?: string } }
   | { kind: 'file_snapshot'; data: { file_path: string; original_content: string; is_new: boolean; tool_use_id: string } }
   | { kind: 'done' }
@@ -47,6 +47,8 @@ interface AgentState {
   isRunning: Record<string, boolean>;
   /** Error message if any */
   error: Record<string, string | null>;
+  /** Latest MCP runtime status for each session */
+  mcpRuntimeStatus: Record<string, string | null>;
   /** Current todos per session (extracted from TodoWrite / Task tools) */
   todos: Record<string, TodoItem[]>;
   /** Accumulated streaming thinking text per session (from stream_event deltas) */
@@ -206,7 +208,7 @@ function parseAgentEvent(raw: string): AgentMessage {
       case 'sidecar_query_done':
         return { kind: 'done' };
       case 'mcp_status_update':
-        return { kind: 'mcp_status', data: (data as any).servers || {} };
+        return { kind: 'mcp_status', data: { servers: (data as any).servers || {}, status: (data as any).status } };
       case 'assistant':
         return { kind: 'assistant', data };
       case 'user':
@@ -547,6 +549,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   eventTimestamps: {},
   isRunning: {},
   error: {},
+  mcpRuntimeStatus: {},
   todos: {},
   streamingThinking: {},
   streamingText: {},
@@ -886,7 +889,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
         // Update MCP status from polling results
         if (event.kind === 'mcp_status') {
-          useMcpStore.getState().updateConnectionStatus(event.data);
+          if (Object.keys(event.data.servers).length > 0) {
+            useMcpStore.getState().updateConnectionStatus(event.data.servers);
+          }
+          if (event.data.status) {
+            set((s) => ({
+              mcpRuntimeStatus: { ...s.mcpRuntimeStatus, [sessionId]: event.data.status || null },
+            }));
+          }
         }
 
         if (event.kind === 'done' || event.kind === 'error' || (event.kind === 'result' && event.data?.is_error)) {
@@ -953,6 +963,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       delete newRunning[sessionId];
       const newError = { ...state.error };
       delete newError[sessionId];
+      const newMcpRuntimeStatus = { ...state.mcpRuntimeStatus };
+      delete newMcpRuntimeStatus[sessionId];
       const newTodos = { ...state.todos };
       delete newTodos[sessionId];
       const newStreaming = { ...state.streamingThinking };
@@ -961,7 +973,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       delete newStreamingText[sessionId];
       const newForceStopped = { ...state.forceStopped };
       delete newForceStopped[sessionId];
-      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, todos: newTodos, streamingThinking: newStreaming, streamingText: newStreamingText, forceStopped: newForceStopped };
+      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, mcpRuntimeStatus: newMcpRuntimeStatus, todos: newTodos, streamingThinking: newStreaming, streamingText: newStreamingText, forceStopped: newForceStopped };
     });
   },
 

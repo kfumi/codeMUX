@@ -71,6 +71,7 @@ export function McpSettingsPanel() {
       name: '',
       description: '',
       subtitle: '',
+      alwaysLoad: false,
       transport: defaultTransport('stdio'),
       enabled: true,
       created_at: now,
@@ -291,6 +292,11 @@ export function McpSettingsPanel() {
                 />
                 <span className="font-medium text-sm truncate">{server.description || server.name}</span>
                 {transportBadge(server.transport.type)}
+                {server.alwaysLoad && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300">
+                    eager
+                  </span>
+                )}
               </div>
               {server.subtitle && (
                 <p className="text-xs text-muted-foreground truncate mt-0.5">
@@ -332,6 +338,19 @@ export function McpSettingsPanel() {
                   value={editing.name}
                   onChange={(e) => setEditing({ ...editing, name: e.target.value })}
                   placeholder="例如 context7"
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+                <div className="space-y-0.5">
+                  <label className="text-sm font-medium">优先首轮加载</label>
+                  <p className="text-xs text-muted-foreground">
+                    关闭 deferred loading。只建议给少数关键 MCP server 开启。
+                  </p>
+                </div>
+                <Switch
+                  checked={Boolean(editing.alwaysLoad)}
+                  onCheckedChange={(checked) => setEditing({ ...editing, alwaysLoad: checked })}
                 />
               </div>
 
