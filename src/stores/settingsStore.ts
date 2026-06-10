@@ -85,7 +85,23 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           state.config.active_provider_id === providerId
             ? providers[0]?.id ?? null
             : state.config.active_provider_id;
-        return { config: { ...state.config, providers, active_provider_id } };
+        const codexDefaultProviderId = state.config.agent_configs.codex.default_provider_id === providerId
+          ? null
+          : state.config.agent_configs.codex.default_provider_id;
+        return {
+          config: {
+            ...state.config,
+            providers,
+            active_provider_id,
+            agent_configs: {
+              ...state.config.agent_configs,
+              codex: {
+                ...state.config.agent_configs.codex,
+                default_provider_id: codexDefaultProviderId,
+              },
+            },
+          },
+        };
       });
     } catch (error) {
       set({ error: String(error) });

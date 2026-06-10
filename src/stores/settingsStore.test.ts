@@ -1,15 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AppConfig } from '../types/provider';
+import type { AppConfig, Provider } from '../types/provider';
 
 const setDefaultAgentKindMock = vi.fn<(agentKind: string) => Promise<void>>();
 const updateAgentConfigMock = vi.fn<(agentKind: string, config: Record<string, unknown>) => Promise<void>>();
+const deleteProviderMock = vi.fn<(providerId: string) => Promise<void>>();
 
 vi.mock('../lib/tauri', () => ({
   configApi: {
     get: vi.fn(),
     updateProvider: vi.fn(),
-    deleteProvider: vi.fn(),
+    deleteProvider: deleteProviderMock,
     setActiveProvider: vi.fn(),
     setTheme: vi.fn(),
     fetchModels: vi.fn(),
@@ -102,6 +103,40 @@ describe('settings store agent config actions', () => {
     expect(updateAgentConfigMock).toHaveBeenCalledWith('codex', {
       default_provider_id: null,
     });
+    expect(useSettingsStore.getState().config?.agent_configs.codex.default_provider_id).toBeNull();
+  });
+
+  it('clears the local codex default provider when that provider is deleted', async () => {
+    const { useSettingsStore } = await import('./settingsStore');
+    const provider: Provider = {
+      id: 'provider-1',
+      name: 'Provider 1',
+      api_key: '',
+      anthropic_base_url: '',
+      openai_base_url: '',
+      default_model: '',
+    };
+    useSettingsStore.setState((state) => ({
+      config: state.config
+        ? {
+            ...state.config,
+            providers: [provider],
+            active_provider_id: 'provider-1',
+            agent_configs: {
+              ...state.config.agent_configs,
+              codex: {
+                ...state.config.agent_configs.codex,
+                default_provider_id: 'provider-1',
+              },
+            },
+          }
+        : null,
+    }));
+
+    await useSettingsStore.getState().deleteProvider('provider-1');
+
+    expect(deleteProviderMock).toHaveBeenCalledWith('provider-1');
+    expect(useSettingsStore.getState().config?.active_provider_id).toBeNull();
     expect(useSettingsStore.getState().config?.agent_configs.codex.default_provider_id).toBeNull();
   });
 });

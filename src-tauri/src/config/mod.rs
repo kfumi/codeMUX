@@ -34,14 +34,26 @@ fn backup_unreadable_config(config_path: &Path) -> Result<PathBuf, String> {
 
 fn load_config_from_path(config_path: &Path) -> AppConfig {
     if config_path.exists() {
-        let content = std::fs::read_to_string(config_path).expect("Failed to read config");
-        match serde_json::from_str::<AppConfig>(&content) {
-            Ok(config) => config,
+        match std::fs::read(config_path) {
+            Ok(content) => match serde_json::from_slice::<AppConfig>(&content) {
+                Ok(config) => config,
+                Err(error) => {
+                    let backup_path = backup_unreadable_config(config_path).ok();
+                    warn!(
+                        target: "config",
+                        "Failed to deserialize config at {}: {}. Backed up unreadable config to {:?} and using fresh defaults.",
+                        config_path.display(),
+                        error,
+                        backup_path.as_ref().map(|path| path.display().to_string())
+                    );
+                    write_default_config_to_path(config_path)
+                }
+            },
             Err(error) => {
                 let backup_path = backup_unreadable_config(config_path).ok();
                 warn!(
                     target: "config",
-                    "Failed to deserialize config at {}: {}. Backed up unreadable config to {:?} and using fresh defaults.",
+                    "Failed to read config at {}: {}. Backed up unreadable config to {:?} and using fresh defaults.",
                     config_path.display(),
                     error,
                     backup_path.as_ref().map(|path| path.display().to_string())
@@ -129,6 +141,32 @@ mod tests {
 
         assert!(current.contains("\"theme\""));
         assert_eq!(preserved, invalid_content);
+
+        let _ = std::fs::remove_file(&config_path);
+        let _ = std::fs::remove_file(&backup_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn preserves_non_utf8_config_bytes_via_backup_recovery() {
+        let temp_dir = temp_config_dir();
+        let config_path = temp_dir.join("config.json");
+        let invalid_bytes = vec![0xff, 0xfe, 0xfd, 0x00];
+        std::fs::write(&config_path, &invalid_bytes).unwrap();
+
+        let config = load_config_from_path(&config_path);
+        let current = std::fs::read(&config_path).unwrap();
+        let backup_path = std::fs::read_dir(&temp_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| path.file_name().unwrap().to_string_lossy().contains(".unreadable."))
+            .unwrap();
+        let preserved = std::fs::read(&backup_path).unwrap();
+
+        assert_eq!(config.agent_defaults.default_agent_kind.as_str(), "claude_code");
+        assert_ne!(current, invalid_bytes);
+        assert_eq!(preserved, invalid_bytes);
 
         let _ = std::fs::remove_file(&config_path);
         let _ = std::fs::remove_file(&backup_path);
