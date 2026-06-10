@@ -55,6 +55,16 @@ fn apply_agent_config_update(
     Ok(())
 }
 
+fn cleanup_provider_references(config: &mut AppConfig, provider_id: &str) {
+    if config.active_provider_id.as_deref() == Some(provider_id) {
+        config.active_provider_id = config.providers.first().map(|p| p.id.clone());
+    }
+
+    if config.agent_configs.codex.default_provider_id.as_deref() == Some(provider_id) {
+        config.agent_configs.codex.default_provider_id = None;
+    }
+}
+
 #[tauri::command]
 pub fn get_config(state: State<'_, AppState>) -> AppConfig {
     debug!(target: "provider", "Loading app config");
@@ -81,11 +91,7 @@ pub fn delete_provider(state: State<'_, AppState>, app: AppHandle, provider_id: 
     info!(target: "provider", "Deleting provider provider_id={}", provider_id);
     let mut config = state.config.lock().unwrap();
     config.providers.retain(|p| p.id != provider_id);
-
-    // If deleted provider was active, clear active_provider_id
-    if config.active_provider_id.as_deref() == Some(&provider_id) {
-        config.active_provider_id = config.providers.first().map(|p| p.id.clone());
-    }
+    cleanup_provider_references(&mut config, &provider_id);
 
     config::save_config(&app, &config)?;
     Ok(())
@@ -126,7 +132,7 @@ pub fn update_agent_config(
 
 #[cfg(test)]
 mod tests {
-    use super::apply_agent_config_update;
+    use super::{apply_agent_config_update, cleanup_provider_references};
     use crate::config::types::{AgentKind, AppConfig};
 
     #[test]
@@ -141,6 +147,19 @@ mod tests {
         )
         .unwrap();
 
+        assert_eq!(app_config.agent_configs.codex.default_provider_id, None);
+    }
+
+    #[test]
+    fn deleting_provider_clears_codex_default_provider_reference() {
+        let mut app_config = AppConfig::default();
+        app_config.providers = vec![];
+        app_config.active_provider_id = Some("provider-1".to_string());
+        app_config.agent_configs.codex.default_provider_id = Some("provider-1".to_string());
+
+        cleanup_provider_references(&mut app_config, "provider-1");
+
+        assert_eq!(app_config.active_provider_id, None);
         assert_eq!(app_config.agent_configs.codex.default_provider_id, None);
     }
 }

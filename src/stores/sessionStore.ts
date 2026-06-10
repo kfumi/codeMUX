@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { AgentKind, Session, SessionMode } from '../types/session';
 import { sessionApi, agentApi } from '../lib/tauri';
 import { useAgentStore } from './agentStore';
+import { useSettingsStore } from './settingsStore';
 import { getDefaultAgentKind } from '../types/agentRegistry';
 
 interface SessionState {
@@ -21,6 +22,10 @@ type CreateSessionAction = {
   (title: string, agentKind: AgentKind, mode?: SessionMode, projectId?: string): Promise<Session>;
 };
 
+function resolveDefaultAgentKind(): AgentKind {
+  return useSettingsStore.getState().config?.agent_defaults.default_agent_kind ?? getDefaultAgentKind();
+}
+
 function normalizeCreateSessionArgs(
   title: string,
   agentKindOrMode?: AgentKind | SessionMode,
@@ -37,7 +42,7 @@ function normalizeCreateSessionArgs(
   }
 
   const legacyMode = agentKindOrMode;
-  return [title, getDefaultAgentKind(), legacyMode, modeOrProjectId as string | undefined];
+  return [title, resolveDefaultAgentKind(), legacyMode, modeOrProjectId as string | undefined];
 }
 
 function createSessionAction(
