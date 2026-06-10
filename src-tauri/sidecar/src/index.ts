@@ -2,6 +2,7 @@ import * as readline from 'node:readline';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import { query, startup } from '@anthropic-ai/claude-agent-sdk';
 import type {
@@ -11,6 +12,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import type { SidecarCommand } from './types.js';
 import { buildMcpInstructions, getProviderMode } from './sessionRuntimeHelpers.js';
+import { resolveClaudeExecutable } from './claudeExecutable.js';
 
 const WARM_START_TIMEOUT_MS = 30_000;
 const WARM_QUERY_WAIT_WINDOW_MS = 500;
@@ -36,6 +38,7 @@ type QueryOptions = Record<string, unknown> & {
 
 /** Pending tool responses waiting for user input */
 const pendingToolResponses = new Map<string, { resolve: (value: unknown) => void }>();
+const SIDECAR_DIST_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 function findClaudeExecutable(): string | undefined {
   try {
@@ -400,7 +403,11 @@ class SessionRuntime {
       process.env.ANTHROPIC_BASE_URL = config.baseUrl;
     }
 
-    const claudePath = findClaudeExecutable();
+    const pathClaude = findClaudeExecutable();
+    const claudePath = resolveClaudeExecutable({
+      sidecarDir: SIDECAR_DIST_DIR,
+      pathClaude,
+    });
     const claudeSessionId = config.sessionId ? sessionIdMap.get(config.sessionId) : undefined;
     const envKey = process.env.ANTHROPIC_API_KEY;
     const envUrl = process.env.ANTHROPIC_BASE_URL;
@@ -410,6 +417,10 @@ class SessionRuntime {
     const anthropicVars = Object.keys(process.env).filter((key) => key.startsWith('ANTHROPIC_'));
     process.stderr.write(`[sidecar] All ANTHROPIC_* env vars: ${anthropicVars.join(', ') || '(none)'}\n`);
     process.stderr.write(`[sidecar] Session: app=${config.sessionId || 'none'}, claude=${claudeSessionId || 'new'}\n`);
+    process.stderr.write(`[sidecar] Claude executable=${claudePath || 'NOT FOUND'}\n`);
+    if (pathClaude && claudePath !== pathClaude) {
+      process.stderr.write(`[sidecar] Ignoring PATH Claude shim in favor of bundled binary: ${pathClaude}\n`);
+    }
 
     const subprocessEnv: Record<string, string | undefined> = { ...process.env };
     if (config.apiKey) subprocessEnv.ANTHROPIC_API_KEY = config.apiKey;

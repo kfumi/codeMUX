@@ -1,13 +1,23 @@
 pub mod commands;
 
 use log::{debug, info, warn};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tauri::Manager;
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
+
+const SIDECAR_RELATIVE_DIR: &str = "sidecar";
+const SIDECAR_ENTRYPOINT: &str = "dist/index.js";
+const NODE_RUNTIME_RELATIVE_DIR: &str = "runtime/node";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BuildEnvironment {
+    Development,
+    Release,
+}
 
 /// Handle to a running sidecar process.
 pub struct SidecarHandle {
@@ -41,24 +51,75 @@ impl SidecarHandle {
     }
 }
 
-/// Path to the sidecar script (dist/index.js).
-///
-/// In production, uses `resource_dir()`. In dev mode (debug), falls back to
-/// the Cargo manifest directory so the sidecar is found in the source tree.
-fn sidecar_script_path(app_handle: &tauri::AppHandle) -> PathBuf {
-    let sidecar_rel = PathBuf::from("sidecar").join("dist").join("index.js");
+fn build_environment() -> BuildEnvironment {
+    if cfg!(debug_assertions) {
+        BuildEnvironment::Development
+    } else {
+        BuildEnvironment::Release
+    }
+}
 
-    // Try resource_dir first (production)
-    if let Ok(resource_dir) = app_handle.path().resource_dir() {
-        let path = resource_dir.join(&sidecar_rel);
-        if path.exists() {
-            return path;
+fn sidecar_relative_path() -> PathBuf {
+    PathBuf::from(SIDECAR_RELATIVE_DIR).join(SIDECAR_ENTRYPOINT)
+}
+
+fn bundled_node_relative_path() -> PathBuf {
+    PathBuf::from(NODE_RUNTIME_RELATIVE_DIR).join(node_binary_name())
+}
+
+fn node_binary_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "node.exe"
+    } else {
+        "node"
+    }
+}
+
+fn resolve_sidecar_script_path(
+    resource_dir: Option<&Path>,
+    manifest_dir: &Path,
+    environment: BuildEnvironment,
+) -> Result<PathBuf, String> {
+    let sidecar_rel = sidecar_relative_path();
+
+    if let Some(resource_dir) = resource_dir {
+        let resource_path = resource_dir.join(&sidecar_rel);
+        if resource_path.exists() {
+            return Ok(resource_path);
         }
     }
 
-    // Fall back to CARGO_MANIFEST_DIR (dev mode)
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir.join(sidecar_rel)
+    if environment == BuildEnvironment::Development {
+        return Ok(manifest_dir.join(sidecar_rel));
+    }
+
+    Err(format!(
+        "Bundled sidecar was not found at {}. Rebuild the installer with bundle.resources including the sidecar directory.",
+        sidecar_rel.display()
+    ))
+}
+
+fn resolve_node_runtime_path(
+    resource_dir: Option<&Path>,
+    environment: BuildEnvironment,
+) -> Result<PathBuf, String> {
+    let bundled_rel = bundled_node_relative_path();
+
+    if let Some(resource_dir) = resource_dir {
+        let bundled_path = resource_dir.join(&bundled_rel);
+        if bundled_path.exists() {
+            return Ok(bundled_path);
+        }
+    }
+
+    if environment == BuildEnvironment::Development {
+        return Ok(PathBuf::from(node_binary_name()));
+    }
+
+    Err(format!(
+        "Bundled Node.js runtime was not found at {}. Rebuild the installer so the runtime is copied into bundle resources.",
+        bundled_rel.display()
+    ))
 }
 
 /// Spawn the sidecar process and return a handle + event receiver.
@@ -69,34 +130,46 @@ pub async fn spawn_sidecar(
     app_handle: &tauri::AppHandle,
     channel: tauri::ipc::Channel<String>,
 ) -> Result<(SidecarHandle, mpsc::Receiver<String>), String> {
-    let script_path = sidecar_script_path(app_handle);
+    let resource_dir = app_handle.path().resource_dir().ok();
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let environment = build_environment();
+    let script_path = resolve_sidecar_script_path(resource_dir.as_deref(), &manifest_dir, environment)?;
+    let node_path = resolve_node_runtime_path(resource_dir.as_deref(), environment)?;
+
     info!(target: "agent", "Spawning sidecar from {}", script_path.display());
+    info!(target: "agent", "Using node runtime {}", node_path.display());
 
-    // Try to find node executable
-    let node_cmd = if cfg!(target_os = "windows") {
-        "node.exe"
-    } else {
-        "node"
-    };
-
-    // Spawn node directly on all platforms (no cmd.exe wrapper to avoid console window flash)
     let mut child = if cfg!(target_os = "windows") {
-        let mut cmd = Command::new(node_cmd);
+        let mut cmd = Command::new(&node_path);
         cmd.arg(script_path.to_str().unwrap())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .creation_flags(0x08000000); // CREATE_NO_WINDOW
         cmd.spawn()
-            .map_err(|e| format!("Failed to spawn sidecar: {}. Is Node.js installed?", e))?
+            .map_err(|e| {
+                format!(
+                    "Failed to spawn sidecar with node={} script={}: {}",
+                    node_path.display(),
+                    script_path.display(),
+                    e
+                )
+            })?
     } else {
-        Command::new(node_cmd)
-            .arg(script_path)
+        Command::new(&node_path)
+            .arg(&script_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to spawn sidecar: {}. Is Node.js installed?", e))?
+            .map_err(|e| {
+                format!(
+                    "Failed to spawn sidecar with node={} script={}: {}",
+                    node_path.display(),
+                    script_path.display(),
+                    e
+                )
+            })?
     };
 
     // Set up stdin writer
@@ -119,11 +192,36 @@ pub async fn spawn_sidecar(
 
     // Set up stdout reader — uses oneshot to signal when the first event (ready) arrives
     let stdout = child.stdout.take().ok_or("Failed to open sidecar stdout")?;
+    let stderr = child.stderr.take().ok_or("Failed to open sidecar stderr")?;
     let (event_tx, event_rx) = mpsc::channel::<String>(256);
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
 
     // Clone for stderr task (needs to send debug events to same channel)
     let stderr_event_tx = event_tx.clone();
+    let stderr_lines = Arc::new(AsyncMutex::new(Vec::<String>::new()));
+    let stderr_lines_for_task = stderr_lines.clone();
+
+    tokio::spawn(async move {
+        let reader = BufReader::new(stderr);
+        let mut lines = reader.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            {
+                let mut captured = stderr_lines_for_task.lock().await;
+                captured.push(line.clone());
+            }
+
+            if line.contains("Stream closed") || line.contains("Error in hook callback") {
+                debug!(target: "sidecar_stderr", "(suppressed abort cleanup) {}", line);
+                continue;
+            }
+            warn!(target: "sidecar_stderr", "{}", line);
+            let debug_msg = serde_json::json!({
+                "type": "sidecar_debug",
+                "message": line
+            });
+            let _ = stderr_event_tx.send(debug_msg.to_string()).await;
+        }
+    });
 
     tokio::spawn(async move {
         let reader = BufReader::new(stdout);
@@ -132,8 +230,15 @@ pub async fn spawn_sidecar(
 
         while let Ok(Some(line)) = lines.next_line().await {
             if let Some(tx) = ready_tx.take() {
-                if line.contains("sidecar_error") {
+                if line.contains("\"type\":\"sidecar_error\"") {
                     let _ = tx.send(Err(format!("Sidecar error: {}", line)));
+                    return;
+                }
+                if !line.contains("\"type\":\"sidecar_ready\"") {
+                    let _ = tx.send(Err(format!(
+                        "Sidecar did not signal readiness before emitting: {}",
+                        line
+                    )));
                     return;
                 }
                 let _ = tx.send(Ok(()));
@@ -146,38 +251,68 @@ pub async fn spawn_sidecar(
 
     // Wait for sidecar to signal ready
     match ready_rx.await {
-        Ok(Ok(())) => {
-            info!(target: "agent", "Sidecar reported ready");
-        }
+        Ok(Ok(())) => info!(target: "agent", "Sidecar reported ready"),
         Ok(Err(e)) => return Err(e),
-        Err(_) => return Err("Sidecar died before signaling ready".to_string()),
-    }
+        Err(_) => {
+            let stderr_summary = {
+                let captured = stderr_lines.lock().await;
+                captured
+                    .iter()
+                    .rev()
+                    .take(5)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            };
 
-    // Log stderr and forward to frontend for debugging.
-    // Filter out known non-fatal SDK errors that occur during abort cleanup
-    // (e.g. "Stream closed" from sendRequest after abortController.abort()).
-    if let Some(stderr) = child.stderr.take() {
-        tokio::spawn(async move {
-            let reader = BufReader::new(stderr);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                // Suppress noisy SDK abort-cleanup errors
-                if line.contains("Stream closed") || line.contains("Error in hook callback") {
-                    debug!(target: "sidecar_stderr", "(suppressed abort cleanup) {}", line);
-                    continue;
-                }
-                warn!(target: "sidecar_stderr", "{}", line);
-                let debug_msg = serde_json::json!({
-                    "type": "sidecar_debug",
-                    "message": line
-                });
-                let _ = stderr_event_tx.send(debug_msg.to_string()).await;
+            if stderr_summary.is_empty() {
+                return Err("Sidecar died before signaling ready".to_string());
             }
-        });
+
+            return Err(format!(
+                "Sidecar died before signaling ready. Recent stderr: {}",
+                stderr_summary
+            ));
+        }
     }
 
     debug!(target: "agent", "Sidecar spawn completed successfully");
     let channel = Arc::new(AsyncMutex::new(channel));
     let handle = SidecarHandle { child, stdin_tx, channel };
     Ok((handle, event_rx))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_node_runtime_path, resolve_sidecar_script_path, BuildEnvironment};
+    use std::path::Path;
+
+    #[test]
+    fn release_build_requires_bundled_sidecar_resources() {
+        let manifest_dir = Path::new("manifest-root");
+        let err = resolve_sidecar_script_path(None, manifest_dir, BuildEnvironment::Release)
+            .expect_err("release builds should not fall back to the source tree");
+
+        assert!(err.contains("Bundled sidecar was not found"));
+    }
+
+    #[test]
+    fn development_build_falls_back_to_source_sidecar() {
+        let manifest_dir = Path::new("manifest-root");
+        let path = resolve_sidecar_script_path(None, manifest_dir, BuildEnvironment::Development)
+            .expect("dev builds should fall back to the source tree");
+
+        assert!(path.ends_with("sidecar/dist/index.js"));
+    }
+
+    #[test]
+    fn release_build_requires_bundled_node_runtime() {
+        let err = resolve_node_runtime_path(None, BuildEnvironment::Release)
+            .expect_err("release builds should require a bundled Node.js runtime");
+
+        assert!(err.contains("Bundled Node.js runtime was not found"));
+    }
 }
