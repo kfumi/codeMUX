@@ -11,6 +11,7 @@ import {
 import { AskUserQuestionCard } from '../AskUserQuestionCard';
 import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
 import { cn } from '@/lib/utils';
+import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
 
 type CodeMuxToolCallPartProps = {
   toolName: string;
@@ -250,7 +251,7 @@ function isCancelledResult(value: unknown): boolean {
     return false;
   }
 
-  return value.trim() === '[Request interrupted by user for tool use]';
+  return value.trim() === INTERRUPT_MARKER;
 }
 
 function hasExplicitFailureSignal(value: unknown): boolean {

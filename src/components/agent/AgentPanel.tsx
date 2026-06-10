@@ -294,7 +294,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         sessionId={sessionId}
         onSend={handleSend}
         onCommand={handleCommand}
-        onStop={() => interrupt(sessionId)}
       >
         <CodeMuxThread
           sessionId={sessionId}
@@ -306,7 +305,11 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                 <div className="flex-1" />
                 <ChangedFilesList sessionId={sessionId} projectPath={project?.path} />
               </div>
-              <CodeMuxComposer sessionId={sessionId} modelName={session?.model || activeProvider?.default_model} />
+              <CodeMuxComposer
+                sessionId={sessionId}
+                modelName={session?.model || activeProvider?.default_model}
+                onStop={() => interrupt(sessionId)}
+              />
             </div>
           }
         />

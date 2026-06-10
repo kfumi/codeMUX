@@ -30,6 +30,7 @@ import { useAgentStore } from '../../../stores/agentStore';
 interface CodeMuxComposerProps {
   sessionId: string;
   modelName?: string;
+  onStop?: () => void | Promise<void>;
 }
 
 type TriggerCategory = {
@@ -58,7 +59,7 @@ const COMMAND_FORMATTER: Unstable_DirectiveFormatter = {
   parse: (text) => (text ? [{ kind: 'text', text }] : []),
 };
 
-export function CodeMuxComposer({ sessionId, modelName }: CodeMuxComposerProps) {
+export function CodeMuxComposer({ sessionId, modelName, onStop }: CodeMuxComposerProps) {
   const aui = useAui();
   const composerRootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -242,23 +243,27 @@ export function CodeMuxComposer({ sessionId, modelName }: CodeMuxComposerProps) 
 
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-muted-foreground/74">
-                  {isRunning ? '运行中' : modelName ?? '就绪'}
+                  {modelName ?? ''}
                 </span>
 
                 {isRunning ? (
-                  <ComposerPrimitive.Cancel
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void onStop?.();
+                    }}
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--destructive)/0.08)] text-[hsl(var(--destructive))] transition-all duration-200 hover:scale-105 hover:bg-[hsl(var(--destructive)/0.14)] active:scale-95"
                     title="停止"
                   >
                     <Square className="h-3.5 w-3.5" fill="currentColor" />
-                  </ComposerPrimitive.Cancel>
+                  </button>
                 ) : (
                   <ComposerPrimitive.Send
                     className={cn(
                       'flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-300 active:scale-95',
                       hasInput
-                        ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-[0_6px_20px_-10px_hsl(var(--primary)/0.55)] hover:scale-105 hover:shadow-[0_10px_28px_-12px_hsl(var(--primary)/0.6)]'
-                        : 'cursor-not-allowed bg-muted/40 text-muted-foreground/45',
+                        ? 'bg-[#2E2E2E] text-white shadow-[0_6px_18px_-12px_hsl(var(--foreground)/0.35)] hover:scale-105 hover:bg-[#262626] dark:bg-[#D0D0D0] dark:text-black dark:shadow-[0_6px_18px_-12px_hsl(var(--foreground)/0.4)] dark:hover:bg-[#C4C4C4]'
+                        : 'cursor-not-allowed bg-[#8B8B8B] text-white dark:bg-[#787878] dark:text-black',
                     )}
                     title="发送"
                   >

@@ -2,6 +2,11 @@
 import { diffLines } from 'diff';
 import { agentApi, fileApi } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
+import {
+  mapPersistedClaudeMessage,
+  parseSdkUserMessage,
+  shouldSuppressLiveEventWhileStopped,
+} from './agentEventParsing';
 import { useSessionStore } from './sessionStore';
 import { useMcpStore } from './mcpStore';
 import { normalizeFilePath, usePreviewStore } from './previewStore';
@@ -205,7 +210,7 @@ function parseAgentEvent(raw: string): AgentMessage {
       case 'assistant':
         return { kind: 'assistant', data };
       case 'user':
-        return { kind: 'tool_result', data };
+        return parseSdkUserMessage(data);
       case 'system':
         if (data.subtype === 'init') {
           return { kind: 'system', data };
@@ -784,6 +789,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           return;
         }
 
+        const forceStopped = get().forceStopped[sessionId] ?? false;
+        if (forceStopped && shouldSuppressLiveEventWhileStopped(event.kind)) {
+          if (event.kind === 'result') {
+            const resultData = event.data;
+            if (!resultData.is_error) {
+              return;
+            }
+            clearPendingStreaming(sessionId);
+            set((s) => ({
+              isRunning: { ...s.isRunning, [sessionId]: false },
+              error: { ...s.error, [sessionId]: resultData.result || 'Request interrupted' },
+            }));
+          }
+          return;
+        }
+
         // When the complete assistant message arrives, filter out blocks
         // that were already displayed via streaming to avoid duplicate display.
         if (event.kind === 'assistant') {
@@ -894,10 +915,24 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   interrupt: async (sessionId: string) => {
     clearPendingStreaming(sessionId);
+    const state = get();
+    const isRunning = state.isRunning[sessionId] ?? false;
+    const forceStopped = state.forceStopped[sessionId] ?? false;
+    const lastEvent = (state.events[sessionId] || []).at(-1);
+
+    if (!isRunning || forceStopped || lastEvent?.kind === 'done') {
+      logger.info('Ignoring interrupt for inactive agent query', {
+        sessionId,
+        isRunning,
+        forceStopped,
+        lastEvent: lastEvent?.kind ?? 'none',
+      });
+      return;
+    }
+
     logger.info('Interrupting agent query', { sessionId });
     // 1. Immediately update UI — BEFORE sending command to sidecar
     set((s) => ({
-      isRunning: { ...s.isRunning, [sessionId]: false },
       forceStopped: { ...s.forceStopped, [sessionId]: true },
       streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
       streamingText: { ...s.streamingText, [sessionId]: '' },
@@ -905,24 +940,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     // 2. Then tell sidecar to stop (async, non-blocking for UI)
     await agentApi.interrupt(sessionId);
-
-    // 3. Add interrupt marker to in-memory events for UI display.
-    // This is NOT persisted to SQLite or JSONL — it only lives in the current session's
-    // event array for visual feedback. When the session is reloaded from JSONL, the
-    // marker won't appear (which is correct — the AI context comes from the JSONL).
-    set((s) => {
-      const prev = s.events[sessionId] || [];
-      // Don't add duplicate marker if query already finished
-      if (prev.length > 0 && prev[prev.length - 1]?.kind === 'done') return {};
-      const interruptMsg: AgentMessage = {
-        kind: 'user',
-        data: { content: '[Request interrupted by user]' },
-      };
-      return {
-        events: { ...s.events, [sessionId]: [...prev, interruptMsg] },
-        eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), Date.now()] },
-      };
-    });
   },
 
   clearEvents: (sessionId: string) => {
@@ -984,38 +1001,81 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
 
     try {
-      // Load directly from Claude Code's JSONL session file
+      // Load directly from Claude Code's JSONL session file.
+      // Each JSONL line has a `timestamp` field (ISO 8601) and a `type` field.
+      // We extract user, assistant, and result messages.
       const jsonlMessages = await agentApi.loadClaudeSessionEvents(sessionId);
       if (jsonlMessages && jsonlMessages.length > 0) {
         const events: AgentMessage[] = [];
+        const timestamps: number[] = [];
+
         for (const raw of jsonlMessages) {
-          const msgType = (raw as Record<string, unknown>).type as string;
-          if (msgType === 'assistant') {
-            events.push({ kind: 'assistant', data: raw as unknown as AgentAssistantMessage });
-          } else if (msgType === 'user') {
-            // JSONL user messages contain tool_result blocks or plain text content.
-            // Convert to the format the frontend expects.
-            const rawMsg = raw as Record<string, unknown>;
-            const msgContent = (rawMsg as any)?.message?.content;
-            if (Array.isArray(msgContent) && msgContent.some((c: any) => c?.type === 'tool_result')) {
-              // Tool result message
-              events.push({ kind: 'tool_result', data: raw as unknown as AgentToolResult });
-            } else if (typeof msgContent === 'string') {
-              // Plain user text message — convert to our user message format
-              events.push({ kind: 'user', data: { content: msgContent } });
-            } else if (Array.isArray(msgContent)) {
-              // Array of content blocks — try to extract text
-              const textParts = msgContent
-                .filter((c: any) => c?.type === 'text')
-                .map((c: any) => c.text || '');
-              if (textParts.length > 0) {
-                events.push({ kind: 'user', data: { content: textParts.join('\n') } });
-              }
-            }
+          const rawMsg = raw as Record<string, unknown>;
+          // Extract timestamp from JSONL (ISO string → epoch ms)
+          const ts = typeof rawMsg.timestamp === 'string'
+            ? new Date(rawMsg.timestamp).getTime() || 0
+            : 0;
+
+          const event = mapPersistedClaudeMessage(rawMsg);
+          if (event) {
+            events.push(event as AgentMessage);
+            timestamps.push(ts);
           }
         }
 
-        const timestamps = new Array(events.length).fill(0);
+        // JSONL does not contain `result` messages (the SDK doesn't write them).
+        // Synthesize one from assistant message usage data so the footer can show
+        // token stats, cost, and duration.
+        const hasResult = events.some((e) => e.kind === 'result');
+        if (!hasResult && events.length > 0) {
+          // Aggregate token usage from all assistant messages
+          let totalInput = 0, totalOutput = 0, totalCacheRead = 0, totalCacheCreate = 0;
+          for (const evt of events) {
+            if (evt.kind === 'assistant') {
+              const usage = (evt.data as any)?.message?.usage;
+              if (usage) {
+                totalInput += usage.input_tokens || 0;
+                totalOutput += usage.output_tokens || 0;
+                totalCacheRead += usage.cache_read_input_tokens || 0;
+                totalCacheCreate += usage.cache_creation_input_tokens || 0;
+              }
+            }
+          }
+          // Compute duration from first to last timestamp
+          const validTs = timestamps.filter((t) => t > 0);
+          const durationMs = validTs.length >= 2
+            ? validTs[validTs.length - 1] - validTs[0]
+            : 0;
+          // Count user messages as turns
+          const numTurns = events.filter((e) => e.kind === 'user').length;
+
+          if (totalInput > 0 || totalOutput > 0) {
+            const syntheticResult: AgentMessage = {
+              kind: 'result',
+              data: {
+                type: 'result',
+                subtype: 'success',
+                is_error: false,
+                uuid: `synthetic-result-${sessionId}`,
+                session_id: sessionId,
+                duration_ms: durationMs,
+                duration_api_ms: 0,
+                num_turns: numTurns,
+                result: '',
+                total_cost_usd: 0,
+                usage: {
+                  input_tokens: totalInput,
+                  output_tokens: totalOutput,
+                  cache_creation_input_tokens: totalCacheCreate,
+                  cache_read_input_tokens: totalCacheRead,
+                },
+              } as AgentResultMessage,
+            };
+            events.push(syntheticResult);
+            timestamps.push(validTs[validTs.length - 1] || 0);
+          }
+        }
+
         set((state) => ({
           events: { ...state.events, [sessionId]: events },
           eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },

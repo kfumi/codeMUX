@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { execSync } from 'node:child_process';
 import { query, startup } from '@anthropic-ai/claude-agent-sdk';
+import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { SidecarCommand } from './types.js';
 
 /** Pending tool responses waiting for user input */
@@ -123,6 +124,22 @@ function emit(obj: unknown): void {
   process.stdout.write(JSON.stringify(obj) + '\n');
 }
 
+async function* createPromptStream(prompt: string): AsyncGenerator<SDKUserMessage, void, void> {
+  yield {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: prompt,
+        },
+      ],
+    },
+    parent_tool_use_id: null,
+  };
+}
+
 async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Promise<void> {
   if (activeQuery) {
     emit({ type: 'sidecar_error', error: 'A query is already active' });
@@ -160,24 +177,25 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
   process.stderr.write(`[sidecar] Session: app=${appSessionId || 'none'}, claude=${claudeSessionId || 'new'}\n`);
 
   abortController = new AbortController();
+  let activeAbortSignal: AbortSignal | null = abortController.signal;
 
   try {
-    // Build explicit env for the SDK subprocess — ensures provider switch
+    // Build explicit env for the SDK subprocess 鈥?ensures provider switch
     // picks up new ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL instead of using
     // whatever the child process inherited at startup.
     const subprocessEnv: Record<string, string | undefined> = { ...process.env };
     // Force-overwrite auth vars so stale values from settings.json can't leak through
     if (cmd.apiKey) subprocessEnv.ANTHROPIC_API_KEY = cmd.apiKey;
     if (cmd.baseUrl) subprocessEnv.ANTHROPIC_BASE_URL = cmd.baseUrl;
-    // Remove ANTHROPIC_AUTH_TOKEN — it's the Claude account login token from
+    // Remove ANTHROPIC_AUTH_TOKEN 鈥?it's the Claude account login token from
     // ~/.claude/settings.json. When set alongside ANTHROPIC_API_KEY, Claude Code
     // uses the auth token (for anthropic.com) instead of the API key, causing
     // 401 on non-Anthropic endpoints like DeepSeek.
-    // NOTE: Must set to empty string instead of delete — the CLI re-reads
+    // NOTE: Must set to empty string instead of delete 鈥?the CLI re-reads
     // settings.json and picks up the token even when the env var is absent.
     subprocessEnv.ANTHROPIC_AUTH_TOKEN = '';
     subprocessEnv.ANTHROPIC_COOKIE = '';
-    // Remove global model overrides from settings — the user's chosen model
+    // Remove global model overrides from settings 鈥?the user's chosen model
     // is passed via the SDK --model flag, these env defaults would interfere.
     for (const key of Object.keys(subprocessEnv)) {
       if (key.startsWith('ANTHROPIC_DEFAULT_')) {
@@ -335,12 +353,12 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
         initializeTimeoutMs: 30_000,
       });
       process.stderr.write(`[sidecar] startup() complete. Sending prompt...\n`);
-      activeQuery = warm.query(cmd.prompt);
+      activeQuery = warm.query(createPromptStream(cmd.prompt));
     } catch (startupErr) {
       process.stderr.write(`[sidecar] startup() failed: ${startupErr}. Falling back to query()...\n`);
       emit({ type: 'mcp_status_update', servers: {}, status: 'startup_failed_fallback' });
       activeQuery = query({
-        prompt: cmd.prompt,
+        prompt: createPromptStream(cmd.prompt),
         options: options as any,
       });
     }
@@ -350,7 +368,7 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
     const MESSAGE_TIMEOUT_MS = 300_000; // 5 minutes per message
     let compacting = false;
     let compactTimer: ReturnType<typeof setTimeout> | null = null;
-    const COMPACT_TIMEOUT_MS = 60_000; // 60s — compact can take a while on large contexts
+    const COMPACT_TIMEOUT_MS = 60_000; // 60s 鈥?compact can take a while on large contexts
 
     function clearCompactTimer() {
       if (compactTimer) { clearTimeout(compactTimer); compactTimer = null; }
@@ -358,22 +376,23 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
 
     // Iteration with timeout detection
     const iterator = activeQuery[Symbol.asyncIterator]();
-    const abortSignal = abortController.signal;
-    // Promise that rejects when the user interrupts — added to Promise.race
+    const abortSignal = activeAbortSignal;
+    const ABORT_DRAIN_TIMEOUT_MS = 4_000;
+    // Promise that rejects when the user interrupts 鈥?added to Promise.race
     // so the loop exits immediately instead of waiting for the next SDK message.
-    const abortPromise = new Promise<never>((_, reject) => {
-      if (abortSignal.aborted) { reject(abortSignal.reason); return; }
-      abortSignal.addEventListener('abort', () => reject(abortSignal.reason), { once: true });
-    });
 
-    while (true) {
-      const result = await Promise.race([
+    async function nextMessageWithTimeout(timeoutMs: number) {
+      return await Promise.race([
         iterator.next(),
-        abortPromise,
-        new Promise<never>((_, reject) => {
+        new Promise<IteratorResult<unknown>>((resolve, reject) => {
           const timer = setTimeout(() => {
-            reject(new Error(`Query timed out: no message received for ${MESSAGE_TIMEOUT_MS / 1000}s (after msg #${msgCount})`));
-          }, MESSAGE_TIMEOUT_MS);
+            if (abortSignal?.aborted && timeoutMs === ABORT_DRAIN_TIMEOUT_MS) {
+              process.stderr.write(`[sidecar] Abort drain timeout after ${timeoutMs}ms; treating query as complete\n`);
+              resolve({ done: true, value: undefined });
+              return;
+            }
+            reject(new Error(`Query timed out: no message received for ${timeoutMs / 1000}s (after msg #${msgCount})`));
+          }, timeoutMs);
           if (timer.unref) timer.unref();
         }),
         // When compacting, if no new message arrives within COMPACT_TIMEOUT_MS, treat as done
@@ -393,24 +412,19 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
           if (compactTimer.unref) compactTimer.unref();
         })] : []),
       ]);
+    }
 
-      clearCompactTimer();
-      if (result.done) break;
-
-      // Stop processing immediately if the user interrupted
-      if (abortController?.signal.aborted) break;
-
+    function processSdkMessage(message: unknown) {
       msgCount++;
-      const message = result.value;
       const msg = message as Record<string, unknown>;
       process.stderr.write(`[sidecar] Message #${msgCount}: type=${msg.type}, subtype=${msg.subtype || 'none'}\n`);
       // Log full content for system messages and assistant messages (debug)
       if (msg.type === 'system') {
-        process.stderr.write(`[sidecar]   → ${JSON.stringify(message)}\n`);
+        process.stderr.write(`[sidecar]   -> ${JSON.stringify(message)}\n`);
       }
       // Log ALL non-assistant messages for debugging compact/status flows
       if (msg.type !== 'assistant' && msg.type !== 'user' && msg.type !== 'system') {
-        process.stderr.write(`[sidecar]   → [${msg.type}] ${JSON.stringify(message)}\n`);
+        process.stderr.write(`[sidecar]   -> [${msg.type}] ${JSON.stringify(message)}\n`);
       }
       // Track compacting status
       if (msg.type === 'system' && msg.subtype === 'status' && (msg as any).status === 'compacting') {
@@ -430,23 +444,27 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       if (msg.type === 'assistant') {
         const m: any = message;
         const usage = m?.message?.usage || m?.usage;
-        process.stderr.write(`[sidecar]   → assistant usage: ${JSON.stringify(usage || 'NONE')}\n`);
+        process.stderr.write(`[sidecar]   -> assistant usage: ${JSON.stringify(usage || 'NONE')}\n`);
         // Debug: log tool_use block names to trace TodoWrite
         const blocks = m?.message?.content;
         if (Array.isArray(blocks)) {
           const toolNames = blocks.filter((b: any) => b?.type === 'tool_use').map((b: any) => b.name);
           if (toolNames.length > 0) {
-            process.stderr.write(`[sidecar]   → tool_use blocks: ${toolNames.join(', ')}\n`);
+            process.stderr.write(`[sidecar]   -> tool_use blocks: ${toolNames.join(', ')}\n`);
           }
         }
       }
 
       // Capture the real Claude session ID from any SDK message
-      if (appSessionId && !sessionIdMap.has(appSessionId)) {
-        if (typeof msg.session_id === 'string' && msg.session_id) {
-          sessionIdMap.set(appSessionId, msg.session_id);
-          saveSessionMap();
-          process.stderr.write(`[sidecar] Captured Claude session ID: ${msg.session_id} for app session: ${appSessionId}\n`);
+      if (typeof appSessionId === 'string') {
+        const sessionId = appSessionId!;
+        if (!sessionIdMap.has(sessionId)) {
+          const sdkSessionId = typeof msg.session_id === 'string' ? String(msg.session_id) : undefined;
+          if (sdkSessionId) {
+            sessionIdMap.set(sessionId, sdkSessionId!);
+            saveSessionMap();
+            process.stderr.write(`[sidecar] Captured Claude session ID: ${sdkSessionId} for app session: ${sessionId}\n`);
+          }
         }
       }
       emit(message);
@@ -481,13 +499,28 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
       }
     }
 
+    while (true) {
+      const result = await nextMessageWithTimeout(abortSignal.aborted ? ABORT_DRAIN_TIMEOUT_MS : MESSAGE_TIMEOUT_MS);
+
+      clearCompactTimer();
+      if (result.done) break;
+      processSdkMessage(result.value);
+    }
+
     process.stderr.write(`[sidecar] Query iteration done. Total messages: ${msgCount}\n`);
     emit({ type: 'sidecar_query_done' });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
-    const isAbort = errorMsg.toLowerCase().includes('abort');
-    if (!isAbort) {
+    const normalizedError = errorMsg.toLowerCase();
+    const isAbort = normalizedError.includes('abort');
+    const isGracefulInterruptCleanup = Boolean(
+      activeAbortSignal?.aborted &&
+      (normalizedError.includes('stream closed') || normalizedError.includes('query timed out')),
+    );
+    if (!isAbort && !isGracefulInterruptCleanup) {
       emit({ type: 'sidecar_error', error: errorMsg });
+    } else {
+      process.stderr.write(`[sidecar] Suppressed interrupt cleanup error: ${errorMsg}\n`);
     }
   } finally {
     activeQuery = null;
@@ -496,11 +529,34 @@ async function handleStart(cmd: Extract<SidecarCommand, { type: 'start' }>): Pro
 }
 
 function handleInterrupt(): void {
-  if (abortController) {
-    abortController.abort();
-    abortController = null;
+  if (activeQuery) {
+    process.stderr.write('[sidecar] Interrupt requested; sending query.interrupt()\n');
+    const controller = abortController;
+    const fallbackTimer = setTimeout(() => {
+      if (controller && !controller.signal.aborted) {
+        process.stderr.write('[sidecar] Interrupt fallback timeout reached; aborting transport\n');
+        controller.abort('user_interrupt_fallback');
+      }
+    }, 2_000);
+    if (fallbackTimer.unref) fallbackTimer.unref();
+
+    void activeQuery.interrupt()
+      .catch((err) => {
+        process.stderr.write(`[sidecar] query.interrupt() failed: ${err}\n`);
+        if (controller && !controller.signal.aborted) {
+          controller.abort('user_interrupt_error');
+        }
+      })
+      .finally(() => {
+        clearTimeout(fallbackTimer);
+      });
+    return;
   }
-  activeQuery = null;
+
+  if (abortController && !abortController.signal.aborted) {
+    process.stderr.write('[sidecar] Interrupt requested without active query; aborting transport\n');
+    abortController.abort('user_interrupt_no_query');
+  }
 }
 
 function handleResetSession(cmd: Extract<SidecarCommand, { type: 'reset_session' }>): void {
@@ -533,7 +589,7 @@ async function main(): Promise<void> {
 
     switch (cmd.type) {
       case 'start':
-        // Run async but don't await — allows interrupt to be received during execution
+        // Run async but don't await 鈥?allows interrupt to be received during execution
         handleStart(cmd).catch((err) => {
           emit({ type: 'sidecar_error', error: String(err) });
         });
@@ -566,3 +622,4 @@ main().catch((err) => {
   emit({ type: 'sidecar_error', error: `Fatal: ${String(err)}` });
   process.exit(1);
 });
+

@@ -36,6 +36,7 @@ pub fn get_agent_events(
     Ok(messages.last().map(|m| m.content.clone()).unwrap_or_default())
 }
 
+
 #[tauri::command]
 pub fn create_session(
     state: State<'_, AppState>,

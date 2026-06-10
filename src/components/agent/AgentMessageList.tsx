@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAgentStore, type AgentMessage } from '../../stores/agentStore';
+import { isInterruptMarker } from '../../stores/agentEventParsing';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { calculateCost } from '../../lib/pricing';
 import type { Provider } from '../../types/provider';
@@ -268,7 +269,7 @@ function renderEvent(sessionId: string, msg: AgentMessage, _prevMsg: AgentMessag
   switch (msg.kind) {
     case 'user': {
       const content = msg.data.content;
-      if (content === '[Request interrupted by user for tool use]') {
+      if (isInterruptMarker(content)) {
         return (
           <div className="text-xs text-muted-foreground/40 py-2 px-1 animate-fade-in">
             工具运行中断
@@ -667,7 +668,7 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
 
   const userIdxes = useMemo(
     () => events.reduce<number[]>((acc, msg, i) => {
-      if (msg.kind === 'user' && msg.data.content !== '[Request interrupted by user for tool use]') acc.push(i);
+      if (msg.kind === 'user' && !isInterruptMarker(msg.data.content)) acc.push(i);
       return acc;
     }, []),
     [events]

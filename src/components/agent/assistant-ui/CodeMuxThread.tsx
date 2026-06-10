@@ -18,6 +18,7 @@ import {
 import { cn } from '../../../lib/utils';
 import { calculateCost } from '../../../lib/pricing';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
+import { isInterruptMarker } from '../../../stores/agentEventParsing';
 import type { Provider } from '../../../types/provider';
 import {
   CodeMuxDataMessagePart,
@@ -35,7 +36,6 @@ type CodeMuxThreadProps = {
 
 const EMPTY_EVENTS: AgentMessage[] = [];
 const EMPTY_TIMESTAMPS: number[] = [];
-const INTERRUPT_MARKER = '[Request interrupted by user for tool use]';
 const INTERRUPT_LABEL = '\u7528\u6237\u4e2d\u65ad\u8bf7\u6c42';
 const GROUP_BY_PART = groupPartByType({
   reasoning: ['group-thinking'],
@@ -44,6 +44,7 @@ const GROUP_BY_PART = groupPartByType({
 export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProps) {
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
+  const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const toolDurations = useMemo(() => buildToolDurationMap(events, eventTimestamps), [events, eventTimestamps]);
   const thinkingDurations = useMemo(
@@ -62,7 +63,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
         }
 
         const text = event.data.content.trim();
-        if (text.length === 0 || text === INTERRUPT_MARKER) {
+        if (text.length === 0 || isInterruptMarker(text)) {
           return items;
         }
 
@@ -99,6 +100,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
                 )
               }
             </ThreadPrimitive.Messages>
+            {stopped ? <InterruptBanner /> : null}
             <StreamingContent sessionId={sessionId} />
             <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-background pb-4 pt-4 md:pb-6">
             <ThreadPrimitive.ScrollToBottom
@@ -119,6 +121,16 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
   );
 }
 
+function InterruptBanner() {
+  return (
+    <div className="mb-4 flex w-full justify-center">
+      <div className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
+        {INTERRUPT_LABEL}
+      </div>
+    </div>
+  );
+}
+
 function UserMessage({ message, sourceEventIndex }: { message: MessageState; sourceEventIndex?: number }) {
   const text = getMessageText(message);
   const timestamp = getSourceTimestamp(message);
@@ -127,7 +139,7 @@ function UserMessage({ message, sourceEventIndex }: { message: MessageState; sou
     return null;
   }
 
-  if (text === INTERRUPT_MARKER) {
+  if (isInterruptMarker(text)) {
     return (
       <div className="mb-4 flex w-full justify-center">
         <div className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">

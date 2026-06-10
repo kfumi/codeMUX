@@ -56,7 +56,7 @@ fn find_session_jsonl(claude_dir: &std::path::Path, claude_session_id: &str) -> 
 ///
 /// Reads `~/.claude/session-id-map.json` to find the Claude session ID,
 /// then locates and parses `~/.claude/projects/{project}/{sessionId}.jsonl`.
-/// Returns a JSON array of raw SDK message objects (user/assistant types only).
+/// Returns a JSON array of raw SDK message objects from Claude JSONL.
 #[tauri::command]
 pub async fn load_claude_session_events(
     app_session_id: String,
@@ -66,37 +66,36 @@ pub async fn load_claude_session_events(
 
     debug!(target: "agent", "Loading Claude session events for app_session_id={}", app_session_id);
 
-    let (claude_dir, claude_session_id) = get_claude_session_id(&app_session_id)?;
-
-    let jsonl_path = find_session_jsonl(&claude_dir, &claude_session_id)
-        .ok_or_else(|| format!("JSONL file not found for Claude session {}", claude_session_id))?;
-
-    debug!(target: "agent", "Reading JSONL from {}", jsonl_path.display());
-
-    let file = fs::File::open(&jsonl_path)
-        .map_err(|e| format!("Failed to open JSONL: {}", e))?;
-    let reader = BufReader::new(file);
-
     let mut messages = Vec::new();
-    for line_result in reader.lines() {
-        let line = match line_result {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
 
-        let val: serde_json::Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
+    if let Ok((claude_dir, claude_session_id)) = get_claude_session_id(&app_session_id) {
+        if let Some(jsonl_path) = find_session_jsonl(&claude_dir, &claude_session_id) {
+            debug!(target: "agent", "Reading JSONL from {}", jsonl_path.display());
 
-        let msg_type = val.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        // Only include user and assistant messages (skip queue-operation, attachment, etc.)
-        if msg_type == "user" || msg_type == "assistant" {
-            messages.push(val);
+            let file = fs::File::open(&jsonl_path)
+                .map_err(|e| format!("Failed to open JSONL: {}", e))?;
+            let reader = BufReader::new(file);
+
+            for line_result in reader.lines() {
+                let line = match line_result {
+                    Ok(l) => l,
+                    Err(_) => continue,
+                };
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                let val: serde_json::Value = match serde_json::from_str(trimmed) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+
+                let msg_type = val.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if msg_type == "user" || msg_type == "assistant" || msg_type == "result" {
+                    messages.push(val);
+                }
+            }
         }
     }
 

@@ -153,14 +153,20 @@ pub async fn spawn_sidecar(
         Err(_) => return Err("Sidecar died before signaling ready".to_string()),
     }
 
-    // Log stderr and forward to frontend for debugging
+    // Log stderr and forward to frontend for debugging.
+    // Filter out known non-fatal SDK errors that occur during abort cleanup
+    // (e.g. "Stream closed" from sendRequest after abortController.abort()).
     if let Some(stderr) = child.stderr.take() {
         tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                // Suppress noisy SDK abort-cleanup errors
+                if line.contains("Stream closed") || line.contains("Error in hook callback") {
+                    debug!(target: "sidecar_stderr", "(suppressed abort cleanup) {}", line);
+                    continue;
+                }
                 warn!(target: "sidecar_stderr", "{}", line);
-                // Also send stderr to frontend as a debug event
                 let debug_msg = serde_json::json!({
                     "type": "sidecar_debug",
                     "message": line

@@ -16,7 +16,6 @@ type CodeMuxAssistantRuntimeProviderProps = {
   sessionId: string;
   onSend: (content: string) => Promise<void>;
   onCommand: (command: SlashCommand, args: string) => void | Promise<void>;
-  onStop?: () => void;
   children: ReactNode;
 };
 
@@ -29,7 +28,6 @@ export function CodeMuxAssistantRuntimeProvider({
   sessionId,
   onSend,
   onCommand,
-  onStop,
   children,
 }: CodeMuxAssistantRuntimeProviderProps) {
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
@@ -69,11 +67,6 @@ export function CodeMuxAssistantRuntimeProvider({
     isRunning,
     convertMessage: (message) => convertCodeMuxMessageToThreadMessageLike(message, eventTimestamps),
     onNew: handleNew,
-    onCancel: onStop
-      ? async () => {
-          onStop();
-        }
-      : undefined,
   });
 
   return <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>;
