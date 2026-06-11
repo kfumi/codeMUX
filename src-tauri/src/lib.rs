@@ -2,6 +2,7 @@ mod db;
 mod config;
 mod commands;
 mod agent;
+mod agent_runtime;
 mod mcp;
 mod skills;
 
@@ -202,6 +203,9 @@ pub fn run() {
             agent::commands::send_tool_response,
             agent::commands::delete_claude_session_files,
             agent::commands::load_claude_session_events,
+            agent::commands::start_codex_proxy,
+            agent::commands::stop_codex_proxy,
+            agent::commands::get_codex_proxy_port,
             skills::commands::list_installed_skills,
             skills::commands::uninstall_skill,
             skills::commands::toggle_skill,

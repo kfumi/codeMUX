@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import type { AgentConfigMap, AgentConfigUpdateMap, AppConfig, Provider, Theme } from '../types/provider';
 import type { ModelInfo } from '../lib/tauri';
-import { configApi } from '../lib/tauri';
+import { configApi, agentApi } from '../lib/tauri';
+import { useNewSessionStore } from './newSessionStore';
 import { getDefaultAgentKind } from '../types/agentRegistry';
 import type { AgentKind } from '../types/session';
 
@@ -9,6 +10,10 @@ interface SettingsState {
   config: AppConfig | null;
   isLoading: boolean;
   error: string | null;
+  /** Whether the codex compat proxy is currently running (tracked by frontend) */
+  proxyRunning: boolean;
+  /** Local proxy URL when running, e.g. "http://127.0.0.1:63684" */
+  proxyUrl: string | null;
   fetchConfig: () => Promise<void>;
   setTheme: (theme: Theme) => Promise<void>;
   setActiveProvider: (providerId: string) => Promise<void>;
@@ -20,17 +25,23 @@ interface SettingsState {
   getDefaultAgentKind: () => AgentKind;
   setDefaultAgentKind: (agentKind: AgentKind) => Promise<void>;
   updateAgentConfig: <T extends keyof AgentConfigMap>(agentKind: T, config: AgentConfigUpdateMap[T]) => Promise<void>;
+  startProxy: () => Promise<void>;
+  stopProxy: () => Promise<void>;
+  setProxyRunning: (running: boolean, url?: string | null) => void;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   config: null,
   isLoading: false,
   error: null,
+  proxyRunning: false,
+  proxyUrl: null,
 
   fetchConfig: async () => {
     set({ isLoading: true, error: null });
     try {
       const config = await configApi.get();
+      useNewSessionStore.getState().setSelectedAgentKind(config.agent_defaults.default_agent_kind);
       set({ config, isLoading: false });
     } catch (error) {
       set({ error: String(error), isLoading: false });
@@ -85,21 +96,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           state.config.active_provider_id === providerId
             ? providers[0]?.id ?? null
             : state.config.active_provider_id;
-        const codexDefaultProviderId = state.config.agent_configs.codex.default_provider_id === providerId
-          ? null
-          : state.config.agent_configs.codex.default_provider_id;
         return {
           config: {
             ...state.config,
             providers,
             active_provider_id,
-            agent_configs: {
-              ...state.config.agent_configs,
-              codex: {
-                ...state.config.agent_configs.codex,
-                default_provider_id: codexDefaultProviderId,
-              },
-            },
           },
         };
       });
@@ -132,6 +133,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setDefaultAgentKind: async (agentKind: AgentKind) => {
     try {
       await configApi.setDefaultAgentKind(agentKind);
+      useNewSessionStore.getState().setSelectedAgentKind(agentKind);
       set((state) => ({
         config: state.config
           ? {
@@ -165,6 +167,36 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             }
           : null,
       }));
+    } catch (error) {
+      set({ error: String(error) });
+    }
+  },
+
+  setProxyRunning: (running: boolean, url?: string | null) => {
+    set({ proxyRunning: running, proxyUrl: running ? (url ?? get().proxyUrl) : null });
+  },
+
+  startProxy: async () => {
+    const provider = get().getActiveProvider();
+    if (!provider?.api_key || !provider?.openai_base_url) {
+      set({ error: 'No provider configured with api_key and openai_base_url' });
+      return;
+    }
+    try {
+      const port = await agentApi.startProxy(provider.api_key, provider.openai_base_url);
+      set({
+        proxyRunning: true,
+        proxyUrl: port > 0 ? `http://127.0.0.1:${port}` : null,
+      });
+    } catch (error) {
+      set({ error: String(error) });
+    }
+  },
+
+  stopProxy: async () => {
+    try {
+      await agentApi.stopProxy();
+      set({ proxyRunning: false, proxyUrl: null });
     } catch (error) {
       set({ error: String(error) });
     }

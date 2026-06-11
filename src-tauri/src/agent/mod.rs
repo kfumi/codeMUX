@@ -26,6 +26,8 @@ pub struct SidecarHandle {
     /// The Tauri channel used by the forwarding task. Updated when the sidecar
     /// is reused for a new `start` command so events reach the new frontend channel.
     channel: Arc<AsyncMutex<tauri::ipc::Channel<String>>>,
+    /// Captured stderr lines from the sidecar process.
+    pub stderr_lines: Arc<AsyncMutex<Vec<String>>>,
 }
 
 impl SidecarHandle {
@@ -281,7 +283,7 @@ pub async fn spawn_sidecar(
 
     debug!(target: "agent", "Sidecar spawn completed successfully");
     let channel = Arc::new(AsyncMutex::new(channel));
-    let handle = SidecarHandle { child, stdin_tx, channel };
+    let handle = SidecarHandle { child, stdin_tx, channel, stderr_lines };
     Ok((handle, event_rx))
 }
 

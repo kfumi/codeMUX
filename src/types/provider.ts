@@ -13,7 +13,6 @@ export interface AgentConfigMap {
   };
   codex: {
     sdk_mode?: 'responses' | 'agent';
-    default_provider_id?: string | null;
   };
   gemini_cli: Record<string, never>;
   opencode: Record<string, never>;

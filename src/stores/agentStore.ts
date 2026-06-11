@@ -3,13 +3,16 @@ import { diffLines } from 'diff';
 import { agentApi, fileApi } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 import {
+  isTerminalAgentEvent,
   mapPersistedClaudeMessage,
   parseSdkUserMessage,
+  shouldProcessTerminalEvent,
   shouldSuppressLiveEventWhileStopped,
 } from './agentEventParsing';
 import { useSessionStore } from './sessionStore';
 import { useMcpStore } from './mcpStore';
 import { normalizeFilePath, usePreviewStore } from './previewStore';
+import { useSettingsStore } from './settingsStore';
 import type {
   AgentAssistantMessage,
   AgentToolResult,
@@ -33,6 +36,7 @@ export type AgentMessage =
   | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string }>; multiSelect?: boolean }> } }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
   | { kind: 'mcp_status'; data: { servers: Record<string, string>; status?: string } }
+  | { kind: 'proxy_status'; data: { running: boolean; port: number | null; upstreamBaseUrl: string | null } }
   | { kind: 'streaming'; data: { event: Record<string, unknown>; session_id?: string } }
   | { kind: 'file_snapshot'; data: { file_path: string; original_content: string; is_new: boolean; tool_use_id: string } }
   | { kind: 'done' }
@@ -209,6 +213,8 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'done' };
       case 'mcp_status_update':
         return { kind: 'mcp_status', data: { servers: (data as any).servers || {}, status: (data as any).status } };
+      case 'proxy_status':
+        return { kind: 'proxy_status', data: { running: (data as any).running, port: (data as any).port, upstreamBaseUrl: (data as any).upstreamBaseUrl } };
       case 'assistant':
         return { kind: 'assistant', data };
       case 'user':
@@ -898,8 +904,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }));
           }
         }
+        // Update proxy status with local URL from sidecar
+        if (event.kind === 'proxy_status') {
+          const localUrl = event.data.running && event.data.port
+            ? `http://127.0.0.1:${event.data.port}`
+            : null;
+          useSettingsStore.getState().setProxyRunning(event.data.running, localUrl);
+        }
 
-        if (event.kind === 'done' || event.kind === 'error' || (event.kind === 'result' && event.data?.is_error)) {
+        const isTerminalEvent = isTerminalAgentEvent(event.kind, Boolean(event.kind === 'result' && event.data?.is_error));
+        if (isTerminalEvent && !shouldProcessTerminalEvent(get().isRunning[sessionId] ?? false, event.kind, Boolean(event.kind === 'result' && event.data?.is_error))) {
+          return;
+        }
+
+        if (isTerminalEvent) {
           clearPendingStreaming(sessionId);
           set((s) => ({
             isRunning: { ...s.isRunning, [sessionId]: false },

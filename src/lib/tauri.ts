@@ -155,6 +155,10 @@ export const agentApi = {
   /** Load session events directly from Claude Code's JSONL session file. */
   loadClaudeSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_claude_session_events', { appSessionId }),
+  startProxy: (apiKey: string, baseUrl: string): Promise<number> =>
+    invokeLogged('start_codex_proxy', { apiKey, baseUrl }),
+  stopProxy: (): Promise<void> => invokeLogged('stop_codex_proxy'),
+  getProxyPort: (): Promise<number | null> => invokeLogged('get_codex_proxy_port'),
 };
 
 export const configApi = {

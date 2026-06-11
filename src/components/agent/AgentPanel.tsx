@@ -15,10 +15,13 @@ import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { resolveAgentProviderConfig } from '../../lib/agentProvider';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { AgentStatusBar } from './AgentStatusBar';
 import { FolderOpen, MoreHorizontal, Pencil, PanelRightOpen, PanelRightClose } from 'lucide-react';
 import type { SlashCommand, CommandContext } from '../../lib/slashCommands';
 import { agentApi, sessionApi } from '../../lib/tauri';
+import { supportsCapability } from './agentCapabilities';
 
 interface AgentPanelProps {
   sessionId: string;
@@ -34,7 +37,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, updateSessionTitle, createSession } = useSessionStore();
   const { projects } = useProjectStore();
   const { startQuery, interrupt, loadSessionMessages, clearEvents, clearSavedEvents } = useAgentStore();
-  const { config, getActiveProvider } = useSettingsStore();
+  const { config, getActiveProvider, setProxyRunning } = useSettingsStore();
   const { isOpen: previewOpen, togglePanel: togglePreview, loadFileTree, setProjectPath } = usePreviewStore();
 
   const todos = useAgentStore((s) => s.todos[sessionId] ?? EMPTY_TODOS);
@@ -42,11 +45,11 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   const session = sessions.find((s) => s.id === sessionId);
   const project = session?.project_id ? projects.find((p) => p.id === session.project_id) : null;
-  const activeProvider = config?.providers.find((p) => p.id === config.active_provider_id) ?? null;
-  const sessionProvider =
-    session?.provider_id
-      ? config?.providers.find((provider) => provider.id === session.provider_id) ?? null
-      : null;
+  const { provider: resolvedProvider, apiKey, baseUrl, model } = resolveAgentProviderConfig({
+    agentKind: session?.agent_kind ?? 'claude_code',
+    config,
+    sessionProviderId: session?.provider_id,
+  });
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
@@ -92,24 +95,12 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   }, [sessionId, project?.path]);
 
   useEffect(() => {
-    let provider = activeProvider;
-    if (session?.provider_id) {
-      const storedProvider = config?.providers.find((p) => p.id === session.provider_id);
-      if (storedProvider) provider = storedProvider;
-    }
-
     const effectiveCwd = project?.path || cwd;
-    const apiKey = provider?.api_key || undefined;
-    const baseUrl = provider?.anthropic_base_url || undefined;
-    let model = provider?.default_model || undefined;
-    if (model && provider?.context_1m && !model.includes('[1m]')) {
-      model = model + '[1m]';
-    }
 
     const ensureKey = JSON.stringify({
       sessionId,
       cwd: effectiveCwd,
-      providerId: provider?.id || null,
+      providerId: resolvedProvider?.id || null,
       model: model || null,
       hasApiKey: Boolean(apiKey),
       baseUrl: baseUrl || null,
@@ -120,12 +111,24 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
 
     lastEnsureKeyRef.current = ensureKey;
-    agentApi.ensureSession(sessionId, effectiveCwd, undefined, apiKey, baseUrl, model).catch(() => {
+    agentApi.ensureSession(sessionId, effectiveCwd, undefined, apiKey, baseUrl, model).then(async () => {
+      // If provider needs a compat proxy, mark it as running and fetch the port
+      if (baseUrl) {
+        try {
+          if (new URL(baseUrl).host.toLowerCase() !== 'api.openai.com') {
+            // Wait a bit for the proxy to start, then read the port
+            await new Promise((r) => setTimeout(r, 600));
+            const port = await agentApi.getProxyPort().catch(() => null);
+            setProxyRunning(true, port && port > 0 ? `http://127.0.0.1:${port}` : null);
+          }
+        } catch { /* invalid URL */ }
+      }
+    }).catch(() => {
       if (lastEnsureKeyRef.current === ensureKey) {
         lastEnsureKeyRef.current = null;
       }
     });
-  }, [sessionId, cwd, project?.path, session?.provider_id, activeProvider, config?.providers]);
+  }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, model]);
 
   const events = useAgentStore((s) => s.events[sessionId] ?? EMPTY_EVENTS);
 
@@ -176,33 +179,21 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
     const totalTokens = getSessionContextLimit({
       model: session?.model,
-      sessionProviderUsesLargeContext: !!sessionProvider?.context_1m,
-      activeProviderUsesLargeContext: !!activeProvider?.context_1m,
+      sessionProviderUsesLargeContext: !!resolvedProvider?.context_1m,
+      activeProviderUsesLargeContext: !!resolvedProvider?.context_1m,
     });
 
     return { usedTokens, totalTokens, inputTokens, cachedTokens, outputTokens };
-  }, [events, session?.model, sessionProvider?.context_1m, activeProvider?.context_1m]);
+  }, [events, session?.model, resolvedProvider?.context_1m]);
 
   const handleSend = async (content: string) => {
-    let provider = activeProvider;
-    if (session?.provider_id) {
-      const storedProvider = config?.providers.find((p) => p.id === session.provider_id);
-      if (storedProvider) provider = storedProvider;
-    }
-
     const effectiveCwd = project?.path || cwd;
-    const apiKey = provider?.api_key || undefined;
-    const baseUrl = provider?.anthropic_base_url || undefined;
-    let model = provider?.default_model || undefined;
-    if (model && provider?.context_1m && !model.includes('[1m]')) {
-      model = model + '[1m]';
-    }
 
-    if (session && !session.provider_id && provider?.id && model) {
-      sessionApi.updateProvider(sessionId, provider.id, model).catch(() => {});
+    if (session && !session.provider_id && resolvedProvider?.id && model) {
+      sessionApi.updateProvider(sessionId, resolvedProvider.id, model).catch(() => {});
       useSessionStore.setState((s) => ({
         sessions: s.sessions.map(sess =>
-          sess.id === sessionId ? { ...sess, provider_id: provider!.id, model } : sess
+          sess.id === sessionId ? { ...sess, provider_id: resolvedProvider.id, model } : sess
         ),
       }));
     }
@@ -293,11 +284,11 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           </DropdownMenuItem>
         </DropdownMenu>
         <div className="flex-1" />
-        {contextUsage.usedTokens > 0 && (
+        {contextUsage.usedTokens > 0 && supportsCapability(session?.agent_kind ?? 'claude_code', 'supports_cost') && (
           <ContextDisplay
             usedTokens={contextUsage.usedTokens}
             totalTokens={contextUsage.totalTokens}
-            modelName={session?.model || activeProvider?.default_model}
+            modelName={session?.model || resolvedProvider?.default_model}
             inputTokens={contextUsage.inputTokens}
             cachedTokens={contextUsage.cachedTokens}
             outputTokens={contextUsage.outputTokens}
@@ -344,7 +335,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       >
         <CodeMuxThread
           sessionId={sessionId}
-          provider={sessionProvider ?? activeProvider}
+          provider={resolvedProvider}
           footer={
             <div className="flex w-full flex-col gap-3">
               <div className="flex items-end justify-between gap-3">
@@ -354,13 +345,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
               </div>
               <CodeMuxComposer
                 sessionId={sessionId}
-                modelName={session?.model || activeProvider?.default_model}
+                modelName={session?.model || resolvedProvider?.default_model}
                 onStop={() => interrupt(sessionId)}
               />
             </div>
           }
         />
       </CodeMuxAssistantRuntimeProvider>
+      <AgentStatusBar sessionId={sessionId} />
 
       {/* Rename dialog */}
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>

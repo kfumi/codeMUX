@@ -104,6 +104,8 @@ pub async fn load_claude_session_events(
 pub struct AgentState {
     pub sidecars: Arc<Mutex<HashMap<String, SidecarHandle>>>,
     pub session_startup_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    /// Port of the running codex compat proxy, if any.
+    pub proxy_port: Arc<Mutex<Option<u16>>>,
 }
 
 impl Default for AgentState {
@@ -111,6 +113,7 @@ impl Default for AgentState {
         Self {
             sidecars: Arc::new(Mutex::new(HashMap::new())),
             session_startup_locks: Arc::new(Mutex::new(HashMap::new())),
+            proxy_port: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -159,6 +162,7 @@ async fn ensure_sidecar_for_session(
 fn build_ensure_session_command(
     state: &crate::AppState,
     session_id: &str,
+    agent_kind: &str,
     cwd: String,
     api_key: Option<String>,
     base_url: Option<String>,
@@ -178,6 +182,7 @@ fn build_ensure_session_command(
     };
     let mut cmd = serde_json::json!({
         "type": "ensure_session",
+        "agentKind": agent_kind,
         "cwd": resolved_cwd,
         "sessionId": session_id,
     });
@@ -263,10 +268,36 @@ pub async fn ensure_agent_session(
         base_url.as_ref().map(|url| !url.is_empty()).unwrap_or(false)
     );
 
+    let agent_kind = {
+        let db = state.db.lock().unwrap();
+        crate::agent_runtime::factory::session_runtime_kind_name(&db, &session_id)
+            .unwrap_or_else(|_| "claude_code".to_string())
+    };
+
     ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
-    let cmd = build_ensure_session_command(&state, &session_id, cwd, api_key, base_url, model);
+
+    // Get stderr Arc before sending command (for proxy port parsing)
+    let stderr_lines = {
+        let sidecars = agent_state.sidecars.lock().await;
+        sidecars.get(&session_id).map(|h| h.stderr_lines.clone())
+    };
+
+    let cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model);
     send_command_to_session(&agent_state, &session_id, cmd).await?;
-    info!(target: "agent", "Agent ensure command sent for session_id={}", session_id);
+    info!(target: "agent", "Agent ensure command sent for session_id={} agent_kind={}", session_id, agent_kind);
+
+    // Parse proxy port from stderr if proxy was auto-started
+    if agent_kind == "codex" {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        if let Some(lines) = stderr_lines {
+            let captured = lines.lock().await;
+            if let Some(port) = parse_proxy_port_from_stderr(&captured) {
+                *agent_state.proxy_port.lock().await = Some(port);
+                info!(target: "agent", "Auto-detected codex proxy on port {}", port);
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -300,8 +331,14 @@ pub async fn start_agent_session(
 ) -> Result<(), String> {
     info!(target: "agent", "Starting agent session wrapper for session_id={}", session_id);
 
+    let agent_kind = {
+        let db = state.db.lock().unwrap();
+        crate::agent_runtime::factory::session_runtime_kind_name(&db, &session_id)
+            .unwrap_or_else(|_| "claude_code".to_string())
+    };
+
     ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
-    let ensure_cmd = build_ensure_session_command(&state, &session_id, cwd, api_key, base_url, model);
+    let ensure_cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model);
     send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 
     let input_cmd = serde_json::json!({
@@ -497,4 +534,96 @@ pub async fn delete_claude_session_files(
     );
 
     Ok(deleted)
+}
+
+/// Find any active sidecar to send a global command (e.g. proxy management).
+/// Returns the first available sidecar handle's session_id.
+fn find_any_active_sidecar(
+    sidecars: &HashMap<String, SidecarHandle>,
+) -> Option<String> {
+    sidecars.keys().next().cloned()
+}
+
+/// Parse the proxy port from captured sidecar stderr lines.
+fn parse_proxy_port_from_stderr(lines: &[String]) -> Option<u16> {
+    for line in lines.iter().rev() {
+        // Match: [proxy-manager] Proxy started on port 50284, upstream=...
+        if let Some(rest) = line.strip_prefix("[proxy-manager] Proxy started on port ") {
+            if let Some(port_str) = rest.split(',').next() {
+                if let Ok(port) = port_str.trim().parse::<u16>() {
+                    return Some(port);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
+pub async fn start_codex_proxy(
+    agent_state: State<'_, AgentState>,
+    api_key: String,
+    base_url: String,
+) -> Result<u16, String> {
+    info!(target: "agent", "Starting codex proxy upstream={}", base_url);
+
+    let session_id = {
+        let sidecars = agent_state.sidecars.lock().await;
+        find_any_active_sidecar(&sidecars)
+    };
+    let session_id = session_id.ok_or("No active sidecar to start proxy. Create a session first.")?;
+
+    // Get the stderr lines Arc before sending the command
+    let stderr_lines = {
+        let sidecars = agent_state.sidecars.lock().await;
+        sidecars.get(&session_id).map(|h| h.stderr_lines.clone())
+    };
+
+    let cmd = serde_json::json!({
+        "type": "start_proxy",
+        "apiKey": api_key,
+        "baseUrl": base_url,
+    });
+    send_command_to_session(&agent_state, &session_id, cmd).await?;
+
+    // Wait briefly for the sidecar to process and write stderr
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // Parse the port from stderr
+    let port = if let Some(lines) = stderr_lines {
+        let captured = lines.lock().await;
+        parse_proxy_port_from_stderr(&captured).unwrap_or(0)
+    } else {
+        0
+    };
+
+    *agent_state.proxy_port.lock().await = Some(port);
+    info!(target: "agent", "Codex proxy started on port {}", port);
+    Ok(port)
+}
+
+#[tauri::command]
+pub async fn stop_codex_proxy(
+    agent_state: State<'_, AgentState>,
+) -> Result<(), String> {
+    info!(target: "agent", "Stopping codex proxy");
+
+    let session_id = {
+        let sidecars = agent_state.sidecars.lock().await;
+        find_any_active_sidecar(&sidecars)
+    };
+    let session_id = session_id.ok_or("No active sidecar to stop proxy")?;
+
+    let cmd = serde_json::json!({ "type": "stop_proxy" });
+    send_command_to_session(&agent_state, &session_id, cmd).await?;
+
+    *agent_state.proxy_port.lock().await = None;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_codex_proxy_port(
+    agent_state: State<'_, AgentState>,
+) -> Result<Option<u16>, String> {
+    Ok(*agent_state.proxy_port.lock().await)
 }

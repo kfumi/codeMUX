@@ -1,29 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum OptionalField<T> {
-    #[default]
-    Missing,
-    Null,
-    Value(T),
-}
-
-impl<'de, T> Deserialize<'de> for OptionalField<T>
-where
-    T: Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        match Option::<T>::deserialize(deserializer)? {
-            Some(value) => Ok(Self::Value(value)),
-            None => Ok(Self::Null),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentKind {
@@ -150,8 +127,6 @@ pub struct ClaudeCodeAgentConfigUpdate {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CodexAgentConfigUpdate {
     pub sdk_mode: Option<String>,
-    #[serde(default)]
-    pub default_provider_id: OptionalField<String>,
 }
 
 impl Default for CodexAgentConfig {
@@ -165,7 +140,7 @@ impl Default for CodexAgentConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentKind, AppConfig, CodexAgentConfigUpdate, OptionalField};
+    use super::{AgentKind, AppConfig, CodexAgentConfigUpdate};
 
     #[test]
     fn old_config_json_deserializes_with_agent_defaults() {

@@ -1,11 +1,14 @@
 // Commands from Rust to sidecar (via stdin)
 export type SidecarCommand =
-  | { type: 'ensure_session'; cwd: string; sessionId?: string; apiKey?: string; baseUrl?: string; model?: string; mcpServers?: Record<string, unknown>; mcpServerInstructions?: Record<string, string>; skills?: string[] }
+  | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; apiKey?: string; baseUrl?: string; model?: string; mcpServers?: Record<string, unknown>; mcpServerInstructions?: Record<string, string>; skills?: string[] }
   | { type: 'send_input'; prompt: string }
   | { type: 'reset_session'; sessionId: string }
   | { type: 'interrupt' }
   | { type: 'shutdown' }
-  | { type: 'tool_response'; toolUseId: string; response: unknown };
+  | { type: 'tool_response'; toolUseId: string; response: unknown }
+  | { type: 'start_proxy'; apiKey: string; baseUrl: string }
+  | { type: 'stop_proxy' }
+  | { type: 'proxy_status' };
 
 // The sidecar emits raw SDKMessage JSON lines to stdout.
 // We re-export key shapes here for reference only.

@@ -13,6 +13,9 @@ import type {
 import type { SidecarCommand } from './types.js';
 import { buildMcpInstructions, getProviderMode } from './sessionRuntimeHelpers.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
+import { CodexSessionRuntime } from './codexRuntime.js';
+import { getRuntimeFlavor } from './runtimeEvents.js';
+import { proxyManager } from './proxyManager.js';
 
 const WARM_START_TIMEOUT_MS = 30_000;
 const WARM_QUERY_WAIT_WINDOW_MS = 500;
@@ -147,7 +150,7 @@ function isMissingClaudeConversationError(err: unknown): boolean {
   return String(err).includes('No conversation found with session ID');
 }
 
-class SessionRuntime {
+export class SessionRuntime {
   private config: SessionBootstrap | null = null;
   private configFingerprint: string | null = null;
   private providerMode = getProviderMode(undefined);
@@ -719,6 +722,10 @@ class SessionRuntime {
 }
 
 const runtime = new SessionRuntime();
+const codexRuntime = new CodexSessionRuntime();
+
+/** Tracks which runtime is active for the current session. */
+let activeAgentKind: string | undefined;
 
 async function main(): Promise<void> {
   loadClaudeSettingsEnv();
@@ -741,30 +748,49 @@ async function main(): Promise<void> {
     }
 
     switch (cmd.type) {
-      case 'ensure_session':
+      case 'ensure_session': {
+        const flavor = getRuntimeFlavor(cmd.agentKind);
+        activeAgentKind = cmd.agentKind;
         try {
-          await runtime.ensure(cmd);
+          if (flavor === 'codex') {
+            await codexRuntime.ensure(cmd);
+          } else {
+            await runtime.ensure(cmd);
+          }
         } catch (err) {
           emit({ type: 'sidecar_error', error: String(err) });
         }
         break;
+      }
       case 'send_input':
         try {
-          await runtime.sendInput(cmd.prompt);
+          if (getRuntimeFlavor(activeAgentKind) === 'codex') {
+            await codexRuntime.sendInput(cmd.prompt);
+          } else {
+            await runtime.sendInput(cmd.prompt);
+          }
         } catch (err) {
           emit({ type: 'sidecar_error', error: String(err) });
         }
         break;
       case 'reset_session':
         try {
-          await runtime.resetSession(cmd.sessionId);
+          if (getRuntimeFlavor(activeAgentKind) === 'codex') {
+            await codexRuntime.resetSession(cmd.sessionId);
+          } else {
+            await runtime.resetSession(cmd.sessionId);
+          }
         } catch (err) {
           emit({ type: 'sidecar_error', error: String(err) });
         }
         break;
       case 'interrupt':
         try {
-          await runtime.interrupt();
+          if (getRuntimeFlavor(activeAgentKind) === 'codex') {
+            await codexRuntime.interrupt();
+          } else {
+            await runtime.interrupt();
+          }
         } catch (err) {
           emit({ type: 'sidecar_error', error: String(err) });
         }
@@ -780,8 +806,35 @@ async function main(): Promise<void> {
         break;
       }
       case 'shutdown':
-        await runtime.shutdown();
+        await proxyManager.stop();
+        if (getRuntimeFlavor(activeAgentKind) === 'codex') {
+          await codexRuntime.shutdown();
+        } else {
+          await runtime.shutdown();
+        }
         process.exit(0);
+        break;
+      case 'start_proxy':
+        try {
+          const result = await proxyManager.start(cmd.apiKey, cmd.baseUrl);
+          emit({ type: 'proxy_status', ...proxyManager.getStatus() });
+          if (result) {
+            process.stderr.write(`[sidecar] Proxy started on port ${result.port}\n`);
+          }
+        } catch (err) {
+          emit({ type: 'sidecar_error', error: `Failed to start proxy: ${String(err)}` });
+        }
+        break;
+      case 'stop_proxy':
+        try {
+          await proxyManager.stop();
+          emit({ type: 'proxy_status', ...proxyManager.getStatus() });
+        } catch (err) {
+          emit({ type: 'sidecar_error', error: `Failed to stop proxy: ${String(err)}` });
+        }
+        break;
+      case 'proxy_status':
+        emit({ type: 'proxy_status', ...proxyManager.getStatus() });
         break;
     }
   }

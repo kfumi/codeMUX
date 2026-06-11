@@ -1,7 +1,7 @@
 use tauri::{AppHandle, State};
 use crate::AppState;
 use crate::config::types::{
-    AgentKind, ClaudeCodeAgentConfigUpdate, CodexAgentConfigUpdate, OptionalField, AppConfig, Provider, Theme,
+    AgentKind, ClaudeCodeAgentConfigUpdate, CodexAgentConfigUpdate, AppConfig, Provider, Theme,
 };
 use crate::config;
 use futures::StreamExt;
@@ -32,31 +32,11 @@ fn apply_agent_config_update(
             let update: CodexAgentConfigUpdate = serde_json::from_value(config)
                 .map_err(|e| format!("Invalid Codex config: {}", e))?;
 
-            let validated_default_provider_id = match update.default_provider_id {
-                OptionalField::Missing => OptionalField::Missing,
-                OptionalField::Null => OptionalField::Null,
-                OptionalField::Value(default_provider_id) => {
-                    if !app_config.providers.iter().any(|provider| provider.id == default_provider_id) {
-                        return Err(format!("Unknown Codex default_provider_id: {}", default_provider_id));
-                    }
-                    OptionalField::Value(default_provider_id)
-                }
-            };
-
             if let Some(sdk_mode) = update.sdk_mode {
                 if !matches!(sdk_mode.as_str(), "responses" | "agent") {
                     return Err(format!("Unsupported Codex sdk_mode: {}", sdk_mode));
                 }
                 app_config.agent_configs.codex.sdk_mode = sdk_mode;
-            }
-            match validated_default_provider_id {
-                OptionalField::Missing => {}
-                OptionalField::Null => {
-                    app_config.agent_configs.codex.default_provider_id = None;
-                }
-                OptionalField::Value(default_provider_id) => {
-                    app_config.agent_configs.codex.default_provider_id = Some(default_provider_id);
-                }
             }
         }
         AgentKind::GeminiCli => {}
@@ -69,10 +49,6 @@ fn apply_agent_config_update(
 fn cleanup_provider_references(config: &mut AppConfig, provider_id: &str) {
     if config.active_provider_id.as_deref() == Some(provider_id) {
         config.active_provider_id = config.providers.first().map(|p| p.id.clone());
-    }
-
-    if config.agent_configs.codex.default_provider_id.as_deref() == Some(provider_id) {
-        config.agent_configs.codex.default_provider_id = None;
     }
 }
 

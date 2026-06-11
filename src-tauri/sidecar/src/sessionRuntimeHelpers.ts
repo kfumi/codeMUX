@@ -35,6 +35,19 @@ export function getProviderMode(baseUrl?: string | null): {
   };
 }
 
+export function shouldUseCodexChatCompatProxy(baseUrl?: string | null): boolean {
+  if (!baseUrl) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(baseUrl);
+    return parsed.host.toLowerCase() !== 'api.openai.com';
+  } catch {
+    return true;
+  }
+}
+
 export function buildMcpInstructions(
   mcpServers?: Record<string, unknown>,
   serverInstructions?: Record<string, string>,
