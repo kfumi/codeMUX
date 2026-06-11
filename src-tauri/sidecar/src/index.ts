@@ -26,6 +26,7 @@ type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
 
 type SessionBootstrap = {
   sessionId?: string;
+  agentSessionId?: string;
   cwd: string;
   apiKey?: string;
   baseUrl?: string;
@@ -72,41 +73,6 @@ function loadClaudeSettingsEnv(): void {
     }
   } catch (err) {
     process.stderr.write(`[sidecar] Warning: failed to load Claude settings: ${err}\n`);
-  }
-}
-
-/**
- * Maps app session ID -> Claude Code's real session ID.
- * Captured from the first SDK message that contains a session_id field.
- */
-const sessionIdMap = new Map<string, string>();
-const SESSION_MAP_FILE = path.join(os.homedir(), '.claude', 'session-id-map.json');
-
-function loadSessionMap(): void {
-  try {
-    if (fs.existsSync(SESSION_MAP_FILE)) {
-      const data = JSON.parse(fs.readFileSync(SESSION_MAP_FILE, 'utf-8'));
-      if (data && typeof data === 'object') {
-        for (const [k, v] of Object.entries(data)) {
-          if (typeof v === 'string') sessionIdMap.set(k, v);
-        }
-        process.stderr.write(`[sidecar] Loaded ${sessionIdMap.size} session mappings from disk\n`);
-      }
-    }
-  } catch (err) {
-    process.stderr.write(`[sidecar] Warning: failed to load session map: ${err}\n`);
-  }
-}
-
-function saveSessionMap(): void {
-  try {
-    const obj: Record<string, string> = {};
-    sessionIdMap.forEach((value, key) => {
-      obj[key] = value;
-    });
-    fs.writeFileSync(SESSION_MAP_FILE, JSON.stringify(obj, null, 2), 'utf-8');
-  } catch (err) {
-    process.stderr.write(`[sidecar] Warning: failed to save session map: ${err}\n`);
   }
 }
 
@@ -241,15 +207,11 @@ export class SessionRuntime {
   }
 
   async resetSession(sessionId: string): Promise<void> {
-    const deleted = sessionIdMap.delete(sessionId);
-    if (deleted) {
-      saveSessionMap();
-    }
     await this.resetForReconfigure();
     this.config = null;
     this.configFingerprint = null;
     this.providerMode = getProviderMode(undefined);
-    process.stderr.write(`[sidecar] Reset session ${sessionId}: ${deleted ? 'cleared' : 'not found'}\n`);
+    process.stderr.write(`[sidecar] Reset session ${sessionId}\n`);
   }
 
   async shutdown(): Promise<void> {
@@ -260,6 +222,7 @@ export class SessionRuntime {
     const cwd = cmd.cwd === '.' ? os.homedir() : cmd.cwd;
     return {
       sessionId: cmd.sessionId,
+      agentSessionId: cmd.agentSessionId,
       cwd,
       apiKey: cmd.apiKey,
       baseUrl: cmd.baseUrl,
@@ -282,16 +245,19 @@ export class SessionRuntime {
   }
 
   private clearStaleResumeMapping(reason: unknown): boolean {
-    if (!this.config?.sessionId || !isMissingClaudeConversationError(reason)) {
+    if (!this.config?.agentSessionId || !isMissingClaudeConversationError(reason)) {
       return false;
     }
 
-    const deleted = sessionIdMap.delete(this.config.sessionId);
-    if (deleted) {
-      saveSessionMap();
-      process.stderr.write(`[sidecar] Cleared stale Claude session mapping for app session ${this.config.sessionId}\n`);
-    }
-    return deleted;
+    process.stderr.write(
+      `[sidecar] Cleared stale in-memory Claude resume session for app session ${this.config.sessionId}\n`,
+    );
+    this.config = {
+      ...this.config,
+      agentSessionId: undefined,
+    };
+    this.configFingerprint = JSON.stringify(this.config);
+    return true;
   }
 
   private startWarmup(configGeneration: number): void {
@@ -411,7 +377,7 @@ export class SessionRuntime {
       sidecarDir: SIDECAR_DIST_DIR,
       pathClaude,
     });
-    const claudeSessionId = config.sessionId ? sessionIdMap.get(config.sessionId) : undefined;
+    const claudeSessionId = config.agentSessionId;
     const envKey = process.env.ANTHROPIC_API_KEY;
     const envUrl = process.env.ANTHROPIC_BASE_URL;
     process.stderr.write(`[sidecar] ENV ANTHROPIC_API_KEY=${envKey ? envKey.slice(0, 10) + '...' : 'NOT SET'}\n`);
@@ -632,12 +598,20 @@ export class SessionRuntime {
           process.stderr.write(`[sidecar]   -> assistant usage: ${JSON.stringify(usage || 'NONE')}\n`);
         }
 
-        if (typeof appSessionId === 'string' && !sessionIdMap.has(appSessionId)) {
+        if (typeof appSessionId === 'string') {
           const sdkSessionId = typeof msg.session_id === 'string' ? String(msg.session_id) : undefined;
-          if (sdkSessionId) {
-            sessionIdMap.set(appSessionId, sdkSessionId);
-            saveSessionMap();
+          if (sdkSessionId && this.config?.agentSessionId !== sdkSessionId) {
+            if (this.config) {
+              this.config = { ...this.config, agentSessionId: sdkSessionId };
+              this.configFingerprint = JSON.stringify(this.config);
+            }
             process.stderr.write(`[sidecar] Captured Claude session ID: ${sdkSessionId} for app session: ${appSessionId}\n`);
+            emit({
+              type: 'agent_session_mapping',
+              app_session_id: appSessionId,
+              agent_kind: 'claude_code',
+              agent_session_id: sdkSessionId,
+            });
           }
         }
 
@@ -729,7 +703,6 @@ let activeAgentKind: string | undefined;
 
 async function main(): Promise<void> {
   loadClaudeSettingsEnv();
-  loadSessionMap();
 
   emit({ type: 'sidecar_ready' });
 

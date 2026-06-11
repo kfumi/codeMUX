@@ -30,6 +30,24 @@ export function CodeMuxAssistantRuntimeProvider({
   onCommand,
   children,
 }: CodeMuxAssistantRuntimeProviderProps) {
+  return (
+    <SessionScopedAssistantRuntime
+      key={sessionId}
+      sessionId={sessionId}
+      onSend={onSend}
+      onCommand={onCommand}
+    >
+      {children}
+    </SessionScopedAssistantRuntime>
+  );
+}
+
+function SessionScopedAssistantRuntime({
+  sessionId,
+  onSend,
+  onCommand,
+  children,
+}: CodeMuxAssistantRuntimeProviderProps) {
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);

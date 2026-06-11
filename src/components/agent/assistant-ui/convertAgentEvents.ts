@@ -102,6 +102,22 @@ export function convertAgentEventsToAssistantMessages(
       return;
     }
 
+    if (event.kind === 'error') {
+      const text = event.data.error.trim();
+      if (text.length > 0) {
+        messages.push(
+          createMessage(
+            `error-${index}`,
+            'system',
+            [{ type: 'text', text: `Error: ${text}` }],
+            event,
+            index,
+          ),
+        );
+      }
+      return;
+    }
+
     if (isVisibleEventKind(event.kind)) {
       const messageIndex = messages.length;
       const part = createEventPart(event.kind, event);

@@ -1,4 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 
 import {
   CodexChatHistory,
@@ -21,10 +24,10 @@ export async function createCodexCompatProxyServer(config: ProxyConfig): Promise
   const history = new CodexChatHistory();
   const server = createServer(async (req, res) => {
     try {
-      debugLog(`${req.method ?? 'UNKNOWN'} ${req.url ?? '/'}`);
+      proxyLog(`${req.method ?? 'UNKNOWN'} ${req.url ?? '/'}`);
       await handleRequest(req, res, config, history);
     } catch (error) {
-      debugLog(`error ${req.method ?? 'UNKNOWN'} ${req.url ?? '/'}: ${error instanceof Error ? error.message : String(error)}`);
+      proxyLog(`error ${req.method ?? 'UNKNOWN'} ${req.url ?? '/'}: ${error instanceof Error ? error.message : String(error)}`);
       writeJson(res, 500, {
         error: {
           message: error instanceof Error ? error.message : String(error),
@@ -86,7 +89,27 @@ async function handleRequest(
   }
 
   const requestBody = await readJsonBody(req) as Parameters<typeof convertResponsesToChatRequest>[0];
+  proxyLog(`responses request ${summarizeResponsesRequest(requestBody)}`);
+  if (Array.isArray(requestBody.tools) && requestBody.tools.length > 0) {
+    proxyLog(`responses tool names ${requestBody.tools.map((tool) => summarizeToolName(tool)).join(', ')}`);
+    const missingResponseTools = requestBody.tools.filter((tool) => summarizeToolName(tool) === '<missing>');
+    if (missingResponseTools.length > 0) {
+      proxyLog(`responses missing-name tools ${truncateForLog(JSON.stringify(missingResponseTools))}`);
+    }
+    proxyLog(`responses tools raw ${truncateForLog(JSON.stringify(requestBody.tools.slice(0, 3)))}`);
+    persistDebugJson('last-codex-responses-request.json', requestBody);
+  }
   const chatRequest = convertResponsesToChatRequest(requestBody, history);
+  proxyLog(`chat request ${summarizeChatRequest(chatRequest)}`);
+  if (Array.isArray(chatRequest.tools) && chatRequest.tools.length > 0) {
+    proxyLog(`chat tool names ${chatRequest.tools.map((tool) => summarizeChatToolName(tool)).join(', ')}`);
+    const missingChatTools = chatRequest.tools.filter((tool) => summarizeChatToolName(tool) === '<missing>');
+    if (missingChatTools.length > 0) {
+      proxyLog(`chat missing-name tools ${truncateForLog(JSON.stringify(missingChatTools))}`);
+    }
+    proxyLog(`chat tools raw ${truncateForLog(JSON.stringify(chatRequest.tools.slice(0, 3)))}`);
+    persistDebugJson('last-codex-chat-request.json', chatRequest);
+  }
   const completion = await fetchChatCompletion(chatRequest, config);
   const compatResponse = convertChatCompletionToResponses(completion, requestBody, history);
 
@@ -117,6 +140,8 @@ async function fetchChatCompletion(
       }),
     });
 
+    proxyLog(`upstream POST ${endpoint} -> ${response.status}`);
+
     if (response.status === 404) {
       lastError = new Error(`upstream endpoint not found: ${endpoint}`);
       continue;
@@ -124,10 +149,13 @@ async function fetchChatCompletion(
 
     if (!response.ok) {
       const body = await response.text();
+      proxyLog(`upstream error body ${truncateForLog(body)}`);
       throw new Error(`unexpected status ${response.status} from ${endpoint}: ${body}`);
     }
 
-    return response.json() as Promise<Parameters<typeof convertChatCompletionToResponses>[0]>;
+    const json = await response.json() as Parameters<typeof convertChatCompletionToResponses>[0];
+    proxyLog(`upstream success model=${json.model || 'unknown'} choices=${json.choices?.length ?? 0}`);
+    return json;
   }
 
   throw lastError ?? new Error('No upstream chat completions endpoint succeeded.');
@@ -144,6 +172,8 @@ async function fetchModels(config: ProxyConfig): Promise<unknown> {
       },
     });
 
+    proxyLog(`upstream GET ${endpoint} -> ${response.status}`);
+
     if (response.status === 404 || response.status === 405) {
       lastError = new Error(`upstream models endpoint not found: ${endpoint}`);
       continue;
@@ -151,6 +181,7 @@ async function fetchModels(config: ProxyConfig): Promise<unknown> {
 
     if (!response.ok) {
       const body = await response.text();
+      proxyLog(`upstream models error body ${truncateForLog(body)}`);
       throw new Error(`unexpected status ${response.status} from ${endpoint}: ${body}`);
     }
 
@@ -232,10 +263,101 @@ function writeSse(res: ServerResponse, events: Array<Record<string, unknown>>): 
   res.end('data: [DONE]\n\n');
 }
 
-function debugLog(message: string): void {
-  if (process.env.CODEX_COMPAT_PROXY_DEBUG !== '1') {
-    return;
-  }
-
+function proxyLog(message: string): void {
   process.stderr.write(`[codex-compat-proxy] ${message}\n`);
+}
+
+function summarizeResponsesRequest(request: Parameters<typeof convertResponsesToChatRequest>[0]): string {
+  const inputs = Array.isArray(request.input) ? request.input : [request.input];
+  const toolSummary = Array.isArray(request.tools)
+    ? request.tools
+      .slice(0, 5)
+      .map((tool, index) => `#${index}:${summarizeTool(tool)}`)
+      .join(', ')
+    : 'none';
+  return [
+    `model=${request.model}`,
+    `stream=${request.stream === true}`,
+    `previous=${request.previous_response_id ?? 'none'}`,
+    `input_items=${inputs.length}`,
+    `tools=${request.tools?.length ?? 0}`,
+    `tool_summary=[${toolSummary}]`,
+  ].join(' ');
+}
+
+function summarizeChatRequest(request: ReturnType<typeof convertResponsesToChatRequest>): string {
+  const toolSummary = Array.isArray(request.tools)
+    ? request.tools
+      .slice(0, 5)
+      .map((tool, index) => `#${index}:${summarizeChatTool(tool)}`)
+      .join(', ')
+    : 'none';
+  return [
+    `model=${request.model}`,
+    `messages=${request.messages.length}`,
+    `tools=${request.tools?.length ?? 0}`,
+    `stream=${request.stream === true}`,
+    `tool_summary=[${toolSummary}]`,
+  ].join(' ');
+}
+
+function truncateForLog(value: string, maxLength = 500): string {
+  const compact = value.replace(/\s+/g, ' ').trim();
+  return compact.length <= maxLength ? compact : `${compact.slice(0, maxLength)}...`;
+}
+
+function persistDebugJson(fileName: string, value: unknown): void {
+  try {
+    const dir = path.join(os.tmpdir(), 'codemux-codex-debug');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, fileName), JSON.stringify(value, null, 2), 'utf8');
+  } catch (error) {
+    proxyLog(`failed to persist debug json ${fileName}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function summarizeTool(tool: unknown): string {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+    return String(tool);
+  }
+  const record = tool as Record<string, unknown>;
+  return JSON.stringify({
+    type: record.type,
+    name: record.name,
+    has_parameters: Boolean(record.parameters),
+  });
+}
+
+function summarizeChatTool(tool: unknown): string {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+    return String(tool);
+  }
+  const record = tool as Record<string, unknown>;
+  const fn = record.function && typeof record.function === 'object' && !Array.isArray(record.function)
+    ? record.function as Record<string, unknown>
+    : null;
+  return JSON.stringify({
+    type: record.type,
+    name: fn?.name,
+    has_parameters: Boolean(fn?.parameters),
+  });
+}
+
+function summarizeToolName(tool: unknown): string {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+    return String(tool);
+  }
+  const record = tool as Record<string, unknown>;
+  return typeof record.name === 'string' ? record.name : '<missing>';
+}
+
+function summarizeChatToolName(tool: unknown): string {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+    return String(tool);
+  }
+  const record = tool as Record<string, unknown>;
+  const fn = record.function && typeof record.function === 'object' && !Array.isArray(record.function)
+    ? record.function as Record<string, unknown>
+    : null;
+  return typeof fn?.name === 'string' ? fn.name : '<missing>';
 }

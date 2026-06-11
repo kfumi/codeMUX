@@ -27,23 +27,15 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
         );
 
-        CREATE TABLE IF NOT EXISTS messages (
-            id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
+        CREATE TABLE IF NOT EXISTS agent_session_mappings (
+            app_session_id TEXT NOT NULL,
+            agent_kind TEXT NOT NULL,
+            agent_session_id TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS tool_calls (
-            id TEXT PRIMARY KEY,
-            message_id TEXT NOT NULL,
-            tool_name TEXT NOT NULL,
-            arguments TEXT,
-            result TEXT,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (app_session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+            UNIQUE(app_session_id, agent_kind),
+            UNIQUE(agent_kind, agent_session_id)
         );
 
         CREATE TABLE IF NOT EXISTS mcp_servers (
@@ -104,6 +96,9 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         );
     }
 
+    let _ = conn.execute("DROP TABLE IF EXISTS tool_calls", []);
+    let _ = conn.execute("DROP TABLE IF EXISTS messages", []);
+
     // Migration: add subtitle column to mcp_servers if missing
     let has_subtitle: bool = conn
         .prepare("SELECT subtitle FROM mcp_servers LIMIT 0")
@@ -131,9 +126,8 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
     // 创建索引（在所有迁移之后，确保列存在）
     conn.execute_batch(
         "
-        CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
-        CREATE INDEX IF NOT EXISTS idx_tool_calls_message_id ON tool_calls(message_id);
         CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions(project_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_session_mappings_app_session_id ON agent_session_mappings(app_session_id);
         "
     )?;
 
@@ -188,5 +182,34 @@ mod tests {
             )
             .unwrap();
         assert_eq!(agent_kind, "claude_code");
+    }
+
+    #[test]
+    fn drops_legacy_message_tables_and_creates_agent_session_mappings() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE tool_calls (
+                id TEXT PRIMARY KEY,
+                message_id TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            ",
+        )
+        .unwrap();
+
+        initialize_database(&conn).unwrap();
+
+        assert!(conn.prepare("SELECT app_session_id FROM agent_session_mappings LIMIT 0").is_ok());
+        assert!(conn.prepare("SELECT id FROM messages LIMIT 0").is_err());
+        assert!(conn.prepare("SELECT id FROM tool_calls LIMIT 0").is_err());
     }
 }

@@ -17,7 +17,6 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { resolveAgentProviderConfig } from '../../lib/agentProvider';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { AgentStatusBar } from './AgentStatusBar';
 import { FolderOpen, MoreHorizontal, Pencil, PanelRightOpen, PanelRightClose } from 'lucide-react';
 import type { SlashCommand, CommandContext } from '../../lib/slashCommands';
 import { agentApi, sessionApi } from '../../lib/tauri';
@@ -36,7 +35,7 @@ const LARGE_CONTEXT_MODEL_SUFFIX = '[1m]';
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, updateSessionTitle, createSession } = useSessionStore();
   const { projects } = useProjectStore();
-  const { startQuery, interrupt, loadSessionMessages, clearEvents, clearSavedEvents } = useAgentStore();
+  const { startQuery, interrupt, loadSessionMessages, clearEvents } = useAgentStore();
   const { config, getActiveProvider, setProxyRunning } = useSettingsStore();
   const { isOpen: previewOpen, togglePanel: togglePreview, loadFileTree, setProjectPath } = usePreviewStore();
 
@@ -253,7 +252,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         clearEvents,
         resetSession: () => { agentApi.resetSession(sessionId); },
         deleteClaudeSessionFiles: () => agentApi.deleteClaudeSessionFiles(sessionId),
-        clearSavedEvents: (sid: string) => clearSavedEvents(sid),
         getActiveProvider: () => getActiveProvider(),
         getTheme: () => config?.theme || 'System',
         getCostInfo,
@@ -263,7 +261,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       const prompt = command.prompt.replace(/\{args\}/g, args || '');
       await handleSend(prompt);
     }
-  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, clearSavedEvents, getActiveProvider, config, getCostInfo, handleSend]);
+  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, getCostInfo, handleSend]);
 
   return (
     <div className="flex flex-col h-full">
@@ -352,7 +350,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           }
         />
       </CodeMuxAssistantRuntimeProvider>
-      <AgentStatusBar sessionId={sessionId} />
 
       {/* Rename dialog */}
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>

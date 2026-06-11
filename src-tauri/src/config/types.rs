@@ -57,6 +57,31 @@ fn default_codex_sdk_mode() -> String {
     "responses".to_string()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OptionalField<T> {
+    Missing,
+    Null,
+    Value(T),
+}
+
+impl<T> Default for OptionalField<T> {
+    fn default() -> Self {
+        Self::Missing
+    }
+}
+
+fn deserialize_optional_field<'de, D, T>(deserializer: D) -> Result<OptionalField<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    let value = Option::<T>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(value) => OptionalField::Value(value),
+        None => OptionalField::Null,
+    })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
     pub id: String,
@@ -127,6 +152,8 @@ pub struct ClaudeCodeAgentConfigUpdate {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CodexAgentConfigUpdate {
     pub sdk_mode: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub default_provider_id: OptionalField<String>,
 }
 
 impl Default for CodexAgentConfig {
@@ -140,7 +167,7 @@ impl Default for CodexAgentConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentKind, AppConfig, CodexAgentConfigUpdate};
+    use super::{AgentKind, AppConfig, CodexAgentConfigUpdate, OptionalField};
 
     #[test]
     fn old_config_json_deserializes_with_agent_defaults() {

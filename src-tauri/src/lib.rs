@@ -20,6 +20,7 @@ const TRAY_QUIT_ID: &str = "tray_quit";
 pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
     pub config: Mutex<config::types::AppConfig>,
+    pub app_data_dir: std::path::PathBuf,
     /// MCP connection status from startup probe: server name → connected?
     pub mcp_status: Mutex<std::collections::HashMap<String, bool>>,
     /// Cached MCP server instructions from startup probe: server name → instructions text.
@@ -136,6 +137,7 @@ pub fn run() {
             app.manage(AppState {
                 db: Mutex::new(conn),
                 config: Mutex::new(config),
+                app_data_dir: app.path().app_data_dir()?,
                 mcp_status: Mutex::new(std::collections::HashMap::new()),
                 mcp_instructions: mcp_instructions_cache,
             });
@@ -177,9 +179,6 @@ pub fn run() {
             commands::session::delete_session,
             commands::session::update_session_title,
             commands::session::update_session_provider,
-            commands::session::get_messages,
-            commands::session::save_agent_events,
-            commands::session::get_agent_events,
             commands::project::create_project,
             commands::project::get_all_projects,
             commands::project::delete_project,
@@ -203,6 +202,7 @@ pub fn run() {
             agent::commands::send_tool_response,
             agent::commands::delete_claude_session_files,
             agent::commands::load_claude_session_events,
+            agent::commands::load_codex_session_events,
             agent::commands::start_codex_proxy,
             agent::commands::stop_codex_proxy,
             agent::commands::get_codex_proxy_port,

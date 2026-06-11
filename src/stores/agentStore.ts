@@ -75,8 +75,6 @@ interface AgentState {
   interrupt: (sessionId: string) => Promise<void>;
   /** Clear events for a session */
   clearEvents: (sessionId: string) => void;
-  /** Clear saved events from database */
-  clearSavedEvents: (sessionId: string) => Promise<void>;
   /** Load historical messages for a session */
   loadSessionMessages: (sessionId: string) => Promise<void>;
   /** Clear changed files for a session */
@@ -252,6 +250,10 @@ function truncateTitle(text: string, maxLen = 30): string {
   const firstLine = text.split('\n')[0].trim();
   if (firstLine.length <= maxLen) return firstLine;
   return firstLine.slice(0, maxLen) + '...';
+}
+
+function getSessionAgentKind(sessionId: string) {
+  return useSessionStore.getState().sessions.find((session) => session.id === sessionId)?.agent_kind;
 }
 
 /**
@@ -605,7 +607,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       isRunning: { ...s.isRunning, [sessionId]: true },
       error: { ...s.error, [sessionId]: null },
     }));
-
     try {
       await agentApi.startSession(sessionId, prompt, cwd, (raw: string) => {
         let event = parseAgentEvent(raw);
@@ -995,12 +996,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     });
   },
 
-  clearSavedEvents: async (sessionId: string) => {
-    // Overwrite with empty array to clear persisted events
-    logger.info('Clearing persisted agent events', { sessionId });
-    await agentApi.saveEvents(sessionId, JSON.stringify({ events: [], timestamps: [] }));
-  },
-
   loadSessionMessages: async (sessionId: string) => {
     // Restore acknowledgedFiles from localStorage
     let restoredAcknowledged: Set<string> | undefined;
@@ -1030,135 +1025,106 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return;
     }
 
+    const agentKind = getSessionAgentKind(sessionId);
+
     try {
-      // Load directly from Claude Code's JSONL session file.
-      // Each JSONL line has a `timestamp` field (ISO 8601) and a `type` field.
-      // We extract user, assistant, and result messages.
-      const jsonlMessages = await agentApi.loadClaudeSessionEvents(sessionId);
-      if (jsonlMessages && jsonlMessages.length > 0) {
-        const events: AgentMessage[] = [];
-        const timestamps: number[] = [];
+      const jsonlMessages = agentKind === 'codex'
+        ? await agentApi.loadCodexSessionEvents(sessionId)
+        : await agentApi.loadClaudeSessionEvents(sessionId);
 
-        for (const raw of jsonlMessages) {
-          const rawMsg = raw as Record<string, unknown>;
-          // Extract timestamp from JSONL (ISO string → epoch ms)
-          const ts = typeof rawMsg.timestamp === 'string'
-            ? new Date(rawMsg.timestamp).getTime() || 0
-            : 0;
-
-          const event = mapPersistedClaudeMessage(rawMsg);
-          if (event) {
-            events.push(event as AgentMessage);
-            timestamps.push(ts);
-          }
-        }
-
-        // JSONL does not contain `result` messages (the SDK doesn't write them).
-        // Synthesize one from assistant message usage data so the footer can show
-        // token stats, cost, and duration.
-        const hasResult = events.some((e) => e.kind === 'result');
-        if (!hasResult && events.length > 0) {
-          // Aggregate token usage from all assistant messages
-          let totalInput = 0, totalOutput = 0, totalCacheRead = 0, totalCacheCreate = 0;
-          for (const evt of events) {
-            if (evt.kind === 'assistant') {
-              const usage = (evt.data as any)?.message?.usage;
-              if (usage) {
-                totalInput += usage.input_tokens || 0;
-                totalOutput += usage.output_tokens || 0;
-                totalCacheRead += usage.cache_read_input_tokens || 0;
-                totalCacheCreate += usage.cache_creation_input_tokens || 0;
-              }
-            }
-          }
-          // Compute duration from first to last timestamp
-          const validTs = timestamps.filter((t) => t > 0);
-          const durationMs = validTs.length >= 2
-            ? validTs[validTs.length - 1] - validTs[0]
-            : 0;
-          // Count user messages as turns
-          const numTurns = events.filter((e) => e.kind === 'user').length;
-
-          if (totalInput > 0 || totalOutput > 0) {
-            const syntheticResult: AgentMessage = {
-              kind: 'result',
-              data: {
-                type: 'result',
-                subtype: 'success',
-                is_error: false,
-                uuid: `synthetic-result-${sessionId}`,
-                session_id: sessionId,
-                duration_ms: durationMs,
-                duration_api_ms: 0,
-                num_turns: numTurns,
-                result: '',
-                total_cost_usd: 0,
-                usage: {
-                  input_tokens: totalInput,
-                  output_tokens: totalOutput,
-                  cache_creation_input_tokens: totalCacheCreate,
-                  cache_read_input_tokens: totalCacheRead,
-                },
-              } as AgentResultMessage,
-            };
-            events.push(syntheticResult);
-            timestamps.push(validTs[validTs.length - 1] || 0);
-          }
-        }
-
-        set((state) => ({
-          events: { ...state.events, [sessionId]: events },
-          eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
-          todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
-          acknowledgedFiles: restoredAcknowledged ? { ...state.acknowledgedFiles, [sessionId]: restoredAcknowledged } : state.acknowledgedFiles,
-          changedFiles: { ...state.changedFiles, [sessionId]: extractChangedFilesFromEvents(events, restoredAcknowledged) },
-        }));
-        logger.info('Loaded session events from Claude JSONL', {
+      if (!jsonlMessages || jsonlMessages.length === 0) {
+        logger.info('No agent JSONL history found for session', {
           sessionId,
-          eventCount: events.length,
+          agentKind: agentKind ?? 'claude_code',
         });
         return;
       }
-    } catch (err) {
-      logger.warn('Failed to load from Claude JSONL, falling back to SQLite', { sessionId }, serializeError(err));
-    }
 
-    // Fallback: try loading from SQLite (for old sessions that may not have JSONL)
-    try {
-      const eventsJson = await agentApi.getEvents(sessionId);
-      if (eventsJson) {
-        const parsed = JSON.parse(eventsJson);
-        let events: AgentMessage[];
-        let timestamps: number[];
-        if (Array.isArray(parsed)) {
-          events = parsed;
-          timestamps = new Array(events.length).fill(0);
-        } else {
-          events = parsed.events || [];
-          timestamps = parsed.timestamps || new Array(events.length).fill(0);
+      const events: AgentMessage[] = [];
+      const timestamps: number[] = [];
+
+      for (const raw of jsonlMessages) {
+        const rawMsg = raw as Record<string, unknown>;
+        const ts = typeof rawMsg.timestamp === 'string'
+          ? new Date(rawMsg.timestamp).getTime() || 0
+          : 0;
+
+        const event = mapPersistedClaudeMessage(rawMsg);
+        if (event) {
+          events.push(event as AgentMessage);
+          timestamps.push(ts);
         }
-        const sessionOriginals: Record<string, { content: string; isNew: boolean; toolUseId?: string }> = {};
+      }
+
+      const hasResult = events.some((e) => e.kind === 'result');
+      if (!hasResult && events.length > 0) {
+        let totalInput = 0;
+        let totalOutput = 0;
+        let totalCacheRead = 0;
+        let totalCacheCreate = 0;
+
         for (const evt of events) {
-          if (evt.kind === 'file_snapshot') {
-            const { file_path, original_content, is_new, tool_use_id } = evt.data;
-            sessionOriginals[file_path] = { content: original_content, isNew: is_new, toolUseId: tool_use_id };
+          if (evt.kind === 'assistant') {
+            const usage = (evt.data as any)?.message?.usage;
+            if (usage) {
+              totalInput += usage.input_tokens || 0;
+              totalOutput += usage.output_tokens || 0;
+              totalCacheRead += usage.cache_read_input_tokens || 0;
+              totalCacheCreate += usage.cache_creation_input_tokens || 0;
+            }
           }
         }
-        set((state) => ({
-          events: { ...state.events, [sessionId]: events },
-          eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
-          todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
-          fileOriginals: { ...state.fileOriginals, [sessionId]: sessionOriginals },
-          acknowledgedFiles: restoredAcknowledged ? { ...state.acknowledgedFiles, [sessionId]: restoredAcknowledged } : state.acknowledgedFiles,
-          changedFiles: { ...state.changedFiles, [sessionId]: extractChangedFilesFromEvents(events, restoredAcknowledged, sessionOriginals) },
-        }));
-        logger.info('Loaded persisted agent events from SQLite fallback', {
-          sessionId,
-          eventCount: events.length,
-        });
+
+        const validTs = timestamps.filter((t) => t > 0);
+        const durationMs = validTs.length >= 2
+          ? validTs[validTs.length - 1] - validTs[0]
+          : 0;
+        const numTurns = events.filter((e) => e.kind === 'user').length;
+
+        if (totalInput > 0 || totalOutput > 0) {
+          const syntheticResult: AgentMessage = {
+            kind: 'result',
+            data: {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              uuid: `synthetic-result-${sessionId}`,
+              session_id: sessionId,
+              duration_ms: durationMs,
+              duration_api_ms: 0,
+              num_turns: numTurns,
+              result: '',
+              total_cost_usd: 0,
+              usage: {
+                input_tokens: totalInput,
+                output_tokens: totalOutput,
+                cache_creation_input_tokens: totalCacheCreate,
+                cache_read_input_tokens: totalCacheRead,
+              },
+            } as AgentResultMessage,
+          };
+          events.push(syntheticResult);
+          timestamps.push(validTs[validTs.length - 1] || 0);
+        }
       }
+
+      set((state) => ({
+        events: { ...state.events, [sessionId]: events },
+        eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
+        todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
+        acknowledgedFiles: restoredAcknowledged ? { ...state.acknowledgedFiles, [sessionId]: restoredAcknowledged } : state.acknowledgedFiles,
+        changedFiles: { ...state.changedFiles, [sessionId]: extractChangedFilesFromEvents(events, restoredAcknowledged) },
+      }));
+      logger.info('Loaded session events from agent JSONL', {
+        sessionId,
+        agentKind: agentKind ?? 'claude_code',
+        eventCount: events.length,
+      });
     } catch (err) {
-      logger.error('Failed to load session messages', { sessionId }, serializeError(err));
+      logger.error('Failed to load session messages from agent JSONL', {
+        sessionId,
+        agentKind: agentKind ?? 'claude_code',
+      }, serializeError(err));
     }
   },
 

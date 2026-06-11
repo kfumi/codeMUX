@@ -84,15 +84,15 @@ fn resolve_sidecar_script_path(
 ) -> Result<PathBuf, String> {
     let sidecar_rel = sidecar_relative_path();
 
+    if environment == BuildEnvironment::Development {
+        return Ok(manifest_dir.join(sidecar_rel));
+    }
+
     if let Some(resource_dir) = resource_dir {
         let resource_path = resource_dir.join(&sidecar_rel);
         if resource_path.exists() {
             return Ok(resource_path);
         }
-    }
-
-    if environment == BuildEnvironment::Development {
-        return Ok(manifest_dir.join(sidecar_rel));
     }
 
     Err(format!(
@@ -308,6 +308,20 @@ mod tests {
             .expect("dev builds should fall back to the source tree");
 
         assert!(path.ends_with("sidecar/dist/index.js"));
+    }
+
+    #[test]
+    fn development_build_prefers_source_sidecar_over_bundled_resource_copy() {
+        let manifest_dir = Path::new("manifest-root");
+        let resource_dir = Path::new("resource-root");
+        let path = resolve_sidecar_script_path(
+            Some(resource_dir),
+            manifest_dir,
+            BuildEnvironment::Development,
+        )
+        .expect("dev builds should always use the source tree sidecar");
+
+        assert_eq!(path, manifest_dir.join("sidecar").join("dist").join("index.js"));
     }
 
     #[test]

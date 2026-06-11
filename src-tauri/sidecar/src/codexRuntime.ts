@@ -1,17 +1,17 @@
 import {
-  spawn,
-  type ChildProcess,
-} from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
-import fs from 'node:fs';
-import os from 'node:os';
-import * as readline from 'node:readline';
+  Codex,
+  type Thread,
+  type ThreadEvent,
+  type ThreadItem,
+  type Usage,
+} from '@openai/codex-sdk';
 
 import type { SidecarCommand } from './types.js';
 import {
   buildAssistantEvent,
   buildCodexResultEvent,
+  buildCodexToolResultContent,
+  buildCodexToolUseContent,
   buildToolResultEvent,
 } from './runtimeEvents.js';
 import { shouldUseCodexChatCompatProxy } from './sessionRuntimeHelpers.js';
@@ -19,22 +19,9 @@ import { proxyManager } from './proxyManager.js';
 
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
 
-type CodexJsonItem = {
-  type: string;
-  id?: string;
-  role?: string;
-  call_id?: string;
-  name?: string;
-  arguments?: string;
-  output?: string;
-  content?: Array<{
-    type?: string;
-    text?: string;
-  }>;
-};
-
 type CodexSessionBootstrap = {
   sessionId?: string;
+  agentSessionId?: string;
   cwd: string;
   apiKey?: string;
   upstreamBaseUrl?: string;
@@ -46,29 +33,21 @@ function emit(obj: unknown): void {
   process.stdout.write(JSON.stringify(obj) + '\n');
 }
 
-function buildCliWrapperSource(): string {
-  return [
-    "import { pathToFileURL } from 'node:url';",
-    'const [nodePath, cliPath, ...cliArgs] = process.argv;',
-    'const realExit = process.exit.bind(process);',
-    'process.argv = [nodePath, cliPath, ...cliArgs];',
-    "process.exit = (code = 0) => { setTimeout(() => realExit(code), 80); throw new Error('__CODEX_EXIT__:' + code); };",
-    'try {',
-    '  await import(pathToFileURL(cliPath).href);',
-    '} catch (error) {',
-    "  const text = error instanceof Error ? error.message : String(error);",
-    "  if (!text.startsWith('__CODEX_EXIT__:')) {",
-    '    throw error;',
-    '  }',
-    '}',
-  ].join('\n');
+function emptyUsage(): Usage {
+  return {
+    input_tokens: 0,
+    cached_input_tokens: 0,
+    output_tokens: 0,
+    reasoning_output_tokens: 0,
+  };
 }
 
 export class CodexSessionRuntime {
   private config: CodexSessionBootstrap | null = null;
   private configFingerprint: string | null = null;
   private abortController: AbortController | null = null;
-  private activeChild: ChildProcess | null = null;
+  private client: Codex | null = null;
+  private thread: Thread | null = null;
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     const cwd = cmd.cwd === '.'
@@ -76,6 +55,7 @@ export class CodexSessionRuntime {
       : cmd.cwd;
     const requestedConfig = {
       sessionId: cmd.sessionId,
+      agentSessionId: cmd.agentSessionId,
       cwd,
       apiKey: cmd.apiKey,
       upstreamBaseUrl: cmd.baseUrl,
@@ -83,14 +63,15 @@ export class CodexSessionRuntime {
     };
     const nextFingerprint = JSON.stringify(requestedConfig);
 
-    if (this.configFingerprint === nextFingerprint && this.config) {
-      process.stderr.write(`[codex] Session ensured: session_id=${cmd.sessionId || 'none'} cwd=${cwd}\n`);
+    if (this.configFingerprint === nextFingerprint && this.config && this.thread) {
+      process.stderr.write(
+        `[codex] Session ensured via SDK: session_id=${cmd.sessionId || 'none'} cwd=${cwd} thread=${requestedConfig.agentSessionId || 'new'}\n`,
+      );
       emit({
         type: 'mcp_status_update',
         servers: {},
         status: 'ready',
       });
-      // Always sync proxy status to frontend on every ensure() call
       emit({ type: 'proxy_status', ...proxyManager.getStatus() });
       return;
     }
@@ -118,30 +99,75 @@ export class CodexSessionRuntime {
       runtimeBaseUrl,
     };
 
-    process.stderr.write(`[codex] Session ensured: session_id=${cmd.sessionId || 'none'} cwd=${cwd}\n`);
+    const codexEnv: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) {
+        codexEnv[key] = value;
+      }
+    }
+    if (requestedConfig.apiKey) {
+      codexEnv.OPENAI_API_KEY = requestedConfig.apiKey;
+      codexEnv.CODEX_API_KEY = requestedConfig.apiKey;
+    }
+    if (runtimeBaseUrl) {
+      codexEnv.OPENAI_BASE_URL = runtimeBaseUrl;
+    }
+
+    this.client = new Codex({
+      env: codexEnv,
+      apiKey: requestedConfig.apiKey,
+      baseUrl: runtimeBaseUrl,
+      config: runtimeBaseUrl
+        ? {
+            model_provider: 'codemux_proxy',
+            model_providers: {
+              codemux_proxy: {
+                name: 'CodeMUX Proxy',
+                base_url: runtimeBaseUrl,
+                env_key: 'OPENAI_API_KEY',
+              },
+            },
+            openai_base_url: runtimeBaseUrl,
+          }
+        : undefined,
+    });
+    process.stderr.write(
+      `[codex] SDK client configured with baseUrl=${runtimeBaseUrl || 'default'} env.OPENAI_BASE_URL=${codexEnv.OPENAI_BASE_URL || 'unset'} model_provider=codemux_proxy\n`,
+    );
+    this.thread = requestedConfig.agentSessionId
+      ? this.client.resumeThread(requestedConfig.agentSessionId, this.threadOptions())
+      : this.client.startThread(this.threadOptions());
+
+    process.stderr.write(
+      `[codex] Session ensured via SDK: session_id=${cmd.sessionId || 'none'} cwd=${cwd} thread=${requestedConfig.agentSessionId || 'new'}\n`,
+    );
 
     emit({
       type: 'mcp_status_update',
       servers: {},
       status: 'ready',
     });
-
-    // Always emit proxy status so frontend stays in sync
     emit({ type: 'proxy_status', ...proxyManager.getStatus() });
   }
 
   async sendInput(prompt: string): Promise<void> {
-    if (!this.config) {
+    if (!this.config || !this.thread) {
       throw new Error('Codex session not initialized. Call ensure_session first.');
     }
 
     const sessionId = this.config.sessionId || '';
     const model = this.config.model || 'o4-mini';
     const startedAt = Date.now();
+    let usage: Usage = emptyUsage();
+    let usageSeen = false;
+    let turnCompleted = false;
+    let turnFailed = false;
+    let failureEmitted = false;
+    let pendingStreamError: string | null = null;
 
     this.abortController = new AbortController();
 
-    process.stderr.write(`[codex] Processing input: ${prompt.slice(0, 80)}...\n`);
+    process.stderr.write(`[codex] Processing input via SDK: ${prompt.slice(0, 80)}...\n`);
 
     emit({
       type: 'system',
@@ -154,14 +180,72 @@ export class CodexSessionRuntime {
       permissionMode: 'bypassPermissions',
     });
 
+    const emitFailure = (message: string): void => {
+      turnFailed = true;
+      if (failureEmitted) {
+        return;
+      }
+      failureEmitted = true;
+      emit({ type: 'sidecar_error', error: message });
+    };
+
+    const noteStreamError = (message: string): void => {
+      pendingStreamError = message;
+      process.stderr.write(`[codex] SDK stream warning: ${message}\n`);
+    };
+
     try {
-      await this.runQuietTurn(prompt, sessionId, startedAt);
+      const { events } = await this.thread.runStreamed(prompt, {
+        signal: this.abortController.signal,
+      });
+
+      for await (const event of events) {
+        const eventDetail =
+          event.type === 'error'
+            ? ` message=${event.message}`
+            : event.type === 'turn.failed'
+              ? ` message=${event.error.message}`
+              : 'item' in event
+                ? ` item=${event.item.type}`
+                : '';
+        process.stderr.write(`[codex] SDK event: ${event.type}${eventDetail}\n`);
+
+        if (event.type === 'turn.completed') {
+          usage = event.usage;
+          usageSeen = true;
+          turnCompleted = true;
+        }
+
+        await this.handleSdkEvent(sessionId, event, emitFailure, noteStreamError);
+      }
     } catch (error) {
       if (!this.abortController?.signal.aborted) {
-        throw error;
+        const message = error instanceof Error
+          ? `${error.message}${error.stack ? `\n${error.stack}` : ''}`
+          : String(error);
+        process.stderr.write(`[codex] SDK turn failed before completion: ${message}\n`);
+        emitFailure(message);
+      } else {
+        process.stderr.write('[codex] SDK turn aborted\n');
       }
-      process.stderr.write('[codex] Turn aborted\n');
     } finally {
+      if (!this.abortController?.signal.aborted && !turnCompleted && !turnFailed && pendingStreamError) {
+        emitFailure(pendingStreamError);
+      }
+
+      const finalUsage = usageSeen ? usage : emptyUsage();
+      if (!this.abortController?.signal.aborted && turnCompleted && !turnFailed) {
+        emit(buildCodexResultEvent({
+          sessionId,
+          usage: finalUsage,
+          durationMs: Date.now() - startedAt,
+        }));
+      } else if (!this.abortController?.signal.aborted) {
+        process.stderr.write(
+          `[codex] Skipping success result: completed=${turnCompleted} failed=${turnFailed}\n`,
+        );
+      }
+
       this.abortController = null;
       this.finishTurn();
     }
@@ -170,7 +254,6 @@ export class CodexSessionRuntime {
   async interrupt(): Promise<void> {
     process.stderr.write('[codex] Interrupt requested\n');
     this.abortController?.abort();
-    this.activeChild?.kill();
   }
 
   async resetSession(sessionId: string): Promise<void> {
@@ -191,169 +274,122 @@ export class CodexSessionRuntime {
     this.configFingerprint = null;
   }
 
-  private async runQuietTurn(
-    prompt: string,
-    sessionId: string,
-    startedAt: number,
-  ): Promise<void> {
+  private threadOptions() {
     if (!this.config) {
-      throw new Error('Codex session not initialized. Call ensure_session first.');
+      throw new Error('Missing Codex config');
     }
 
-    const cliPath = path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      '../node_modules/@openai/codex/dist/cli.js',
-    );
-    const args = [
-      '--input-type=module',
-      '-e',
-      buildCliWrapperSource(),
-      cliPath,
-      '-q',
-      '--model',
-      this.config.model || 'o4-mini',
-      '--dangerously-auto-approve-everything',
-      prompt,
-    ];
-
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      OPENAI_API_KEY: this.config.apiKey || process.env.OPENAI_API_KEY || 'dummy',
-      CODEX_API_KEY: this.config.apiKey || process.env.CODEX_API_KEY || 'dummy',
+    return {
+      model: this.config.model,
+      workingDirectory: this.config.cwd,
+      skipGitRepoCheck: true,
+      sandboxMode: 'danger-full-access' as const,
+      approvalPolicy: 'never' as const,
+      networkAccessEnabled: true,
     };
-    fs.mkdirSync(path.join(os.tmpdir(), 'oai-codex'), { recursive: true });
-    if (this.config.runtimeBaseUrl) {
-      env.OPENAI_BASE_URL = this.config.runtimeBaseUrl;
-    }
-
-    const child = spawn(process.execPath, args, {
-      cwd: this.config.cwd,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      signal: this.abortController?.signal,
-    });
-    this.activeChild = child;
-    let childError: Error | null = null;
-    child.on('error', (error) => {
-      if (error.name === 'AbortError' || this.abortController?.signal.aborted) {
-        return;
-      }
-      childError = error;
-    });
-
-    let stderr = '';
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString('utf8');
-    });
-
-    const rl = readline.createInterface({
-      input: child.stdout,
-      crlfDelay: Infinity,
-    });
-
-    let assistantMessages = 0;
-
-    try {
-      for await (const line of rl) {
-        if (!line.trim()) {
-          continue;
-        }
-
-        let item: CodexJsonItem;
-        try {
-          item = JSON.parse(line) as CodexJsonItem;
-        } catch {
-          process.stderr.write(`[codex] Failed to parse JSON line: ${line.slice(0, 200)}\n`);
-          continue;
-        }
-
-        assistantMessages += this.handleQuietItem(sessionId, item);
-      }
-    } finally {
-      rl.close();
-    }
-
-    const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-      child.once('exit', (code, signal) => resolve({ code, signal }));
-    });
-    this.activeChild = null;
-
-    if (stderr.trim()) {
-      process.stderr.write(`[codex] CLI stderr: ${stderr.slice(0, 500)}\n`);
-    }
-
-    if (childError && !this.abortController?.signal.aborted) {
-      throw childError;
-    }
-
-    if (!this.abortController?.signal.aborted && exit.code !== 0) {
-      throw new Error(`Codex CLI exited with code ${exit.code ?? 1}: ${stderr}`);
-    }
-
-    emit(buildCodexResultEvent({
-      sessionId,
-      usage: {
-        input_tokens: 0,
-        cached_input_tokens: 0,
-        output_tokens: assistantMessages,
-        reasoning_output_tokens: 0,
-      },
-      durationMs: Date.now() - startedAt,
-    }));
   }
 
-  private handleQuietItem(
+  private async handleSdkEvent(
     sessionId: string,
-    item: CodexJsonItem,
-  ): number {
-    if (item.type === 'message' && item.role === 'assistant') {
-      const text = (item.content ?? [])
-        .filter((part) => part.type === 'output_text' && typeof part.text === 'string')
-        .map((part) => part.text?.trim() ?? '')
-        .filter(Boolean)
-        .join('\n');
-      if (!text) {
-        return 0;
-      }
-
-      emit(buildAssistantEvent({
-        sessionId,
-        content: [{ type: 'text', text }],
-      }));
-      return 1;
-    }
-
-    if (item.type === 'function_call' && item.call_id && item.name) {
-      let parsedArguments: Record<string, unknown> = {};
-      if (item.arguments) {
-        try {
-          parsedArguments = JSON.parse(item.arguments) as Record<string, unknown>;
-        } catch {
-          parsedArguments = { raw: item.arguments };
+    event: ThreadEvent,
+    emitFailure: (message: string) => void,
+    noteStreamError: (message: string) => void,
+  ): Promise<void> {
+    switch (event.type) {
+      case 'thread.started': {
+        if (this.config && this.config.agentSessionId !== event.thread_id) {
+          this.config = {
+            ...this.config,
+            agentSessionId: event.thread_id,
+          };
+          this.configFingerprint = JSON.stringify(this.config);
         }
-      }
 
+        process.stderr.write(
+          `[codex] Captured SDK thread ID: ${event.thread_id} for app session: ${sessionId}\n`,
+        );
+        emit({
+          type: 'agent_session_mapping',
+          app_session_id: sessionId,
+          agent_kind: 'codex',
+          agent_session_id: event.thread_id,
+        });
+        return;
+      }
+      case 'item.started':
+      case 'item.updated':
+      case 'item.completed':
+        this.emitItemEvent(sessionId, event.type, event.item, emitFailure);
+        return;
+      case 'turn.failed':
+        process.stderr.write(`[codex] SDK turn failed: ${event.error.message}\n`);
+        emitFailure(event.error.message);
+        return;
+      case 'error':
+        noteStreamError(event.message);
+        return;
+      case 'turn.started':
+      case 'turn.completed':
+        return;
+    }
+  }
+
+  private emitItemEvent(
+    sessionId: string,
+    eventType: 'item.started' | 'item.updated' | 'item.completed',
+    item: ThreadItem,
+    emitFailure: (message: string) => void,
+  ): void {
+    if (item.type === 'error' && eventType === 'item.completed') {
+      process.stderr.write(`[codex] SDK item error: ${item.message}\n`);
+      emitFailure(item.message);
+      return;
+    }
+
+    if (item.type === 'agent_message' && eventType === 'item.completed') {
+      if (item.text.trim()) {
+        emit(buildAssistantEvent({
+          sessionId,
+          content: [{ type: 'text', text: item.text }],
+        }));
+      }
+      return;
+    }
+
+    if (item.type === 'reasoning' && eventType === 'item.completed') {
+      if (item.text.trim()) {
+        emit(buildAssistantEvent({
+          sessionId,
+          content: [{ type: 'thinking', thinking: item.text }],
+        }));
+      }
+      return;
+    }
+
+    const toolUse = buildCodexToolUseContent(item);
+    if (toolUse && eventType === 'item.started') {
       emit(buildAssistantEvent({
         sessionId,
-        content: [{
-          type: 'tool_use',
-          id: item.call_id,
-          name: item.name,
-          input: parsedArguments,
-        }],
-      }));
-      return 0;
-    }
-
-    if (item.type === 'function_call_output' && item.call_id && typeof item.output === 'string') {
-      emit(buildToolResultEvent({
-        sessionId,
-        toolUseId: item.call_id,
-        content: item.output,
+        content: [toolUse],
       }));
     }
 
-    return 0;
+    if (
+      eventType === 'item.completed'
+      && (item.type === 'command_execution'
+        || item.type === 'mcp_tool_call'
+        || item.type === 'todo_list'
+        || item.type === 'web_search')
+    ) {
+      const result = buildCodexToolResultContent(item);
+      if (result) {
+        emit(buildToolResultEvent({
+          sessionId,
+          toolUseId: item.id,
+          content: result,
+        }));
+      }
+    }
   }
 
   private finishTurn(): void {
@@ -361,7 +397,9 @@ export class CodexSessionRuntime {
   }
 
   private async teardownClient(): Promise<void> {
-    this.activeChild?.kill();
-    this.activeChild = null;
+    this.abortController?.abort();
+    this.abortController = null;
+    this.thread = null;
+    this.client = null;
   }
 }

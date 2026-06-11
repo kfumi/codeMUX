@@ -106,7 +106,6 @@ export const sessionApi = {
   delete: (sessionId: string): Promise<void> => invokeLogged('delete_session', { sessionId }),
   updateTitle: (sessionId: string, title: string): Promise<void> => invokeLogged('update_session_title', { sessionId, title }),
   updateProvider: (sessionId: string, providerId: string, model: string): Promise<void> => invokeLogged('update_session_provider', { sessionId, providerId, model }),
-  getMessages: (sessionId: string): Promise<unknown[]> => invokeLogged('get_messages', { sessionId }),
 };
 
 export const agentApi = {
@@ -148,13 +147,12 @@ export const agentApi = {
   /** Delete all Claude Code session files (history, file-history, etc.) for an app session. */
   deleteClaudeSessionFiles: (appSessionId: string): Promise<string[]> =>
     invokeLogged('delete_claude_session_files', { appSessionId }),
-  saveEvents: (sessionId: string, eventsJson: string): Promise<void> =>
-    invokeLogged('save_agent_events', { sessionId, eventsJson }),
-  getEvents: (sessionId: string): Promise<string> =>
-    invokeLogged('get_agent_events', { sessionId }),
   /** Load session events directly from Claude Code's JSONL session file. */
   loadClaudeSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_claude_session_events', { appSessionId }),
+  /** Load session events from Codex's JSONL session file. */
+  loadCodexSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
+    invokeLogged('load_codex_session_events', { appSessionId }),
   startProxy: (apiKey: string, baseUrl: string): Promise<number> =>
     invokeLogged('start_codex_proxy', { apiKey, baseUrl }),
   stopProxy: (): Promise<void> => invokeLogged('stop_codex_proxy'),

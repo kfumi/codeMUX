@@ -1,42 +1,35 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
 
+use crate::config::types::AgentKind;
+use crate::db::operations;
 use log::{debug, info, warn};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 
 use super::{spawn_sidecar, SidecarHandle};
 
-fn get_claude_session_id(app_session_id: &str) -> Result<(std::path::PathBuf, String), String> {
-    use std::fs;
-    use std::path::PathBuf;
-
-    let home = std::env::var("USERPROFILE")
+fn home_dir() -> Result<PathBuf, String> {
+    std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
-        .map_err(|_| "Cannot determine home directory".to_string())?;
-    let claude_dir = PathBuf::from(&home).join(".claude");
-
-    let map_file = claude_dir.join("session-id-map.json");
-    if !map_file.exists() {
-        return Err("session-id-map.json not found".to_string());
-    }
-    let map_content = fs::read_to_string(&map_file)
-        .map_err(|e| format!("Failed to read session-id-map.json: {}", e))?;
-    let map: serde_json::Value = serde_json::from_str(&map_content)
-        .map_err(|e| format!("Failed to parse session-id-map.json: {}", e))?;
-
-    let claude_session_id = map
-        .get(app_session_id)
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("No Claude session mapping for {}", app_session_id))?;
-
-    Ok((claude_dir, claude_session_id.to_string()))
+        .map(PathBuf::from)
+        .map_err(|_| "Cannot determine home directory".to_string())
 }
 
-fn find_session_jsonl(
-    claude_dir: &std::path::Path,
-    claude_session_id: &str,
-) -> Option<std::path::PathBuf> {
+fn get_agent_session_id(
+    state: &crate::AppState,
+    app_session_id: &str,
+    agent_kind: AgentKind,
+) -> Result<Option<String>, String> {
+    let db = state.db.lock().unwrap();
+    operations::get_agent_session_mapping(&db, app_session_id, agent_kind)
+        .map(|mapping| mapping.map(|record| record.agent_session_id))
+        .map_err(|err| err.to_string())
+}
+
+fn find_claude_session_jsonl(claude_dir: &Path, claude_session_id: &str) -> Option<PathBuf> {
     use std::fs;
 
     let projects_dir = claude_dir.join("projects");
@@ -55,8 +48,78 @@ fn find_session_jsonl(
     None
 }
 
+fn first_non_empty_line(path: &Path) -> Option<String> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+
+    let file = File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    for line in reader.lines() {
+        let line = line.ok()?;
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
+}
+
+fn read_codex_session_meta_id(path: &Path) -> Option<String> {
+    let line = first_non_empty_line(path)?;
+    let value = serde_json::from_str::<serde_json::Value>(&line).ok()?;
+    if value.get("type").and_then(|entry| entry.as_str()) != Some("session_meta") {
+        return None;
+    }
+
+    value
+        .get("payload")
+        .and_then(|payload| payload.get("id"))
+        .and_then(|entry| entry.as_str())
+        .map(|id| id.to_string())
+}
+
+fn collect_codex_jsonl_files(root: &Path, output: &mut Vec<PathBuf>) {
+    use std::fs;
+
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if entry.file_type().map(|ty| ty.is_dir()).unwrap_or(false) {
+            collect_codex_jsonl_files(&path, output);
+            continue;
+        }
+
+        if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
+            output.push(path);
+        }
+    }
+}
+
+fn find_codex_session_jsonl(sessions_dir: &Path, codex_session_id: &str) -> Option<PathBuf> {
+    use std::fs;
+
+    let mut candidates = Vec::new();
+    collect_codex_jsonl_files(sessions_dir, &mut candidates);
+
+    candidates
+        .into_iter()
+        .filter(|path| read_codex_session_meta_id(path).as_deref() == Some(codex_session_id))
+        .max_by_key(|path| {
+            fs::metadata(path)
+                .ok()
+                .and_then(|meta| meta.modified().ok())
+                .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_millis() as i64)
+                .unwrap_or(0)
+        })
+}
+
 #[tauri::command]
 pub async fn load_claude_session_events(
+    state: State<'_, crate::AppState>,
     app_session_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {
     use std::fs;
@@ -66,38 +129,223 @@ pub async fn load_claude_session_events(
 
     let mut messages = Vec::new();
 
-    if let Ok((claude_dir, claude_session_id)) = get_claude_session_id(&app_session_id) {
-        if let Some(jsonl_path) = find_session_jsonl(&claude_dir, &claude_session_id) {
-            debug!(target: "agent", "Reading JSONL from {}", jsonl_path.display());
+    let Some(claude_session_id) =
+        get_agent_session_id(state.inner(), &app_session_id, AgentKind::ClaudeCode)?
+    else {
+        info!(target: "agent", "No Claude mapping found for app_session_id={}", app_session_id);
+        return Ok(messages);
+    };
 
-            let file = fs::File::open(&jsonl_path)
-                .map_err(|e| format!("Failed to open JSONL: {}", e))?;
-            let reader = BufReader::new(file);
+    let claude_dir = home_dir()?.join(".claude");
+    let Some(jsonl_path) = find_claude_session_jsonl(&claude_dir, &claude_session_id) else {
+        info!(
+            target: "agent",
+            "Claude JSONL not found for app_session_id={} claude_session_id={}",
+            app_session_id,
+            claude_session_id
+        );
+        return Ok(messages);
+    };
 
-            for line_result in reader.lines() {
-                let line = match line_result {
-                    Ok(l) => l,
-                    Err(_) => continue,
-                };
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
+    debug!(target: "agent", "Reading JSONL from {}", jsonl_path.display());
 
-                let val: serde_json::Value = match serde_json::from_str(trimmed) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                };
+    let file =
+        fs::File::open(&jsonl_path).map_err(|e| format!("Failed to open JSONL: {}", e))?;
+    let reader = BufReader::new(file);
 
-                let msg_type = val.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                if msg_type == "user" || msg_type == "assistant" || msg_type == "result" {
-                    messages.push(val);
-                }
-            }
+    for line_result in reader.lines() {
+        let line = match line_result {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let val: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let msg_type = val.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if msg_type == "user" || msg_type == "assistant" || msg_type == "result" {
+            messages.push(val);
         }
     }
 
     info!(target: "agent", "Loaded {} messages from Claude JSONL for app_session_id={}", messages.len(), app_session_id);
+    Ok(messages)
+}
+
+/// Convert a codex JSONL response_item to a Claude-compatible message format.
+/// Codex uses: {type: "response_item", payload: {type, role, content, ...}}
+/// Claude uses: {type: "assistant"|"user", message: {role, content: [...]}, ...}
+fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_json::Value> {
+    let item_type = val.get("type")?.as_str()?;
+    let payload = val.get("payload")?;
+
+    if item_type == "response_item" {
+        let payload_type = payload.get("type")?.as_str()?;
+        let role = payload.get("role").and_then(|r| r.as_str());
+
+        // Assistant text message
+        if role == Some("assistant") {
+            let content_blocks = payload.get("content")?;
+            // Convert codex content format to claude format
+            let mut claude_content = Vec::new();
+            if let Some(arr) = content_blocks.as_array() {
+                for block in arr {
+                    let block_type = block.get("type")?.as_str()?;
+                    if block_type == "output_text" {
+                        if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                            claude_content.push(serde_json::json!({"type": "text", "text": text}));
+                        }
+                    } else if block_type == "reasoning" {
+                        // Skip reasoning blocks for now
+                    }
+                }
+            }
+            if claude_content.is_empty() {
+                return None;
+            }
+            return Some(serde_json::json!({
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": claude_content
+                }
+            }));
+        }
+
+        // User message
+        if role == Some("user") {
+            let content_blocks = payload.get("content")?;
+            let mut text_parts = Vec::new();
+            if let Some(arr) = content_blocks.as_array() {
+                for block in arr {
+                    let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                    if block_type == "input_text" {
+                        if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                            text_parts.push(text.to_string());
+                        }
+                    }
+                }
+            }
+            if text_parts.is_empty() {
+                return None;
+            }
+            return Some(serde_json::json!({
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": text_parts.join("\n")
+                }
+            }));
+        }
+
+        // Function call → tool_use
+        if payload_type == "function_call" {
+            let name = payload.get("name")?.as_str()?;
+            let call_id = payload.get("call_id")?.as_str()?;
+            let arguments = payload.get("arguments");
+            let input: serde_json::Value = if let Some(args_str) = arguments.and_then(|a| a.as_str()) {
+                serde_json::from_str(args_str).unwrap_or_else(|_| serde_json::json!({"raw": args_str}))
+            } else {
+                arguments.cloned().unwrap_or(serde_json::json!({}))
+            };
+            return Some(serde_json::json!({
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": call_id,
+                        "name": name,
+                        "input": input
+                    }]
+                }
+            }));
+        }
+
+        // Function call output → user tool_result
+        if payload_type == "function_call_output" {
+            let call_id = payload.get("call_id")?.as_str()?;
+            let output = payload.get("output").and_then(|o| o.as_str()).unwrap_or("");
+            return Some(serde_json::json!({
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": call_id,
+                        "content": output
+                    }]
+                }
+            }));
+        }
+    }
+
+    None
+}
+
+#[tauri::command]
+pub async fn load_codex_session_events(
+    state: State<'_, crate::AppState>,
+    app_session_id: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    use std::fs;
+    use std::io::{BufRead, BufReader};
+
+    debug!(target: "agent", "Loading Codex session events for app_session_id={}", app_session_id);
+
+    let mut messages = Vec::new();
+    let Some(codex_session_id) = get_agent_session_id(state.inner(), &app_session_id, AgentKind::Codex)?
+    else {
+        info!(target: "agent", "No Codex mapping found for app_session_id={}", app_session_id);
+        return Ok(messages);
+    };
+
+    let sessions_dir = home_dir()?.join(".codex").join("sessions");
+    let Some(jsonl_path) = find_codex_session_jsonl(&sessions_dir, &codex_session_id) else {
+        info!(
+            target: "agent",
+            "No Codex JSONL found for app_session_id={} codex_session_id={} dir={}",
+            app_session_id,
+            codex_session_id,
+            sessions_dir.display()
+        );
+        return Ok(messages);
+    };
+
+    debug!(target: "agent", "Reading Codex JSONL from {}", jsonl_path.display());
+    let file = match fs::File::open(&jsonl_path) {
+        Ok(file) => file,
+        Err(error) => return Err(format!("Failed to open Codex JSONL: {}", error)),
+    };
+    let reader = BufReader::new(file);
+
+    for line_result in reader.lines() {
+        let line = match line_result {
+            Ok(line) => line,
+            Err(_) => continue,
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let val: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+
+        if let Some(converted) = convert_codex_item_to_claude_format(&val) {
+            messages.push(converted);
+        }
+    }
+
+    info!(target: "agent", "Loaded {} messages from Codex JSONL for app_session_id={}", messages.len(), app_session_id);
     Ok(messages)
 }
 
@@ -145,8 +393,12 @@ async fn ensure_sidecar_for_session(
     let (handle, mut rx) = spawn_sidecar(&app, channel).await?;
     let shared_channel = handle.channel.clone();
     let session_id_clone = session_id.to_string();
+    let app_handle = app.clone();
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
+            if handle_agent_session_mapping_event(&app_handle, &event) {
+                continue;
+            }
             let ch = shared_channel.lock().await;
             let _ = ch.send(event);
         }
@@ -157,6 +409,70 @@ async fn ensure_sidecar_for_session(
     sidecars.insert(session_id.to_string(), handle);
 
     Ok(())
+}
+
+fn handle_agent_session_mapping_event(app: &AppHandle, event: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(event) else {
+        return false;
+    };
+
+    if value.get("type").and_then(|entry| entry.as_str()) != Some("agent_session_mapping") {
+        return false;
+    }
+
+    let Some(app_session_id) = value
+        .get("app_session_id")
+        .and_then(|entry| entry.as_str())
+    else {
+        warn!(target: "agent", "Dropping mapping event without app_session_id");
+        return true;
+    };
+    let Some(agent_kind_str) = value.get("agent_kind").and_then(|entry| entry.as_str()) else {
+        warn!(target: "agent", "Dropping mapping event without agent_kind app_session_id={}", app_session_id);
+        return true;
+    };
+    let Some(agent_session_id) = value
+        .get("agent_session_id")
+        .and_then(|entry| entry.as_str())
+    else {
+        warn!(target: "agent", "Dropping mapping event without agent_session_id app_session_id={}", app_session_id);
+        return true;
+    };
+
+    let Ok(agent_kind) = AgentKind::from_str(agent_kind_str) else {
+        warn!(
+            target: "agent",
+            "Dropping mapping event with unsupported agent_kind={} app_session_id={}",
+            agent_kind_str,
+            app_session_id
+        );
+        return true;
+    };
+
+    let state = app.state::<crate::AppState>();
+    let db = state.db.lock().unwrap();
+    match operations::upsert_agent_session_mapping(&db, app_session_id, agent_kind, agent_session_id) {
+        Ok(_) => {
+            info!(
+                target: "agent",
+                "Upserted agent session mapping app_session_id={} agent_kind={} agent_session_id={}",
+                app_session_id,
+                agent_kind.as_str(),
+                agent_session_id
+            );
+        }
+        Err(error) => {
+            warn!(
+                target: "agent",
+                "Failed to upsert agent session mapping app_session_id={} agent_kind={} error={}",
+                app_session_id,
+                agent_kind.as_str(),
+                error
+            );
+        }
+    }
+
+    true
 }
 
 fn build_ensure_session_command(
@@ -195,6 +511,21 @@ fn build_ensure_session_command(
     }
     if let Some(m) = model {
         cmd["model"] = serde_json::Value::String(m);
+    }
+    if let Ok(parsed_agent_kind) = AgentKind::from_str(agent_kind) {
+        match get_agent_session_id(state, session_id, parsed_agent_kind) {
+            Ok(Some(agent_session_id)) => {
+                cmd["agentSessionId"] = serde_json::Value::String(agent_session_id);
+            }
+            Ok(None) => {}
+            Err(error) => warn!(
+                target: "agent",
+                "Failed to load agent session mapping for session_id={} agent_kind={} error={}",
+                session_id,
+                agent_kind,
+                error
+            ),
+        }
     }
 
     if !mcp_servers.is_empty() {
@@ -426,28 +757,16 @@ pub async fn reset_agent_session(
 
 #[tauri::command]
 pub async fn delete_claude_session_files(
+    state: State<'_, crate::AppState>,
     app_session_id: String,
 ) -> Result<Vec<String>, String> {
     use std::fs;
-    use std::path::PathBuf;
+    let claude_dir = home_dir()?.join(".claude");
 
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .map_err(|_| "Cannot determine home directory".to_string())?;
-    let claude_dir = PathBuf::from(&home).join(".claude");
-
-    let map_file = claude_dir.join("session-id-map.json");
-    let map_content = fs::read_to_string(&map_file)
-        .map_err(|e| format!("Failed to read session-id-map.json: {}", e))?;
-    let map: serde_json::Value = serde_json::from_str(&map_content)
-        .map_err(|e| format!("Failed to parse session-id-map.json: {}", e))?;
-
-    let claude_session_id = match map.get(&app_session_id).and_then(|v| v.as_str()) {
-        Some(id) => id.to_string(),
-        None => {
-            debug!(target: "agent", "No Claude session mapping found for session_id={}", app_session_id);
-            return Ok(vec![]);
-        }
+    let Some(claude_session_id) = get_agent_session_id(state.inner(), &app_session_id, AgentKind::ClaudeCode)?
+    else {
+        debug!(target: "agent", "No Claude session mapping found for session_id={}", app_session_id);
+        return Ok(vec![]);
     };
 
     info!(
@@ -521,11 +840,6 @@ pub async fn delete_claude_session_files(
         }
     }
 
-    if let serde_json::Value::Object(mut map_obj) = map {
-        map_obj.remove(&app_session_id);
-        let _ = fs::write(&map_file, serde_json::to_string_pretty(&map_obj).unwrap_or_default());
-    }
-
     info!(
         target: "agent",
         "Deleted {} Claude session file entries for app_session_id={}",
@@ -557,6 +871,44 @@ fn parse_proxy_port_from_stderr(lines: &[String]) -> Option<u16> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_codex_session_jsonl;
+
+    #[test]
+    fn find_codex_session_jsonl_matches_only_session_meta_payload_id() {
+        use std::fs;
+
+        let base = std::env::temp_dir().join(format!("codemux-codex-test-{}", uuid::Uuid::new_v4()));
+        let sessions_dir = base.join("2026").join("06").join("11");
+        fs::create_dir_all(&sessions_dir).unwrap();
+        fs::write(
+            sessions_dir.join("wrong-id.jsonl"),
+            concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"wrong-session\",\"timestamp\":\"2026-06-11T10:00:00Z\"}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"wrong\"}]}}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            sessions_dir.join("target.jsonl"),
+            concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"target-session\",\"timestamp\":\"2026-06-11T11:00:00Z\"}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}}\n"
+            ),
+        )
+        .unwrap();
+
+        let matched = find_codex_session_jsonl(&base, "target-session").expect("matching file should exist");
+        assert_eq!(matched, sessions_dir.join("target.jsonl"));
+
+        let missing = find_codex_session_jsonl(&base, "missing-session");
+        assert!(missing.is_none());
+
+        let _ = fs::remove_dir_all(&base);
+    }
 }
 
 #[tauri::command]

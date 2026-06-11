@@ -215,6 +215,16 @@ export function convertResponsesToChatRequest(
   history: CodexChatHistory,
 ): ChatCompletionsRequest {
   const messages = buildChatMessages(request, history);
+  const tools = request.tools
+    ?.filter((tool): tool is ResponsesFunctionTool => isNamedFunctionTool(tool))
+    .map((tool) => ({
+      type: 'function' as const,
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      },
+    }));
 
   return {
     model: request.model,
@@ -226,14 +236,7 @@ export function convertResponsesToChatRequest(
     user: request.user,
     metadata: request.metadata,
     reasoning_effort: request.reasoning?.effort,
-    tools: request.tools?.map((tool) => ({
-      type: 'function',
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parameters,
-      },
-    })),
+    tools,
     tool_choice: request.tool_choice,
   };
 }
@@ -568,6 +571,17 @@ function stringifyContent(content: unknown): string {
     return '';
   }
   return JSON.stringify(content);
+}
+
+function isNamedFunctionTool(tool: unknown): tool is ResponsesFunctionTool {
+  return (
+    typeof tool === 'object' &&
+    tool !== null &&
+    !Array.isArray(tool) &&
+    (tool as { type?: unknown }).type === 'function' &&
+    typeof (tool as { name?: unknown }).name === 'string' &&
+    (tool as { name: string }).name.length > 0
+  );
 }
 
 function extractReasoningAndText(message: NonNullable<ChatCompletionChoice['message']>): {

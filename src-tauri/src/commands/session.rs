@@ -1,43 +1,9 @@
-use log::{debug, info};
-use tauri::State;
-use crate::AppState;
 use crate::config::types::AgentKind;
 use crate::db::operations;
+use crate::AppState;
+use log::{debug, info};
 use std::str::FromStr;
-
-#[tauri::command]
-pub fn save_agent_events(
-    state: State<'_, AppState>,
-    session_id: String,
-    events_json: String,
-) -> Result<(), String> {
-    debug!(target: "session", "Persisting agent events for session_id={} payload_bytes={}", session_id, events_json.len());
-    let db = state.db.lock().unwrap();
-    // Delete existing agent events for this session
-    db.execute(
-        "DELETE FROM messages WHERE session_id = ?1 AND role = 'agent'",
-        rusqlite::params![session_id],
-    ).map_err(|e| e.to_string())?;
-    // Save new events as a single JSON blob
-    operations::create_message(&db, &session_id, "agent", &events_json)
-        .map_err(|e| e.to_string())?;
-    debug!(target: "session", "Persisted agent events for session_id={}", session_id);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn get_agent_events(
-    state: State<'_, AppState>,
-    session_id: String,
-) -> Result<String, String> {
-    debug!(target: "session", "Loading persisted agent events for session_id={}", session_id);
-    let db = state.db.lock().unwrap();
-    let messages = operations::get_messages_by_role(&db, &session_id, "agent")
-        .map_err(|e| e.to_string())?;
-    // Return the events JSON (latest one)
-    Ok(messages.last().map(|m| m.content.clone()).unwrap_or_default())
-}
-
+use tauri::State;
 
 #[tauri::command]
 pub fn create_session(
@@ -48,7 +14,14 @@ pub fn create_session(
     project_id: Option<String>,
 ) -> Result<operations::Session, String> {
     let agent_kind = AgentKind::from_str(agent_kind.as_deref().unwrap_or("claude_code"))?;
-    info!(target: "session", "Creating session title={} agent_kind={} mode={} project_id={}", title, agent_kind.as_str(), mode.as_deref().unwrap_or("chat"), project_id.as_deref().unwrap_or("none"));
+    info!(
+        target: "session",
+        "Creating session title={} agent_kind={} mode={} project_id={}",
+        title,
+        agent_kind.as_str(),
+        mode.as_deref().unwrap_or("chat"),
+        project_id.as_deref().unwrap_or("none")
+    );
     let db = state.db.lock().unwrap();
     let mode_str = mode.as_deref().unwrap_or("chat");
     match project_id.as_deref() {
@@ -81,13 +54,13 @@ pub fn update_session_title(state: State<'_, AppState>, session_id: String, titl
 
 #[tauri::command]
 pub fn update_session_provider(state: State<'_, AppState>, session_id: String, provider_id: String, model: String) -> Result<(), String> {
-    info!(target: "session", "Updating session provider session_id={} provider_id={} model={}", session_id, provider_id, model);
+    info!(
+        target: "session",
+        "Updating session provider session_id={} provider_id={} model={}",
+        session_id,
+        provider_id,
+        model
+    );
     let db = state.db.lock().unwrap();
     operations::update_session_provider(&db, &session_id, &provider_id, &model).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn get_messages(state: State<'_, AppState>, session_id: String) -> Result<Vec<operations::Message>, String> {
-    let db = state.db.lock().unwrap();
-    operations::get_messages_by_session(&db, &session_id).map_err(|e| e.to_string())
 }
