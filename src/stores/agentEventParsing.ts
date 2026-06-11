@@ -20,6 +20,22 @@ export function shouldSuppressLiveEventWhileStopped(kind: string): boolean {
   return kind !== 'done' && kind !== 'error';
 }
 
+export function isTerminalAgentEvent(kind: string, isResultError = false): boolean {
+  return kind === 'done' || kind === 'error' || (kind === 'result' && isResultError);
+}
+
+export function shouldProcessTerminalEvent(
+  isRunning: boolean,
+  kind: string,
+  isResultError = false,
+): boolean {
+  if (!isTerminalAgentEvent(kind, isResultError)) {
+    return true;
+  }
+
+  return isRunning;
+}
+
 export function parseSdkUserMessage(data: Record<string, unknown>): ParsedStoreEvent {
   const message = asRecord(data.message);
   const content = Array.isArray(message?.content) ? message.content : undefined;

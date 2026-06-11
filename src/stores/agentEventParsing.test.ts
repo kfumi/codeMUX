@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   INTERRUPT_MARKER,
+  isTerminalAgentEvent,
   isInterruptMarker,
   mapPersistedClaudeMessage,
   parseSdkUserMessage,
+  shouldProcessTerminalEvent,
   shouldSuppressLiveEventWhileStopped,
 } from './agentEventParsing';
 
@@ -109,5 +111,72 @@ describe('shouldSuppressLiveEventWhileStopped', () => {
     expect(shouldSuppressLiveEventWhileStopped('result')).toBe(true);
     expect(shouldSuppressLiveEventWhileStopped('done')).toBe(false);
     expect(shouldSuppressLiveEventWhileStopped('error')).toBe(false);
+  });
+});
+
+describe('terminal event helpers', () => {
+  it('identifies done, error, and error results as terminal events', () => {
+    expect(isTerminalAgentEvent('done')).toBe(true);
+    expect(isTerminalAgentEvent('error')).toBe(true);
+    expect(isTerminalAgentEvent('result', true)).toBe(true);
+    expect(isTerminalAgentEvent('result', false)).toBe(false);
+    expect(isTerminalAgentEvent('assistant')).toBe(false);
+  });
+
+  it('ignores duplicate terminal events after the session already stopped', () => {
+    expect(shouldProcessTerminalEvent(true, 'error')).toBe(true);
+    expect(shouldProcessTerminalEvent(true, 'done')).toBe(true);
+    expect(shouldProcessTerminalEvent(false, 'done')).toBe(false);
+    expect(shouldProcessTerminalEvent(false, 'error')).toBe(false);
+    expect(shouldProcessTerminalEvent(false, 'result', true)).toBe(false);
+    expect(shouldProcessTerminalEvent(false, 'assistant')).toBe(true);
+  });
+});
+
+describe('Codex runtime event normalization', () => {
+  it('keeps non-Claude assistant payloads usable after runtime normalization', () => {
+    const event = mapPersistedClaudeMessage({
+      type: 'assistant',
+      uuid: 'assistant-1',
+      session_id: 'session-1',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Codex says hello' }],
+      },
+      parent_tool_use_id: null,
+    });
+
+    expect(event).toEqual({
+      kind: 'assistant',
+      data: expect.objectContaining({
+        message: expect.objectContaining({
+          content: [{ type: 'text', text: 'Codex says hello' }],
+        }),
+      }),
+    });
+  });
+
+  it('normalizes Codex result events the same way as Claude result events', () => {
+    const event = mapPersistedClaudeMessage({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      uuid: 'result-codex-1',
+      session_id: 'session-codex-1',
+      duration_ms: 5,
+      duration_api_ms: 4,
+      num_turns: 1,
+      result: 'done',
+      total_cost_usd: 0,
+      usage: { input_tokens: 10, output_tokens: 20 },
+    });
+
+    expect(event).toEqual({
+      kind: 'result',
+      data: expect.objectContaining({
+        uuid: 'result-codex-1',
+        session_id: 'session-codex-1',
+      }),
+    });
   });
 });

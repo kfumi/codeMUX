@@ -6,9 +6,10 @@ interface DropdownMenuProps {
   trigger: ReactNode;
   children: ReactNode;
   align?: 'left' | 'right';
+  panelClassName?: string;
 }
 
-export function DropdownMenu({ trigger, children, align = 'left' }: DropdownMenuProps) {
+export function DropdownMenu({ trigger, children, align = 'left', panelClassName }: DropdownMenuProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -39,7 +40,10 @@ export function DropdownMenu({ trigger, children, align = 'left' }: DropdownMenu
     ? createPortal(
         <div
           ref={panelRef}
-          className="fixed z-[100] min-w-[160px] rounded-md border bg-popover p-1 shadow-lg"
+          className={cn(
+            'fixed z-[100] min-w-[160px] rounded-md border bg-popover p-1 shadow-lg',
+            panelClassName,
+          )}
           style={{ top: pos.top, left: pos.left }}
           onClick={() => setOpen(false)}
         >

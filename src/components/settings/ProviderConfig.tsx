@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Provider } from '../../types/provider';
 import type { ModelInfo } from '../../lib/tauri';
+import { normalizeOpenAIBaseUrl } from '../../lib/providerUrls';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
@@ -96,9 +97,14 @@ export function ProviderConfigPanel() {
       return;
     }
 
-    await updateProvider(editingProvider);
+    const normalizedProvider: Provider = {
+      ...editingProvider,
+      openai_base_url: normalizeOpenAIBaseUrl(editingProvider.openai_base_url),
+    };
+
+    await updateProvider(normalizedProvider);
     if (isNew) {
-      await setActiveProvider(editingProvider.id);
+      await setActiveProvider(normalizedProvider.id);
     }
     closeModal();
   };
@@ -135,7 +141,7 @@ export function ProviderConfigPanel() {
 
   const handleFetchModels = async () => {
     if (!editingProvider) return;
-    const url = editingProvider.anthropic_base_url || editingProvider.openai_base_url;
+    const url = editingProvider.anthropic_base_url || normalizeOpenAIBaseUrl(editingProvider.openai_base_url);
 
     if (!url?.trim()) {
       setFetchStatus('error');

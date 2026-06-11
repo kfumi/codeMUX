@@ -1,6 +1,8 @@
 import { useAgentStore, type AgentMessage } from '../../stores/agentStore';
+import { useSessionStore } from '../../stores/sessionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { calculateCost } from '../../lib/pricing';
+import { humanizeCodexError } from '../../lib/providerUrls';
 import { Loader2 } from 'lucide-react';
 
 interface AgentStatusBarProps {
@@ -13,13 +15,15 @@ export function AgentStatusBar({ sessionId }: AgentStatusBarProps) {
   const isRunning = useAgentStore((s) => s.isRunning[sessionId] ?? false);
   const error = useAgentStore((s) => s.error[sessionId]);
   const events = useAgentStore((s) => s.events[sessionId] ?? EMPTY_EVENTS);
+  const session = useSessionStore((s) => s.sessions.find((item) => item.id === sessionId) ?? null);
   const config = useSettingsStore((s) => s.config);
   const provider = config?.providers.find((p) => p.id === config.active_provider_id) ?? null;
+  const displayError = session?.agent_kind === 'codex' && error ? humanizeCodexError(error) : error;
 
   const lastResult = [...events].reverse().find((e) => e.kind === 'result');
   const cost = lastResult?.kind === 'result' ? calculateCost(lastResult.data.usage, provider) : null;
 
-  if (!isRunning && !error && events.length === 0) return null;
+  if (!isRunning && !displayError && events.length === 0) return null;
 
   return (
     <div className="border-t border-border/25 py-1.5 shrink-0">
@@ -32,7 +36,7 @@ export function AgentStatusBar({ sessionId }: AgentStatusBarProps) {
             <span>running</span>
           </div>
         )}
-        {error && <span className="text-red-500">error: {error}</span>}
+        {displayError && <span className="text-red-500">error: {displayError}</span>}
         {lastResult && lastResult.kind === 'result' && !isRunning && (
           <span>
             done · {(lastResult.data.duration_ms / 1000).toFixed(1)}s{cost != null && ` · $${cost.toFixed(4)}`}

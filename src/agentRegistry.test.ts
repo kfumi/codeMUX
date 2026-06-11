@@ -13,7 +13,9 @@ describe('agent registry', () => {
     });
   });
 
-  it('returns undefined for unsupported registry lookups', () => {
-    expect(getAgentDefinition('missing_agent' as never)).toBeUndefined();
+  it('marks unsupported registry lookups as missing', () => {
+    expect(AGENT_REGISTRY.some((entry) => entry.kind === 'gemini_cli')).toBe(true);
+    expect(getAgentDefinition('gemini_cli')).toBeDefined();
+    expect(getAgentDefinition('nonexistent' as never)).toBeUndefined();
   });
 });

@@ -21,7 +21,7 @@ export const AGENT_REGISTRY: AgentDefinition[] = [
   {
     kind: 'claude_code',
     label: 'Claude Code',
-    description: 'Default coding agent with the most complete runtime support.',
+    description: '默认编码智能体，当前运行时支持最完整。',
     icon: 'claude',
     capabilities: [
       'supports_resume',
@@ -36,21 +36,21 @@ export const AGENT_REGISTRY: AgentDefinition[] = [
   {
     kind: 'codex',
     label: 'Codex',
-    description: 'OpenAI Codex SDK backed coding agent.',
+    description: '基于 OpenAI Codex SDK 的编码智能体。',
     icon: 'codex',
     capabilities: ['supports_tools', 'supports_file_snapshots'],
   },
   {
     kind: 'gemini_cli',
     label: 'Gemini CLI',
-    description: 'Future coding agent entry kept in the registry for menu stability.',
+    description: '为后续扩展预留的 Gemini 接入入口。',
     icon: 'gemini',
     capabilities: [],
   },
   {
     kind: 'opencode',
     label: 'OpenCode',
-    description: 'Future coding agent entry kept in the registry for menu stability.',
+    description: '为后续扩展预留的 OpenCode 接入入口。',
     icon: 'opencode',
     capabilities: [],
   },
