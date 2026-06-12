@@ -346,8 +346,14 @@ export class CodexSessionRuntime {
   }
 
   async interrupt(): Promise<void> {
-    process.stderr.write('[codex] Interrupt requested\n');
+    process.stderr.write('[codex] Interrupt requested — tearing down client to stop agentic loop\n');
+    // Abort the signal first for immediate effect on in-flight requests.
     this.abortController?.abort();
+    // Emit done so the frontend clears isRunning.
+    this.finishTurn();
+    // Destroy the SDK client and thread to stop the agentic loop.
+    // The session will be re-established on the next ensure_session call.
+    await this.teardownClient();
   }
 
   async resetSession(sessionId: string): Promise<void> {
