@@ -49,10 +49,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   )}
                 >
                   <Icon
-                    className={cn(
-                      'h-4 w-4 transition-colors',
-                      activeTab === id ? 'text-[hsl(var(--primary))]' : '',
-                    )}
+                    className={cn('h-4 w-4 transition-colors', activeTab === id ? 'text-[hsl(var(--primary))]' : '')}
                   />
                   {label}
                 </button>

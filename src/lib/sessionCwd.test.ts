@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Project } from '../types/project';
-import { resolveSessionCwd } from './sessionCwd';
+import { DEFAULT_AGENT_CWD, getStoredAgentCwd, resolveSessionCwd } from './sessionCwd';
 
 const projects: Project[] = [
   {
@@ -24,5 +24,15 @@ describe('resolveSessionCwd', () => {
 
   it('falls back to the remembered cwd when the draft project is missing', () => {
     expect(resolveSessionCwd(projects, 'missing-project', 'D:/workspace')).toBe('D:/workspace');
+  });
+});
+
+describe('getStoredAgentCwd', () => {
+  it('returns the remembered cwd when available', () => {
+    expect(getStoredAgentCwd({ getItem: () => 'D:/workspace' })).toBe('D:/workspace');
+  });
+
+  it('falls back to the default cwd when storage is unavailable', () => {
+    expect(getStoredAgentCwd(undefined)).toBe(DEFAULT_AGENT_CWD);
   });
 });

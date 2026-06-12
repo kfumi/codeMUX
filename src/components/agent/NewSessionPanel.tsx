@@ -64,7 +64,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
       </div>
 
       <div className="relative flex w-full max-w-5xl flex-col items-center gap-9">
-        <div className="flex flex-col items-center gap-5 text-center animate-fade-in-up">
+        <div className="flex animate-fade-in-up flex-col items-center gap-5 text-center">
           <span
             className="rounded-full border border-border/50 bg-background/75 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground shadow-[0_8px_24px_-18px_hsl(var(--foreground)/0.28)] backdrop-blur"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
@@ -73,17 +73,11 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
           </span>
 
           <div className="relative mx-auto inline-flex">
-            <AgentSelector
-              value={selectedAgentKind}
-              onChange={setSelectedAgentKind}
-              variant="floating"
-            />
+            <AgentSelector value={selectedAgentKind} onChange={setSelectedAgentKind} variant="floating" />
           </div>
 
           <div className="space-y-3">
-            <h1 className="text-3xl font-semibold tracking-[-0.03em] text-foreground sm:text-4xl">
-              开始新对话
-            </h1>
+            <h1 className="text-3xl font-semibold tracking-[-0.03em] text-foreground sm:text-4xl">开始新对话</h1>
             <p className="mx-auto max-w-2xl text-sm leading-7 text-muted-foreground sm:text-[15px]">
               选择合适的编码智能体，给出你的第一条任务指令，
               让这次会话从更清晰的上下文开始。

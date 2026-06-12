@@ -1,5 +1,13 @@
 import type { Project } from '../types/project';
 
+export const DEFAULT_AGENT_CWD = '.';
+
+export function getStoredAgentCwd(
+  storage: Pick<Storage, 'getItem'> | null | undefined = globalThis.localStorage,
+): string {
+  return storage?.getItem('agent-user-cwd') || DEFAULT_AGENT_CWD;
+}
+
 export function resolveSessionCwd(
   projects: Project[],
   draftProjectId: string | null | undefined,

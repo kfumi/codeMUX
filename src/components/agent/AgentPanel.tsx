@@ -1,25 +1,27 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useAgentStore } from '../../stores/agentStore';
-import { useSessionStore } from '../../stores/sessionStore';
-import { useProjectStore } from '../../stores/projectStore';
-import { useSettingsStore } from '../../stores/settingsStore';
-import { usePreviewStore } from '../../stores/previewStore';
+import { FolderOpen, MoreHorizontal, PanelRightClose, PanelRightOpen, Pencil } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import { getStoredAgentCwd } from '../../lib/sessionCwd';
+import { resolveAgentProviderConfig } from '../../lib/agentProvider';
 import { cn } from '../../lib/utils';
+import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
+import { agentApi, sessionApi } from '../../lib/tauri';
+import { useAgentStore } from '../../stores/agentStore';
+import { usePreviewStore } from '../../stores/previewStore';
+import { useProjectStore } from '../../stores/projectStore';
+import { useSessionStore } from '../../stores/sessionStore';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { ContextDisplay } from '../assistant-ui/context-display';
+import { Button } from '../ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
+import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
+import { Input } from '../ui/input';
+import { ChangedFilesList } from './ChangedFilesList';
+import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
 import { CodeMuxThread } from './assistant-ui/CodeMuxThread';
-import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
-import { ContextDisplay } from '../assistant-ui/context-display';
-import { TodoList } from './TodoList';
-import { ChangedFilesList } from './ChangedFilesList';
-import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { resolveAgentProviderConfig } from '../../lib/agentProvider';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { FolderOpen, MoreHorizontal, Pencil, PanelRightOpen, PanelRightClose } from 'lucide-react';
-import type { SlashCommand, CommandContext } from '../../lib/slashCommands';
-import { agentApi, sessionApi } from '../../lib/tauri';
+import { TodoList } from './TodoList';
 import { supportsCapability } from './agentCapabilities';
 
 interface AgentPanelProps {
@@ -39,11 +41,12 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { config, getActiveProvider, setProxyRunning } = useSettingsStore();
   const { isOpen: previewOpen, togglePanel: togglePreview, loadFileTree, setProjectPath } = usePreviewStore();
 
-  const todos = useAgentStore((s) => s.todos[sessionId] ?? EMPTY_TODOS);
-  const mcpRuntimeStatus = useAgentStore((s) => s.mcpRuntimeStatus[sessionId] ?? null);
+  const todos = useAgentStore((state) => state.todos[sessionId] ?? EMPTY_TODOS);
+  const mcpRuntimeStatus = useAgentStore((state) => state.mcpRuntimeStatus[sessionId] ?? null);
+  const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
 
-  const session = sessions.find((s) => s.id === sessionId);
-  const project = session?.project_id ? projects.find((p) => p.id === session.project_id) : null;
+  const session = sessions.find((entry) => entry.id === sessionId);
+  const project = session?.project_id ? projects.find((entry) => entry.id === session.project_id) : null;
   const { provider: resolvedProvider, apiKey, baseUrl, model } = resolveAgentProviderConfig({
     agentKind: session?.agent_kind ?? 'claude_code',
     config,
@@ -55,6 +58,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const [infoOpen, setInfoOpen] = useState(false);
   const [infoTitle, setInfoTitle] = useState('');
   const [infoContent, setInfoContent] = useState('');
+  const [cwd, setCwd] = useState(() => getStoredAgentCwd());
   const lastEnsureKeyRef = useRef<string | null>(null);
 
   const handleRenameOpen = () => {
@@ -69,10 +73,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
     setRenameOpen(false);
   };
-
-  const [cwd, setCwd] = useState(() => {
-    return localStorage.getItem('agent-user-cwd') || '.';
-  });
 
   useEffect(() => {
     loadSessionMessages(sessionId);
@@ -89,13 +89,12 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     if (project?.path) {
       setCwd(project.path);
     } else {
-      setCwd(localStorage.getItem('agent-user-cwd') || '.');
+      setCwd(getStoredAgentCwd());
     }
   }, [sessionId, project?.path]);
 
   useEffect(() => {
     const effectiveCwd = project?.path || cwd;
-
     const ensureKey = JSON.stringify({
       sessionId,
       cwd: effectiveCwd,
@@ -111,25 +110,23 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
     lastEnsureKeyRef.current = ensureKey;
     agentApi.ensureSession(sessionId, effectiveCwd, undefined, apiKey, baseUrl, model).then(async () => {
-      // If provider needs a compat proxy, mark it as running and fetch the port
       if (baseUrl) {
         try {
           if (new URL(baseUrl).host.toLowerCase() !== 'api.openai.com') {
-            // Wait a bit for the proxy to start, then read the port
-            await new Promise((r) => setTimeout(r, 600));
+            await new Promise((resolve) => setTimeout(resolve, 600));
             const port = await agentApi.getProxyPort().catch(() => null);
             setProxyRunning(true, port && port > 0 ? `http://127.0.0.1:${port}` : null);
           }
-        } catch { /* invalid URL */ }
+        } catch {
+          // Ignore invalid base URLs and let the runtime surface the real error.
+        }
       }
     }).catch(() => {
       if (lastEnsureKeyRef.current === ensureKey) {
         lastEnsureKeyRef.current = null;
       }
     });
-  }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, model]);
-
-  const events = useAgentStore((s) => s.events[sessionId] ?? EMPTY_EVENTS);
+  }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, model, setProxyRunning]);
 
   const contextUsage = useMemo(() => {
     let usedTokens = 0;
@@ -137,10 +134,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     let cachedTokens = 0;
     let outputTokens = 0;
 
-    for (let i = events.length - 1; i >= 0; i--) {
-      const evt = events[i];
-      if (usedTokens === 0 && evt.kind === 'assistant') {
-        const data: any = evt.data;
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (usedTokens === 0 && event.kind === 'assistant') {
+        const data: any = event.data;
         const usage = data?.message?.usage || data?.usage;
         if (usage) {
           const input = usage.input_tokens || 0;
@@ -156,8 +153,9 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           }
         }
       }
-      if (usedTokens === 0 && evt.kind === 'result') {
-        const data: any = evt.data;
+
+      if (usedTokens === 0 && event.kind === 'result') {
+        const data: any = event.data;
         if (data?.usage) {
           const usage = data.usage;
           const input = usage.input_tokens || 0;
@@ -173,7 +171,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           }
         }
       }
-      if (usedTokens > 0) break;
+
+      if (usedTokens > 0) {
+        break;
+      }
     }
 
     const totalTokens = getSessionContextLimit({
@@ -190,18 +191,18 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
     if (session && !session.provider_id && resolvedProvider?.id && model) {
       sessionApi.updateProvider(sessionId, resolvedProvider.id, model).catch(() => {});
-      useSessionStore.setState((s) => ({
-        sessions: s.sessions.map(sess =>
-          sess.id === sessionId ? { ...sess, provider_id: resolvedProvider.id, model } : sess
+      useSessionStore.setState((state) => ({
+        sessions: state.sessions.map((entry) =>
+          entry.id === sessionId ? { ...entry, provider_id: resolvedProvider.id, model } : entry,
         ),
       }));
     }
 
     try {
       await startQuery(sessionId, content, effectiveCwd, apiKey, baseUrl, model);
-    } catch (err) {
-      useAgentStore.setState((s) => ({
-        error: { ...s.error, [sessionId]: String(err) },
+    } catch (error) {
+      useAgentStore.setState((state) => ({
+        error: { ...state.error, [sessionId]: String(error) },
       }));
     }
   };
@@ -213,14 +214,15 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   }, []);
 
   const getCostInfo = useCallback((): string => {
-    for (let i = events.length - 1; i >= 0; i--) {
-      const evt = events[i];
-      if (evt.kind === 'result' && evt.data) {
-        const data = evt.data as any;
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (event.kind === 'result' && event.data) {
+        const data = event.data as any;
         const usage = data.usage;
         const duration = data.duration_ms;
         const turns = data.num_turns;
         const lines: string[] = [];
+
         if (turns) lines.push(`**对话轮次**　${turns}`);
         if (duration) lines.push(`**耗时**　${(duration / 1000).toFixed(1)}s`);
         if (usage) {
@@ -232,19 +234,20 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           lines.push(`**输出 tokens**　${output.toLocaleString()}`);
           if (cacheRead) lines.push(`**缓存命中**　${cacheRead.toLocaleString()}`);
           if (cacheCreation) lines.push(`**缓存创建**　${cacheCreation.toLocaleString()}`);
-          const total = input + output + cacheRead + cacheCreation;
-          lines.push(`**总计**　${total.toLocaleString()} tokens`);
+          lines.push(`**总计**　${(input + output + cacheRead + cacheCreation).toLocaleString()} tokens`);
         }
         if (data.total_cost) lines.push(`**费用**　$${data.total_cost.toFixed(4)}`);
+
         return lines.join('\n\n');
       }
     }
+
     return '暂无费用信息（当前会话还没有完成过对话）';
   }, [events]);
 
   const handleCommand = useCallback(async (command: SlashCommand, args: string) => {
     if (command.handler === 'local' && command.action) {
-      const ctx: CommandContext = {
+      const context: CommandContext = {
         sessionId,
         cwd,
         showInfoDialog,
@@ -256,26 +259,26 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         getTheme: () => config?.theme || 'System',
         getCostInfo,
       };
-      await command.action(ctx, args);
-    } else if (command.handler === 'prompt' && command.prompt) {
+      await command.action(context, args);
+      return;
+    }
+
+    if (command.handler === 'prompt' && command.prompt) {
       const prompt = command.prompt.replace(/\{args\}/g, args || '');
       await handleSend(prompt);
     }
-  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, getCostInfo, handleSend]);
+  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, getCostInfo]);
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-3 border-b border-border/30 bg-background/80 backdrop-blur-sm shrink-0">
-        <h2 className="text-[13px] font-medium text-foreground/86 truncate">
-          {session?.title || '新对话'}
-        </h2>
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center gap-3 border-b border-border/30 bg-background/80 px-6 py-3 backdrop-blur-sm">
+        <h2 className="truncate text-[13px] font-medium text-foreground/86">{session?.title || '新对话'}</h2>
         <DropdownMenu
-          trigger={
-            <button className="p-1 rounded-lg hover:bg-muted/40 text-muted-foreground/72 hover:text-foreground transition-colors">
+          trigger={(
+            <button className="rounded-lg p-1 text-muted-foreground/72 transition-colors hover:bg-muted/40 hover:text-foreground">
               <MoreHorizontal className="h-4 w-4" />
             </button>
-          }
+          )}
         >
           <DropdownMenuItem icon={<Pencil className="h-3.5 w-3.5" />} onClick={handleRenameOpen}>
             重命名
@@ -293,15 +296,16 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           />
         )}
         {project && (
-          <div className="flex items-center gap-1.5 text-[12px] text-foreground/78 bg-muted/30 rounded-lg px-2.5 py-1.5 border border-border/20 min-w-0 max-w-[300px]"
+          <div
+            className="flex min-w-0 max-w-[300px] items-center gap-1.5 rounded-lg border border-border/20 bg-muted/30 px-2.5 py-1.5 text-[12px] text-foreground/78"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
-            <FolderOpen className="h-3 w-3 text-foreground/62 shrink-0" />
+            <FolderOpen className="h-3 w-3 shrink-0 text-foreground/62" />
             <span className="truncate">{project.path}</span>
           </div>
         )}
         {mcpRuntimeStatus && mcpRuntimeStatus !== 'ready' && (
-          <div className="text-[11px] text-muted-foreground bg-muted/30 rounded-lg px-2 py-1 border border-border/20">
+          <div className="rounded-lg border border-border/20 bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
             {mcpRuntimeStatus === 'warming' && 'MCP 正在后台预热'}
             {mcpRuntimeStatus === 'deferred' && 'MCP 将按需连接'}
             {mcpRuntimeStatus === 'fallback_live' && '对话已启动，MCP 继续后台接入'}
@@ -311,30 +315,20 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         <button
           onClick={togglePreview}
           className={cn(
-            'p-1.5 rounded-lg transition-all duration-200',
-            previewOpen
-              ? 'bg-muted text-foreground'
-              : 'text-muted-foreground/72 hover:text-foreground hover:bg-muted/30'
+            'rounded-lg p-1.5 transition-all duration-200',
+            previewOpen ? 'bg-muted text-foreground' : 'text-muted-foreground/72 hover:bg-muted/30 hover:text-foreground',
           )}
           title={previewOpen ? '收起预览面板' : '展开预览面板'}
         >
-          {previewOpen ? (
-            <PanelRightClose className="h-4 w-4" />
-          ) : (
-            <PanelRightOpen className="h-4 w-4" />
-          )}
+          {previewOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
         </button>
       </div>
 
-      <CodeMuxAssistantRuntimeProvider
-        sessionId={sessionId}
-        onSend={handleSend}
-        onCommand={handleCommand}
-      >
+      <CodeMuxAssistantRuntimeProvider sessionId={sessionId} onSend={handleSend} onCommand={handleCommand}>
         <CodeMuxThread
           sessionId={sessionId}
           provider={resolvedProvider}
-          footer={
+          footer={(
             <div className="flex w-full flex-col gap-3">
               <div className="flex items-end justify-between gap-3">
                 {todos.length > 0 && <TodoList todos={todos} />}
@@ -347,11 +341,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                 onStop={() => interrupt(sessionId)}
               />
             </div>
-          }
+          )}
         />
       </CodeMuxAssistantRuntimeProvider>
 
-      {/* Rename dialog */}
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
@@ -359,25 +352,24 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           </DialogHeader>
           <Input
             value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSave(); }}
+            onChange={(event) => setRenameValue(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') void handleRenameSave(); }}
             placeholder="输入对话名称"
             autoFocus
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => setRenameOpen(false)}>取消</Button>
-            <Button onClick={handleRenameSave}>保存</Button>
+            <Button onClick={() => void handleRenameSave()}>保存</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Info dialog */}
       <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
         <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
             <DialogTitle>{infoTitle}</DialogTitle>
           </DialogHeader>
-          <div className="text-sm leading-relaxed max-h-[60vh] overflow-y-auto [&_p]:my-1.5 [&_strong]:text-foreground [&_strong]:font-semibold [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded-md [&_code]:bg-muted [&_code]:text-[13px] [&_code]:font-mono [&_blockquote]:border-l-2 [&_blockquote]:border-[hsl(var(--primary)/0.3)] [&_blockquote]:pl-3 [&_blockquote]:py-1 [&_blockquote]:my-2 [&_blockquote]:text-muted-foreground [&_blockquote]:text-xs [&_ul]:my-1 [&_ul]:pl-4 [&_ul]:list-disc [&_li]:my-0.5 [&_hr]:my-3">
+          <div className="max-h-[60vh] overflow-y-auto text-sm leading-relaxed [&_blockquote]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-[hsl(var(--primary)/0.3)] [&_blockquote]:py-1 [&_blockquote]:pl-3 [&_blockquote]:text-xs [&_blockquote]:text-muted-foreground [&_code]:rounded-md [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_hr]:my-3 [&_li]:my-0.5 [&_p]:my-1.5 [&_strong]:font-semibold [&_strong]:text-foreground [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-4">
             <MarkdownRenderer content={infoContent} />
           </div>
           <DialogFooter>

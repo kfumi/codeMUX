@@ -54,7 +54,6 @@ describe('session store createSession', () => {
           },
           codex: {
             sdk_mode: 'responses',
-            default_provider_id: null,
           },
           gemini_cli: {},
           opencode: {},

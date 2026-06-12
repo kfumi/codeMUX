@@ -1,19 +1,15 @@
-import { useEffect, useState } from 'react';
 import { Sparkles } from 'lucide-react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Toaster } from 'sonner';
 
-import { AgentPanel } from './components/agent/AgentPanel';
-import { NewSessionPanel } from './components/agent/NewSessionPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { Sidebar } from './components/layout/Sidebar';
 import { MainLayout } from './components/layout/MainLayout';
-import { PreviewPanel } from './components/preview/PreviewPanel';
-import { SettingsDialog } from './components/settings/SettingsDialog';
+import { Sidebar } from './components/layout/Sidebar';
 import { TooltipProvider } from './components/ui/tooltip';
 import { resolveAgentProviderConfig } from './lib/agentProvider';
 import { useTheme } from './hooks/useTheme';
 import { createLogger, serializeError } from './lib/logger';
-import { resolveSessionCwd } from './lib/sessionCwd';
+import { getStoredAgentCwd, resolveSessionCwd } from './lib/sessionCwd';
 import { registerSkillCommands } from './lib/slashCommands';
 import { sessionApi } from './lib/tauri';
 import { useAgentStore } from './stores/agentStore';
@@ -24,13 +20,29 @@ import { useSettingsStore } from './stores/settingsStore';
 import { useSkillStore } from './stores/skillStore';
 
 const logger = createLogger('App');
+const AgentPanel = lazy(async () => ({ default: (await import('./components/agent/AgentPanel')).AgentPanel }));
+const NewSessionPanel = lazy(async () => ({ default: (await import('./components/agent/NewSessionPanel')).NewSessionPanel }));
+const PreviewPanel = lazy(async () => ({ default: (await import('./components/preview/PreviewPanel')).PreviewPanel }));
+const SettingsDialog = lazy(async () => ({ default: (await import('./components/settings/SettingsDialog')).SettingsDialog }));
+
+const panelFallback = (
+  <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground/60">
+    加载中...
+  </div>
+);
 
 function App() {
-  const { createSession, activeSessionId, setActiveSession } = useSessionStore();
-  const { startQuery } = useAgentStore();
-  const { config, fetchConfig } = useSettingsStore();
-  const { projects, setActiveProject } = useProjectStore();
-  const { isDraftOpen, openDraft, closeDraft } = useNewSessionStore();
+  const createSession = useSessionStore((state) => state.createSession);
+  const activeSessionId = useSessionStore((state) => state.activeSessionId);
+  const setActiveSession = useSessionStore((state) => state.setActiveSession);
+  const startQuery = useAgentStore((state) => state.startQuery);
+  const config = useSettingsStore((state) => state.config);
+  const fetchConfig = useSettingsStore((state) => state.fetchConfig);
+  const projects = useProjectStore((state) => state.projects);
+  const setActiveProject = useProjectStore((state) => state.setActiveProject);
+  const isDraftOpen = useNewSessionStore((state) => state.isDraftOpen);
+  const openDraft = useNewSessionStore((state) => state.openDraft);
+  const closeDraft = useNewSessionStore((state) => state.closeDraft);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   useTheme();
@@ -79,7 +91,7 @@ function App() {
 
   const handleStartNewSession = async (message: string) => {
     const { selectedAgentKind, draftProjectId } = useNewSessionStore.getState();
-    const cwd = resolveSessionCwd(projects, draftProjectId, localStorage.getItem('agent-user-cwd') || '.');
+    const cwd = resolveSessionCwd(projects, draftProjectId, getStoredAgentCwd());
     const { provider, apiKey, baseUrl, model } = resolveAgentProviderConfig({
       agentKind: selectedAgentKind,
       config,
@@ -118,13 +130,21 @@ function App() {
             onToggleCollapse={onToggleCollapse}
           />
         )}
-        preview={<PreviewPanel />}
+        preview={(
+          <Suspense fallback={null}>
+            <PreviewPanel />
+          </Suspense>
+        )}
       >
         <ErrorBoundary>
           {activeSessionId ? (
-            <AgentPanel sessionId={activeSessionId} />
+            <Suspense fallback={panelFallback}>
+              <AgentPanel sessionId={activeSessionId} />
+            </Suspense>
           ) : isDraftOpen ? (
-            <NewSessionPanel onSubmit={handleStartNewSession} />
+            <Suspense fallback={panelFallback}>
+              <NewSessionPanel onSubmit={handleStartNewSession} />
+            </Suspense>
           ) : (
             <div className="flex flex-1 items-center justify-center animate-fade-in">
               <div className="max-w-md space-y-5 text-center">
@@ -145,7 +165,11 @@ function App() {
           )}
         </ErrorBoundary>
       </MainLayout>
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+        </Suspense>
+      )}
       <Toaster position="top-center" richColors />
     </TooltipProvider>
   );

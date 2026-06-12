@@ -10,9 +10,7 @@ interface SettingsState {
   config: AppConfig | null;
   isLoading: boolean;
   error: string | null;
-  /** Whether the codex compat proxy is currently running (tracked by frontend) */
   proxyRunning: boolean;
-  /** Local proxy URL when running, e.g. "http://127.0.0.1:63684" */
   proxyUrl: string | null;
   fetchConfig: () => Promise<void>;
   setTheme: (theme: Theme) => Promise<void>;
@@ -75,9 +73,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await configApi.updateProvider(provider);
       set((state) => {
         if (!state.config) return { config: null };
-        const exists = state.config.providers.some((p) => p.id === provider.id);
+        const exists = state.config.providers.some((entry) => entry.id === provider.id);
         const providers = exists
-          ? state.config.providers.map((p) => (p.id === provider.id ? provider : p))
+          ? state.config.providers.map((entry) => (entry.id === provider.id ? provider : entry))
           : [...state.config.providers, provider];
         return { config: { ...state.config, providers } };
       });
@@ -91,7 +89,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await configApi.deleteProvider(providerId);
       set((state) => {
         if (!state.config) return { config: null };
-        const providers = state.config.providers.filter((p) => p.id !== providerId);
+        const providers = state.config.providers.filter((entry) => entry.id !== providerId);
         const active_provider_id =
           state.config.active_provider_id === providerId
             ? providers[0]?.id ?? null
@@ -110,19 +108,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   fetchModels: async (apiKey: string, baseUrl: string) => {
-    const models = await configApi.fetchModels(apiKey, baseUrl);
-    return models;
+    return configApi.fetchModels(apiKey, baseUrl);
   },
 
   testProvider: async (providerId: string) => {
-    const result = await configApi.testProvider(providerId);
-    return result;
+    return configApi.testProvider(providerId);
   },
 
   getActiveProvider: () => {
     const config = get().config;
     if (!config) return null;
-    return config.providers.find((p) => p.id === config.active_provider_id) ?? null;
+    return config.providers.find((provider) => provider.id === config.active_provider_id) ?? null;
   },
 
   getDefaultAgentKind: () => {

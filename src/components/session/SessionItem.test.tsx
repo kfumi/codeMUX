@@ -10,7 +10,7 @@ describe('SessionItem', () => {
     cleanup();
   });
 
-  it('shows the bound agent label for Codex sessions', () => {
+  it('keeps the session title visible for Codex sessions', () => {
     render(
       <SessionItem
         session={{
@@ -30,10 +30,11 @@ describe('SessionItem', () => {
       />,
     );
 
-    expect(screen.getByText('Codex')).toBeTruthy();
+    expect(screen.getByText('Codex Session')).toBeTruthy();
+    expect(screen.queryByText('Codex')).toBeNull();
   });
 
-  it('shows the bound agent label for Claude Code sessions', () => {
+  it('keeps the session title visible for Claude Code sessions', () => {
     render(
       <SessionItem
         session={{
@@ -53,30 +54,7 @@ describe('SessionItem', () => {
       />,
     );
 
-    expect(screen.getByText('Claude Code')).toBeTruthy();
-  });
-
-  it('does not show agent badge for sessions with no matching registry entry', () => {
-    const { container } = render(
-      <SessionItem
-        session={{
-          id: 'session-3',
-          title: 'Unknown Session',
-          agent_kind: 'gemini_cli' as any,
-          provider_id: null,
-          model: null,
-          mode: 'agent',
-          project_id: null,
-          created_at: '',
-          updated_at: '',
-        }}
-        isActive={false}
-        onClick={vi.fn()}
-        onDelete={vi.fn()}
-      />,
-    );
-
-    // gemini_cli has capabilities=[] so it's in the registry but still has a label
-    expect(screen.getByText('Gemini CLI')).toBeTruthy();
+    expect(screen.getByText('Claude Session')).toBeTruthy();
+    expect(screen.queryByText('Claude Code')).toBeNull();
   });
 });

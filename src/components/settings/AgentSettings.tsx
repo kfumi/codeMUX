@@ -1,4 +1,4 @@
-import { Check, Sparkles, CircleDot, Play, Square } from 'lucide-react';
+import { Check, CircleDot, Play, Sparkles, Square } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -8,14 +8,23 @@ import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 const SELECTABLE_AGENTS = AGENT_REGISTRY.filter((agent) => agent.capabilities.length > 0);
 
 export function AgentSettingsPanel() {
-  const { config, getDefaultAgentKind, setDefaultAgentKind, proxyRunning, proxyUrl, startProxy, stopProxy } = useSettingsStore();
-  const selectedKind = config?.agent_defaults.default_agent_kind ?? getDefaultAgentKind();
+  const config = useSettingsStore((state) => state.config);
+  const getDefaultAgentKind = useSettingsStore((state) => state.getDefaultAgentKind);
+  const setDefaultAgentKind = useSettingsStore((state) => state.setDefaultAgentKind);
+  const proxyRunning = useSettingsStore((state) => state.proxyRunning);
+  const proxyUrl = useSettingsStore((state) => state.proxyUrl);
+  const startProxy = useSettingsStore((state) => state.startProxy);
+  const stopProxy = useSettingsStore((state) => state.stopProxy);
 
-  // Determine if the active provider needs a compat proxy for codex
-  const activeProvider = config?.providers.find((p) => p.id === config.active_provider_id) ?? null;
+  const selectedKind = config?.agent_defaults.default_agent_kind ?? getDefaultAgentKind();
+  const activeProvider = config?.providers.find((provider) => provider.id === config.active_provider_id) ?? null;
   const codexBaseUrl = activeProvider?.openai_base_url ?? '';
   const needsProxy = codexBaseUrl && (() => {
-    try { return new URL(codexBaseUrl).host.toLowerCase() !== 'api.openai.com'; } catch { return true; }
+    try {
+      return new URL(codexBaseUrl).host.toLowerCase() !== 'api.openai.com';
+    } catch {
+      return true;
+    }
   })();
 
   return (
@@ -81,7 +90,7 @@ export function AgentSettingsPanel() {
         <div className="space-y-3 rounded-2xl border border-border/45 bg-muted/15 p-4">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
-              <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 {proxyRunning ? (
                   <CircleDot className="h-4 w-4 text-green-500" />
                 ) : (

@@ -23,7 +23,6 @@ function resolveModel(provider: Provider | null, agentKind: AgentKind): string |
     return undefined;
   }
 
-  // [1m] suffix is Claude-specific for large context windows
   if (agentKind === 'claude_code' && provider?.context_1m && !model.includes('[1m]')) {
     return `${model}[1m]`;
   }
@@ -42,7 +41,6 @@ export function resolveAgentProviderConfig({
 }): AgentProviderConfig {
   const sessionProvider = getProviderById(config, sessionProviderId);
   const activeProvider = getProviderById(config, config?.active_provider_id);
-
   const provider = sessionProvider ?? activeProvider;
 
   return {

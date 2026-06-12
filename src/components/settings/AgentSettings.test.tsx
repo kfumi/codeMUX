@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentSettingsPanel } from './AgentSettings';
@@ -40,7 +40,6 @@ describe('AgentSettingsPanel', () => {
           },
           codex: {
             sdk_mode: 'responses',
-            default_provider_id: null,
           },
           gemini_cli: {},
           opencode: {},
@@ -48,7 +47,6 @@ describe('AgentSettingsPanel', () => {
         theme: 'System',
       },
       setDefaultAgentKind: vi.fn(),
-      updateAgentConfig: vi.fn().mockResolvedValue(undefined),
       getDefaultAgentKind: () => 'codex',
     }));
   });
@@ -57,26 +55,10 @@ describe('AgentSettingsPanel', () => {
     cleanup();
   });
 
-  it('shows Codex provider controls when Codex is available', () => {
+  it('does not show duplicate codex provider controls', () => {
     render(<AgentSettingsPanel />);
 
-    expect(screen.getByText('Codex Provider')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Use Active Provider' })).toBeTruthy();
-  });
-
-  it('persists the selected Codex default provider', () => {
-    const updateAgentConfig = vi.fn().mockResolvedValue(undefined);
-    useSettingsStore.setState((state) => ({
-      ...state,
-      updateAgentConfig,
-    }));
-
-    render(<AgentSettingsPanel />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Codex Provider' }));
-
-    expect(updateAgentConfig).toHaveBeenCalledWith('codex', {
-      default_provider_id: 'provider-codex',
-    });
+    expect(screen.queryByText('Codex Default Provider')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Use Active Provider' })).toBeNull();
   });
 });

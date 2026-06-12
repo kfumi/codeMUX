@@ -1,7 +1,8 @@
-import { ReactNode, useCallback, useRef, useState } from 'react';
-import { TitleBar } from './TitleBar';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { type ReactNode, useCallback, useRef, useState } from 'react';
+
 import { usePreviewStore } from '../../stores/previewStore';
-import { PanelLeftOpen, PanelLeftClose } from 'lucide-react';
+import { TitleBar } from './TitleBar';
 
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 500;
@@ -18,19 +19,21 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const sidebarDragging = useRef(false);
 
-  const { isOpen: previewOpen, panelWidth: previewWidth, setPanelWidth: setPreviewWidth } = usePreviewStore();
+  const previewOpen = usePreviewStore((state) => state.isOpen);
+  const previewWidth = usePreviewStore((state) => state.panelWidth);
+  const setPreviewWidth = usePreviewStore((state) => state.setPanelWidth);
   const previewDragging = useRef(false);
 
-  const handleSidebarMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
+  const handleSidebarMouseDown = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
     sidebarDragging.current = true;
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
 
-    const onMove = (ev: MouseEvent) => {
+    const onMove = (moveEvent: MouseEvent) => {
       if (!sidebarDragging.current) return;
-      const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, ev.clientX));
-      setSidebarWidth(w);
+      const width = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, moveEvent.clientX));
+      setSidebarWidth(width);
     };
 
     const onUp = () => {
@@ -45,21 +48,19 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
     document.addEventListener('mouseup', onUp);
   }, []);
 
-  const handlePreviewMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
+  const handlePreviewMouseDown = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
     previewDragging.current = true;
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
 
-    const startX = e.clientX;
+    const startX = event.clientX;
     const startWidth = previewWidth;
 
-    const onMove = (ev: MouseEvent) => {
+    const onMove = (moveEvent: MouseEvent) => {
       if (!previewDragging.current) return;
-      const delta = startX - ev.clientX;
-      const maxWidth = Math.floor(window.innerWidth / 2);
-      const newWidth = Math.min(maxWidth, Math.max(300, startWidth + delta));
-      setPreviewWidth(newWidth);
+      const delta = startX - moveEvent.clientX;
+      setPreviewWidth(startWidth + delta);
     };
 
     const onUp = () => {
@@ -75,48 +76,41 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
   }, [previewWidth, setPreviewWidth]);
 
   const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed((prev) => !prev);
+    setSidebarCollapsed((value) => !value);
   }, []);
 
   return (
-    <div className="flex flex-col h-screen bg-background">
-      {/* Title bar — spans full width, window controls on far right */}
+    <div className="flex h-screen flex-col bg-background">
       <TitleBar />
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar toggle button (visible when collapsed) */}
         {sidebarCollapsed && (
           <button
             onClick={toggleSidebar}
-            className="p-1.5 m-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all duration-200 self-start"
+            className="m-1 self-start rounded-lg p-1.5 text-muted-foreground transition-all duration-200 hover:bg-muted/50 hover:text-foreground"
             title="展开侧边栏"
           >
             <PanelLeftOpen className="h-4 w-4" />
           </button>
         )}
 
-        {/* Sidebar — follows theme */}
         {!sidebarCollapsed && (
           <>
             <aside
-              className="flex flex-col bg-[hsl(var(--sidebar-bg))] border-r border-[hsl(var(--sidebar-border))] shrink-0 relative sidebar-grain rounded-tr-2xl rounded-br-2xl"
+              className="relative shrink-0 rounded-br-2xl rounded-tr-2xl border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-bg))] sidebar-grain"
               style={{ width: sidebarWidth }}
             >
-              <div className="relative z-10 flex flex-col h-full">
+              <div className="relative z-10 flex h-full flex-col">
                 {typeof sidebar === 'function' ? sidebar(toggleSidebar) : sidebar}
               </div>
             </aside>
 
-            {/* Sidebar drag handle + collapse button */}
-            <div
-              className="w-1 shrink-0 cursor-col-resize group relative"
-              onMouseDown={handleSidebarMouseDown}
-            >
-              <div className="absolute inset-y-0 -left-0.5 w-2 group-hover:bg-primary/15 transition-colors duration-200" />
-              <div className="absolute inset-y-2 left-0 w-[2px] rounded-full bg-transparent group-hover:bg-primary/30 transition-all duration-300" />
+            <div className="group relative w-1 shrink-0 cursor-col-resize" onMouseDown={handleSidebarMouseDown}>
+              <div className="absolute inset-y-0 -left-0.5 w-2 transition-colors duration-200 group-hover:bg-primary/15" />
+              <div className="absolute inset-y-2 left-0 w-[2px] rounded-full bg-transparent transition-all duration-300 group-hover:bg-primary/30" />
               <button
                 onClick={toggleSidebar}
-                className="absolute top-1 -left-3 p-0.5 rounded-md bg-background border border-border shadow-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all duration-200 opacity-0 group-hover:opacity-100"
+                className="absolute -left-3 top-1 rounded-md border border-border bg-background p-0.5 text-muted-foreground opacity-0 shadow-sm transition-all duration-200 group-hover:opacity-100 hover:bg-muted/50 hover:text-foreground"
                 title="收起侧边栏"
               >
                 <PanelLeftClose className="h-3 w-3" />
@@ -125,20 +119,13 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
           </>
         )}
 
-        {/* Main content area */}
-        <main className="flex-1 flex overflow-hidden bg-background">
-          <div className="flex-1 flex flex-col min-w-0">
-            {children}
-          </div>
+        <main className="flex flex-1 overflow-hidden bg-background">
+          <div className="flex min-w-0 flex-1 flex-col">{children}</div>
           {preview && previewOpen && (
             <>
-              {/* Preview drag handle */}
-              <div
-                className="w-1 shrink-0 cursor-col-resize group relative"
-                onMouseDown={handlePreviewMouseDown}
-              >
-                <div className="absolute inset-y-0 -left-0.5 w-2 group-hover:bg-primary/15 transition-colors duration-200" />
-                <div className="absolute inset-y-2 left-0 w-[2px] rounded-full bg-transparent group-hover:bg-primary/30 transition-all duration-300" />
+              <div className="group relative w-1 shrink-0 cursor-col-resize" onMouseDown={handlePreviewMouseDown}>
+                <div className="absolute inset-y-0 -left-0.5 w-2 transition-colors duration-200 group-hover:bg-primary/15" />
+                <div className="absolute inset-y-2 left-0 w-[2px] rounded-full bg-transparent transition-all duration-300 group-hover:bg-primary/30" />
               </div>
               {preview}
             </>

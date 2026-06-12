@@ -57,31 +57,6 @@ fn default_codex_sdk_mode() -> String {
     "responses".to_string()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OptionalField<T> {
-    Missing,
-    Null,
-    Value(T),
-}
-
-impl<T> Default for OptionalField<T> {
-    fn default() -> Self {
-        Self::Missing
-    }
-}
-
-fn deserialize_optional_field<'de, D, T>(deserializer: D) -> Result<OptionalField<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    let value = Option::<T>::deserialize(deserializer)?;
-    Ok(match value {
-        Some(value) => OptionalField::Value(value),
-        None => OptionalField::Null,
-    })
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
     pub id: String,
@@ -139,8 +114,14 @@ impl Default for ClaudeCodeAgentConfig {
 pub struct CodexAgentConfig {
     #[serde(default = "default_codex_sdk_mode")]
     pub sdk_mode: String,
-    #[serde(default)]
-    pub default_provider_id: Option<String>,
+}
+
+impl Default for CodexAgentConfig {
+    fn default() -> Self {
+        Self {
+            sdk_mode: default_codex_sdk_mode(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -152,56 +133,6 @@ pub struct ClaudeCodeAgentConfigUpdate {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CodexAgentConfigUpdate {
     pub sdk_mode: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_field")]
-    pub default_provider_id: OptionalField<String>,
-}
-
-impl Default for CodexAgentConfig {
-    fn default() -> Self {
-        Self {
-            sdk_mode: default_codex_sdk_mode(),
-            default_provider_id: None,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{AgentKind, AppConfig, CodexAgentConfigUpdate, OptionalField};
-
-    #[test]
-    fn old_config_json_deserializes_with_agent_defaults() {
-        let raw = serde_json::json!({
-            "providers": [],
-            "active_provider_id": null,
-            "theme": "System"
-        });
-
-        let config: AppConfig = serde_json::from_value(raw).unwrap();
-
-        assert_eq!(config.agent_defaults.default_agent_kind, AgentKind::ClaudeCode);
-        assert_eq!(config.agent_configs.claude_code.executable_mode, "auto");
-        assert!(config.agent_configs.claude_code.resume_sessions);
-        assert_eq!(config.agent_configs.codex.sdk_mode, "responses");
-        assert_eq!(config.agent_configs.codex.default_provider_id, None);
-    }
-
-    #[test]
-    fn codex_update_distinguishes_missing_null_and_value() {
-        let missing: CodexAgentConfigUpdate = serde_json::from_value(serde_json::json!({})).unwrap();
-        let clear: CodexAgentConfigUpdate = serde_json::from_value(serde_json::json!({
-            "default_provider_id": null
-        }))
-        .unwrap();
-        let set: CodexAgentConfigUpdate = serde_json::from_value(serde_json::json!({
-            "default_provider_id": "provider-1"
-        }))
-        .unwrap();
-
-        assert!(matches!(missing.default_provider_id, OptionalField::Missing));
-        assert!(matches!(clear.default_provider_id, OptionalField::Null));
-        assert!(matches!(set.default_provider_id, OptionalField::Value(ref value) if value == "provider-1"));
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -257,5 +188,26 @@ impl Default for AppConfig {
             agent_configs: AgentConfigs::default(),
             theme: Theme::System,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AgentKind, AppConfig};
+
+    #[test]
+    fn old_config_json_deserializes_with_agent_defaults() {
+        let raw = serde_json::json!({
+            "providers": [],
+            "active_provider_id": null,
+            "theme": "System"
+        });
+
+        let config: AppConfig = serde_json::from_value(raw).unwrap();
+
+        assert_eq!(config.agent_defaults.default_agent_kind, AgentKind::ClaudeCode);
+        assert_eq!(config.agent_configs.claude_code.executable_mode, "auto");
+        assert!(config.agent_configs.claude_code.resume_sessions);
+        assert_eq!(config.agent_configs.codex.sdk_mode, "responses");
     }
 }

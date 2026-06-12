@@ -21,7 +21,7 @@ export function Sidebar({
   onOpenSettings,
   onToggleCollapse,
 }: SidebarProps) {
-  const { fetchProjects } = useProjectStore();
+  const fetchProjects = useProjectStore((state) => state.fetchProjects);
 
   useEffect(() => {
     fetchProjects();
@@ -39,8 +39,8 @@ export function Sidebar({
         const name = path.split(/[/\\]/).pop() || path;
         await useProjectStore.getState().createProject(name, path);
       }
-    } catch (err) {
-      logger.error('Failed to add project from dialog', undefined, serializeError(err));
+    } catch (error) {
+      logger.error('Failed to add project from dialog', undefined, serializeError(error));
     }
   };
 
@@ -66,10 +66,7 @@ export function Sidebar({
       </div>
 
       <div className="flex-1 overflow-auto px-3 scroll-smooth">
-        <SessionList
-          onNewSessionInProject={onNewSessionInProject}
-          onAddProject={handleAddProject}
-        />
+        <SessionList onNewSessionInProject={onNewSessionInProject} onAddProject={handleAddProject} />
       </div>
 
       <div className="border-t border-[hsl(var(--sidebar-border))] p-3">
