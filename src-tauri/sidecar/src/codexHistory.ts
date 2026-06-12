@@ -10,11 +10,20 @@ interface CachedResponse {
   callOrder: string[];
 }
 
+export interface HistoryMessage {
+  role: string;
+  content?: string;
+  tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
+  tool_call_id?: string;
+  [key: string]: unknown;
+}
+
 export class CodexHistoryStore {
   private readonly maxEntries: number;
   private readonly responses = new Map<string, CachedResponse>();
   private readonly callIndex = new Map<string, string[]>();
   private readonly responseOrder: string[] = [];
+  private readonly messageHistory = new Map<string, HistoryMessage[]>();
 
   constructor(maxEntries = 512) {
     this.maxEntries = maxEntries;
@@ -104,6 +113,21 @@ export class CodexHistoryStore {
       i++;
     }
     return restored;
+  }
+
+  storeMessages(responseId: string, messages: HistoryMessage[]): void {
+    this.messageHistory.set(responseId, messages.map((m) => ({ ...m })));
+    // Evict oldest message history entries when the map grows too large
+    while (this.messageHistory.size > this.maxEntries) {
+      const oldest = this.messageHistory.keys().next().value;
+      if (oldest) this.messageHistory.delete(oldest);
+      else break;
+    }
+  }
+
+  getMessages(responseId: string): HistoryMessage[] | undefined {
+    const messages = this.messageHistory.get(responseId);
+    return messages ? messages.map((m) => ({ ...m })) : undefined;
   }
 
   private evict(): void {

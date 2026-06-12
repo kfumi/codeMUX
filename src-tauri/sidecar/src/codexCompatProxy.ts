@@ -3,13 +3,14 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-import {
-  CodexChatHistory,
-  buildResponsesSseEvents,
-  convertChatCompletionToResponses,
-  convertResponsesToChatRequest,
-} from './codexChatCompat.js';
+import { convertResponsesToChatRequest } from './codexRequestTransform.js';
+import { convertChatStreamToResponsesEvents, parseChatCompletionSseStream, type ChatCompletionChunk } from './codexStreamTransform.js';
+import { CodexHistoryStore } from './codexHistory.js';
+import { inferReasoningConfig } from './codexReasoning.js';
+// Keep legacy imports for non-streaming path compatibility
+import { CodexChatHistory, convertChatCompletionToResponses } from './codexChatCompat.js';
 import { buildToolResultEvent } from './runtimeEvents.js';
+import crypto from 'node:crypto';
 
 type ProxyConfig = {
   apiKey: string;
@@ -21,12 +22,13 @@ export type ProxyServerHandle = {
   close: () => Promise<void>;
 };
 
-export async function createCodexCompatProxyServer(config: ProxyConfig): Promise<ProxyServerHandle> {
-  const history = new CodexChatHistory();
+export async function createCodexCompatProxyServer(config: ProxyConfig, preferredPort = 15722): Promise<ProxyServerHandle> {
+  const historyStore = new CodexHistoryStore();
+  const legacyHistory = new CodexChatHistory();
   const server = createServer(async (req, res) => {
     try {
       proxyLog(`${req.method ?? 'UNKNOWN'} ${req.url ?? '/'}`);
-      await handleRequest(req, res, config, history);
+      await handleRequest(req, res, config, historyStore, legacyHistory);
     } catch (error) {
       proxyLog(`error ${req.method ?? 'UNKNOWN'} ${req.url ?? '/'}: ${error instanceof Error ? error.message : String(error)}`);
       writeJson(res, 500, {
@@ -39,7 +41,7 @@ export async function createCodexCompatProxyServer(config: ProxyConfig): Promise
     }
   });
 
-  const PORT = 15722;
+  const PORT = preferredPort;
   const address = await new Promise<{ port: number }>((resolve, reject) => {
     let retries = 0;
     const tryListen = () => {
@@ -86,7 +88,8 @@ async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
   config: ProxyConfig,
-  history: CodexChatHistory,
+  historyStore: CodexHistoryStore,
+  legacyHistory: CodexChatHistory,
 ): Promise<void> {
   if (req.method === 'GET' && isHealthPath(req.url ?? '/')) {
     writeJson(res, 200, { ok: true });
@@ -130,7 +133,8 @@ async function handleRequest(
     proxyLog(`responses tools raw ${truncateForLog(JSON.stringify(requestBody.tools.slice(0, 3)))}`);
     persistDebugJson('last-codex-responses-request.json', requestBody);
   }
-  const chatRequest = convertResponsesToChatRequest(requestBody, history);
+  const reasoningConfig = inferReasoningConfig(requestBody.model, config.baseUrl, '');
+  const chatRequest = convertResponsesToChatRequest(requestBody, historyStore, reasoningConfig);
   proxyLog(`chat request ${summarizeChatRequest(chatRequest)}`);
   if (Array.isArray(chatRequest.tools) && chatRequest.tools.length > 0) {
     proxyLog(`chat tool names ${chatRequest.tools.map((tool) => summarizeChatToolName(tool)).join(', ')}`);
@@ -141,6 +145,95 @@ async function handleRequest(
     proxyLog(`chat tools raw ${truncateForLog(JSON.stringify(chatRequest.tools.slice(0, 3)))}`);
     persistDebugJson('last-codex-chat-request.json', chatRequest);
   }
+  // --- Streaming path: forward upstream SSE deltas as Responses API events ---
+  if (requestBody.stream) {
+    const responseId = `resp_${crypto.randomUUID()}`;
+    const messageId = `msg_${crypto.randomUUID()}`;
+    const reasoningId = `rs_${crypto.randomUUID()}`;
+
+    try {
+      const { chunks, response: upstreamRes } = await streamChatCompletion(chatRequest, config);
+      const responsesEvents = convertChatStreamToResponsesEvents(chunks, {
+        responseId,
+        model: upstreamRes.headers.get('x-model') || chatRequest.model || 'unknown',
+        reasoningId,
+        messageId,
+      });
+
+      // Forward Responses API SSE events to the Codex SDK in real-time.
+      res.statusCode = 200;
+      res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+      res.setHeader('cache-control', 'no-cache, no-transform');
+      res.setHeader('connection', 'keep-alive');
+
+      // Collect tool calls to emit as assistant events (the SDK doesn't handle
+      // function_call items from the proxy).
+      let toolCalls: Array<Record<string, unknown>> | null = null;
+
+      for await (const event of responsesEvents) {
+        // Intercept function_call items for direct emit and history recording.
+        if (event.type === 'response.output_item.done') {
+          const item = event.item as Record<string, unknown> | undefined;
+          if (item?.type === 'function_call') {
+            if (!toolCalls) toolCalls = [];
+            toolCalls.push({
+              id: (item.id ?? item.call_id ?? '') as string,
+              name: (item.name ?? '') as string,
+              arguments: (item.arguments ?? '') as string,
+            });
+            // Record tool call in history for future request enrichment
+            if (typeof item.call_id === 'string') {
+              historyStore.recordStreamingToolCall(responseId, {
+                callId: item.call_id,
+                name: (item.name ?? '') as string,
+                arguments: (item.arguments ?? '') as string,
+              });
+            }
+          }
+        }
+
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      }
+
+      res.end('data: [DONE]\n\n');
+
+      // Emit tool_use events after streaming completes.
+      if (toolCalls && toolCalls.length > 0) {
+        const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
+        proxyLog(`emitting ${toolCalls.length} tool_use events from stream, sessionId=${activeSessionId || '(empty)'}`);
+        for (const tc of toolCalls) {
+          let args: unknown;
+          try { args = JSON.parse(tc.arguments || '{}'); } catch { args = {}; }
+          emitEvent({
+            type: 'assistant',
+            uuid: crypto.randomUUID(),
+            session_id: activeSessionId,
+            message: {
+              role: 'assistant',
+              content: [{ type: 'tool_use', id: tc.id, name: tc.name, input: args }],
+            },
+            parent_tool_use_id: null,
+          });
+        }
+      }
+    } catch (error) {
+      proxyLog(`streaming error: ${error instanceof Error ? error.message : String(error)}`);
+      if (!res.headersSent) {
+        writeJson(res, 502, {
+          error: {
+            message: error instanceof Error ? error.message : String(error),
+            type: 'proxy_error',
+            code: 502,
+          },
+        });
+      } else {
+        res.end();
+      }
+    }
+    return;
+  }
+
+  // --- Non-streaming path: wait for complete response ---
   const completion = await fetchChatCompletion(chatRequest, config);
 
   // Emit tool_use events for tool calls so the frontend renders them in real-time.
@@ -148,7 +241,6 @@ async function handleRequest(
   const toolCalls = completion.choices?.[0]?.message?.tool_calls;
   if (Array.isArray(toolCalls) && toolCalls.length > 0) {
     const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
-    const crypto = await import('node:crypto');
     proxyLog(`emitting ${toolCalls.length} tool_use events, sessionId=${activeSessionId || '(empty)'}`);
     for (const tc of toolCalls) {
       const name = tc.function?.name ?? 'tool';
@@ -167,12 +259,35 @@ async function handleRequest(
     }
   }
 
-  const compatResponse = convertChatCompletionToResponses(completion, requestBody, history);
+  const compatResponse = convertChatCompletionToResponses(completion, requestBody, legacyHistory);
 
-  if (requestBody.stream) {
-    writeSse(res, buildResponsesSseEvents(compatResponse));
-    return;
+  // Store messages in legacy history so the next request can reconstruct the full
+  // conversation chain. The new convertResponsesToChatRequest doesn't do this
+  // internally, so we do it here for non-streaming requests.
+  const historyMessages: Array<{ role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string }> = [];
+  if (requestBody.instructions) {
+    historyMessages.push({ role: 'system', content: requestBody.instructions });
   }
+  for (const msg of chatRequest.messages) {
+    historyMessages.push(msg as { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string });
+  }
+  // Build assistant message with original tool_call IDs from the chat request,
+  // not from compatResponse.output which uses generated IDs.
+  const assistantMsg: { role: string; content?: string; tool_calls?: unknown[] } = { role: 'assistant' };
+  if (compatResponse.output_text) {
+    assistantMsg.content = compatResponse.output_text;
+  }
+  // Find the assistant message from chatRequest.messages that has tool_calls
+  // (the last assistant message in the messages array should have them)
+  const lastAssistantMsg = [...chatRequest.messages].reverse().find((m) => m.role === 'assistant' && m.tool_calls);
+  if (lastAssistantMsg?.tool_calls) {
+    assistantMsg.tool_calls = lastAssistantMsg.tool_calls;
+  } else if (Array.isArray(completion.choices?.[0]?.message?.tool_calls) && completion.choices[0].message.tool_calls.length > 0) {
+    assistantMsg.tool_calls = completion.choices[0].message.tool_calls;
+  }
+  historyMessages.push(assistantMsg);
+  legacyHistory.store(compatResponse.id, historyMessages as any);
+  historyStore.storeMessages(compatResponse.id, historyMessages as any);
 
   writeJson(res, 200, compatResponse);
 }
@@ -235,17 +350,25 @@ async function fetchChatCompletion(
   let lastError: Error | null = null;
 
   for (const endpoint of buildChatCompletionEndpoints(config.baseUrl)) {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        ...requestBody,
-        stream: false,
-      }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120_000);
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...requestBody,
+          stream: false,
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     proxyLog(`upstream POST ${endpoint} -> ${response.status}`);
 
@@ -254,10 +377,17 @@ async function fetchChatCompletion(
       continue;
     }
 
-    if (!response.ok) {
+    if (response.status >= 400 && response.status < 500) {
       const body = await response.text();
-      proxyLog(`upstream error body ${truncateForLog(body)}`);
-      throw new Error(`unexpected status ${response.status} from ${endpoint}: ${body}`);
+      proxyLog(`upstream client error body ${truncateForLog(body)}`);
+      throw new Error(`client error ${response.status}: ${body}`);
+    }
+
+    if (response.status >= 500) {
+      const body = await response.text();
+      proxyLog(`upstream server error body ${truncateForLog(body)}`);
+      lastError = new Error(`server error ${response.status}`);
+      continue;
     }
 
     const json = await response.json() as Parameters<typeof convertChatCompletionToResponses>[0];
@@ -266,6 +396,58 @@ async function fetchChatCompletion(
   }
 
   throw lastError ?? new Error('No upstream chat completions endpoint succeeded.');
+}
+
+async function streamChatCompletion(
+  requestBody: ReturnType<typeof convertResponsesToChatRequest>,
+  config: ProxyConfig,
+): Promise<{ chunks: AsyncGenerator<import('./codexChatCompat.js').ChatStreamToolCall & Record<string, unknown>, void, unknown>; response: Response }> {
+  let lastError: Error | null = null;
+
+  for (const endpoint of buildChatCompletionEndpoints(config.baseUrl)) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        ...requestBody,
+        stream: true,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    proxyLog(`upstream stream POST ${endpoint} -> ${response.status}`);
+
+    if (response.status === 404) {
+      lastError = new Error(`upstream endpoint not found: ${endpoint}`);
+      continue;
+    }
+
+    if (response.status >= 400 && response.status < 500) {
+      const body = await response.text();
+      proxyLog(`upstream stream client error body ${truncateForLog(body)}`);
+      throw new Error(`client error ${response.status}: ${body}`);
+    }
+
+    if (response.status >= 500) {
+      lastError = new Error(`server error ${response.status}`);
+      continue;
+    }
+
+    if (!response.body) {
+      throw new Error(`upstream response body is null for ${endpoint}`);
+    }
+
+    const chunks = parseChatCompletionSseStream(response.body);
+    return { chunks: chunks as any, response };
+  }
+
+  throw lastError ?? new Error('No upstream chat completions stream endpoint succeeded.');
 }
 
 async function fetchModels(config: ProxyConfig): Promise<unknown> {

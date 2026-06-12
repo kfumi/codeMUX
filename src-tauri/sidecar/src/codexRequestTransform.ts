@@ -190,14 +190,22 @@ export function convertResponsesToChatRequest(
   history: CodexHistoryStore,
   reasoningConfig: ReasoningConfig | null,
 ): ChatCompletionsRequest {
-  const { model, instructions, input, stream, max_output_tokens, tool_choice, tools, reasoning, ...rest } = request;
+  const { model, instructions, input, previous_response_id, stream, max_output_tokens, tool_choice, tools, reasoning, ...rest } = request;
+
+  // Retrieve previous messages from history for multi-turn conversations
+  const previousMessages = previous_response_id ? history.getMessages(previous_response_id) : undefined;
 
   // Enrich input with any missing function_call items from history
   const enrichedInput = [...input] as Array<Record<string, unknown>>;
-  history.enrichRequest(enrichedInput, undefined);
+  history.enrichRequest(enrichedInput, previous_response_id);
 
   // Build chat messages from input items, merging consecutive function_calls
   const messages: ChatMessage[] = [];
+  if (previousMessages && previousMessages.length > 0) {
+    for (const msg of previousMessages) {
+      messages.push(msg as ChatMessage);
+    }
+  }
   let i = 0;
   while (i < enrichedInput.length) {
     const item = enrichedInput[i] as ResponsesInputItem;
