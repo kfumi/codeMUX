@@ -1,0 +1,520 @@
+// src-tauri/sidecar/src/codexStreamTransform.ts
+// Converts upstream Chat Completions SSE streams into Responses API SSE events.
+// Includes a state machine for detecting inline <think> tags embedded in delta.content
+// by models like Qwen that don't use the separate reasoning_content field.
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type ChatCompletionChunk = {
+  id?: string;
+  model?: string;
+  choices?: Array<{
+    index?: number;
+    delta: {
+      role?: string;
+      content?: string | null;
+      reasoning_content?: string | null;
+      reasoning?: string | null;
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: 'function';
+        function?: { name?: string; arguments?: string };
+      }>;
+    };
+    finish_reason?: string | null;
+  }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
+};
+
+export type ChatStreamToolCall = {
+  id: string;
+  name: string;
+  arguments: string;
+};
+
+// ---------------------------------------------------------------------------
+// SSE Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse an SSE byte stream from an upstream Chat Completions endpoint into
+ * individual chunk objects. Handles the standard `data: {...}\n\n` format and
+ * the terminal `data: [DONE]` sentinel.
+ */
+export async function* parseChatCompletionSseStream(
+  body: AsyncIterable<Uint8Array>,
+): AsyncGenerator<ChatCompletionChunk, void, unknown> {
+  let buffer = '';
+
+  for await (const chunk of body) {
+    buffer += typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
+
+    let newlineIndex: number;
+    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+
+      if (!line || line.startsWith(':')) continue;
+      if (!line.startsWith('data:')) continue;
+
+      const payload = line.slice(5).trim();
+      if (payload === '[DONE]') return;
+
+      try {
+        yield JSON.parse(payload) as ChatCompletionChunk;
+      } catch {
+        // Skip malformed lines.
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Think tag state machine
+// ---------------------------------------------------------------------------
+
+/**
+ * State machine for detecting inline <think> tags in content deltas.
+ *
+ * - `detecting`: Looking for an opening <think> tag. Flushes safe text
+ *   whenever the buffer contains no `<` character.
+ * - `reasoning`: Inside a <think>...</think> block. Looking for the closing tag.
+ *   Flushes safe reasoning text when no `<` character is present.
+ * - `text`: After a <think>...</think> block (or no tag was ever present).
+ *   Everything is emitted as plain text.
+ */
+export interface ThinkState {
+  mode: 'detecting' | 'reasoning' | 'text';
+  buffer: string;
+}
+
+type ChunkEvent =
+  | { type: 'text'; text: string }
+  | { type: 'reasoning'; text: string }
+  | { type: 'startReasoning' }
+  | { type: 'endReasoning' };
+
+/**
+ * Synchronous function that processes a content delta string through the think-tag
+ * state machine and returns an array of events. Does NOT yield — the caller iterates
+ * the returned array and yields each event into the async generator.
+ */
+export function processContentChunk(chunk: string, state: ThinkState): ChunkEvent[] {
+  const events: ChunkEvent[] = [];
+
+  if (state.mode === 'text') {
+    // Post-tag or no-tag mode: everything is plain text.
+    if (chunk) {
+      events.push({ type: 'text', text: chunk });
+    }
+    return events;
+  }
+
+  // detecting or reasoning mode: accumulate and scan for tag boundaries.
+
+  // --- Helper: flush safe portion when buffer has no tag start ---
+  const flushSafe = (emitType: 'text' | 'reasoning'): void => {
+    const ltIdx = state.buffer.indexOf('<');
+    if (ltIdx === -1) {
+      // No '<' at all — entire buffer is safe to emit.
+      if (state.buffer) {
+        events.push({ type: emitType, text: state.buffer });
+        state.buffer = '';
+      }
+    } else if (ltIdx > 0) {
+      // Text before '<' is safe; keep from '<' onward.
+      const safe = state.buffer.slice(0, ltIdx);
+      state.buffer = state.buffer.slice(ltIdx);
+      events.push({ type: emitType, text: safe });
+    }
+    // If ltIdx === 0, buffer starts with '<' — keep it, might be tag start.
+  };
+
+  state.buffer += chunk;
+
+  if (state.mode === 'detecting') {
+    // Look for opening <think> tag.
+    const thinkOpenIdx = state.buffer.indexOf('<think>');
+    if (thinkOpenIdx !== -1) {
+      // Emit any text before the tag.
+      const before = state.buffer.slice(0, thinkOpenIdx);
+      if (before) {
+        events.push({ type: 'text', text: before });
+      }
+      // Switch to reasoning mode.
+      events.push({ type: 'startReasoning' });
+      state.mode = 'reasoning';
+      // Process remainder after <think> (after the opening tag itself).
+      state.buffer = state.buffer.slice(thinkOpenIdx + '<think>'.length);
+      // Continue processing in reasoning mode (fall through).
+    } else {
+      flushSafe('text');
+      return events;
+    }
+  }
+
+  if (state.mode === 'reasoning') {
+    // Look for closing </think> tag.
+    const thinkCloseIdx = state.buffer.indexOf('</think>');
+    if (thinkCloseIdx !== -1) {
+      // Emit reasoning before the closing tag.
+      const reasoning = state.buffer.slice(0, thinkCloseIdx);
+      if (reasoning) {
+        events.push({ type: 'reasoning', text: reasoning });
+      }
+      // Close reasoning and switch to text mode.
+      events.push({ type: 'endReasoning' });
+      state.mode = 'text';
+      // Process remainder after </think>.
+      state.buffer = state.buffer.slice(thinkCloseIdx + '</think>'.length);
+      // Emit remaining as text.
+      if (state.buffer) {
+        events.push({ type: 'text', text: state.buffer });
+        state.buffer = '';
+      }
+    } else {
+      flushSafe('reasoning');
+    }
+  }
+
+  return events;
+}
+
+// ---------------------------------------------------------------------------
+// Stream converter: Chat Completions chunks -> Responses API events
+// ---------------------------------------------------------------------------
+
+// Internal helpers that yield events (must be generator functions since they use yield).
+
+type EventGenerator = Generator<Record<string, unknown>, void, unknown>;
+
+/**
+ * Convert an upstream Chat Completions SSE stream into Responses API SSE
+ * events. Yields plain objects that the caller should serialize as
+ * `data: <json>\n\n`.
+ *
+ * @param chunks   Async iterable of parsed Chat Completions chunks.
+ * @param opts     Response / item IDs to reuse (generated once before the
+ *                 stream starts so the opening events can reference them).
+ * @returns        Async generator of Responses API event objects.
+ */
+export async function* convertChatStreamToResponsesEvents(
+  chunks: AsyncIterable<ChatCompletionChunk>,
+  opts: {
+    responseId: string;
+    model: string;
+    reasoningId: string;
+    messageId: string;
+  },
+): AsyncGenerator<Record<string, unknown>, void, unknown> {
+  const { responseId, model, reasoningId, messageId } = opts;
+
+  // Emit the opening events immediately so the SDK knows the response is in progress.
+  const baseResponse = {
+    id: responseId,
+    object: 'response' as const,
+    created_at: Math.floor(Date.now() / 1000),
+    model,
+    status: 'in_progress' as const,
+    output: [] as unknown[],
+  };
+
+  yield { type: 'response.created', response: baseResponse };
+  yield { type: 'response.in_progress', response: baseResponse };
+
+  // Track state across chunks.
+  let startedReasoning = false;
+  let startedText = false;
+  let outputTextClosed = false;
+  let itemsClosed = false;
+  let textContentIndex = 0;
+  const thinkState: ThinkState = { mode: 'detecting', buffer: '' };
+
+  const toolCalls = new Map<number, ChatStreamToolCall>();
+  let finishReason: string | null = null;
+  let lastUsage: ChatCompletionChunk['usage'] = null;
+
+  // --- Inline helper generators (yield events into the parent generator) ---
+
+  /** Ensure the text message item has been started. Yields added events. */
+  function* ensureTextStarted(): EventGenerator {
+    if (startedText) return;
+    startedText = true;
+    textContentIndex = startedReasoning ? 1 : 0;
+    // If reasoning was started and we're now starting text, we know the
+    // reasoning think block has ended (via endReasoning event or explicit
+    // reasoning_content ending before content begins). Close the reasoning
+    // item at its fixed output_index of 0.
+    if (startedReasoning) {
+      yield {
+        type: 'response.output_text.done',
+        item_id: reasoningId,
+        output_index: 0,
+        content_index: 0,
+        text: '',
+      };
+      yield {
+        type: 'response.output_item.done',
+        output_index: 0,
+        item: { type: 'reasoning', id: reasoningId, status: 'completed', summary: [] },
+      };
+      startedReasoning = false;
+    }
+    yield {
+      type: 'response.output_item.added',
+      output_index: textContentIndex,
+      item: { type: 'message', id: messageId, status: 'in_progress', role: 'assistant', content: [] },
+    };
+    yield {
+      type: 'response.content_part.added',
+      item_id: messageId,
+      output_index: textContentIndex,
+      content_index: 0,
+      part: { type: 'output_text', text: '', annotations: [] },
+    };
+  }
+
+  /** Close the reasoning item if it was started and hasn't been closed yet. */
+  function* closeReasoning(): EventGenerator {
+    if (!startedReasoning) return;
+    startedReasoning = false;
+    yield {
+      type: 'response.output_text.done',
+      item_id: reasoningId,
+      output_index: 0,
+      content_index: 0,
+      text: '',
+    };
+    yield {
+      type: 'response.output_item.done',
+      output_index: 0,
+      item: { type: 'reasoning', id: reasoningId, status: 'completed', summary: [] },
+    };
+  }
+
+  /** Close the text message item if it was started and hasn't been closed yet. */
+  function* closeText(): EventGenerator {
+    if (!startedText || outputTextClosed) return;
+    outputTextClosed = true;
+    yield {
+      type: 'response.output_text.done',
+      item_id: messageId,
+      output_index: textContentIndex,
+      content_index: 0,
+      text: '',
+    };
+    yield {
+      type: 'response.content_part.done',
+      item_id: messageId,
+      output_index: textContentIndex,
+      content_index: 0,
+      part: { type: 'output_text', text: '', annotations: [] },
+    };
+    yield {
+      type: 'response.output_item.done',
+      output_index: textContentIndex,
+      item: { type: 'message', id: messageId, status: 'completed', role: 'assistant', content: [] },
+    };
+  }
+
+  /** Flush the think state buffer and emit any remaining content. */
+  function* flushThinkBuffer(): EventGenerator {
+    if (thinkState.buffer) {
+      if (thinkState.mode === 'reasoning') {
+        yield {
+          type: 'response.reasoning_delta',
+          item_id: reasoningId,
+          output_index: 0,
+          delta: { type: 'reasoning_summary_text_delta', text: thinkState.buffer },
+        };
+      } else {
+        // detecting or text mode: emit as text.
+        yield* ensureTextStarted();
+        yield {
+          type: 'response.output_text.delta',
+          item_id: messageId,
+          output_index: textContentIndex,
+          content_index: 0,
+          delta: thinkState.buffer,
+        };
+      }
+      thinkState.buffer = '';
+    }
+  }
+
+  /** Close all open items. */
+  function* closeAllItems(): EventGenerator {
+    yield* flushThinkBuffer();
+    yield* closeReasoning();
+    yield* closeText();
+    itemsClosed = true;
+  }
+
+  // --- Main chunk processing loop ---
+
+  for await (const chunk of chunks) {
+    const choice = chunk.choices?.[0];
+    if (!choice) {
+      if (chunk.usage) lastUsage = chunk.usage;
+      continue;
+    }
+
+    const delta = choice.delta;
+    if (choice.finish_reason) finishReason = choice.finish_reason;
+    if (chunk.usage) lastUsage = chunk.usage;
+
+    // --- Explicit reasoning_content / reasoning deltas ---
+    const reasoningDelta = delta.reasoning_content ?? delta.reasoning ?? null;
+    if (reasoningDelta) {
+      if (!startedReasoning) {
+        startedReasoning = true;
+        yield {
+          type: 'response.output_item.added',
+          output_index: 0,
+          item: { type: 'reasoning', id: reasoningId, status: 'in_progress', summary: [] },
+        };
+      }
+      yield {
+        type: 'response.reasoning_delta',
+        item_id: reasoningId,
+        output_index: 0,
+        delta: { type: 'reasoning_summary_text_delta', text: reasoningDelta },
+      };
+    }
+
+    // --- Text content via think-tag state machine ---
+    if (delta.content) {
+      const chunkEvents = processContentChunk(delta.content, thinkState);
+
+      for (const evt of chunkEvents) {
+        switch (evt.type) {
+          case 'startReasoning': {
+            if (!startedReasoning) {
+              startedReasoning = true;
+              yield {
+                type: 'response.output_item.added',
+                output_index: 0,
+                item: { type: 'reasoning', id: reasoningId, status: 'in_progress', summary: [] },
+              };
+            }
+            break;
+          }
+          case 'reasoning': {
+            yield {
+              type: 'response.reasoning_delta',
+              item_id: reasoningId,
+              output_index: 0,
+              delta: { type: 'reasoning_summary_text_delta', text: evt.text },
+            };
+            break;
+          }
+          case 'endReasoning': {
+            // Reasoning ended via inline tag — if text is already started,
+            // close reasoning now. Otherwise, ensureTextStarted will close it
+            // when the first text event arrives.
+            if (startedText || outputTextClosed) {
+              yield* closeReasoning();
+            }
+            break;
+          }
+          case 'text': {
+            yield* ensureTextStarted();
+            yield {
+              type: 'response.output_text.delta',
+              item_id: messageId,
+              output_index: textContentIndex,
+              content_index: 0,
+              delta: evt.text,
+            };
+            break;
+          }
+        }
+      }
+    }
+
+    // --- Tool call deltas ---
+    if (delta.tool_calls) {
+      for (const tc of delta.tool_calls) {
+        const idx = tc.index ?? 0;
+        let entry = toolCalls.get(idx);
+        if (!entry) {
+          entry = { id: tc.id ?? `call_${idx}`, name: '', arguments: '' };
+          toolCalls.set(idx, entry);
+        }
+        if (tc.id) entry.id = tc.id;
+        if (tc.function?.name) entry.name += tc.function.name;
+        if (tc.function?.arguments) entry.arguments += tc.function.arguments;
+      }
+    }
+
+    // --- Finish reason: close all open items immediately ---
+    if (finishReason) {
+      yield* closeAllItems();
+    }
+  }
+
+  // Close any remaining items if finish_reason wasn't received.
+  if (!itemsClosed && (startedReasoning || startedText || thinkState.buffer)) {
+    yield* closeAllItems();
+  }
+
+  // Emit tool call items.
+  const baseOutputIndex = startedText ? textContentIndex + 1 : startedReasoning ? 1 : 0;
+  for (const [idx, tc] of toolCalls) {
+    const outputIndex = baseOutputIndex + idx;
+    yield {
+      type: 'response.output_item.added',
+      output_index: outputIndex,
+      item: { type: 'function_call', id: tc.id, status: 'in_progress', call_id: tc.id, name: tc.name, arguments: '' },
+    };
+    yield {
+      type: 'response.function_call_arguments.delta',
+      item_id: tc.id,
+      output_index: outputIndex,
+      content_index: 0,
+      delta: tc.arguments,
+    };
+    yield {
+      type: 'response.function_call_arguments.done',
+      item_id: tc.id,
+      output_index: outputIndex,
+      content_index: 0,
+      arguments: tc.arguments,
+    };
+    yield {
+      type: 'response.output_item.done',
+      output_index: outputIndex,
+      item: { type: 'function_call', id: tc.id, status: 'completed', call_id: tc.id, name: tc.name, arguments: tc.arguments },
+    };
+  }
+
+  // Final completed response.
+  const output: unknown[] = [];
+  if (startedReasoning) output.push({ type: 'reasoning', id: reasoningId, summary: [] });
+  if (startedText) output.push({ type: 'message', id: messageId, status: 'completed', role: 'assistant', content: [] });
+  for (const tc of toolCalls.values()) {
+    output.push({ type: 'function_call', id: tc.id, status: 'completed', call_id: tc.id, name: tc.name, arguments: tc.arguments });
+  }
+
+  const finalStatus = toolCalls.size > 0 ? 'requires_action' : 'completed';
+  const usage = lastUsage ? {
+    input_tokens: lastUsage.prompt_tokens ?? 0,
+    input_tokens_details: { cached_tokens: 0 },
+    output_tokens: lastUsage.completion_tokens ?? 0,
+    output_tokens_details: { reasoning_tokens: 0 },
+    total_tokens: lastUsage.total_tokens ?? 0,
+  } : undefined;
+
+  yield {
+    type: 'response.completed',
+    response: {
+      ...baseResponse,
+      status: finalStatus,
+      output,
+      ...(usage ? { usage } : {}),
+    },
+  };
+}
