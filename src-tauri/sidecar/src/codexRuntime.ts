@@ -78,6 +78,24 @@ export function setActiveSessionId(id: string): void {
   activeSessionId = id;
 }
 
+/**
+ * Abort controller for the currently active Codex turn.
+ * Set by CodexSessionRuntime.sendInput() and cleared in its finally block.
+ * Exposed so the command dispatcher can interrupt immediately without waiting
+ * for the stdin command loop to unblock.
+ */
+let activeAbortController: AbortController | null = null;
+
+/** Abort the active Codex turn immediately. Returns true if an active turn was aborted. */
+export function interruptActiveTurn(): boolean {
+  if (activeAbortController && !activeAbortController.signal.aborted) {
+    process.stderr.write('[codex] Aborting active turn via interruptActiveTurn\n');
+    activeAbortController.abort();
+    return true;
+  }
+  return false;
+}
+
 function emptyUsage(): Usage {
   return {
     input_tokens: 0,
@@ -226,6 +244,7 @@ export class CodexSessionRuntime {
     let pendingStreamError: string | null = null;
 
     this.abortController = new AbortController();
+    activeAbortController = this.abortController;
 
     process.stderr.write(`[codex] Processing input via SDK: ${prompt.slice(0, 80)}...\n`);
 
@@ -306,6 +325,7 @@ export class CodexSessionRuntime {
         );
       }
 
+      activeAbortController = null;
       this.abortController = null;
       this.finishTurn();
     }

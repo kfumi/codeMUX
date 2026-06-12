@@ -794,7 +794,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
         // Handle streaming events (thinking/text deltas + tool_use) separately
         if (event.kind === 'streaming') {
-          if (!get().isRunning[sessionId]) return;
+          if (!get().isRunning[sessionId] || get().forceStopped[sessionId]) return;
           const streamEvent = event.data.event as Record<string, unknown>;
           const eventType = streamEvent.type as string;
           const findToolId = (idx: number | undefined): string | undefined => {
@@ -1177,14 +1177,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     logger.info('Interrupting agent query', { sessionId });
     // 1. Immediately update UI — BEFORE sending command to sidecar
-    set((s) => ({
-      forceStopped: { ...s.forceStopped, [sessionId]: true },
-      streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
-      streamingText: { ...s.streamingText, [sessionId]: '' },
-    }));
+    set((s) => {
+      const { [sessionId]: _removed, ...rest } = s.queryStartTime;
+      return {
+        forceStopped: { ...s.forceStopped, [sessionId]: true },
+        isRunning: { ...s.isRunning, [sessionId]: false },
+        queryStartTime: rest,
+        streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+        streamingText: { ...s.streamingText, [sessionId]: '' },
+      };
+    });
 
     // 2. Then tell sidecar to stop (async, non-blocking for UI)
-    await agentApi.interrupt(sessionId);
+    try {
+      await agentApi.interrupt(sessionId);
+    } catch {
+      // Sidecar may already be gone — UI is already stopped.
+    }
   },
 
   clearEvents: (sessionId: string) => {

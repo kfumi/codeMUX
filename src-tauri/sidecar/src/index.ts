@@ -13,7 +13,7 @@ import type {
 import type { SidecarCommand } from './types.js';
 import { buildMcpInstructions, getProviderMode } from './sessionRuntimeHelpers.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
-import { CodexSessionRuntime } from './codexRuntime.js';
+import { CodexSessionRuntime, interruptActiveTurn } from './codexRuntime.js';
 import { getRuntimeFlavor } from './runtimeEvents.js';
 import { proxyManager } from './proxyManager.js';
 
@@ -175,6 +175,7 @@ export class SessionRuntime {
       if (this.abortController && !this.abortController.signal.aborted) {
         this.abortController.abort('user_interrupt_no_query');
       }
+      this.finishTurn();
       return;
     }
 
@@ -736,14 +737,17 @@ async function main(): Promise<void> {
         break;
       }
       case 'send_input':
-        try {
-          if (getRuntimeFlavor(activeAgentKind) === 'codex') {
-            await codexRuntime.sendInput(cmd.prompt);
-          } else {
-            await runtime.sendInput(cmd.prompt);
-          }
-        } catch (err) {
-          emit({ type: 'sidecar_error', error: String(err) });
+        // Fire-and-forget: don't await sendInput so the command loop stays
+        // responsive. The interrupt command can then call interruptActiveTurn()
+        // immediately to abort the running stream.
+        if (getRuntimeFlavor(activeAgentKind) === 'codex') {
+          codexRuntime.sendInput(cmd.prompt).catch((err) => {
+            emit({ type: 'sidecar_error', error: String(err) });
+          });
+        } else {
+          runtime.sendInput(cmd.prompt).catch((err) => {
+            emit({ type: 'sidecar_error', error: String(err) });
+          });
         }
         break;
       case 'reset_session':
@@ -760,6 +764,8 @@ async function main(): Promise<void> {
       case 'interrupt':
         try {
           if (getRuntimeFlavor(activeAgentKind) === 'codex') {
+            // Immediately abort the active stream (bypasses blocked stdin loop).
+            interruptActiveTurn();
             await codexRuntime.interrupt();
           } else {
             await runtime.interrupt();
