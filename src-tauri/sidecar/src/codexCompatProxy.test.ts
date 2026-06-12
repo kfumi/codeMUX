@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from 'node:http';
 
 import { createCodexCompatProxyServer } from './codexCompatProxy.js';
@@ -30,8 +30,22 @@ function closeServer(server: ReturnType<typeof createServer>): Promise<void> {
 }
 
 const cleanups: Array<() => Promise<void>> = [];
+let stdoutSpy: ReturnType<typeof vi.spyOn> | null = null;
+let stdoutWrites: string[] = [];
+
+beforeEach(() => {
+  stdoutWrites = [];
+  stdoutSpy = vi
+    .spyOn(process.stdout, 'write')
+    .mockImplementation(((chunk: string | Uint8Array) => {
+      stdoutWrites.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+});
 
 afterEach(async () => {
+  stdoutSpy?.mockRestore();
+  stdoutSpy = null;
   while (cleanups.length > 0) {
     const cleanup = cleanups.pop();
     if (cleanup) {
@@ -76,6 +90,29 @@ describe('createCodexCompatProxyServer', () => {
         },
       ],
     });
+  });
+
+  it('responds to local health checks without touching the upstream provider', async () => {
+    let upstreamTouched = false;
+    const upstream = createServer((_req, _res) => {
+      upstreamTouched = true;
+    });
+
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const proxy = await createCodexCompatProxyServer({
+      apiKey: 'proxy-key',
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+    });
+    cleanups.push(() => proxy.close());
+
+    const response = await fetch(`${proxy.baseUrl}/__codemux_proxy_health`);
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json).toEqual({ ok: true });
+    expect(upstreamTouched).toBe(false);
   });
 
   it('translates responses requests into chat completions and preserves tool-call history', async () => {
@@ -228,6 +265,41 @@ describe('createCodexCompatProxyServer', () => {
         },
       ],
     });
+
+    const emittedEvents = stdoutWrites
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line));
+
+    expect(emittedEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              expect.objectContaining({
+                type: 'tool_use',
+                id: 'call_123',
+              }),
+            ],
+          },
+        }),
+        expect.objectContaining({
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              expect.objectContaining({
+                type: 'tool_result',
+                tool_use_id: 'call_123',
+                content: 'D:/project/ai-code/codeMUX',
+              }),
+            ],
+          },
+        }),
+      ]),
+    );
   });
 
   it('streams synthesized responses SSE events for chat-completions providers', async () => {

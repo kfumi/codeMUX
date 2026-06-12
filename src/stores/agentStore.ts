@@ -261,6 +261,60 @@ function getSessionAgentKind(sessionId: string) {
  * Handles TodoWrite (full list replacement), TaskCreate/TaskUpdate (incremental),
  * and infers status from tool execution flow when TodoWrite doesn't update statuses.
  */
+
+/**
+ * Build a synthetic result event for a single turn (Claude Code historical sessions).
+ * Accumulates usage from assistant messages between startIdx (inclusive) and endIdx (exclusive).
+ */
+function buildTurnSyntheticResult(
+  events: AgentMessage[],
+  timestamps: number[],
+  startIdx: number,
+  endIdx: number,
+  turnStartTime: number,
+  sessionId: string,
+): { insertAt: number; result: AgentMessage } | null {
+  let totalInput = 0, totalOutput = 0, totalCacheRead = 0, totalCacheCreate = 0;
+  let lastAssistantIdx = -1;
+
+  for (let i = startIdx; i < endIdx; i++) {
+    if (events[i].kind === 'assistant') {
+      lastAssistantIdx = i;
+      const evt = events[i] as any;
+      const usage = evt.data?.message?.usage || evt.data?.usage;
+      if (usage) {
+        totalInput += usage.input_tokens || 0;
+        totalOutput += usage.output_tokens || 0;
+        totalCacheRead += usage.cache_read_input_tokens || 0;
+        totalCacheCreate += usage.cache_creation_input_tokens || 0;
+      }
+    }
+  }
+
+  if (totalInput === 0 && totalOutput === 0) return null;
+  if (lastAssistantIdx < 0) return null;
+
+  const endTime = timestamps[endIdx - 1] || timestamps[lastAssistantIdx] || 0;
+  const durationMs = endTime > turnStartTime ? endTime - turnStartTime : 0;
+
+  return {
+    insertAt: lastAssistantIdx,
+    result: {
+      kind: 'result',
+      data: {
+        type: 'result', subtype: 'success', is_error: false,
+        uuid: `synthetic-turn-${sessionId}-${startIdx}`, session_id: sessionId,
+        duration_ms: durationMs, duration_api_ms: 0,
+        num_turns: 1, result: '', total_cost_usd: 0,
+        usage: {
+          input_tokens: totalInput, output_tokens: totalOutput,
+          cache_creation_input_tokens: totalCacheCreate, cache_read_input_tokens: totalCacheRead,
+        },
+      } as AgentResultMessage,
+    },
+  };
+}
+
 function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
   let todos: TodoItem[] = [];
   const taskMap = new Map<string, TodoItem>();
@@ -611,6 +665,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       await agentApi.startSession(sessionId, prompt, cwd, (raw: string) => {
         let event = parseAgentEvent(raw);
         const now = Date.now();
+
+        if (event.kind === 'error' && /Codex session not initialized\. Call ensure_session first\./i.test(event.data.error)) {
+          const existingEvents = get().events[sessionId] || [];
+          const alreadyFailedProxyStartup = existingEvents.some((existingEvent) =>
+            existingEvent.kind === 'error' &&
+            /EADDRINUSE|address already in use|listen .*15722/i.test(existingEvent.data.error),
+          );
+
+          if (alreadyFailedProxyStartup) {
+            logger.warn('Suppressing cascading Codex initialization error after proxy startup failure', {
+              sessionId,
+            });
+            return;
+          }
+        }
 
         // Handle file_snapshot events: store original content captured before
         // Write/Edit tool execution, then re-extract changed files.
@@ -1058,53 +1127,65 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
       const hasResult = events.some((e) => e.kind === 'result');
       if (!hasResult && events.length > 0) {
-        let totalInput = 0;
-        let totalOutput = 0;
-        let totalCacheRead = 0;
-        let totalCacheCreate = 0;
+        // Generate per-turn synthetic result events (for Claude Code historical sessions)
+        // Each turn starts with a user message; accumulate usage across assistant messages in the turn.
+        let turnStartIdx = -1;
+        let turnStartTime = 0;
+        const turnResults: Array<{ insertAt: number; result: AgentMessage }> = [];
 
-        for (const evt of events) {
-          if (evt.kind === 'assistant') {
-            const usage = (evt.data as any)?.message?.usage;
-            if (usage) {
-              totalInput += usage.input_tokens || 0;
-              totalOutput += usage.output_tokens || 0;
-              totalCacheRead += usage.cache_read_input_tokens || 0;
-              totalCacheCreate += usage.cache_creation_input_tokens || 0;
+        for (let i = 0; i < events.length; i++) {
+          if (events[i].kind === 'user') {
+            // Flush previous turn if it had usage
+            if (turnStartIdx >= 0) {
+              const turnResult = buildTurnSyntheticResult(events, timestamps, turnStartIdx, i, turnStartTime, sessionId);
+              if (turnResult) turnResults.push({ insertAt: turnResult.insertAt, result: turnResult.result });
             }
+            turnStartIdx = i;
+            turnStartTime = timestamps[i] || 0;
           }
         }
+        // Flush last turn
+        if (turnStartIdx >= 0) {
+          const turnResult = buildTurnSyntheticResult(events, timestamps, turnStartIdx, events.length, turnStartTime, sessionId);
+          if (turnResult) turnResults.push({ insertAt: turnResult.insertAt, result: turnResult.result });
+        }
 
-        const validTs = timestamps.filter((t) => t > 0);
-        const durationMs = validTs.length >= 2
-          ? validTs[validTs.length - 1] - validTs[0]
-          : 0;
-        const numTurns = events.filter((e) => e.kind === 'user').length;
+        // Insert in reverse order to preserve indices
+        for (const tr of turnResults.reverse()) {
+          events.splice(tr.insertAt + 1, 0, tr.result);
+          timestamps.splice(tr.insertAt + 1, 0, timestamps[tr.insertAt] || 0);
+        }
 
-        if (totalInput > 0 || totalOutput > 0) {
-          const syntheticResult: AgentMessage = {
-            kind: 'result',
-            data: {
-              type: 'result',
-              subtype: 'success',
-              is_error: false,
-              uuid: `synthetic-result-${sessionId}`,
-              session_id: sessionId,
-              duration_ms: durationMs,
-              duration_api_ms: 0,
-              num_turns: numTurns,
-              result: '',
-              total_cost_usd: 0,
-              usage: {
-                input_tokens: totalInput,
-                output_tokens: totalOutput,
-                cache_creation_input_tokens: totalCacheCreate,
-                cache_read_input_tokens: totalCacheRead,
-              },
-            } as AgentResultMessage,
-          };
-          events.push(syntheticResult);
-          timestamps.push(validTs[validTs.length - 1] || 0);
+        // Fallback: if no per-turn results were generated, create a single one at the end
+        if (turnResults.length === 0) {
+          let totalInput = 0, totalOutput = 0, totalCacheRead = 0, totalCacheCreate = 0;
+          for (const evt of events) {
+            if (evt.kind === 'assistant') {
+              const usage = (evt.data as any)?.message?.usage;
+              if (usage) {
+                totalInput += usage.input_tokens || 0;
+                totalOutput += usage.output_tokens || 0;
+                totalCacheRead += usage.cache_read_input_tokens || 0;
+                totalCacheCreate += usage.cache_creation_input_tokens || 0;
+              }
+            }
+          }
+          if (totalInput > 0 || totalOutput > 0) {
+            const validTs = timestamps.filter((t) => t > 0);
+            events.push({
+              kind: 'result',
+              data: {
+                type: 'result', subtype: 'success', is_error: false,
+                uuid: `synthetic-result-${sessionId}`, session_id: sessionId,
+                duration_ms: validTs.length >= 2 ? validTs[validTs.length - 1] - validTs[0] : 0,
+                duration_api_ms: 0,
+                num_turns: events.filter((e) => e.kind === 'user').length,
+                result: '', total_cost_usd: 0,
+                usage: { input_tokens: totalInput, output_tokens: totalOutput, cache_creation_input_tokens: totalCacheCreate, cache_read_input_tokens: totalCacheRead },
+              } as AgentResultMessage,
+            });
+            timestamps.push(validTs[validTs.length - 1] || 0);
+          }
         }
       }
 

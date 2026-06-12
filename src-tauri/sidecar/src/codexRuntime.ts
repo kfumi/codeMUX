@@ -13,11 +13,50 @@ import {
   buildCodexToolResultContent,
   buildCodexToolUseContent,
   buildToolResultEvent,
+  isCodexToolResultError,
 } from './runtimeEvents.js';
 import { shouldUseCodexChatCompatProxy } from './sessionRuntimeHelpers.js';
 import { proxyManager } from './proxyManager.js';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
+
+/**
+ * Write codeMUX-managed MCP servers to .mcp.json in the project directory.
+ * Codex CLI reads .mcp.json for MCP server definitions.
+ */
+function syncMcpServersToConfigToml(mcpServers: Record<string, unknown>, cwd: string): void {
+  try {
+    const mcpConfig: Record<string, unknown> = {};
+    for (const [name, serverConfig] of Object.entries(mcpServers)) {
+      if (!serverConfig || typeof serverConfig !== 'object') continue;
+      const cfg = serverConfig as Record<string, unknown>;
+      const entry: Record<string, unknown> = {};
+
+      if (cfg.type === 'http' || cfg.type === 'sse' || (cfg.url && !cfg.command)) {
+        entry.url = cfg.url;
+      } else if (cfg.command) {
+        entry.command = cfg.command;
+        if (Array.isArray(cfg.args)) entry.args = cfg.args;
+      }
+      if (cfg.env && typeof cfg.env === 'object') {
+        entry.env = cfg.env;
+      }
+      if (Object.keys(entry).length > 0) {
+        mcpConfig[name] = entry;
+      }
+    }
+
+    if (Object.keys(mcpConfig).length === 0) return;
+
+    const mcpJsonPath = join(cwd, '.mcp.json');
+    writeFileSync(mcpJsonPath, JSON.stringify({ mcp_servers: mcpConfig }, null, 2), 'utf-8');
+    process.stderr.write(`[codex] Wrote ${Object.keys(mcpConfig).length} MCP servers to ${mcpJsonPath}\n`);
+  } catch (err) {
+    process.stderr.write(`[codex] Failed to write .mcp.json: ${err}\n`);
+  }
+}
 
 type CodexSessionBootstrap = {
   sessionId?: string;
@@ -29,8 +68,14 @@ type CodexSessionBootstrap = {
   model?: string;
 };
 
-function emit(obj: unknown): void {
+export function emit(obj: unknown): void {
   process.stdout.write(JSON.stringify(obj) + '\n');
+}
+
+/** Current active session ID — shared with the proxy for event routing. */
+export let activeSessionId = '';
+export function setActiveSessionId(id: string): void {
+  activeSessionId = id;
 }
 
 function emptyUsage(): Usage {
@@ -48,8 +93,10 @@ export class CodexSessionRuntime {
   private abortController: AbortController | null = null;
   private client: Codex | null = null;
   private thread: Thread | null = null;
+  private streamingItemState = new Map<string, { kind: 'text' | 'thinking'; text: string }>();
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
+    if (cmd.sessionId) setActiveSessionId(cmd.sessionId);
     const cwd = cmd.cwd === '.'
       ? (process.env.USERPROFILE || process.env.HOME || cmd.cwd)
       : cmd.cwd;
@@ -80,7 +127,13 @@ export class CodexSessionRuntime {
     this.configFingerprint = nextFingerprint;
 
     let runtimeBaseUrl = requestedConfig.upstreamBaseUrl;
-    if (
+    if (cmd.proxyBaseUrl) {
+      // Proxy already running externally (e.g. started from settings) — use it directly
+      runtimeBaseUrl = cmd.proxyBaseUrl;
+      process.stderr.write(
+        `[codex] Using existing proxy at ${runtimeBaseUrl}\n`,
+      );
+    } else if (
       requestedConfig.apiKey &&
       requestedConfig.upstreamBaseUrl &&
       shouldUseCodexChatCompatProxy(requestedConfig.upstreamBaseUrl)
@@ -113,23 +166,30 @@ export class CodexSessionRuntime {
       codexEnv.OPENAI_BASE_URL = runtimeBaseUrl;
     }
 
+    // Build Codex CLI config overrides (values must be CodexConfigValue-compatible)
+    const codexConfig: Record<string, string | number | boolean | Record<string, unknown> | Record<string, unknown>[]> = {};
+    if (runtimeBaseUrl) {
+      codexConfig.model_provider = 'codemux_proxy';
+      codexConfig.model_providers = {
+        codemux_proxy: {
+          name: 'CodeMUX Proxy',
+          base_url: runtimeBaseUrl,
+          env_key: 'OPENAI_API_KEY',
+        },
+      };
+      codexConfig.openai_base_url = runtimeBaseUrl;
+    }
+
+    // Sync codeMUX-managed MCP servers to ~/.codex/config.toml
+    if (cmd.mcpServers && typeof cmd.mcpServers === 'object') {
+      syncMcpServersToConfigToml(cmd.mcpServers, cwd);
+    }
+
     this.client = new Codex({
       env: codexEnv,
       apiKey: requestedConfig.apiKey,
       baseUrl: runtimeBaseUrl,
-      config: runtimeBaseUrl
-        ? {
-            model_provider: 'codemux_proxy',
-            model_providers: {
-              codemux_proxy: {
-                name: 'CodeMUX Proxy',
-                base_url: runtimeBaseUrl,
-                env_key: 'OPENAI_API_KEY',
-              },
-            },
-            openai_base_url: runtimeBaseUrl,
-          }
-        : undefined,
+      config: Object.keys(codexConfig).length > 0 ? codexConfig as any : undefined,
     });
     process.stderr.write(
       `[codex] SDK client configured with baseUrl=${runtimeBaseUrl || 'default'} env.OPENAI_BASE_URL=${codexEnv.OPENAI_BASE_URL || 'unset'} model_provider=codemux_proxy\n`,
@@ -260,6 +320,7 @@ export class CodexSessionRuntime {
     process.stderr.write(`[codex] Reset session: ${sessionId}\n`);
     this.abortController?.abort();
     this.abortController = null;
+    this.streamingItemState.clear();
     await this.teardownClient();
     this.config = null;
     this.configFingerprint = null;
@@ -269,6 +330,7 @@ export class CodexSessionRuntime {
     process.stderr.write('[codex] Shutdown\n');
     this.abortController?.abort();
     this.abortController = null;
+    this.streamingItemState.clear();
     await this.teardownClient();
     this.config = null;
     this.configFingerprint = null;
@@ -347,6 +409,7 @@ export class CodexSessionRuntime {
     }
 
     if (item.type === 'agent_message' && eventType === 'item.completed') {
+      this.completeStreamingText(sessionId, item.id);
       if (item.text.trim()) {
         emit(buildAssistantEvent({
           sessionId,
@@ -356,7 +419,13 @@ export class CodexSessionRuntime {
       return;
     }
 
+    if (item.type === 'agent_message' && eventType === 'item.updated') {
+      this.emitStreamingTextDelta(sessionId, item.id, 'text', item.text);
+      return;
+    }
+
     if (item.type === 'reasoning' && eventType === 'item.completed') {
+      this.completeStreamingText(sessionId, item.id);
       if (item.text.trim()) {
         emit(buildAssistantEvent({
           sessionId,
@@ -366,40 +435,123 @@ export class CodexSessionRuntime {
       return;
     }
 
-    const toolUse = buildCodexToolUseContent(item);
-    if (toolUse && eventType === 'item.started') {
-      emit(buildAssistantEvent({
-        sessionId,
-        content: [toolUse],
-      }));
+    if (item.type === 'reasoning' && eventType === 'item.updated') {
+      this.emitStreamingTextDelta(sessionId, item.id, 'thinking', item.text);
+      return;
     }
 
-    if (
-      eventType === 'item.completed'
-      && (item.type === 'command_execution'
+    const toolUse = buildCodexToolUseContent(item);
+    if (eventType === 'item.started') {
+      if (toolUse) {
+        emit(buildAssistantEvent({
+          sessionId,
+          content: [toolUse],
+        }));
+      } else {
+        process.stderr.write(`[codex] item.started with no tool_use mapping: type=${item.type} id=${item.id}\n`);
+      }
+    }
+
+    if (eventType === 'item.completed') {
+      if (item.type === 'command_execution'
         || item.type === 'mcp_tool_call'
         || item.type === 'todo_list'
-        || item.type === 'web_search')
-    ) {
-      const result = buildCodexToolResultContent(item);
-      if (result) {
-        emit(buildToolResultEvent({
-          sessionId,
-          toolUseId: item.id,
-          content: result,
-        }));
+        || item.type === 'web_search') {
+        const result = buildCodexToolResultContent(item);
+        if (result) {
+          const isError = isCodexToolResultError(item);
+          emit(buildToolResultEvent({
+            sessionId,
+            toolUseId: item.id,
+            content: result,
+            isError,
+          }));
+        }
+      } else if (item.type !== 'agent_message' && item.type !== 'reasoning' && item.type !== 'error') {
+        process.stderr.write(`[codex] item.completed with unhandled type: ${item.type} id=${item.id}\n`);
       }
     }
   }
 
   private finishTurn(): void {
+    this.streamingItemState.clear();
     emit({ type: 'sidecar_query_done' });
   }
 
   private async teardownClient(): Promise<void> {
     this.abortController?.abort();
     this.abortController = null;
+    this.streamingItemState.clear();
     this.thread = null;
     this.client = null;
+  }
+
+  private emitStreamingTextDelta(
+    sessionId: string,
+    itemId: string,
+    kind: 'text' | 'thinking',
+    nextText: string,
+  ): void {
+    const previous = this.streamingItemState.get(itemId);
+    const previousText = previous?.text ?? '';
+    const delta = nextText.startsWith(previousText)
+      ? nextText.slice(previousText.length)
+      : nextText;
+
+    if (!previous) {
+      emit({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: {
+            type: kind === 'thinking' ? 'thinking' : 'text',
+            [kind === 'thinking' ? 'thinking' : 'text']: '',
+          },
+        },
+      });
+    }
+
+    this.streamingItemState.set(itemId, { kind, text: nextText });
+
+    if (!delta) {
+      return;
+    }
+
+    emit({
+      type: 'stream_event',
+      session_id: sessionId,
+      event: {
+        type: 'content_block_delta',
+        index: 0,
+        delta: kind === 'thinking'
+          ? {
+              type: 'thinking_delta',
+              thinking: delta,
+            }
+          : {
+              type: 'text_delta',
+              text: delta,
+            },
+      },
+    });
+  }
+
+  private completeStreamingText(sessionId: string, itemId: string): void {
+    const state = this.streamingItemState.get(itemId);
+    if (!state) {
+      return;
+    }
+
+    emit({
+      type: 'stream_event',
+      session_id: sessionId,
+      event: {
+        type: 'content_block_stop',
+        index: 0,
+      },
+    });
+    this.streamingItemState.delete(itemId);
   }
 }

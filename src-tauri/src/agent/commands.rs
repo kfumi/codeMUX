@@ -235,11 +235,16 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
             if text_parts.is_empty() {
                 return None;
             }
+            let content = text_parts.join("\n");
+            // Skip Codex environment context injections (not real user messages)
+            if content.starts_with("<environment_context>") {
+                return None;
+            }
             return Some(serde_json::json!({
                 "type": "user",
                 "message": {
                     "role": "user",
-                    "content": text_parts.join("\n")
+                    "content": content
                 }
             }));
         }
@@ -712,12 +717,25 @@ pub async fn ensure_agent_session(
         sidecars.get(&session_id).map(|h| h.stderr_lines.clone())
     };
 
-    let cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model);
+    let mut cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model);
+
+    // If the proxy is already running (e.g. started manually from settings),
+    // tell the sidecar to use it directly instead of starting a new one.
+    if agent_kind == "codex" {
+        let existing_port = *agent_state.proxy_port.lock().await;
+        if let Some(port) = existing_port {
+            if port > 0 {
+                cmd["proxyBaseUrl"] = serde_json::json!(format!("http://127.0.0.1:{}", port));
+                info!(target: "agent", "Proxy already running on port {}, passing to sidecar", port);
+            }
+        }
+    }
+
     send_command_to_session(&agent_state, &session_id, cmd).await?;
     info!(target: "agent", "Agent ensure command sent for session_id={} agent_kind={}", session_id, agent_kind);
 
     // Parse proxy port from stderr if proxy was auto-started
-    if agent_kind == "codex" {
+    if agent_kind == "codex" && agent_state.proxy_port.lock().await.is_none() {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         if let Some(lines) = stderr_lines {
             let captured = lines.lock().await;
@@ -768,7 +786,18 @@ pub async fn start_agent_session(
     };
 
     ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
-    let ensure_cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model);
+    let mut ensure_cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model);
+
+    if agent_kind == "codex" {
+        let existing_port = *agent_state.proxy_port.lock().await;
+        if let Some(port) = existing_port {
+            if port > 0 {
+                ensure_cmd["proxyBaseUrl"] = serde_json::json!(format!("http://127.0.0.1:{}", port));
+                info!(target: "agent", "Proxy already running on port {}, passing to sidecar", port);
+            }
+        }
+    }
+
     send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 
     let input_cmd = serde_json::json!({
@@ -949,18 +978,65 @@ pub async fn delete_claude_session_files(
     Ok(deleted)
 }
 
+#[tauri::command]
+pub async fn delete_codex_session_files(
+    state: State<'_, crate::AppState>,
+    app_session_id: String,
+) -> Result<Vec<String>, String> {
+    use std::fs;
+
+    let Some(codex_session_id) = get_agent_session_id(state.inner(), &app_session_id, AgentKind::Codex)?
+    else {
+        debug!(target: "agent", "No Codex session mapping found for session_id={}", app_session_id);
+        return Ok(vec![]);
+    };
+
+    info!(
+        target: "agent",
+        "Deleting Codex session files for app_session_id={} codex_session_id={}",
+        app_session_id,
+        codex_session_id
+    );
+
+    let mut deleted = Vec::new();
+    let sessions_dir = home_dir()?.join(".codex").join("sessions");
+
+    if sessions_dir.exists() {
+        let mut candidates = Vec::new();
+        collect_codex_jsonl_files(&sessions_dir, &mut candidates);
+
+        for path in candidates {
+            if read_codex_session_meta_id(&path).as_deref() == Some(&codex_session_id) {
+                let _ = fs::remove_file(&path);
+                deleted.push(path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    info!(
+        target: "agent",
+        "Deleted {} Codex session file entries for app_session_id={}",
+        deleted.len(),
+        app_session_id
+    );
+
+    Ok(deleted)
+}
+
 /// Find any active sidecar to send a global command (e.g. proxy management).
-/// Returns the first available sidecar handle's session_id.
+/// Skips the dedicated proxy sidecar — it has no Codex session initialized.
 fn find_any_active_sidecar(
     sidecars: &HashMap<String, SidecarHandle>,
 ) -> Option<String> {
-    sidecars.keys().next().cloned()
+    sidecars
+        .keys()
+        .find(|id| id.as_str() != PROXY_SESSION_ID)
+        .cloned()
 }
 
 /// Parse the proxy port from captured sidecar stderr lines.
 fn parse_proxy_port_from_stderr(lines: &[String]) -> Option<u16> {
     for line in lines.iter().rev() {
-        // Match: [proxy-manager] Proxy started on port 50284, upstream=...
         if let Some(rest) = line.strip_prefix("[proxy-manager] Proxy started on port ") {
             if let Some(port_str) = rest.split(',').next() {
                 if let Ok(port) = port_str.trim().parse::<u16>() {
@@ -968,13 +1044,20 @@ fn parse_proxy_port_from_stderr(lines: &[String]) -> Option<u16> {
                 }
             }
         }
+
+        if let Some(rest) = line.strip_prefix("[proxy-manager] Reusing existing proxy on port ") {
+            if let Ok(port) = rest.trim().parse::<u16>() {
+                return Some(port);
+            }
+        }
     }
+
     None
 }
 
 #[cfg(test)]
 mod tests {
-    use super::find_codex_session_jsonl;
+    use super::{find_codex_session_jsonl, parse_proxy_port_from_stderr};
 
     #[test]
     fn find_codex_session_jsonl_matches_only_session_meta_payload_id() {
@@ -1008,21 +1091,52 @@ mod tests {
 
         let _ = fs::remove_dir_all(&base);
     }
+
+    #[test]
+    fn parse_proxy_port_from_reuse_log() {
+        let lines = vec![
+            "[codex-compat-proxy] port 15722 busy, retrying (1/5)...".to_string(),
+            "[proxy-manager] Reusing existing proxy on port 15722".to_string(),
+        ];
+
+        assert_eq!(parse_proxy_port_from_stderr(&lines), Some(15722));
+    }
 }
+
+const PROXY_SESSION_ID: &str = "__codex_proxy__";
 
 #[tauri::command]
 pub async fn start_codex_proxy(
+    app: AppHandle,
     agent_state: State<'_, AgentState>,
     api_key: String,
     base_url: String,
 ) -> Result<u16, String> {
     info!(target: "agent", "Starting codex proxy upstream={}", base_url);
 
+    // Find an existing sidecar, or spawn a dedicated one for the proxy
     let session_id = {
         let sidecars = agent_state.sidecars.lock().await;
         find_any_active_sidecar(&sidecars)
     };
-    let session_id = session_id.ok_or("No active sidecar to start proxy. Create a session first.")?;
+
+    let session_id = match session_id {
+        Some(id) => id,
+        None => {
+            info!(target: "agent", "No active sidecar, spawning dedicated proxy sidecar");
+            let (handle, mut rx) = spawn_sidecar(&app, tauri::ipc::Channel::new(|_| Ok(()))).await?;
+
+            // Drain the event stream in the background
+            let session_id_clone = PROXY_SESSION_ID.to_string();
+            tokio::spawn(async move {
+                while rx.recv().await.is_some() {}
+                info!(target: "agent", "Proxy sidecar stream closed for {}", session_id_clone);
+            });
+
+            agent_state.sidecars.lock().await.insert(PROXY_SESSION_ID.to_string(), handle);
+            PROXY_SESSION_ID.to_string()
+        }
+    };
 
     // Get the stderr lines Arc before sending the command
     let stderr_lines = {
@@ -1037,20 +1151,31 @@ pub async fn start_codex_proxy(
     });
     send_command_to_session(&agent_state, &session_id, cmd).await?;
 
-    // Wait briefly for the sidecar to process and write stderr
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    // Wait until stderr confirms either a fresh start or successful reuse.
+    let timeout = std::time::Duration::from_secs(5);
+    let poll_interval = std::time::Duration::from_millis(100);
+    let deadline = tokio::time::Instant::now() + timeout;
 
-    // Parse the port from stderr
-    let port = if let Some(lines) = stderr_lines {
-        let captured = lines.lock().await;
-        parse_proxy_port_from_stderr(&captured).unwrap_or(0)
-    } else {
-        0
-    };
+    while tokio::time::Instant::now() < deadline {
+        if let Some(lines) = &stderr_lines {
+            let captured = lines.lock().await;
+            if let Some(port) = parse_proxy_port_from_stderr(&captured) {
+                drop(captured);
+                *agent_state.proxy_port.lock().await = Some(port);
+                info!(target: "agent", "Codex proxy started on port {}", port);
+                return Ok(port);
+            }
+        }
 
-    *agent_state.proxy_port.lock().await = Some(port);
-    info!(target: "agent", "Codex proxy started on port {}", port);
-    Ok(port)
+        tokio::time::sleep(poll_interval).await;
+    }
+
+    warn!(
+        target: "agent",
+        "Codex proxy did not confirm startup within {}ms; leaving proxy_port unset",
+        timeout.as_millis()
+    );
+    Err("Codex proxy did not confirm startup. Check sidecar logs for details.".to_string())
 }
 
 #[tauri::command]
@@ -1061,12 +1186,28 @@ pub async fn stop_codex_proxy(
 
     let session_id = {
         let sidecars = agent_state.sidecars.lock().await;
-        find_any_active_sidecar(&sidecars)
+        // Prefer the dedicated proxy sidecar if it exists
+        if sidecars.contains_key(PROXY_SESSION_ID) {
+            Some(PROXY_SESSION_ID.to_string())
+        } else {
+            find_any_active_sidecar(&sidecars)
+        }
     };
     let session_id = session_id.ok_or("No active sidecar to stop proxy")?;
 
     let cmd = serde_json::json!({ "type": "stop_proxy" });
     send_command_to_session(&agent_state, &session_id, cmd).await?;
+
+    // Wait for the proxy to fully release the port
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // Clean up the dedicated proxy sidecar
+    if session_id == PROXY_SESSION_ID {
+        if let Some(mut handle) = agent_state.sidecars.lock().await.remove(PROXY_SESSION_ID) {
+            handle.shutdown().await;
+            info!(target: "agent", "Dedicated proxy sidecar shut down");
+        }
+    }
 
     *agent_state.proxy_port.lock().await = None;
     Ok(())

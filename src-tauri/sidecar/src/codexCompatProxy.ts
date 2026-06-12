@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse, type Server as HttpServer } from 'node:http';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -9,6 +9,7 @@ import {
   convertChatCompletionToResponses,
   convertResponsesToChatRequest,
 } from './codexChatCompat.js';
+import { buildToolResultEvent } from './runtimeEvents.js';
 
 type ProxyConfig = {
   apiKey: string;
@@ -38,16 +39,32 @@ export async function createCodexCompatProxyServer(config: ProxyConfig): Promise
     }
   });
 
+  const PORT = 15722;
   const address = await new Promise<{ port: number }>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const currentAddress = server.address();
-      if (!currentAddress || typeof currentAddress === 'string') {
-        reject(new Error('Codex proxy server did not expose a TCP port.'));
-        return;
-      }
-      resolve({ port: currentAddress.port });
-    });
+    let retries = 0;
+    const tryListen = () => {
+      server.once('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE' && retries < 5) {
+          retries++;
+          proxyLog(`port ${PORT} busy, retrying (${retries}/5)...`);
+          setTimeout(() => {
+            server.removeAllListeners('error');
+            tryListen();
+          }, 300);
+        } else {
+          reject(err);
+        }
+      });
+      server.listen(PORT, '127.0.0.1', () => {
+        const currentAddress = server.address();
+        if (!currentAddress || typeof currentAddress === 'string') {
+          reject(new Error('Codex proxy server did not expose a TCP port.'));
+          return;
+        }
+        resolve({ port: currentAddress.port });
+      });
+    };
+    tryListen();
   });
 
   return {
@@ -71,6 +88,19 @@ async function handleRequest(
   config: ProxyConfig,
   history: CodexChatHistory,
 ): Promise<void> {
+  if (req.method === 'GET' && isHealthPath(req.url ?? '/')) {
+    writeJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === 'POST' && isShutdownPath(req.url ?? '/')) {
+    writeJson(res, 200, { ok: true });
+    setImmediate(() => {
+      (res.socket as typeof res.socket & { server?: HttpServer | null } | null)?.server?.close();
+    });
+    return;
+  }
+
   if (req.method === 'GET' && isModelsPath(req.url ?? '/')) {
     const models = await fetchModels(config);
     writeJson(res, 200, models);
@@ -89,6 +119,7 @@ async function handleRequest(
   }
 
   const requestBody = await readJsonBody(req) as Parameters<typeof convertResponsesToChatRequest>[0];
+  emitToolResultEventsFromRequest(requestBody);
   proxyLog(`responses request ${summarizeResponsesRequest(requestBody)}`);
   if (Array.isArray(requestBody.tools) && requestBody.tools.length > 0) {
     proxyLog(`responses tool names ${requestBody.tools.map((tool) => summarizeToolName(tool)).join(', ')}`);
@@ -111,6 +142,31 @@ async function handleRequest(
     persistDebugJson('last-codex-chat-request.json', chatRequest);
   }
   const completion = await fetchChatCompletion(chatRequest, config);
+
+  // Emit tool_use events for tool calls so the frontend renders them in real-time.
+  // The Codex SDK doesn't emit item events for function_call items from the proxy.
+  const toolCalls = completion.choices?.[0]?.message?.tool_calls;
+  if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+    const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
+    const crypto = await import('node:crypto');
+    proxyLog(`emitting ${toolCalls.length} tool_use events, sessionId=${activeSessionId || '(empty)'}`);
+    for (const tc of toolCalls) {
+      const name = tc.function?.name ?? 'tool';
+      let args: unknown;
+      try { args = JSON.parse(tc.function?.arguments ?? '{}'); } catch { args = {}; }
+      emitEvent({
+        type: 'assistant',
+        uuid: crypto.randomUUID(),
+        session_id: activeSessionId,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: tc.id, name, input: args }],
+        },
+        parent_tool_use_id: null,
+      });
+    }
+  }
+
   const compatResponse = convertChatCompletionToResponses(completion, requestBody, history);
 
   if (requestBody.stream) {
@@ -119,6 +175,57 @@ async function handleRequest(
   }
 
   writeJson(res, 200, compatResponse);
+}
+
+function emitToolResultEventsFromRequest(
+  requestBody: Parameters<typeof convertResponsesToChatRequest>[0],
+): void {
+  const inputItems = Array.isArray(requestBody.input) ? requestBody.input : [requestBody.input];
+  const functionCallOutputs = inputItems.filter(isFunctionCallOutputItem);
+
+  if (functionCallOutputs.length === 0) {
+    return;
+  }
+
+  void import('./codexRuntime.js').then(({ emit: emitEvent, activeSessionId }) => {
+    for (const item of functionCallOutputs) {
+      emitEvent(buildToolResultEvent({
+        sessionId: activeSessionId,
+        toolUseId: item.call_id,
+        content: stringifyFunctionCallOutput(item.output),
+      }));
+    }
+  }).catch((error) => {
+    proxyLog(`failed to emit tool_result event: ${error instanceof Error ? error.message : String(error)}`);
+  });
+}
+
+function isFunctionCallOutputItem(
+  value: unknown,
+): value is { type: 'function_call_output'; call_id: string; output: unknown } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as Record<string, unknown>).type === 'function_call_output' &&
+    typeof (value as Record<string, unknown>).call_id === 'string'
+  );
+}
+
+function stringifyFunctionCallOutput(output: unknown): string {
+  if (typeof output === 'string') {
+    return output;
+  }
+
+  if (output == null) {
+    return '';
+  }
+
+  try {
+    return JSON.stringify(output, null, 2);
+  } catch {
+    return String(output);
+  }
 }
 
 async function fetchChatCompletion(
@@ -233,6 +340,16 @@ function isResponsesPath(rawUrl: string): boolean {
 function isModelsPath(rawUrl: string): boolean {
   const pathname = new URL(rawUrl, 'http://127.0.0.1').pathname.replace(/\/+$/, '');
   return pathname === '/models' || pathname === '/v1/models';
+}
+
+function isHealthPath(rawUrl: string): boolean {
+  const pathname = new URL(rawUrl, 'http://127.0.0.1').pathname.replace(/\/+$/, '');
+  return pathname === '/__codemux_proxy_health';
+}
+
+function isShutdownPath(rawUrl: string): boolean {
+  const pathname = new URL(rawUrl, 'http://127.0.0.1').pathname.replace(/\/+$/, '');
+  return pathname === '/__codemux_proxy_shutdown';
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {

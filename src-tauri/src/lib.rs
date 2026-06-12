@@ -201,6 +201,7 @@ pub fn run() {
             agent::commands::reset_agent_session,
             agent::commands::send_tool_response,
             agent::commands::delete_claude_session_files,
+            agent::commands::delete_codex_session_files,
             agent::commands::load_claude_session_events,
             agent::commands::load_codex_session_events,
             agent::commands::start_codex_proxy,

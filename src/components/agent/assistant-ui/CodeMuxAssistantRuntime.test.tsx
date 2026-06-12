@@ -41,6 +41,45 @@ const sessionTwoEvents: AgentMessage[] = [
   },
 ];
 
+const failedToolEvents: AgentMessage[] = [
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-tool-1',
+      session_id: 'session-tool',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'npm test' } }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'error',
+    data: {
+      type: 'sidecar_error',
+      error: 'Command failed with exit code 1',
+    },
+  },
+];
+
+const timestampOnlyAssistantEvents: AgentMessage[] = [
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-timestamp-only',
+      session_id: 'session-timestamp',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'timestamp only assistant' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+];
+
 function Harness({ sessionId }: { sessionId: string }) {
   return (
     <CodeMuxAssistantRuntimeProvider
@@ -67,10 +106,14 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       events: {
         'session-1': sessionOneEvents,
         'session-2': sessionTwoEvents,
+        'session-tool': failedToolEvents,
+        'session-timestamp': timestampOnlyAssistantEvents,
       },
       eventTimestamps: {
         'session-1': [1, 2],
         'session-2': [3, 4],
+        'session-tool': [5, 6],
+        'session-timestamp': [Date.parse('2026-06-12T21:40:00+08:00')],
       },
       isRunning: {},
       error: {},
@@ -104,5 +147,22 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     expect(screen.getByText('session two assistant')).toBeTruthy();
     expect(screen.queryByText('session one assistant')).toBeNull();
+  });
+
+  it('renders failed tool calls as errors instead of leaving them running', () => {
+    const { container } = render(<Harness sessionId="session-tool" />);
+
+    expect(screen.getByText(/工具/i)).toBeTruthy();
+    expect(screen.queryByText(/Error: Command failed with exit code 1/)).toBeNull();
+    expect(container.querySelector('.lucide-circle-x')).toBeTruthy();
+    expect(container.querySelector('.lucide-loader')).toBeNull();
+  });
+
+  it('hides footer (copy button + timestamp) on intermediate or incomplete assistant messages', () => {
+    render(<Harness sessionId="session-timestamp" />);
+
+    expect(screen.getByText('timestamp only assistant')).toBeTruthy();
+    // No result event means no isFinalAssistantMessage, so footer (timestamp) should not render.
+    expect(screen.queryByText('21:40')).toBeNull();
   });
 });

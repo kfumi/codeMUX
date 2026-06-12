@@ -386,8 +386,9 @@ function AssistantLikeMessage({
   const thinkingDuration = sourceEventIndex != null ? thinkingDurations[sourceEventIndex] : undefined;
   const sourceTimestamp = getSourceTimestamp(message);
   const footerStats = sourceEventIndex != null ? resultStatsByAssistantIndex[sourceEventIndex] : undefined;
+  const isFinal = message.metadata.custom?.isFinalAssistantMessage === true;
   const shouldRenderFooter =
-    message.metadata.custom?.sourceRole !== 'system' && footerStats !== undefined;
+    isFinal && message.metadata.custom?.sourceRole !== 'system' && (footerStats !== undefined || sourceTimestamp !== undefined);
 
   return (
     <MessagePrimitive.Root className="mb-5 flex w-full justify-start">

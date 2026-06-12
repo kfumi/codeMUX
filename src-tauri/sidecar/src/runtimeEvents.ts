@@ -41,10 +41,12 @@ export function buildToolResultEvent({
   sessionId,
   toolUseId,
   content,
+  isError = false,
 }: {
   sessionId: string;
   toolUseId: string;
   content: string;
+  isError?: boolean;
 }) {
   return {
     type: 'user',
@@ -57,6 +59,7 @@ export function buildToolResultEvent({
           type: 'tool_result' as const,
           tool_use_id: toolUseId,
           content,
+          is_error: isError,
         },
       ],
     },
@@ -139,6 +142,9 @@ export function buildCodexToolResultContent(
     case 'command_execution':
       return item.aggregated_output || `Command finished with status ${item.status}`;
     case 'mcp_tool_call':
+      if (item.status === 'failed' && item.error?.message) {
+        return item.error.message;
+      }
       return JSON.stringify(
         item.result?.structured_content ?? item.result?.content ?? item.error ?? { status: item.status },
         null,
@@ -150,5 +156,17 @@ export function buildCodexToolResultContent(
       return `Search completed for: ${item.query}`;
     default:
       return null;
+  }
+}
+
+export function isCodexToolResultError(
+  item: CommandExecutionItem | McpToolCallItem | TodoListItem | WebSearchItem,
+): boolean {
+  switch (item.type) {
+    case 'command_execution':
+    case 'mcp_tool_call':
+      return item.status === 'failed';
+    default:
+      return false;
   }
 }

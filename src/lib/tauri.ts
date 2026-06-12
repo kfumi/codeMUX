@@ -147,6 +147,9 @@ export const agentApi = {
   /** Delete all Claude Code session files (history, file-history, etc.) for an app session. */
   deleteClaudeSessionFiles: (appSessionId: string): Promise<string[]> =>
     invokeLogged('delete_claude_session_files', { appSessionId }),
+  /** Delete Codex session JSONL files for an app session. */
+  deleteCodexSessionFiles: (appSessionId: string): Promise<string[]> =>
+    invokeLogged('delete_codex_session_files', { appSessionId }),
   /** Load session events directly from Claude Code's JSONL session file. */
   loadClaudeSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_claude_session_events', { appSessionId }),

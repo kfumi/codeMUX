@@ -115,11 +115,11 @@ describe('shouldSuppressLiveEventWhileStopped', () => {
 });
 
 describe('terminal event helpers', () => {
-  it('identifies done, error, and error results as terminal events', () => {
+  it('identifies done, error, and all result events as terminal events', () => {
     expect(isTerminalAgentEvent('done')).toBe(true);
     expect(isTerminalAgentEvent('error')).toBe(true);
     expect(isTerminalAgentEvent('result', true)).toBe(true);
-    expect(isTerminalAgentEvent('result', false)).toBe(false);
+    expect(isTerminalAgentEvent('result', false)).toBe(true);
     expect(isTerminalAgentEvent('assistant')).toBe(false);
   });
 

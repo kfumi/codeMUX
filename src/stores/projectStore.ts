@@ -48,11 +48,12 @@ export const useProjectStore = create<ProjectState>((set) => ({
   deleteProject: async (projectId: string) => {
     set({ isLoading: true, error: null });
     try {
-      // Clean up Claude session files for all sessions in this project
+      // Clean up agent session files for all sessions in this project
       const sessions = useSessionStore.getState().sessions.filter((s) => s.project_id === projectId);
       for (const session of sessions) {
         try {
           await agentApi.deleteClaudeSessionFiles(session.id);
+          await agentApi.deleteCodexSessionFiles(session.id);
           await agentApi.resetSession(session.id);
         } catch {
           // Ignore cleanup errors

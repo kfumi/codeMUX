@@ -109,6 +109,7 @@ function convertCodeMuxMessageToThreadMessageLike(
         ...message.metadata,
         sourceRole: message.role,
         sourceTimestamp,
+        isFinalAssistantMessage: message.metadata.isFinalAssistantMessage,
       },
     },
   };

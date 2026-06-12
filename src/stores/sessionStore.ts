@@ -98,10 +98,11 @@ export const useSessionStore = create<SessionState>((set) => ({
   deleteSession: async (sessionId: string) => {
     set({ isLoading: true, error: null });
     try {
-      // Clean up Claude Code session files (best-effort, don't block on failure)
+      // Clean up agent session files (best-effort, don't block on failure)
       try {
         await agentApi.shutdown(sessionId);
         await agentApi.deleteClaudeSessionFiles(sessionId);
+        await agentApi.deleteCodexSessionFiles(sessionId);
         await agentApi.resetSession(sessionId);
       } catch {
         // Ignore cleanup errors — the session mapping may not exist

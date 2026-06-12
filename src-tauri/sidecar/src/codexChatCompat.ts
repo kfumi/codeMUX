@@ -216,15 +216,15 @@ export function convertResponsesToChatRequest(
 ): ChatCompletionsRequest {
   const messages = buildChatMessages(request, history);
   const tools = request.tools
-    ?.filter((tool): tool is ResponsesFunctionTool => isNamedFunctionTool(tool))
-    .map((tool) => ({
-      type: 'function' as const,
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parameters,
-      },
-    }));
+    ? flattenResponsesTools(request.tools).map((tool) => ({
+        type: 'function' as const,
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        },
+      }))
+    : undefined;
 
   return {
     model: request.model,
@@ -288,13 +288,41 @@ export function convertChatCompletionToResponses(
   }
 
   for (const toolCall of message.tool_calls ?? []) {
-    output.push({
-      type: 'function_call',
-      id: createId('fc'),
-      call_id: toolCall.id,
-      name: toolCall.function.name,
-      arguments: toolCall.function.arguments,
-    });
+    const name = toolCall.function.name;
+    const callId = toolCall.id;
+
+    if (name.startsWith('mcp__')) {
+      // MCP tool: mcp__<server>__<tool> — use function_call but add SDK-compatible fields
+      const parts = name.split('__');
+      const server = parts[1] ?? '';
+      const tool = parts.slice(2).join('__');
+      output.push({
+        type: 'function_call' as const,
+        id: createId('fc'),
+        call_id: callId,
+        name,
+        arguments: toolCall.function.arguments,
+        // Extra fields for Codex SDK to recognize as MCP tool
+        server,
+        tool,
+      } as any);
+    } else if (name === 'shell_command') {
+      output.push({
+        type: 'function_call' as const,
+        id: createId('fc'),
+        call_id: callId,
+        name,
+        arguments: toolCall.function.arguments,
+      });
+    } else {
+      output.push({
+        type: 'function_call',
+        id: createId('fc'),
+        call_id: callId,
+        name,
+        arguments: toolCall.function.arguments,
+      });
+    }
   }
 
   const status = message.tool_calls?.length ? 'requires_action' : 'completed';
@@ -511,11 +539,32 @@ function convertInputItemToChatMessages(item: ResponsesInputItem): ChatMessage[]
     return [{ role: 'user', content: item }];
   }
 
+  // Tool results from various SDK tool types
   if (item.type === 'function_call_output') {
     return [{
       role: 'tool',
       tool_call_id: item.call_id ?? '',
       content: stringifyContent(item.output),
+    }];
+  }
+
+  // MCP tool result (from Codex SDK)
+  if ((item as any).type === 'mcp_tool_call_output') {
+    const rec = item as any;
+    return [{
+      role: 'tool',
+      tool_call_id: rec.call_id ?? '',
+      content: stringifyContent(rec.output ?? rec.result),
+    }];
+  }
+
+  // Command execution result (from Codex SDK)
+  if ((item as any).type === 'command_execution_output') {
+    const rec = item as any;
+    return [{
+      role: 'tool',
+      tool_call_id: rec.call_id ?? '',
+      content: stringifyContent(rec.output ?? rec.aggregated_output),
     }];
   }
 
@@ -574,14 +623,41 @@ function stringifyContent(content: unknown): string {
 }
 
 function isNamedFunctionTool(tool: unknown): tool is ResponsesFunctionTool {
-  return (
-    typeof tool === 'object' &&
-    tool !== null &&
-    !Array.isArray(tool) &&
-    (tool as { type?: unknown }).type === 'function' &&
-    typeof (tool as { name?: unknown }).name === 'string' &&
-    (tool as { name: string }).name.length > 0
-  );
+  if (typeof tool !== 'object' || tool === null || Array.isArray(tool)) return false;
+  const record = tool as Record<string, unknown>;
+  return record.type === 'function' && typeof record.name === 'string' && record.name.length > 0;
+}
+
+/**
+ * Flatten Responses API tools to Chat Completions format.
+ * MCP tools arrive as { type: "namespace", name: "mcp__server", tools: [...] }.
+ * They need to be expanded into individual function tools with prefixed names.
+ */
+function flattenResponsesTools(tools: unknown[]): ResponsesFunctionTool[] {
+  const result: ResponsesFunctionTool[] = [];
+  for (const tool of tools) {
+    if (typeof tool !== 'object' || tool === null || Array.isArray(tool)) continue;
+    const record = tool as Record<string, unknown>;
+
+    if (record.type === 'namespace' && typeof record.name === 'string' && Array.isArray(record.tools)) {
+      // MCP namespace — expand child tools with mcp__<server>__<tool> naming
+      for (const child of record.tools) {
+        if (typeof child !== 'object' || child === null) continue;
+        const childRecord = child as Record<string, unknown>;
+        if (childRecord.type === 'function' && typeof childRecord.name === 'string') {
+          result.push({
+            type: 'function',
+            name: `${record.name}__${childRecord.name}`,
+            description: typeof childRecord.description === 'string' ? childRecord.description : undefined,
+            parameters: typeof childRecord.parameters === 'object' ? childRecord.parameters as JsonRecord : undefined,
+          });
+        }
+      }
+    } else if (isNamedFunctionTool(tool)) {
+      result.push(tool);
+    }
+  }
+  return result;
 }
 
 function extractReasoningAndText(message: NonNullable<ChatCompletionChoice['message']>): {
@@ -611,4 +687,8 @@ function cleanText(value: string | null | undefined): string {
 
 function createId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`;
+}
+
+function tryParseJson(value: string): unknown {
+  try { return JSON.parse(value); } catch { return value; }
 }

@@ -21,7 +21,7 @@ export function shouldSuppressLiveEventWhileStopped(kind: string): boolean {
 }
 
 export function isTerminalAgentEvent(kind: string, isResultError = false): boolean {
-  return kind === 'done' || kind === 'error' || (kind === 'result' && isResultError);
+  return kind === 'done' || kind === 'error' || kind === 'result';
 }
 
 export function shouldProcessTerminalEvent(

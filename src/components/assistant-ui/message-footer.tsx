@@ -25,7 +25,6 @@ export function MessageFooter({ timestamp, stats, className }: MessageFooterProp
   const hasStats =
     stats &&
     (stats.durationMs != null ||
-      stats.numTurns != null ||
       stats.costUsd != null ||
       stats.inputTokens != null ||
       stats.outputTokens != null);
@@ -62,7 +61,6 @@ export function MessageFooter({ timestamp, stats, className }: MessageFooterProp
 
       {timestamp ? <FooterItem>{formatTime(timestamp)}</FooterItem> : null}
       {stats?.durationMs != null ? <FooterItem>耗时 {(stats.durationMs / 1000).toFixed(1)}s</FooterItem> : null}
-      {stats?.numTurns != null ? <FooterItem>轮次 {stats.numTurns}</FooterItem> : null}
       {stats?.costUsd != null ? <FooterItem>${stats.costUsd.toFixed(4)}</FooterItem> : null}
       {stats?.outputTokens != null || totalInputTokens > 0 ? (
         <FooterItem>

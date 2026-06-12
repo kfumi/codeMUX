@@ -186,6 +186,45 @@ describe('agent store Codex history loading', () => {
     expect(saveEventsMock).not.toHaveBeenCalled();
   });
 
+  it('stops running after a successful result even if sidecar_query_done never arrives', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'assistant',
+        uuid: 'assistant-1',
+        session_id: sessionId,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Codex reply' }],
+        },
+      }));
+      onEvent(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        uuid: 'result-1',
+        session_id: sessionId,
+        duration_ms: 5,
+        duration_api_ms: 4,
+        num_turns: 1,
+        result: '',
+        total_cost_usd: 0,
+        usage: {
+          input_tokens: 5,
+          output_tokens: 7,
+        },
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+  });
+
   it.each([
     ['codex', loadCodexSessionEventsMock],
     ['claude_code', loadClaudeSessionEventsMock],

@@ -33,6 +33,7 @@ export type CodeMuxAssistantMessage = {
   metadata: {
     sourceEventIndex: number;
     sourceKind: AgentMessage['kind'];
+    isFinalAssistantMessage?: boolean;
   };
 };
 
@@ -62,7 +63,6 @@ export function convertAgentEventsToAssistantMessages(
       );
 
       if (parts.length > 0) {
-        const messageIndex = messages.length;
         const message = createMessage(
           event.data.uuid || `assistant-${index}`,
           'assistant',
@@ -70,8 +70,16 @@ export function convertAgentEventsToAssistantMessages(
           event,
           index,
         );
+        const messageIndex = getAssistantInsertionIndex(messages, message) ?? messages.length;
 
-        messages.push(message);
+        if (messageIndex < messages.length) {
+          messages.splice(messageIndex, 0, message);
+          shiftLocationIndexes(toolCallLocationById, messageIndex);
+          shiftLocationIndexes(askQuestionLocationByToolUseId, messageIndex);
+        } else {
+          messages.push(message);
+        }
+
         message.content.forEach((part, partIndex) => {
           if (part.type === 'tool-call') {
             toolCallLocationById.set(part.toolCallId, { messageIndex, partIndex });
@@ -104,7 +112,7 @@ export function convertAgentEventsToAssistantMessages(
 
     if (event.kind === 'error') {
       const text = event.data.error.trim();
-      if (text.length > 0) {
+      if (text.length > 0 && !attachLatestPendingToolError(messages, toolCallLocationById, text)) {
         messages.push(
           createMessage(
             `error-${index}`,
@@ -114,6 +122,13 @@ export function convertAgentEventsToAssistantMessages(
             index,
           ),
         );
+      }
+      return;
+    }
+
+    if (event.kind === 'result') {
+      if (event.data.is_error) {
+        attachLatestPendingToolError(messages, toolCallLocationById, event.data.result.trim());
       }
       return;
     }
@@ -137,7 +152,41 @@ export function convertAgentEventsToAssistantMessages(
     }
   });
 
+  markFinalAssistantMessages(messages, events);
+
   return messages;
+}
+
+function markFinalAssistantMessages(
+  messages: CodeMuxAssistantMessage[],
+  events: AgentMessage[],
+): void {
+  // Find which assistant event indices have an associated result event.
+  const assistantIndicesWithResult = new Set<number>();
+  let lastAssistantIndex: number | undefined;
+
+  for (let index = 0; index < events.length; index++) {
+    const event = events[index];
+
+    if (event.kind === 'assistant') {
+      lastAssistantIndex = index;
+      continue;
+    }
+
+    if (event.kind === 'result' && lastAssistantIndex != null) {
+      assistantIndicesWithResult.add(lastAssistantIndex);
+    }
+  }
+
+  // Mark the message whose sourceEventIndex is in that set.
+  for (const message of messages) {
+    if (
+      message.role === 'assistant' &&
+      assistantIndicesWithResult.has(message.metadata.sourceEventIndex)
+    ) {
+      message.metadata.isFinalAssistantMessage = true;
+    }
+  }
 }
 
 function convertContentBlockToParts(
@@ -207,6 +256,84 @@ function attachToolResult(
   content[location.partIndex] = { ...part, result, isError };
   messages[location.messageIndex] = { ...message, content };
   return true;
+}
+
+function attachLatestPendingToolError(
+  messages: CodeMuxAssistantMessage[],
+  toolCallLocationById: Map<string, { messageIndex: number; partIndex: number }>,
+  errorText: string,
+): boolean {
+  if (errorText.length === 0) {
+    return false;
+  }
+
+  const pendingEntries = Array.from(toolCallLocationById.entries()).reverse();
+
+  for (const [toolCallId, location] of pendingEntries) {
+    const message = messages[location.messageIndex];
+    const part = message?.content[location.partIndex];
+
+    if (!message || part?.type !== 'tool-call' || part.result !== undefined) {
+      continue;
+    }
+
+    return attachToolResult(messages, toolCallLocationById, toolCallId, errorText, true);
+  }
+
+  return false;
+}
+
+function getAssistantInsertionIndex(
+  messages: CodeMuxAssistantMessage[],
+  nextMessage: CodeMuxAssistantMessage,
+): number | undefined {
+  if (!isNarrationOnlyAssistantMessage(nextMessage)) {
+    return undefined;
+  }
+
+  let insertAt: number | undefined;
+
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message?.role !== 'assistant') {
+      break;
+    }
+
+    if (!isPendingToolOnlyAssistantMessage(message)) {
+      break;
+    }
+
+    insertAt = index;
+  }
+
+  return insertAt;
+}
+
+function isNarrationOnlyAssistantMessage(message: CodeMuxAssistantMessage): boolean {
+  if (message.role !== 'assistant' || message.content.length === 0) {
+    return false;
+  }
+
+  return message.content.every((part) => part.type === 'text' || part.type === 'reasoning');
+}
+
+function isPendingToolOnlyAssistantMessage(message: CodeMuxAssistantMessage): boolean {
+  if (message.role !== 'assistant' || message.content.length === 0) {
+    return false;
+  }
+
+  return message.content.every((part) => part.type === 'tool-call' && part.result === undefined);
+}
+
+function shiftLocationIndexes(
+  locations: Map<string, { messageIndex: number; partIndex: number }>,
+  insertedAt: number,
+): void {
+  for (const [, location] of locations) {
+    if (location.messageIndex >= insertedAt) {
+      location.messageIndex += 1;
+    }
+  }
 }
 
 

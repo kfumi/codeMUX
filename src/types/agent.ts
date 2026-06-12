@@ -42,6 +42,7 @@ export interface AgentToolResult {
       type: 'tool_result';
       tool_use_id: string;
       content: string;
+      is_error?: boolean;
     }>;
   };
   parent_tool_use_id: string | null;

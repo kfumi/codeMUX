@@ -1,0 +1,1 @@
+{"root":["./src/claudeexecutable.ts","./src/clauderuntime.ts","./src/codexchatcompat.ts","./src/codexcompatproxy.ts","./src/codexruntime.ts","./src/index.ts","./src/proxymanager.ts","./src/runtimeevents.ts","./src/sessionruntimehelpers.ts","./src/types.ts"],"version":"5.9.3"}
