@@ -303,20 +303,33 @@ describe('createCodexCompatProxyServer', () => {
   });
 
   it('streams synthesized responses SSE events for chat-completions providers', async () => {
-    const upstream = createServer(async (_req, res) => {
-      res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({
+    const upstream = createServer(async (req, res) => {
+      // Respond with SSE chunks when the request asks for streaming.
+      const wantsStream = (req.url ?? '').includes('stream') || true;
+      res.setHeader('content-type', wantsStream ? 'text/event-stream' : 'application/json');
+      res.setHeader('cache-control', 'no-cache');
+
+      const send = (data: Record<string, unknown>) => {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
+
+      send({
+        id: 'chunk-1',
         model: 'mimo-v2-pro',
-        choices: [
-          {
-            message: {
-              role: 'assistant',
-              content: '<think>quick plan</think>OK',
-            },
-            finish_reason: 'stop',
-          },
-        ],
-      }));
+        choices: [{ index: 0, delta: { role: 'assistant', content: '<think>quick plan' }, finish_reason: null }],
+      });
+      send({
+        id: 'chunk-2',
+        model: 'mimo-v2-pro',
+        choices: [{ index: 0, delta: { content: '</think>OK' }, finish_reason: 'stop' }],
+      });
+      send({
+        id: 'chunk-done',
+        model: 'mimo-v2-pro',
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+      });
+      res.end('data: [DONE]\n\n');
     });
 
     const upstreamPort = await listen(upstream);
@@ -325,7 +338,7 @@ describe('createCodexCompatProxyServer', () => {
     const proxy = await createCodexCompatProxyServer({
       apiKey: 'proxy-key',
       baseUrl: `http://127.0.0.1:${upstreamPort}`,
-    });
+    }, 0);
     cleanups.push(() => proxy.close());
 
     const response = await fetch(`${proxy.baseUrl}/v1/responses`, {
@@ -346,5 +359,70 @@ describe('createCodexCompatProxyServer', () => {
     expect(body).toContain('"type":"response.output_text.delta"');
     expect(body).toContain('"type":"response.output_item.done"');
     expect(body).toContain('"type":"response.completed"');
+  });
+
+  it('splits inline think tags into reasoning and text during streaming', async () => {
+    const upstream = createServer(async (_req, res) => {
+      res.setHeader('content-type', 'text/event-stream');
+      res.setHeader('cache-control', 'no-cache');
+      const send = (data: Record<string, unknown>) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+      send({ id: 'c1', model: 'qwen-plus', choices: [{ delta: { content: '<think>analysis...' }, finish_reason: null }] });
+      send({ id: 'c2', model: 'qwen-plus', choices: [{ delta: { content: '</think>here is the answer' }, finish_reason: 'stop' }] });
+      send({ id: 'c3', model: 'qwen-plus', choices: [{ delta: {}, finish_reason: null }], usage: { prompt_tokens: 5, completion_tokens: 10, total_tokens: 15 } });
+      res.end('data: [DONE]\n\n');
+    });
+
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const proxy = await createCodexCompatProxyServer({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+    }, 0);
+    cleanups.push(() => proxy.close());
+
+    const response = await fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'qwen-plus', stream: true, input: [{ role: 'user', content: 'test' }] }),
+    });
+
+    const body = await response.text();
+
+    // Should contain reasoning deltas (from <think> content)
+    expect(body).toContain('"type":"response.reasoning_delta"');
+    // Should contain text deltas (from content after </think>)
+    expect(body).toContain('"type":"response.output_text.delta"');
+    // Should complete normally
+    expect(body).toContain('"type":"response.completed"');
+  });
+
+  it('injects stream_options for upstream requests', async () => {
+    let receivedBody: any = null;
+    const upstream = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      receivedBody = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      res.setHeader('content-type', 'text/event-stream');
+      res.end('data: [DONE]\n\n');
+    });
+
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const proxy = await createCodexCompatProxyServer({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+    }, 0);
+    cleanups.push(() => proxy.close());
+
+    await fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'mimo-v2.5-pro', stream: true, input: [{ role: 'user', content: 'Hi' }] }),
+    });
+
+    expect(receivedBody.stream_options).toEqual({ include_usage: true });
   });
 });
