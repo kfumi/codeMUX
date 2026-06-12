@@ -33,7 +33,7 @@ export function SessionItem({ session, isActive, onClick, onDelete }: SessionIte
           <div className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-[hsl(var(--sidebar-glow))] opacity-80" />
         )}
         {agentDef ? (
-          <span className={cn('shrink-0 transition-opacity duration-200', isActive ? 'opacity-100' : 'opacity-64')}>
+          <span className={cn('flex shrink-0 items-center transition-opacity duration-200', isActive ? 'opacity-100' : 'opacity-64')}>
             <AgentBrandIcon agent={agentDef} size="sm" />
           </span>
         ) : (

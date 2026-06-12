@@ -21,12 +21,7 @@ interface AgentBrandIconProps {
 
 export function AgentBrandIcon({ agent, size = 'sm' }: AgentBrandIconProps) {
   const brandSvg = AGENT_BRAND_SVGS[agent.icon];
-  const iconClassName =
-    size === 'hero'
-      ? 'inline-flex h-10 w-10 leading-none [&>svg]:h-10 [&>svg]:w-10'
-      : size === 'md'
-        ? 'inline-flex h-5 w-5 leading-none [&>svg]:h-5 [&>svg]:w-5'
-        : 'inline-flex h-4 w-4 leading-none [&>svg]:h-4 [&>svg]:w-4';
+  // iconClassName no longer needed — SVG dimensions are set inline
   const wrapperClassName =
     size === 'hero'
       ? 'inline-flex h-10 w-10 shrink-0 items-center justify-center text-foreground'
@@ -35,16 +30,20 @@ export function AgentBrandIcon({ agent, size = 'sm' }: AgentBrandIconProps) {
         : 'inline-flex h-4 w-4 shrink-0 items-center justify-center text-foreground';
 
   if (brandSvg) {
+    // Strip inline styles/size, inject display:block + explicit px dimensions
+    const svgSize = size === 'hero' ? 40 : size === 'md' ? 20 : 16;
+    const cleanedSvg = brandSvg
+      .replace(/(<svg\b[^>]*\bstyle=")[^"]*(")/, '$1display:block$2')
+      .replace(/(<svg\b[^>]*) width="[^"]*"/, '$1')
+      .replace(/(<svg\b[^>]*) height="[^"]*"/, '$1')
+      .replace(/<svg\b/, `<svg width="${svgSize}" height="${svgSize}"`);
+
     return (
       <span
         className={cn(wrapperClassName, AGENT_ICON_COLORS[agent.icon])}
         aria-hidden="true"
-      >
-        <span
-          className={iconClassName}
-          dangerouslySetInnerHTML={{ __html: brandSvg }}
-        />
-      </span>
+        dangerouslySetInnerHTML={{ __html: cleanedSvg }}
+      />
     );
   }
 

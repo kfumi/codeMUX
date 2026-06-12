@@ -144,8 +144,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           const cacheRead = usage.cache_read_input_tokens || 0;
           const cacheCreation = usage.cache_creation_input_tokens || 0;
           const output = usage.output_tokens || 0;
-          const total = input + cacheRead + cacheCreation;
-          if (total > 0 || output > 0) {
+          const total = input + cacheRead + cacheCreation + output;
+          if (total > 0) {
             inputTokens = input;
             cachedTokens = cacheRead + cacheCreation;
             outputTokens = output;
@@ -162,8 +162,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           const cacheRead = usage.cache_read_input_tokens || 0;
           const cacheCreation = usage.cache_creation_input_tokens || 0;
           const output = usage.output_tokens || 0;
-          const total = input + cacheRead + cacheCreation;
-          if (total > 0 || output > 0) {
+          const total = input + cacheRead + cacheCreation + output;
+          if (total > 0) {
             inputTokens = input;
             cachedTokens = cacheRead + cacheCreation;
             outputTokens = output;

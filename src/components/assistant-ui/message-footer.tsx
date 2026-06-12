@@ -40,11 +40,12 @@ export function MessageFooter({ timestamp, stats, className }: MessageFooterProp
     );
   }
 
-  const totalInputTokens =
+  const totalInputTokens = stats?.inputTokens || 0;
+  const allInputTokens =
     (stats?.inputTokens || 0) + (stats?.cacheReadTokens || 0) + (stats?.cacheCreationTokens || 0);
   const cacheHitRate =
-    totalInputTokens > 0 && (stats?.cacheReadTokens || 0) > 0
-      ? ((stats?.cacheReadTokens || 0) / totalInputTokens) * 100
+    allInputTokens > 0 && (stats?.cacheReadTokens || 0) > 0
+      ? ((stats?.cacheReadTokens || 0) / allInputTokens) * 100
       : null;
 
   return (

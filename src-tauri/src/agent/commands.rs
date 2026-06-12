@@ -325,24 +325,123 @@ pub async fn load_codex_session_events(
     };
     let reader = BufReader::new(file);
 
-    for line_result in reader.lines() {
-        let line = match line_result {
-            Ok(line) => line,
-            Err(_) => continue,
-        };
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
+    // Collect all raw events for two-pass processing
+    let raw_events: Vec<serde_json::Value> = reader
+        .lines()
+        .filter_map(|line_result| line_result.ok())
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str(line.trim()).ok())
+        .collect();
+
+    // --- Pass 1: Identify turns and collect per-turn stats ---
+    // Each turn starts with a turn_context and has its own task_complete + token_counts.
+    // We compute per-turn token deltas so each turn gets its own result event.
+
+    #[derive(Default)]
+    struct TurnInfo {
+        last_token_usage: Option<serde_json::Value>,
+        duration_ms: Option<u64>,
+        last_assistant_msg_idx: Option<usize>, // index in `messages`
+    }
+
+    let mut turns: Vec<TurnInfo> = Vec::new();
+    let mut msg_idx: usize = 0;
+
+    for val in &raw_events {
+        let item_type = val.get("type").and_then(|t| t.as_str());
+
+        // Turn boundary
+        if item_type == Some("turn_context") {
+            turns.push(TurnInfo::default());
         }
 
-        let val: serde_json::Value = match serde_json::from_str(trimmed) {
-            Ok(value) => value,
-            Err(_) => continue,
+        let current_turn = if turns.is_empty() {
+            turns.push(TurnInfo::default());
+            turns.last_mut().unwrap()
+        } else {
+            turns.last_mut().unwrap()
         };
 
-        if let Some(converted) = convert_codex_item_to_claude_format(&val) {
+        if item_type == Some("event_msg") {
+            if let Some(payload) = val.get("payload") {
+                let payload_type = payload.get("type").and_then(|t| t.as_str());
+                match payload_type {
+                    Some("token_count") => {
+                        if let Some(info) = payload.get("info") {
+                            if let Some(usage) = info.get("total_token_usage") {
+                                current_turn.last_token_usage = Some(usage.clone());
+                            }
+                        }
+                    }
+                    Some("task_complete") => {
+                        if let Some(dm) = payload.get("duration_ms").and_then(|d| d.as_u64()) {
+                            current_turn.duration_ms = Some(dm);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            continue; // event_msg entries are not converted to messages
+        }
+
+        // Track which message index the last assistant message of this turn lands at
+        if let Some(converted) = convert_codex_item_to_claude_format(val) {
+            if converted.get("type").and_then(|t| t.as_str()) == Some("assistant") {
+                current_turn.last_assistant_msg_idx = Some(msg_idx);
+            }
             messages.push(converted);
+            msg_idx += 1;
         }
+    }
+
+    // --- Pass 2: Insert synthetic result events per turn ---
+    // Each turn's last token_count is cumulative; display as-is (total so far).
+    // Insert in reverse order so indices stay valid.
+
+    struct TurnResult {
+        insert_at: usize, // insert AFTER this message index
+        result: serde_json::Value,
+    }
+    let mut turn_results: Vec<TurnResult> = Vec::new();
+
+    for (i, turn) in turns.iter().enumerate() {
+        let usage = match &turn.last_token_usage {
+            Some(u) => u,
+            None => continue,
+        };
+
+        let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let cached = usage.get("cached_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let output = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        if input > 0 || output > 0 {
+            if let Some(insert_at) = turn.last_assistant_msg_idx {
+                let result = serde_json::json!({
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": false,
+                    "uuid": format!("synthetic-codex-turn-{}-{}", app_session_id, i),
+                    "session_id": app_session_id,
+                    "duration_ms": turn.duration_ms.unwrap_or(0),
+                    "duration_api_ms": 0,
+                    "num_turns": 1,
+                    "result": "",
+                    "total_cost_usd": 0,
+                    "usage": {
+                        "input_tokens": input,
+                        "output_tokens": output,
+                        "cache_read_input_tokens": cached,
+                        "cache_creation_input_tokens": 0
+                    }
+                });
+                turn_results.push(TurnResult { insert_at, result });
+            }
+        }
+    }
+
+    // Insert result events in reverse order to preserve indices
+    for tr in turn_results.into_iter().rev() {
+        messages.insert(tr.insert_at + 1, tr.result);
     }
 
     info!(target: "agent", "Loaded {} messages from Codex JSONL for app_session_id={}", messages.len(), app_session_id);
