@@ -469,6 +469,7 @@ function CodeMuxReasoningGroup({
 function StreamingContent({ sessionId }: { sessionId: string }) {
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
+  const queryStartTime = useAgentStore((state) => state.queryStartTime[sessionId]);
   const thinking = useAgentStore((state) => state.streamingThinking[sessionId] ?? '');
   const text = useAgentStore((state) => state.streamingText[sessionId] ?? '');
 
@@ -506,7 +507,7 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
-            <RunningElapsedTimer />
+            <RunningElapsedTimer startTime={queryStartTime} />
           </div>
         ) : null}
       </div>

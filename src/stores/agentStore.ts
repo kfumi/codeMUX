@@ -49,6 +49,8 @@ interface AgentState {
   eventTimestamps: Record<string, number[]>;
   /** Whether a query is currently running */
   isRunning: Record<string, boolean>;
+  /** When each running query started (ms epoch) — for elapsed timer */
+  queryStartTime: Record<string, number>;
   /** Error message if any */
   error: Record<string, string | null>;
   /** Latest MCP runtime status for each session */
@@ -697,6 +699,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   events: {},
   eventTimestamps: {},
   isRunning: {},
+  queryStartTime: {},
   error: {},
   mcpRuntimeStatus: {},
   todos: {},
@@ -746,6 +749,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         [sessionId]: [...(s.eventTimestamps[sessionId] || []), userTs],
       },
       isRunning: { ...s.isRunning, [sessionId]: true },
+      queryStartTime: { ...s.queryStartTime, [sessionId]: Date.now() },
       error: { ...s.error, [sessionId]: null },
     }));
     try {
@@ -963,10 +967,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               return;
             }
             clearPendingStreaming(sessionId);
-            set((s) => ({
-              isRunning: { ...s.isRunning, [sessionId]: false },
-              error: { ...s.error, [sessionId]: resultData.result || 'Request interrupted' },
-            }));
+            set((s) => {
+              const { [sessionId]: _removed, ...rest } = s.queryStartTime;
+              return {
+                isRunning: { ...s.isRunning, [sessionId]: false },
+                queryStartTime: rest,
+                error: { ...s.error, [sessionId]: resultData.result || 'Request interrupted' },
+              };
+            });
           }
           return;
         }
@@ -1117,14 +1125,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               };
             });
           }
-          set((s) => ({
-            isRunning: { ...s.isRunning, [sessionId]: false },
-            streamingText: { ...s.streamingText, [sessionId]: '' },
-            streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
-            error: event.kind === 'error'
+          set((s) => {
+            const { [sessionId]: _removed, ...rest } = s.queryStartTime;
+            return {
+              isRunning: { ...s.isRunning, [sessionId]: false },
+              queryStartTime: rest,
+              streamingText: { ...s.streamingText, [sessionId]: '' },
+              streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+              error: event.kind === 'error'
               ? { ...s.error, [sessionId]: event.data.error }
               : s.error,
-          }));
+            };
+          });
           logger.info('Agent query finished', {
             sessionId,
             terminalEvent: event.kind,
@@ -1134,10 +1146,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }, apiKey, baseUrl, model);
     } catch (err) {
       logger.error('Agent query failed to start or stream', { sessionId, cwd, model }, serializeError(err));
-      set((s) => ({
-        isRunning: { ...s.isRunning, [sessionId]: false },
-        error: { ...s.error, [sessionId]: String(err) },
-      }));
+      set((s) => {
+        const { [sessionId]: _removed, ...rest } = s.queryStartTime;
+        return {
+          isRunning: { ...s.isRunning, [sessionId]: false },
+          queryStartTime: rest,
+          error: { ...s.error, [sessionId]: String(err) },
+        };
+      });
     }
   },
 

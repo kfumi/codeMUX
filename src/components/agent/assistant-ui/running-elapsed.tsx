@@ -14,23 +14,27 @@ export function formatElapsed(ms: number): string {
 
 type RunningElapsedTimerProps = {
   label?: string;
+  /** If provided, computes elapsed from this epoch ms instead of mount time. */
+  startTime?: number;
 };
 
 export function RunningElapsedTimer({
   label = 'Agent 执行中',
+  startTime,
 }: RunningElapsedTimerProps) {
-  const [elapsed, setElapsed] = useState(0);
-  const startRef = useRef(Date.now());
+  const mountTime = useRef(Date.now());
+  const base = startTime ?? mountTime.current;
+  const [elapsed, setElapsed] = useState(Date.now() - base);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setElapsed(Date.now() - startRef.current);
+      setElapsed(Date.now() - base);
     }, 200);
 
     return () => {
       window.clearInterval(timer);
     };
-  }, []);
+  }, [base]);
 
   return <span>{label} · {formatElapsed(elapsed)}</span>;
 }
