@@ -278,24 +278,38 @@ export class CodexSessionRuntime {
         signal: this.abortController.signal,
       });
 
-      for await (const event of events) {
-        const eventDetail =
-          event.type === 'error'
-            ? ` message=${event.message}`
-            : event.type === 'turn.failed'
-              ? ` message=${event.error.message}`
-              : 'item' in event
-                ? ` item=${event.item.type}`
-                : '';
-        process.stderr.write(`[codex] SDK event: ${event.type}${eventDetail}\n`);
+      // Safety: if abort fires but the SDK iterator doesn't close within 5s, force-break.
+      let forceBreak = false;
+      const onAbort = () => {
+        setTimeout(() => { forceBreak = true; }, 5_000);
+      };
+      this.abortController.signal.addEventListener('abort', onAbort, { once: true });
 
-        if (event.type === 'turn.completed') {
-          usage = event.usage;
-          usageSeen = true;
-          turnCompleted = true;
+      try {
+        for await (const event of events) {
+          if (this.abortController?.signal.aborted || forceBreak) break;
+
+          const eventDetail =
+            event.type === 'error'
+              ? ` message=${event.message}`
+              : event.type === 'turn.failed'
+                ? ` message=${event.error.message}`
+                : 'item' in event
+                  ? ` item=${event.item.type}`
+                  : '';
+          process.stderr.write(`[codex] SDK event: ${event.type}${eventDetail}\n`);
+
+          if (event.type === 'turn.completed') {
+            usage = event.usage;
+            usageSeen = true;
+            turnCompleted = true;
+          }
+
+          if (this.abortController?.signal.aborted || forceBreak) break;
+          await this.handleSdkEvent(sessionId, event, emitFailure, noteStreamError);
         }
-
-        await this.handleSdkEvent(sessionId, event, emitFailure, noteStreamError);
+      } finally {
+        this.abortController?.signal.removeEventListener('abort', onAbort);
       }
     } catch (error) {
       if (!this.abortController?.signal.aborted) {
