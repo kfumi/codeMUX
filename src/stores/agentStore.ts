@@ -199,6 +199,93 @@ function queueStreamingDelta(
   pendingStreamingFlushHandles.set(sessionId, handle);
 }
 
+// ---------------------------------------------------------------------------
+// Simulated streaming: when the SDK delivers text all at once (e.g. reasoning
+// models that only emit item.completed for the final text), feed it to
+// streamingText in chunks so the UI renders token-by-token instead of
+// appearing all at once.
+// ---------------------------------------------------------------------------
+
+const SIM_CHUNK_MIN = 8;
+const SIM_CHUNK_MAX = 32;
+
+type SimulatedStreamEntry = {
+  event: AgentMessage;
+  remaining: string;
+  timer: number;
+};
+
+const pendingSimulatedStreams = new Map<string, SimulatedStreamEntry>();
+
+function clearSimulatedStream(sessionId: string) {
+  const entry = pendingSimulatedStreams.get(sessionId);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  pendingSimulatedStreams.delete(sessionId);
+}
+
+function simulateStreamingText(
+  sessionId: string,
+  event: AgentMessage,
+  text: string,
+  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
+  get: () => AgentState,
+) {
+  // Clear any prior simulation for this session.
+  clearSimulatedStream(sessionId);
+
+  // Reset streaming state so StreamingContent starts fresh.
+  set((s) => ({
+    streamingText: { ...s.streamingText, [sessionId]: '' },
+    streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+  }));
+
+  const entry: SimulatedStreamEntry = { event, remaining: text, timer: 0 };
+  pendingSimulatedStreams.set(sessionId, entry);
+
+  const tick = () => {
+    const current = pendingSimulatedStreams.get(sessionId);
+    if (!current || current !== entry) return; // superseded or cleared
+
+    if (!current.remaining) {
+      // All chunks delivered — commit the event and clear streaming state.
+      pendingSimulatedStreams.delete(sessionId);
+      set((s) => {
+        const prev = s.events[sessionId] || [];
+        const timestamps = s.eventTimestamps[sessionId] || [];
+        return {
+          events: { ...s.events, [sessionId]: [...prev, current.event] },
+          eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...timestamps, Date.now()] },
+          streamingText: { ...s.streamingText, [sessionId]: '' },
+        };
+      });
+      return;
+    }
+
+    // Take a random-sized chunk for a natural feel.
+    const size = Math.min(
+      SIM_CHUNK_MIN + Math.floor(Math.random() * (SIM_CHUNK_MAX - SIM_CHUNK_MIN + 1)),
+      current.remaining.length,
+    );
+    const chunk = current.remaining.slice(0, size);
+    current.remaining = current.remaining.slice(size);
+
+    set((s) => ({
+      streamingText: {
+        ...s.streamingText,
+        [sessionId]: (s.streamingText[sessionId] || '') + chunk,
+      },
+    }));
+
+    // Schedule next chunk — faster for small remaining text.
+    const delay = current.remaining.length > 0 ? 16 + Math.random() * 24 : 0;
+    current.timer = window.setTimeout(tick, delay);
+  };
+
+  // Start on the next frame so the UI renders the empty streaming state first.
+  entry.timer = window.setTimeout(tick, 30);
+}
+
 function parseAgentEvent(raw: string): AgentMessage {
   try {
     const data = JSON.parse(raw);
@@ -887,6 +974,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         // When the complete assistant message arrives, filter out blocks
         // that were already displayed via streaming to avoid duplicate display.
         if (event.kind === 'assistant') {
+          // Commit any pending simulated stream immediately before processing.
+          const pendingSim = pendingSimulatedStreams.get(sessionId);
+          if (pendingSim) {
+            clearSimulatedStream(sessionId);
+            set((s) => {
+              const prev = s.events[sessionId] || [];
+              const timestamps = s.eventTimestamps[sessionId] || [];
+              return {
+                events: { ...s.events, [sessionId]: [...prev, pendingSim.event] },
+                eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...timestamps, Date.now()] },
+                streamingText: { ...s.streamingText, [sessionId]: '' },
+              };
+            });
+          }
+
           flushPendingStreaming(sessionId, set);
           const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
           const streamedIds = get().streamedToolUseIds[sessionId];
@@ -909,6 +1011,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               data: { ...event.data, message: { ...event.data.message, content: filtered } },
             };
           }
+
+          // If the event only carries text (no tool_use) and the SDK did not
+          // stream it incrementally (streamingText is empty), simulate a
+          // token-by-token render so the user sees text appear progressively.
+          const textBlock = filtered.find((b: any) => b?.type === 'text' && b.text);
+          const hasToolUse = filtered.some((b: any) => b?.type === 'tool_use');
+          const currentStreamingText = get().streamingText[sessionId] || '';
+          const currentStreamingThinking = get().streamingThinking[sessionId] || '';
+          if (textBlock && !hasToolUse && !currentStreamingText && !currentStreamingThinking) {
+            simulateStreamingText(sessionId, event, textBlock.text, set, get);
+            return;
+          }
+
           set((s) => {
             const updates: Partial<AgentState> = {};
             if (s.streamingThinking[sessionId]) updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
@@ -989,8 +1104,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
         if (isTerminalEvent) {
           clearPendingStreaming(sessionId);
+          // Commit any pending simulated stream before marking as done.
+          const pendingSim = pendingSimulatedStreams.get(sessionId);
+          if (pendingSim) {
+            clearSimulatedStream(sessionId);
+            set((s) => {
+              const prev = s.events[sessionId] || [];
+              const timestamps = s.eventTimestamps[sessionId] || [];
+              return {
+                events: { ...s.events, [sessionId]: [...prev, pendingSim.event] },
+                eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...timestamps, Date.now()] },
+              };
+            });
+          }
           set((s) => ({
             isRunning: { ...s.isRunning, [sessionId]: false },
+            streamingText: { ...s.streamingText, [sessionId]: '' },
+            streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
             error: event.kind === 'error'
               ? { ...s.error, [sessionId]: event.data.error }
               : s.error,
@@ -1013,6 +1143,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   interrupt: async (sessionId: string) => {
     clearPendingStreaming(sessionId);
+    clearSimulatedStream(sessionId);
     const state = get();
     const isRunning = state.isRunning[sessionId] ?? false;
     const forceStopped = state.forceStopped[sessionId] ?? false;
@@ -1042,6 +1173,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   clearEvents: (sessionId: string) => {
     clearPendingStreaming(sessionId);
+    clearSimulatedStream(sessionId);
     set((state) => {
       const newEvents = { ...state.events };
       delete newEvents[sessionId];
