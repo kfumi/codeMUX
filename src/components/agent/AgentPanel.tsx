@@ -59,7 +59,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const [infoTitle, setInfoTitle] = useState('');
   const [infoContent, setInfoContent] = useState('');
   const [cwd, setCwd] = useState(() => getStoredAgentCwd());
-  const lastEnsureKeyRef = useRef<string | null>(null);
+  const ensuredSessionsRef = useRef<Set<string>>(new Set());
 
   const handleRenameOpen = () => {
     setRenameValue(session?.title || '');
@@ -104,11 +104,11 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       baseUrl: baseUrl || null,
     });
 
-    if (lastEnsureKeyRef.current === ensureKey) {
+    if (ensuredSessionsRef.current.has(ensureKey)) {
       return;
     }
 
-    lastEnsureKeyRef.current = ensureKey;
+    ensuredSessionsRef.current.add(ensureKey);
     agentApi.ensureSession(sessionId, effectiveCwd, undefined, apiKey, baseUrl, model).then(async () => {
       if (baseUrl) {
         try {
@@ -122,9 +122,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         }
       }
     }).catch(() => {
-      if (lastEnsureKeyRef.current === ensureKey) {
-        lastEnsureKeyRef.current = null;
-      }
+      ensuredSessionsRef.current.delete(ensureKey);
     });
   }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, model, setProxyRunning]);
 
