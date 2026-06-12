@@ -137,15 +137,15 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     cleanup();
   });
 
-  it('switches rendered messages when the active session changes', () => {
+  it('switches rendered messages when the active session changes', async () => {
     const view = render(<Harness sessionId="session-1" />);
 
-    expect(screen.getByText('session one assistant')).toBeTruthy();
+    expect(await screen.findByText('session one assistant')).toBeTruthy();
     expect(screen.queryByText('session two assistant')).toBeNull();
 
     view.rerender(<Harness sessionId="session-2" />);
 
-    expect(screen.getByText('session two assistant')).toBeTruthy();
+    expect(await screen.findByText('session two assistant')).toBeTruthy();
     expect(screen.queryByText('session one assistant')).toBeNull();
   });
 

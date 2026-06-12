@@ -32,7 +32,6 @@ export function CodeMuxAssistantRuntimeProvider({
 }: CodeMuxAssistantRuntimeProviderProps) {
   return (
     <SessionScopedAssistantRuntime
-      key={sessionId}
       sessionId={sessionId}
       onSend={onSend}
       onCommand={onCommand}
