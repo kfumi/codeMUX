@@ -184,6 +184,7 @@ pub async fn load_claude_session_events(
 fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_json::Value> {
     let item_type = val.get("type")?.as_str()?;
     let payload = val.get("payload")?;
+    let timestamp = val.get("timestamp").cloned();
 
     if item_type == "response_item" {
         let payload_type = payload.get("type")?.as_str()?;
@@ -211,6 +212,7 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
             }
             return Some(serde_json::json!({
                 "type": "assistant",
+                "timestamp": timestamp,
                 "message": {
                     "role": "assistant",
                     "content": claude_content
@@ -242,6 +244,7 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
             }
             return Some(serde_json::json!({
                 "type": "user",
+                "timestamp": timestamp,
                 "message": {
                     "role": "user",
                     "content": content
@@ -261,6 +264,7 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
             };
             return Some(serde_json::json!({
                 "type": "assistant",
+                "timestamp": timestamp,
                 "message": {
                     "role": "assistant",
                     "content": [{
@@ -279,6 +283,7 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
             let output = payload.get("output").and_then(|o| o.as_str()).unwrap_or("");
             return Some(serde_json::json!({
                 "type": "user",
+                "timestamp": timestamp,
                 "message": {
                     "role": "user",
                     "content": [{
