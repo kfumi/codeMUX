@@ -1,37 +1,31 @@
 use rusqlite::{Connection, Result, params};
-use uuid::Uuid;
-use chrono::Utc;
 
-use super::types::{McpServer, McpTransport};
+use super::types::{McpServer, McpApps};
 
-/// 从数据库行构建 McpServer
+/// 从数据库行构建 McpServer（新 schema: server_config + enabled_* columns）
 fn row_to_mcp_server(row: &rusqlite::Row) -> rusqlite::Result<McpServer> {
-    let _transport_type: String = row.get(3)?;
-    let transport_config: String = row.get(4)?;
-    let enabled: i32 = row.get(5)?;
-
-    let transport: McpTransport = serde_json::from_str(&transport_config)
+    let server_config_str: String = row.get(2)?;
+    let server: serde_json::Value = serde_json::from_str(&server_config_str)
         .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-            4, rusqlite::types::Type::Text, Box::new(e),
+            2, rusqlite::types::Type::Text, Box::new(e),
         ))?;
 
     Ok(McpServer {
         id: row.get(0)?,
         name: row.get(1)?,
-        description: row.get(2)?,
-        subtitle: row.get(8).unwrap_or_default(),
-        always_load: row.get::<_, i32>(9).unwrap_or(0) != 0,
-        transport,
-        enabled: enabled != 0,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
+        server,
+        apps: McpApps {
+            claude: row.get::<_, i64>(3)? != 0,
+            codex: row.get::<_, i64>(4)? != 0,
+            gemini: row.get::<_, i64>(5)? != 0,
+            opencode: row.get::<_, i64>(6)? != 0,
+        },
     })
 }
 
 pub fn get_all_mcp_servers(conn: &Connection) -> Result<Vec<McpServer>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, description, transport_type, transport_config, enabled, created_at, updated_at, subtitle
-                , always_load
+        "SELECT id, name, server_config, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode
          FROM mcp_servers ORDER BY name ASC"
     )?;
 
@@ -40,39 +34,43 @@ pub fn get_all_mcp_servers(conn: &Connection) -> Result<Vec<McpServer>> {
     Ok(servers)
 }
 
-pub fn get_enabled_mcp_servers(conn: &Connection) -> Result<Vec<McpServer>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, name, description, transport_type, transport_config, enabled, created_at, updated_at, subtitle
-                , always_load
-         FROM mcp_servers WHERE enabled = 1 ORDER BY name ASC"
-    )?;
+pub fn get_servers_enabled_for_app(conn: &Connection, app: &str) -> Result<Vec<McpServer>> {
+    let column = match app {
+        "claude" => "enabled_claude",
+        "codex" => "enabled_codex",
+        "gemini" => "enabled_gemini",
+        "opencode" => "enabled_opencode",
+        _ => return Ok(Vec::new()),
+    };
 
+    let sql = format!(
+        "SELECT id, name, server_config, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode
+         FROM mcp_servers WHERE {column} = 1 ORDER BY name ASC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let servers = stmt.query_map([], |row| row_to_mcp_server(row))?
         .collect::<Result<Vec<_>>>()?;
     Ok(servers)
 }
 
 pub fn upsert_mcp_server(conn: &Connection, server: &McpServer) -> Result<()> {
-    let now = Utc::now().to_rfc3339();
-    let transport_config = server.transport.to_config_json().to_string();
-    let transport_type = server.transport.transport_type();
-    let always_load: i32 = if server.always_load { 1 } else { 0 };
-    let enabled: i32 = if server.enabled { 1 } else { 0 };
+    let server_config = serde_json::to_string(&server.server).unwrap_or_default();
 
     conn.execute(
-        "INSERT INTO mcp_servers (id, name, description, transport_type, transport_config, always_load, enabled, created_at, updated_at, subtitle)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        "INSERT INTO mcp_servers (id, name, server_config, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
          ON CONFLICT(id) DO UPDATE SET
              name = excluded.name,
-             description = excluded.description,
-             transport_type = excluded.transport_type,
-             transport_config = excluded.transport_config,
-             always_load = excluded.always_load,
-             enabled = excluded.enabled,
-             updated_at = excluded.updated_at,
-             subtitle = excluded.subtitle",
-        params![server.id, server.name, server.description, transport_type, transport_config, always_load, enabled,
-                server.created_at, now, server.subtitle],
+             server_config = excluded.server_config,
+             enabled_claude = excluded.enabled_claude,
+             enabled_codex = excluded.enabled_codex,
+             enabled_gemini = excluded.enabled_gemini,
+             enabled_opencode = excluded.enabled_opencode",
+        params![
+            server.id, server.name, server_config,
+            server.apps.claude as i32, server.apps.codex as i32,
+            server.apps.gemini as i32, server.apps.opencode as i32,
+        ],
     )?;
     Ok(())
 }
@@ -82,28 +80,9 @@ pub fn delete_mcp_server(conn: &Connection, id: &str) -> Result<bool> {
     Ok(rows > 0)
 }
 
-pub fn toggle_mcp_server(conn: &Connection, id: &str) -> Result<bool> {
-    let now = Utc::now().to_rfc3339();
-    conn.execute(
-        "UPDATE mcp_servers SET enabled = NOT enabled, updated_at = ?1 WHERE id = ?2",
-        params![now, id],
-    )?;
-
-    let enabled: bool = conn.query_row(
-        "SELECT enabled FROM mcp_servers WHERE id = ?1",
-        params![id],
-        |row| {
-            let v: i32 = row.get(0)?;
-            Ok(v != 0)
-        },
-    )?;
-    Ok(enabled)
-}
-
 pub fn get_mcp_server(conn: &Connection, id: &str) -> Result<Option<McpServer>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, description, transport_type, transport_config, enabled, created_at, updated_at, subtitle
-                , always_load
+        "SELECT id, name, server_config, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode
          FROM mcp_servers WHERE id = ?1"
     )?;
 
@@ -114,20 +93,52 @@ pub fn get_mcp_server(conn: &Connection, id: &str) -> Result<Option<McpServer>> 
     }
 }
 
-pub fn create_mcp_server(conn: &Connection, name: &str, description: &str, transport: &McpTransport) -> Result<McpServer> {
-    let id = Uuid::new_v4().to_string();
-    let now = Utc::now().to_rfc3339();
-    let server = McpServer {
-        id,
-        name: name.to_string(),
-        description: description.to_string(),
-        subtitle: String::new(),
-        always_load: false,
-        transport: transport.clone(),
-        enabled: true,
-        created_at: now.clone(),
-        updated_at: now,
+pub fn set_mcp_app_enabled(conn: &Connection, id: &str, app: &str, enabled: bool) -> Result<()> {
+    let column = match app {
+        "claude" => "enabled_claude",
+        "codex" => "enabled_codex",
+        "gemini" => "enabled_gemini",
+        "opencode" => "enabled_opencode",
+        _ => return Err(rusqlite::Error::InvalidParameterName(app.to_string())),
     };
-    upsert_mcp_server(conn, &server)?;
-    Ok(server)
+
+    let sql = format!("UPDATE mcp_servers SET {column} = ?1 WHERE id = ?2");
+    conn.execute(&sql, rusqlite::params![if enabled { 1i32 } else { 0i32 }, id])?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_mcp_app_enabled_updates_only_the_target_app() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+
+        let server = McpServer {
+            id: "fetch".into(),
+            name: "fetch".into(),
+            server: serde_json::json!({
+                "type": "stdio",
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-fetch"]
+            }),
+            apps: McpApps {
+                claude: true,
+                codex: false,
+                gemini: false,
+                opencode: false,
+            },
+        };
+
+        upsert_mcp_server(&conn, &server).unwrap();
+        set_mcp_app_enabled(&conn, "fetch", "codex", true).unwrap();
+
+        let updated = get_mcp_server(&conn, "fetch").unwrap().unwrap();
+        assert!(updated.apps.claude);
+        assert!(updated.apps.codex);
+        assert!(!updated.apps.gemini);
+        assert!(!updated.apps.opencode);
+    }
 }

@@ -17,46 +17,8 @@ import {
 } from './runtimeEvents.js';
 import { shouldUseCodexChatCompatProxy } from './sessionRuntimeHelpers.js';
 import { proxyManager } from './proxyManager.js';
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
-
-/**
- * Write codeMUX-managed MCP servers to .mcp.json in the project directory.
- * Codex CLI reads .mcp.json for MCP server definitions.
- */
-function syncMcpServersToConfigToml(mcpServers: Record<string, unknown>, cwd: string): void {
-  try {
-    const mcpConfig: Record<string, unknown> = {};
-    for (const [name, serverConfig] of Object.entries(mcpServers)) {
-      if (!serverConfig || typeof serverConfig !== 'object') continue;
-      const cfg = serverConfig as Record<string, unknown>;
-      const entry: Record<string, unknown> = {};
-
-      if (cfg.type === 'http' || cfg.type === 'sse' || (cfg.url && !cfg.command)) {
-        entry.url = cfg.url;
-      } else if (cfg.command) {
-        entry.command = cfg.command;
-        if (Array.isArray(cfg.args)) entry.args = cfg.args;
-      }
-      if (cfg.env && typeof cfg.env === 'object') {
-        entry.env = cfg.env;
-      }
-      if (Object.keys(entry).length > 0) {
-        mcpConfig[name] = entry;
-      }
-    }
-
-    if (Object.keys(mcpConfig).length === 0) return;
-
-    const mcpJsonPath = join(cwd, '.mcp.json');
-    writeFileSync(mcpJsonPath, JSON.stringify({ mcp_servers: mcpConfig }, null, 2), 'utf-8');
-    process.stderr.write(`[codex] Wrote ${Object.keys(mcpConfig).length} MCP servers to ${mcpJsonPath}\n`);
-  } catch (err) {
-    process.stderr.write(`[codex] Failed to write .mcp.json: ${err}\n`);
-  }
-}
 
 type CodexSessionBootstrap = {
   sessionId?: string;
@@ -196,11 +158,6 @@ export class CodexSessionRuntime {
         },
       };
       codexConfig.openai_base_url = runtimeBaseUrl;
-    }
-
-    // Sync codeMUX-managed MCP servers to ~/.codex/config.toml
-    if (cmd.mcpServers && typeof cmd.mcpServers === 'object') {
-      syncMcpServersToConfigToml(cmd.mcpServers, cwd);
     }
 
     this.client = new Codex({

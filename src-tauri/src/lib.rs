@@ -21,11 +21,6 @@ pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
     pub config: Mutex<config::types::AppConfig>,
     pub app_data_dir: std::path::PathBuf,
-    /// MCP connection status from startup probe: server name → connected?
-    pub mcp_status: Mutex<std::collections::HashMap<String, bool>>,
-    /// Cached MCP server instructions from startup probe: server name → instructions text.
-    /// Shared via Arc so the background probe task can populate it.
-    pub mcp_instructions: std::sync::Arc<Mutex<std::collections::HashMap<String, String>>>,
 }
 
 fn should_hide_to_tray(window_label: &str) -> bool {
@@ -102,44 +97,10 @@ pub fn run() {
                 config.theme
             );
 
-            let mcp_instructions_cache = std::sync::Arc::new(Mutex::new(std::collections::HashMap::<String, String>::new()));
-            let mcp_instructions_for_probe = mcp_instructions_cache.clone();
-
-            // Background probe: check MCP server connectivity at startup
-            // and cache instructions for later use by agent sessions
-            let probe_conn = db::initialize(&app.handle()).expect("Failed to init probe DB");
-            tauri::async_runtime::spawn(async move {
-                let servers = mcp::db::get_enabled_mcp_servers(&probe_conn).unwrap_or_default();
-                if servers.is_empty() {
-                    info!(target: "mcp_probe", "Startup probe skipped: no enabled MCP servers");
-                    return;
-                }
-                info!(target: "mcp_probe", "Startup probe beginning for {} MCP server(s)", servers.len());
-                let results = commands::mcp::probe_servers(&servers).await;
-                let connected = results.values().filter(|r| r.connected).count();
-                info!(target: "mcp_probe", "Startup probe finished: {}/{} connected", connected, results.len());
-                // Cache instructions from connected servers
-                let mut cache = mcp_instructions_for_probe.lock().unwrap();
-                for (name, probe_result) in results {
-                    if let Some(instructions) = probe_result.instructions {
-                        if !instructions.is_empty() {
-                            cache.insert(name, instructions);
-                        }
-                    }
-                }
-                if !cache.is_empty() {
-                    info!(target: "mcp_probe", "Cached MCP instructions for {} server(s)", cache.len());
-                } else {
-                    warn!(target: "mcp_probe", "No MCP server instructions were cached during startup probe");
-                }
-            });
-
             app.manage(AppState {
                 db: Mutex::new(conn),
                 config: Mutex::new(config),
                 app_data_dir: app.path().app_data_dir()?,
-                mcp_status: Mutex::new(std::collections::HashMap::new()),
-                mcp_instructions: mcp_instructions_cache,
             });
             app.manage(agent::commands::AgentState::default());
 
@@ -191,7 +152,9 @@ pub fn run() {
             commands::mcp::get_mcp_servers,
             commands::mcp::upsert_mcp_server,
             commands::mcp::delete_mcp_server,
-            commands::mcp::toggle_mcp_server,
+            commands::mcp::toggle_mcp_app,
+            commands::mcp::import_mcp_from_apps,
+            commands::mcp::probe_mcp_server,
             commands::mcp::probe_all_mcp_servers,
             agent::commands::ensure_agent_session,
             agent::commands::send_agent_input,

@@ -10,7 +10,6 @@ import {
   shouldSuppressLiveEventWhileStopped,
 } from './agentEventParsing';
 import { useSessionStore } from './sessionStore';
-import { useMcpStore } from './mcpStore';
 import { normalizeFilePath, usePreviewStore } from './previewStore';
 import { useSettingsStore } from './settingsStore';
 import type {
@@ -1078,19 +1077,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
           };
         });
-        // Extract MCP server connection status from init messages
-        if (event.kind === 'system' && event.data?.mcp_servers) {
-          const statuses: Record<string, string> = {};
-          for (const s of event.data.mcp_servers as Array<{ name: string; status: string }>) {
-            statuses[s.name] = s.status;
-          }
-          useMcpStore.getState().updateConnectionStatus(statuses);
-        }
-        // Update MCP status from polling results
+        // Update MCP runtime status from polling results (local to agentStore)
         if (event.kind === 'mcp_status') {
-          if (Object.keys(event.data.servers).length > 0) {
-            useMcpStore.getState().updateConnectionStatus(event.data.servers);
-          }
           if (event.data.status) {
             set((s) => ({
               mcpRuntimeStatus: { ...s.mcpRuntimeStatus, [sessionId]: event.data.status || null },

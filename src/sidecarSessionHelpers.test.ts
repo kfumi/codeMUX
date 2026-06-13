@@ -32,27 +32,8 @@ describe('getProviderMode', () => {
 });
 
 describe('buildMcpInstructions', () => {
-  it('includes server instructions without forcing WaitForMcpServers first', () => {
-    const text = buildMcpInstructions(
-      { context7: {}, filesystem: {} },
-      { context7: 'Use for docs lookups.' },
-      false,
-    );
-
-    expect(text).toContain('## context7');
-    expect(text).toContain('Use for docs lookups.');
-    expect(text).toContain('MCP servers available: context7, filesystem.');
-    expect(text).not.toContain('Before using any MCP tool, call WaitForMcpServers first.');
-  });
-
-  it('mentions limited provider mode when deferred tool search is unavailable', () => {
-    const text = buildMcpInstructions(
-      { context7: {} },
-      {},
-      true,
-    );
-
-    expect(text).toContain('Tool discovery may be limited on this provider.');
+  it('returns undefined — probe-derived MCP instructions are no longer injected', () => {
+    expect(buildMcpInstructions()).toBeUndefined();
   });
 });
 
@@ -109,7 +90,7 @@ describe('buildCodexResultEvent', () => {
       total_cost_usd: 0,
       usage: {
         input_tokens: 10,
-        output_tokens: 12,
+        output_tokens: 5,
         cache_read_input_tokens: 3,
       },
     });

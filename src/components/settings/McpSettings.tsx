@@ -1,22 +1,24 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useMcpStore } from '../../stores/mcpStore';
-import type { McpServer, McpTransport, McpTransportType } from '../../types/mcp';
+import type { McpServer, McpApps, McpServerSpec } from '../../types/mcp';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
-import { Switch } from '../ui/switch';
-import { Plus, Pencil, Trash2, Loader2, Server, Wand2, Wand, RefreshCw } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Server, Wand2, Wand, RefreshCw, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { EditorView } from '@codemirror/view';
+import { cn } from '../../lib/utils';
+
+type TransportType = 'stdio' | 'http' | 'sse';
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
 }
 
-function defaultTransport(type: McpTransportType): McpTransport {
+function defaultServerSpec(type: TransportType): McpServerSpec {
   switch (type) {
     case 'stdio':
       return { type: 'stdio', command: '', args: [], env: {} };
@@ -35,8 +37,21 @@ const baseTheme = EditorView.theme({
   '.cm-activeLine': { backgroundColor: 'hsl(var(--accent) / 0.3)' },
 });
 
+const APP_ORDER: Array<keyof McpApps> = ['claude', 'codex', 'gemini', 'opencode'];
+
+function summarizeServer(server: McpServer): string {
+  const spec = server.server;
+  const type = (spec.type ?? 'stdio') as string;
+  if (type === 'stdio') {
+    const command = typeof spec.command === 'string' ? spec.command : '';
+    const args = Array.isArray(spec.args) ? spec.args.join(' ') : '';
+    return `${type}: ${[command, args].filter(Boolean).join(' ')}`;
+  }
+  return `${type}: ${typeof spec.url === 'string' ? spec.url : ''}`;
+}
+
 export function McpSettingsPanel() {
-  const { servers, isLoading, connectionStatus, fetchServers, probeAll, probeNonConnected, upsertServer, deleteServer, toggleServer } = useMcpStore();
+  const { servers, probeStatus, isLoading, fetchServers, probeAll, probeServer, upsertServer, deleteServer, toggleApp, importFromApps } = useMcpStore();
   const [editing, setEditing] = useState<McpServer | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -45,9 +60,10 @@ export function McpSettingsPanel() {
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState('');
   const [probing, setProbing] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   // wizard local state
-  const [wizType, setWizType] = useState<McpTransportType>('stdio');
+  const [wizType, setWizType] = useState<TransportType>('stdio');
   const [wizName, setWizName] = useState('');
   const [wizCommand, setWizCommand] = useState('');
   const [wizArgs, setWizArgs] = useState('');
@@ -56,31 +72,37 @@ export function McpSettingsPanel() {
   const [wizHeaders, setWizHeaders] = useState('');
 
   useEffect(() => {
-    fetchServers().then(() => { setProbing(true); probeNonConnected().finally(() => setProbing(false)); });
-  }, [fetchServers, probeNonConnected]);
+    fetchServers();
+  }, [fetchServers]);
 
   const handleRefresh = () => {
     setProbing(true);
     probeAll().finally(() => setProbing(false));
   };
 
+  const handleImport = async () => {
+    setImporting(true);
+    try {
+      await importFromApps();
+      toast.success('导入完成');
+    } catch {
+      toast.error('导入失败');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const openNew = () => {
-    const now = new Date().toISOString();
     const server: McpServer = {
       id: generateId(),
       name: '',
-      description: '',
-      subtitle: '',
-      alwaysLoad: false,
-      transport: defaultTransport('stdio'),
-      enabled: true,
-      created_at: now,
-      updated_at: now,
+      server: defaultServerSpec('stdio'),
+      apps: { claude: false, codex: false, gemini: false, opencode: false },
     };
     setEditing(server);
     setIsNew(true);
     setDeleteConfirm(false);
-    setJsonText(JSON.stringify(server.transport, null, 2));
+    setJsonText(JSON.stringify(server.server, null, 2));
     setJsonError('');
   };
 
@@ -88,7 +110,7 @@ export function McpSettingsPanel() {
     setEditing({ ...server });
     setIsNew(false);
     setDeleteConfirm(false);
-    setJsonText(JSON.stringify(server.transport, null, 2));
+    setJsonText(JSON.stringify(server.server, null, 2));
     setJsonError('');
   };
 
@@ -103,7 +125,7 @@ export function McpSettingsPanel() {
       const formatted = JSON.stringify(parsed, null, 2);
       setJsonText(formatted);
       if (editing) {
-        setEditing({ ...editing, transport: parsed as McpTransport });
+        setEditing({ ...editing, server: parsed as McpServerSpec });
       }
       setJsonError('');
     } catch (e) {
@@ -116,7 +138,7 @@ export function McpSettingsPanel() {
     try {
       const parsed = JSON.parse(value);
       if (editing) {
-        setEditing({ ...editing, transport: parsed as McpTransport });
+        setEditing({ ...editing, server: parsed as McpServerSpec });
       }
       setJsonError('');
     } catch (e) {
@@ -128,15 +150,16 @@ export function McpSettingsPanel() {
     if (!editing) return;
 
     if (!editing.name.trim()) {
-      toast.error('请填写 MCP 标题');
+      toast.error('请填写 MCP 名称');
       return;
     }
-    const t = editing.transport;
-    if (t.type === 'stdio' && !t.command.trim()) {
+    const spec = editing.server;
+    const serverType = (spec.type ?? 'stdio') as string;
+    if (serverType === 'stdio' && !spec.command?.trim()) {
       toast.error('请填写 command');
       return;
     }
-    if ((t.type === 'http' || t.type === 'sse') && !t.url.trim()) {
+    if ((serverType === 'http' || serverType === 'sse') && !(spec.url as string)?.trim()) {
       toast.error('请填写 url');
       return;
     }
@@ -145,7 +168,7 @@ export function McpSettingsPanel() {
       (s) => s.name === editing.name.trim() && s.id !== editing.id
     );
     if (nameExists) {
-      toast.error('标题已存在');
+      toast.error('名称已存在');
       return;
     }
 
@@ -158,26 +181,23 @@ export function McpSettingsPanel() {
     }
   };
 
-  const handleToggle = async (id: string) => {
-    await toggleServer(id);
-  };
-
   const openWizard = () => {
     if (!editing) return;
-    setWizType(editing.transport.type);
+    const spec = editing.server;
+    const serverType = (spec.type ?? 'stdio') as TransportType;
+    setWizType(serverType);
     setWizName(editing.name);
-    const t = editing.transport;
-    setWizCommand(t.type === 'stdio' ? t.command : '');
-    setWizArgs(t.type === 'stdio' ? (t.args || []).join('\n') : '');
+    setWizCommand(serverType === 'stdio' ? (spec.command ?? '') : '');
+    setWizArgs(serverType === 'stdio' ? (spec.args ?? []).join('\n') : '');
     setWizEnv(
       Object.entries(
-        (t.type === 'stdio' ? t.env : t.headers) || {}
+        (serverType === 'stdio' ? spec.env : spec.headers) || {}
       ).map(([k, v]) => `${k}=${v}`).join('\n')
     );
-    setWizUrl(t.type !== 'stdio' ? t.url : '');
+    setWizUrl(serverType !== 'stdio' ? (spec.url ?? '') : '');
     setWizHeaders(
-      t.type !== 'stdio'
-        ? Object.entries(t.headers || {}).map(([k, v]) => `${k}=${v}`).join('\n')
+      serverType !== 'stdio'
+        ? Object.entries(spec.headers || {}).map(([k, v]) => `${k}=${v}`).join('\n')
         : ''
     );
     setWizardOpen(true);
@@ -187,7 +207,7 @@ export function McpSettingsPanel() {
     if (!editing) return;
 
     if (!wizName.trim()) {
-      toast.error('请填写 MCP 标题');
+      toast.error('请填写 MCP 名称');
       return;
     }
     if (wizType === 'stdio' && !wizCommand.trim()) {
@@ -199,14 +219,14 @@ export function McpSettingsPanel() {
       return;
     }
 
-    let transport: McpTransport;
+    let spec: McpServerSpec;
     if (wizType === 'stdio') {
       const env: Record<string, string> = {};
       for (const line of wizEnv.split('\n')) {
         const idx = line.indexOf('=');
         if (idx > 0) env[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
       }
-      transport = {
+      spec = {
         type: 'stdio',
         command: wizCommand,
         args: wizArgs.split('\n').filter((a) => a.trim()),
@@ -218,22 +238,22 @@ export function McpSettingsPanel() {
         const idx = line.indexOf('=');
         if (idx > 0) headers[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
       }
-      transport = { type: wizType, url: wizUrl, headers };
+      spec = { type: wizType, url: wizUrl, headers };
     }
-    setEditing({ ...editing, name: wizName, transport });
-    setJsonText(JSON.stringify(transport, null, 2));
+    setEditing({ ...editing, name: wizName, server: spec });
+    setJsonText(JSON.stringify(spec, null, 2));
     setJsonError('');
     setWizardOpen(false);
   };
 
-  const transportBadge = (type: McpTransportType) => {
-    const colors = {
+  const transportBadge = (type: string) => {
+    const colors: Record<string, string> = {
       stdio: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
       http: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
       sse: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
     };
     return (
-      <span className={`text-xs px-1.5 py-0.5 rounded ${colors[type]}`}>
+      <span className={`text-xs px-1.5 py-0.5 rounded ${colors[type] ?? 'bg-gray-100 text-gray-700'}`}>
         {type}
       </span>
     );
@@ -246,7 +266,11 @@ export function McpSettingsPanel() {
     <div className="space-y-4">
       <div className="flex items-center justify-between pr-12">
         <h3 className="font-medium">MCP Servers</h3>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={handleImport} disabled={importing}>
+            {importing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Download className="h-4 w-4 mr-1" />}
+            从工具导入
+          </Button>
           <Button size="sm" variant="ghost" onClick={handleRefresh} disabled={probing}>
             <RefreshCw className={`h-4 w-4 ${probing ? 'animate-spin' : ''}`} />
           </Button>
@@ -268,59 +292,74 @@ export function McpSettingsPanel() {
         <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
           <Server className="h-8 w-8 mb-2 opacity-50" />
           <p className="text-sm">暂无 MCP Server</p>
-          <p className="text-xs">点击上方按钮添加</p>
+          <p className="text-xs">点击"从工具导入"或"添加"按钮</p>
         </div>
       )}
 
       <div className="space-y-2">
-        {servers.map((server) => (
-          <div
-            key={server.id}
-            className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
-          >
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span
-                  className={`h-2 w-2 rounded-full flex-shrink-0 ${
-                    server.enabled
-                      ? connectionStatus[server.name] === 'connected' ? 'bg-green-500'
-                        : connectionStatus[server.name] === 'pending' ? 'bg-yellow-500'
-                        : connectionStatus[server.name] === 'failed' ? 'bg-red-500'
-                        : 'bg-gray-400'
-                      : 'bg-gray-300'
-                  }`}
-                />
-                <span className="font-medium text-sm truncate">{server.description || server.name}</span>
-                {transportBadge(server.transport.type)}
-                {server.alwaysLoad && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300">
-                    eager
-                  </span>
-                )}
-              </div>
-              {server.subtitle && (
-                <p className="text-xs text-muted-foreground truncate mt-0.5">
-                  {server.subtitle}
-                </p>
-              )}
-            </div>
-            <Switch
-              checked={server.enabled}
-              onCheckedChange={() => handleToggle(server.id)}
-            />
-            <Button variant="ghost" size="sm" onClick={() => openEdit(server)}>
-              <Pencil className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => { setDeletingId(server.id); setDeleteConfirm(true); }}
-              className="text-destructive hover:text-destructive"
+        {servers.map((server) => {
+          const serverType = (server.server.type ?? 'stdio') as string;
+          const anyEnabled = Object.values(server.apps).some(Boolean);
+          return (
+            <div
+              key={server.id}
+              className="flex flex-col gap-2 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
             >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-        ))}
+              <div className="flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`h-2 w-2 rounded-full flex-shrink-0 ${
+                        anyEnabled
+                          ? probeStatus[server.id] === 'connected' ? 'bg-green-500'
+                            : probeStatus[server.id] === 'pending' ? 'bg-yellow-500'
+                            : probeStatus[server.id] === 'failed' ? 'bg-red-500'
+                            : 'bg-gray-400'
+                          : 'bg-gray-300'
+                      }`}
+                    />
+                    <span className="font-medium text-sm truncate">{server.name}</span>
+                    {transportBadge(serverType)}
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">
+                    {summarizeServer(server)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1">
+                  {APP_ORDER.map((app) => (
+                    <button
+                      key={app}
+                      aria-label={`toggle-${server.id}-${app}`}
+                      onClick={() => toggleApp(server.id, app, !server.apps[app])}
+                      className={cn(
+                        'rounded-md px-2 py-1 text-xs border',
+                        server.apps[app]
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted-foreground',
+                      )}
+                    >
+                      {app}
+                    </button>
+                  ))}
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => probeServer(server.id)}>
+                  <RefreshCw className={`h-3 w-3 ${probeStatus[server.id] === 'pending' ? 'animate-spin' : ''}`} />
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => openEdit(server)}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { setDeletingId(server.id); setDeleteConfirm(true); }}
+                  className="text-destructive hover:text-destructive"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* 编辑/新建弹窗 */}
@@ -333,7 +372,7 @@ export function McpSettingsPanel() {
           {editing && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium">MCP 标题（唯一） <span className="text-destructive">*</span></label>
+                <label className="text-sm font-medium">名称（唯一） <span className="text-destructive">*</span></label>
                 <Input
                   value={editing.name}
                   onChange={(e) => setEditing({ ...editing, name: e.target.value })}
@@ -343,33 +382,31 @@ export function McpSettingsPanel() {
 
               <div className="flex items-center justify-between rounded-lg border px-3 py-2">
                 <div className="space-y-0.5">
-                  <label className="text-sm font-medium">优先首轮加载</label>
+                  <label className="text-sm font-medium">启用到工具</label>
                   <p className="text-xs text-muted-foreground">
-                    关闭 deferred loading。只建议给少数关键 MCP server 开启。
+                    选择哪些工具使用此 MCP server
                   </p>
                 </div>
-                <Switch
-                  checked={Boolean(editing.alwaysLoad)}
-                  onCheckedChange={(checked) => setEditing({ ...editing, alwaysLoad: checked })}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">显示名称</label>
-                <Input
-                  value={editing.description}
-                  onChange={(e) => setEditing({ ...editing, description: e.target.value })}
-                  placeholder="例如 @upstash/context7-mcp"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">描述</label>
-                <Input
-                  value={editing.subtitle}
-                  onChange={(e) => setEditing({ ...editing, subtitle: e.target.value })}
-                  placeholder="可选描述信息"
-                />
+                <div className="flex items-center gap-1">
+                  {APP_ORDER.map((app) => (
+                    <button
+                      key={app}
+                      aria-label={`toggle-edit-${app}`}
+                      onClick={() => setEditing({
+                        ...editing,
+                        apps: { ...editing.apps, [app]: !editing.apps[app] }
+                      })}
+                      className={cn(
+                        'rounded-md px-2 py-1 text-xs border',
+                        editing.apps[app]
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted-foreground',
+                      )}
+                    >
+                      {app}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -472,10 +509,10 @@ export function McpSettingsPanel() {
                 <label className="text-sm font-medium">类型 <span className="text-destructive">*</span></label>
                 <RadioGroup
                   value={wizType}
-                  onValueChange={(v) => setWizType(v as McpTransportType)}
+                  onValueChange={(v) => setWizType(v as TransportType)}
                   className="flex gap-6"
                 >
-                  {(['stdio', 'http', 'sse'] as McpTransportType[]).map((type) => (
+                  {(['stdio', 'http', 'sse'] as TransportType[]).map((type) => (
                     <div key={type} className="flex items-center gap-2">
                       <RadioGroupItem value={type} id={`wiz-${type}`} />
                       <label htmlFor={`wiz-${type}`} className="text-sm cursor-pointer select-none">
@@ -487,7 +524,7 @@ export function McpSettingsPanel() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">MCP 标题（唯一） <span className="text-destructive">*</span></label>
+                <label className="text-sm font-medium">名称（唯一） <span className="text-destructive">*</span></label>
                 <Input
                   value={wizName}
                   onChange={(e) => setWizName(e.target.value)}

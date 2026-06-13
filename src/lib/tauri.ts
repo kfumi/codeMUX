@@ -194,8 +194,12 @@ export const mcpApi = {
   getAll: (): Promise<McpServer[]> => invokeLogged('get_mcp_servers'),
   upsert: (server: McpServer): Promise<void> => invokeLogged('upsert_mcp_server', { server }),
   delete: (id: string): Promise<void> => invokeLogged('delete_mcp_server', { id }),
-  toggle: (id: string): Promise<boolean> => invokeLogged('toggle_mcp_server', { id }),
+  toggleApp: (serverId: string, app: string, enabled: boolean): Promise<void> =>
+    invokeLogged('toggle_mcp_app', { serverId, app, enabled }),
+  probe: (id: string): Promise<{ connected: boolean; instructions?: string | null }> =>
+    invokeLogged('probe_mcp_server', { id }),
   probeAll: (): Promise<Record<string, boolean>> => invokeLogged('probe_all_mcp_servers'),
+  importFromApps: (): Promise<{ total: number }> => invokeLogged('import_mcp_from_apps'),
 };
 
 export const skillApi = {

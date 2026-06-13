@@ -32,7 +32,6 @@ type SessionBootstrap = {
   baseUrl?: string;
   model?: string;
   mcpServers?: Record<string, unknown>;
-  mcpServerInstructions?: Record<string, string>;
   skills?: string[];
 };
 
@@ -229,7 +228,6 @@ export class SessionRuntime {
       baseUrl: cmd.baseUrl,
       model: cmd.model,
       mcpServers: cmd.mcpServers,
-      mcpServerInstructions: cmd.mcpServerInstructions,
       skills: cmd.skills,
     };
   }
@@ -403,12 +401,8 @@ export class SessionRuntime {
       }
     }
 
-    const mcpInstructions = buildMcpInstructions(
-      config.mcpServers,
-      config.mcpServerInstructions,
-      !this.providerMode.supportsDeferredToolSearch,
-    );
-    process.stderr.write(`[sidecar] MCP instructions built: ${mcpInstructions ? `${mcpInstructions.length} chars` : 'none'}\n`);
+    // MCP instructions are no longer injected — managed natively per tool
+    process.stderr.write(`[sidecar] MCP instructions: disabled (native config per tool)\n`);
 
     const cleanSettings: Record<string, unknown> = {};
     if (config.apiKey || config.baseUrl) {
@@ -443,7 +437,7 @@ export class SessionRuntime {
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
-        append: mcpInstructions || '',
+        append: '',
       },
       stderr: (data: string) => {
         process.stderr.write(`[claude-stderr] ${data}`);

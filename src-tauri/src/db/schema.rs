@@ -99,21 +99,10 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
     let _ = conn.execute("DROP TABLE IF EXISTS tool_calls", []);
     let _ = conn.execute("DROP TABLE IF EXISTS messages", []);
 
-    // Migration: add subtitle column to mcp_servers if missing
-    let has_subtitle: bool = conn
-        .prepare("SELECT subtitle FROM mcp_servers LIMIT 0")
-        .is_ok();
-    if !has_subtitle {
-        let _ = conn.execute("ALTER TABLE mcp_servers ADD COLUMN subtitle TEXT DEFAULT ''", []);
-    }
-
-    // Migration: add always_load column to mcp_servers if missing
-    let has_always_load: bool = conn
-        .prepare("SELECT always_load FROM mcp_servers LIMIT 0")
-        .is_ok();
-    if !has_always_load {
-        let _ = conn.execute("ALTER TABLE mcp_servers ADD COLUMN always_load INTEGER NOT NULL DEFAULT 0", []);
-    }
+    // Migration: migrate mcp_servers from legacy schema to per-app schema
+    // Must run BEFORE subtitle/always_load migrations since those columns
+    // are dropped during the table rebuild.
+    migrate_mcp_servers_table(conn)?;
 
     // Migration: add disk_path column to skills if missing
     let has_disk_path: bool = conn
@@ -129,6 +118,55 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions(project_id);
         CREATE INDEX IF NOT EXISTS idx_agent_session_mappings_app_session_id ON agent_session_mappings(app_session_id);
         "
+    )?;
+
+    Ok(())
+}
+
+fn migrate_mcp_servers_table(conn: &Connection) -> Result<()> {
+    // Already on new schema — nothing to do
+    let has_server_config = conn.prepare("SELECT server_config FROM mcp_servers LIMIT 0").is_ok();
+    if has_server_config {
+        return Ok(());
+    }
+
+    // No legacy enabled column either — fresh DB before any rows were inserted
+    let has_legacy_enabled = conn.prepare("SELECT enabled FROM mcp_servers LIMIT 0").is_ok();
+    if !has_legacy_enabled {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        r#"
+        ALTER TABLE mcp_servers RENAME TO mcp_servers_legacy;
+
+        CREATE TABLE mcp_servers (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            server_config TEXT NOT NULL,
+            enabled_claude INTEGER NOT NULL DEFAULT 0,
+            enabled_codex INTEGER NOT NULL DEFAULT 0,
+            enabled_gemini INTEGER NOT NULL DEFAULT 0,
+            enabled_opencode INTEGER NOT NULL DEFAULT 0
+        );
+
+        INSERT INTO mcp_servers (
+            id, name, server_config,
+            enabled_claude, enabled_codex, enabled_gemini, enabled_opencode
+        )
+        SELECT
+            id,
+            name,
+            transport_config,
+            CASE WHEN enabled = 1 THEN 1 ELSE 0 END,
+            0,
+            0,
+            0
+        FROM mcp_servers_legacy;
+
+        DROP TABLE mcp_servers_legacy;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_servers_name ON mcp_servers(name);
+        "#,
     )?;
 
     Ok(())
@@ -182,6 +220,72 @@ mod tests {
             )
             .unwrap();
         assert_eq!(agent_kind, "claude_code");
+    }
+
+    #[test]
+    fn migrates_legacy_mcp_rows_to_per_app_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE mcp_servers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                transport_type TEXT NOT NULL,
+                transport_config TEXT NOT NULL,
+                always_load INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                subtitle TEXT DEFAULT ''
+            );
+
+            INSERT INTO mcp_servers (
+                id, name, description, transport_type, transport_config,
+                always_load, enabled, created_at, updated_at, subtitle
+            ) VALUES (
+                'fetch',
+                'fetch',
+                'legacy row',
+                'stdio',
+                '{"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-fetch"]}',
+                1,
+                1,
+                '2026-06-01T00:00:00Z',
+                '2026-06-01T00:00:00Z',
+                'old subtitle'
+            );
+            "#,
+        )
+        .unwrap();
+
+        initialize_database(&conn).unwrap();
+
+        let row = conn
+            .query_row(
+                "SELECT server_config, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode
+                 FROM mcp_servers WHERE id = 'fetch'",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            row.0,
+            r#"{"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-fetch"]}"#
+        );
+        assert_eq!(row.1, 1);
+        assert_eq!(row.2, 0);
+        assert_eq!(row.3, 0);
+        assert_eq!(row.4, 0);
     }
 
     #[test]

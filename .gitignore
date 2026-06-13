@@ -25,5 +25,3 @@ dist-ssr
 
 # Tauri
 src-tauri/target/
-
-.mcp.json

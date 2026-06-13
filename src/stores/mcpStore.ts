@@ -1,26 +1,26 @@
 import { create } from 'zustand';
-import type { McpServer } from '../types/mcp';
+import type { McpServer, McpApps } from '../types/mcp';
 import { mcpApi } from '../lib/tauri';
 
 interface McpStore {
   servers: McpServer[];
+  probeStatus: Record<string, 'idle' | 'pending' | 'connected' | 'failed'>;
   isLoading: boolean;
   error: string | null;
-  connectionStatus: Record<string, string>;
   fetchServers: () => Promise<void>;
   upsertServer: (server: McpServer) => Promise<void>;
   deleteServer: (id: string) => Promise<void>;
-  toggleServer: (id: string) => Promise<void>;
-  updateConnectionStatus: (statuses: Record<string, string>) => void;
+  toggleApp: (serverId: string, app: keyof McpApps, enabled: boolean) => Promise<void>;
+  probeServer: (id: string) => Promise<void>;
   probeAll: () => Promise<void>;
-  probeNonConnected: () => Promise<void>;
+  importFromApps: () => Promise<void>;
 }
 
 export const useMcpStore = create<McpStore>((set, get) => ({
   servers: [],
+  probeStatus: {},
   isLoading: false,
   error: null,
-  connectionStatus: {},
 
   fetchServers: async () => {
     set({ isLoading: true, error: null });
@@ -60,12 +60,14 @@ export const useMcpStore = create<McpStore>((set, get) => ({
     }
   },
 
-  toggleServer: async (id: string) => {
+  toggleApp: async (serverId: string, app: keyof McpApps, enabled: boolean) => {
     try {
-      const newEnabled = await mcpApi.toggle(id);
+      await mcpApi.toggleApp(serverId, app, enabled);
       set((state) => ({
         servers: state.servers.map((s) =>
-          s.id === id ? { ...s, enabled: newEnabled } : s
+          s.id === serverId
+            ? { ...s, apps: { ...s.apps, [app]: enabled } }
+            : s
         ),
       }));
     } catch (error) {
@@ -74,41 +76,48 @@ export const useMcpStore = create<McpStore>((set, get) => ({
     }
   },
 
-  updateConnectionStatus: (statuses: Record<string, string>) => {
-    set({ connectionStatus: statuses });
+  probeServer: async (id: string) => {
+    set((state) => ({
+      probeStatus: { ...state.probeStatus, [id]: 'pending' },
+    }));
+    try {
+      const result = await mcpApi.probe(id);
+      set((state) => ({
+        probeStatus: {
+          ...state.probeStatus,
+          [id]: result.connected ? 'connected' : 'failed',
+        },
+      }));
+    } catch {
+      set((state) => ({
+        probeStatus: { ...state.probeStatus, [id]: 'failed' },
+      }));
+    }
   },
 
   probeAll: async () => {
     try {
       const results = await mcpApi.probeAll();
-      const statuses: Record<string, string> = {};
+      const probeStatus: Record<string, 'connected' | 'failed'> = {};
       for (const [name, ok] of Object.entries(results)) {
-        statuses[name] = ok ? 'connected' : 'failed';
+        probeStatus[name] = ok ? 'connected' : 'failed';
       }
-      set({ connectionStatus: statuses });
+      set({ probeStatus });
     } catch {
       // ignore probe errors
     }
   },
 
-  probeNonConnected: async () => {
+  importFromApps: async () => {
     try {
-      const current = get().connectionStatus;
-      // Skip if all enabled servers are already connected
-      const hasNonConnected = get().servers.some(s => s.enabled && current[s.name] !== 'connected');
-      if (!hasNonConnected) return;
-
-      const results = await mcpApi.probeAll();
-      const statuses = { ...current };
-      for (const [name, ok] of Object.entries(results)) {
-        // Only update non-connected servers, keep existing connected ones
-        if (statuses[name] !== 'connected') {
-          statuses[name] = ok ? 'connected' : 'failed';
-        }
+      const result = await mcpApi.importFromApps();
+      if (result.total > 0) {
+        // Refresh the server list after import
+        await get().fetchServers();
       }
-      set({ connectionStatus: statuses });
-    } catch {
-      // ignore
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
     }
   },
 }));

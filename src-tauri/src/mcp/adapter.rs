@@ -1,10 +1,12 @@
-use super::types::McpServer;
+pub type McpAdapterResult<T> = Result<T, String>;
 
-pub trait McpAdapter {
-    /// 将统一格式转为目标工具配置 JSON
-    fn to_config(&self, servers: &[McpServer]) -> Result<serde_json::Value, String>;
-    /// 从目标工具配置导入
-    fn import_from_config(&self, config: &serde_json::Value) -> Result<Vec<McpServer>, String>;
-    /// 同步启用的 servers 到目标工具配置文件
-    fn sync_to_config_file(&self, servers: &[McpServer]) -> Result<(), String>;
+pub trait McpAdapter: Sync {
+    /// Whether this tool is installed and we should sync to it
+    fn should_sync(&self) -> bool;
+    /// Sync a single server to the tool's native config
+    fn sync_single_server(&self, id: &str, server_spec: &serde_json::Value) -> McpAdapterResult<()>;
+    /// Remove a server from the tool's native config
+    fn remove_server(&self, id: &str) -> McpAdapterResult<()>;
+    /// Import servers from the tool's native config
+    fn import_from_tool(&self) -> McpAdapterResult<Vec<(String, serde_json::Value)>>;
 }

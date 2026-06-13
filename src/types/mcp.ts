@@ -1,34 +1,24 @@
-export type McpTransportType = 'stdio' | 'http' | 'sse';
+export interface McpApps {
+  claude: boolean;
+  codex: boolean;
+  gemini: boolean;
+  opencode: boolean;
+}
 
-export interface McpTransportStdio {
-  type: 'stdio';
-  command: string;
-  args: string[];
+export type McpServerSpec = {
+  type?: 'stdio' | 'http' | 'sse';
+  command?: string;
+  args?: string[];
   env?: Record<string, string>;
-}
-
-export interface McpTransportHttp {
-  type: 'http';
-  url: string;
+  cwd?: string;
+  url?: string;
   headers?: Record<string, string>;
-}
-
-export interface McpTransportSse {
-  type: 'sse';
-  url: string;
-  headers?: Record<string, string>;
-}
-
-export type McpTransport = McpTransportStdio | McpTransportHttp | McpTransportSse;
+  [key: string]: unknown;
+};
 
 export interface McpServer {
   id: string;
   name: string;
-  description: string;
-  subtitle: string;
-  alwaysLoad?: boolean;
-  transport: McpTransport;
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
+  server: McpServerSpec;
+  apps: McpApps;
 }

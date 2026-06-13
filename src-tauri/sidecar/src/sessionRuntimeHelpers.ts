@@ -48,33 +48,11 @@ export function shouldUseCodexChatCompatProxy(baseUrl?: string | null): boolean 
   }
 }
 
-export function buildMcpInstructions(
-  mcpServers?: Record<string, unknown>,
-  serverInstructions?: Record<string, string>,
-  isLimitedProvider = false,
-): string | undefined {
-  if (!mcpServers || Object.keys(mcpServers).length === 0) return undefined;
-
-  const lines: string[] = [];
-  const serverNames = Object.keys(mcpServers);
-
-  if (serverInstructions && Object.keys(serverInstructions).length > 0) {
-    for (const name of serverNames) {
-      const instruction = serverInstructions[name];
-      if (!instruction) continue;
-      lines.push(`## ${name}`);
-      lines.push(instruction);
-      lines.push('');
-    }
-  }
-
-  lines.push(`MCP servers available: ${serverNames.join(', ')}.`);
-  lines.push('Use MCP tools when they are relevant to the task.');
-
-  if (isLimitedProvider) {
-    lines.push('Tool discovery may be limited on this provider.');
-    lines.push('If an MCP server is still pending when needed, WaitForMcpServers can be used as a fallback.');
-  }
-
-  return lines.join('\n');
+/**
+ * MCP instructions are no longer injected into system prompts.
+ * Probe-derived instructions have been removed; MCP servers are configured
+ * natively per tool via the unified management system.
+ */
+export function buildMcpInstructions(): undefined {
+  return undefined;
 }
