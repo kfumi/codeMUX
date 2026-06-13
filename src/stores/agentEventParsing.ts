@@ -13,7 +13,7 @@ export type ParsedStoreEvent =
   | { kind: 'result'; data: AgentResultMessage };
 
 export function isInterruptMarker(text: string): boolean {
-  return text.trim() === INTERRUPT_MARKER;
+  return text.trim().startsWith(INTERRUPT_MARKER);
 }
 
 export function shouldSuppressLiveEventWhileStopped(kind: string): boolean {
