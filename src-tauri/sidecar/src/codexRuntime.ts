@@ -406,6 +406,7 @@ export class CodexSessionRuntime {
     }
 
     if (item.type === 'agent_message' && eventType === 'item.completed') {
+      process.stderr.write(`[codex] agent_message completed: text_length=${item.text?.length ?? 0} preview=${JSON.stringify((item.text ?? '').slice(0, 100))}\n`);
       this.completeStreamingText(sessionId, item.id);
       if (item.text.trim()) {
         emit(buildAssistantEvent({

@@ -31,6 +31,7 @@ export interface ResponsesRequest {
   input: ResponsesInputItem[];
   stream: boolean;
   max_output_tokens?: number;
+  previous_response_id?: string;
   tool_choice?: unknown;
   tools?: ResponsesFunctionTool[];
   reasoning?: JsonRecord;
@@ -141,11 +142,33 @@ function normalizeContent(content: unknown): string {
 export function flattenResponsesTools(tools: ResponsesFunctionTool[]): unknown[] {
   const result: unknown[] = [];
   for (const tool of tools) {
-    if (tool.type !== 'function') {
-      result.push(tool);
+    if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
       continue;
     }
-    const name = tool.name ?? '';
+    if (tool.type === 'namespace' && typeof tool.name === 'string' && Array.isArray(tool.tools)) {
+      for (const child of tool.tools) {
+        if (!child || typeof child !== 'object' || Array.isArray(child)) {
+          continue;
+        }
+        const childRecord = child as Record<string, unknown>;
+        if (childRecord.type !== 'function' || typeof childRecord.name !== 'string') {
+          continue;
+        }
+        result.push({
+          type: 'function',
+          function: {
+            name: `${tool.name}__${childRecord.name}`,
+            description: typeof childRecord.description === 'string' ? childRecord.description : '',
+            parameters: childRecord.parameters ?? { type: 'object', properties: {} },
+          },
+        });
+      }
+      continue;
+    }
+    if (tool.type !== 'function' || typeof tool.name !== 'string' || tool.name.length === 0) {
+      continue;
+    }
+    const name = tool.name;
     const mcpMatch = name.match(/^mcp__([^_]+(?:__[^_]+)*)__([^_]+)$/);
     if (mcpMatch) {
       // Already namespaced mcp__<server>__<tool> — keep as-is, just wrap in chat format

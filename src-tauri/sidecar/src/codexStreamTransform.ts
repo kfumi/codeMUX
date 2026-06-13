@@ -49,8 +49,16 @@ export async function* parseChatCompletionSseStream(
 ): AsyncGenerator<ChatCompletionChunk, void, unknown> {
   let buffer = '';
 
+  let chunkCount = 0;
+  let sseLineCount = 0;
   for await (const chunk of body) {
-    buffer += typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
+    chunkCount++;
+    const text = typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
+    buffer += text;
+
+    if (chunkCount <= 2) {
+      process.stderr.write(`[sse-parser] raw chunk#${chunkCount} len=${text.length} preview=${JSON.stringify(text.slice(0, 200))}\n`);
+    }
 
     let newlineIndex: number;
     while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
@@ -60,16 +68,25 @@ export async function* parseChatCompletionSseStream(
       if (!line || line.startsWith(':')) continue;
       if (!line.startsWith('data:')) continue;
 
+      sseLineCount++;
       const payload = line.slice(5).trim();
-      if (payload === '[DONE]') return;
+      if (payload === '[DONE]') {
+        process.stderr.write(`[sse-parser] stream done: ${chunkCount} raw chunks, ${sseLineCount} SSE data lines\n`);
+        return;
+      }
 
       try {
-        yield JSON.parse(payload) as ChatCompletionChunk;
+        const parsed = JSON.parse(payload) as ChatCompletionChunk;
+        if (sseLineCount <= 3) {
+          process.stderr.write(`[sse-parser] data#${sseLineCount} choices=${parsed.choices?.length ?? 0} delta_keys=${Object.keys(parsed.choices?.[0]?.delta ?? {}).join(',')}\n`);
+        }
+        yield parsed;
       } catch {
         // Skip malformed lines.
       }
     }
   }
+  process.stderr.write(`[sse-parser] stream ended: ${chunkCount} raw chunks, ${sseLineCount} SSE data lines\n`);
 }
 
 // ---------------------------------------------------------------------------
@@ -208,9 +225,11 @@ export async function* convertChatStreamToResponsesEvents(
     model: string;
     reasoningId: string;
     messageId: string;
+    reasoningEnabled?: boolean;
   },
 ): AsyncGenerator<Record<string, unknown>, void, unknown> {
   const { responseId, model, reasoningId, messageId } = opts;
+  const reasoningEnabled = opts.reasoningEnabled ?? true;
 
   // Emit the opening events immediately so the SDK knows the response is in progress.
   const baseResponse = {
@@ -231,6 +250,8 @@ export async function* convertChatStreamToResponsesEvents(
   let outputTextClosed = false;
   let itemsClosed = false;
   let textContentIndex = 0;
+  let accumulatedText = '';
+  let accumulatedReasoning = '';
   const thinkState: ThinkState = { mode: 'detecting', buffer: '' };
 
   const toolCalls = new Map<number, ChatStreamToolCall>();
@@ -254,7 +275,7 @@ export async function* convertChatStreamToResponsesEvents(
         item_id: reasoningId,
         output_index: 0,
         content_index: 0,
-        text: '',
+        text: accumulatedReasoning,
       };
       yield {
         type: 'response.output_item.done',
@@ -286,7 +307,7 @@ export async function* convertChatStreamToResponsesEvents(
       item_id: reasoningId,
       output_index: 0,
       content_index: 0,
-      text: '',
+      text: accumulatedReasoning,
     };
     yield {
       type: 'response.output_item.done',
@@ -299,24 +320,31 @@ export async function* convertChatStreamToResponsesEvents(
   function* closeText(): EventGenerator {
     if (!startedText || outputTextClosed) return;
     outputTextClosed = true;
+    process.stderr.write(`[stream-transform] closeText: accumulatedText length=${accumulatedText.length} preview=${JSON.stringify(accumulatedText.slice(0, 100))}\n`);
     yield {
       type: 'response.output_text.done',
       item_id: messageId,
       output_index: textContentIndex,
       content_index: 0,
-      text: '',
+      text: accumulatedText,
     };
     yield {
       type: 'response.content_part.done',
       item_id: messageId,
       output_index: textContentIndex,
       content_index: 0,
-      part: { type: 'output_text', text: '', annotations: [] },
+      part: { type: 'output_text', text: accumulatedText, annotations: [] },
     };
     yield {
       type: 'response.output_item.done',
       output_index: textContentIndex,
-      item: { type: 'message', id: messageId, status: 'completed', role: 'assistant', content: [] },
+      item: {
+        type: 'message',
+        id: messageId,
+        status: 'completed',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: accumulatedText, annotations: [] }],
+      },
     };
   }
 
@@ -330,6 +358,7 @@ export async function* convertChatStreamToResponsesEvents(
           output_index: 0,
           delta: { type: 'reasoning_summary_text_delta', text: thinkState.buffer },
         };
+        accumulatedReasoning += thinkState.buffer;
       } else {
         // detecting or text mode: emit as text.
         yield* ensureTextStarted();
@@ -340,6 +369,7 @@ export async function* convertChatStreamToResponsesEvents(
           content_index: 0,
           delta: thinkState.buffer,
         };
+        accumulatedText += thinkState.buffer;
       }
       thinkState.buffer = '';
     }
@@ -369,20 +399,34 @@ export async function* convertChatStreamToResponsesEvents(
     // --- Explicit reasoning_content / reasoning deltas ---
     const reasoningDelta = delta.reasoning_content ?? delta.reasoning ?? null;
     if (reasoningDelta) {
-      if (!startedReasoning) {
-        startedReasoning = true;
+      if (reasoningEnabled) {
+        if (!startedReasoning) {
+          startedReasoning = true;
+          yield {
+            type: 'response.output_item.added',
+            output_index: 0,
+            item: { type: 'reasoning', id: reasoningId, status: 'in_progress', summary: [] },
+          };
+        }
         yield {
-          type: 'response.output_item.added',
+          type: 'response.reasoning_delta',
+          item_id: reasoningId,
           output_index: 0,
-          item: { type: 'reasoning', id: reasoningId, status: 'in_progress', summary: [] },
+          delta: { type: 'reasoning_summary_text_delta', text: reasoningDelta },
         };
+        accumulatedReasoning += reasoningDelta;
+      } else {
+        // Reasoning disabled: treat reasoning_content as regular text
+        yield* ensureTextStarted();
+        yield {
+          type: 'response.output_text.delta',
+          item_id: messageId,
+          output_index: textContentIndex,
+          content_index: 0,
+          delta: reasoningDelta,
+        };
+        accumulatedText += reasoningDelta;
       }
-      yield {
-        type: 'response.reasoning_delta',
-        item_id: reasoningId,
-        output_index: 0,
-        delta: { type: 'reasoning_summary_text_delta', text: reasoningDelta },
-      };
     }
 
     // --- Text content via think-tag state machine ---
@@ -429,6 +473,7 @@ export async function* convertChatStreamToResponsesEvents(
               content_index: 0,
               delta: evt.text,
             };
+            accumulatedText += evt.text;
             break;
           }
         }
@@ -494,12 +539,13 @@ export async function* convertChatStreamToResponsesEvents(
   // Final completed response.
   const output: unknown[] = [];
   if (startedReasoning) output.push({ type: 'reasoning', id: reasoningId, summary: [] });
-  if (startedText) output.push({ type: 'message', id: messageId, status: 'completed', role: 'assistant', content: [] });
+  if (startedText) output.push({ type: 'message', id: messageId, status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: accumulatedText, annotations: [] }] });
   for (const tc of toolCalls.values()) {
     output.push({ type: 'function_call', id: tc.id, status: 'completed', call_id: tc.id, name: tc.name, arguments: tc.arguments });
   }
 
   const finalStatus = toolCalls.size > 0 ? 'requires_action' : 'completed';
+  process.stderr.write(`[stream-transform] response.completed: startedReasoning=${startedReasoning} startedText=${startedText} accumulatedText.length=${accumulatedText.length} toolCalls=${toolCalls.size} output_items=${output.length}\n`);
   const usage = lastUsage ? {
     input_tokens: lastUsage.prompt_tokens ?? 0,
     input_tokens_details: { cached_tokens: 0 },

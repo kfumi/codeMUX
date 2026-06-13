@@ -101,4 +101,27 @@ describe('convertChatStreamToResponsesEvents', () => {
     const itemDone = events.filter((e) => e.type === 'response.output_item.done');
     expect(itemDone.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('keeps completed assistant message content on response.output_item.done', async () => {
+    const events = await collectEvents(convertChatStreamToResponsesEvents(makeChunks([
+      { choices: [{ delta: { content: '你好' }, finish_reason: 'stop' }] },
+    ]), IDS));
+
+    const messageDone = events.find((event) =>
+      event.type === 'response.output_item.done'
+      && (event.item as Record<string, unknown> | undefined)?.type === 'message',
+    ) as Record<string, unknown> | undefined;
+
+    expect(messageDone).toBeTruthy();
+    expect(messageDone?.item).toMatchObject({
+      type: 'message',
+      role: 'assistant',
+      content: [
+        {
+          type: 'output_text',
+          text: '你好',
+        },
+      ],
+    });
+  });
 });

@@ -26,8 +26,10 @@ export const useMcpStore = create<McpStore>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const servers = await mcpApi.getAll();
+      console.log('[mcpStore] fetchServers got', servers.length, 'servers');
       set({ servers, isLoading: false });
     } catch (error) {
+      console.error('[mcpStore] fetchServers failed:', error);
       set({ error: String(error), isLoading: false });
     }
   },
@@ -98,9 +100,14 @@ export const useMcpStore = create<McpStore>((set, get) => ({
   probeAll: async () => {
     try {
       const results = await mcpApi.probeAll();
+      // Backend returns name→connected map; match to server.id for UI
+      const servers = get().servers;
       const probeStatus: Record<string, 'connected' | 'failed'> = {};
       for (const [name, ok] of Object.entries(results)) {
-        probeStatus[name] = ok ? 'connected' : 'failed';
+        const server = servers.find((s) => s.name === name);
+        if (server) {
+          probeStatus[server.id] = ok ? 'connected' : 'failed';
+        }
       }
       set({ probeStatus });
     } catch {
@@ -111,11 +118,13 @@ export const useMcpStore = create<McpStore>((set, get) => ({
   importFromApps: async () => {
     try {
       const result = await mcpApi.importFromApps();
+      console.log('[mcpStore] importFromApps result:', result);
       if (result.total > 0) {
         // Refresh the server list after import
         await get().fetchServers();
       }
     } catch (error) {
+      console.error('[mcpStore] importFromApps failed:', error);
       set({ error: String(error) });
       throw error;
     }

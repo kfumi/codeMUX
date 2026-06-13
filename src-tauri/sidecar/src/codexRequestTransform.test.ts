@@ -157,4 +157,55 @@ describe('convertResponsesToChatRequest', () => {
       },
     }]);
   });
+
+  it('expands namespace tools and drops non-function tools unsupported by chat completions', () => {
+    const result = convertResponsesToChatRequest({
+      model: 'mimo-v2-pro',
+      input: [{ role: 'user', content: 'Hi' }],
+      tools: [
+        {
+          type: 'namespace',
+          name: 'mcp__chrome_devtools_mcp',
+          tools: [
+            {
+              type: 'function',
+              name: 'click',
+              description: 'Click element',
+              parameters: { type: 'object', properties: { uid: { type: 'string' } } },
+            },
+          ],
+        },
+        {
+          type: 'web_search',
+          external_web_access: true,
+        },
+        {
+          type: 'function',
+          name: 'shell_command',
+          description: 'Run shell command',
+          parameters: { type: 'object', properties: { command: { type: 'string' } } },
+        },
+      ] as any,
+      stream: false,
+    }, history, null);
+
+    expect(result.tools).toEqual([
+      {
+        type: 'function',
+        function: {
+          name: 'mcp__chrome_devtools_mcp__click',
+          description: 'Click element',
+          parameters: { type: 'object', properties: { uid: { type: 'string' } } },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'shell_command',
+          description: 'Run shell command',
+          parameters: { type: 'object', properties: { command: { type: 'string' } } },
+        },
+      },
+    ]);
+  });
 });

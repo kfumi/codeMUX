@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useMcpStore } from '../../stores/mcpStore';
 import type { McpServer, McpApps, McpServerSpec } from '../../types/mcp';
 import { Button } from '../ui/button';
@@ -11,6 +11,42 @@ import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { EditorView } from '@codemirror/view';
 import { cn } from '../../lib/utils';
+
+// Agent brand SVGs for per-tool toggle icons
+import claudeSvg from '@lobehub/icons-static-svg/icons/claude-color.svg?raw';
+import openAiSvg from '@lobehub/icons-static-svg/icons/openai.svg?raw';
+import geminiSvg from '@lobehub/icons-static-svg/icons/geminicli-color.svg?raw';
+import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
+
+const APP_SVGS: Record<keyof McpApps, string> = {
+  claude: claudeSvg,
+  codex: openAiSvg,
+  gemini: geminiSvg,
+  opencode: opencodeSvg,
+};
+
+const APP_LABELS: Record<keyof McpApps, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  gemini: 'Gemini',
+  opencode: 'OpenCode',
+};
+
+function AppIcon({ app, size = 16 }: { app: keyof McpApps; size?: number }) {
+  const svg = APP_SVGS[app];
+  const cleaned = svg
+    .replace(/(<svg\b[^>]*\bstyle=")[^"]*(")/, '$1display:block$2')
+    .replace(/(<svg\b[^>]*) width="[^"]*"/, '$1')
+    .replace(/(<svg\b[^>]*) height="[^"]*"/, '$1')
+    .replace(/<svg\b/, `<svg width="${size}" height="${size}"`);
+  return (
+    <span
+      className="inline-flex shrink-0 items-center justify-center"
+      aria-hidden="true"
+      dangerouslySetInnerHTML={{ __html: cleaned }}
+    />
+  );
+}
 
 type TransportType = 'stdio' | 'http' | 'sse';
 
@@ -39,19 +75,17 @@ const baseTheme = EditorView.theme({
 
 const APP_ORDER: Array<keyof McpApps> = ['claude', 'codex', 'gemini', 'opencode'];
 
-function summarizeServer(server: McpServer): string {
-  const spec = server.server;
-  const type = (spec.type ?? 'stdio') as string;
-  if (type === 'stdio') {
-    const command = typeof spec.command === 'string' ? spec.command : '';
-    const args = Array.isArray(spec.args) ? spec.args.join(' ') : '';
-    return `${type}: ${[command, args].filter(Boolean).join(' ')}`;
-  }
-  return `${type}: ${typeof spec.url === 'string' ? spec.url : ''}`;
-}
-
 export function McpSettingsPanel() {
-  const { servers, probeStatus, isLoading, fetchServers, probeAll, probeServer, upsertServer, deleteServer, toggleApp, importFromApps } = useMcpStore();
+  const servers = useMcpStore((s) => s.servers);
+  const probeStatus = useMcpStore((s) => s.probeStatus);
+  const isLoading = useMcpStore((s) => s.isLoading);
+  const fetchServers = useMcpStore((s) => s.fetchServers);
+  const probeAll = useMcpStore((s) => s.probeAll);
+  const probeServer = useMcpStore((s) => s.probeServer);
+  const upsertServer = useMcpStore((s) => s.upsertServer);
+  const deleteServer = useMcpStore((s) => s.deleteServer);
+  const toggleApp = useMcpStore((s) => s.toggleApp);
+  const importFromApps = useMcpStore((s) => s.importFromApps);
   const [editing, setEditing] = useState<McpServer | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -71,7 +105,10 @@ export function McpSettingsPanel() {
   const [wizUrl, setWizUrl] = useState('');
   const [wizHeaders, setWizHeaders] = useState('');
 
+  const didFetchRef = useRef(false);
   useEffect(() => {
+    if (didFetchRef.current) return;
+    didFetchRef.current = true;
     fetchServers();
   }, [fetchServers]);
 
@@ -96,6 +133,7 @@ export function McpSettingsPanel() {
     const server: McpServer = {
       id: generateId(),
       name: '',
+      description: '',
       server: defaultServerSpec('stdio'),
       apps: { claude: false, codex: false, gemini: false, opencode: false },
     };
@@ -305,7 +343,7 @@ export function McpSettingsPanel() {
               key={server.id}
               className="flex flex-col gap-2 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
             >
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span
@@ -321,41 +359,46 @@ export function McpSettingsPanel() {
                     <span className="font-medium text-sm truncate">{server.name}</span>
                     {transportBadge(serverType)}
                   </div>
-                  <p className="text-xs text-muted-foreground truncate mt-0.5">
-                    {summarizeServer(server)}
-                  </p>
+                  {server.description && (
+                    <p className="text-xs text-muted-foreground truncate mt-0.5 ml-4">
+                      {server.description}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
                   {APP_ORDER.map((app) => (
                     <button
                       key={app}
                       aria-label={`toggle-${server.id}-${app}`}
+                      title={APP_LABELS[app]}
                       onClick={() => toggleApp(server.id, app, !server.apps[app])}
                       className={cn(
-                        'rounded-md px-2 py-1 text-xs border',
+                        'inline-flex items-center justify-center w-7 h-7 rounded-md border transition-colors',
                         server.apps[app]
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-background text-muted-foreground',
+                          ? 'bg-primary/10 border-primary/30'
+                          : 'bg-background border-transparent opacity-40 hover:opacity-70',
                       )}
                     >
-                      {app}
+                      <AppIcon app={app} size={16} />
                     </button>
                   ))}
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => probeServer(server.id)}>
-                  <RefreshCw className={`h-3 w-3 ${probeStatus[server.id] === 'pending' ? 'animate-spin' : ''}`} />
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => openEdit(server)}>
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => { setDeletingId(server.id); setDeleteConfirm(true); }}
-                  className="text-destructive hover:text-destructive"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                <div className="flex items-center -space-x-1">
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => probeServer(server.id)}>
+                    <RefreshCw className={`h-3 w-3 ${probeStatus[server.id] === 'pending' ? 'animate-spin' : ''}`} />
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(server)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                    onClick={() => { setDeletingId(server.id); setDeleteConfirm(true); }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </div>
             </div>
           );
@@ -380,6 +423,15 @@ export function McpSettingsPanel() {
                 />
               </div>
 
+              <div className="space-y-2">
+                <label className="text-sm font-medium">描述</label>
+                <Input
+                  value={editing.description}
+                  onChange={(e) => setEditing({ ...editing, description: e.target.value })}
+                  placeholder="例如 @upstash/context7-mcp — 文档查询服务"
+                />
+              </div>
+
               <div className="flex items-center justify-between rounded-lg border px-3 py-2">
                 <div className="space-y-0.5">
                   <label className="text-sm font-medium">启用到工具</label>
@@ -387,23 +439,24 @@ export function McpSettingsPanel() {
                     选择哪些工具使用此 MCP server
                   </p>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1.5">
                   {APP_ORDER.map((app) => (
                     <button
                       key={app}
                       aria-label={`toggle-edit-${app}`}
+                      title={APP_LABELS[app]}
                       onClick={() => setEditing({
                         ...editing,
                         apps: { ...editing.apps, [app]: !editing.apps[app] }
                       })}
                       className={cn(
-                        'rounded-md px-2 py-1 text-xs border',
+                        'inline-flex items-center justify-center w-8 h-8 rounded-md border transition-colors',
                         editing.apps[app]
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-background text-muted-foreground',
+                          ? 'bg-primary/10 border-primary/30'
+                          : 'bg-background border-transparent opacity-40 hover:opacity-70',
                       )}
                     >
-                      {app}
+                      <AppIcon app={app} size={20} />
                     </button>
                   ))}
                 </div>

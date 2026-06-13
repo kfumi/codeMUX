@@ -2,6 +2,7 @@ import { createCodexCompatProxyServer, type ProxyServerHandle } from './codexCom
 import { shouldUseCodexChatCompatProxy } from './sessionRuntimeHelpers.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import crypto from 'node:crypto';
 
 type ProxyConfig = {
   apiKey: string;
@@ -20,9 +21,17 @@ const COMPAT_PROXY_BASE_URL = `http://127.0.0.1:${COMPAT_PROXY_PORT}`;
 const COMPAT_PROXY_HEALTH_URL = `${COMPAT_PROXY_BASE_URL}/__codemux_proxy_health`;
 const COMPAT_PROXY_SHUTDOWN_URL = `${COMPAT_PROXY_BASE_URL}/__codemux_proxy_shutdown`;
 
+function createConfigFingerprint(config: ProxyConfig): string {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(config))
+    .digest('hex');
+}
+
 class ProxyManager {
   private proxy: ProxyServerHandle | null = null;
   private config: ProxyConfig | null = null;
+  private ownsProxy = false;
 
   /**
    * Start the compat proxy. If already running with the same config, returns existing port.
@@ -66,6 +75,7 @@ class ProxyManager {
       }
     }
     this.config = newConfig;
+    this.ownsProxy = true;
     const port = this.extractPort(this.proxy.baseUrl);
     process.stderr.write(`[proxy-manager] Proxy started on port ${port}, upstream=${baseUrl}\n`);
     return { port };
@@ -76,13 +86,18 @@ class ProxyManager {
       return;
     }
     try {
-      await this.proxy.close();
-      process.stderr.write('[proxy-manager] Proxy stopped\n');
+      if (this.ownsProxy) {
+        await this.proxy.close();
+        process.stderr.write('[proxy-manager] Proxy stopped\n');
+      } else {
+        process.stderr.write('[proxy-manager] Released reused proxy reference without shutting it down\n');
+      }
     } catch (error) {
       process.stderr.write(`[proxy-manager] Error stopping proxy: ${error}\n`);
     }
     this.proxy = null;
     this.config = null;
+    this.ownsProxy = false;
   }
 
   getStatus(): ProxyStatus {
@@ -110,6 +125,13 @@ class ProxyManager {
         return false;
       }
 
+      const body = await response.json().catch(() => null) as { configFingerprint?: string } | null;
+      const expectedFingerprint = createConfigFingerprint(config);
+      if (body?.configFingerprint !== expectedFingerprint) {
+        process.stderr.write('[proxy-manager] Existing proxy fingerprint mismatch, starting a fresh proxy\n');
+        return false;
+      }
+
       this.proxy = {
         baseUrl: COMPAT_PROXY_BASE_URL,
         close: async () => {
@@ -122,6 +144,7 @@ class ProxyManager {
         },
       };
       this.config = config;
+      this.ownsProxy = false;
       process.stderr.write(`[proxy-manager] Reusing existing proxy on port ${COMPAT_PROXY_PORT}\n`);
       return true;
     } catch {

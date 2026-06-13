@@ -101,11 +101,13 @@ impl McpAdapter for ClaudeAdapter {
 
     fn import_from_tool(&self) -> McpAdapterResult<Vec<(String, serde_json::Value)>> {
         let config = read_claude_json()?;
+        log::info!(target: "mcp_import", "claude: config keys: {:?}", config.as_object().map(|o| o.keys().collect::<Vec<_>>()));
         let mcp_servers = config
             .get("mcpServers")
             .and_then(|v| v.as_object())
             .cloned()
             .unwrap_or_default();
+        log::info!(target: "mcp_import", "claude: found {} mcpServers entries", mcp_servers.len());
 
         let mut result = Vec::new();
         for (name, server_config) in mcp_servers {
@@ -136,6 +138,7 @@ mod tests {
             McpServer {
                 id: "filesystem".into(),
                 name: "filesystem".into(),
+                description: String::new(),
                 server: serde_json::json!({
                     "type": "stdio",
                     "command": "npx",
@@ -146,6 +149,7 @@ mod tests {
             McpServer {
                 id: "context7".into(),
                 name: "context7".into(),
+                description: String::new(),
                 server: serde_json::json!({
                     "type": "http",
                     "url": "https://example.com/mcp",

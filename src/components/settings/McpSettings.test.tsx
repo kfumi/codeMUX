@@ -4,29 +4,33 @@ import { describe, expect, it, vi } from 'vitest';
 
 const toggleApp = vi.fn();
 const importFromApps = vi.fn();
-const fetchServers = vi.fn();
+const fetchServers = vi.fn().mockResolvedValue(undefined);
 const probeServer = vi.fn();
 const probeAll = vi.fn();
 
+const mockState = {
+  servers: [{
+    id: 'fetch',
+    name: 'fetch',
+    description: 'Web fetcher',
+    server: { type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-fetch'] },
+    apps: { claude: true, codex: false, gemini: false, opencode: false },
+  }],
+  probeStatus: { fetch: 'idle' as const },
+  isLoading: false,
+  error: null,
+  fetchServers,
+  upsertServer: vi.fn(),
+  deleteServer: vi.fn(),
+  toggleApp,
+  probeServer,
+  probeAll,
+  importFromApps,
+};
+
 vi.mock('../../stores/mcpStore', () => ({
-  useMcpStore: () => ({
-    servers: [{
-      id: 'fetch',
-      name: 'fetch',
-      server: { type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-fetch'] },
-      apps: { claude: true, codex: false, gemini: false, opencode: false },
-    }],
-    probeStatus: { fetch: 'idle' },
-    isLoading: false,
-    error: null,
-    fetchServers,
-    upsertServer: vi.fn(),
-    deleteServer: vi.fn(),
-    toggleApp,
-    probeServer,
-    probeAll,
-    importFromApps,
-  }),
+  useMcpStore: (selector?: (state: typeof mockState) => unknown) =>
+    selector ? selector(mockState) : mockState,
 }));
 
 vi.mock('sonner', () => ({

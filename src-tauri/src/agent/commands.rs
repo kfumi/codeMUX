@@ -729,12 +729,9 @@ pub async fn ensure_agent_session(
     // If the proxy is already running (e.g. started manually from settings),
     // tell the sidecar to use it directly instead of starting a new one.
     if agent_kind == "codex" {
-        let existing_port = *agent_state.proxy_port.lock().await;
-        if let Some(port) = existing_port {
-            if port > 0 {
-                cmd["proxyBaseUrl"] = serde_json::json!(format!("http://127.0.0.1:{}", port));
-                info!(target: "agent", "Proxy already running on port {}, passing to sidecar", port);
-            }
+        if let Some(port) = get_live_proxy_port(&agent_state).await {
+            cmd["proxyBaseUrl"] = serde_json::json!(format!("http://127.0.0.1:{}", port));
+            info!(target: "agent", "Proxy already running on port {}, passing to sidecar", port);
         }
     }
 
@@ -796,12 +793,9 @@ pub async fn start_agent_session(
     let mut ensure_cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model);
 
     if agent_kind == "codex" {
-        let existing_port = *agent_state.proxy_port.lock().await;
-        if let Some(port) = existing_port {
-            if port > 0 {
-                ensure_cmd["proxyBaseUrl"] = serde_json::json!(format!("http://127.0.0.1:{}", port));
-                info!(target: "agent", "Proxy already running on port {}, passing to sidecar", port);
-            }
+        if let Some(port) = get_live_proxy_port(&agent_state).await {
+            ensure_cmd["proxyBaseUrl"] = serde_json::json!(format!("http://127.0.0.1:{}", port));
+            info!(target: "agent", "Proxy already running on port {}, passing to sidecar", port);
         }
     }
 
@@ -1062,6 +1056,39 @@ fn parse_proxy_port_from_stderr(lines: &[String]) -> Option<u16> {
     None
 }
 
+async fn probe_local_proxy_health(port: u16) -> bool {
+    let url = format!("http://127.0.0.1:{}/__codemux_proxy_health", port);
+    match reqwest::Client::new()
+        .get(url)
+        .timeout(std::time::Duration::from_secs(2))
+        .send()
+        .await
+    {
+        Ok(response) => response.status().is_success(),
+        Err(_) => false,
+    }
+}
+
+async fn get_live_proxy_port(agent_state: &State<'_, AgentState>) -> Option<u16> {
+    let current = *agent_state.proxy_port.lock().await;
+    let Some(port) = current else {
+        return None;
+    };
+
+    if port == 0 {
+        *agent_state.proxy_port.lock().await = None;
+        return None;
+    }
+
+    if probe_local_proxy_health(port).await {
+        return Some(port);
+    }
+
+    warn!(target: "agent", "Cached codex proxy port {} failed health check; clearing stale proxy state", port);
+    *agent_state.proxy_port.lock().await = None;
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::{find_codex_session_jsonl, parse_proxy_port_from_stderr};
@@ -1121,6 +1148,7 @@ mod tests {
             &crate::mcp::types::McpServer {
                 id: "fetch".into(),
                 name: "fetch".into(),
+                description: String::new(),
                 server: serde_json::json!({"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-fetch"]}),
                 apps: crate::mcp::types::McpApps { claude: true, codex: false, gemini: false, opencode: false },
             },
@@ -1132,6 +1160,7 @@ mod tests {
             &crate::mcp::types::McpServer {
                 id: "context7".into(),
                 name: "context7".into(),
+                description: String::new(),
                 server: serde_json::json!({"type":"http","url":"https://mcp.example.com"}),
                 apps: crate::mcp::types::McpApps { claude: false, codex: true, gemini: false, opencode: false },
             },

@@ -8,14 +8,16 @@
 
 - [一、整体架构](#一整体架构)
 - [二、两个关键协议对比](#二两个关键协议对比)
-- [三、路由判断逻辑](#三路由判断逻辑)
+- [三、路由判断与路由表](#三路由判断与路由表)
 - [四、协议转换（Responses ↔ Chat Completions）](#四协议转换responses--chat-completions)
-- [五、国产模型 Reasoning 兼容处理](#五国产模型-reasoning-兼容处理)
-- [六、认证信息注入](#六认证信息注入)
-- [七、URL 构建与请求转发](#七url-构建与请求转发)
-- [八、请求历史恢复（Chat History Store）](#八请求历史恢复chat-history-store)
-- [九、完整请求处理流程](#九完整请求处理流程)
-- [十、接入建议与参考文件清单](#十接入建议与参考文件清单)
+- [五、CodexToolContext 工具类型桥接系统](#五codextoolcontext-工具类型桥接系统)
+- [六、国产模型 Reasoning 兼容处理](#六国产模型-reasoning-兼容处理)
+- [七、认证信息注入](#七认证信息注入)
+- [八、URL 构建与请求转发](#八url-构建与请求转发)
+- [九、请求历史恢复（Chat History Store）](#九请求历史恢复chat-history-store)
+- [十、错误处理与容错机制](#十错误处理与容错机制)
+- [十一、完整请求处理流程](#十一完整请求处理流程)
+- [十二、接入建议与参考文件清单](#十二接入建议与参考文件清单)
 
 ---
 
@@ -35,23 +37,23 @@
 
 | 组件 | 职责 |
 |------|------|
-| **HTTP 代理服务器** | 监听本地端口，接收 Codex SDK 的请求 |
+| **HTTP 代理服务器** | Axum + hyper HTTP/1.1，监听本地端口，`preserve_header_case` 保留原始请求头大小写 |
+| **路由层** | `build_router()` 注册所有 API 端点（Claude/Codex/Gemini/Claude Desktop） |
 | **路由判断层** | 判断上游是否需要 Chat Completions 格式，决定是否转换 |
-| **协议转换层** | Responses API ↔ Chat Completions 的双向转换 |
-| **认证注入层** | 移除占位 Key，注入真实 API Key |
+| **CodexToolContext** | 工具类型桥接系统，处理 function/namespace/custom/tool_search 四种工具类型 |
+| **协议转换层** | Responses API ↔ Chat Completions 的双向转换（含推理内容处理） |
+| **认证注入层** | 移除占位 Key，注入真实 API Key（支持 Bearer/Copilot OAuth/Codex OAuth） |
 | **模型映射层** | 将 Codex 请求中的模型名映射为上游实际模型名 |
-| **历史缓存层** | 缓存 function_call 供后续 `previous_response_id` 引用 |
-| **熔断 / 故障转移** | Provider 不可用时自动切换到备选 |
+| **历史缓存层** | 缓存 function_call / custom_tool_call / tool_search_call 供后续引用 |
+| **熔断 / 故障转移** | Provider 不可用时自动切换到备选，含智能错误分类 |
 
 ---
 
 ## 二、两个关键协议对比
 
-Codex SDK 使用 **OpenAI Responses API**，而绝大多数国产模型只支持 **OpenAI Chat Completions API**。这是路由代理需要解决的核心矛盾。
+Codex SDK 使用 **OpenAI Responses API**，而绝大多数国产模型只支持 **OpenAI Chat Completions API**。
 
 ### 2.1 OpenAI Responses API（Codex 原生协议）
-
-**请求示例：**
 
 ```json
 POST /v1/responses
@@ -62,17 +64,10 @@ POST /v1/responses
     {"role": "user", "content": [{"type": "input_text", "text": "Hello"}]}
   ],
   "tools": [
-    {
-      "type": "function",
-      "name": "read_file",
-      "description": "Read a file",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "path": {"type": "string"}
-        }
-      }
-    }
+    {"type": "function", "name": "read_file", "parameters": {...}},
+    {"type": "namespace", "name": "my_ns", "tools": [...]},
+    {"type": "custom", "name": "my_tool", "input_schema": {...}},
+    {"type": "tool_search", "search_prompt": "find relevant tools"}
   ],
   "stream": true,
   "previous_response_id": "resp_xxx"
@@ -82,20 +77,20 @@ POST /v1/responses
 **流式响应事件类型：**
 
 ```
-event: response.created
-event: response.output_item.added
-event: response.content_part.added
-event: response.output_text.delta          ← 文本增量
-event: response.output_text.done
-event: response.function_call_arguments.delta  ← 工具调用参数增量
-event: response.function_call_arguments.done
-event: response.output_item.done
-event: response.completed                  ← 包含 usage 统计
+response.created
+response.output_item.added
+response.content_part.added
+response.output_text.delta                   ← 文本增量
+response.output_text.done
+response.function_call_arguments.delta       ← 工具调用参数增量
+response.function_call_arguments.done
+response.custom_tool_call_input.delta        ← 自定义工具调用增量（新增）
+response.custom_tool_call_input.done
+response.output_item.done
+response.completed                           ← 包含 usage 统计
 ```
 
 ### 2.2 OpenAI Chat Completions API（国产模型通用协议）
-
-**请求示例：**
 
 ```json
 POST /v1/chat/completions
@@ -106,34 +101,11 @@ POST /v1/chat/completions
     {"role": "user", "content": "Hello"}
   ],
   "tools": [
-    {
-      "type": "function",
-      "function": {
-        "name": "read_file",
-        "description": "Read a file",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "path": {"type": "string"}
-          }
-        }
-      }
-    }
+    {"type": "function", "function": {"name": "read_file", "parameters": {...}}}
   ],
   "stream": true,
   "stream_options": {"include_usage": true}
 }
-```
-
-**流式响应格式：**
-
-```
-data: {"id":"chatcmpl-xxx","choices":[{"delta":{"content":"Hello"},"index":0}]}
-data: {"id":"chatcmpl-xxx","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file","arguments":""}}]},"index":0}]}
-data: {"id":"chatcmpl-xxx","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path"}}]},"index":0}]}
-data: {"id":"chatcmpl-xxx","choices":[{"delta":{},"finish_reason":"tool_calls","index":0}]}
-data: {"id":"chatcmpl-xxx","usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}
-data: [DONE]
 ```
 
 ### 2.3 关键差异对照
@@ -143,22 +115,37 @@ data: [DONE]
 | 端点 | `/v1/responses` | `/v1/chat/completions` |
 | 系统提示 | `instructions` 字段 | `messages[0].role = "system"` |
 | 输入格式 | `input` 数组，item 有 `type` 字段 | `messages` 数组，item 有 `role` 字段 |
-| 工具定义 | `{"type":"function","name":"xxx","parameters":{...}}` | `{"type":"function","function":{"name":"xxx","parameters":{...}}}` |
+| 工具定义 | 4 种类型：function/namespace/custom/tool_search | 仅 function 类型 |
 | 工具调用 | `function_call` output item | `assistant.tool_calls` + `tool` message |
 | 多轮引用 | `previous_response_id` | 完整 `messages` 历史 |
 | 推理内容 | reasoning output item | `reasoning_content` / `reasoning` 字段 |
+| 压缩端点 | `/responses/compact` | 无对应 |
 
 ---
 
-## 三、路由判断逻辑
+## 三、路由判断与路由表
 
-### 3.1 核心判断函数
+### 3.1 完整路由表
+
+代理服务器在 `build_router()` 中注册以下路由：
+
+| 分类 | 路由 | 方法 | 处理器 |
+|------|------|------|--------|
+| 健康检查 | `/health`, `/status` | GET | `health_check`, `get_status` |
+| Claude API | `/v1/messages`, `/claude/v1/messages` | POST | `handle_messages` |
+| Claude Desktop | `/claude-desktop/v1/models` | GET | `handle_claude_desktop_models` |
+| Claude Desktop | `/claude-desktop/v1/messages` | POST | `handle_claude_desktop_messages` |
+| Chat Completions | `/chat/completions`, `/v1/chat/completions`, `/v1/v1/chat/completions`, `/codex/v1/chat/completions` | POST | `handle_chat_completions` |
+| Responses | `/responses`, `/v1/responses`, `/v1/v1/responses`, `/codex/v1/responses` | POST | `handle_responses` |
+| Responses Compact | `/responses/compact`, `/v1/responses/compact`, `/v1/v1/responses/compact`, `/codex/v1/responses/compact` | POST | `handle_responses_compact` |
+| Gemini | `/v1beta/*path`, `/gemini/v1beta/*path`, `/gemini/v1/*path` | ANY | `handle_gemini` |
+
+> **`/v1/v1/...` 双前缀路由**：某些客户端库会在配置的 base_url 上再拼一个 `/v1`，导致实际请求路径变成 `/v1/v1/responses`。
+
+### 3.2 Codex 路由判断逻辑
 
 ```typescript
-function shouldConvertResponsesToChat(
-  provider: Provider,
-  endpoint: string
-): boolean {
+function shouldConvertResponsesToChat(provider: Provider, endpoint: string): boolean {
   // 1. 请求路径是 Responses API 端点
   const path = endpoint.split('?')[0];
   const isResponsesEndpoint = ['/responses', '/v1/responses'].includes(path);
@@ -170,31 +157,14 @@ function shouldConvertResponsesToChat(
 }
 ```
 
-### 3.2 判断上游 API 格式的优先级
+**判断上游 API 格式的优先级：**
 
-```typescript
-function providerUsesChatCompletions(provider: Provider): boolean {
-  // 优先级 1：显式声明 api_format
-  const apiFormat = provider.meta?.api_format
-    ?? provider.settings_config?.api_format
-    ?? provider.settings_config?.apiFormat;
-  if (apiFormat) {
-    return apiFormat === 'openai_chat';
-  }
-
-  // 优先级 2：从 Codex TOML config 中提取 wire_api
-  const wireApi = extractWireApiFromConfig(provider.settings_config?.config);
-  if (wireApi) {
-    return wireApi === 'chat_completions';
-  }
-
-  // 优先级 3：从 base_url 推断
-  const baseUrl = provider.settings_config?.base_url ?? '';
-  return baseUrl.toLowerCase().includes('/chat/completions');
-}
 ```
-
-**建议**：为每个 provider 配置显式的 `api_format` 字段，取值为 `"openai_chat"` 或 `"openai_responses"`，避免依赖 URL 推断导致误判。
+1. provider.meta.api_format 显式声明 → "openai_chat"
+2. settings_config 中的 api_format / apiFormat 字段
+3. 从 Codex TOML config 中提取 wire_api 配置
+4. 从 base_url 推断（URL 含 /chat/completions 则判定为 Chat 模式）
+```
 
 ---
 
@@ -202,93 +172,50 @@ function providerUsesChatCompletions(provider: Provider): boolean {
 
 ### 4.1 请求转换：Responses → Chat Completions
 
-这是将 Codex SDK 发出的 Responses API 请求转换为 Chat Completions 格式的过程。
-
 ```typescript
-function responsesToChatCompletions(body: any, reasoningConfig?: ReasoningConfig): any {
+function responsesToChatCompletions(body: any, toolContext: CodexToolContext): any {
   const result: any = {};
 
-  // ─── 1. model 字段直接透传 ───
+  // 1. model 字段直接透传
   result.model = body.model;
 
-  // ─── 2. instructions → system message ───
+  // 2. instructions → system message
   const messages: any[] = [];
   if (body.instructions) {
-    messages.push({
-      role: 'system',
-      content: extractInstructionText(body.instructions)
-    });
+    messages.push({ role: 'system', content: extractInstructionText(body.instructions) });
   }
 
-  // ─── 3. input 数组 → messages 数组（核心转换）───
-  appendResponsesInputAsChatMessages(body.input, messages);
-  // 转换规则：
-  //   input item {type:"message", role:"user", content:[{type:"input_text", text:"..."}]}
-  //     → {role: "user", content: "..."}
-  //   input item {type:"message", role:"assistant", content:[{type:"output_text", text:"..."}]}
-  //     → {role: "assistant", content: "..."}
-  //   input item {type:"function_call", call_id:"call_1", name:"read_file", arguments:"{...}"}
-  //     → assistant message 中的 tool_calls
-  //   input item {type:"function_call_output", call_id:"call_1", output:"..."}
-  //     → {role: "tool", tool_call_id: "call_1", content: "..."}
-
-  // 合并连续的 system messages 到消息头部
+  // 3. input 数组 → messages 数组（核心转换）
+  //    - user/content → user message
+  //    - assistant output → assistant message（含 tool_calls）
+  //    - function_call_output → tool message
+  //    - custom_tool_call_output → tool message
+  //    - tool_search_output → 动态工具加载（追加到 toolContext）
+  appendResponsesInputAsChatMessages(body.input, &mut messages);
   result.messages = collapseSystemMessagesToHead(messages);
 
-  // ─── 4. max_output_tokens → max_tokens / max_completion_tokens ───
-  const model = body.model ?? '';
-  if (body.max_output_tokens) {
-    if (isOpenAIOSeries(model)) {
-      result.max_completion_tokens = body.max_output_tokens;
-    } else {
-      result.max_tokens = body.max_output_tokens;
-    }
+  // 4. max_output_tokens → max_tokens / max_completion_tokens
+  if (isOpenAIOSeries(model)) {
+    result.max_completion_tokens = body.max_output_tokens;
+  } else {
+    result.max_tokens = body.max_output_tokens;
   }
 
-  // ─── 5. 基础参数透传 ───
-  for (const key of ['temperature', 'top_p', 'stream']) {
-    if (body[key] !== undefined) {
-      result[key] = body[key];
-    }
-  }
-
-  // ─── 6. 推理参数处理（见第五节）───
+  // 5. 推理参数处理（见第六节）
   applyReasoningOptions(result, body, model, reasoningConfig);
 
-  // ─── 7. tools 转换 ───
-  //   Responses: {type:"function", name:"xxx", parameters:{...}, description:"..."}
-  //   Chat:      {type:"function", function:{name:"xxx", parameters:{...}, description:"..."}}
-  if (body.tools?.length) {
-    result.tools = body.tools
-      .map(responseToolToChatTool)
-      .filter(Boolean);
+  // 6. tools 转换（通过 CodexToolContext 处理 4 种工具类型）
+  result.tools = toolContext.chatTools();  // 见第五节
+
+  // 7. 空工具数组保护：tools 为空时移除 tool_choice 和 parallel_tool_calls
+  if (!result.tools?.length) {
+    delete result.tool_choice;
+    delete result.parallel_tool_calls;
   }
 
-  // ─── 8. tool_choice 转换 ───
-  if (body.tool_choice) {
-    result.tool_choice = responsesToolChoiceToChat(body.tool_choice);
-    // Responses: {type: "function", name: "xxx"} 或 "auto" / "required"
-    // Chat:      "auto" / "required" / {"type":"function","function":{"name":"xxx"}}
-  }
-
-  // ─── 9. 流式请求必须注入 stream_options ───
-  //    不注入的话，很多国产模型的流式响应不返回 usage 统计
+  // 8. 流式请求注入 stream_options
   if (result.stream) {
-    result.stream_options = {
-      ...(result.stream_options ?? {}),
-      include_usage: true
-    };
-  }
-
-  // ─── 10. 额外透传字段 ───
-  for (const key of [
-    'frequency_penalty', 'logit_bias', 'logprobs', 'metadata',
-    'n', 'parallel_tool_calls', 'presence_penalty', 'response_format',
-    'seed', 'service_tier', 'stop', 'stream_options', 'top_logprobs', 'user'
-  ]) {
-    if (body[key] !== undefined) {
-      result[key] = body[key];
-    }
+    result.stream_options = { include_usage: true };
   }
 
   return result;
@@ -297,168 +224,161 @@ function responsesToChatCompletions(body: any, reasoningConfig?: ReasoningConfig
 
 ### 4.2 流式响应转换：Chat SSE → Responses SSE
 
-这是一个**有状态**的流转换器，逐 chunk 将 Chat Completions SSE 事件转换为 Responses API SSE 事件。
-
-#### 状态机定义
+有状态流转换器，核心状态机新增了 `tool_context` 字段：
 
 ```typescript
 interface ChatToResponsesState {
   responseStarted: boolean;
   completed: boolean;
-  responseId: string;
+  responseId: string;        // 默认 "resp_ccswitch"
   model: string;
-  createdAt: number;
   nextOutputIndex: number;
 
-  // 文本输出状态
-  text: {
-    outputIndex: number | null;
-    itemId: string;
-    text: string;
-    added: boolean;   // 是否已 emit output_item.added
-    done: boolean;
-  };
+  text: TextItemState;            // 文本输出
+  reasoning: ReasoningItemState;  // 推理内容
+  inlineThink: InlineThinkState;  // 内联 <think> 标签检测
 
-  // 推理内容状态
-  reasoning: {
-    outputIndex: number | null;
-    itemId: string;
-    text: string;
-    added: boolean;
-    done: boolean;
-  };
+  tools: Map<number, ToolCallState>;  // 工具调用（按 index 索引）
+  latestUsage: any;
+  finishReason: string;
 
-  // 内联 think 标签检测（处理 Qwen 等模型在 content 中塞 <think> 标签的情况）
-  inlineThink: {
-    mode: 'detecting' | 'reasoning' | 'text';
-    buffer: string;
-  };
-
-  // 工具调用状态（按 tool_call index 索引）
-  tools: Map<number, {
-    outputIndex: number | null;
-    itemId: string;
-    callId: string;
-    name: string;
-    arguments: string;     // 累积的参数 JSON 字符串
-    reasoningContent: string;
-    added: boolean;
-    done: boolean;
-  }>;
-
-  latestUsage: any | null;
-  finishReason: string | null;
+  toolContext: CodexToolContext;  // ★ 工具名称映射上下文
 }
 ```
 
-#### 转换逻辑
+**转换逻辑：**
 
 ```
-收到 Chat Completions SSE chunk
+Chat Completions SSE chunk
   │
-  ├─ delta.content 存在
-  │   ├─ 检测 <think> 标签（Qwen 等内联推理格式）
-  │   │   ├─ <think> 开始 → 切换到 reasoning 模式，emit reasoning item
-  │   │   ├─  内容 → response.output_text.delta (reasoning item)
-  │   │   └─  结束 → 切换到 text 模式
-  │   └─ 普通文本 → response.output_text.delta (text item)
+  ├─ delta.content
+  │   ├─ 检测 <think> 标签 → reasoning item（Qwen 等内联推理）
+  │   └─ 普通文本 → response.output_text.delta
   │
-  ├─ delta.reasoning_content 存在（DeepSeek/Kimi/MiniMax 等）
-  │   └─ → response.output_text.delta (reasoning item)
+  ├─ delta.reasoning_content → reasoning item（DeepSeek/Kimi/MiniMax 等）
   │
-  ├─ delta.tool_calls 存在
-  │   ├─ 新 tool_call (有 id 和 name)
-  │   │   └─ 初始化工具调用状态，emit response.output_item.added
-  │   ├─ 工具参数增量 (function.arguments)
-  │   │   └─ 累积到 state.tools[index].arguments
-  │   │       → response.function_call_arguments.delta
-  │   └─ 工具调用完成
-  │       └─ emit response.function_call_arguments.done
-  │           + response.output_item.done
+  ├─ delta.tool_calls
+  │   ├─ 新 tool_call → 根据 toolContext 判断类型
+  │   │   ├─ function → response.function_call_arguments.delta
+  │   │   └─ custom   → response.custom_tool_call_input.delta ★新增
+  │   └─ 参数累积 → 完成后 emit done 事件
   │
-  ├─ finish_reason 存在
-  │   └─ emit response.output_item.done (text/reasoning)
-  │       + response.completed
+  ├─ finish_reason → response.output_item.done + response.completed
   │
-  └─ usage chunk（最后到达）
-      └─ 更新 response.completed 中的 usage 字段
-```
-
-#### 关键转换示例
-
-**文本输出：**
-
-```
-Chat:     data: {"choices":[{"delta":{"content":"Hello world"}}]}
-  ↓
-Responses:
-  event: response.output_item.added      ← 首次出现时触发
-  data: {"type":"message","id":"msg_xxx","role":"assistant","content":[]}
-
-  event: response.content_part.added
-  data: {"type":"output_text","text":""}
-
-  event: response.output_text.delta
-  data: {"type":"output_text_delta","delta":"Hello world"}
-```
-
-**工具调用：**
-
-```
-Chat:     data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file","arguments":""}}]}}]}
-Chat:     data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":"}}]}}]}
-Chat:     data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"/tmp/test.txt\"}"}}]}}]}
-  ↓
-Responses:
-  event: response.output_item.added
-  data: {"type":"function_call","id":"fc_xxx","call_id":"call_1","name":"read_file","arguments":""}
-
-  event: response.function_call_arguments.delta
-  data: {"type":"function_call_arguments_delta","delta":"{\"path\":"}
-
-  event: response.function_call_arguments.delta
-  data: {"type":"function_call_arguments_delta","delta":"\"/tmp/test.txt\"}"}
-
-  event: response.function_call_arguments.done
-  data: {"type":"function_call_arguments","arguments":"{\"path\":\"/tmp/test.txt\"}"}
-
-  event: response.output_item.done
-  data: {"type":"function_call","id":"fc_xxx","call_id":"call_1","name":"read_file","arguments":"{\"path\":\"/tmp/test.txt\"}"}
-```
-
-**推理内容（reasoning_content 字段）：**
-
-```
-Chat:     data: {"choices":[{"delta":{"reasoning_content":"Let me think..."}}]}
-  ↓
-Responses:
-  event: response.output_item.added
-  data: {"type":"reasoning","id":"reasoning_xxx","summary":[]}
-
-  event: response.output_text.delta
-  data: {"type":"reasoning_text_delta","delta":"Let me think..."}
-
-  event: response.output_text.done
-  data: {"type":"reasoning_text","text":"Let me think..."}
-```
-
-**内联 <think> 标签（Qwen 等模型）：**
-
-```
-Chat:     data: {"choices":[{"delta":{"content":"<think>\nLet me analyze...\n</think>\nHere is the answer"}}]}
-  ↓
-Responses: 拆分为两部分
-  先输出 reasoning item: "Let me analyze..."
-  再输出 text item: "Here is the answer"
+  └─ usage chunk → 更新 response.completed 中的 usage
 ```
 
 ---
 
-## 五、国产模型 Reasoning 兼容处理
+## 五、CodexToolContext 工具类型桥接系统
 
-这是接入国产模型最容易踩坑的地方。**每个模型族的推理参数完全不同**。
+### 5.1 问题
 
-### 5.1 各模型推理参数对照表
+Codex Responses API 支持 4 种工具类型，但 Chat Completions API 只支持 function 类型。需要一个桥接层将所有工具类型统一转换为 function，并在响应中恢复原始类型。
+
+### 5.2 四种工具类型
+
+| Codex 工具类型 | 说明 | 转换策略 |
+|---------------|------|---------|
+| `function` | 标准函数工具 | 直接映射为 Chat function |
+| `namespace` | 命名空间，包含子工具 | 展开为 `namespace__toolname` 格式的独立 function |
+| `custom` | 自定义工具（非函数调用） | 转换为 function，参数为 `input: string` |
+| `tool_search` | 动态工具搜索 | 生成代理 function `tool_search`，运行时加载工具 |
+
+### 5.3 核心数据结构
+
+```rust
+enum CodexToolKind { Function, Namespace, Custom, ToolSearch }
+
+struct CodexToolSpec {
+    kind: CodexToolKind,
+    name: String,
+    namespace: Option<String>,
+}
+
+struct CodexToolContext {
+    // 转换后的 Chat 格式工具列表
+    chat_tools: Vec<Value>,
+    // Chat 工具名 → 原始 Codex 工具规格（用于响应回写）
+    chat_name_to_spec: HashMap<String, CodexToolSpec>,
+    // (namespace, tool_name) → Chat 平展名
+    namespace_name_to_chat_name: HashMap<(String, String), String>,
+}
+```
+
+### 5.4 转换规则
+
+```typescript
+function buildCodexToolContext(tools: any[]): CodexToolContext {
+  const ctx = new CodexToolContext();
+
+  for (const tool of tools) {
+    switch (tool.type) {
+      case "function":
+        // 直接映射，保留 name/parameters/description
+        ctx.addChatTool(tool.name, {
+          type: "function",
+          function: { name: tool.name, parameters: tool.parameters, description: tool.description }
+        }, { kind: "Function", name: tool.name });
+        break;
+
+      case "namespace":
+        // 展开子工具为平展名称
+        for (const sub of tool.tools) {
+          const flatName = `${tool.name}__${sub.name}`;  // namespace__toolname
+          // 超过 64 字符时用 SHA-256 截断
+          const chatName = flatName.length > 64
+            ? sha256(flatName).slice(0, 64)
+            : flatName;
+          ctx.addChatTool(chatName, {
+            type: "function",
+            function: { name: chatName, parameters: sub.parameters }
+          }, { kind: "Namespace", name: sub.name, namespace: tool.name });
+        }
+        break;
+
+      case "custom":
+        // 转换为 function，参数为 input 字符串
+        ctx.addChatTool(tool.name, {
+          type: "function",
+          function: {
+            name: tool.name,
+            parameters: { type: "object", properties: { input: { type: "string" } } }
+          }
+        }, { kind: "Custom", name: tool.name });
+        break;
+
+      case "tool_search":
+        // 生成代理 function
+        ctx.addChatTool("tool_search", {
+          type: "function",
+          function: {
+            name: "tool_search",
+            parameters: { type: "object", properties: { query: { type: "string" } } }
+          }
+        }, { kind: "ToolSearch", name: "tool_search" });
+        break;
+    }
+  }
+
+  return ctx;
+}
+```
+
+### 5.5 响应中的工具名恢复
+
+流式转换器使用 `toolContext.lookupChatName(chatName)` 将 Chat 格式的工具名恢复为原始 Codex 工具名和类型：
+
+- **function** → emit `response.function_call_arguments.delta/done`
+- **custom** → emit `response.custom_tool_call_input.delta/done` ★新增
+- **namespace 子工具** → emit `response.function_call_arguments.delta/done`（恢复原始子工具名）
+- **tool_search** → emit `response.function_call_arguments.delta/done`
+
+---
+
+## 六、国产模型 Reasoning 兼容处理
+
+### 6.1 各模型推理参数对照表
 
 | 模型 | thinking 参数 | effort 参数 | 输出中的推理字段 |
 |------|--------------|------------|----------------|
@@ -471,617 +391,378 @@ Responses: 拆分为两部分
 | **阶跃 StepFun** | ❌ 无显式参数 | `reasoning_effort` (low/high) | `reasoning` |
 | **OpenAI o-series** | ❌ 自动启用 | `reasoning_effort` (low/medium/high) | `reasoning` (Responses) |
 
-### 5.2 推理配置数据结构
+### 6.2 StepFun 特殊处理（新增）
+
+```typescript
+// StepFun: 仅 step-3.5-flash-2603 支持 reasoning effort（low/high 两档）
+if (haystack.includes("stepfun") || haystack.includes("step-3.5-flash-2603")) {
+  return {
+    supports_thinking: true,
+    supports_effort: model.includes("2603"),  // 仅 2603 版本支持
+    thinking_param: "none",                    // 无需显式参数
+    effort_param: "reasoning_effort",
+    effort_value_mode: "low_high",             // 仅 low/high 两档
+    output_format: "reasoning",
+  };
+}
+```
+
+### 6.3 推理配置数据结构
 
 ```typescript
 interface ReasoningConfig {
   supports_thinking: boolean;   // 是否支持推理模式
   supports_effort: boolean;     // 是否支持 effort 控制
-  thinking_param: string;       // 启用推理的参数名
-                                //   "thinking" → {thinking: {type: "enabled"}}
-                                //   "enable_thinking" → {enable_thinking: true}
-                                //   "reasoning_split" → {reasoning_split: true}
-                                //   "none" → 无需显式参数
-  effort_param: string;         // effort 参数名（"reasoning_effort" / "none"）
-  effort_value_mode: string;    // effort 值映射模式
-                                //   "deepseek" → low/medium/high 直传
-                                //   "low_high" → 仅支持 low/high 两档
-  output_format: string;        // 响应中推理内容的字段名
-                                //   "reasoning_content" → delta.reasoning_content
-                                //   "reasoning" → delta.reasoning
-                                //   "reasoning_details" → delta.reasoning_details
+  thinking_param: string;       // "thinking" / "enable_thinking" / "reasoning_split" / "none"
+  effort_param: string;         // "reasoning_effort" / "none"
+  effort_value_mode: string;    // "deepseek" (low/med/high) / "low_high" (仅两档)
+  output_format: string;        // "reasoning_content" / "reasoning" / "reasoning_details"
 }
 ```
 
-### 5.3 推理配置推断逻辑
+### 6.4 推理配置推断逻辑
 
 ```typescript
-function inferReasoningConfig(
-  model: string,
-  baseUrl: string,
-  providerName: string
-): ReasoningConfig | null {
+function inferReasoningConfig(model: string, baseUrl: string, providerName: string): ReasoningConfig | null {
   const haystack = `${providerName} ${baseUrl} ${model}`.toLowerCase();
 
   // ── 平台优先：聚合平台的推理接口由平台框架决定 ──
-  //    同一模型在不同平台参数可能完全不同，必须先按平台判定
   const platformConfig = inferAggregatorPlatformConfig(providerName, baseUrl);
   if (platformConfig) return platformConfig;
 
   // ── 模型厂商判定 ──
-  if (haystack.includes('deepseek')) {
-    return {
-      supports_thinking: true,
-      supports_effort: true,
-      thinking_param: 'thinking',
-      effort_param: 'reasoning_effort',
-      effort_value_mode: 'deepseek',
-      output_format: 'reasoning_content',
-    };
-  }
-
-  if (haystack.includes('kimi') || haystack.includes('moonshot')) {
-    return {
-      supports_thinking: true,
-      supports_effort: false,
-      thinking_param: 'thinking',
-      effort_param: 'none',
-      effort_value_mode: '',
-      output_format: 'reasoning_content',
-    };
-  }
-
-  if (haystack.includes('qwen') || haystack.includes('dashscope')) {
-    return {
-      supports_thinking: true,
-      supports_effort: false,
-      thinking_param: 'enable_thinking',
-      effort_param: 'none',
-      effort_value_mode: '',
-      output_format: 'reasoning_content',
-    };
-  }
-
-  if (haystack.includes('glm') || haystack.includes('zhipu')) {
-    return {
-      supports_thinking: true,
-      supports_effort: false,
-      thinking_param: 'thinking',
-      effort_param: 'none',
-      effort_value_mode: '',
-      output_format: 'reasoning_content',
-    };
-  }
-
-  if (haystack.includes('minimax')) {
-    return {
-      supports_thinking: true,
-      supports_effort: false,
-      thinking_param: 'reasoning_split',
-      effort_param: 'none',
-      effort_value_mode: '',
-      output_format: 'reasoning_details',
-    };
-  }
-
-  if (haystack.includes('mimo')) {
-    return {
-      supports_thinking: true,
-      supports_effort: false,
-      thinking_param: 'thinking',
-      effort_param: 'none',
-      effort_value_mode: '',
-      output_format: 'reasoning_content',
-    };
-  }
-
-  if (haystack.includes('stepfun') || haystack.includes('step-3.5-flash-2603')) {
-    return {
-      supports_thinking: true,
-      supports_effort: model.includes('2603'),
-      thinking_param: 'none',
-      effort_param: 'reasoning_effort',
-      effort_value_mode: 'low_high',
-      output_format: 'reasoning',
-    };
-  }
+  if (haystack.includes("deepseek")) return DEEPSEEK_CONFIG;
+  if (haystack.includes("stepfun") || haystack.includes("step-3.5-flash-2603")) return STEPFUN_CONFIG;
+  if (haystack.includes("kimi") || haystack.includes("moonshot")) return KIMI_CONFIG;
+  if (haystack.includes("glm") || haystack.includes("zhipu") || haystack.includes("z.ai")) return GLM_CONFIG;
+  if (haystack.includes("qwen") || haystack.includes("dashscope") || haystack.includes("bailian")) return QWEN_CONFIG;
+  if (haystack.includes("minimax")) return MINIMAX_CONFIG;
+  if (haystack.includes("mimo")) return MIMO_CONFIG;
 
   return null;
 }
 ```
 
-### 5.4 将推理配置应用到请求体
+### 6.5 聚合平台特殊处理
 
-```typescript
-function applyReasoningOptions(
-  result: any,          // 目标 Chat 请求体
-  body: any,            // 原始 Responses 请求体
-  model: string,
-  config?: ReasoningConfig
-): void {
-  if (!config) {
-    // 无推理配置：仅对 OpenAI o-series 透传 effort
-    if (supportsReasoningEffort(model)) {
-      const effort = body.reasoning?.effort;
-      if (effort) result.reasoning_effort = effort;
-    }
-    return;
-  }
+同一模型在不同平台参数可能完全不同，必须优先按平台标识判定：
 
-  // 1. 注入 thinking 参数
-  switch (config.thinking_param) {
-    case 'thinking':
-      result.thinking = { type: 'enabled' };
-      break;
-    case 'enable_thinking':
-      result.enable_thinking = true;
-      break;
-    case 'reasoning_split':
-      result.reasoning_split = true;
-      break;
-    case 'none':
-    default:
-      // 不需要显式参数
-      break;
-  }
-
-  // 2. 注入 effort 参数（如果上游支持）
-  if (config.supports_effort && config.effort_param !== 'none') {
-    const effort = body.reasoning?.effort ?? 'medium'; // 默认 medium
-    switch (config.effort_value_mode) {
-      case 'deepseek':
-        result[config.effort_param] = effort; // low/medium/high 直传
-        break;
-      case 'low_high':
-        result[config.effort_param] = effort === 'high' ? 'high' : 'low';
-        break;
-      default:
-        result[config.effort_param] = effort;
-    }
-  }
-}
-```
-
-### 5.5 聚合平台特殊处理
-
-**问题**：同一个模型在不同平台参数可能完全不同。
-
-| 模型 | 官方平台 | SiliconFlow | OpenRouter |
-|------|---------|-------------|------------|
-| DeepSeek | `thinking: {type:"enabled"}` | `enable_thinking: true` | `reasoning: {effort:"medium"}` |
-
-**解决**：优先按平台标识（`base_url` / `provider_name`）判定，不掺入模型名。
-
-```typescript
-function inferAggregatorPlatformConfig(
-  name: string,
-  baseUrl: string
-): ReasoningConfig | null {
-  const identifier = `${name} ${baseUrl}`.toLowerCase();
-
-  // SiliconFlow 平台
-  if (identifier.includes('siliconflow') || identifier.includes('siliconflow.cn')) {
-    return {
-      supports_thinking: true,
-      supports_effort: false,
-      thinking_param: 'enable_thinking',
-      effort_param: 'none',
-      effort_value_mode: '',
-      output_format: 'reasoning_content',
-    };
-  }
-
-  // OpenRouter 平台
-  if (identifier.includes('openrouter')) {
-    return {
-      supports_thinking: true,
-      supports_effort: true,
-      thinking_param: 'none',
-      effort_param: 'reasoning',
-      effort_value_mode: 'openrouter',
-      output_format: 'reasoning',
-    };
-  }
-
-  // NewAPI / One API 等自部署网关（通常透传模型原生参数）
-  // 此处返回 null，回退到模型名推断
-  return null;
-}
-```
+| 平台 | 特征 | thinking 参数 |
+|------|------|--------------|
+| **SiliconFlow** | `siliconflow` / `siliconflow.cn` | `enable_thinking: true` |
+| **OpenRouter** | `openrouter` | `reasoning: {effort: "medium"}` |
+| NewAPI / One API | 自部署网关 | 回退到模型名推断 |
 
 ---
 
-## 六、认证信息注入
+## 七、认证信息注入
 
-### 6.1 认证策略
+### 7.1 认证策略
 
-```typescript
-enum AuthStrategy {
-  Bearer,           // Authorization: Bearer <key>（国产模型通用）
-  XApiKey,          // x-api-key: <key>（Anthropic 原生）
-  GoogleOAuth,      // OAuth access_token
-  GitHubCopilot,    // Copilot token（动态获取）
-  CodexOAuth,       // ChatGPT Plus OAuth（动态获取）
-}
-```
+| 策略 | 头部格式 | 适用场景 |
+|------|---------|---------|
+| `Bearer` | `Authorization: Bearer <key>` | 国产模型通用 |
+| `XApiKey` | `x-api-key: <key>` | Anthropic 原生 |
+| `GitHubCopilot` | `Authorization: Bearer <copilot-token>` | 动态获取 Copilot token |
+| `CodexOAuth` | `Authorization: Bearer <access_token>` | ChatGPT Plus OAuth |
 
-### 6.2 认证头替换流程
+### 7.2 认证头替换流程
 
 ```typescript
-async function injectAuth(
-  requestHeaders: Headers,
-  provider: Provider
-): Promise<Headers> {
+async function injectAuth(headers: Headers, provider: Provider): Promise<Headers> {
   // 1. 从 Provider 配置提取真实 API Key
   const auth = extractAuth(provider);
-  // → { api_key: "sk-xxx", strategy: AuthStrategy.Bearer }
 
-  // 2. 动态 token 刷新（如果需要）
-  if (auth.strategy === AuthStrategy.GitHubCopilot) {
-    auth.api_key = await copilotAuthManager.getValidToken();
+  // 2. 动态 token 刷新
+  if (auth.strategy === "GitHubCopilot") {
+    auth.apiKey = await copilotAuthManager.getValidToken(accountId);
+  }
+  if (auth.strategy === "CodexOAuth") {
+    auth.apiKey = await codexOAuthManager.getAccessToken();
+    headers.set("ChatGPT-Account-Id", accountId);
   }
 
-  // 3. 移除客户端发来的占位认证头
-  requestHeaders.delete('authorization');
-  requestHeaders.delete('x-api-key');
-  requestHeaders.delete('anthropic-version');
-
-  // 4. 注入真实认证头
-  switch (auth.strategy) {
-    case AuthStrategy.Bearer:
-      requestHeaders.set('Authorization', `Bearer ${auth.api_key}`);
-      break;
-    case AuthStrategy.XApiKey:
-      requestHeaders.set('x-api-key', auth.api_key);
-      break;
-    // ...
-  }
-
-  return requestHeaders;
+  // 3. 移除客户端占位头 → 注入真实头
+  headers.delete("authorization");
+  headers.set("Authorization", `Bearer ${auth.apiKey}`);
+  return headers;
 }
 ```
 
-### 6.3 Provider 配置中的 API Key 存储
+### 7.3 Codex OAuth 特殊处理（新增）
+
+Codex OAuth 需要额外注入会话头：
 
 ```typescript
-interface ProviderSettingsConfig {
-  // 方式一：直接字段
-  base_url?: string;
-  api_key?: string;
-
-  // 方式二：Codex TOML config（兼容 Codex CLI 的 config.toml）
-  config?: string;  // TOML 格式的配置字符串
-  auth?: {
-    OPENAI_API_KEY?: string;
-  };
-
-  // 方式三：环境变量风格
-  env?: {
-    OPENAI_API_KEY?: string;
-    ANTHROPIC_API_KEY?: string;
-  };
-}
+// Codex OAuth 额外头部
+headers.set("ChatGPT-Account-Id", accountId);
+headers.set("session_id", sessionId);
+headers.set("x-client-request-id", generateUUID());
+headers.set("x-codex-window-id", windowId);
 ```
 
 ---
 
-## 七、URL 构建与请求转发
+## 八、URL 构建与请求转发
 
-### 7.1 URL 构建
+### 8.1 URL 构建
 
 ```typescript
-function buildUpstreamUrl(
-  provider: Provider,
-  endpoint: string,
-  needsChatConversion: boolean
-): string {
+function buildUpstreamUrl(provider: Provider, endpoint: string, needsChatConversion: boolean): string {
   const baseUrl = extractBaseUrl(provider).replace(/\/+$/, '');
-
-  // 如果 base_url 本身已包含完整端点（如 https://api.example.com/v1/chat/completions）
   const isFullUrl = provider.meta?.is_full_url ?? false;
-  if (isFullUrl) {
-    return baseUrl;
-  }
 
-  // 上游是 Chat Completions 且 base_url 已以 /chat/completions 结尾
-  if (needsChatConversion && baseUrl.toLowerCase().endsWith('/chat/completions')) {
-    return baseUrl;
-  }
+  // base_url 已是完整端点 → 直接使用
+  if (isFullUrl) return baseUrl;
 
-  // 上游是 Chat Completions：改写 endpoint
-  const effectiveEndpoint = needsChatConversion
-    ? '/v1/chat/completions'
-    : endpoint;
+  // base_url 已以 /chat/completions 结尾 → 直接使用
+  if (needsChatConversion && baseUrl.toLowerCase().endsWith('/chat/completions')) return baseUrl;
 
+  // 正常拼接
+  const effectiveEndpoint = needsChatConversion ? '/v1/chat/completions' : endpoint;
   return `${baseUrl}${effectiveEndpoint}`;
 }
 ```
 
-### 7.2 请求转发
+### 8.2 请求转发流程
 
 ```typescript
-async function forwardRequest(
-  url: string,
-  method: string,
-  headers: Headers,
-  body: any,
-  isStreaming: boolean,
-  timeoutSeconds: number
-): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    timeoutSeconds * 1000
-  );
+async function forward(appType, method, provider, endpoint, body, headers, providers) {
+  // 1. 获取适配器
+  const adapter = getAdapter(appType);
 
-  try {
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    return response;
-  } finally {
-    clearTimeout(timeout);
+  // 2. 提取 base_url
+  let baseUrl = adapter.extractBaseUrl(provider);
+
+  // 3. 模型映射
+  let mappedBody = applyModelMapping(body, provider);
+
+  // 4. 判断是否需要协议转换
+  const needsConvert = shouldConvertResponsesToChat(provider, endpoint);
+
+  // 5. 构建请求体
+  let requestBody;
+  if (needsConvert) {
+    // 补全 function_call 历史
+    codexChatHistory.enrichRequest(mappedBody);
+    // 替换模型名
+    applyCodexChatUpstreamModel(provider, mappedBody);
+    // 推理配置
+    const reasoningConfig = resolveCodexChatReasoningConfig(provider, mappedBody);
+    // 构建工具上下文
+    const toolContext = buildCodexToolContextFromRequest(mappedBody);
+    // 转换
+    requestBody = responsesToChatCompletionsWithReasoning(mappedBody, reasoningConfig, toolContext);
+  } else {
+    requestBody = mappedBody;
   }
+
+  // 6. 构建 URL + 注入认证 + 转发
+  const url = buildUpstreamUrl(provider, endpoint, needsConvert);
+  const authHeaders = injectAuth(headers, provider);
+  return await httpClient.post(url, requestBody, authHeaders);
 }
 ```
 
-### 7.3 超时与错误处理
+### 8.3 超时设置
 
-| 场景 | 超时设置 | 处理方式 |
-|------|---------|---------|
+| 场景 | 超时 | 处理 |
+|------|------|------|
 | 非流式请求 | 120s | 等待完整响应 |
 | 流式请求首字节 | 60s | 等待第一个 SSE chunk |
-| 流式请求静默期 | 120s | chunk 间隔超时 |
-| 上游 5xx 错误 | — | 故障转移到下一个 provider |
-| 上游 4xx 错误 | — | 直接返回客户端（客户端问题） |
-| 网络超时 | — | 故障转移到下一个 provider |
+| 上游 5xx / 超时 | — | 故障转移到下一个 provider |
+| 上游 4xx（客户端错误） | — | 直接返回，不污染熔断器 |
 
 ---
 
-## 八、请求历史恢复（Chat History Store）
+## 九、请求历史恢复（Chat History Store）
 
-### 8.1 问题描述
+### 9.1 问题
 
-Codex SDK 使用 `previous_response_id` 引用上一轮的 function call 结果：
+Codex SDK 使用 `previous_response_id` 引用上一轮的工具调用结果。Chat Completions 协议没有 response ID，需要恢复完整的 assistant message（含 tool_calls）。
 
-```json
-{
-  "previous_response_id": "resp_abc123",
-  "input": [
-    {"type": "function_call_output", "call_id": "call_456", "output": "file content..."}
-  ]
-}
-```
+### 9.2 扩展的工具类型支持（新增）
 
-但 Chat Completions 协议没有 response ID 概念，需要恢复完整的 assistant message（含 tool_calls）才能构建合法的 messages 数组：
+历史缓存现在支持 3 种工具调用类型：
 
-```json
-// 需要恢复出的 messages 序列：
-[
-  {"role": "assistant", "tool_calls": [{"id": "call_456", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\":\"/tmp/test.txt\"}"}}]},
-  {"role": "tool", "tool_call_id": "call_456", "content": "file content..."}
-]
-```
+| 工具类型 | 调用 item type | 输出 item type |
+|---------|---------------|---------------|
+| function | `function_call` | `function_call_output` |
+| custom | `custom_tool_call` | `custom_tool_call_output` |
+| tool_search | `tool_search_call` | `tool_search_output` |
 
-### 8.2 数据结构
+### 9.3 数据结构
 
 ```typescript
-interface CachedResponse {
-  // call_id → 该 function_call 的完整数据
-  callsById: Map<string, {
-    callId: string;
-    name: string;
-    arguments: string;
-    reasoningContent?: string;
-  }>;
-  callOrder: string[];  // 保持原始顺序
-}
-
 class ChatHistoryStore {
-  // response_id → 该 response 中所有 function_call 的缓存
+  // response_id → 该 response 中所有工具调用的缓存
   private responses: Map<string, CachedResponse> = new Map();
-  // call_id → response_id 反向索引（用于 fallback 查找）
+  // call_id → response_id 反向索引（fallback 查找）
   private callIndex: Map<string, string[]> = new Map();
-  // LRU 淘汰
-  private responseOrder: string[] = [];
   private maxCached = 512;
 }
 ```
 
-### 8.3 核心操作
+### 9.4 核心操作
 
 ```typescript
 class ChatHistoryStore {
-
-  // ── 记录：每次收到上游 Responses 响应后调用 ──
+  // ── 记录：每次收到上游响应后调用 ──
   recordResponse(responseId: string, output: any[]): void {
-    const calls = output
-      .filter(item => item.type === 'function_call')
-      .map(item => ({
-        callId: item.call_id,
-        name: item.name,
-        arguments: item.arguments,
-        reasoningContent: item.reasoning_content,
-      }));
-
-    if (calls.length === 0) return;
-
-    const cached: CachedResponse = { callsById: new Map(), callOrder: [] };
-    for (const call of calls) {
-      cached.callsById.set(call.callId, call);
-      cached.callOrder.push(call.callId);
-
-      // 反向索引
-      if (!this.callIndex.has(call.callId)) {
-        this.callIndex.set(call.callId, []);
-      }
-      this.callIndex.get(call.callId)!.push(responseId);
-    }
-
-    this.responses.set(responseId, cached);
-    this.responseOrder.push(responseId);
-    this.evict();
+    const calls = output.filter(item =>
+      ["function_call", "custom_tool_call", "tool_search_call"].includes(item.type)
+    );
+    // 缓存到 responses map 和 callIndex 反向索引
   }
 
-  // ── 补全：发送请求前调用，补全缺失的 function_call ──
+  // ── 补全：发送请求前调用 ──
   enrichRequest(body: any): number {
     const previousResponseId = body.previous_response_id;
-    const input = body.input;
-    if (!input || !Array.isArray(input)) return 0;
-
-    let restored = 0;
-    const enrichedInput: any[] = [];
-
-    for (const item of input) {
-      if (item.type === 'function_call_output') {
-        // 查找对应的 function_call
+    for (const item of body.input) {
+      if (isFunctionCallOutput(item.type)) {
         const call = this.lookupCall(previousResponseId, item.call_id);
         if (call) {
-          // 在 output 前插入 assistant message with tool_calls
-          enrichedInput.push({
-            type: 'function_call',
-            call_id: call.callId,
-            name: call.name,
-            arguments: call.arguments,
-          });
-          restored++;
-        }
-      }
-      enrichedInput.push(item);
-    }
-
-    if (restored > 0) {
-      body.input = enrichedInput;
-    }
-    return restored;
-  }
-
-  // ── 查找：优先 previous_response_id，fallback 到 call_id 反向索引 ──
-  private lookupCall(responseId?: string, callId?: string): CachedCall | null {
-    // 1. 按 response_id 精确查找
-    if (responseId) {
-      const cached = this.responses.get(responseId);
-      if (cached?.callsById.has(callId!)) {
-        return cached.callsById.get(callId!)!;
-      }
-    }
-
-    // 2. Fallback：按 call_id 反向索引
-    if (callId) {
-      const responseIds = this.callIndex.get(callId);
-      if (responseIds) {
-        for (const rid of responseIds) {
-          const cached = this.responses.get(rid);
-          if (cached?.callsById.has(callId)) {
-            return cached.callsById.get(callId)!;
-          }
+          // 在 output 前插入对应的工具调用
+          body.input.splice(body.input.indexOf(item), 0, call);
         }
       }
     }
-
-    return null;
   }
-}
-```
 
-### 8.4 流式响应的记录时机
-
-在流式场景下，function_call 的信息在多个 chunk 中分批到达，需要在流转换过程中累积，**在 `response.output_item.done` 事件发出时记录到 HistoryStore**。
-
-```typescript
-// 在流式转换器中
-function onOutputItemDone(state: ChatToResponsesState, historyStore: ChatHistoryStore): void {
-  // 记录所有已完成的 function_call 到历史缓存
-  for (const [index, toolState] of state.tools) {
-    if (toolState.done && toolState.callId) {
-      historyStore.recordFunctionCall(state.responseId, {
-        callId: toolState.callId,
-        name: toolState.name,
-        arguments: toolState.arguments,
-        reasoningContent: toolState.reasoningContent || undefined,
-      });
-    }
+  // ── 推理内容补全（新增）───
+  enrichCallItemReasoning(body: any): void {
+    // 为已存在的 call item 补全 reasoning_content 字段
+    // DeepSeek 等模型要求 assistant message 中的 tool_call 携带推理内容
   }
 }
 ```
 
 ---
 
-## 九、完整请求处理流程
+## 十、错误处理与容错机制
+
+### 10.1 智能错误分类（新增）
+
+```typescript
+enum ErrorCategory { Retryable, NonRetryable, ClientAbort }
+
+function categorizeError(error: ProxyError): ErrorCategory {
+  if (error instanceof Timeout || error instanceof ForwardFailed) return Retryable;
+  if (error.status >= 500) return Retryable;
+
+  // 客户端错误不重试，不污染熔断器
+  const nonRetryableStatuses = [400, 405, 406, 413, 414, 415, 422, 501];
+  if (nonRetryableStatuses.includes(error.status)) return NonRetryable;
+
+  return Retryable;
+}
+```
+
+### 10.2 媒体内容整流（新增）
+
+当文本模型收到图片输入时：
+
+```typescript
+// 1. 发送前预防：检测模型是否支持媒体，不支持则降级（移除图片）
+applyMediaPrevention(body, provider);
+
+// 2. 发送后重试：上游返回媒体相关错误时，降级后重试同一 provider
+if (mediaRetryShouldTrigger(error)) {
+  body = degradeMediaContent(body);  // 移除图片，保留文本
+  return retrySameProvider(body);    // 不计入故障转移
+}
+```
+
+### 10.3 SSE 响应容错（新增）
+
+处理上游 Content-Type 标注错误等边界情况：
+
+```typescript
+// 检测响应体是否实际为 SSE（即使 Content-Type 不是 text/event-stream）
+function bodyLooksLikeSse(body: string): boolean {
+  return body.startsWith("data: ") || body.startsWith("event: ");
+}
+
+// SSE 聚合为完整 JSON（非流式回退）
+function sseToResponseValue(sseBody: string): any {
+  // 处理 BOM、CRLF、截断的尾部块、空错误占位符
+  // Azure content-filter 占位值
+}
+```
+
+### 10.4 ActiveConnectionGuard（新增）
+
+```typescript
+// RAII 守卫：确保流式响应期间 active_connections 计数准确
+class ActiveConnectionGuard {
+  constructor(status: ProxyStatus) {
+    status.activeConnections++;  // 构造时 +1
+  }
+
+  // 析构时 -1（流式 body 结束时才触发）
+  destructor() {
+    this.status.activeConnections--;
+  }
+}
+```
+
+---
+
+## 十一、完整请求处理流程
 
 ```
 Codex SDK → POST /v1/responses (stream=true)
   │
   ▼
 ┌─ 路由层 ──────────────────────────────────────────────┐
-│  匹配 /v1/responses → handle_responses handler        │
+│  匹配 /v1/responses → handle_responses                │
 └───────────────────────────────────────────────────────┘
   │
   ▼
 ┌─ 上下文初始化 ────────────────────────────────────────┐
 │  RequestContext::new()                                 │
-│  ├── 从数据库/配置读取 provider 列表                     │
 │  ├── ProviderRouter::select_providers()                │
-│  │   ├── 故障转移开启 → 按优先级排序 (P1 → P2 → ...)    │
+│  │   ├── 故障转移开启 → 按优先级排序 + 熔断器检查       │
 │  │   └── 故障转移关闭 → 仅当前 provider                 │
-│  ├── 提取 model、session_id                            │
-│  └── 读取应用级代理配置（重试次数、超时等）                 │
+│  └── 提取 model, session_id                            │
 └───────────────────────────────────────────────────────┘
   │
   ▼
 ┌─ 请求转发（带故障转移）────────────────────────────────┐
 │  for provider in providers:                            │
+│  ├── 检查熔断器                                        │
+│  ├── 模型映射 (apply_model_mapping)                    │
+│  ├── 媒体预防 (apply_media_prevention) ★新增           │
+│  ├── 协议判断: should_convert_responses_to_chat?       │
 │  │                                                     │
-│  ├── 检查熔断器（circuit breaker）                       │
-│  │   └── 熔断中 → skip，尝试下一个 provider              │
-│  │                                                     │
-│  ├── 模型映射                                           │
-│  │   └── apply_model_mapping()                         │
-│  │       将 Codex 请求中的模型名替换为上游实际模型名        │
-│  │                                                     │
-│  ├── 协议判断                                           │
-│  │   └── should_convert_codex_responses_to_chat()?      │
-│  │       ├── YES → 协议转换流程 ↓                        │
-│  │       └── NO  → 透传流程（上游支持 Responses API）     │
-│  │                                                     │
-│  ├── [协议转换流程]                                      │
-│  │   ├── ChatHistoryStore.enrich_request()              │
-│  │   │   └── 根据 previous_response_id 补全 function_call│
-│  │   ├── apply_codex_chat_upstream_model()              │
-│  │   │   └── 替换模型名为上游配置的模型                    │
-│  │   ├── resolve_codex_chat_reasoning_config()          │
-│  │   │   └── 推断目标模型的推理参数配置                    │
+│  ├── [协议转换流程]                                     │
+│  │   ├── enrich_request() → 补全 function_call 历史     │
+│  │   ├── enrich_call_item_reasoning() → 补全推理内容 ★  │
+│  │   ├── apply_codex_chat_upstream_model() → 替换模型名 │
+│  │   ├── resolve_codex_chat_reasoning_config() → 推理参数│
+│  │   ├── build_codex_tool_context_from_request() → 工具桥│
 │  │   └── responses_to_chat_completions_with_reasoning() │
-│  │       └── 完成 Responses → Chat 格式转换               │
 │  │                                                     │
-│  ├── URL 构建                                           │
-│  │   └── base_url + effective_endpoint                  │
+│  ├── 构建 URL + 注入认证                                │
+│  ├── HTTP POST → 上游                                  │
 │  │                                                     │
-│  ├── 认证注入                                           │
-│  │   ├── 移除客户端占位头（Authorization / x-api-key）    │
-│  │   └── 注入真实 API Key（Bearer token）                │
-│  │                                                     │
-│  ├── HTTP POST → 上游                                   │
-│  │                                                     │
-│  ├── 成功 → 记录熔断器成功，返回响应                       │
-│  └── 失败 → 记录熔断器失败，continue 到下一个 provider    │
+│  ├── 成功 → 记录熔断器 + ActiveConnectionGuard          │
+│  └── 失败 → categorize_error()                         │
+│       ├── Retryable → 记录熔断器，下一个 provider        │
+│       ├── NonRetryable → 直接返回客户端 ★新增           │
+│       └── Media 相关 → 降级重试同一 provider ★新增      │
 └───────────────────────────────────────────────────────┘
   │
   ▼
 ┌─ 响应处理 ────────────────────────────────────────────┐
-│                                                        │
 │  [需要协议转换]                                         │
-│  ├── 上游返回 Chat Completions SSE                     │
-│  ├── create_responses_sse_stream_from_chat()           │
-│  │   ├── 状态机逐 chunk 处理                            │
-│  │   ├── 推理内容 → reasoning output item               │
-│  │   ├── 文本内容 → text output item                    │
-│  │   ├── tool_calls → function_call output item         │
-│  │   ├── usage → response.completed 事件               │
-│  │   └── 同时缓存 function_call 到 ChatHistoryStore     │
+│  ├── create_responses_sse_stream_from_chat_with_context│
+│  │   ├── 状态机（含 tool_context）逐 chunk 处理          │
+│  │   ├── function → response.function_call_* 事件      │
+│  │   ├── custom → response.custom_tool_call_input_* ★  │
+│  │   ├── reasoning → reasoning output item             │
+│  │   ├── 内联 <think> → 拆分 reasoning/text ★              │
+│  │   └── 缓存工具调用到 ChatHistoryStore                │
 │  └── 返回 Responses SSE 流给 Codex SDK                 │
 │                                                        │
 │  [透传模式]                                             │
@@ -1091,64 +772,70 @@ Codex SDK → POST /v1/responses (stream=true)
 
 ---
 
-## 十、接入建议与参考文件清单
+## 十二、接入建议与参考文件清单
 
-### 10.1 最小可行版本（MVP）
+### 12.1 最小可行版本（MVP）
 
-如果你用 **Node.js / TypeScript** 实现，最小可行版本只需要关注以下 5 个模块：
+| 优先级 | 模块 | 说明 |
+|--------|------|------|
+| P0 | 本地 HTTP 服务器 | Express/Hono/Fastify 监听一个端口 |
+| P0 | 请求转换（Responses → Chat） | 第四节 4.1，含工具类型转换 |
+| P0 | 流式响应转换（Chat SSE → Responses SSE） | 第四节 4.2 状态机，最复杂 |
+| P1 | CodexToolContext | 第五节，处理 function/namespace/custom/tool_search |
+| P1 | 推理配置 | 第六节，按目标模型配置 |
+| P1 | 认证注入 | 第七节 |
+| P1 | 历史恢复 | 第九节，含 extended item types |
+| P2 | 熔断 / 故障转移 | 第十节 |
+| P2 | 媒体整流 | 第十节 10.2 |
+| P2 | SSE 容错 | 第十节 10.3 |
 
-| 优先级 | 模块 | 工作量 | 说明 |
-|--------|------|--------|------|
-| P0 | 本地 HTTP 服务器 | 小 | Express/Hono/Fastify 监听一个端口 |
-| P0 | 请求转换（Responses → Chat） | 中 | 第四节 4.1 的逻辑 |
-| P0 | 流式响应转换（Chat SSE → Responses SSE） | **大** | 第四节 4.2 的状态机，最复杂的部分 |
-| P1 | 推理配置 | 中 | 第五节，按目标模型配置 |
-| P1 | 认证注入 | 小 | 第六节，简单替换 Header |
-| P1 | 历史恢复 | 中 | 第八节，处理 `previous_response_id` |
-| P2 | 熔断 / 故障转移 | 中 | 可后续迭代 |
-| P2 | 模型映射 | 小 | 可后续迭代 |
-
-### 10.2 接入步骤
+### 12.2 接入步骤
 
 ```
-Step 1: 启动本地 HTTP 服务器，监听 127.0.0.1:15721
-
-Step 2: 配置 Codex SDK 环境变量
-        OPENAI_BASE_URL=http://127.0.0.1:15721
-        OPENAI_API_KEY=PROXY_MANAGED  (占位符，真实 Key 在代理中注入)
-
-Step 3: 实现 /v1/responses 路由
-        ├── 解析请求体
-        ├── 判断是否需要转换为 Chat Completions
-        ├── [需要转换] 执行请求协议转换
-        ├── 替换认证头
-        ├── POST 到上游
-        ├── [需要转换] 流式转换 Chat SSE → Responses SSE
-        └── 返回给客户端
-
-Step 4: 添加推理参数支持（按目标模型配置）
-
-Step 5: 实现 ChatHistoryStore（处理多轮 function_call）
-
-Step 6: 添加错误处理和超时控制
+Step 1: 启动本地 HTTP 服务器
+Step 2: 配置 Codex SDK → OPENAI_BASE_URL=http://127.0.0.1:PORT
+Step 3: 实现 /v1/responses 路由 + Responses→Chat 转换
+Step 4: 实现流式 Chat SSE→Responses SSE 转换状态机
+Step 5: 实现 CodexToolContext（4 种工具类型桥接）
+Step 6: 添加推理参数支持 + ChatHistoryStore
+Step 7: 添加错误分类 + 媒体整流 + SSE 容错
 ```
 
-### 10.3 CC Switch 项目参考文件清单
+### 12.3 CC Switch 参考文件清单
 
-按重要程度排序：
+**核心转换模块（必读）：**
 
-| 文件 | 说明 | 关注重点 |
-|------|------|---------|
-| `src-tauri/src/proxy/providers/transform_codex_chat.rs` | Responses → Chat 请求转换 | `responses_to_chat_completions_with_reasoning()` 完整转换逻辑 |
-| `src-tauri/src/proxy/providers/streaming_codex_chat.rs` | Chat SSE → Responses SSE 流转换 | `ChatToResponsesState` 状态机，最复杂的模块 |
-| `src-tauri/src/proxy/providers/codex.rs` | 路由判断 + 推理配置推断 | `should_convert_codex_responses_to_chat()`, `infer_codex_chat_reasoning_config()` |
-| `src-tauri/src/proxy/providers/codex_chat_history.rs` | function_call 历史缓存 | `enrich_request()`, `record_response()` |
-| `src-tauri/src/proxy/providers/codex_chat_common.rs` | 公共工具函数 | reasoning 解析、think 标签拆分、tool_call 辅助 |
-| `src-tauri/src/proxy/forwarder.rs` | 请求转发 + 故障转移 | `forward_with_retry()`, `forward()` 中的 URL 构建和认证注入 |
-| `src-tauri/src/proxy/handlers.rs` | 请求处理器入口 | `handle_responses()` 的完整请求生命周期 |
-| `src-tauri/src/proxy/server.rs` | 代理服务器 + 路由注册 | `build_router()` 中 Codex 相关路由 |
-| `src-tauri/src/proxy/providers/auth.rs` | 认证策略定义 | `AuthInfo`, `AuthStrategy` 枚举 |
-| `src-tauri/src/proxy/providers/adapter.rs` | Provider 适配器 trait | `ProviderAdapter` 统一接口定义 |
-| `src-tauri/src/proxy/provider_router.rs` | Provider 路由选择 | `select_providers()` 故障转移队列 |
-| `cc-switch-main/src/config/universalProviderPresets.ts` | 国产模型预设配置 | NewAPI / n1n.ai 等聚合平台预设 |
-| `docs/proxy-guide-zh.md` | 用户文档 | 代理配置的用户视角说明 |
+| 文件 | 说明 |
+|------|------|
+| `src-tauri/src/proxy/providers/transform_codex_chat.rs` | **协议转换核心**：`CodexToolContext`, `responses_to_chat_completions_with_reasoning()`, 4 种工具类型处理 |
+| `src-tauri/src/proxy/providers/streaming_codex_chat.rs` | **流式转换核心**：`ChatToResponsesState` 状态机（含 `tool_context`），custom tool 事件 |
+| `src-tauri/src/proxy/providers/codex.rs` | **路由判断 + 推理配置**：`should_convert_codex_responses_to_chat()`, `infer_codex_chat_reasoning_config()`（含 StepFun） |
+| `src-tauri/src/proxy/providers/codex_chat_history.rs` | **历史缓存**：扩展支持 function_call/custom_tool_call/tool_search_call |
+| `src-tauri/src/proxy/providers/codex_chat_common.rs` | 公共工具函数：reasoning 解析、think 标签拆分 |
+
+**转发与路由：**
+
+| 文件 | 说明 |
+|------|------|
+| `src-tauri/src/proxy/forwarder.rs` | 请求转发 + 故障转移 + `ActiveConnectionGuard` + 媒体整流 + 错误分类 |
+| `src-tauri/src/proxy/handlers.rs` | 请求处理器：`handle_responses()`, `handle_responses_compact()`, SSE 聚合回退 |
+| `src-tauri/src/proxy/server.rs` | 代理服务器 + `build_router()` 路由注册 |
+| `src-tauri/src/proxy/provider_router.rs` | Provider 路由选择 + 熔断器 |
+| `src-tauri/src/proxy/circuit_breaker.rs` | 熔断器实现（Closed→Open→HalfOpen） |
+
+**认证与模型：**
+
+| 文件 | 说明 |
+|------|------|
+| `src-tauri/src/proxy/providers/auth.rs` | `AuthInfo`, `AuthStrategy` 枚举 |
+| `src-tauri/src/proxy/providers/adapter.rs` | `ProviderAdapter` trait |
+| `src-tauri/src/proxy/providers/codex_oauth_auth.rs` | Codex OAuth 认证流程 ★新增 |
+| `src-tauri/src/proxy/providers/copilot_auth.rs` | GitHub Copilot 认证 ★新增 |
+| `src-tauri/src/proxy/model_mapper.rs` | 模型映射（haiku/sonnet/opus） |
+
+**文档与配置：**
+
+| 文件 | 说明 |
+|------|------|
+| `docs/proxy-guide-zh.md` | 用户文档 |
+| `cc-switch-main/src/config/universalProviderPresets.ts` | 国产模型预设配置 |

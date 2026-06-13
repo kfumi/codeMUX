@@ -64,6 +64,7 @@ pub fn toggle_app(state: &crate::AppState, server_id: &str, app: &str, enabled: 
 
 pub fn import_from_apps(state: &crate::AppState) -> Result<crate::commands::mcp::ImportResult, String> {
     use crate::mcp::adapters::all_apps;
+    use log::info;
 
     let mut result = crate::commands::mcp::ImportResult {
         claude: 0, codex: 0, gemini: 0, opencode: 0, total: 0,
@@ -73,15 +74,24 @@ pub fn import_from_apps(state: &crate::AppState) -> Result<crate::commands::mcp:
 
     for app in all_apps() {
         let Some(adapter) = crate::mcp::adapters::get_adapter(app) else { continue };
-        if !adapter.should_sync() { continue; }
+        let should = adapter.should_sync();
+        info!(target: "mcp_import", "app={} should_sync={}", app, should);
+        if !should { continue; }
 
         let entries = match adapter.import_from_tool() {
-            Ok(entries) => entries,
-            Err(_) => continue,
+            Ok(entries) => {
+                info!(target: "mcp_import", "app={} imported {} entries", app, entries.len());
+                entries
+            }
+            Err(e) => {
+                log::warn!(target: "mcp_import", "app={} import_from_tool failed: {}", app, e);
+                continue;
+            }
         };
 
         for (id, spec) in entries {
-            if crate::mcp::validation::validate_server_spec(&spec).is_err() {
+            if let Err(e) = crate::mcp::validation::validate_server_spec(&spec) {
+                info!(target: "mcp_import", "app={} id={} validation failed: {}", app, id, e);
                 continue;
             }
 
@@ -91,6 +101,7 @@ pub fn import_from_apps(state: &crate::AppState) -> Result<crate::commands::mcp:
 
             if let Some(mut existing) = existing {
                 // Already exists: just enable the source app
+                info!(target: "mcp_import", "app={} id={} already exists, enabling app", app, id);
                 match app {
                     "claude" => existing.apps.claude = true,
                     "codex" => existing.apps.codex = true,
@@ -98,9 +109,13 @@ pub fn import_from_apps(state: &crate::AppState) -> Result<crate::commands::mcp:
                     "opencode" => existing.apps.opencode = true,
                     _ => {}
                 }
-                let _ = crate::mcp::db::upsert_mcp_server(&db, &existing);
+                if let Err(e) = crate::mcp::db::upsert_mcp_server(&db, &existing) {
+                    log::warn!(target: "mcp_import", "app={} id={} upsert existing failed: {}", app, id, e);
+                    continue;
+                }
             } else {
                 // New: create with only source app enabled
+                info!(target: "mcp_import", "app={} id={} creating new entry", app, id);
                 let mut apps = McpApps::default();
                 match app {
                     "claude" => apps.claude = true,
@@ -112,10 +127,14 @@ pub fn import_from_apps(state: &crate::AppState) -> Result<crate::commands::mcp:
                 let server = McpServer {
                     id: id.clone(),
                     name: id.clone(),
+                    description: String::new(),
                     server: spec,
                     apps,
                 };
-                let _ = crate::mcp::db::upsert_mcp_server(&db, &server);
+                if let Err(e) = crate::mcp::db::upsert_mcp_server(&db, &server) {
+                    log::warn!(target: "mcp_import", "app={} id={} upsert new failed: {}", app, id, e);
+                    continue;
+                }
             }
 
             match app {
@@ -152,6 +171,7 @@ mod tests {
         let existing = McpServer {
             id: "fetch".into(),
             name: "fetch".into(),
+            description: String::new(),
             server: serde_json::json!({"type":"stdio","command":"npx"}),
             apps: McpApps { claude: true, codex: false, gemini: false, opencode: false },
         };

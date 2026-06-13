@@ -88,9 +88,12 @@ impl McpAdapter for CodexAdapter {
 
     fn import_from_tool(&self) -> McpAdapterResult<Vec<(String, serde_json::Value)>> {
         let doc = read_codex_config()?;
+        log::info!(target: "mcp_import", "codex: config root keys: {:?}", doc.as_table().iter().map(|(k,_)| k).collect::<Vec<_>>());
         let Some(mcp_servers) = doc.get("mcp_servers").and_then(|v| v.as_table_like()) else {
+            log::info!(target: "mcp_import", "codex: no mcp_servers table found");
             return Ok(Vec::new());
         };
+        log::info!(target: "mcp_import", "codex: found {} mcp_servers entries", mcp_servers.len());
 
         let mut result = Vec::new();
         for (name, item) in mcp_servers.iter() {
@@ -166,5 +169,44 @@ mod tests {
         let args = table["args"].as_array().unwrap();
         assert_eq!(args.len(), 2);
         assert_eq!(args.get(0).and_then(|v| v.as_str()), Some("-y"));
+    }
+
+    #[test]
+    fn codex_import_handles_nested_env_subtable() {
+        let toml_str = r#"
+[mcp_servers]
+
+[mcp_servers.server_a]
+type = "stdio"
+command = "npx"
+args = ["-y", "some-server"]
+
+[mcp_servers.server_a.env]
+TOKEN = "abc"
+
+[mcp_servers.server_b]
+type = "stdio"
+command = "cmd"
+args = ["/c", "npx", "-y", "other-server"]
+"#;
+        let doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
+        let mcp_servers = doc.get("mcp_servers").unwrap().as_table_like().unwrap();
+
+        let mut names: Vec<&str> = Vec::new();
+        for (name, item) in mcp_servers.iter() {
+            if item.as_table_like().is_some() {
+                let has_cmd = item.as_table_like()
+                    .and_then(|t| t.get("command"))
+                    .and_then(|v| v.as_str())
+                    .is_some();
+                names.push(name);
+                println!("  entry: {} has_command={}", name, has_cmd);
+            }
+        }
+        // server_a.env should NOT appear as a direct child
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"server_a"));
+        assert!(names.contains(&"server_b"));
+        assert!(!names.contains(&"server_a.env"));
     }
 }

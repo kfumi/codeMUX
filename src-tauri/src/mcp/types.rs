@@ -12,6 +12,8 @@ pub struct McpApps {
 pub struct McpServer {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub description: String,
     pub server: serde_json::Value,
     pub apps: McpApps,
 }

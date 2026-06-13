@@ -17,6 +17,13 @@ type ProxyConfig = {
   baseUrl: string;
 };
 
+function createConfigFingerprint(config: ProxyConfig): string {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(config))
+    .digest('hex');
+}
+
 export type ProxyServerHandle = {
   baseUrl: string;
   close: () => Promise<void>;
@@ -25,10 +32,11 @@ export type ProxyServerHandle = {
 export async function createCodexCompatProxyServer(config: ProxyConfig, preferredPort = 15722): Promise<ProxyServerHandle> {
   const historyStore = new CodexHistoryStore();
   const legacyHistory = new CodexChatHistory();
+  const configFingerprint = createConfigFingerprint(config);
   const server = createServer(async (req, res) => {
     try {
       proxyLog(`${req.method ?? 'UNKNOWN'} ${req.url ?? '/'}`);
-      await handleRequest(req, res, config, historyStore, legacyHistory);
+      await handleRequest(req, res, config, configFingerprint, historyStore, legacyHistory);
     } catch (error) {
       proxyLog(`error ${req.method ?? 'UNKNOWN'} ${req.url ?? '/'}: ${error instanceof Error ? error.message : String(error)}`);
       writeJson(res, 500, {
@@ -88,11 +96,12 @@ async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
   config: ProxyConfig,
+  configFingerprint: string,
   historyStore: CodexHistoryStore,
   legacyHistory: CodexChatHistory,
 ): Promise<void> {
   if (req.method === 'GET' && isHealthPath(req.url ?? '/')) {
-    writeJson(res, 200, { ok: true });
+    writeJson(res, 200, { ok: true, configFingerprint });
     return;
   }
 
@@ -153,11 +162,13 @@ async function handleRequest(
 
     try {
       const { chunks, response: upstreamRes } = await streamChatCompletion(chatRequest, config);
+      const reasoningEnabled = reasoningConfig?.supports_thinking ?? false;
       const responsesEvents = convertChatStreamToResponsesEvents(chunks, {
         responseId,
         model: upstreamRes.headers.get('x-model') || chatRequest.model || 'unknown',
         reasoningId,
         messageId,
+        reasoningEnabled,
       });
 
       // Forward Responses API SSE events to the Codex SDK in real-time.
@@ -170,7 +181,13 @@ async function handleRequest(
       // function_call items from the proxy).
       let toolCalls: Array<Record<string, unknown>> | null = null;
 
+      let eventCount = 0;
       for await (const event of responsesEvents) {
+        eventCount++;
+        // Log key events for debugging
+        if (eventCount <= 2 || (event.type as string) === 'response.output_item.done' || (event.type as string) === 'response.output_text.done' || (event.type as string) === 'response.content_part.done' || (event.type as string) === 'response.completed') {
+          proxyLog(`→ #${eventCount} ${event.type} ${JSON.stringify(event).slice(0, 300)}`);
+        }
         // Intercept function_call items for direct emit and history recording.
         if (event.type === 'response.output_item.done') {
           const item = event.item as Record<string, unknown> | undefined;
@@ -192,10 +209,23 @@ async function handleRequest(
           }
         }
 
-        res.write(`data: ${JSON.stringify(event)}\n\n`);
+        // Log the first text delta and completed event for debugging
+        if (eventCount === 1) {
+          proxyLog(`first event: ${JSON.stringify(event).slice(0, 200)}`);
+        }
+        if ((event.type as string) === 'response.completed') {
+          const output = (event as any).response?.output;
+          proxyLog(`response.completed output items=${output?.length ?? 0}`);
+          if (output?.[0]) {
+            proxyLog(`  output[0] type=${output[0].type} content_len=${JSON.stringify(output[0].content ?? output[0].summary ?? '').length}`);
+          }
+        }
+
+        res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
       }
 
       res.end('data: [DONE]\n\n');
+      proxyLog(`stream completed: ${eventCount} events forwarded`);
 
       // Emit tool_use events after streaming completes.
       if (toolCalls && toolCalls.length > 0) {
@@ -203,7 +233,7 @@ async function handleRequest(
         proxyLog(`emitting ${toolCalls.length} tool_use events from stream, sessionId=${activeSessionId || '(empty)'}`);
         for (const tc of toolCalls) {
           let args: unknown;
-          try { args = JSON.parse(tc.arguments || '{}'); } catch { args = {}; }
+          try { args = JSON.parse(String(tc.arguments ?? '{}')); } catch { args = {}; }
           emitEvent({
             type: 'assistant',
             uuid: crypto.randomUUID(),
@@ -259,7 +289,7 @@ async function handleRequest(
     }
   }
 
-  const compatResponse = convertChatCompletionToResponses(completion, requestBody, legacyHistory);
+  const compatResponse = convertChatCompletionToResponses(completion, requestBody as Parameters<typeof convertChatCompletionToResponses>[1], legacyHistory);
 
   // Store messages in legacy history so the next request can reconstruct the full
   // conversation chain. The new convertResponsesToChatRequest doesn't do this
@@ -306,7 +336,7 @@ function emitToolResultEventsFromRequest(
     for (const item of functionCallOutputs) {
       emitEvent(buildToolResultEvent({
         sessionId: activeSessionId,
-        toolUseId: item.call_id,
+        toolUseId: item.call_id ?? '',
         content: stringifyFunctionCallOutput(item.output),
       }));
     }
@@ -401,7 +431,7 @@ async function fetchChatCompletion(
 async function streamChatCompletion(
   requestBody: ReturnType<typeof convertResponsesToChatRequest>,
   config: ProxyConfig,
-): Promise<{ chunks: AsyncGenerator<import('./codexChatCompat.js').ChatStreamToolCall & Record<string, unknown>, void, unknown>; response: Response }> {
+): Promise<{ chunks: AsyncGenerator<import('./codexStreamTransform.js').ChatStreamToolCall & Record<string, unknown>, void, unknown>; response: Response }> {
   let lastError: Error | null = null;
 
   for (const endpoint of buildChatCompletionEndpoints(config.baseUrl)) {

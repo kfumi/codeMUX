@@ -4,6 +4,7 @@ use crate::AppState;
 use crate::mcp::types::McpServer;
 use crate::mcp::db;
 use std::collections::HashMap;
+use std::sync::Mutex;
 use tokio::io::AsyncWriteExt;
 use tokio::io::AsyncBufReadExt;
 
@@ -23,10 +24,16 @@ pub struct ImportResult {
     pub total: usize,
 }
 
+fn get_mcp_servers_from_db(db: &Mutex<rusqlite::Connection>) -> Result<Vec<McpServer>, String> {
+    let conn = db.lock().unwrap();
+    db::get_all_mcp_servers(&conn).map_err(|e| format!("Failed to get MCP servers: {}", e))
+}
+
 #[tauri::command]
 pub fn get_mcp_servers(state: State<'_, AppState>) -> Result<Vec<McpServer>, String> {
-    let db = state.db.lock().unwrap();
-    db::get_all_mcp_servers(&db).map_err(|e| format!("Failed to get MCP servers: {}", e))
+    let servers = get_mcp_servers_from_db(&state.db)?;
+    log::info!(target: "mcp_fetch", "get_mcp_servers returning {} entries", servers.len());
+    Ok(servers)
 }
 
 #[tauri::command]
@@ -54,7 +61,7 @@ pub fn toggle_mcp_app(
 }
 
 #[tauri::command]
-pub fn import_mcp_from_apps(state: State<'_, AppState>) -> Result<ImportResult, String> {
+pub async fn import_mcp_from_apps(state: State<'_, AppState>) -> Result<ImportResult, String> {
     crate::mcp::service::import_from_apps(state.inner())
 }
 
@@ -391,4 +398,45 @@ pub async fn probe_mcp_server(
     let result = probe_servers(&[server]).await;
     let (_, probe) = result.into_iter().next().ok_or("Probe returned no result")?;
     Ok(probe)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::get_mcp_servers_from_db;
+    use rusqlite::Connection;
+    use std::sync::Mutex;
+
+    #[test]
+    fn get_mcp_servers_from_db_returns_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        crate::mcp::db::upsert_mcp_server(
+            &conn,
+            &crate::mcp::types::McpServer {
+                id: "fetch".into(),
+                name: "fetch".into(),
+                description: "Web fetcher".into(),
+                server: serde_json::json!({
+                    "type": "stdio",
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-fetch"]
+                }),
+                apps: crate::mcp::types::McpApps {
+                    claude: true,
+                    codex: false,
+                    gemini: false,
+                    opencode: false,
+                },
+            },
+        )
+        .unwrap();
+
+        let db = Mutex::new(conn);
+
+        let servers = get_mcp_servers_from_db(&db).unwrap();
+
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].id, "fetch");
+        assert_eq!(servers[0].description, "Web fetcher");
+    }
 }

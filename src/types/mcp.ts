@@ -19,6 +19,7 @@ export type McpServerSpec = {
 export interface McpServer {
   id: string;
   name: string;
+  description: string;
   server: McpServerSpec;
   apps: McpApps;
 }

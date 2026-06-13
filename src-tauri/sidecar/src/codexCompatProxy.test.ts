@@ -111,7 +111,8 @@ describe('createCodexCompatProxyServer', () => {
     const json = await response.json();
 
     expect(response.status).toBe(200);
-    expect(json).toEqual({ ok: true });
+    expect(json).toMatchObject({ ok: true });
+    expect(typeof json.configFingerprint).toBe('string');
     expect(upstreamTouched).toBe(false);
   });
 
@@ -424,5 +425,94 @@ describe('createCodexCompatProxyServer', () => {
     });
 
     expect(receivedBody.stream_options).toEqual({ include_usage: true });
+  });
+
+  it('sends only chat-completions-compatible function tools upstream', async () => {
+    let receivedBody: any = null;
+    const upstream = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      receivedBody = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({
+        model: 'mimo-v2-pro',
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: 'ok',
+            },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: {
+          prompt_tokens: 1,
+          completion_tokens: 1,
+          total_tokens: 2,
+        },
+      }));
+    });
+
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const proxy = await createCodexCompatProxyServer({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+    }, 0);
+    cleanups.push(() => proxy.close());
+
+    const response = await fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'mimo-v2-pro',
+        input: [{ role: 'user', content: 'Hi' }],
+        tools: [
+          {
+            type: 'namespace',
+            name: 'mcp__chrome_devtools_mcp',
+            tools: [
+              {
+                type: 'function',
+                name: 'click',
+                description: 'Click element',
+                parameters: { type: 'object', properties: { uid: { type: 'string' } } },
+              },
+            ],
+          },
+          {
+            type: 'web_search',
+            external_web_access: true,
+          },
+          {
+            type: 'function',
+            name: 'shell_command',
+            description: 'Run shell command',
+            parameters: { type: 'object', properties: { command: { type: 'string' } } },
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(receivedBody.tools).toEqual([
+      {
+        type: 'function',
+        function: {
+          name: 'mcp__chrome_devtools_mcp__click',
+          description: 'Click element',
+          parameters: { type: 'object', properties: { uid: { type: 'string' } } },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'shell_command',
+          description: 'Run shell command',
+          parameters: { type: 'object', properties: { command: { type: 'string' } } },
+        },
+      },
+    ]);
   });
 });

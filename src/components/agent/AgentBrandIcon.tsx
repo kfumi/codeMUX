@@ -1,5 +1,7 @@
 import claudeSvg from '@lobehub/icons-static-svg/icons/claude-color.svg?raw';
 import openAiSvg from '@lobehub/icons-static-svg/icons/openai.svg?raw';
+import geminiSvg from '@lobehub/icons-static-svg/icons/geminicli-color.svg?raw';
+import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
 
 import { cn } from '../../lib/utils';
 import type { AgentDefinition } from '../../types/agentRegistry';
@@ -7,11 +9,15 @@ import type { AgentDefinition } from '../../types/agentRegistry';
 const AGENT_ICON_COLORS: Partial<Record<AgentDefinition['icon'], string>> = {
   claude: 'text-foreground',
   codex: 'text-foreground',
+  gemini: 'text-foreground',
+  opencode: 'text-foreground',
 };
 
 const AGENT_BRAND_SVGS: Partial<Record<AgentDefinition['icon'], string>> = {
   claude: claudeSvg,
   codex: openAiSvg,
+  gemini: geminiSvg,
+  opencode: opencodeSvg,
 };
 
 interface AgentBrandIconProps {

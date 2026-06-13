@@ -124,9 +124,14 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
 }
 
 fn migrate_mcp_servers_table(conn: &Connection) -> Result<()> {
-    // Already on new schema — nothing to do
     let has_server_config = conn.prepare("SELECT server_config FROM mcp_servers LIMIT 0").is_ok();
+
     if has_server_config {
+        // Already on new schema — ensure description column exists
+        let has_description = conn.prepare("SELECT description FROM mcp_servers LIMIT 0").is_ok();
+        if !has_description {
+            conn.execute("ALTER TABLE mcp_servers ADD COLUMN description TEXT NOT NULL DEFAULT ''", [])?;
+        }
         return Ok(());
     }
 
@@ -143,6 +148,7 @@ fn migrate_mcp_servers_table(conn: &Connection) -> Result<()> {
         CREATE TABLE mcp_servers (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
             server_config TEXT NOT NULL,
             enabled_claude INTEGER NOT NULL DEFAULT 0,
             enabled_codex INTEGER NOT NULL DEFAULT 0,
@@ -151,12 +157,13 @@ fn migrate_mcp_servers_table(conn: &Connection) -> Result<()> {
         );
 
         INSERT INTO mcp_servers (
-            id, name, server_config,
+            id, name, description, server_config,
             enabled_claude, enabled_codex, enabled_gemini, enabled_opencode
         )
         SELECT
             id,
             name,
+            COALESCE(description, ''),
             transport_config,
             CASE WHEN enabled = 1 THEN 1 ELSE 0 END,
             0,
@@ -263,29 +270,31 @@ mod tests {
 
         let row = conn
             .query_row(
-                "SELECT server_config, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode
+                "SELECT description, server_config, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode
                  FROM mcp_servers WHERE id = 'fetch'",
                 [],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(1)?,
                         row.get::<_, i64>(2)?,
                         row.get::<_, i64>(3)?,
                         row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
                     ))
                 },
             )
             .unwrap();
 
+        assert_eq!(row.0, "legacy row");
         assert_eq!(
-            row.0,
+            row.1,
             r#"{"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-fetch"]}"#
         );
-        assert_eq!(row.1, 1);
-        assert_eq!(row.2, 0);
+        assert_eq!(row.2, 1);
         assert_eq!(row.3, 0);
         assert_eq!(row.4, 0);
+        assert_eq!(row.5, 0);
     }
 
     #[test]
