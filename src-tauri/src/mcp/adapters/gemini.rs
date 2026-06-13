@@ -64,17 +64,17 @@ impl McpAdapter for GeminiAdapter {
         gemini_config_path().parent().map_or(false, |p| p.exists())
     }
 
-    fn sync_single_server(&self, id: &str, server_spec: &serde_json::Value) -> McpAdapterResult<()> {
+    fn sync_single_server(&self, name: &str, server_spec: &serde_json::Value) -> McpAdapterResult<()> {
         let mut config = read_gemini_json()?;
         let gemini_spec = convert_to_gemini_server(server_spec)?;
-        config["mcpServers"][id] = gemini_spec;
+        config["mcpServers"][name] = gemini_spec;
         write_gemini_json(&config)
     }
 
-    fn remove_server(&self, id: &str) -> McpAdapterResult<()> {
+    fn remove_server(&self, name: &str) -> McpAdapterResult<()> {
         let mut config = read_gemini_json()?;
         if let Some(mcp_servers) = config.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
-            mcp_servers.remove(id);
+            mcp_servers.remove(name);
         }
         write_gemini_json(&config)
     }

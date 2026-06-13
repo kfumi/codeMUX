@@ -58,17 +58,17 @@ impl McpAdapter for OpenCodeAdapter {
         opencode_config_path().exists()
     }
 
-    fn sync_single_server(&self, id: &str, server_spec: &serde_json::Value) -> McpAdapterResult<()> {
+    fn sync_single_server(&self, name: &str, server_spec: &serde_json::Value) -> McpAdapterResult<()> {
         let mut config = read_opencode_json()?;
         let oc_spec = convert_to_opencode_server(server_spec)?;
-        config["mcp"][id] = oc_spec;
+        config["mcp"][name] = oc_spec;
         write_opencode_json(&config)
     }
 
-    fn remove_server(&self, id: &str) -> McpAdapterResult<()> {
+    fn remove_server(&self, name: &str) -> McpAdapterResult<()> {
         let mut config = read_opencode_json()?;
         if let Some(mcp) = config.get_mut("mcp").and_then(|v| v.as_object_mut()) {
-            mcp.remove(id);
+            mcp.remove(name);
         }
         write_opencode_json(&config)
     }

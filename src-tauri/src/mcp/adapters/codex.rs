@@ -71,17 +71,17 @@ impl McpAdapter for CodexAdapter {
         codex_config_path().parent().map_or(false, |p| p.exists())
     }
 
-    fn sync_single_server(&self, id: &str, server_spec: &serde_json::Value) -> McpAdapterResult<()> {
+    fn sync_single_server(&self, name: &str, server_spec: &serde_json::Value) -> McpAdapterResult<()> {
         let mut doc = read_codex_config()?;
         let table = json_server_to_toml_table(server_spec)?;
-        doc["mcp_servers"][id] = toml_edit::Item::Table(table);
+        doc["mcp_servers"][name] = toml_edit::Item::Table(table);
         write_codex_config(&doc)
     }
 
-    fn remove_server(&self, id: &str) -> McpAdapterResult<()> {
+    fn remove_server(&self, name: &str) -> McpAdapterResult<()> {
         let mut doc = read_codex_config()?;
         if let Some(mcp_servers) = doc.get_mut("mcp_servers").and_then(|v| v.as_table_like_mut()) {
-            mcp_servers.remove(id);
+            mcp_servers.remove(name);
         }
         write_codex_config(&doc)
     }

@@ -70,7 +70,7 @@ impl McpAdapter for ClaudeAdapter {
             .exists()
     }
 
-    fn sync_single_server(&self, id: &str, server_spec: &serde_json::Value) -> McpAdapterResult<()> {
+    fn sync_single_server(&self, name: &str, server_spec: &serde_json::Value) -> McpAdapterResult<()> {
         let mut config = read_claude_json()?;
         let mcp_servers = config
             .get_mut("mcpServers")
@@ -87,14 +87,14 @@ impl McpAdapter for ClaudeAdapter {
             }
         }
 
-        mcp_servers.insert(id.to_string(), spec);
+        mcp_servers.insert(name.to_string(), spec);
         write_claude_json(&config)
     }
 
-    fn remove_server(&self, id: &str) -> McpAdapterResult<()> {
+    fn remove_server(&self, name: &str) -> McpAdapterResult<()> {
         let mut config = read_claude_json()?;
         if let Some(mcp_servers) = config.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
-            mcp_servers.remove(id);
+            mcp_servers.remove(name);
         }
         write_claude_json(&config)
     }

@@ -50,10 +50,11 @@ pub fn toggle_app(state: &crate::AppState, server_id: &str, app: &str, enabled: 
     if let Some(server) = server {
         if let Some(adapter) = crate::mcp::adapters::get_adapter(app) {
             if adapter.should_sync() {
+                // Use server name as the key in native config files (not the DB id)
                 if enabled {
-                    let _ = adapter.sync_single_server(server_id, &server.server);
+                    let _ = adapter.sync_single_server(&server.name, &server.server);
                 } else {
-                    let _ = adapter.remove_server(server_id);
+                    let _ = adapter.remove_server(&server.name);
                 }
             }
         }
