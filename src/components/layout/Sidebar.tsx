@@ -1,5 +1,5 @@
 import { open } from '@tauri-apps/plugin-dialog';
-import { MessageSquarePlus, PanelLeftClose, Settings } from 'lucide-react';
+import { MessageSquarePlus, Settings } from 'lucide-react';
 import { useEffect } from 'react';
 
 import { createLogger, serializeError } from '../../lib/logger';
@@ -12,14 +12,12 @@ interface SidebarProps {
   onNewSession: () => void;
   onNewSessionInProject: (projectId: string) => void;
   onOpenSettings: () => void;
-  onToggleCollapse?: () => void;
 }
 
 export function Sidebar({
   onNewSession,
   onNewSessionInProject,
   onOpenSettings,
-  onToggleCollapse,
 }: SidebarProps) {
   const fetchProjects = useProjectStore((state) => state.fetchProjects);
 
@@ -54,15 +52,6 @@ export function Sidebar({
           <MessageSquarePlus className="h-4 w-4" />
           <span className="flex-1 text-left">新对话</span>
         </button>
-        {onToggleCollapse && (
-          <button
-            onClick={onToggleCollapse}
-            className="shrink-0 rounded-lg p-1.5 text-[hsl(var(--sidebar-fg))]/40 transition-all duration-200 hover:bg-[hsl(var(--sidebar-glow)/0.06)] hover:text-[hsl(var(--sidebar-glow))]"
-            title="收起侧边栏"
-          >
-            <PanelLeftClose className="h-3.5 w-3.5" />
-          </button>
-        )}
       </div>
 
       <div className="flex-1 overflow-auto px-3 scroll-smooth">

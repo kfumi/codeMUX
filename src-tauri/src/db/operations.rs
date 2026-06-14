@@ -219,10 +219,18 @@ pub fn delete_session(conn: &Connection, session_id: &str) -> Result<()> {
 }
 
 pub fn update_session_title(conn: &Connection, session_id: &str, title: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE sessions SET title = ?1 WHERE id = ?2",
+        params![title, session_id],
+    )?;
+    Ok(())
+}
+
+pub fn touch_session(conn: &Connection, session_id: &str) -> Result<()> {
     let now = Utc::now().to_rfc3339();
     conn.execute(
-        "UPDATE sessions SET title = ?1, updated_at = ?2 WHERE id = ?3",
-        params![title, now, session_id],
+        "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+        params![now, session_id],
     )?;
     Ok(())
 }

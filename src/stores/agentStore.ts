@@ -735,6 +735,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
     }
 
+    // Update session activity timestamp
+    useSessionStore.getState().touchSession(sessionId);
+
     // 添加用户消息到事件列表
     const userMsg: AgentMessage = { kind: 'user', data: { content: prompt } };
     const userTs = Date.now();

@@ -139,6 +139,7 @@ pub fn run() {
             commands::session::get_all_sessions,
             commands::session::delete_session,
             commands::session::update_session_title,
+            commands::session::touch_session,
             commands::session::update_session_provider,
             commands::project::create_project,
             commands::project::get_all_projects,

@@ -15,7 +15,7 @@ import { cn } from '../../lib/utils';
 // Agent brand SVGs for per-tool toggle icons
 import claudeSvg from '@lobehub/icons-static-svg/icons/claude-color.svg?raw';
 import openAiSvg from '@lobehub/icons-static-svg/icons/openai.svg?raw';
-import geminiSvg from '@lobehub/icons-static-svg/icons/geminicli-color.svg?raw';
+import geminiSvg from '@lobehub/icons-static-svg/icons/gemini-color.svg?raw';
 import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
 
 const APP_SVGS: Record<keyof McpApps, string> = {

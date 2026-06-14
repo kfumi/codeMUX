@@ -15,6 +15,7 @@ interface SessionState {
   deleteSession: (sessionId: string) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
+  touchSession: (sessionId: string) => void;
 }
 
 type CreateSessionAction = {
@@ -132,5 +133,12 @@ export const useSessionStore = create<SessionState>((set) => ({
     } catch (error) {
       set({ error: String(error) });
     }
+  },
+  touchSession: (sessionId: string) => {
+    const now = new Date().toISOString();
+    set((state) => ({
+      sessions: state.sessions.map((s) => s.id === sessionId ? { ...s, updated_at: now } : s),
+    }));
+    sessionApi.touch(sessionId).catch(() => {});
   },
 }));

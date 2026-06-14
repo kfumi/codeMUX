@@ -813,7 +813,7 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="h-full overflow-auto px-5 py-6"
+        className="h-full overflow-auto pl-5 pr-14 py-6"
         style={{ visibility: contentVisible ? 'visible' : 'hidden' }}
       >
         <div className="max-w-3xl mx-auto space-y-5">

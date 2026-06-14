@@ -82,6 +82,9 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     if (project?.path) {
       setProjectPath(project.path);
       loadFileTree(project.path);
+    } else {
+      setProjectPath(null);
+      usePreviewStore.setState({ treeRoot: null, treeRootPath: null });
     }
   }, [project?.path, setProjectPath, loadFileTree]);
 

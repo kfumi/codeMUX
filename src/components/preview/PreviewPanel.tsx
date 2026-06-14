@@ -102,13 +102,15 @@ export function PreviewPanel() {
     setContextMenu({ path, x: e.clientX, y: e.clientY });
   }, []);
 
-  if (!isOpen) return null;
-
   return (
     <div
-      className="border-l border-border/30 bg-muted/10 flex flex-col h-full shrink-0"
-      style={{ width: panelWidth }}
+      className="h-full shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out"
+      style={{ width: isOpen ? panelWidth : 0 }}
     >
+      <div
+        className="border-l border-border/30 bg-muted/10 flex flex-col h-full"
+        style={{ width: panelWidth }}
+      >
       {/* Toolbar */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border/25">
         <div className="flex items-center gap-1">
@@ -263,6 +265,7 @@ export function PreviewPanel() {
           style={{ left: contextMenu.x, top: contextMenu.y }}
         />
       )}
+      </div>
     </div>
   );
 }

@@ -39,7 +39,7 @@ interface PreviewState {
   projectPath: string | null;
 
   // Actions
-  setProjectPath: (path: string) => void;
+  setProjectPath: (path: string | null) => void;
   openFile: (path: string, originalContent?: string) => Promise<void>;
   closeFile: (path: string) => void;
   closeOtherFiles: (path: string) => void;
@@ -99,7 +99,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
 
   projectPath: null,
 
-  setProjectPath: (path: string) => set({ projectPath: path }),
+  setProjectPath: (path: string | null) => set({ projectPath: path }),
 
   openFile: async (path: string, originalContent?: string) => {
     const normalizedPath = normalizeFilePath(path);

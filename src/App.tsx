@@ -122,12 +122,11 @@ function App() {
   return (
     <TooltipProvider>
       <MainLayout
-        sidebar={(onToggleCollapse) => (
+        sidebar={(
           <Sidebar
             onNewSession={() => handleNewSession()}
             onNewSessionInProject={(projectId) => handleNewSession(projectId)}
             onOpenSettings={() => setSettingsOpen(true)}
-            onToggleCollapse={onToggleCollapse}
           />
         )}
         preview={(

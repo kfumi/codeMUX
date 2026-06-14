@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { SessionItem } from './SessionItem';
 import { ProjectGroup } from './ProjectGroup';
 import { Plus, MessageSquarePlus } from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
 
 interface SessionListProps {
   onNewSessionInProject: (projectId: string) => void;
@@ -11,8 +12,22 @@ interface SessionListProps {
 }
 
 export function SessionList({ onNewSessionInProject, onAddProject }: SessionListProps) {
-  const { sessions, activeSessionId, fetchSessions, setActiveSession, deleteSession } = useSessionStore();
+  const { sessions, activeSessionId, fetchSessions, setActiveSession, deleteSession, updateSessionTitle } = useSessionStore();
   const { projects, activeProjectId, fetchProjects, deleteProject, renameProject, setActiveProject } = useProjectStore();
+  const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
+
+  const closeMenu = useCallback(() => setMenuSessionId(null), []);
+
+  useEffect(() => {
+    if (!menuSessionId) return;
+    const close = () => setMenuSessionId(null);
+    window.addEventListener('click', close);
+    window.addEventListener('contextmenu', close);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('contextmenu', close);
+    };
+  }, [menuSessionId]);
 
   useEffect(() => {
     fetchSessions();
@@ -44,13 +59,17 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
             >
               项目
             </span>
-            <button
-              className="p-0.5 rounded hover:bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-fg))]/60 hover:text-[hsl(var(--sidebar-fg))] transition-all duration-200"
-              onClick={onAddProject}
-              title="添加项目"
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="p-0.5 rounded hover:bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-fg))]/60 hover:text-[hsl(var(--sidebar-fg))] transition-all duration-200"
+                  onClick={onAddProject}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right"><p>添加项目</p></TooltipContent>
+            </Tooltip>
           </div>
 
           {projects.map((project) => (
@@ -62,9 +81,13 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
               isActiveProject={project.id === activeProjectId}
               onSelectSession={(id) => { setActiveProject(project.id); setActiveSession(id); }}
               onDeleteSession={deleteSession}
+              onRenameSession={updateSessionTitle}
               onNewSessionInProject={onNewSessionInProject}
               onDeleteProject={deleteProject}
               onRenameProject={renameProject}
+              menuSessionId={menuSessionId}
+              onOpenMenu={setMenuSessionId}
+              onCloseMenu={closeMenu}
             />
           ))}
         </div>
@@ -90,6 +113,10 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
               isActive={session.id === activeSessionId}
               onClick={() => { setActiveProject(null); setActiveSession(session.id); }}
               onDelete={() => deleteSession(session.id)}
+              onRename={(title) => updateSessionTitle(session.id, title)}
+              isMenuOpen={menuSessionId === session.id}
+              onOpenMenu={() => setMenuSessionId(session.id)}
+              onCloseMenu={closeMenu}
             />
           ))}
         </div>

@@ -53,6 +53,12 @@ pub fn update_session_title(state: State<'_, AppState>, session_id: String, titl
 }
 
 #[tauri::command]
+pub fn touch_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+    let db = state.db.lock().unwrap();
+    operations::touch_session(&db, &session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn update_session_provider(state: State<'_, AppState>, session_id: String, provider_id: String, model: String) -> Result<(), String> {
     info!(
         target: "session",

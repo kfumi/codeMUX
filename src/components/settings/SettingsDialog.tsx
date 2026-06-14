@@ -30,7 +30,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[520px] flex-col overflow-hidden p-0 sm:max-w-[700px]">
+      <DialogContent className="flex h-[560px] flex-col overflow-hidden p-0 sm:max-w-[880px]">
         <div className="flex flex-1 overflow-hidden">
           <div className="w-44 shrink-0 border-r border-border/40 bg-muted/20 p-2">
             <DialogHeader className="p-2 pb-3">

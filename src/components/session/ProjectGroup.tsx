@@ -6,6 +6,7 @@ import { Button } from '../ui/button';
 import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Folder, ChevronRight, MoreHorizontal, Pencil, Trash2, MessageSquarePlus, FolderOpen } from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
 import { invoke } from '@tauri-apps/api/core';
 import { cn } from '../../lib/utils';
 
@@ -16,9 +17,13 @@ interface ProjectGroupProps {
   isActiveProject: boolean;
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
+  onRenameSession: (sessionId: string, title: string) => void;
   onNewSessionInProject: (projectId: string) => void;
   onDeleteProject: (projectId: string) => void;
   onRenameProject: (projectId: string, newName: string) => void;
+  menuSessionId: string | null;
+  onOpenMenu: (sessionId: string) => void;
+  onCloseMenu: () => void;
 }
 
 export function ProjectGroup({
@@ -28,9 +33,13 @@ export function ProjectGroup({
   isActiveProject,
   onSelectSession,
   onDeleteSession,
+  onRenameSession,
   onNewSessionInProject,
   onDeleteProject,
   onRenameProject,
+  menuSessionId,
+  onOpenMenu,
+  onCloseMenu,
 }: ProjectGroupProps) {
   const [expanded, setExpanded] = useState(true);
   const [renaming, setRenaming] = useState(false);
@@ -117,13 +126,17 @@ export function ProjectGroup({
               移除
             </DropdownMenuItem>
           </DropdownMenu>
-          <button
-            className="p-1 rounded-md hover:bg-[hsl(var(--sidebar-glow)/0.08)] text-[hsl(var(--sidebar-fg))]/40 hover:text-[hsl(var(--sidebar-glow))] transition-all duration-200"
-            title={`在 ${project.name} 中开始对话`}
-            onClick={() => onNewSessionInProject(project.id)}
-          >
-            <MessageSquarePlus className="h-3.5 w-3.5" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="p-1 rounded-md hover:bg-[hsl(var(--sidebar-glow)/0.08)] text-[hsl(var(--sidebar-fg))]/40 hover:text-[hsl(var(--sidebar-glow))] transition-all duration-200"
+                onClick={() => onNewSessionInProject(project.id)}
+              >
+                <MessageSquarePlus className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right"><p>在 {project.name} 中开始对话</p></TooltipContent>
+          </Tooltip>
         </div>
       </div>
       {expanded && (
@@ -135,6 +148,10 @@ export function ProjectGroup({
               isActive={session.id === activeSessionId}
               onClick={() => onSelectSession(session.id)}
               onDelete={() => onDeleteSession(session.id)}
+              onRename={(title) => onRenameSession(session.id, title)}
+              isMenuOpen={menuSessionId === session.id}
+              onOpenMenu={() => onOpenMenu(session.id)}
+              onCloseMenu={onCloseMenu}
             />
           ))}
         </div>

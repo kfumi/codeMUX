@@ -105,6 +105,7 @@ export const sessionApi = {
   getAll: (): Promise<Session[]> => invokeLogged('get_all_sessions'),
   delete: (sessionId: string): Promise<void> => invokeLogged('delete_session', { sessionId }),
   updateTitle: (sessionId: string, title: string): Promise<void> => invokeLogged('update_session_title', { sessionId, title }),
+  touch: (sessionId: string): Promise<void> => invokeLogged('touch_session', { sessionId }),
   updateProvider: (sessionId: string, providerId: string, model: string): Promise<void> => invokeLogged('update_session_provider', { sessionId, providerId, model }),
 };
 

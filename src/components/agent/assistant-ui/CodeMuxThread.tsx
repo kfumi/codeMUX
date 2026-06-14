@@ -84,7 +84,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
           className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scroll-smooth [scrollbar-gutter:stable]"
           autoScroll
         >
-          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 pt-4">
+          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col pl-4 pr-14 pt-4">
             <ThreadPrimitive.Messages>
               {({ message }) =>
                 message.role === 'user' ? (
