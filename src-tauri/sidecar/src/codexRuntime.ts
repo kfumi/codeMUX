@@ -260,6 +260,7 @@ export class CodexSessionRuntime {
             usage = event.usage;
             usageSeen = true;
             turnCompleted = true;
+            break;
           }
 
           if (this.abortController?.signal.aborted || forceBreak) break;

@@ -367,7 +367,15 @@ function renderEvent(sessionId: string, msg: AgentMessage, _prevMsg: AgentMessag
           if (events[i].kind === 'result') break;
         }
       }
-      const cost = calculateCost(msg.data.usage, provider);
+      const ltu = msg.data.last_token_usage;
+      const usageForCost = ltu
+        ? { input_tokens: ltu.input_tokens, output_tokens: ltu.output_tokens, cache_read_input_tokens: ltu.cached_input_tokens ?? 0 }
+        : msg.data.usage;
+      const cost = calculateCost(usageForCost, provider);
+      const displayInput = ltu ? ltu.input_tokens : (msg.data.usage?.input_tokens || 0) + (msg.data.usage?.cache_read_input_tokens || 0) + (msg.data.usage?.cache_creation_input_tokens || 0);
+      const displayOutput = ltu ? ltu.output_tokens : (msg.data.usage?.output_tokens || 0);
+      const displayCache = ltu ? (ltu.cached_input_tokens || 0) : (msg.data.usage?.cache_read_input_tokens || 0);
+      const displayTotal = ltu ? ltu.total_tokens : (displayInput + displayOutput);
       const assistantData = assistantTextMap?.[eventIndex];
       return (
         <div className="border-t border-border/15 pt-3 mt-4 animate-fade-in-up">
@@ -391,20 +399,13 @@ function renderEvent(sessionId: string, msg: AgentMessage, _prevMsg: AgentMessag
               </>
             )}
             <span className="text-muted-foreground/20">·</span>
-            <span>{(msg.data.usage?.input_tokens || 0) + (msg.data.usage?.cache_read_input_tokens || 0) + (msg.data.usage?.cache_creation_input_tokens || 0)}+{msg.data.usage?.output_tokens} token</span>
-            {(() => {
-              const totalInput = (msg.data.usage?.input_tokens || 0) + (msg.data.usage?.cache_read_input_tokens || 0) + (msg.data.usage?.cache_creation_input_tokens || 0);
-              const cacheRead = msg.data.usage?.cache_read_input_tokens || 0;
-              if (totalInput > 0 && cacheRead > 0) {
-                return (
-                  <>
-                    <span className="text-muted-foreground/20">·</span>
-                    <span>缓存命中 {((cacheRead / totalInput) * 100).toFixed(0)}%</span>
-                  </>
-                );
-              }
-              return null;
-            })()}
+            <span>{displayInput}+{displayOutput} / {displayTotal} token</span>
+            {displayCache > 0 && displayInput > 0 && (
+              <>
+                <span className="text-muted-foreground/20">·</span>
+                <span>缓存命中 {((displayCache / displayInput) * 100).toFixed(0)}%</span>
+              </>
+            )}
           </div>
         </div>
       );

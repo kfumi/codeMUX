@@ -350,6 +350,7 @@ pub async fn load_codex_session_events(
     #[derive(Default)]
     struct TurnInfo {
         last_token_usage: Option<serde_json::Value>,
+        model_context_window: Option<u64>,
         duration_ms: Option<u64>,
         last_assistant_msg_idx: Option<usize>, // index in `messages`
     }
@@ -378,8 +379,12 @@ pub async fn load_codex_session_events(
                 match payload_type {
                     Some("token_count") => {
                         if let Some(info) = payload.get("info") {
-                            if let Some(usage) = info.get("total_token_usage") {
+                            if let Some(usage) = info.get("last_token_usage") {
                                 current_turn.last_token_usage = Some(usage.clone());
+                            }
+                            // Also capture model_context_window for the frontend
+                            if let Some(ctx) = info.get("model_context_window").and_then(|v| v.as_u64()) {
+                                current_turn.model_context_window = Some(ctx);
                             }
                         }
                     }
@@ -423,10 +428,11 @@ pub async fn load_codex_session_events(
         let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
         let cached = usage.get("cached_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
         let output = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let total = usage.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(input + cached + output);
 
         if input > 0 || output > 0 {
             if let Some(insert_at) = turn.last_assistant_msg_idx {
-                let result = serde_json::json!({
+                let mut result = serde_json::json!({
                     "type": "result",
                     "subtype": "success",
                     "is_error": false,
@@ -442,8 +448,17 @@ pub async fn load_codex_session_events(
                         "output_tokens": output,
                         "cache_read_input_tokens": cached,
                         "cache_creation_input_tokens": 0
+                    },
+                    "last_token_usage": {
+                        "input_tokens": input,
+                        "output_tokens": output,
+                        "cached_input_tokens": cached,
+                        "total_tokens": total
                     }
                 });
+                if let Some(ctx) = turn.model_context_window {
+                    result["model_context_window"] = serde_json::json!(ctx);
+                }
                 turn_results.push(TurnResult { insert_at, result });
             }
         }

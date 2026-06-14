@@ -79,6 +79,12 @@ export interface AgentResultMessage {
     cache_creation_input_tokens?: number;
     cache_read_input_tokens?: number;
   };
+  last_token_usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cached_input_tokens?: number;
+    total_tokens: number;
+  };
   terminal_reason?: string;
 }
 

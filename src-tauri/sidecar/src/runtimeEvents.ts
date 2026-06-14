@@ -76,6 +76,7 @@ export function buildCodexResultEvent({
   usage: Usage;
   durationMs: number;
 }) {
+  const totalTokens = usage.input_tokens + usage.cached_input_tokens + usage.output_tokens;
   return {
     type: 'result',
     subtype: 'success',
@@ -91,6 +92,12 @@ export function buildCodexResultEvent({
       input_tokens: usage.input_tokens,
       output_tokens: usage.output_tokens,
       cache_read_input_tokens: usage.cached_input_tokens,
+    },
+    last_token_usage: {
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      cached_input_tokens: usage.cached_input_tokens,
+      total_tokens: totalTokens,
     },
   };
 }

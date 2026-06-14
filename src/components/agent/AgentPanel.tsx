@@ -134,46 +134,51 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     let inputTokens = 0;
     let cachedTokens = 0;
     let outputTokens = 0;
+    let modelContextWindow: number | undefined;
 
     for (let index = events.length - 1; index >= 0; index -= 1) {
       const event = events[index];
       if (usedTokens === 0 && event.kind === 'assistant') {
         const data: any = event.data;
-        const usage = data?.message?.usage || data?.usage;
+        const usage = data?.last_token_usage || data?.message?.usage || data?.usage;
         if (usage) {
           const input = usage.input_tokens || 0;
-          const cacheRead = usage.cache_read_input_tokens || 0;
-          const cacheCreation = usage.cache_creation_input_tokens || 0;
+          const cacheRead = usage.cached_input_tokens || usage.cache_read_input_tokens || 0;
           const output = usage.output_tokens || 0;
-          const total = input + cacheRead + cacheCreation + output;
+          const total = usage.total_tokens || (input + cacheRead + output);
           if (total > 0) {
             inputTokens = input;
-            cachedTokens = cacheRead + cacheCreation;
+            cachedTokens = cacheRead;
             outputTokens = output;
             usedTokens = total;
           }
+        }
+        if (!modelContextWindow && data?.model_context_window) {
+          modelContextWindow = data.model_context_window;
         }
       }
 
       if (usedTokens === 0 && event.kind === 'result') {
         const data: any = event.data;
-        if (data?.usage) {
-          const usage = data.usage;
+        const usage = data?.last_token_usage || data?.usage;
+        if (usage) {
           const input = usage.input_tokens || 0;
-          const cacheRead = usage.cache_read_input_tokens || 0;
-          const cacheCreation = usage.cache_creation_input_tokens || 0;
+          const cacheRead = usage.cached_input_tokens || usage.cache_read_input_tokens || 0;
           const output = usage.output_tokens || 0;
-          const total = input + cacheRead + cacheCreation + output;
+          const total = usage.total_tokens || (input + cacheRead + output);
           if (total > 0) {
             inputTokens = input;
-            cachedTokens = cacheRead + cacheCreation;
+            cachedTokens = cacheRead;
             outputTokens = output;
             usedTokens = total;
           }
         }
+        if (!modelContextWindow && data?.model_context_window) {
+          modelContextWindow = data.model_context_window;
+        }
       }
 
-      if (usedTokens > 0) {
+      if (usedTokens > 0 && modelContextWindow) {
         break;
       }
     }
@@ -182,6 +187,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       model: session?.model,
       sessionProviderUsesLargeContext: !!resolvedProvider?.context_1m,
       activeProviderUsesLargeContext: !!resolvedProvider?.context_1m,
+      modelContextWindow,
     });
 
     return { usedTokens, totalTokens, inputTokens, cachedTokens, outputTokens };
@@ -386,11 +392,18 @@ function getSessionContextLimit({
   model,
   sessionProviderUsesLargeContext,
   activeProviderUsesLargeContext,
+  modelContextWindow,
 }: {
   model?: string | null;
   sessionProviderUsesLargeContext: boolean;
   activeProviderUsesLargeContext: boolean;
+  modelContextWindow?: number;
 }) {
+  // Codex: use the real context window from the API if available
+  if (modelContextWindow && modelContextWindow > 0) {
+    return modelContextWindow;
+  }
+
   if (typeof model === 'string' && model.trim().length > 0) {
     return model.includes(LARGE_CONTEXT_MODEL_SUFFIX) ? LARGE_CONTEXT_TOKENS : DEFAULT_CONTEXT_TOKENS;
   }

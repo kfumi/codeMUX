@@ -669,15 +669,19 @@ function buildAssistantResultStatsMap(
       continue;
     }
 
+    const ltu = (event.data as any).last_token_usage;
     const usage = event.data.usage;
+    const usageForCost = ltu
+      ? { input_tokens: ltu.input_tokens, output_tokens: ltu.output_tokens, cache_read_input_tokens: ltu.cached_input_tokens ?? 0 }
+      : usage;
     statsMap[lastAssistantIndex] = {
       durationMs: event.data.duration_ms,
       numTurns: event.data.num_turns,
-      costUsd: calculateCost(usage, provider),
-      inputTokens: usage?.input_tokens || 0,
-      outputTokens: usage?.output_tokens || 0,
-      cacheReadTokens: usage?.cache_read_input_tokens || 0,
-      cacheCreationTokens: usage?.cache_creation_input_tokens || 0,
+      costUsd: calculateCost(usageForCost, provider),
+      inputTokens: ltu ? ltu.input_tokens : (usage?.input_tokens || 0),
+      outputTokens: ltu ? ltu.output_tokens : (usage?.output_tokens || 0),
+      cacheReadTokens: ltu ? (ltu.cached_input_tokens || 0) : (usage?.cache_read_input_tokens || 0),
+      cacheCreationTokens: ltu ? 0 : (usage?.cache_creation_input_tokens || 0),
     };
   }
 

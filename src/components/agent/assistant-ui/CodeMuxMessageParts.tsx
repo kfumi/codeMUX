@@ -96,7 +96,37 @@ export function CodeMuxToolCallMessagePart({
 }
 
 export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPartProps) {
-  if (name !== 'codemux-event' || !isAskUserQuestionData(data) || !sessionId) {
+  if (name !== 'codemux-event') {
+    return null;
+  }
+
+  if (isApiRetryData(data)) {
+    const { attempt, max_retries, error_status, error } = data.event.data as any;
+    const isLastRetry = attempt >= max_retries;
+    return (
+      <div className={`text-xs rounded-xl p-3 my-1 border animate-fade-in ${
+        isLastRetry
+          ? 'text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]'
+          : 'text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]'
+      }`}>
+        {isLastRetry ? '请求失败' : `请求重试 ${attempt}/${max_retries}`} · {error_status}: {error}
+      </div>
+    );
+  }
+
+  if (isCompactData(data)) {
+    const preTokens = data.event.data.compact_metadata?.pre_tokens;
+    const tokenText = preTokens >= 1000 ? ` · 节省 ${(preTokens / 1000).toFixed(1)}k tokens` : preTokens > 0 ? ` · 节省 ${preTokens} tokens` : '';
+    return (
+      <div className="text-center py-3 animate-fade-in">
+        <span className="text-[11px] text-muted-foreground/35 tracking-wider font-medium">
+          — 上下文已压缩{tokenText} —
+        </span>
+      </div>
+    );
+  }
+
+  if (!isAskUserQuestionData(data) || !sessionId) {
     return null;
   }
 
@@ -122,6 +152,24 @@ function isAskUserQuestionData(value: unknown): value is AskUserQuestionData {
     value.eventKind === 'ask_user_question' &&
     isRecord(value.event) &&
     value.event.kind === 'ask_user_question'
+  );
+}
+
+function isApiRetryData(value: unknown): value is { eventKind: string; event: Extract<AgentMessage, { kind: 'api_retry' }> } {
+  return (
+    isRecord(value) &&
+    value.eventKind === 'api_retry' &&
+    isRecord(value.event) &&
+    value.event.kind === 'api_retry'
+  );
+}
+
+function isCompactData(value: unknown): value is { eventKind: string; event: Extract<AgentMessage, { kind: 'compact' }> } {
+  return (
+    isRecord(value) &&
+    value.eventKind === 'compact' &&
+    isRecord(value.event) &&
+    value.event.kind === 'compact'
   );
 }
 

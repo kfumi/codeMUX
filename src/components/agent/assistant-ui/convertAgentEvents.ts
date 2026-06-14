@@ -3,7 +3,7 @@ import type { ContentBlock } from '../../../types/agent';
 
 type CodeMuxAssistantRole = 'user' | 'assistant' | 'system';
 
-type CodeMuxVisibleEventKind = Extract<AgentMessage['kind'], 'ask_user_question'>;
+type CodeMuxVisibleEventKind = Extract<AgentMessage['kind'], 'ask_user_question' | 'api_retry' | 'compact'>;
 
 type PersistedContentBlock = ContentBlock | Record<string, unknown> | null | undefined;
 
@@ -37,7 +37,7 @@ export type CodeMuxAssistantMessage = {
   };
 };
 
-const visibleEventKinds = ['ask_user_question'] as const satisfies readonly CodeMuxVisibleEventKind[];
+const visibleEventKinds = ['ask_user_question', 'api_retry', 'compact'] as const satisfies readonly CodeMuxVisibleEventKind[];
 
 export function convertAgentEventsToAssistantMessages(
   events: AgentMessage[],
