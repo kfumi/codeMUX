@@ -31,6 +31,7 @@ export type AgentMessage =
   | { kind: 'result'; data: AgentResultMessage }
   | { kind: 'ready'; data: SidecarReadyEvent }
   | { kind: 'error'; data: SidecarErrorEvent }
+  | { kind: 'stream_status'; data: { message: string; is_reconnecting: boolean } }
   | { kind: 'api_retry'; data: { attempt: number; max_retries: number; retry_delay_ms: number; error_status: number; error: string } }
   | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string }>; multiSelect?: boolean }> } }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
@@ -326,6 +327,8 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'streaming', data: { event: data.event, session_id: data.session_id } };
       case 'sidecar_debug':
         return { kind: 'raw', data };
+      case 'sidecar_stream_status':
+        return { kind: 'stream_status', data: { message: data.message, is_reconnecting: data.is_reconnecting } };
       default:
         return { kind: 'raw', data };
     }

@@ -711,13 +711,6 @@ pub async fn ensure_agent_session(
 
     // If the proxy is already running (e.g. started manually from settings),
     // tell the sidecar to use it directly instead of starting a new one.
-    if agent_kind == "codex" {
-        if let Some(port) = get_live_proxy_port(&agent_state).await {
-            cmd["proxyBaseUrl"] = serde_json::json!(format!("http://127.0.0.1:{}", port));
-            info!(target: "agent", "Proxy already running on port {}, passing to sidecar", port);
-        }
-    }
-
     send_command_to_session(&agent_state, &session_id, cmd).await?;
     info!(target: "agent", "Agent ensure command sent for session_id={} agent_kind={}", session_id, agent_kind);
 
@@ -773,14 +766,7 @@ pub async fn start_agent_session(
     };
 
     ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
-    let mut ensure_cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model);
-
-    if agent_kind == "codex" {
-        if let Some(port) = get_live_proxy_port(&agent_state).await {
-            ensure_cmd["proxyBaseUrl"] = serde_json::json!(format!("http://127.0.0.1:{}", port));
-            info!(target: "agent", "Proxy already running on port {}, passing to sidecar", port);
-        }
-    }
+    let ensure_cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model);
 
     send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 

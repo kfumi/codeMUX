@@ -12,6 +12,7 @@ import { AskUserQuestionCard } from '../AskUserQuestionCard';
 import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
 import { cn } from '@/lib/utils';
 import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
+import { AlertTriangle, XCircle } from 'lucide-react';
 
 type CodeMuxToolCallPartProps = {
   toolName: string;
@@ -100,6 +101,63 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
     return null;
   }
 
+  if (isErrorData(data)) {
+    const errorMsg = data.event.data.error?.trim();
+    if (!errorMsg) return null;
+    // Parse codex stderr format: "[codex] <label>: <message>"
+    const match = errorMsg.match(/^\[codex\]\s*(?:SDK\s*)?(\w[\w\s]*?):\s*(.+)$/s);
+    const label = match ? match[1].trim() : undefined;
+    const message = match ? match[2].trim() : errorMsg;
+    return (
+      <div className="text-xs rounded-xl p-3 my-1 border animate-fade-in text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]">
+        <div className="flex items-start gap-2">
+          <XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            {label && <span className="font-medium">{label}: </span>}
+            <span className="break-all whitespace-pre-wrap">{message}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isStreamStatusData(data)) {
+    const { message, is_reconnecting } = data.event.data;
+    // Parse "Reconnecting... N/M (reason)" from codex SDK
+    const reconnectMatch = message.match(/Reconnecting\.\.\.\s*(\d+)\/(\d+)(?:\s*\((.+)\))?/);
+    if (reconnectMatch) {
+      const [, current, total, reason] = reconnectMatch;
+      return (
+        <div className="text-xs rounded-xl p-3 my-1 border animate-fade-in text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 animate-pulse" />
+            <span>正在重新连接 {current}/{total}{reason ? ` · ${reason}` : ''}</span>
+          </div>
+        </div>
+      );
+    }
+    // Non-reconnecting stream error (final failure)
+    if (!is_reconnecting) {
+      return (
+        <div className="text-xs rounded-xl p-3 my-1 border animate-fade-in text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]">
+          <div className="flex items-start gap-2">
+            <XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span className="break-all whitespace-pre-wrap">连接断开: {message}</span>
+          </div>
+        </div>
+      );
+    }
+    // Generic reconnecting message
+    return (
+      <div className="text-xs rounded-xl p-3 my-1 border animate-fade-in text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 animate-pulse" />
+          <span>{message}</span>
+        </div>
+      </div>
+    );
+  }
+
   if (isApiRetryData(data)) {
     const { attempt, max_retries, error_status, error } = data.event.data as any;
     const isLastRetry = attempt >= max_retries;
@@ -170,6 +228,24 @@ function isCompactData(value: unknown): value is { eventKind: string; event: Ext
     value.eventKind === 'compact' &&
     isRecord(value.event) &&
     value.event.kind === 'compact'
+  );
+}
+
+function isErrorData(value: unknown): value is { eventKind: string; event: Extract<AgentMessage, { kind: 'error' }> } {
+  return (
+    isRecord(value) &&
+    value.eventKind === 'error' &&
+    isRecord(value.event) &&
+    value.event.kind === 'error'
+  );
+}
+
+function isStreamStatusData(value: unknown): value is { eventKind: string; event: Extract<AgentMessage, { kind: 'stream_status' }> } {
+  return (
+    isRecord(value) &&
+    value.eventKind === 'stream_status' &&
+    isRecord(value.event) &&
+    value.event.kind === 'stream_status'
   );
 }
 

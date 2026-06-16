@@ -3,7 +3,7 @@ import type { ContentBlock } from '../../../types/agent';
 
 type CodeMuxAssistantRole = 'user' | 'assistant' | 'system';
 
-type CodeMuxVisibleEventKind = Extract<AgentMessage['kind'], 'ask_user_question' | 'api_retry' | 'compact'>;
+type CodeMuxVisibleEventKind = Extract<AgentMessage['kind'], 'ask_user_question' | 'api_retry' | 'compact' | 'error' | 'stream_status'>;
 
 type PersistedContentBlock = ContentBlock | Record<string, unknown> | null | undefined;
 
@@ -37,7 +37,7 @@ export type CodeMuxAssistantMessage = {
   };
 };
 
-const visibleEventKinds = ['ask_user_question', 'api_retry', 'compact'] as const satisfies readonly CodeMuxVisibleEventKind[];
+const visibleEventKinds = ['ask_user_question', 'api_retry', 'compact', 'error', 'stream_status'] as const satisfies readonly CodeMuxVisibleEventKind[];
 
 export function convertAgentEventsToAssistantMessages(
   events: AgentMessage[],
@@ -131,17 +131,10 @@ export function convertAgentEventsToAssistantMessages(
     if (event.kind === 'error') {
       const text = event.data.error.trim();
       if (text.length > 0 && !attachLatestPendingToolError(messages, toolCallLocationById, text)) {
-        messages.push(
-          createMessage(
-            `error-${index}`,
-            'system',
-            [{ type: 'text', text: `Error: ${text}` }],
-            event,
-            index,
-          ),
-        );
+        // Fall through to isVisibleEventKind below to render as data-codemux-event
+      } else {
+        return;
       }
-      return;
     }
 
     if (event.kind === 'result') {

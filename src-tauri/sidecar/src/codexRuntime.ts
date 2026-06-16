@@ -107,13 +107,9 @@ export class CodexSessionRuntime {
     this.configFingerprint = nextFingerprint;
 
     let runtimeBaseUrl = requestedConfig.upstreamBaseUrl;
-    if (cmd.proxyBaseUrl) {
-      // Proxy already running externally (e.g. started from settings) — use it directly
-      runtimeBaseUrl = cmd.proxyBaseUrl;
-      process.stderr.write(
-        `[codex] Using existing proxy at ${runtimeBaseUrl}\n`,
-      );
-    } else if (
+    // Always go through proxyManager — it checks fingerprint and restarts
+    // the proxy when the upstream config (apiKey/baseUrl) changes.
+    if (
       requestedConfig.apiKey &&
       requestedConfig.upstreamBaseUrl &&
       shouldUseCodexChatCompatProxy(requestedConfig.upstreamBaseUrl)
@@ -387,6 +383,13 @@ export class CodexSessionRuntime {
         return;
       case 'error':
         noteStreamError(event.message);
+        // Forward stream errors (e.g. "Reconnecting...") as structured events
+        // so the UI can display status instead of only logging to stderr.
+        emit({
+          type: 'sidecar_stream_status',
+          message: event.message,
+          is_reconnecting: event.message.includes('Reconnecting'),
+        });
         return;
       case 'turn.started':
       case 'turn.completed':
