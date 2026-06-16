@@ -9,12 +9,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '../ui/select';
 import { Loader2, Eye, EyeOff, Zap } from 'lucide-react';
 
-const BUILT_IN_MODELS: ModelInfo[] = [
-  { id: 'claude-opus', owned_by: 'anthropic' },
-  { id: 'claude-sonnet', owned_by: 'anthropic' },
-  { id: 'claude-haiku', owned_by: 'anthropic' },
-];
-
 function generateId(): string {
   return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
 }
@@ -64,7 +58,7 @@ export function ProviderConfigPanel() {
       api_key: '',
       anthropic_base_url: '',
       openai_base_url: '',
-      default_model: BUILT_IN_MODELS[1].id,
+      default_model: '',
     });
     setIsNew(true);
     setShowKey(false);
@@ -176,7 +170,6 @@ export function ProviderConfigPanel() {
       } else {
         setFetchMessage(`获取失败: ${msg}`);
       }
-      setAvailableModels(BUILT_IN_MODELS);
     } finally {
       setIsFetchingModels(false);
     }
@@ -303,7 +296,7 @@ export function ProviderConfigPanel() {
                 <Input
                   value={editingProvider.openai_base_url}
                   onChange={(e) => updateField('openai_base_url', e.target.value)}
-                  placeholder="可选"
+                  placeholder="https://api.openai.com/v1"
                 />
               </div>
 
@@ -334,7 +327,7 @@ export function ProviderConfigPanel() {
                       <Input
                         value={editingProvider.default_model}
                         onChange={(e) => updateField('default_model', e.target.value)}
-                        placeholder="如 claude-sonnet-4-20250514"
+                        placeholder="如 claude-opus-4-8"
                       />
                     )}
                   </div>

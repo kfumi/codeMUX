@@ -303,6 +303,73 @@ describe('createCodexCompatProxyServer', () => {
     );
   });
 
+  it('emits each live function_call_output tool_result only once', async () => {
+    const upstream = createServer(async (_req, res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({
+        model: 'deepseek-v4-flash',
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: 'ack',
+            },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: {
+          prompt_tokens: 1,
+          completion_tokens: 1,
+          total_tokens: 2,
+        },
+      }));
+    });
+
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const proxy = await createCodexCompatProxyServer({
+      apiKey: 'proxy-key',
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+    }, 0);
+    cleanups.push(() => proxy.close());
+
+    const requestBody = {
+      model: 'deepseek-v4-flash',
+      input: [
+        {
+          type: 'function_call_output',
+          call_id: 'call_repeat',
+          output: 'same result',
+        },
+      ],
+    };
+
+    await fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+    await fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+
+    const emittedToolResults = stdoutWrites
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line))
+      .filter((event) =>
+        event.type === 'user' &&
+        event.message?.content?.some?.((content: Record<string, unknown>) =>
+          content.type === 'tool_result' && content.tool_use_id === 'call_repeat',
+        ),
+      );
+
+    expect(emittedToolResults).toHaveLength(1);
+  });
+
   it('streams synthesized responses SSE events for chat-completions providers', async () => {
     const upstream = createServer(async (req, res) => {
       // Respond with SSE chunks when the request asks for streaming.

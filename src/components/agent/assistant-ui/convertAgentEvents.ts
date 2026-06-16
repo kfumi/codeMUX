@@ -45,6 +45,7 @@ export function convertAgentEventsToAssistantMessages(
   const messages: CodeMuxAssistantMessage[] = [];
   const toolCallLocationById = new Map<string, { messageIndex: number; partIndex: number }>();
   const askQuestionLocationByToolUseId = new Map<string, { messageIndex: number; partIndex: number }>();
+  const pendingToolResultsById = new Map<string, { content: string; isError: boolean }>();
 
   events.forEach((event, index) => {
     if (event.kind === 'user') {
@@ -83,6 +84,17 @@ export function convertAgentEventsToAssistantMessages(
         message.content.forEach((part, partIndex) => {
           if (part.type === 'tool-call') {
             toolCallLocationById.set(part.toolCallId, { messageIndex, partIndex });
+            const pendingResult = pendingToolResultsById.get(part.toolCallId);
+            if (pendingResult) {
+              attachToolResult(
+                messages,
+                toolCallLocationById,
+                part.toolCallId,
+                pendingResult.content,
+                pendingResult.isError,
+              );
+              pendingToolResultsById.delete(part.toolCallId);
+            }
           }
         });
       }
@@ -92,13 +104,19 @@ export function convertAgentEventsToAssistantMessages(
 
     if (event.kind === 'tool_result') {
       for (const result of getToolResults(event)) {
-        attachToolResult(
+        const attachedToolResult = attachToolResult(
           messages,
           toolCallLocationById,
           result.toolUseId,
           result.content,
           result.isError,
         );
+        if (!attachedToolResult) {
+          pendingToolResultsById.set(result.toolUseId, {
+            content: result.content,
+            isError: result.isError,
+          });
+        }
         attachAskQuestionResult(
           messages,
           askQuestionLocationByToolUseId,

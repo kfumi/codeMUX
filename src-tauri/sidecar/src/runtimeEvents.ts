@@ -115,7 +115,7 @@ export function buildCodexToolUseContent(item: ThreadItem): AssistantContentBloc
       return {
         type: 'tool_use',
         id: item.id,
-        name: `mcp__${item.server}__${item.tool}`,
+        name: formatMcpToolName(item.server, item.tool),
         input: (item.arguments as Record<string, unknown>) ?? {},
       };
     case 'todo_list':
@@ -140,6 +140,15 @@ export function buildCodexToolUseContent(item: ThreadItem): AssistantContentBloc
     default:
       return null;
   }
+}
+
+function formatMcpToolName(server: string, tool: string): string {
+  // Global MCP helper tools (list_mcp_resources, etc.) don't follow the mcp__server__tool convention
+  if (tool.startsWith('list_mcp_') || tool.startsWith('read_mcp_')) {
+    return tool;
+  }
+
+  return `mcp__${server}__${tool}`;
 }
 
 export function buildCodexToolResultContent(

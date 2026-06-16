@@ -538,7 +538,7 @@ function getSourceTimestamp(message: MessageState): number | undefined {
   return typeof value === 'number' && value > 0 ? value : undefined;
 }
 
-function buildToolDurationMap(events: AgentMessage[], eventTimestamps: number[]): Record<string, number> {
+export function buildToolDurationMap(events: AgentMessage[], eventTimestamps: number[]): Record<string, number> {
   const durations: Record<string, number> = {};
   const startTimes: Record<string, number> = {};
 
@@ -566,7 +566,7 @@ function buildToolDurationMap(events: AgentMessage[], eventTimestamps: number[])
             continue;
           }
 
-          if (startTimes[result.tool_use_id]) {
+          if (startTimes[result.tool_use_id] && durations[result.tool_use_id] == null) {
             durations[result.tool_use_id] = timestamp - startTimes[result.tool_use_id];
           }
         }
@@ -576,7 +576,8 @@ function buildToolDurationMap(events: AgentMessage[], eventTimestamps: number[])
       if (
         toolUseResult &&
         typeof toolUseResult.tool_use_id === 'string' &&
-        startTimes[toolUseResult.tool_use_id]
+        startTimes[toolUseResult.tool_use_id] &&
+        durations[toolUseResult.tool_use_id] == null
       ) {
         durations[toolUseResult.tool_use_id] = timestamp - startTimes[toolUseResult.tool_use_id];
       }
@@ -584,7 +585,7 @@ function buildToolDurationMap(events: AgentMessage[], eventTimestamps: number[])
       if (
         typeof data.parent_tool_use_id === 'string' &&
         startTimes[data.parent_tool_use_id] &&
-        !durations[data.parent_tool_use_id]
+        durations[data.parent_tool_use_id] == null
       ) {
         durations[data.parent_tool_use_id] = timestamp - startTimes[data.parent_tool_use_id];
       }

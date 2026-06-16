@@ -29,14 +29,18 @@ export type ProxyServerHandle = {
   close: () => Promise<void>;
 };
 
-export async function createCodexCompatProxyServer(config: ProxyConfig, preferredPort = 15722): Promise<ProxyServerHandle> {
+export async function createCodexCompatProxyServer(
+  config: ProxyConfig,
+  preferredPort = 15722,
+): Promise<ProxyServerHandle> {
   const historyStore = new CodexHistoryStore();
   const legacyHistory = new CodexChatHistory();
+  const emittedToolResultIds = new Set<string>();
   const configFingerprint = createConfigFingerprint(config);
   const server = createServer(async (req, res) => {
     try {
       proxyLog(`${req.method ?? 'UNKNOWN'} ${req.url ?? '/'}`);
-      await handleRequest(req, res, config, configFingerprint, historyStore, legacyHistory);
+      await handleRequest(req, res, config, configFingerprint, historyStore, legacyHistory, emittedToolResultIds);
     } catch (error) {
       proxyLog(`error ${req.method ?? 'UNKNOWN'} ${req.url ?? '/'}: ${error instanceof Error ? error.message : String(error)}`);
       writeJson(res, 500, {
@@ -79,8 +83,8 @@ export async function createCodexCompatProxyServer(config: ProxyConfig, preferre
 
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
-    close: () =>
-      new Promise<void>((resolve, reject) => {
+    close: async () => {
+      await new Promise<void>((resolve, reject) => {
         server.close((error) => {
           if (error) {
             reject(error);
@@ -88,7 +92,8 @@ export async function createCodexCompatProxyServer(config: ProxyConfig, preferre
           }
           resolve();
         });
-      }),
+      });
+    },
   };
 }
 
@@ -99,6 +104,7 @@ async function handleRequest(
   configFingerprint: string,
   historyStore: CodexHistoryStore,
   legacyHistory: CodexChatHistory,
+  emittedToolResultIds: Set<string>,
 ): Promise<void> {
   if (req.method === 'GET' && isHealthPath(req.url ?? '/')) {
     writeJson(res, 200, { ok: true, configFingerprint });
@@ -131,7 +137,7 @@ async function handleRequest(
   }
 
   const requestBody = await readJsonBody(req) as Parameters<typeof convertResponsesToChatRequest>[0];
-  emitToolResultEventsFromRequest(requestBody);
+  emitToolResultEventsFromRequest(requestBody, emittedToolResultIds);
   proxyLog(`responses request ${summarizeResponsesRequest(requestBody)}`);
   if (Array.isArray(requestBody.tools) && requestBody.tools.length > 0) {
     proxyLog(`responses tool names ${requestBody.tools.map((tool) => summarizeToolName(tool)).join(', ')}`);
@@ -146,7 +152,7 @@ async function handleRequest(
   const chatRequest = convertResponsesToChatRequest(requestBody, historyStore, reasoningConfig);
   proxyLog(`chat request ${summarizeChatRequest(chatRequest)}`);
   if (Array.isArray(chatRequest.tools) && chatRequest.tools.length > 0) {
-    proxyLog(`chat tool names ${chatRequest.tools.map((tool) => summarizeChatToolName(tool)).join(', ')}`);
+    // proxyLog(`chat tool names ${chatRequest.tools.map((tool) => summarizeChatToolName(tool)).join(', ')}`);
     const missingChatTools = chatRequest.tools.filter((tool) => summarizeChatToolName(tool) === '<missing>');
     if (missingChatTools.length > 0) {
       proxyLog(`chat missing-name tools ${truncateForLog(JSON.stringify(missingChatTools))}`);
@@ -156,96 +162,50 @@ async function handleRequest(
   }
   // --- Streaming path: forward upstream SSE deltas as Responses API events ---
   if (requestBody.stream) {
-    const responseId = `resp_${crypto.randomUUID()}`;
-    const messageId = `msg_${crypto.randomUUID()}`;
-    const reasoningId = `rs_${crypto.randomUUID()}`;
-
     try {
+      const responseId = `resp_${crypto.randomUUID()}`;
+      const messageId = `msg_${crypto.randomUUID()}`;
+      const reasoningId = `rs_${crypto.randomUUID()}`;
       const { chunks, response: upstreamRes } = await streamChatCompletion(chatRequest, config);
-      const reasoningEnabled = reasoningConfig?.supports_thinking ?? false;
       const responsesEvents = convertChatStreamToResponsesEvents(chunks, {
         responseId,
         model: upstreamRes.headers.get('x-model') || chatRequest.model || 'unknown',
         reasoningId,
         messageId,
-        reasoningEnabled,
+        reasoningEnabled: reasoningConfig?.supports_thinking ?? false,
       });
 
-      // Forward Responses API SSE events to the Codex SDK in real-time.
-      res.statusCode = 200;
-      res.setHeader('content-type', 'text/event-stream; charset=utf-8');
-      res.setHeader('cache-control', 'no-cache, no-transform');
-      res.setHeader('connection', 'keep-alive');
-
-      // Collect tool calls to emit as assistant events (the SDK doesn't handle
-      // function_call items from the proxy).
-      let toolCalls: Array<Record<string, unknown>> | null = null;
-
+      const events: Array<Record<string, unknown>> = [];
+      const toolCalls: StreamingToolCall[] = [];
       let eventCount = 0;
       for await (const event of responsesEvents) {
         eventCount++;
-        // Log key events for debugging
-        if (eventCount <= 2 || (event.type as string) === 'response.output_item.done' || (event.type as string) === 'response.output_text.done' || (event.type as string) === 'response.content_part.done' || (event.type as string) === 'response.completed') {
-          proxyLog(`→ #${eventCount} ${event.type} ${JSON.stringify(event).slice(0, 300)}`);
-        }
-        // Intercept function_call items for direct emit and history recording.
+        logStreamingEvent(event, eventCount);
+        events.push(event);
+
         if (event.type === 'response.output_item.done') {
           const item = event.item as Record<string, unknown> | undefined;
           if (item?.type === 'function_call') {
-            if (!toolCalls) toolCalls = [];
-            toolCalls.push({
-              id: (item.id ?? item.call_id ?? '') as string,
-              name: (item.name ?? '') as string,
-              arguments: (item.arguments ?? '') as string,
-            });
-            // Record tool call in history for future request enrichment
-            if (typeof item.call_id === 'string') {
+            const call = {
+              id: String(item.call_id ?? item.id ?? ''),
+              name: String(item.name ?? ''),
+              arguments: String(item.arguments ?? ''),
+            };
+            toolCalls.push(call);
+            if (call.id) {
               historyStore.recordStreamingToolCall(responseId, {
-                callId: item.call_id,
-                name: (item.name ?? '') as string,
-                arguments: (item.arguments ?? '') as string,
+                callId: call.id,
+                name: call.name,
+                arguments: call.arguments,
               });
             }
           }
         }
-
-        // Log the first text delta and completed event for debugging
-        if (eventCount === 1) {
-          proxyLog(`first event: ${JSON.stringify(event).slice(0, 200)}`);
-        }
-        if ((event.type as string) === 'response.completed') {
-          const output = (event as any).response?.output;
-          proxyLog(`response.completed output items=${output?.length ?? 0}`);
-          if (output?.[0]) {
-            proxyLog(`  output[0] type=${output[0].type} content_len=${JSON.stringify(output[0].content ?? output[0].summary ?? '').length}`);
-          }
-        }
-
-        res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
       }
 
-      res.end('data: [DONE]\n\n');
+      forwardResponsesSseEvents(res, events);
       proxyLog(`stream completed: ${eventCount} events forwarded`);
-
-      // Emit tool_use events after streaming completes.
-      if (toolCalls && toolCalls.length > 0) {
-        const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
-        proxyLog(`emitting ${toolCalls.length} tool_use events from stream, sessionId=${activeSessionId || '(empty)'}`);
-        for (const tc of toolCalls) {
-          let args: unknown;
-          try { args = JSON.parse(String(tc.arguments ?? '{}')); } catch { args = {}; }
-          emitEvent({
-            type: 'assistant',
-            uuid: crypto.randomUUID(),
-            session_id: activeSessionId,
-            message: {
-              role: 'assistant',
-              content: [{ type: 'tool_use', id: tc.id, name: tc.name, input: args }],
-            },
-            parent_tool_use_id: null,
-          });
-        }
-      }
+      await emitToolUseEventsFromStream(toolCalls);
     } catch (error) {
       proxyLog(`streaming error: ${error instanceof Error ? error.message : String(error)}`);
       if (!res.headersSent) {
@@ -324,6 +284,7 @@ async function handleRequest(
 
 function emitToolResultEventsFromRequest(
   requestBody: Parameters<typeof convertResponsesToChatRequest>[0],
+  emittedToolResultIds: Set<string>,
 ): void {
   const inputItems = Array.isArray(requestBody.input) ? requestBody.input : [requestBody.input];
   const functionCallOutputs = inputItems.filter(isFunctionCallOutputItem);
@@ -334,6 +295,11 @@ function emitToolResultEventsFromRequest(
 
   void import('./codexRuntime.js').then(({ emit: emitEvent, activeSessionId }) => {
     for (const item of functionCallOutputs) {
+      const emittedKey = `${activeSessionId}\0${item.call_id}`;
+      if (emittedToolResultIds.has(emittedKey)) {
+        continue;
+      }
+      emittedToolResultIds.add(emittedKey);
       emitEvent(buildToolResultEvent({
         sessionId: activeSessionId,
         toolUseId: item.call_id ?? '',
@@ -371,6 +337,78 @@ function stringifyFunctionCallOutput(output: unknown): string {
   } catch {
     return String(output);
   }
+}
+
+type StreamingToolCall = {
+  id: string;
+  name: string;
+  arguments: string;
+};
+
+function forwardResponsesSseEvents(res: ServerResponse, events: Array<Record<string, unknown>>): void {
+  res.statusCode = 200;
+  res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+  res.setHeader('cache-control', 'no-cache, no-transform');
+  res.setHeader('connection', 'keep-alive');
+
+  for (const event of events) {
+    res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+  }
+  res.end('data: [DONE]\n\n');
+}
+
+function logStreamingEvent(event: Record<string, unknown>, eventCount: number): void {
+  if (eventCount <= 2 || (event.type as string) === 'response.output_item.done' || (event.type as string) === 'response.output_text.done' || (event.type as string) === 'response.content_part.done' || (event.type as string) === 'response.completed') {
+    proxyLog(`stream event #${eventCount} ${String(event.type)} ${JSON.stringify(event).slice(0, 300)}`);
+  }
+  if (eventCount === 1) {
+    proxyLog(`first event: ${JSON.stringify(event).slice(0, 200)}`);
+  }
+  if ((event.type as string) === 'response.completed') {
+    const output = (event as any).response?.output;
+    proxyLog(`response.completed output items=${output?.length ?? 0}`);
+    if (output?.[0]) {
+      proxyLog(`  output[0] type=${output[0].type} content_len=${JSON.stringify(output[0].content ?? output[0].summary ?? '').length}`);
+    }
+  }
+}
+
+async function emitToolUseEventsFromStream(toolCalls: StreamingToolCall[]): Promise<void> {
+  if (toolCalls.length === 0) {
+    return;
+  }
+
+  const { activeSessionId } = await import('./codexRuntime.js');
+  proxyLog(`emitting ${toolCalls.length} tool_use events from stream, sessionId=${activeSessionId || '(empty)'}`);
+  for (const tc of toolCalls) {
+    await emitToolUseEvent(tc, parseJsonObject(tc.arguments));
+  }
+}
+
+async function emitToolUseEvent(toolCall: StreamingToolCall, input: Record<string, unknown>): Promise<void> {
+  const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
+  emitEvent({
+    type: 'assistant',
+    uuid: crypto.randomUUID(),
+    session_id: activeSessionId,
+    message: {
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: toolCall.id, name: toolCall.name, input }],
+    },
+    parent_tool_use_id: null,
+  });
+}
+
+function parseJsonObject(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value || '{}');
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Fall through to the safe empty object expected by Chat Completions tools.
+  }
+  return {};
 }
 
 async function fetchChatCompletion(

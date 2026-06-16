@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { CodeMuxAssistantRuntimeProvider } from './CodeMuxAssistantRuntime';
-import { CodeMuxThread } from './CodeMuxThread';
+import { CodeMuxThread, buildToolDurationMap } from './CodeMuxThread';
 
 const sessionOneEvents: AgentMessage[] = [
   { kind: 'user', data: { content: 'session one user' } },
@@ -80,6 +80,8 @@ const timestampOnlyAssistantEvents: AgentMessage[] = [
   },
 ];
 
+const originalScrollTo = HTMLElement.prototype.scrollTo;
+
 function Harness({ sessionId }: { sessionId: string }) {
   return (
     <CodeMuxAssistantRuntimeProvider
@@ -101,6 +103,10 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     }
 
     vi.stubGlobal('ResizeObserver', MockResizeObserver);
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      value: vi.fn(),
+    });
 
     useAgentStore.setState({
       events: {
@@ -134,6 +140,10 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      value: originalScrollTo,
+    });
     cleanup();
   });
 
@@ -164,5 +174,53 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('timestamp only assistant')).toBeTruthy();
     // No result event means no isFinalAssistantMessage, so footer (timestamp) should not render.
     expect(screen.queryByText('21:40')).toBeNull();
+  });
+
+  it('keeps the first completion time when duplicate live tool results arrive', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-repeat',
+          session_id: 'session-tool-repeat',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'call-repeat', name: 'mcp__context7__query_docs', input: {} }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-first',
+          session_id: 'session-tool-repeat',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'call-repeat', content: 'first' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-duplicate',
+          session_id: 'session-tool-repeat',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'call-repeat', content: 'duplicate' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    expect(buildToolDurationMap(events, [1_000, 1_250, 5_000])).toEqual({
+      'call-repeat': 250,
+    });
   });
 });

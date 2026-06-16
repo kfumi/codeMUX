@@ -35,6 +35,41 @@ export type ChatStreamToolCall = {
   arguments: string;
 };
 
+function parseMcpFunctionName(name: string): { server: string; tool: string } | null {
+  if (!name.startsWith('mcp__')) {
+    return null;
+  }
+  const parts = name.split('__');
+  if (parts.length < 3 || parts[1].length === 0) {
+    return null;
+  }
+  return {
+    server: parts[1],
+    tool: parts.slice(2).join('__'),
+  };
+}
+
+function buildFunctionCallItem(
+  toolCall: ChatStreamToolCall,
+  status: 'in_progress' | 'completed',
+  argumentsValue: string,
+): Record<string, unknown> {
+  const item: Record<string, unknown> = {
+    type: 'function_call',
+    id: toolCall.id,
+    status,
+    call_id: toolCall.id,
+    name: toolCall.name,
+    arguments: argumentsValue,
+  };
+  const mcp = parseMcpFunctionName(toolCall.name);
+  if (mcp) {
+    item.server = mcp.server;
+    item.tool = mcp.tool;
+  }
+  return item;
+}
+
 // ---------------------------------------------------------------------------
 // SSE Parser
 // ---------------------------------------------------------------------------
@@ -513,7 +548,7 @@ export async function* convertChatStreamToResponsesEvents(
     yield {
       type: 'response.output_item.added',
       output_index: outputIndex,
-      item: { type: 'function_call', id: tc.id, status: 'in_progress', call_id: tc.id, name: tc.name, arguments: '' },
+      item: buildFunctionCallItem(tc, 'in_progress', ''),
     };
     yield {
       type: 'response.function_call_arguments.delta',
@@ -532,7 +567,7 @@ export async function* convertChatStreamToResponsesEvents(
     yield {
       type: 'response.output_item.done',
       output_index: outputIndex,
-      item: { type: 'function_call', id: tc.id, status: 'completed', call_id: tc.id, name: tc.name, arguments: tc.arguments },
+      item: buildFunctionCallItem(tc, 'completed', tc.arguments),
     };
   }
 
@@ -541,7 +576,7 @@ export async function* convertChatStreamToResponsesEvents(
   if (startedReasoning) output.push({ type: 'reasoning', id: reasoningId, summary: [] });
   if (startedText) output.push({ type: 'message', id: messageId, status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: accumulatedText, annotations: [] }] });
   for (const tc of toolCalls.values()) {
-    output.push({ type: 'function_call', id: tc.id, status: 'completed', call_id: tc.id, name: tc.name, arguments: tc.arguments });
+    output.push(buildFunctionCallItem(tc, 'completed', tc.arguments));
   }
 
   const finalStatus = toolCalls.size > 0 ? 'requires_action' : 'completed';

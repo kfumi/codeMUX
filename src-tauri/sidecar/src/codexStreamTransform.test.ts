@@ -82,6 +82,47 @@ describe('convertChatStreamToResponsesEvents', () => {
     expect(functionCallDone[0].arguments).toBe('{"path":"/tmp"}');
   });
 
+  it('preserves MCP server and tool metadata on streamed function calls', async () => {
+    const events = await collectEvents(convertChatStreamToResponsesEvents(makeChunks([
+      {
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'call_context7',
+              type: 'function',
+              function: {
+                name: 'mcp__context7__resolve_library_id',
+                arguments: '{"libraryName":"Spring Boot"}',
+              },
+            }],
+          },
+          finish_reason: 'tool_calls',
+        }],
+      },
+    ]), IDS));
+
+    const functionCallDone = events.find((e) =>
+      e.type === 'response.output_item.done'
+      && (e.item as Record<string, unknown> | undefined)?.type === 'function_call',
+    );
+    expect(functionCallDone?.item).toMatchObject({
+      type: 'function_call',
+      name: 'mcp__context7__resolve_library_id',
+      server: 'context7',
+      tool: 'resolve_library_id',
+    });
+
+    const completed = events.find((e) => e.type === 'response.completed');
+    const response = completed?.response as { output?: unknown[] } | undefined;
+    expect(response?.output?.[0]).toMatchObject({
+      type: 'function_call',
+      name: 'mcp__context7__resolve_library_id',
+      server: 'context7',
+      tool: 'resolve_library_id',
+    });
+  });
+
   it('emits response.completed with usage', async () => {
     const events = await collectEvents(convertChatStreamToResponsesEvents(makeChunks([
       { choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }] },

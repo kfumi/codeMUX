@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ThreadEvent } from '@openai/codex-sdk';
 
 import { CodexSessionRuntime } from './codexRuntime.js';
+import { buildCodexToolUseContent } from './runtimeEvents.js';
 
 describe('CodexSessionRuntime', () => {
   it('emits incremental stream events from item.updated agent messages', () => {
@@ -162,5 +163,23 @@ describe('CodexSessionRuntime', () => {
     } finally {
       stdoutSpy.mockRestore();
     }
+  });
+
+  it('keeps global MCP helper tool names unprefixed for live rendering parity with history', () => {
+    const toolUse = buildCodexToolUseContent({
+      id: 'tool-1',
+      type: 'mcp_tool_call',
+      server: 'context7',
+      tool: 'list_mcp_resources',
+      arguments: { server: 'context7' },
+      status: 'completed',
+    } as any);
+
+    expect(toolUse).toEqual({
+      type: 'tool_use',
+      id: 'tool-1',
+      name: 'list_mcp_resources',
+      input: { server: 'context7' },
+    });
   });
 });

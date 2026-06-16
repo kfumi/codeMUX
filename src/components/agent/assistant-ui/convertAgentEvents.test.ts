@@ -179,4 +179,63 @@ describe('convertAgentEventsToAssistantMessages', () => {
       },
     ]);
   });
+
+  it('attaches tool results that arrive before their matching live tool call', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'call-query-docs',
+                content: 'unsupported call',
+                is_error: true,
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'call-query-docs',
+                name: 'mcp__context7__query_docs',
+                input: { libraryId: '/spring-projects/spring-boot' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content).toEqual([
+      {
+        type: 'tool-call',
+        toolCallId: 'call-query-docs',
+        toolName: 'mcp__context7__query_docs',
+        args: { libraryId: '/spring-projects/spring-boot' },
+        result: 'unsupported call',
+        isError: true,
+      },
+    ]);
+  });
 });
