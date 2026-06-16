@@ -1,13 +1,8 @@
-import { createCodexCompatProxyServer, type ProxyServerHandle } from './codexCompatProxy.js';
+import { createCodexCompatProxyServer, type ProxyServerHandle, type ProxyConfig } from './codexCompatProxy.js';
 import { shouldUseCodexChatCompatProxy } from './sessionRuntimeHelpers.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import crypto from 'node:crypto';
-
-type ProxyConfig = {
-  apiKey: string;
-  baseUrl: string;
-};
 
 export type ProxyStatus = {
   running: boolean;
@@ -38,13 +33,13 @@ class ProxyManager {
    * If config changed, stops the old proxy and starts a new one.
    * Returns null if the baseUrl doesn't need a proxy (i.e. it's api.openai.com).
    */
-  async start(apiKey: string, baseUrl: string): Promise<{ port: number } | null> {
+  async start(apiKey: string, baseUrl: string, providerName?: string): Promise<{ port: number } | null> {
     if (!shouldUseCodexChatCompatProxy(baseUrl)) {
       process.stderr.write('[proxy-manager] Proxy not needed for this provider\n');
       return null;
     }
 
-    const newConfig: ProxyConfig = { apiKey, baseUrl };
+    const newConfig: ProxyConfig = { apiKey, baseUrl, providerName };
     const configFingerprint = JSON.stringify(newConfig);
 
     if (this.proxy && this.config && JSON.stringify(this.config) === configFingerprint) {

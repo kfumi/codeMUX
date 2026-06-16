@@ -1115,8 +1115,9 @@ pub async fn start_codex_proxy(
     agent_state: State<'_, AgentState>,
     api_key: String,
     base_url: String,
+    provider_name: String,
 ) -> Result<u16, String> {
-    info!(target: "agent", "Starting codex proxy upstream={}", base_url);
+    info!(target: "agent", "Starting codex proxy upstream={} provider={}", base_url, provider_name);
 
     // Find an existing sidecar, or spawn a dedicated one for the proxy
     let session_id = {
@@ -1152,6 +1153,7 @@ pub async fn start_codex_proxy(
         "type": "start_proxy",
         "apiKey": api_key,
         "baseUrl": base_url,
+        "providerName": provider_name,
     });
     send_command_to_session(&agent_state, &session_id, cmd).await?;
 

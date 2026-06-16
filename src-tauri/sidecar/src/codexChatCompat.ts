@@ -527,6 +527,13 @@ function buildChatMessages(
   const nextMessages = inputItems.flatMap((item) => convertInputItemToChatMessages(item));
   const messages = [...historyMessages, ...nextMessages];
 
+  // Normalize developer → system role
+  for (const msg of messages) {
+    if (msg.role === 'developer') {
+      (msg as ChatMessage).role = 'system';
+    }
+  }
+
   if (request.instructions && !startsWithSystemMessage(messages)) {
     return [{ role: 'system', content: request.instructions }, ...messages];
   }

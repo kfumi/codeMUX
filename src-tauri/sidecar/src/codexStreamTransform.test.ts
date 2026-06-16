@@ -38,9 +38,9 @@ describe('convertChatStreamToResponsesEvents', () => {
       { choices: [{ delta: { reasoning_content: 'let me think...' }, finish_reason: null }] },
       { choices: [{ delta: { content: 'answer' }, finish_reason: 'stop' }] },
     ]), IDS));
-    const reasoningDeltas = events.filter((e) => e.type === 'response.reasoning_delta');
+    const reasoningDeltas = events.filter((e) => e.type === 'response.reasoning_summary_text.delta');
     expect(reasoningDeltas).toHaveLength(1);
-    expect(reasoningDeltas[0].delta).toEqual({ type: 'reasoning_summary_text_delta', text: 'let me think...' });
+    expect(reasoningDeltas[0].delta).toBe('let me think...');
   });
 
   it('detects inline <think> tags in content and splits to reasoning + text', async () => {
@@ -48,10 +48,10 @@ describe('convertChatStreamToResponsesEvents', () => {
       { choices: [{ delta: { content: '<think>plan' }, finish_reason: null }] },
       { choices: [{ delta: { content: ' details</think>answer' }, finish_reason: 'stop' }] },
     ]), IDS));
-    const reasoningDeltas = events.filter((e) => e.type === 'response.reasoning_delta');
+    const reasoningDeltas = events.filter((e) => e.type === 'response.reasoning_summary_text.delta');
     const textDeltas = events.filter((e) => e.type === 'response.output_text.delta');
     expect(reasoningDeltas.length).toBeGreaterThanOrEqual(1);
-    const reasoningText = reasoningDeltas.map((e) => (e.delta as any).text).join('');
+    const reasoningText = reasoningDeltas.map((e) => e.delta).join('');
     expect(reasoningText).toContain('plan');
     expect(reasoningText).toContain('details');
     expect(textDeltas.length).toBeGreaterThanOrEqual(1);
@@ -65,7 +65,7 @@ describe('convertChatStreamToResponsesEvents', () => {
       { choices: [{ delta: { content: 'soning</th' }, finish_reason: null }] },
       { choices: [{ delta: { content: 'ink>text' }, finish_reason: 'stop' }] },
     ]), IDS));
-    const reasoningDeltas = events.filter((e) => e.type === 'response.reasoning_delta');
+    const reasoningDeltas = events.filter((e) => e.type === 'response.reasoning_summary_text.delta');
     const textDeltas = events.filter((e) => e.type === 'response.output_text.delta');
     expect(reasoningDeltas.length).toBeGreaterThanOrEqual(1);
     expect(textDeltas.length).toBeGreaterThanOrEqual(1);

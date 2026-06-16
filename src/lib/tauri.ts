@@ -157,8 +157,8 @@ export const agentApi = {
   /** Load session events from Codex's JSONL session file. */
   loadCodexSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_codex_session_events', { appSessionId }),
-  startProxy: (apiKey: string, baseUrl: string): Promise<number> =>
-    invokeLogged('start_codex_proxy', { apiKey, baseUrl }),
+  startProxy: (apiKey: string, baseUrl: string, providerName: string): Promise<number> =>
+    invokeLogged('start_codex_proxy', { apiKey, baseUrl, providerName }),
   stopProxy: (): Promise<void> => invokeLogged('stop_codex_proxy'),
   getProxyPort: (): Promise<number | null> => invokeLogged('get_codex_proxy_port'),
 };

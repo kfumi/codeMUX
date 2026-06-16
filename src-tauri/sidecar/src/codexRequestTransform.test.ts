@@ -41,6 +41,7 @@ describe('convertResponsesToChatRequest', () => {
         type: 'function',
         function: { name: 'read_file', arguments: '{"path":"/tmp"}' },
       }],
+      reasoning_content: 'tool call',
     });
     expect(result.messages[1]).toEqual({
       role: 'tool',

@@ -459,7 +459,7 @@ describe('createCodexCompatProxyServer', () => {
     const body = await response.text();
 
     // Should contain reasoning deltas (from <think> content)
-    expect(body).toContain('"type":"response.reasoning_delta"');
+    expect(body).toContain('"type":"response.reasoning_summary_text.delta"');
     // Should contain text deltas (from content after </think>)
     expect(body).toContain('"type":"response.output_text.delta"');
     // Should complete normally

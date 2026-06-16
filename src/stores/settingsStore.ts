@@ -179,7 +179,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       return;
     }
     try {
-      const port = await agentApi.startProxy(provider.api_key, provider.openai_base_url);
+      const port = await agentApi.startProxy(provider.api_key, provider.openai_base_url, provider.name);
       set({
         proxyRunning: true,
         proxyUrl: port > 0 ? `http://127.0.0.1:${port}` : null,

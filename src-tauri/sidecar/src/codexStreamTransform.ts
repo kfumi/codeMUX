@@ -253,6 +253,8 @@ type EventGenerator = Generator<Record<string, unknown>, void, unknown>;
  *                 stream starts so the opening events can reference them).
  * @returns        Async generator of Responses API event objects.
  */
+export type ToolContextEntry = { kind: 'function' | 'custom' | 'tool_search'; name: string };
+
 export async function* convertChatStreamToResponsesEvents(
   chunks: AsyncIterable<ChatCompletionChunk>,
   opts: {
@@ -261,6 +263,7 @@ export async function* convertChatStreamToResponsesEvents(
     reasoningId: string;
     messageId: string;
     reasoningEnabled?: boolean;
+    toolContext?: Map<string, ToolContextEntry>;
   },
 ): AsyncGenerator<Record<string, unknown>, void, unknown> {
   const { responseId, model, reasoningId, messageId } = opts;
@@ -388,10 +391,10 @@ export async function* convertChatStreamToResponsesEvents(
     if (thinkState.buffer) {
       if (thinkState.mode === 'reasoning') {
         yield {
-          type: 'response.reasoning_delta',
+          type: 'response.reasoning_summary_text.delta',
           item_id: reasoningId,
           output_index: 0,
-          delta: { type: 'reasoning_summary_text_delta', text: thinkState.buffer },
+          delta: thinkState.buffer,
         };
         accumulatedReasoning += thinkState.buffer;
       } else {
@@ -444,10 +447,10 @@ export async function* convertChatStreamToResponsesEvents(
           };
         }
         yield {
-          type: 'response.reasoning_delta',
+          type: 'response.reasoning_summary_text.delta',
           item_id: reasoningId,
           output_index: 0,
-          delta: { type: 'reasoning_summary_text_delta', text: reasoningDelta },
+          delta: reasoningDelta,
         };
         accumulatedReasoning += reasoningDelta;
       } else {
@@ -483,10 +486,10 @@ export async function* convertChatStreamToResponsesEvents(
           }
           case 'reasoning': {
             yield {
-              type: 'response.reasoning_delta',
+              type: 'response.reasoning_summary_text.delta',
               item_id: reasoningId,
               output_index: 0,
-              delta: { type: 'reasoning_summary_text_delta', text: evt.text },
+              delta: evt.text,
             };
             break;
           }
@@ -541,33 +544,70 @@ export async function* convertChatStreamToResponsesEvents(
     yield* closeAllItems();
   }
 
-  // Emit tool call items.
+  // Emit tool call items with proper type based on toolContext.
   const baseOutputIndex = startedText ? textContentIndex + 1 : startedReasoning ? 1 : 0;
   for (const [idx, tc] of toolCalls) {
     const outputIndex = baseOutputIndex + idx;
+    const spec = opts.toolContext?.get(tc.name);
+    const isCustom = spec?.kind === 'custom';
+    const isToolSearch = spec?.kind === 'tool_search';
+
+    // Build the item based on tool type
+    const buildItem = (status: 'in_progress' | 'completed', argsValue: string): Record<string, unknown> => {
+      if (isCustom) {
+        return {
+          type: 'custom_tool_call',
+          id: `ctc_${tc.id}`,
+          status,
+          call_id: tc.id,
+          name: spec?.name ?? tc.name,
+          input: status === 'completed' ? argsValue : '',
+        };
+      }
+      if (isToolSearch) {
+        return {
+          type: 'tool_search_call',
+          id: `tsc_${tc.id}`,
+          status,
+          call_id: tc.id,
+          name: 'tool_search',
+          arguments: argsValue,
+        };
+      }
+      return buildFunctionCallItem(tc, status, argsValue);
+    };
+
+    // Determine the delta event type
+    const deltaEventType = isCustom
+      ? 'response.custom_tool_call_input.delta'
+      : 'response.function_call_arguments.delta';
+    const doneEventType = isCustom
+      ? 'response.custom_tool_call_input.done'
+      : 'response.function_call_arguments.done';
+
     yield {
       type: 'response.output_item.added',
       output_index: outputIndex,
-      item: buildFunctionCallItem(tc, 'in_progress', ''),
+      item: buildItem('in_progress', ''),
     };
     yield {
-      type: 'response.function_call_arguments.delta',
-      item_id: tc.id,
+      type: deltaEventType,
+      item_id: isCustom ? `ctc_${tc.id}` : isToolSearch ? `tsc_${tc.id}` : tc.id,
       output_index: outputIndex,
       content_index: 0,
       delta: tc.arguments,
     };
     yield {
-      type: 'response.function_call_arguments.done',
-      item_id: tc.id,
+      type: doneEventType,
+      item_id: isCustom ? `ctc_${tc.id}` : isToolSearch ? `tsc_${tc.id}` : tc.id,
       output_index: outputIndex,
       content_index: 0,
-      arguments: tc.arguments,
+      ...(isCustom ? { input: tc.arguments } : { arguments: tc.arguments }),
     };
     yield {
       type: 'response.output_item.done',
       output_index: outputIndex,
-      item: buildFunctionCallItem(tc, 'completed', tc.arguments),
+      item: buildItem('completed', tc.arguments),
     };
   }
 
@@ -576,7 +616,14 @@ export async function* convertChatStreamToResponsesEvents(
   if (startedReasoning) output.push({ type: 'reasoning', id: reasoningId, summary: [] });
   if (startedText) output.push({ type: 'message', id: messageId, status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: accumulatedText, annotations: [] }] });
   for (const tc of toolCalls.values()) {
-    output.push(buildFunctionCallItem(tc, 'completed', tc.arguments));
+    const spec = opts.toolContext?.get(tc.name);
+    if (spec?.kind === 'custom') {
+      output.push({ type: 'custom_tool_call', id: `ctc_${tc.id}`, status: 'completed', call_id: tc.id, name: spec.name, input: tc.arguments });
+    } else if (spec?.kind === 'tool_search') {
+      output.push({ type: 'tool_search_call', id: `tsc_${tc.id}`, status: 'completed', call_id: tc.id, name: 'tool_search', arguments: tc.arguments });
+    } else {
+      output.push(buildFunctionCallItem(tc, 'completed', tc.arguments));
+    }
   }
 
   const finalStatus = toolCalls.size > 0 ? 'requires_action' : 'completed';

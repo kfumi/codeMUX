@@ -126,7 +126,7 @@ describe('applyReasoningOptions', () => {
     const responsesBody = { reasoning: { effort: 'medium' } };
     const config = inferReasoningConfig('step-3.5-flash-2603', 'https://api.stepfun.com/v1', '')!;
     applyReasoningOptions(chatBody, responsesBody, 'step-3.5-flash-2603', config);
-    expect(chatBody.reasoning_effort).toBe('low');
+    expect(chatBody.reasoning_effort).toBe('high');
   });
 
   it('passes reasoning_effort through for OpenRouter', () => {

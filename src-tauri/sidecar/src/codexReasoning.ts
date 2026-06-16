@@ -72,8 +72,8 @@ const PLATFORM_CONFIGS: Array<{ match: (name: string, url: string) => boolean; c
 const MODEL_IDENTIFIERS: Array<{ keywords: string[]; key: string }> = [
   { keywords: ['deepseek'], key: 'deepseek' },
   { keywords: ['kimi', 'moonshot'], key: 'kimi' },
-  { keywords: ['qwen', 'dashscope'], key: 'qwen' },
-  { keywords: ['glm', 'zhipu'], key: 'glm' },
+  { keywords: ['qwen', 'dashscope', 'bailian'], key: 'qwen' },
+  { keywords: ['glm', 'zhipu', 'z.ai'], key: 'glm' },
   { keywords: ['minimax'], key: 'minimax' },
   { keywords: ['mimo'], key: 'mimo' },
   { keywords: ['stepfun', 'step-3.5-flash-2603'], key: 'stepfun' },
@@ -90,6 +90,50 @@ export function inferReasoningConfig(model: string, baseUrl: string, providerNam
   return null;
 }
 
+/**
+ * Check if reasoning is requested in the request body.
+ * Returns: true (enabled), false (explicitly disabled), undefined (not specified).
+ */
+function reasoningRequested(body: Record<string, unknown>): boolean | undefined {
+  const reasoning = body.reasoning;
+  if (reasoning === undefined || reasoning === null) return undefined;
+  if (typeof reasoning === 'object') {
+    const effort = (reasoning as Record<string, unknown>).effort;
+    if (typeof effort === 'string') {
+      const lower = effort.trim().toLowerCase();
+      if (lower === 'none' || lower === 'off' || lower === 'disabled') return false;
+      return true;
+    }
+  }
+  return true;
+}
+
+/**
+ * Map effort value according to the mode.
+ * Returns the mapped value, or null if effort should be suppressed (e.g. 'none').
+ */
+function mapEffortValue(effort: string, mode: string): string | null {
+  const lower = effort.trim().toLowerCase();
+  if (lower === 'none' || lower === 'off' || lower === 'disabled') return null;
+
+  switch (mode) {
+    case 'deepseek':
+      // max/xhigh → max, everything else → high
+      return (lower === 'max' || lower === 'xhigh') ? 'max' : 'high';
+    case 'low_high':
+      // minimal/low → low, everything else → high
+      return (lower === 'minimal' || lower === 'low') ? 'low' : 'high';
+    case 'openrouter':
+      // full mapping: minimal/low/medium/high/xhigh (max → xhigh since max is invalid for OpenRouter)
+      if (lower === 'max') return 'xhigh';
+      if (['minimal', 'low', 'medium', 'high', 'xhigh'].includes(lower)) return lower;
+      return null;
+    default:
+      // passthrough
+      return lower;
+  }
+}
+
 export function applyReasoningOptions(
   chatBody: Record<string, unknown>,
   responsesBody: Record<string, unknown>,
@@ -97,26 +141,51 @@ export function applyReasoningOptions(
   config: ReasoningConfig | null,
 ): void {
   if (!config) {
+    // No config: only handle o-series reasoning_effort
     if (model.toLowerCase().startsWith('o')) {
       const effort = (responsesBody.reasoning as Record<string, unknown> | undefined)?.effort;
       if (typeof effort === 'string') chatBody.reasoning_effort = effort;
     }
     return;
   }
-  switch (config.thinking_param) {
-    case 'thinking': chatBody.thinking = { type: 'enabled' }; break;
-    case 'enable_thinking': chatBody.enable_thinking = true; break;
-    case 'reasoning_split': chatBody.reasoning_split = true; break;
-    default: break;
+
+  const enabled = reasoningRequested(responsesBody);
+  const supportsThinking = config.supports_thinking || config.supports_effort;
+
+  // P1-6: Inject thinking parameter (enabled or disabled)
+  if (supportsThinking && config.thinking_param !== 'none') {
+    switch (config.thinking_param) {
+      case 'thinking': chatBody.thinking = { type: enabled === false ? 'disabled' : 'enabled' }; break;
+      case 'enable_thinking': chatBody.enable_thinking = enabled !== false; break;
+      case 'reasoning_split': chatBody.reasoning_split = enabled !== false; break;
+    }
   }
+
+  // P1-6: If reasoning is explicitly disabled, inject close parameters and return
+  if (enabled === false) {
+    if (config.effort_param === 'reasoning') {
+      chatBody.reasoning = { effort: 'none' };
+    } else if (config.effort_param !== 'none') {
+      chatBody[config.effort_param] = 'none';
+    }
+    return;
+  }
+
+  // If reasoning is not specified, don't inject effort
+  if (enabled === undefined) return;
+
+  // P1-5: Inject effort parameter with proper mapping
   if (config.supports_effort && config.effort_param !== 'none') {
     const effort = (responsesBody.reasoning as Record<string, unknown> | undefined)?.effort as string | undefined;
     if (effort !== undefined) {
-      switch (config.effort_value_mode) {
-        case 'deepseek': chatBody[config.effort_param] = effort; break;
-        case 'low_high': chatBody[config.effort_param] = effort === 'high' ? 'high' : 'low'; break;
-        case 'openrouter': chatBody[config.effort_param] = { effort }; break;
-        default: chatBody[config.effort_param] = effort; break;
+      const mapped = mapEffortValue(effort, config.effort_value_mode);
+      if (mapped !== null) {
+        if (config.effort_param === 'reasoning') {
+          // OpenRouter uses nested reasoning: { effort: value }
+          chatBody.reasoning = { effort: mapped };
+        } else {
+          chatBody[config.effort_param] = mapped;
+        }
       }
     }
   }

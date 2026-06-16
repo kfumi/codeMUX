@@ -12,9 +12,10 @@ import { CodexChatHistory, convertChatCompletionToResponses } from './codexChatC
 import { buildToolResultEvent } from './runtimeEvents.js';
 import crypto from 'node:crypto';
 
-type ProxyConfig = {
+export type ProxyConfig = {
   apiKey: string;
   baseUrl: string;
+  providerName?: string;
 };
 
 function createConfigFingerprint(config: ProxyConfig): string {
@@ -148,7 +149,7 @@ async function handleRequest(
     proxyLog(`responses tools raw ${truncateForLog(JSON.stringify(requestBody.tools.slice(0, 3)))}`);
     persistDebugJson('last-codex-responses-request.json', requestBody);
   }
-  const reasoningConfig = inferReasoningConfig(requestBody.model, config.baseUrl, '');
+  const reasoningConfig = inferReasoningConfig(requestBody.model, config.baseUrl, config.providerName ?? '');
   const chatRequest = convertResponsesToChatRequest(requestBody, historyStore, reasoningConfig);
   proxyLog(`chat request ${summarizeChatRequest(chatRequest)}`);
   if (Array.isArray(chatRequest.tools) && chatRequest.tools.length > 0) {
@@ -167,12 +168,26 @@ async function handleRequest(
       const messageId = `msg_${crypto.randomUUID()}`;
       const reasoningId = `rs_${crypto.randomUUID()}`;
       const { chunks, response: upstreamRes } = await streamChatCompletion(chatRequest, config);
+
+      // Build toolContext for streaming tool type determination (P1-7)
+      const toolContext = new Map<string, { kind: 'function' | 'custom' | 'tool_search'; name: string }>();
+      for (const tool of (requestBody.tools ?? [])) {
+        const toolRecord = tool as Record<string, unknown>;
+        if (toolRecord.type === 'custom' && typeof toolRecord.name === 'string') {
+          toolContext.set(toolRecord.name, { kind: 'custom', name: toolRecord.name });
+        } else if (toolRecord.type === 'tool_search') {
+          toolContext.set('tool_search', { kind: 'tool_search', name: 'tool_search' });
+        }
+        // function and namespace tools are handled as function_call (default)
+      }
+
       const responsesEvents = convertChatStreamToResponsesEvents(chunks, {
         responseId,
         model: upstreamRes.headers.get('x-model') || chatRequest.model || 'unknown',
         reasoningId,
         messageId,
         reasoningEnabled: reasoningConfig?.supports_thinking ?? false,
+        toolContext,
       });
 
       const events: Array<Record<string, unknown>> = [];
@@ -584,7 +599,13 @@ function stripTrailingSlash(value: string): string {
 
 function isResponsesPath(rawUrl: string): boolean {
   const pathname = new URL(rawUrl, 'http://127.0.0.1').pathname.replace(/\/+$/, '');
-  return pathname === '/responses' || pathname === '/v1/responses' || pathname === '/codex/responses';
+  return pathname === '/responses'
+    || pathname === '/v1/responses'
+    || pathname === '/v1/v1/responses'
+    || pathname === '/responses/compact'
+    || pathname === '/v1/responses/compact'
+    || pathname === '/v1/v1/responses/compact'
+    || pathname === '/codex/responses';
 }
 
 function isModelsPath(rawUrl: string): boolean {

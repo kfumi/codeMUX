@@ -6,7 +6,7 @@ export type SidecarCommand =
   | { type: 'interrupt' }
   | { type: 'shutdown' }
   | { type: 'tool_response'; toolUseId: string; response: unknown }
-  | { type: 'start_proxy'; apiKey: string; baseUrl: string }
+  | { type: 'start_proxy'; apiKey: string; baseUrl: string; providerName?: string }
   | { type: 'stop_proxy' }
   | { type: 'proxy_status' };
 
