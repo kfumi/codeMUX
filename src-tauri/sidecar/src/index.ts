@@ -11,7 +11,7 @@ import type {
   WarmQuery,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { SidecarCommand } from './types.js';
-import { buildMcpInstructions, getProviderMode } from './sessionRuntimeHelpers.js';
+import { getProviderMode } from './sessionRuntimeHelpers.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { CodexSessionRuntime, interruptActiveTurn } from './codexRuntime.js';
 import { getRuntimeFlavor } from './runtimeEvents.js';
@@ -31,7 +31,6 @@ type SessionBootstrap = {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
-  mcpServers?: Record<string, unknown>;
   skills?: string[];
 };
 
@@ -227,7 +226,6 @@ export class SessionRuntime {
       apiKey: cmd.apiKey,
       baseUrl: cmd.baseUrl,
       model: cmd.model,
-      mcpServers: cmd.mcpServers,
       skills: cmd.skills,
     };
   }
@@ -401,9 +399,6 @@ export class SessionRuntime {
       }
     }
 
-    // MCP instructions are no longer injected — managed natively per tool
-    process.stderr.write(`[sidecar] MCP instructions: disabled (native config per tool)\n`);
-
     const cleanSettings: Record<string, unknown> = {};
     if (config.apiKey || config.baseUrl) {
       cleanSettings.env = {
@@ -428,11 +423,9 @@ export class SessionRuntime {
         'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep',
         'WebSearch', 'WebFetch', 'AskUserQuestion', 'TodoWrite',
         'WaitForMcpServers', 'Skill',
-        ...Object.keys(config.mcpServers || {}).map((name) => `mcp__${name}__*`),
       ],
       env: subprocessEnv,
       ...(Object.keys(cleanSettings).length > 0 ? { settings: cleanSettings } : {}),
-      mcpServers: config.mcpServers || undefined,
       includePartialMessages: true,
       systemPrompt: {
         type: 'preset',

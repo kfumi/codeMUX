@@ -599,34 +599,6 @@ fn handle_agent_session_mapping_event(app: &AppHandle, event: &str) -> bool {
     true
 }
 
-fn tool_name_for_agent_kind(agent_kind: &str) -> Option<&'static str> {
-    match agent_kind {
-        "claude_code" => Some("claude"),
-        "codex" => Some("codex"),
-        "gemini" => Some("gemini"),
-        "opencode" => Some("opencode"),
-        _ => None,
-    }
-}
-
-fn build_session_mcp_payload(
-    state: &crate::AppState,
-    agent_kind: &str,
-) -> Option<serde_json::Value> {
-    let app = tool_name_for_agent_kind(agent_kind)?;
-    // 当前只有 Claude sidecar 直接消费 Rust 注入的 mcpServers。
-    // Codex 通过 ~/.codex/config.toml 投影读取，Gemini/OpenCode 还未接入 agent runtime。
-    if app != "claude" {
-        return None;
-    }
-
-    let db = state.db.lock().unwrap();
-    let servers = crate::mcp::db::get_servers_enabled_for_app(&db, app).ok()?;
-    let payload = crate::mcp::adapters::claude::to_sdk_config(&servers);
-    payload.as_object().filter(|entries| !entries.is_empty())?;
-    Some(payload)
-}
-
 fn build_ensure_session_command(
     state: &crate::AppState,
     session_id: &str,
@@ -673,10 +645,6 @@ fn build_ensure_session_command(
                 error
             ),
         }
-    }
-
-    if let Some(mcp_payload) = build_session_mcp_payload(state, agent_kind) {
-        cmd["mcpServers"] = mcp_payload;
     }
 
     let enabled_skills = {
@@ -1151,47 +1119,6 @@ mod tests {
         assert_eq!(parse_proxy_port_from_stderr(&lines), Some(15722));
     }
 
-    #[test]
-    fn build_session_mcp_payload_filters_servers_by_agent_kind() {
-        use super::*;
-
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        crate::db::schema::initialize_database(&conn).unwrap();
-
-        crate::mcp::db::upsert_mcp_server(
-            &conn,
-            &crate::mcp::types::McpServer {
-                id: "fetch".into(),
-                name: "fetch".into(),
-                description: String::new(),
-                server: serde_json::json!({"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-fetch"]}),
-                apps: crate::mcp::types::McpApps { claude: true, codex: false, gemini: false, opencode: false },
-            },
-        )
-        .unwrap();
-
-        crate::mcp::db::upsert_mcp_server(
-            &conn,
-            &crate::mcp::types::McpServer {
-                id: "context7".into(),
-                name: "context7".into(),
-                description: String::new(),
-                server: serde_json::json!({"type":"http","url":"https://mcp.example.com"}),
-                apps: crate::mcp::types::McpApps { claude: false, codex: true, gemini: false, opencode: false },
-            },
-        )
-        .unwrap();
-
-        let state = crate::AppState {
-            db: std::sync::Mutex::new(conn),
-            config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
-            app_data_dir: std::path::PathBuf::new(),
-        };
-
-        let payload = build_session_mcp_payload(&state, "claude_code").unwrap();
-        assert!(payload.get("fetch").is_some());
-        assert!(payload.get("context7").is_none());
-    }
 }
 
 const PROXY_SESSION_ID: &str = "__codex_proxy__";

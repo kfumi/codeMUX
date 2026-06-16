@@ -9,26 +9,6 @@ fn claude_config_path() -> PathBuf {
     PathBuf::from(home).join(".claude.json")
 }
 
-/// Convert internal MCP server records into Claude SDK `mcpServers` config.
-pub fn to_sdk_config(servers: &[crate::mcp::types::McpServer]) -> serde_json::Value {
-    let map: serde_json::Map<String, serde_json::Value> = servers
-        .iter()
-        .map(|server| {
-            let mut config = server.server.clone();
-            if let serde_json::Value::Object(ref mut obj) = config {
-                // Strip type field for stdio (Claude SDK convention)
-                let server_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or("stdio");
-                if server_type == "stdio" {
-                    obj.remove("type");
-                }
-            }
-            (server.name.clone(), config)
-        })
-        .collect();
-
-    serde_json::Value::Object(map)
-}
-
 fn read_claude_json() -> Result<serde_json::Value, String> {
     let path = claude_config_path();
     if !path.exists() {
@@ -124,50 +104,5 @@ impl McpAdapter for ClaudeAdapter {
             result.push((name, spec));
         }
         Ok(result)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::to_sdk_config;
-    use crate::mcp::types::{McpServer, McpApps};
-
-    #[test]
-    fn sdk_config_strips_type_for_stdio() {
-        let servers = vec![
-            McpServer {
-                id: "filesystem".into(),
-                name: "filesystem".into(),
-                description: String::new(),
-                server: serde_json::json!({
-                    "type": "stdio",
-                    "command": "npx",
-                    "args": ["demo"],
-                }),
-                apps: McpApps { claude: true, codex: false, gemini: false, opencode: false },
-            },
-            McpServer {
-                id: "context7".into(),
-                name: "context7".into(),
-                description: String::new(),
-                server: serde_json::json!({
-                    "type": "http",
-                    "url": "https://example.com/mcp",
-                }),
-                apps: McpApps { claude: true, codex: false, gemini: false, opencode: false },
-            },
-        ];
-
-        let config = to_sdk_config(&servers);
-        let filesystem = &config["filesystem"];
-        let context7 = &config["context7"];
-
-        // stdio: type stripped
-        assert!(filesystem.get("type").is_none());
-        assert_eq!(filesystem["command"], "npx");
-
-        // http: type kept
-        assert_eq!(context7["type"], "http");
-        assert_eq!(context7["url"], "https://example.com/mcp");
     }
 }

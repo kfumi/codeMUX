@@ -47,12 +47,3 @@ export function shouldUseCodexChatCompatProxy(baseUrl?: string | null): boolean 
     return true;
   }
 }
-
-/**
- * MCP instructions are no longer injected into system prompts.
- * Probe-derived instructions have been removed; MCP servers are configured
- * natively per tool via the unified management system.
- */
-export function buildMcpInstructions(): undefined {
-  return undefined;
-}
