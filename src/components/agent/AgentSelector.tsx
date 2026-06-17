@@ -27,7 +27,7 @@ export function AgentSelector({ value, onChange, variant = 'inline' }: AgentSele
     <DropdownMenu
       panelClassName={cn(
         isFloating &&
-          'rounded-[20px] border border-border/45 bg-[hsl(var(--popover))]/94 p-2 shadow-[0_24px_60px_-28px_hsl(var(--foreground)/0.42)] backdrop-blur-xl',
+          'rounded-lg border border-border/60 bg-popover p-1.5 shadow-[0_18px_44px_-26px_hsl(var(--foreground)/0.36)]',
       )}
       trigger={
         <button
@@ -36,17 +36,16 @@ export function AgentSelector({ value, onChange, variant = 'inline' }: AgentSele
           className={cn(
             'inline-flex items-center text-sm text-foreground/84 transition-all duration-200',
             isFloating
-              ? 'group relative justify-center rounded-[32px] border border-border/35 bg-[hsl(var(--background))]/72 p-4 shadow-[0_18px_40px_-26px_hsl(var(--foreground)/0.24)] backdrop-blur-xl hover:border-[hsl(var(--primary)/0.2)] hover:shadow-[0_22px_48px_-24px_hsl(var(--foreground)/0.3)]'
+              ? 'group relative justify-center rounded-xl border border-border/55 bg-card p-4 shadow-[0_14px_34px_-26px_hsl(var(--foreground)/0.26)] hover:border-[hsl(var(--primary)/0.22)] hover:shadow-[0_18px_42px_-28px_hsl(var(--foreground)/0.32)]'
               : 'gap-2 rounded-2xl border border-border/50 bg-muted/30 px-3 py-1.5 hover:border-border hover:bg-muted/45',
           )}
         >
           {isFloating ? (
             <>
-              <span className="absolute inset-3 rounded-full bg-[radial-gradient(circle,hsl(var(--primary)/0.16),transparent_70%)] blur-2xl" />
-              <span className="relative inline-flex h-20 w-20 items-center justify-center rounded-[28px] bg-[linear-gradient(180deg,hsl(var(--background))/0.92,hsl(var(--muted))/0.55)]">
+              <span className="relative inline-flex h-16 w-16 items-center justify-center rounded-lg border border-border/45 bg-muted/38">
                 <AgentBrandIcon agent={current} size="hero" />
               </span>
-              <span className="absolute bottom-1.5 right-1.5 inline-flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-background/94 text-muted-foreground shadow-[0_8px_22px_-16px_hsl(var(--foreground)/0.45)]">
+              <span className="absolute bottom-1 right-1 inline-flex h-5 w-5 items-center justify-center rounded-md border border-border/60 bg-background text-muted-foreground shadow-sm">
                 <ChevronDown className="h-3 w-3" />
               </span>
             </>

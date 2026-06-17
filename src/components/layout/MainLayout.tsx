@@ -79,15 +79,15 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
   }, []);
 
   return (
-    <div className="flex h-screen flex-col bg-background">
+    <div className="app-shell flex h-screen flex-col bg-background text-foreground">
       <TitleBar sidebarCollapsed={sidebarCollapsed} onToggleSidebar={toggleSidebar} />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="relative z-10 flex flex-1 overflow-hidden">
 
         {!sidebarCollapsed && (
           <>
             <aside
-              className="relative shrink-0 rounded-br-2xl rounded-tr-2xl border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-bg))] sidebar-grain"
+              className="surface-panel surface-panel-muted animate-panel-reveal relative shrink-0 rounded-none border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-bg))] sidebar-grain shadow-[inset_-1px_0_0_hsl(var(--foreground)/0.02)]"
               style={{ width: sidebarWidth }}
             >
               <div className="relative z-10 flex h-full flex-col">
@@ -96,18 +96,18 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
             </aside>
 
             <div className="group relative w-1 shrink-0 cursor-col-resize" onMouseDown={handleSidebarMouseDown}>
-              <div className="absolute inset-y-0 -left-0.5 w-2 transition-colors duration-200 group-hover:bg-primary/15" />
-              <div className="absolute inset-y-2 left-0 w-[2px] rounded-full bg-transparent transition-all duration-300 group-hover:bg-primary/30" />
+              <div className="absolute inset-y-0 -left-0.5 w-2 transition-colors duration-200 group-hover:bg-primary/12" />
+              <div className="absolute inset-y-2 left-0 w-[2px] rounded-full bg-transparent transition-all duration-300 group-hover:bg-primary/28" />
             </div>
           </>
         )}
 
-        <main className="flex flex-1 overflow-hidden bg-background">
+        <main className="relative flex flex-1 overflow-hidden bg-[hsl(var(--background))]/92 transition-[background] duration-300">
           <div className="flex min-w-0 flex-1 flex-col">{children}</div>
           {preview && previewOpen && (
             <div className="group relative w-1 shrink-0 cursor-col-resize" onMouseDown={handlePreviewMouseDown}>
-              <div className="absolute inset-y-0 -left-0.5 w-2 transition-colors duration-200 group-hover:bg-primary/15" />
-              <div className="absolute inset-y-2 left-0 w-[2px] rounded-full bg-transparent transition-all duration-300 group-hover:bg-primary/30" />
+              <div className="absolute inset-y-0 -left-0.5 w-2 transition-colors duration-200 group-hover:bg-primary/12" />
+              <div className="absolute inset-y-2 left-0 w-[2px] rounded-full bg-transparent transition-all duration-300 group-hover:bg-primary/28" />
             </div>
           )}
           {preview}

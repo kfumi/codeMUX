@@ -28,8 +28,8 @@ function formatRelativeTime(dateStr: string): string {
   const diffDay = Math.floor(diffMs / 86_400_000);
 
   if (diffMin < 1) return '刚刚';
-  if (diffMin < 60) return `${diffMin}分前`;
-  if (diffHour < 24) return `${diffHour}时前`;
+  if (diffMin < 60) return `${diffMin}分钟前`;
+  if (diffHour < 24) return `${diffHour}小时前`;
   if (diffDay < 30) return `${diffDay}天前`;
 
   const month = date.getMonth() + 1;
@@ -79,10 +79,11 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
     <>
       <div
         className={cn(
-          'group relative flex items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] transition-all duration-200',
-          'cursor-pointer text-[hsl(var(--sidebar-fg))]/82',
-          'hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-fg))]',
-          isActive && ['bg-[hsl(var(--sidebar-accent))]', 'text-[hsl(var(--sidebar-fg))]'],
+          'group relative flex items-center gap-2.5 rounded-xl border border-transparent px-2.5 py-2 text-[13px] transition-all duration-200',
+          'cursor-pointer text-[hsl(var(--sidebar-fg))]/80',
+          'hover:border-[hsl(var(--sidebar-border))]/50 hover:bg-[hsl(var(--sidebar-accent))]/78 hover:text-[hsl(var(--sidebar-fg))]',
+          'dark:hover:border-[hsl(var(--sidebar-glow))]/12 dark:hover:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.88,hsl(var(--surface-2))/0.78)]',
+          isActive && 'border-[hsl(var(--sidebar-border))]/70 bg-[hsl(var(--sidebar-accent))]/86 text-[hsl(var(--sidebar-fg))] dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.96,hsl(var(--surface-2))/0.84)] dark:shadow-[0_14px_30px_-24px_hsl(var(--surface-shadow-strong)/0.95),inset_0_1px_0_hsl(var(--foreground)/0.05)]',
         )}
         onClick={onClick}
         onContextMenu={handleContextMenu}
@@ -91,7 +92,7 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
           <div className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-[hsl(var(--sidebar-glow))] opacity-80" />
         )}
         {agentDef ? (
-          <span className={cn('flex shrink-0 items-center transition-opacity duration-200', isActive ? 'opacity-100' : 'opacity-64')}>
+          <span className={cn('flex shrink-0 items-center transition-opacity duration-200', isActive ? 'opacity-100' : 'opacity-70')}>
             <AgentBrandIcon agent={agentDef} size="sm" />
           </span>
         ) : (
@@ -109,14 +110,14 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
           <input
             autoFocus
             value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
+            onChange={(event) => setRenameValue(event.target.value)}
             onBlur={handleRenameCommit}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleRenameCommit();
-              if (e.key === 'Escape') setRenaming(false);
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') handleRenameCommit();
+              if (event.key === 'Escape') setRenaming(false);
             }}
-            onClick={(e) => e.stopPropagation()}
-            className="flex-1 min-w-0 text-[13px] bg-[hsl(var(--sidebar-muted))] border border-[hsl(var(--sidebar-border))] px-1.5 py-0.5 rounded-md text-[hsl(var(--sidebar-fg))] outline-none focus:border-[hsl(var(--sidebar-glow))]/30 transition-colors"
+            onClick={(event) => event.stopPropagation()}
+            className="flex-1 min-w-0 rounded-md border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-muted))] px-2 py-1 text-[13px] text-[hsl(var(--sidebar-fg))] outline-none transition-colors focus:border-[hsl(var(--sidebar-glow))]/35"
           />
         ) : (
           <>
@@ -134,11 +135,11 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
               <button
                 className={cn(
                   'absolute right-0 top-1/2 -translate-y-1/2 rounded-md p-1 transition-opacity duration-150',
-                  'text-[hsl(var(--sidebar-fg))]/40 opacity-0 group-hover:opacity-100',
+                  'text-[hsl(var(--sidebar-fg))]/42 opacity-0 group-hover:opacity-100',
                   'hover:bg-[hsl(var(--destructive)/0.1)] hover:text-[hsl(var(--destructive))]',
                 )}
-                onClick={(e) => {
-                  e.stopPropagation();
+                onClick={(event) => {
+                  event.stopPropagation();
                   setConfirmOpen(true);
                 }}
               >
@@ -149,21 +150,20 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
         )}
       </div>
 
-      {/* Context menu */}
       {isMenuOpen && createPortal(
         <div
-          className="fixed z-[100] min-w-[140px] rounded-lg border border-border bg-popover p-1 shadow-lg animate-scale-in"
+          className="surface-panel fixed z-[100] min-w-[140px] rounded-xl border border-border/60 bg-popover/98 p-1.5 backdrop-blur-sm animate-scale-in dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.98,hsl(var(--surface-1))/0.94)]"
           style={{ left: menuPos.x, top: menuPos.y }}
         >
           <button
-            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12px] text-foreground/80 transition-colors hover:bg-muted/70 hover:text-foreground"
             onClick={handleRenameStart}
           >
             <Pencil className="h-3.5 w-3.5" />
             重命名
           </button>
           <button
-            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] text-destructive transition-colors hover:bg-destructive/10"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12px] text-destructive transition-colors hover:bg-destructive/10"
             onClick={handleDelete}
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -177,7 +177,7 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title="删除对话"
-        description={`确定要删除「${session.title || '未命名对话'}」吗？此操作不可撤销。`}
+        description={`确定要删除“${session.title || '未命名对话'}”吗？此操作不可撤销。`}
         confirmLabel="删除"
         variant="destructive"
         onConfirm={onDelete}

@@ -41,10 +41,10 @@ export function DropdownMenu({ trigger, children, align = 'left', panelClassName
         <div
           ref={panelRef}
           className={cn(
-            'fixed z-[100] min-w-[160px] rounded-md border bg-popover p-1 shadow-lg',
+            'surface-panel fixed z-[100] min-w-[160px] rounded-xl border border-border/60 bg-popover/98 p-1.5 backdrop-blur-sm dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.98,hsl(var(--surface-1))/0.94)]',
             panelClassName,
           )}
-          style={{ top: pos.top, left: pos.left }}
+          style={align === 'left' ? { top: pos.top, left: pos.left } : { top: pos.top, left: pos.left, transform: 'translateX(-100%)' }}
           onClick={() => setOpen(false)}
         >
           {children}
@@ -72,7 +72,7 @@ export function DropdownMenuItem({ children, onClick, danger, icon }: DropdownMe
   return (
     <button
       className={cn(
-        'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer hover:bg-accent',
+        'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm cursor-pointer transition-all duration-200 hover:bg-accent/70 dark:hover:bg-[hsl(var(--surface-3))/0.88]',
         danger && 'text-destructive'
       )}
       onClick={onClick}

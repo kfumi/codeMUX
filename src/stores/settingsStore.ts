@@ -6,6 +6,29 @@ import { useNewSessionStore } from './newSessionStore';
 import { getDefaultAgentKind } from '../types/agentRegistry';
 import type { AgentKind } from '../types/session';
 
+function applyThemeLocally(theme: Theme) {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  const root = document.documentElement;
+
+  if (theme === 'Dark') {
+    root.classList.add('dark');
+    return;
+  }
+
+  if (theme === 'Light') {
+    root.classList.remove('dark');
+    return;
+  }
+
+  const prefersDark = typeof window !== 'undefined'
+    && window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+  root.classList.toggle('dark', prefersDark);
+}
+
 interface SettingsState {
   config: AppConfig | null;
   isLoading: boolean;
@@ -47,13 +70,21 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   setTheme: async (theme: Theme) => {
+    const previousTheme = get().config?.theme ?? 'System';
+    applyThemeLocally(theme);
+    set((state) => ({
+      config: state.config ? { ...state.config, theme } : state.config,
+      error: null,
+    }));
+
     try {
       await configApi.setTheme(theme);
-      set((state) => ({
-        config: state.config ? { ...state.config, theme } : null,
-      }));
     } catch (error) {
-      set({ error: String(error) });
+      applyThemeLocally(previousTheme);
+      set((state) => ({
+        config: state.config ? { ...state.config, theme: previousTheme } : state.config,
+        error: String(error),
+      }));
     }
   },
 

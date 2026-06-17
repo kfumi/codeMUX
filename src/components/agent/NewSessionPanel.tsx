@@ -1,4 +1,4 @@
-import { ArrowUp, FolderKanban, Loader2 } from 'lucide-react';
+import { ArrowUp, FileCode2, FolderKanban, Loader2, MessageSquareText, Sparkles } from 'lucide-react';
 import { useMemo, useState, type KeyboardEvent } from 'react';
 
 import { cn } from '../../lib/utils';
@@ -12,9 +12,21 @@ interface NewSessionPanelProps {
 }
 
 const STARTER_PROMPTS = [
-  '帮我梳理这个项目的结构和关键入口',
-  '修复当前项目里最明显的报错或异常',
-  '根据现有代码生成一个实施计划',
+  {
+    title: '理解项目',
+    prompt: '帮我梳理这个项目的结构和关键入口',
+    icon: FolderKanban,
+  },
+  {
+    title: '修复问题',
+    prompt: '修复当前项目里最明显的报错或异常',
+    icon: Sparkles,
+  },
+  {
+    title: '生成计划',
+    prompt: '根据现有代码生成一个实施计划',
+    icon: FileCode2,
+  },
 ];
 
 export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
@@ -30,7 +42,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   );
   const placeholder = useMemo(() => {
     const label = selectedAgent?.label ?? 'Claude Code';
-    return `给 ${label} 发送消息...`;
+    return `给 ${label} 发送第一条任务指令...`;
   }, [selectedAgent]);
 
   const handleSubmit = async () => {
@@ -56,106 +68,149 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   };
 
   return (
-    <div className="relative flex flex-1 items-center justify-center overflow-hidden px-6 py-10">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute left-1/2 top-14 h-56 w-56 -translate-x-1/2 rounded-full bg-[radial-gradient(circle,hsl(var(--primary)/0.15),transparent_70%)] blur-3xl" />
-        <div className="absolute left-[16%] top-[26%] h-40 w-40 rounded-full bg-[radial-gradient(circle,rgba(236,122,73,0.10),transparent_72%)] blur-3xl dark:bg-[radial-gradient(circle,rgba(236,122,73,0.16),transparent_72%)]" />
-        <div className="absolute right-[16%] top-[30%] h-44 w-44 rounded-full bg-[radial-gradient(circle,hsl(var(--primary)/0.08),transparent_74%)] blur-3xl" />
-      </div>
-
-      <div className="relative flex w-full max-w-5xl flex-col items-center gap-9">
-        <div className="flex animate-fade-in-up flex-col items-center gap-5 text-center">
-          <span
-            className="rounded-full border border-border/50 bg-background/75 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground shadow-[0_8px_24px_-18px_hsl(var(--foreground)/0.28)] backdrop-blur"
-            style={{ fontFamily: "'JetBrains Mono', monospace" }}
-          >
-            New Session
-          </span>
-
-          <div className="relative mx-auto inline-flex">
-            <AgentSelector value={selectedAgentKind} onChange={setSelectedAgentKind} variant="floating" />
-          </div>
-
-          <div className="space-y-3">
-            <h1 className="text-3xl font-semibold tracking-[-0.03em] text-foreground sm:text-4xl">开始新对话</h1>
-            <p className="mx-auto max-w-2xl text-sm leading-7 text-muted-foreground sm:text-[15px]">
-              选择合适的编码智能体，给出你的第一条任务指令，
-              让这次会话从更清晰的上下文开始。
-            </p>
-          </div>
-
-          {draftProject && (
-            <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-[hsl(var(--primary)/0.14)] bg-[hsl(var(--primary)/0.06)] px-4 py-2 text-sm text-foreground shadow-[0_10px_24px_-18px_hsl(var(--primary)/0.38)]">
-              <FolderKanban className="h-4 w-4 shrink-0 text-[hsl(var(--primary))]" />
-              <span className="shrink-0 text-muted-foreground">当前关联项目</span>
-              <span className="max-w-[280px] truncate font-medium">{draftProject.name}</span>
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
-            {STARTER_PROMPTS.map((prompt) => (
-              <button
-                key={prompt}
-                type="button"
-                onClick={() => setMessage(prompt)}
-                className="rounded-full border border-border/45 bg-background/72 px-4 py-2 text-sm text-muted-foreground transition-all duration-200 hover:border-[hsl(var(--primary)/0.22)] hover:bg-[hsl(var(--primary)/0.05)] hover:text-foreground"
-              >
-                {prompt}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="w-full max-w-3xl animate-fade-in-up" style={{ animationDelay: '0.08s' }}>
-          <div className="relative overflow-hidden rounded-[32px] border border-border/50 bg-[linear-gradient(180deg,hsl(var(--background))/0.96,hsl(var(--background))/0.84)] p-4 shadow-[0_30px_80px_-42px_hsl(var(--foreground)/0.28)] backdrop-blur-2xl transition-all duration-200 focus-within:border-[hsl(var(--primary)/0.24)] focus-within:shadow-[0_30px_80px_-38px_hsl(var(--primary)/0.22)]">
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,hsl(var(--primary)/0.24),transparent)]" />
-
-            <textarea
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={placeholder}
-              className="min-h-[156px] w-full resize-none border-0 bg-transparent px-4 py-4 text-left text-[15px] leading-8 text-foreground shadow-none outline-none ring-0 placeholder:text-muted-foreground/54 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none"
-              disabled={isSubmitting}
-            />
-
-            <div className="flex items-center justify-between gap-3 border-t border-border/40 px-2 pt-3">
-              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+    <div className="flex flex-1 overflow-auto bg-[hsl(var(--background))] transition-[background] duration-300">
+      <div className="mx-auto flex w-full max-w-6xl flex-col justify-center gap-5 px-6 py-8 lg:px-10">
+        <div className="grid min-h-[min(720px,calc(100vh-8rem))] gap-5 lg:grid-cols-[minmax(260px,0.84fr)_minmax(520px,1.36fr)]">
+          <aside className="surface-panel surface-panel-muted flex animate-panel-reveal flex-col justify-between gap-5 rounded-xl border border-border/60 bg-card/76 p-5 dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.96,hsl(var(--surface-1))/0.9)]">
+            <div className="space-y-6">
+              <div className="space-y-3">
                 <span
-                  className="rounded-full border border-border/45 bg-background/74 px-2.5 py-1 font-medium uppercase tracking-[0.18em]"
+                  className="inline-flex rounded-md border border-border/55 bg-background/72 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground"
+                  style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                >
+                  New Session
+                </span>
+                <div className="space-y-2">
+                  <h1 className="text-[26px] font-semibold leading-tight text-foreground">
+                    开始新的编码任务
+                  </h1>
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    选好模型，描述目标，让这次会话从清楚的上下文开始。
+                  </p>
+                </div>
+              </div>
+
+              <div className="surface-panel rounded-lg border border-border/55 bg-background/56 p-4 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.86,hsl(var(--surface-2))/0.76)]">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                      Agent
+                    </p>
+                    <p className="truncate text-sm font-semibold text-foreground">
+                      {selectedAgent?.label ?? 'Claude Code'}
+                    </p>
+                  </div>
+                  <MessageSquareText className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="flex justify-center py-2">
+                  <AgentSelector value={selectedAgentKind} onChange={setSelectedAgentKind} variant="floating" />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {draftProject ? (
+                <div className="surface-panel rounded-lg border border-[hsl(var(--primary)/0.18)] bg-[hsl(var(--primary)/0.07)] p-3 dark:bg-[linear-gradient(180deg,hsl(var(--surface-glow))/0.12,hsl(var(--surface-2))/0.72)]">
+                  <div className="flex items-center gap-2 text-sm text-foreground">
+                    <FolderKanban className="h-4 w-4 shrink-0 text-[hsl(var(--primary))]" />
+                    <span className="font-medium">当前关联项目</span>
+                  </div>
+                  <p className="mt-1 truncate text-sm text-muted-foreground">{draftProject.name}</p>
+                </div>
+              ) : (
+                <div className="surface-panel rounded-lg border border-dashed border-border/70 bg-background/42 p-3 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.72,hsl(var(--surface-1))/0.62)]">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <FolderKanban className="h-4 w-4 shrink-0" />
+                    <span>未绑定项目</span>
+                  </div>
+                </div>
+              )}
+              <div
+                className="surface-panel rounded-lg border border-border/45 bg-background/42 px-3 py-2 text-[11px] text-muted-foreground dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.74,hsl(var(--surface-1))/0.64)]"
+                style={{ fontFamily: "'JetBrains Mono', monospace" }}
+              >
+                Enter to send · Shift Enter for newline
+              </div>
+            </div>
+          </aside>
+
+          <section className="flex animate-panel-shift flex-col gap-4" style={{ animationDelay: '0.06s' }}>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {STARTER_PROMPTS.map(({ title, prompt, icon: Icon }) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  onClick={() => setMessage(prompt)}
+                  className="surface-panel surface-interactive group flex min-h-[96px] flex-col justify-between rounded-xl border border-border/55 bg-card/72 p-4 text-left dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.9,hsl(var(--surface-1))/0.82)]"
+                >
+                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border/50 bg-background text-muted-foreground transition-colors group-hover:text-foreground dark:bg-[hsl(var(--surface-3))/0.8]">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <span className="space-y-1">
+                    <span className="block text-sm font-semibold text-foreground">{title}</span>
+                    <span className="line-clamp-2 block text-xs leading-5 text-muted-foreground">{prompt}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="surface-panel animate-panel-reveal flex flex-1 flex-col rounded-xl border border-border/60 bg-card dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.95,hsl(var(--surface-1))/0.88)]">
+              <div className="flex items-center justify-between gap-3 border-b border-border/45 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">任务输入</p>
+                  <p className="text-xs text-muted-foreground">
+                    用自然语言描述你想让模型完成的第一步。
+                  </p>
+                </div>
+                <span
+                  className="surface-panel hidden rounded-md border border-border/45 bg-background/66 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground dark:bg-[hsl(var(--surface-3))/0.82] sm:inline-flex"
                   style={{ fontFamily: "'JetBrains Mono', monospace" }}
                 >
                   {selectedAgent?.label ?? 'Claude Code'}
                 </span>
-                {draftProject && (
-                  <span className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full border border-border/45 bg-background/74 px-2.5 py-1">
-                    <FolderKanban className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{draftProject.name}</span>
-                  </span>
-                )}
-                <span>Enter 发送，Shift + Enter 换行</span>
               </div>
 
-              <button
-                type="button"
-                aria-label="发送消息"
-                onClick={() => void handleSubmit()}
-                disabled={!message.trim() || isSubmitting}
-                className={cn(
-                  'inline-flex h-12 min-w-[48px] items-center justify-center rounded-2xl px-4 transition-all duration-200',
-                  message.trim() && !isSubmitting
-                    ? 'bg-[hsl(var(--foreground))] text-[hsl(var(--background))] shadow-[0_14px_28px_-18px_hsl(var(--foreground)/0.55)] hover:scale-[1.02] hover:shadow-[0_18px_34px_-16px_hsl(var(--foreground)/0.45)] dark:bg-[#E8E8E8] dark:text-[#090909] dark:hover:bg-white'
-                    : 'cursor-not-allowed bg-muted text-muted-foreground/50',
-                )}
-              >
-                {isSubmitting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
-                )}
-              </button>
+              <textarea
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={placeholder}
+                className="min-h-[260px] flex-1 resize-none border-0 bg-transparent px-5 py-5 text-left text-[15px] leading-7 text-foreground shadow-none outline-none ring-0 placeholder:text-muted-foreground/54 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none"
+                disabled={isSubmitting}
+              />
+
+              <div className="flex flex-col gap-3 border-t border-border/45 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  {draftProject && (
+                    <span className="surface-panel inline-flex max-w-[240px] items-center gap-1.5 rounded-md border border-border/45 bg-background/66 px-2.5 py-1 dark:bg-[hsl(var(--surface-3))/0.84]">
+                      <FolderKanban className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{draftProject.name}</span>
+                    </span>
+                  )}
+                  <span>准备好后直接发送，系统会自动创建会话。</span>
+                </div>
+
+                <button
+                  type="button"
+                  aria-label="发送消息"
+                  onClick={() => void handleSubmit()}
+                  disabled={!message.trim() || isSubmitting}
+                  className={cn(
+                    'inline-flex h-10 min-w-10 shrink-0 items-center justify-center rounded-lg px-3 transition-all duration-200',
+                    message.trim() && !isSubmitting
+                      ? 'bg-[hsl(var(--foreground))] text-[hsl(var(--background))] shadow-[0_14px_28px_-18px_hsl(var(--foreground)/0.55)] hover:scale-[1.02] hover:shadow-[0_18px_34px_-16px_hsl(var(--foreground)/0.45)] dark:bg-[hsl(var(--surface-glow))] dark:text-[hsl(var(--background))] dark:shadow-[0_16px_36px_-20px_hsl(var(--surface-glow)/0.55)] dark:hover:bg-[hsl(var(--surface-glow))/0.94] dark:hover:shadow-[0_22px_42px_-18px_hsl(var(--surface-glow)/0.48)]'
+                      : 'cursor-not-allowed bg-muted text-muted-foreground/50 dark:bg-[hsl(var(--surface-3))/0.86]',
+                  )}
+                >
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+                  )}
+                </button>
+              </div>
             </div>
-          </div>
+          </section>
         </div>
       </div>
     </div>

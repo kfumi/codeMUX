@@ -231,7 +231,6 @@ function simulateStreamingText(
   event: AgentMessage,
   text: string,
   set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
-  get: () => AgentState,
 ) {
   // Clear any prior simulation for this session.
   clearSimulatedStream(sessionId);
@@ -1028,12 +1027,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           // If the event only carries text (no tool_use) and the SDK did not
           // stream it incrementally (streamingText is empty), simulate a
           // token-by-token render so the user sees text appear progressively.
-          const textBlock = filtered.find((b: any) => b?.type === 'text' && b.text);
+          const textBlock = filtered.find(
+            (b: any): b is { type: 'text'; text: string } =>
+              b?.type === 'text' && typeof b.text === 'string' && b.text.length > 0,
+          );
           const hasToolUse = filtered.some((b: any) => b?.type === 'tool_use');
           const currentStreamingText = get().streamingText[sessionId] || '';
           const currentStreamingThinking = get().streamingThinking[sessionId] || '';
           if (textBlock && !hasToolUse && !currentStreamingText && !currentStreamingThinking) {
-            simulateStreamingText(sessionId, event, textBlock.text, set, get);
+            simulateStreamingText(sessionId, event, textBlock.text, set);
             return;
           }
 
