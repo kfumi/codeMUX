@@ -47,7 +47,7 @@ export function Sidebar({
       <div className="px-3 pb-3 pt-3">
         <button
           onClick={onNewSession}
-          className="surface-panel surface-interactive flex w-full items-center gap-2.5 rounded-xl border border-[hsl(var(--sidebar-border))]/70 bg-[hsl(var(--sidebar-bg))]/78 px-3 py-2.5 text-[13px] font-medium text-[hsl(var(--sidebar-fg))]/84 shadow-[0_1px_0_0_hsl(var(--foreground)/0.02)] transition-all duration-200 hover:border-[hsl(var(--sidebar-glow))]/18 hover:bg-[hsl(var(--sidebar-accent))]/82 hover:text-[hsl(var(--sidebar-fg))] active:scale-[0.985] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.95,hsl(var(--surface-1))/0.92)]"
+          className="surface-panel surface-interactive flex w-full items-center gap-2.5 rounded-lg border border-[hsl(var(--sidebar-border))]/70 bg-[hsl(var(--sidebar-bg))]/82 px-3 py-2.5 text-[13px] font-medium text-[hsl(var(--sidebar-fg))]/84 shadow-[0_1px_0_0_hsl(var(--foreground)/0.02)] transition-all duration-200 hover:border-[hsl(var(--sidebar-glow))]/24 hover:bg-[hsl(var(--sidebar-muted))]/88 hover:text-[hsl(var(--sidebar-fg))] active:scale-[0.985] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.95,hsl(var(--surface-1))/0.92)]"
         >
           <MessageSquarePlus className="h-4 w-4" />
           <span className="flex-1 text-left">新对话</span>
@@ -61,7 +61,7 @@ export function Sidebar({
       <div className="border-t border-[hsl(var(--sidebar-border))] p-3">
         <button
           onClick={onOpenSettings}
-          className="surface-panel flex w-full rounded-xl border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/72 px-3 py-2 text-[13px] text-[hsl(var(--sidebar-fg))]/72 transition-all duration-200 hover:bg-[hsl(var(--sidebar-accent))]/80 hover:text-[hsl(var(--sidebar-fg))] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.86,hsl(var(--surface-1))/0.8)]"
+          className="surface-panel flex w-full rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/76 px-3 py-2 text-[13px] text-[hsl(var(--sidebar-fg))]/72 transition-all duration-200 hover:bg-[hsl(var(--sidebar-muted))]/88 hover:text-[hsl(var(--sidebar-fg))] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.86,hsl(var(--surface-1))/0.8)]"
         >
           <span className="flex items-center gap-2.5">
             <Settings className="h-3.5 w-3.5" />

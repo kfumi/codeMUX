@@ -41,7 +41,7 @@ export function ContextDisplay({
       <TooltipTrigger asChild>
         <button
           type="button"
-          className="inline-flex h-8 shrink-0 self-center items-center gap-2 rounded-md px-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          className="inline-flex h-8 shrink-0 self-center items-center gap-2 rounded-md px-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/65 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           aria-label="查看上下文使用情况"
         >
           <UsageRing percentage={percentage} />

@@ -41,7 +41,7 @@ export function DropdownMenu({ trigger, children, align = 'left', panelClassName
         <div
           ref={panelRef}
           className={cn(
-            'surface-panel fixed z-[100] min-w-[160px] rounded-xl border border-border/60 bg-popover/98 p-1.5 backdrop-blur-sm dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.98,hsl(var(--surface-1))/0.94)]',
+            'surface-panel fixed z-[160] min-w-[160px] rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_50px_-28px_hsl(var(--foreground)/0.4),0_0_0_1px_hsl(var(--background)/0.7)] backdrop-blur-md animate-popover-in dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.98,hsl(var(--surface-1))/0.95)] dark:shadow-[0_24px_64px_-30px_hsl(var(--surface-shadow-strong)/0.98),0_0_0_1px_hsl(var(--foreground)/0.045)]',
             panelClassName,
           )}
           style={align === 'left' ? { top: pos.top, left: pos.left } : { top: pos.top, left: pos.left, transform: 'translateX(-100%)' }}
@@ -72,8 +72,8 @@ export function DropdownMenuItem({ children, onClick, danger, icon }: DropdownMe
   return (
     <button
       className={cn(
-        'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm cursor-pointer transition-all duration-200 hover:bg-accent/70 dark:hover:bg-[hsl(var(--surface-3))/0.88]',
-        danger && 'text-destructive'
+        'flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-foreground/82 transition-all duration-150 hover:bg-muted/72 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.9]',
+        danger && 'text-destructive hover:bg-[hsl(var(--destructive)/0.1)] hover:text-destructive'
       )}
       onClick={onClick}
     >

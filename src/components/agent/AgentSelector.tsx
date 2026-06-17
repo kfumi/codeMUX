@@ -34,18 +34,18 @@ export function AgentSelector({ value, onChange, variant = 'inline' }: AgentSele
           type="button"
           aria-label={current.label}
           className={cn(
-            'inline-flex items-center text-sm text-foreground/84 transition-all duration-200',
-            isFloating
-              ? 'group relative justify-center rounded-xl border border-border/55 bg-card p-4 shadow-[0_14px_34px_-26px_hsl(var(--foreground)/0.26)] hover:border-[hsl(var(--primary)/0.22)] hover:shadow-[0_18px_42px_-28px_hsl(var(--foreground)/0.32)]'
-              : 'gap-2 rounded-2xl border border-border/50 bg-muted/30 px-3 py-1.5 hover:border-border hover:bg-muted/45',
+          'inline-flex items-center text-sm text-foreground/84 transition-all duration-200',
+          isFloating
+              ? 'group relative justify-center rounded-lg border border-border/60 bg-card p-4 shadow-[0_14px_34px_-26px_hsl(var(--foreground)/0.26)] hover:border-[hsl(var(--primary)/0.28)] hover:shadow-[0_18px_42px_-28px_hsl(var(--foreground)/0.32),0_0_0_3px_hsl(var(--primary)/0.06)]'
+              : 'gap-2 rounded-lg border border-border/50 bg-muted/30 px-3 py-1.5 hover:border-border hover:bg-muted/55',
           )}
         >
           {isFloating ? (
             <>
-              <span className="relative inline-flex h-16 w-16 items-center justify-center rounded-lg border border-border/45 bg-muted/38">
+              <span className="relative inline-flex h-16 w-16 items-center justify-center rounded-md border border-border/55 bg-muted/42 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.035)]">
                 <AgentBrandIcon agent={current} size="hero" />
               </span>
-              <span className="absolute bottom-1 right-1 inline-flex h-5 w-5 items-center justify-center rounded-md border border-border/60 bg-background text-muted-foreground shadow-sm">
+              <span className="absolute bottom-1 right-1 inline-flex h-5 w-5 items-center justify-center rounded-md border border-border/60 bg-background text-muted-foreground shadow-sm transition-colors group-hover:text-foreground">
                 <ChevronDown className="h-3 w-3" />
               </span>
             </>

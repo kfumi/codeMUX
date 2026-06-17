@@ -59,9 +59,9 @@ export function ProjectGroup({
       <div
         className={cn(
           'group relative flex cursor-pointer items-center gap-2 rounded-xl border border-transparent px-2.5 py-2 transition-all duration-200',
-          'text-[hsl(var(--sidebar-fg))]/82 hover:bg-[hsl(var(--sidebar-accent))]/78 hover:text-[hsl(var(--sidebar-fg))]',
+          'text-[hsl(var(--sidebar-fg))]/82 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]',
           'dark:hover:border-[hsl(var(--sidebar-glow))]/10 dark:hover:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.84,hsl(var(--surface-2))/0.74)]',
-          isActiveProject && 'border-[hsl(var(--sidebar-border))]/70 bg-[hsl(var(--sidebar-accent))]/82 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.92,hsl(var(--surface-2))/0.8)] dark:shadow-[0_14px_30px_-24px_hsl(var(--surface-shadow-strong)/0.85)]',
+          isActiveProject && 'border-[hsl(var(--sidebar-glow))]/24 bg-[hsl(var(--sidebar-glow))]/8 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.92,hsl(var(--surface-2))/0.8)] dark:shadow-[0_14px_30px_-24px_hsl(var(--surface-shadow-strong)/0.85),0_0_0_1px_hsl(var(--sidebar-glow)/0.07)]',
         )}
         onClick={() => !renaming && setExpanded(!expanded)}
       >
@@ -97,7 +97,7 @@ export function ProjectGroup({
         <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100" onClick={(event) => event.stopPropagation()}>
           <DropdownMenu
             trigger={(
-              <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md text-[hsl(var(--sidebar-fg))]/55 hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-fg))]">
+              <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md text-[hsl(var(--sidebar-fg))]/55 hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]">
                 <MoreHorizontal className="h-3 w-3" />
               </Button>
             )}

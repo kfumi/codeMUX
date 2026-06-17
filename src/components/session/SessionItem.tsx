@@ -81,9 +81,9 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
         className={cn(
           'group relative flex items-center gap-2.5 rounded-xl border border-transparent px-2.5 py-2 text-[13px] transition-all duration-200',
           'cursor-pointer text-[hsl(var(--sidebar-fg))]/80',
-          'hover:border-[hsl(var(--sidebar-border))]/50 hover:bg-[hsl(var(--sidebar-accent))]/78 hover:text-[hsl(var(--sidebar-fg))]',
+          'hover:border-[hsl(var(--sidebar-border))]/55 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]',
           'dark:hover:border-[hsl(var(--sidebar-glow))]/12 dark:hover:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.88,hsl(var(--surface-2))/0.78)]',
-          isActive && 'border-[hsl(var(--sidebar-border))]/70 bg-[hsl(var(--sidebar-accent))]/86 text-[hsl(var(--sidebar-fg))] dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.96,hsl(var(--surface-2))/0.84)] dark:shadow-[0_14px_30px_-24px_hsl(var(--surface-shadow-strong)/0.95),inset_0_1px_0_hsl(var(--foreground)/0.05)]',
+          isActive && 'border-[hsl(var(--sidebar-glow))]/28 bg-[hsl(var(--sidebar-glow))]/9 text-[hsl(var(--sidebar-fg))] dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.96,hsl(var(--surface-2))/0.84)] dark:shadow-[0_14px_30px_-24px_hsl(var(--surface-shadow-strong)/0.95),inset_0_1px_0_hsl(var(--foreground)/0.05),0_0_0_1px_hsl(var(--sidebar-glow)/0.08)]',
         )}
         onClick={onClick}
         onContextMenu={handleContextMenu}
@@ -152,18 +152,18 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
 
       {isMenuOpen && createPortal(
         <div
-          className="surface-panel fixed z-[100] min-w-[140px] rounded-xl border border-border/60 bg-popover/98 p-1.5 backdrop-blur-sm animate-scale-in dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.98,hsl(var(--surface-1))/0.94)]"
+          className="surface-panel fixed z-[180] min-w-[140px] rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_50px_-28px_hsl(var(--foreground)/0.42),0_0_0_1px_hsl(var(--background)/0.7)] backdrop-blur-md animate-popover-in dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.98,hsl(var(--surface-1))/0.95)] dark:shadow-[0_24px_64px_-30px_hsl(var(--surface-shadow-strong)/0.98),0_0_0_1px_hsl(var(--foreground)/0.045)]"
           style={{ left: menuPos.x, top: menuPos.y }}
         >
           <button
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12px] text-foreground/80 transition-colors hover:bg-muted/70 hover:text-foreground"
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] text-foreground/82 transition-colors hover:bg-muted/72 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.9]"
             onClick={handleRenameStart}
           >
             <Pencil className="h-3.5 w-3.5" />
             重命名
           </button>
           <button
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12px] text-destructive transition-colors hover:bg-destructive/10"
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] text-destructive transition-colors hover:bg-destructive/10"
             onClick={handleDelete}
           >
             <Trash2 className="h-3.5 w-3.5" />

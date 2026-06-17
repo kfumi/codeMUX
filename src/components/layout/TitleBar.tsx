@@ -182,7 +182,7 @@ export function TitleBar({ sidebarCollapsed, onToggleSidebar }: TitleBarProps) {
       <div className="flex h-full items-center">
         <DropdownMenu
           align="right"
-          panelClassName="z-[140] min-w-[136px] animate-fade-in"
+          panelClassName="z-[180] min-w-[136px]"
           trigger={(
             <Tooltip>
               <TooltipTrigger asChild>

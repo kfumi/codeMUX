@@ -65,7 +65,7 @@ export function SkillsSettingsPanel() {
         {installedSkills.map((skill) => (
           <div
             key={skill.id}
-            className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+            className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/65 transition-colors"
           >
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
