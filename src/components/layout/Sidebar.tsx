@@ -44,24 +44,24 @@ export function Sidebar({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-1 px-3 pb-2.5 pt-2">
+      <div className="px-3 pb-3 pt-3">
         <button
           onClick={onNewSession}
-          className="flex flex-1 items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-medium text-[hsl(var(--sidebar-fg))]/80 transition-all duration-200 hover:bg-[hsl(var(--sidebar-glow)/0.06)] hover:text-[hsl(var(--sidebar-glow))] hover:shadow-[inset_0_0_0_1px_hsl(var(--sidebar-glow)/0.1)] active:scale-[0.98]"
+          className="surface-panel surface-interactive flex w-full items-center gap-2.5 rounded-lg border border-[hsl(var(--sidebar-border))]/70 bg-[hsl(var(--sidebar-bg))]/82 px-3 py-2.5 text-[13px] font-medium text-[hsl(var(--sidebar-fg))]/84 shadow-[0_1px_0_0_hsl(var(--foreground)/0.02)] transition-all duration-200 hover:border-[hsl(var(--sidebar-glow))]/24 hover:bg-[hsl(var(--sidebar-muted))]/88 hover:text-[hsl(var(--sidebar-fg))] active:scale-[0.985] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.95,hsl(var(--surface-1))/0.92)]"
         >
           <MessageSquarePlus className="h-4 w-4" />
           <span className="flex-1 text-left">新对话</span>
         </button>
       </div>
 
-      <div className="flex-1 overflow-auto px-3 scroll-smooth">
+      <div className="flex-1 overflow-auto px-3 pb-3 scroll-smooth">
         <SessionList onNewSessionInProject={onNewSessionInProject} onAddProject={handleAddProject} />
       </div>
 
       <div className="border-t border-[hsl(var(--sidebar-border))] p-3">
         <button
           onClick={onOpenSettings}
-          className="w-full rounded-xl px-3 py-2 text-[13px] text-[hsl(var(--sidebar-fg))]/70 transition-all duration-200 hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-fg))]"
+          className="surface-panel flex w-full rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/76 px-3 py-2 text-[13px] text-[hsl(var(--sidebar-fg))]/72 transition-all duration-200 hover:bg-[hsl(var(--sidebar-muted))]/88 hover:text-[hsl(var(--sidebar-fg))] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.86,hsl(var(--surface-1))/0.8)]"
         >
           <span className="flex items-center gap-2.5">
             <Settings className="h-3.5 w-3.5" />

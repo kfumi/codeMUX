@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
+import { MessageSquarePlus, Plus } from 'lucide-react';
+
 import { useSessionStore } from '../../stores/sessionStore';
 import { useProjectStore } from '../../stores/projectStore';
-import { SessionItem } from './SessionItem';
 import { ProjectGroup } from './ProjectGroup';
-import { Plus, MessageSquarePlus } from 'lucide-react';
-import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
+import { SessionItem } from './SessionItem';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 interface SessionListProps {
   onNewSessionInProject: (projectId: string) => void;
@@ -48,21 +49,17 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
   }
 
   return (
-    <div className="space-y-2 stagger-children">
-      {/* Projects section */}
+    <div className="space-y-2.5 stagger-children">
       {projects.length > 0 && (
         <div>
-          <div className="flex items-center justify-between px-2.5 py-1.5 mb-0.5">
-            <span
-              className="text-[12px] font-semibold tracking-wide text-[hsl(var(--sidebar-fg))]/30"
-              style={{ fontFamily: "'JetBrains Mono', monospace" }}
-            >
+          <div className="flex items-center justify-between px-2.5 py-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[hsl(var(--sidebar-fg))]/36">
               项目
             </span>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  className="p-0.5 rounded hover:bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-fg))]/60 hover:text-[hsl(var(--sidebar-fg))] transition-all duration-200"
+                  className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/55 transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-fg))]"
                   onClick={onAddProject}
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -79,7 +76,10 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
               sessions={projectSessions.get(project.id) || []}
               activeSessionId={activeSessionId}
               isActiveProject={project.id === activeProjectId}
-              onSelectSession={(id) => { setActiveProject(project.id); setActiveSession(id); }}
+              onSelectSession={(id) => {
+                setActiveProject(project.id);
+                setActiveSession(id);
+              }}
               onDeleteSession={deleteSession}
               onRenameSession={updateSessionTitle}
               onNewSessionInProject={onNewSessionInProject}
@@ -93,15 +93,11 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
         </div>
       )}
 
-      {/* Ungrouped sessions */}
       {ungroupedSessions.length > 0 && (
         <div>
           {projects.length > 0 && (
-            <div className="px-2.5 py-1.5 mb-0.5">
-              <span
-                className="text-[12px] font-semibold tracking-wide text-[hsl(var(--sidebar-fg))]/30"
-                style={{ fontFamily: "'JetBrains Mono', monospace" }}
-              >
+            <div className="px-2.5 py-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[hsl(var(--sidebar-fg))]/36">
                 对话
               </span>
             </div>
@@ -111,7 +107,10 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
               key={session.id}
               session={session}
               isActive={session.id === activeSessionId}
-              onClick={() => { setActiveProject(null); setActiveSession(session.id); }}
+              onClick={() => {
+                setActiveProject(null);
+                setActiveSession(session.id);
+              }}
               onDelete={() => deleteSession(session.id)}
               onRename={(title) => updateSessionTitle(session.id, title)}
               isMenuOpen={menuSessionId === session.id}
@@ -122,28 +121,23 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
         </div>
       )}
 
-      {/* Empty state */}
       {sessions.length === 0 && projects.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
-          <div className="w-8 h-8 rounded-lg bg-[hsl(var(--sidebar-accent))] flex items-center justify-center mb-3">
-            <MessageSquarePlus className="h-4 w-4 text-[hsl(var(--sidebar-fg))]/60" />
+          <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent))]/70 text-[hsl(var(--sidebar-fg))]/60">
+            <MessageSquarePlus className="h-4 w-4" />
           </div>
-          <p className="text-[12px] text-[hsl(var(--sidebar-fg))]/50 leading-relaxed">
-            暂无对话<br />
-            <span className="text-[11px]">点击上方开始</span>
+          <p className="text-[12px] leading-relaxed text-[hsl(var(--sidebar-fg))]/50">
+            暂无对话
+            <br />
+            <span className="text-[11px]">点击上方新建</span>
           </p>
         </div>
       )}
 
-      {/* Add project button when no projects */}
       {projects.length === 0 && sessions.length > 0 && (
         <button
           onClick={onAddProject}
-          className="w-full flex items-center gap-2.5 px-2.5 py-[7px] rounded-md text-[12px]
-            text-[hsl(var(--sidebar-fg))]/50
-            hover:text-[hsl(var(--sidebar-fg))]
-            hover:bg-[hsl(var(--sidebar-accent))]
-            transition-all duration-200 mt-1"
+          className="mt-1 flex w-full items-center gap-2.5 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-2.5 py-[7px] text-[12px] text-[hsl(var(--sidebar-fg))]/56 transition-all duration-200 hover:bg-[hsl(var(--sidebar-accent))]/80 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <Plus className="h-3.5 w-3.5" />
           添加项目

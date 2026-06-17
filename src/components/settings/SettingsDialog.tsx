@@ -1,8 +1,8 @@
-import { Bot, Palette, Plug, Puzzle, Server, Settings } from 'lucide-react';
 import { useState } from 'react';
+import { Bot, Palette, Plug, Puzzle, Server, Settings } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { AgentSettingsPanel } from './AgentSettings';
 import { McpSettingsPanel } from './McpSettings';
 import { ProviderConfigPanel } from './ProviderConfig';
@@ -20,7 +20,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('provider');
 
   const tabs = [
-    { id: 'provider' as const, label: '供应商配置', icon: Plug },
+    { id: 'provider' as const, label: '提供商配置', icon: Plug },
     { id: 'agents' as const, label: '智能体', icon: Bot },
     { id: 'mcp' as const, label: 'MCP', icon: Server },
     { id: 'skills' as const, label: 'Skills', icon: Puzzle },
@@ -30,38 +30,39 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[560px] flex-col overflow-hidden p-0 sm:max-w-[880px]">
-        <div className="flex flex-1 overflow-hidden">
-          <div className="w-44 shrink-0 border-r border-border/40 bg-muted/20 p-2">
-            <DialogHeader className="p-2 pb-3">
-              <DialogTitle className="text-sm font-semibold">设置</DialogTitle>
+      <DialogContent className="flex h-[620px] flex-col overflow-hidden border-border/80 bg-card p-0 sm:max-w-[980px]">
+        <DialogDescription className="sr-only">
+          Configure providers, agents, MCP, skills, appearance, and general application preferences.
+        </DialogDescription>
+        <div className="flex flex-1 overflow-hidden bg-card">
+          <div className="w-52 shrink-0 border-r border-border/65 bg-muted/38 p-3 dark:bg-muted/24">
+            <DialogHeader className="px-2 pb-4 pt-1">
+              <DialogTitle className="text-sm font-semibold text-foreground/90">设置</DialogTitle>
             </DialogHeader>
-            <nav className="space-y-0.5">
+            <nav className="space-y-1">
               {tabs.map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}
                   onClick={() => setActiveTab(id)}
                   className={cn(
-                    'relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-all duration-200',
+                    'relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[13px] transition-all duration-200',
                     activeTab === id
-                      ? 'bg-background font-medium text-foreground shadow-sm'
-                      : 'text-foreground/74 hover:bg-muted/40 hover:text-foreground',
+                      ? 'border border-border/80 bg-background font-medium text-foreground shadow-[0_10px_28px_-22px_hsl(var(--foreground)/0.34)]'
+                      : 'text-foreground/72 hover:bg-background/68 hover:text-foreground',
                   )}
                 >
-                  <Icon
-                    className={cn('h-4 w-4 transition-colors', activeTab === id ? 'text-[hsl(var(--primary))]' : '')}
-                  />
+                  <Icon className={cn('h-4 w-4 transition-colors', activeTab === id ? 'text-primary' : 'text-foreground/50')} />
                   {label}
                 </button>
               ))}
             </nav>
           </div>
 
-          <div className="flex-1 overflow-auto p-5">
+          <div className="flex-1 overflow-auto bg-background p-6">
             {activeTab === 'general' && (
               <div className="space-y-4">
-                <h3 className="text-sm font-semibold">常规设置</h3>
-                <p className="text-sm text-foreground/74">这里会放应用级的通用偏好设置。</p>
+                <h3 className="text-sm font-semibold text-foreground/90">常规设置</h3>
+                <p className="text-sm leading-relaxed text-foreground/68">这里会放应用级的通用偏好设置。</p>
               </div>
             )}
             {activeTab === 'appearance' && <ThemeToggle />}

@@ -278,11 +278,11 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center gap-3 border-b border-border/30 bg-background/80 px-6 py-3 backdrop-blur-sm">
-        <h2 className="truncate text-[13px] font-medium text-foreground/86">{session?.title || '新对话'}</h2>
+      <div className="surface-panel surface-panel-muted animate-panel-reveal flex shrink-0 items-center gap-3 rounded-none border-x-0 border-t-0 border-b border-border/45 bg-[hsl(var(--background))]/82 px-6 py-3.5 backdrop-blur-xl dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.92,hsl(var(--surface-1))/0.84)]">
+        <h2 className="truncate text-[13px] font-semibold text-foreground/88">{session?.title || '新对话'}</h2>
         <DropdownMenu
           trigger={(
-            <button className="rounded-lg p-1 text-muted-foreground/72 transition-colors hover:bg-muted/40 hover:text-foreground">
+            <button className="rounded-lg p-1 text-muted-foreground/66 transition-colors hover:bg-muted/55 hover:text-foreground">
               <MoreHorizontal className="h-4 w-4" />
             </button>
           )}
@@ -304,7 +304,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         )}
         {project && (
           <div
-            className="flex min-w-0 max-w-[300px] items-center gap-1.5 rounded-lg border border-border/20 bg-muted/30 px-2.5 py-1.5 text-[12px] text-foreground/78"
+            className="surface-panel flex min-w-0 max-w-[300px] items-center gap-1.5 rounded-lg border border-border/45 bg-muted/24 px-2.5 py-1.5 text-[12px] text-foreground/78 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.84,hsl(var(--surface-2))/0.74)]"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             <FolderOpen className="h-3 w-3 shrink-0 text-foreground/62" />
@@ -312,7 +312,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           </div>
         )}
         {mcpRuntimeStatus && mcpRuntimeStatus !== 'ready' && (
-          <div className="rounded-lg border border-border/20 bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
+          <div className="surface-panel rounded-lg border border-border/45 bg-muted/24 px-2 py-1 text-[11px] text-muted-foreground dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.8,hsl(var(--surface-2))/0.7)]">
             {mcpRuntimeStatus === 'warming' && 'MCP 正在后台预热'}
             {mcpRuntimeStatus === 'deferred' && 'MCP 将按需连接'}
             {mcpRuntimeStatus === 'fallback_live' && '对话已启动，MCP 继续后台接入'}
@@ -323,7 +323,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           onClick={togglePreview}
           className={cn(
             'rounded-lg p-1.5 transition-all duration-200',
-            previewOpen ? 'bg-muted text-foreground' : 'text-muted-foreground/72 hover:bg-muted/30 hover:text-foreground',
+            previewOpen ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/66 hover:bg-muted/45 hover:text-foreground',
           )}
           title={previewOpen ? '收起预览面板' : '展开预览面板'}
         >

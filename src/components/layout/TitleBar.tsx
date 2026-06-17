@@ -1,9 +1,10 @@
 import { type MouseEvent, useEffect, useState } from 'react';
-import { Minus, PanelLeftClose, PanelLeftOpen, Sun, Moon, Monitor, X } from 'lucide-react';
+import { Minus, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Sun, X } from 'lucide-react';
 
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Theme } from '../../types/provider';
-import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
+import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 type AppWindowLike = {
   isMaximized(): Promise<boolean>;
@@ -16,7 +17,8 @@ type AppWindowLike = {
 };
 
 const isTauriWindowAvailable = () =>
-  typeof window !== 'undefined' && typeof (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
+  typeof window !== 'undefined'
+  && typeof (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
 
 function MaximizeIcon({ restored }: { restored: boolean }) {
   if (restored) {
@@ -43,18 +45,10 @@ interface TitleBarProps {
 export function TitleBar({ sidebarCollapsed, onToggleSidebar }: TitleBarProps) {
   const [appWindow, setAppWindow] = useState<AppWindowLike | null>(null);
   const [maximized, setMaximized] = useState(false);
-  const [themeOpen, setThemeOpen] = useState(false);
   const currentTheme = useSettingsStore((state) => state.config?.theme || 'System');
   const setTheme = useSettingsStore((state) => state.setTheme);
 
   const ThemeIcon = currentTheme === 'Dark' ? Moon : currentTheme === 'Light' ? Sun : Monitor;
-
-  useEffect(() => {
-    if (!themeOpen) return;
-    const close = () => setThemeOpen(false);
-    window.addEventListener('click', close);
-    return () => window.removeEventListener('click', close);
-  }, [themeOpen]);
 
   useEffect(() => {
     if (!isTauriWindowAvailable()) {
@@ -144,10 +138,16 @@ export function TitleBar({ sidebarCollapsed, onToggleSidebar }: TitleBarProps) {
     await menu.popup();
   };
 
+  const themeOptions: Array<{ value: Theme; label: string; Icon: typeof Sun }> = [
+    { value: 'Light', label: '浅色', Icon: Sun },
+    { value: 'Dark', label: '深色', Icon: Moon },
+    { value: 'System', label: '跟随系统', Icon: Monitor },
+  ];
+
   return (
     <div
       data-tauri-drag-region
-      className="relative flex h-[34px] shrink-0 select-none items-center border-b border-border bg-background pl-0 pr-0"
+      className="relative z-20 flex h-[38px] shrink-0 select-none items-center border-b border-border/60 bg-[hsl(var(--background))]/78 pl-0 pr-0 backdrop-blur-xl transition-[background-color,border-color] duration-300 dark:bg-[hsl(var(--surface-1))/0.74] dark:shadow-[0_1px_0_0_hsl(var(--foreground)/0.03),0_12px_30px_-22px_hsl(var(--surface-shadow-strong)/0.9)]"
       onContextMenu={handleContextMenu}
     >
       {onToggleSidebar && (
@@ -155,7 +155,7 @@ export function TitleBar({ sidebarCollapsed, onToggleSidebar }: TitleBarProps) {
           <TooltipTrigger asChild>
             <button
               onClick={onToggleSidebar}
-              className="ml-1 flex h-[22px] w-[28px] shrink-0 items-center justify-center rounded-md text-foreground/70 transition-all duration-150 hover:bg-foreground/10 hover:text-foreground"
+              className="ml-2 flex h-7 w-8 shrink-0 items-center justify-center rounded-lg text-foreground/62 transition-all duration-150 hover:bg-muted/60 hover:text-foreground"
             >
               {sidebarCollapsed ? (
                 <PanelLeftOpen className="h-3.5 w-3.5" />
@@ -165,84 +165,77 @@ export function TitleBar({ sidebarCollapsed, onToggleSidebar }: TitleBarProps) {
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <p>{sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}</p>
+            <p>{sidebarCollapsed ? '展开侧栏' : '收起侧栏'}</p>
           </TooltipContent>
         </Tooltip>
       )}
 
-      <div className="flex items-center gap-2.5 pl-2.5">
-        <div className="relative h-2 w-2 rounded-full bg-gradient-to-br from-[hsl(180_80%_50%)] to-[hsl(215_100%_60%)] shadow-[0_0_8px_hsl(215_100%_60%/0.4)]" />
-        <span
-          className="text-[11px] font-semibold uppercase tracking-[0.18em] text-foreground/90"
-          style={{ fontFamily: "'JetBrains Mono', monospace" }}
-        >
+      <div className="flex items-center gap-2.5 pl-3">
+        <div className="relative h-2.5 w-2.5 rounded-full bg-gradient-to-br from-[hsl(var(--primary))] to-[hsl(var(--primary))/0.65] shadow-[0_0_0_3px_hsl(var(--primary)/0.12)]" />
+        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-foreground/88">
           codeMUX
         </span>
       </div>
 
       <div className="flex-1" />
 
-      <div className="relative flex h-full items-center">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={(e) => { e.stopPropagation(); setThemeOpen((v) => !v); }}
-              className="flex h-[22px] w-[28px] shrink-0 items-center justify-center rounded-md text-foreground/70 transition-all duration-150 hover:bg-foreground/10 hover:text-foreground"
+      <div className="flex h-full items-center">
+        <DropdownMenu
+          align="right"
+          panelClassName="z-[180] min-w-[136px]"
+          trigger={(
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="flex h-7 w-8 shrink-0 items-center justify-center rounded-lg text-foreground/62 transition-all duration-200 hover:bg-muted/60 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.86]"
+                >
+                  <ThemeIcon className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>主题切换</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
+        >
+          {themeOptions.map(({ value, label, Icon }) => (
+            <DropdownMenuItem
+              key={value}
+              onClick={() => {
+                void setTheme(value);
+              }}
             >
-              <ThemeIcon className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p>主题：（点击切换）</p>
-          </TooltipContent>
-        </Tooltip>
-
-        {themeOpen && (
-          <div
-            className="absolute top-full right-0 z-50 mt-0.5 min-w-[120px] rounded-lg border border-border bg-popover p-1 shadow-lg animate-fade-in"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {([
-              { value: 'Light' as Theme, label: '浅色', Icon: Sun },
-              { value: 'Dark' as Theme, label: '深色', Icon: Moon },
-              { value: 'System' as Theme, label: '跟随系统', Icon: Monitor },
-            ]).map(({ value, label, Icon }) => (
-              <button
-                key={value}
-                onClick={() => { setTheme(value); setThemeOpen(false); }}
-                className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] transition-colors ${
-                  currentTheme === value
-                    ? 'bg-accent text-foreground font-medium'
-                    : 'text-foreground/70 hover:bg-muted hover:text-foreground'
-                }`}
-              >
+              <div className="flex w-full items-center gap-2 text-[12px]">
                 <Icon className="h-3.5 w-3.5" />
-                {label}
+                <span className={currentTheme === value ? 'font-medium text-foreground' : 'text-foreground/76'}>
+                  {label}
+                </span>
                 {currentTheme === value && (
-                  <span className="ml-auto text-[10px] text-primary">✓</span>
+                  <span className="ml-auto text-[10px] text-primary">+</span>
                 )}
-              </button>
-            ))}
-          </div>
-        )}
+              </div>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenu>
       </div>
 
       {appWindow && (
         <div className="flex h-full items-stretch self-stretch">
           <button
-            className="flex h-full w-[46px] items-center justify-center rounded-none text-foreground/70 transition-colors duration-150 hover:bg-muted hover:text-foreground"
+            className="flex h-full w-[46px] items-center justify-center rounded-none text-foreground/62 transition-colors duration-150 hover:bg-muted/60 hover:text-foreground"
             onClick={() => appWindow.minimize()}
           >
             <Minus className="h-3.5 w-3.5" strokeWidth={1.5} />
           </button>
           <button
-            className="flex h-full w-[46px] items-center justify-center rounded-none text-foreground/70 transition-colors duration-150 hover:bg-muted hover:text-foreground"
+            className="flex h-full w-[46px] items-center justify-center rounded-none text-foreground/62 transition-colors duration-150 hover:bg-muted/60 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.82]"
             onClick={() => appWindow.toggleMaximize()}
           >
             <MaximizeIcon restored={maximized} />
           </button>
           <button
-            className="flex h-full w-[50px] items-center justify-center rounded-none text-foreground/70 transition-colors duration-150 hover:bg-[hsl(var(--destructive)/0.92)] hover:text-white"
+            className="flex h-full w-[50px] items-center justify-center rounded-none text-foreground/62 transition-colors duration-150 hover:bg-[hsl(var(--destructive)/0.92)] hover:text-white"
             onClick={() => appWindow.close()}
           >
             <X className="h-3.5 w-3.5" strokeWidth={1.5} />

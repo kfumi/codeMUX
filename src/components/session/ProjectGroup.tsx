@@ -1,13 +1,14 @@
 import { useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { ChevronRight, Folder, FolderOpen, MessageSquarePlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+
 import { Session } from '../../types/session';
 import { Project } from '../../types/project';
 import { SessionItem } from './SessionItem';
 import { Button } from '../ui/button';
 import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
 import { ConfirmDialog } from '../ui/confirm-dialog';
-import { Folder, ChevronRight, MoreHorizontal, Pencil, Trash2, MessageSquarePlus, FolderOpen } from 'lucide-react';
-import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
-import { invoke } from '@tauri-apps/api/core';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { cn } from '../../lib/utils';
 
 interface ProjectGroupProps {
@@ -54,60 +55,59 @@ export function ProjectGroup({
   };
 
   return (
-    <div className="mb-0.5">
+    <div className="mb-1">
       <div
         className={cn(
-          'flex items-center gap-2 px-2.5 py-[7px] rounded-lg cursor-pointer transition-all duration-200 group relative',
-          'text-[hsl(var(--sidebar-fg))]/82',
-          'hover:text-[hsl(var(--sidebar-fg))] hover:bg-[hsl(var(--sidebar-accent))]',
-          isActiveProject && 'bg-[hsl(var(--sidebar-accent))]/50'
+          'group relative flex cursor-pointer items-center gap-2 rounded-xl border border-transparent px-2.5 py-2 transition-all duration-200',
+          'text-[hsl(var(--sidebar-fg))]/82 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]',
+          'dark:hover:border-[hsl(var(--sidebar-glow))]/10 dark:hover:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.84,hsl(var(--surface-2))/0.74)]',
+          isActiveProject && 'border-[hsl(var(--sidebar-glow))]/24 bg-[hsl(var(--sidebar-glow))]/8 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.92,hsl(var(--surface-2))/0.8)] dark:shadow-[0_14px_30px_-24px_hsl(var(--surface-shadow-strong)/0.85),0_0_0_1px_hsl(var(--sidebar-glow)/0.07)]',
         )}
         onClick={() => !renaming && setExpanded(!expanded)}
       >
-        {/* Active indicator for project */}
         {isActiveProject && (
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full bg-[hsl(var(--sidebar-glow))] opacity-60" />
+          <div className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-[hsl(var(--sidebar-glow))] opacity-70" />
         )}
         <ChevronRight
           className={cn(
             'h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/64 transition-transform duration-200',
-            expanded && 'rotate-90'
+            expanded && 'rotate-90',
           )}
         />
         <Folder className={cn(
           'h-3.5 w-3.5 shrink-0 transition-colors duration-200',
-          isActiveProject ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64'
+          isActiveProject ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64',
         )} />
         {renaming ? (
           <input
             autoFocus
             value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
+            onChange={(event) => setRenameValue(event.target.value)}
             onBlur={handleRename}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleRename();
-              if (e.key === 'Escape') setRenaming(false);
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') handleRename();
+              if (event.key === 'Escape') setRenaming(false);
             }}
-            className="flex-1 text-[13px] bg-[hsl(var(--sidebar-muted))] border border-[hsl(var(--sidebar-border))] px-1.5 py-0.5 rounded-md text-[hsl(var(--sidebar-fg))] outline-none focus:border-[hsl(var(--sidebar-glow))]/30 transition-colors"
-            onClick={(e) => e.stopPropagation()}
+            className="flex-1 rounded-md border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-muted))] px-2 py-1 text-[13px] text-[hsl(var(--sidebar-fg))] outline-none transition-colors focus:border-[hsl(var(--sidebar-glow))]/35"
+            onClick={(event) => event.stopPropagation()}
           />
         ) : (
           <span className="flex-1 truncate text-[13px] font-medium">{project.name}</span>
         )}
-        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity duration-200" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100" onClick={(event) => event.stopPropagation()}>
           <DropdownMenu
-            trigger={
-              <Button variant="ghost" size="icon" className="h-5 w-5 hover:bg-[hsl(var(--sidebar-accent))]">
+            trigger={(
+              <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md text-[hsl(var(--sidebar-fg))]/55 hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]">
                 <MoreHorizontal className="h-3 w-3" />
               </Button>
-            }
+            )}
             align="right"
           >
             <DropdownMenuItem
               icon={<FolderOpen className="h-3.5 w-3.5" />}
               onClick={() => invoke('open_in_explorer', { path: project.path })}
             >
-              在文件资源管理器打开
+              在资源管理器中打开
             </DropdownMenuItem>
             <DropdownMenuItem
               icon={<Pencil className="h-3.5 w-3.5" />}
@@ -129,18 +129,18 @@ export function ProjectGroup({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className="p-1 rounded-md hover:bg-[hsl(var(--sidebar-glow)/0.08)] text-[hsl(var(--sidebar-fg))]/40 hover:text-[hsl(var(--sidebar-glow))] transition-all duration-200"
+                className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/45 transition-all duration-200 hover:bg-[hsl(var(--sidebar-glow)/0.08)] hover:text-[hsl(var(--sidebar-glow))]"
                 onClick={() => onNewSessionInProject(project.id)}
               >
                 <MessageSquarePlus className="h-3.5 w-3.5" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right"><p>在 {project.name} 中开始对话</p></TooltipContent>
+            <TooltipContent side="right"><p>在此项目中创建对话</p></TooltipContent>
           </Tooltip>
         </div>
       </div>
       {expanded && (
-        <div className="ml-4 pl-2.5 border-l border-[hsl(var(--sidebar-border))]/60">
+        <div className="ml-4 mt-1 border-l border-[hsl(var(--sidebar-border))]/60 pl-2.5">
           {sessions.map((session) => (
             <SessionItem
               key={session.id}
@@ -161,7 +161,7 @@ export function ProjectGroup({
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title="移除项目"
-        description={`确定要移除「${project.name}」吗？项目下的对话不会被删除。`}
+        description={`确定要移除“${project.name}”吗？项目下的对话不会被删除。`}
         confirmLabel="移除"
         variant="destructive"
         onConfirm={() => onDeleteProject(project.id)}

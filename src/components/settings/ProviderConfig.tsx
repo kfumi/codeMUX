@@ -331,7 +331,7 @@ export function ProviderConfigPanel() {
                       />
                     )}
                   </div>
-                  <label className="flex items-center gap-1.5 px-2.5 rounded-md border border-input bg-background text-xs cursor-pointer select-none shrink-0 hover:bg-accent/50 transition-colors">
+                  <label className="flex items-center gap-1.5 px-2.5 rounded-md border border-input bg-background text-xs cursor-pointer select-none shrink-0 hover:bg-muted/65 transition-colors">
                     <input
                       type="checkbox"
                       checked={!!editingProvider.context_1m}
