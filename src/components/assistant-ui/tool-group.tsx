@@ -75,7 +75,7 @@ function ToolGroupTrigger({
   count: number;
   active?: boolean;
 }) {
-  const label = `${count} tool ${count === 1 ? 'call' : 'calls'}`;
+  const label = `${count} 次工具调用`;
 
   return (
     <CollapsibleTrigger
@@ -168,7 +168,7 @@ const ToolGroupImpl: FC<PropsWithChildren<{ startIndex: number; endIndex: number
   const toolCount = endIndex - startIndex + 1;
 
   return (
-    <ToolGroupRoot>
+    <ToolGroupRoot variant="ghost">
       <ToolGroupTrigger count={toolCount} />
       <ToolGroupContent>{children}</ToolGroupContent>
     </ToolGroupRoot>

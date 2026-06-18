@@ -32,6 +32,7 @@ export type CodeMuxAssistantMessage = {
   content: CodeMuxAssistantPart[];
   metadata: {
     sourceEventIndex: number;
+    sourceEventIndices: number[];
     sourceKind: AgentMessage['kind'];
     isFinalAssistantMessage?: boolean;
   };
@@ -72,6 +73,37 @@ export function convertAgentEventsToAssistantMessages(
           index,
         );
         const messageIndex = getAssistantInsertionIndex(messages, message) ?? messages.length;
+        const mergedMessageIndex = mergeIntoPreviousToolOnlyMessage(
+          messages,
+          message,
+          messageIndex,
+          toolCallLocationById,
+        );
+
+        if (mergedMessageIndex != null) {
+          message.content.forEach((part, partIndex) => {
+            if (part.type === 'tool-call') {
+              const mergedPartIndex = messages[mergedMessageIndex]?.content.length - message.content.length + partIndex;
+              toolCallLocationById.set(part.toolCallId, {
+                messageIndex: mergedMessageIndex,
+                partIndex: mergedPartIndex,
+              });
+              const pendingResult = pendingToolResultsById.get(part.toolCallId);
+              if (pendingResult) {
+                attachToolResult(
+                  messages,
+                  toolCallLocationById,
+                  part.toolCallId,
+                  pendingResult.content,
+                  pendingResult.isError,
+                );
+                pendingToolResultsById.delete(part.toolCallId);
+              }
+            }
+          });
+
+          return;
+        }
 
         if (messageIndex < messages.length) {
           messages.splice(messageIndex, 0, message);
@@ -193,11 +225,59 @@ function markFinalAssistantMessages(
   for (const message of messages) {
     if (
       message.role === 'assistant' &&
-      assistantIndicesWithResult.has(message.metadata.sourceEventIndex)
+      message.metadata.sourceEventIndices.some((sourceEventIndex) =>
+        assistantIndicesWithResult.has(sourceEventIndex),
+      )
     ) {
       message.metadata.isFinalAssistantMessage = true;
     }
   }
+}
+
+function mergeIntoPreviousToolOnlyMessage(
+  messages: CodeMuxAssistantMessage[],
+  nextMessage: CodeMuxAssistantMessage,
+  insertionIndex: number,
+  toolCallLocationById: Map<string, { messageIndex: number; partIndex: number }>,
+): number | undefined {
+  const previousIndex = insertionIndex - 1;
+  const previousMessage = messages[previousIndex];
+
+  if (
+    !previousMessage ||
+    !isToolOnlyAssistantMessage(previousMessage) ||
+    !isToolOnlyAssistantMessage(nextMessage)
+  ) {
+    return undefined;
+  }
+
+  messages[previousIndex] = {
+    ...previousMessage,
+    content: [...previousMessage.content, ...nextMessage.content],
+    metadata: {
+      ...previousMessage.metadata,
+      sourceEventIndices: [
+        ...previousMessage.metadata.sourceEventIndices,
+        ...nextMessage.metadata.sourceEventIndices,
+      ],
+    },
+  };
+
+  for (const [, location] of toolCallLocationById) {
+    if (location.messageIndex === insertionIndex) {
+      location.messageIndex = previousIndex;
+    }
+  }
+
+  return previousIndex;
+}
+
+function isToolOnlyAssistantMessage(message: CodeMuxAssistantMessage): boolean {
+  if (message.role !== 'assistant' || message.content.length === 0) {
+    return false;
+  }
+
+  return message.content.every((part) => part.type === 'tool-call');
 }
 
 function convertContentBlockToParts(
@@ -534,6 +614,7 @@ function createMessage(
     content,
     metadata: {
       sourceEventIndex: index,
+      sourceEventIndices: [index],
       sourceKind: event.kind,
     },
   };

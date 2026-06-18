@@ -9,6 +9,7 @@ import { ArrowDown, Loader2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 
 import { MessageFooter, type MessageFooterStats } from '@/components/assistant-ui/message-footer';
+import { ToolGroup } from '@/components/assistant-ui/tool-group';
 import {
   ReasoningContent,
   ReasoningRoot,
@@ -39,6 +40,7 @@ const EMPTY_TIMESTAMPS: number[] = [];
 const INTERRUPT_LABEL = '\u7528\u6237\u4e2d\u65ad\u8bf7\u6c42';
 const GROUP_BY_PART = groupPartByType({
   reasoning: ['group-thinking'],
+  'tool-call': ['group-tool-call'],
 });
 
 export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProps) {
@@ -403,6 +405,13 @@ function AssistantLikeMessage({
             switch (part.type) {
               case 'group-thinking':
                 return <CodeMuxReasoningGroup durationMs={thinkingDuration}>{children}</CodeMuxReasoningGroup>;
+
+              case 'group-tool-call':
+                return (
+                  <ToolGroup startIndex={part.indices[0] ?? 0} endIndex={part.indices[part.indices.length - 1] ?? 0}>
+                    {children}
+                  </ToolGroup>
+                );
 
               case 'text':
                 return <CodeMuxTextMessagePart />;

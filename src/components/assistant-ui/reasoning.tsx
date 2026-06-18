@@ -1,8 +1,8 @@
 "use client";
 
-import { createContext, memo, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, memo, useCallback, useEffect, useState } from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
-import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import { BrainIcon, ChevronDownIcon } from 'lucide-react';
 import {
   useAuiState,
   type ReasoningGroupComponent,
@@ -110,26 +110,21 @@ function ReasoningTrigger({
   active?: boolean;
   duration?: number;
 }) {
-  const isOpen = useContext(ReasoningOpenContext);
   const durationText = duration != null ? ` (${duration}s)` : '';
   const label = `深度思考${durationText}`;
-  const ChevronIcon = isOpen ? ChevronDownIcon : ChevronRightIcon;
 
   return (
     <CollapsibleTrigger
       data-slot="reasoning-trigger"
       className={cn(
-        'aui-reasoning-trigger text-foreground hover:text-foreground flex w-full items-center gap-2 py-1 text-sm transition-colors',
+        'aui-reasoning-trigger group/trigger text-muted-foreground hover:text-foreground flex max-w-[75%] items-center gap-2 py-1 text-sm transition-colors',
         className,
       )}
       {...props}
     >
-      <ChevronIcon
-        data-slot="reasoning-trigger-chevron"
-        className={cn(
-          'aui-reasoning-trigger-chevron size-4 shrink-0',
-          'transition-transform duration-(--animation-duration) ease-out',
-        )}
+      <BrainIcon
+        data-slot="reasoning-trigger-icon"
+        className="aui-reasoning-trigger-icon size-4 shrink-0"
       />
       <span
         data-slot="reasoning-trigger-label"
@@ -146,6 +141,15 @@ function ReasoningTrigger({
           </span>
         ) : null}
       </span>
+      <ChevronDownIcon
+        data-slot="reasoning-trigger-chevron"
+        className={cn(
+          'aui-reasoning-trigger-chevron mt-0.5 size-4 shrink-0',
+          'transition-transform duration-(--animation-duration) ease-out',
+          'group-data-[state=closed]/trigger:-rotate-90',
+          'group-data-[state=open]/trigger:rotate-0',
+        )}
+      />
     </CollapsibleTrigger>
   );
 }
@@ -182,7 +186,7 @@ function ReasoningText({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="reasoning-text"
       className={cn(
-        'aui-reasoning-text relative z-0 max-h-64 space-y-3 overflow-y-auto ps-6 pe-2 pt-1.5 pb-1 leading-relaxed [scrollbar-gutter:stable]',
+        'aui-reasoning-text relative z-0 max-h-64 space-y-3 overflow-y-auto ps-6 pe-2 pt-1.5 pb-1 leading-relaxed scrollbar-gutter-stable',
         'transform-gpu transition-[transform,opacity]',
         'group-data-[state=open]/collapsible-content:animate-in',
         'group-data-[state=closed]/collapsible-content:animate-out',

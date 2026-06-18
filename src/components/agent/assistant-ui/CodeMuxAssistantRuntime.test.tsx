@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
@@ -80,6 +80,77 @@ const timestampOnlyAssistantEvents: AgentMessage[] = [
   },
 ];
 
+const reasoningEvents: AgentMessage[] = [
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-reasoning',
+      session_id: 'session-reasoning',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'thinking through it' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+];
+
+const groupedToolEvents: AgentMessage[] = [
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-tool-1',
+      session_id: 'session-grouped-tools',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'src/App.tsx' } }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'tool_result',
+    data: {
+      type: 'user',
+      uuid: 'tool-result-1',
+      session_id: 'session-grouped-tools',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'app' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-tool-2',
+      session_id: 'session-grouped-tools',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'tool-2', name: 'Read', input: { file_path: 'src/main.tsx' } }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'tool_result',
+    data: {
+      type: 'user',
+      uuid: 'tool-result-2',
+      session_id: 'session-grouped-tools',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'tool-2', content: 'main' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+];
+
 const originalScrollTo = HTMLElement.prototype.scrollTo;
 
 function Harness({ sessionId }: { sessionId: string }) {
@@ -114,6 +185,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-2': sessionTwoEvents,
         'session-tool': failedToolEvents,
         'session-timestamp': timestampOnlyAssistantEvents,
+        'session-reasoning': reasoningEvents,
+        'session-grouped-tools': groupedToolEvents,
       },
       eventTimestamps: {
         'session-1': [1, 2],
@@ -164,6 +237,11 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     expect(screen.getByText(/工具/i)).toBeTruthy();
     expect(screen.queryByText(/Error: Command failed with exit code 1/)).toBeNull();
+
+    // Single tool call is now wrapped in a collapsed ToolGroup — expand it to check the icon
+    const trigger = container.querySelector('[data-slot="tool-group-trigger"]');
+    if (trigger) fireEvent.click(trigger);
+
     expect(container.querySelector('.lucide-circle-x')).toBeTruthy();
     expect(container.querySelector('.lucide-loader')).toBeNull();
   });
@@ -174,6 +252,29 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('timestamp only assistant')).toBeTruthy();
     // No result event means no isFinalAssistantMessage, so footer (timestamp) should not render.
     expect(screen.queryByText('21:40')).toBeNull();
+  });
+
+  it('renders the reasoning trigger like the native assistant-ui component', () => {
+    const { container } = render(<Harness sessionId="session-reasoning" />);
+    const trigger = container.querySelector('[data-slot="reasoning-trigger"]');
+    const childSlots = Array.from(trigger?.children ?? []).map((element) =>
+      element.getAttribute('data-slot'),
+    );
+
+    expect(childSlots).toEqual([
+      'reasoning-trigger-icon',
+      'reasoning-trigger-label',
+      'reasoning-trigger-chevron',
+    ]);
+  });
+
+  it('renders consecutive related tool calls inside one tool group', () => {
+    const { container } = render(<Harness sessionId="session-grouped-tools" />);
+    const toolGroup = container.querySelector('[data-slot="tool-group-root"]');
+
+    expect(toolGroup).toBeTruthy();
+    expect(toolGroup?.getAttribute('data-variant')).toBe('ghost');
+    expect(screen.getByText('2 次工具调用')).toBeTruthy();
   });
 
   it('keeps the first completion time when duplicate live tool results arrive', () => {

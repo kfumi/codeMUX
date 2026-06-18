@@ -238,4 +238,97 @@ describe('convertAgentEventsToAssistantMessages', () => {
       },
     ]);
   });
+
+  it('coalesces consecutive tool-only assistant events into one message for tool grouping', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'tool-1',
+                name: 'Read',
+                input: { file_path: 'src/App.tsx' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'app' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-2',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'tool-2',
+                name: 'Read',
+                input: { file_path: 'src/main.tsx' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-2',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-2', content: 'main' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content).toEqual([
+      {
+        type: 'tool-call',
+        toolCallId: 'tool-1',
+        toolName: 'Read',
+        args: { file_path: 'src/App.tsx' },
+        result: 'app',
+        isError: false,
+      },
+      {
+        type: 'tool-call',
+        toolCallId: 'tool-2',
+        toolName: 'Read',
+        args: { file_path: 'src/main.tsx' },
+        result: 'main',
+        isError: false,
+      },
+    ]);
+  });
 });

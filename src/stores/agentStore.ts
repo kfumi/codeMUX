@@ -1159,7 +1159,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const state = get();
     const isRunning = state.isRunning[sessionId] ?? false;
     const forceStopped = state.forceStopped[sessionId] ?? false;
-    const lastEvent = (state.events[sessionId] || []).at(-1);
+    const events = state.events[sessionId] || [];
+    const lastEvent = events[events.length - 1];
 
     if (!isRunning || forceStopped || lastEvent?.kind === 'done') {
       logger.info('Ignoring interrupt for inactive agent query', {
