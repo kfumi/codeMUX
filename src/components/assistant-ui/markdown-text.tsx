@@ -11,6 +11,7 @@ import {
 import remarkGfm from 'remark-gfm';
 import { type FC, memo, useState } from 'react';
 import { CheckIcon, CopyIcon } from 'lucide-react';
+import { open } from '@tauri-apps/plugin-shell';
 
 import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button';
 import { cn } from '@/lib/utils';
@@ -110,12 +111,17 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
-  a: ({ className, ...props }) => (
+  a: ({ className, href, ...props }) => (
     <a
       className={cn(
         'aui-md-a text-primary hover:text-primary/80 underline underline-offset-2',
         className,
       )}
+      href={href}
+      onClick={(e) => {
+        e.preventDefault();
+        if (href) open(href);
+      }}
       {...props}
     />
   ),

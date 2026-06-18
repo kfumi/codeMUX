@@ -83,7 +83,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <ThreadPrimitive.Viewport
           ref={viewportRef}
-          className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scroll-smooth [scrollbar-gutter:stable]"
+          className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scroll-smooth scrollbar-gutter-stable"
           autoScroll
         >
           <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col pl-4 pr-14 pt-4">
@@ -320,7 +320,7 @@ function MessageNav({
         )}
       >
         <div
-          className="absolute left-1/2 w-px -translate-x-1/2 rounded-full bg-gradient-to-b from-border/20 via-muted-foreground/55 to-border/20 dark:from-border/40 dark:via-muted-foreground/50 dark:to-border/40"
+          className="absolute left-1/2 w-px -translate-x-1/2 rounded-full bg-linear-to-b from-border/20 via-muted-foreground/55 to-border/20 dark:from-border/40 dark:via-muted-foreground/50 dark:to-border/40"
           style={{
             top: `${navMetrics.railPadding}px`,
             bottom: `${navMetrics.railPadding}px`,

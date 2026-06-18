@@ -1,10 +1,12 @@
 use crate::mcp::types::{McpApps, McpServer};
 
+#[allow(dead_code)]
 pub struct AppDiff {
     pub enable: Vec<&'static str>,
     pub disable: Vec<&'static str>,
 }
 
+#[allow(dead_code)]
 pub fn diff_apps(previous: &McpApps, next: &McpApps) -> AppDiff {
     let mut enable = Vec::new();
     let mut disable = Vec::new();
@@ -26,6 +28,7 @@ pub fn diff_apps(previous: &McpApps, next: &McpApps) -> AppDiff {
     AppDiff { enable, disable }
 }
 
+#[allow(dead_code)]
 pub fn merge_imported_server(mut server: McpServer, app: &str) -> McpServer {
     match app {
         "claude" => server.apps.claude = true,

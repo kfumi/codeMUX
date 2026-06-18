@@ -707,7 +707,7 @@ pub async fn ensure_agent_session(
         sidecars.get(&session_id).map(|h| h.stderr_lines.clone())
     };
 
-    let mut cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model);
+    let cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model);
 
     // If the proxy is already running (e.g. started manually from settings),
     // tell the sidecar to use it directly instead of starting a new one.
@@ -1025,6 +1025,7 @@ fn parse_proxy_port_from_stderr(lines: &[String]) -> Option<u16> {
     None
 }
 
+#[allow(dead_code)]
 async fn probe_local_proxy_health(port: u16) -> bool {
     let url = format!("http://127.0.0.1:{}/__codemux_proxy_health", port);
     match reqwest::Client::new()
@@ -1038,6 +1039,7 @@ async fn probe_local_proxy_health(port: u16) -> bool {
     }
 }
 
+#[allow(dead_code)]
 async fn get_live_proxy_port(agent_state: &State<'_, AgentState>) -> Option<u16> {
     let current = *agent_state.proxy_port.lock().await;
     let Some(port) = current else {

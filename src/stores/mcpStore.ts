@@ -6,6 +6,7 @@ interface McpStore {
   servers: McpServer[];
   probeStatus: Record<string, 'idle' | 'pending' | 'connected' | 'failed'>;
   isLoading: boolean;
+  isProbing: boolean;
   error: string | null;
   fetchServers: () => Promise<void>;
   upsertServer: (server: McpServer) => Promise<void>;
@@ -20,6 +21,7 @@ export const useMcpStore = create<McpStore>((set, get) => ({
   servers: [],
   probeStatus: {},
   isLoading: false,
+  isProbing: false,
   error: null,
 
   fetchServers: async () => {
@@ -98,6 +100,8 @@ export const useMcpStore = create<McpStore>((set, get) => ({
   },
 
   probeAll: async () => {
+    if (get().isProbing) return;
+    set({ isProbing: true });
     try {
       const results = await mcpApi.probeAll();
       // Backend returns name→connected map; match to server.id for UI
@@ -112,6 +116,8 @@ export const useMcpStore = create<McpStore>((set, get) => ({
       set({ probeStatus });
     } catch {
       // ignore probe errors
+    } finally {
+      set({ isProbing: false });
     }
   },
 

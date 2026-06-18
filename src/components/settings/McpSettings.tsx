@@ -79,6 +79,7 @@ export function McpSettingsPanel() {
   const servers = useMcpStore((s) => s.servers);
   const probeStatus = useMcpStore((s) => s.probeStatus);
   const isLoading = useMcpStore((s) => s.isLoading);
+  const isProbing = useMcpStore((s) => s.isProbing);
   const fetchServers = useMcpStore((s) => s.fetchServers);
   const probeAll = useMcpStore((s) => s.probeAll);
   const probeServer = useMcpStore((s) => s.probeServer);
@@ -93,7 +94,6 @@ export function McpSettingsPanel() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState('');
-  const [probing, setProbing] = useState(false);
   const [importing, setImporting] = useState(false);
 
   // wizard local state
@@ -112,9 +112,13 @@ export function McpSettingsPanel() {
     fetchServers();
   }, [fetchServers]);
 
+  // 进入 MCP 设置时自动探测所有 server 状态（store 层 isProbing 防重复）
+  useEffect(() => {
+    probeAll();
+  }, [probeAll]);
+
   const handleRefresh = () => {
-    setProbing(true);
-    probeAll().finally(() => setProbing(false));
+    probeAll();
   };
 
   const handleImport = async () => {
@@ -309,8 +313,8 @@ export function McpSettingsPanel() {
             {importing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Download className="h-4 w-4 mr-1" />}
             从工具导入
           </Button>
-          <Button size="sm" variant="ghost" onClick={handleRefresh} disabled={probing}>
-            <RefreshCw className={`h-4 w-4 ${probing ? 'animate-spin' : ''}`} />
+          <Button size="sm" variant="ghost" onClick={handleRefresh} disabled={isProbing}>
+            <RefreshCw className={`h-4 w-4 ${isProbing ? 'animate-spin' : ''}`} />
           </Button>
           <Button size="sm" onClick={openNew}>
             <Plus className="h-4 w-4 mr-1" />

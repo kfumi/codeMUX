@@ -35,6 +35,7 @@ pub fn get_all_mcp_servers(conn: &Connection) -> Result<Vec<McpServer>> {
     Ok(servers)
 }
 
+#[allow(dead_code)]
 pub fn get_servers_enabled_for_app(conn: &Connection, app: &str) -> Result<Vec<McpServer>> {
     let column = match app {
         "claude" => "enabled_claude",

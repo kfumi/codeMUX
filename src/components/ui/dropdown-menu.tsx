@@ -55,7 +55,7 @@ export function DropdownMenu({ trigger, children, align = 'left', panelClassName
 
   return (
     <>
-      <div ref={triggerRef} onClick={() => setOpen(!open)}>{trigger}</div>
+      <div ref={triggerRef} role="button" onClick={() => setOpen(!open)}>{trigger}</div>
       {panel}
     </>
   );

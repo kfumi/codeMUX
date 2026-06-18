@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
+import { open } from '@tauri-apps/plugin-shell';
 
 interface MarkdownRendererProps {
   content: string;
@@ -118,7 +119,15 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
         },
         a({ children, href, ...props }) {
           return (
-            <a href={href} className="text-[hsl(var(--primary))] hover:underline underline-offset-2" target="_blank" rel="noopener noreferrer" {...props}>
+            <a
+              href={href}
+              className="text-[hsl(var(--primary))] hover:underline underline-offset-2"
+              onClick={(e) => {
+                e.preventDefault();
+                if (href) open(href);
+              }}
+              {...props}
+            >
               {children}
             </a>
           );

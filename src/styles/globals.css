@@ -118,6 +118,16 @@
     border-color: var(--color-border);
   }
 
+  /* 交互元素统一显示手型光标 */
+  button,
+  [role="button"],
+  a[href],
+  summary,
+  [type="submit"],
+  [type="button"] {
+    cursor: pointer;
+  }
+
   html {
     font-family: 'Inter Tight', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }

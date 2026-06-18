@@ -6,7 +6,7 @@ mod agent_runtime;
 mod mcp;
 mod skills;
 
-use log::{info, warn};
+use log::info;
 use tauri::menu::MenuBuilder;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, Window, WindowEvent};
