@@ -138,7 +138,7 @@ export function CodeMuxComposer({ sessionId, modelName, onStop }: CodeMuxCompose
                 <ComposerPrimitive.Unstable_TriggerPopoverCategoryItem
                   key={category.id}
                   categoryId={category.id}
-                  className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/50 data-[highlighted]:bg-muted/60"
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/50 data-highlighted:bg-muted/60"
                 >
                   <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-muted text-muted-foreground">
                     {getCategoryIcon(category.id)}
@@ -169,7 +169,7 @@ export function CodeMuxComposer({ sessionId, modelName, onStop }: CodeMuxCompose
                   <ComposerPrimitive.Unstable_TriggerPopoverItem
                     key={item.id}
                     item={item}
-                    className="flex w-full items-start gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/50 data-[highlighted]:bg-muted/60"
+                    className="flex w-full items-start gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/50 data-highlighted:bg-muted/60"
                   >
                     <span className="mt-0.5 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-muted text-muted-foreground">
                       {getCommandIcon(item.id)}
@@ -207,9 +207,9 @@ export function CodeMuxComposer({ sessionId, modelName, onStop }: CodeMuxCompose
               });
             }}
             className={cn(
-              'flex w-full flex-col gap-2 overflow-hidden rounded-[24px] border p-[10px] transition-all duration-200',
+              'aui-composer-root flex w-full flex-col gap-2 overflow-hidden rounded-3xl border p-2.5 transition-all duration-200',
               isFocused
-                ? 'border-[hsl(var(--primary)/0.28)] bg-background shadow-[0_18px_50px_-28px_hsl(var(--foreground)/0.28)] ring-2 ring-[hsl(var(--primary)/0.08)]'
+                ? 'border-[hsl(var(--primary)/0.28)] bg-background shadow-[0_18px_50px_-28px_hsl(var(--foreground)/0.28)]'
                 : 'border-border/70 bg-background',
             )}
           >
@@ -223,7 +223,7 @@ export function CodeMuxComposer({ sessionId, modelName, onStop }: CodeMuxCompose
                 'max-h-32 min-h-10 w-full resize-none border-0 px-2 py-1 text-sm leading-6 text-foreground outline-none ring-0 shadow-none placeholder:text-muted-foreground/95',
                 'rounded-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none',
                 'focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none',
-                '[box-shadow:none] [-webkit-appearance:none] [appearance:none]',
+                '[box-shadow:none] [-webkit-appearance:none] appearance-none',
                 'bg-transparent',
               )}
             />

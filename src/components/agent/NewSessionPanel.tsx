@@ -1,9 +1,11 @@
 import { ArrowUp, FileCode2, FolderKanban, Loader2, MessageSquareText, Sparkles } from 'lucide-react';
+import { Cpu } from 'lucide-react';
 import { useMemo, useState, type KeyboardEvent } from 'react';
 
 import { cn } from '../../lib/utils';
 import { useNewSessionStore } from '../../stores/newSessionStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { getAgentDefinition } from '../../types/agentRegistry';
 import { AgentSelector } from './AgentSelector';
 
@@ -32,6 +34,7 @@ const STARTER_PROMPTS = [
 export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const { selectedAgentKind, setSelectedAgentKind, draftProjectId } = useNewSessionStore();
   const projects = useProjectStore((state) => state.projects);
+  const activeProvider = useSettingsStore((s) => s.getActiveProvider());
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -71,7 +74,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     <div className="flex flex-1 overflow-auto bg-[hsl(var(--background))] transition-[background] duration-300">
       <div className="mx-auto flex w-full max-w-6xl flex-col justify-center gap-5 px-6 py-8 lg:px-10">
         <div className="grid min-h-[min(720px,calc(100vh-8rem))] gap-5 lg:grid-cols-[minmax(260px,0.84fr)_minmax(520px,1.36fr)]">
-          <aside className="surface-panel surface-panel-muted flex animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both [animation-duration:340ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex-col justify-between gap-5 rounded-xl border border-border/60 bg-card/76 p-5 dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.96,hsl(var(--surface-1))/0.9)]">
+          <aside className="surface-panel surface-panel-muted flex animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[340ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex-col justify-between gap-5 rounded-xl border border-border/60 bg-card/76 p-5 dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.96,hsl(var(--surface-1))/0.9)]">
             <div className="space-y-6">
               <div className="space-y-3">
                 <span
@@ -106,6 +109,23 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                   <AgentSelector value={selectedAgentKind} onChange={setSelectedAgentKind} variant="floating" />
                 </div>
               </div>
+
+              <div className="surface-panel rounded-lg border border-border/55 bg-background/56 p-4 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.86,hsl(var(--surface-2))/0.76)]">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                    Model
+                  </p>
+                  <Cpu className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <p className="truncate text-sm font-semibold text-foreground">
+                  {activeProvider?.default_model || '未配置模型'}
+                </p>
+                {activeProvider?.name && (
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    {activeProvider.name}
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -134,14 +154,14 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
             </div>
           </aside>
 
-          <section className="flex animate-in fade-in slide-in-from-right-3 fill-mode-both [animation-duration:420ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex-col gap-4" style={{ animationDelay: '0.06s' }}>
+          <section className="flex animate-in fade-in slide-in-from-right-3 fill-mode-both animation-duration-[420ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex-col gap-4" style={{ animationDelay: '0.06s' }}>
             <div className="grid gap-3 sm:grid-cols-3">
               {STARTER_PROMPTS.map(({ title, prompt, icon: Icon }) => (
                 <button
                   key={prompt}
                   type="button"
                   onClick={() => setMessage(prompt)}
-                  className="surface-panel surface-interactive group flex min-h-[96px] flex-col justify-between rounded-xl border border-border/55 bg-card/72 p-4 text-left dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.9,hsl(var(--surface-1))/0.82)]"
+                  className="surface-panel surface-interactive group flex min-h-24 flex-col justify-between rounded-xl border border-border/55 bg-card/72 p-4 text-left dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.9,hsl(var(--surface-1))/0.82)]"
                 >
                   <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border/50 bg-background text-muted-foreground transition-colors group-hover:text-foreground dark:bg-[hsl(var(--surface-3))/0.8]">
                     <Icon className="h-4 w-4" />
@@ -154,7 +174,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               ))}
             </div>
 
-            <div className="surface-panel animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both [animation-duration:340ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex flex-1 flex-col rounded-xl border border-border/60 bg-card dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.95,hsl(var(--surface-1))/0.88)]">
+            <div className="new-session-input surface-panel animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[340ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex flex-1 flex-col rounded-xl border border-border/60 bg-card dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.95,hsl(var(--surface-1))/0.88)]">
               <div className="flex items-center justify-between gap-3 border-b border-border/45 px-4 py-3">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">任务输入</p>
@@ -175,14 +195,14 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                 onChange={(event) => setMessage(event.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={placeholder}
-                className="min-h-[260px] flex-1 resize-none border-0 bg-transparent px-5 py-5 text-left text-[15px] leading-7 text-foreground shadow-none outline-none ring-0 placeholder:text-muted-foreground/54 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none"
+                className="min-h-65 flex-1 resize-none border-0 bg-transparent px-5 py-5 text-left text-[15px] leading-7 text-foreground shadow-none outline-none ring-0 placeholder:text-muted-foreground/54 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none"
                 disabled={isSubmitting}
               />
 
               <div className="flex flex-col gap-3 border-t border-border/45 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   {draftProject && (
-                    <span className="surface-panel inline-flex max-w-[240px] items-center gap-1.5 rounded-md border border-border/45 bg-background/66 px-2.5 py-1 dark:bg-[hsl(var(--surface-3))/0.84]">
+                    <span className="surface-panel inline-flex max-w-60 items-center gap-1.5 rounded-md border border-border/45 bg-background/66 px-2.5 py-1 dark:bg-[hsl(var(--surface-3))/0.84]">
                       <FolderKanban className="h-3.5 w-3.5 shrink-0" />
                       <span className="truncate">{draftProject.name}</span>
                     </span>

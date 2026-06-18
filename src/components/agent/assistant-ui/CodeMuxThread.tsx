@@ -1,4 +1,4 @@
-import {
+﻿import {
   MessagePrimitive,
   ThreadPrimitive,
   groupPartByType,
@@ -37,7 +37,7 @@ type CodeMuxThreadProps = {
 
 const EMPTY_EVENTS: AgentMessage[] = [];
 const EMPTY_TIMESTAMPS: number[] = [];
-const INTERRUPT_LABEL = '\u7528\u6237\u4e2d\u65ad\u8bf7\u6c42';
+const INTERRUPT_LABEL = '用户中断请求';
 const GROUP_BY_PART = groupPartByType({
   reasoning: ['group-thinking'],
   'tool-call': ['group-tool-call'],
