@@ -204,6 +204,7 @@ async function handleRequest(
             const call = {
               id: String(item.call_id ?? item.id ?? ''),
               name: String(item.name ?? ''),
+              namespace: typeof item.namespace === 'string' ? item.namespace : undefined,
               arguments: String(item.arguments ?? ''),
             };
             toolCalls.push(call);
@@ -211,6 +212,7 @@ async function handleRequest(
               historyStore.recordStreamingToolCall(responseId, {
                 callId: call.id,
                 name: call.name,
+                namespace: call.namespace,
                 arguments: call.arguments,
               });
             }

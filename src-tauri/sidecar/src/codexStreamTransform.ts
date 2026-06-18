@@ -54,18 +54,17 @@ function buildFunctionCallItem(
   status: 'in_progress' | 'completed',
   argumentsValue: string,
 ): Record<string, unknown> {
+  const mcp = parseMcpFunctionName(toolCall.name);
   const item: Record<string, unknown> = {
     type: 'function_call',
     id: toolCall.id,
     status,
     call_id: toolCall.id,
-    name: toolCall.name,
+    name: mcp?.tool ?? toolCall.name,
     arguments: argumentsValue,
   };
-  const mcp = parseMcpFunctionName(toolCall.name);
   if (mcp) {
-    item.server = mcp.server;
-    item.tool = mcp.tool;
+    item.namespace = `mcp__${mcp.server}`;
   }
   return item;
 }

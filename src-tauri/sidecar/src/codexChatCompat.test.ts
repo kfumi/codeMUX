@@ -178,6 +178,48 @@ describe('convertChatCompletionToResponses', () => {
       ],
     });
   });
+
+  it('unwraps MCP function names and preserves namespace metadata', () => {
+    const history = new CodexChatHistory(8);
+
+    const response = convertChatCompletionToResponses(
+      {
+        model: 'deepseek-v4-flash',
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: '',
+              tool_calls: [
+                {
+                  id: 'call_context7',
+                  type: 'function',
+                  function: {
+                    name: 'mcp__context7__resolve_library_id',
+                    arguments: '{"libraryName":"MyBatis"}',
+                  },
+                },
+              ],
+            },
+            finish_reason: 'tool_calls',
+          },
+        ],
+      },
+      {
+        model: 'deepseek-v4-flash',
+        input: [{ role: 'user', content: 'Use Context7' }],
+      },
+      history,
+    );
+
+    expect(response.output[0]).toMatchObject({
+      type: 'function_call',
+      call_id: 'call_context7',
+      name: 'resolve_library_id',
+      namespace: 'mcp__context7',
+      arguments: '{"libraryName":"MyBatis"}',
+    });
+  });
 });
 
 describe('buildResponsesSseEvents', () => {
@@ -240,6 +282,63 @@ describe('buildResponsesSseEvents', () => {
       response: {
         id: 'resp_1',
         status: 'requires_action',
+      },
+    });
+  });
+
+  it('preserves MCP namespace metadata in SSE function call items', () => {
+    const events = buildResponsesSseEvents({
+      id: 'resp_1',
+      object: 'response',
+      created_at: 1,
+      model: 'deepseek-v4-flash',
+      status: 'requires_action',
+      output: [
+        {
+          type: 'function_call',
+          id: 'fc_1',
+          call_id: 'call_context7',
+          name: 'resolve_library_id',
+          namespace: 'mcp__context7',
+          arguments: '{"libraryName":"MyBatis"}',
+        },
+      ],
+      usage: {
+        input_tokens: 1,
+        input_tokens_details: {
+          cached_tokens: 0,
+        },
+        output_tokens: 2,
+        output_tokens_details: {
+          reasoning_tokens: 0,
+        },
+        total_tokens: 3,
+      },
+      error: null,
+      incomplete_details: null,
+      instructions: null,
+      max_output_tokens: null,
+      parallel_tool_calls: false,
+      reasoning: null,
+      text: {
+        format: {
+          type: 'text',
+        },
+      },
+      tool_choice: 'auto',
+      tools: [],
+      truncation: 'disabled',
+      metadata: {},
+      output_text: '',
+    });
+
+    const itemDone = events.find((event) => event.type === 'response.output_item.done');
+
+    expect(itemDone).toMatchObject({
+      item: {
+        type: 'function_call',
+        name: 'resolve_library_id',
+        namespace: 'mcp__context7',
       },
     });
   });

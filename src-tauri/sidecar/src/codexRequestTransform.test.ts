@@ -50,6 +50,37 @@ describe('convertResponsesToChatRequest', () => {
     });
   });
 
+  it('re-prefixes MCP namespace function_call input for chat completions', () => {
+    const result = convertResponsesToChatRequest({
+      model: 'mimo-v2.5-pro',
+      input: [
+        {
+          type: 'function_call',
+          call_id: 'call_context7',
+          name: 'resolve_library_id',
+          namespace: 'mcp__context7',
+          arguments: '{"libraryName":"MyBatis"}',
+        },
+        { type: 'function_call_output', call_id: 'call_context7', output: 'result' },
+      ],
+      stream: false,
+    }, history, null);
+
+    expect(result.messages[0]).toMatchObject({
+      role: 'assistant',
+      tool_calls: [
+        {
+          id: 'call_context7',
+          type: 'function',
+          function: {
+            name: 'mcp__context7__resolve_library_id',
+            arguments: '{"libraryName":"MyBatis"}',
+          },
+        },
+      ],
+    });
+  });
+
   it('merges consecutive function_call items into one assistant message', () => {
     const result = convertResponsesToChatRequest({
       model: 'mimo-v2.5-pro',

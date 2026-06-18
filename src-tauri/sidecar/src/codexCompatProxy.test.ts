@@ -494,6 +494,79 @@ describe('createCodexCompatProxyServer', () => {
     expect(receivedBody.stream_options).toEqual({ include_usage: true });
   });
 
+  it('streams MCP tool calls with Responses namespace metadata', async () => {
+    let receivedBody: any = null;
+    const upstream = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      receivedBody = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+
+      res.setHeader('content-type', 'text/event-stream');
+      res.setHeader('cache-control', 'no-cache');
+      const send = (data: Record<string, unknown>) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+      send({
+        id: 'chunk-tool',
+        model: 'mimo-v2-pro',
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'call_context7',
+              type: 'function',
+              function: {
+                name: 'mcp__context7__resolve_library_id',
+                arguments: '{"libraryName":"MyBatis"}',
+              },
+            }],
+          },
+          finish_reason: 'tool_calls',
+        }],
+      });
+      res.end('data: [DONE]\n\n');
+    });
+
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const proxy = await createCodexCompatProxyServer({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+    }, 0);
+    cleanups.push(() => proxy.close());
+
+    const response = await fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'mimo-v2-pro',
+        stream: true,
+        input: [{ role: 'user', content: 'Use Context7' }],
+        tools: [
+          {
+            type: 'namespace',
+            name: 'mcp__context7',
+            tools: [
+              {
+                type: 'function',
+                name: 'resolve_library_id',
+                description: 'Resolve a library ID',
+                parameters: { type: 'object', properties: { libraryName: { type: 'string' } } },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const body = await response.text();
+
+    expect(receivedBody.tools[0].function.name).toBe('mcp__context7__resolve_library_id');
+    expect(body).toContain('"name":"resolve_library_id"');
+    expect(body).toContain('"namespace":"mcp__context7"');
+    expect(body).not.toContain('"name":"mcp__context7__resolve_library_id"');
+  });
+
   it('sends only chat-completions-compatible function tools upstream', async () => {
     let receivedBody: any = null;
     const upstream = createServer(async (req, res) => {

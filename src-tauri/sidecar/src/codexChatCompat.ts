@@ -123,6 +123,7 @@ type ResponsesOutputItem =
       call_id: string;
       name: string;
       arguments: string;
+      namespace?: string;
     };
 
 type ResponsesUsage = {
@@ -300,11 +301,9 @@ export function convertChatCompletionToResponses(
         type: 'function_call' as const,
         id: createId('fc'),
         call_id: callId,
-        name,
+        name: tool,
         arguments: toolCall.function.arguments,
-        // Extra fields for Codex SDK to recognize as MCP tool
-        server,
-        tool,
+        namespace: `mcp__${server}`,
       } as any);
     } else if (name === 'shell_command') {
       output.push({
@@ -419,6 +418,7 @@ export function buildResponsesSseEvents(response: ResponsesResponse): Array<Reco
           status: 'in_progress',
           call_id: item.call_id,
           name: item.name,
+          ...(item.namespace ? { namespace: item.namespace } : {}),
           arguments: '',
         },
       });
@@ -445,6 +445,7 @@ export function buildResponsesSseEvents(response: ResponsesResponse): Array<Reco
           status: 'completed',
           call_id: item.call_id,
           name: item.name,
+          ...(item.namespace ? { namespace: item.namespace } : {}),
           arguments: item.arguments,
         },
       });

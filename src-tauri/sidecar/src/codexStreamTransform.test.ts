@@ -82,7 +82,7 @@ describe('convertChatStreamToResponsesEvents', () => {
     expect(functionCallDone[0].arguments).toBe('{"path":"/tmp"}');
   });
 
-  it('preserves MCP server and tool metadata on streamed function calls', async () => {
+  it('unwraps MCP function names and preserves namespace on streamed function calls', async () => {
     const events = await collectEvents(convertChatStreamToResponsesEvents(makeChunks([
       {
         choices: [{
@@ -108,18 +108,16 @@ describe('convertChatStreamToResponsesEvents', () => {
     );
     expect(functionCallDone?.item).toMatchObject({
       type: 'function_call',
-      name: 'mcp__context7__resolve_library_id',
-      server: 'context7',
-      tool: 'resolve_library_id',
+      name: 'resolve_library_id',
+      namespace: 'mcp__context7',
     });
 
     const completed = events.find((e) => e.type === 'response.completed');
     const response = completed?.response as { output?: unknown[] } | undefined;
     expect(response?.output?.[0]).toMatchObject({
       type: 'function_call',
-      name: 'mcp__context7__resolve_library_id',
-      server: 'context7',
-      tool: 'resolve_library_id',
+      name: 'resolve_library_id',
+      namespace: 'mcp__context7',
     });
   });
 

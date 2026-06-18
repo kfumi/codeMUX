@@ -77,6 +77,29 @@ describe('CodexHistoryStore', () => {
     expect(cached?.name).toBe('read_file');
   });
 
+  it('preserves MCP namespace when enriching tool call history', () => {
+    const store = new CodexHistoryStore();
+    store.recordStreamingToolCall('resp_1', {
+      callId: 'call_context7',
+      name: 'resolve_library_id',
+      namespace: 'mcp__context7',
+      arguments: '{"libraryName":"MyBatis"}',
+    });
+
+    const input = [
+      { type: 'function_call_output', call_id: 'call_context7', output: 'result' },
+    ];
+    store.enrichRequest(input, 'resp_1');
+
+    expect(input[0]).toMatchObject({
+      type: 'function_call',
+      call_id: 'call_context7',
+      name: 'resolve_library_id',
+      namespace: 'mcp__context7',
+      arguments: '{"libraryName":"MyBatis"}',
+    });
+  });
+
   it('evicts oldest entries when maxEntries exceeded', () => {
     const store = new CodexHistoryStore(2);
     store.recordResponse('resp_1', [{ type: 'function_call', call_id: 'c1', name: 'a', arguments: '{}' }]);

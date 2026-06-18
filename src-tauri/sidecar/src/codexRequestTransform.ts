@@ -64,6 +64,14 @@ export interface ChatCompletionsRequest {
   [key: string]: unknown;
 }
 
+function toChatFunctionName(item: Pick<ResponsesInputItem, 'name'> & { namespace?: unknown }): string {
+  const name = item.name ?? '';
+  if (typeof item.namespace === 'string' && item.namespace.startsWith('mcp__') && name.length > 0) {
+    return `${item.namespace}__${name}`;
+  }
+  return name;
+}
+
 /**
  * Convert a Responses API input item into one or more Chat messages.
  * Consecutive function_call items are merged into a single assistant message.
@@ -86,7 +94,7 @@ export function convertInputItemToChatMessages(
       tool_calls: [{
         id: item.call_id,
         type: 'function',
-        function: { name: item.name ?? '', arguments: item.arguments ?? '{}' },
+        function: { name: toChatFunctionName(item), arguments: item.arguments ?? '{}' },
       }],
     }];
   }
@@ -388,7 +396,7 @@ export function convertResponsesToChatRequest(
         toolCalls.push({
           id: fc.call_id ?? '',
           type: 'function',
-          function: { name: fc.name ?? '', arguments: fc.arguments ?? '{}' },
+          function: { name: toChatFunctionName(fc), arguments: fc.arguments ?? '{}' },
         });
         i++;
       }

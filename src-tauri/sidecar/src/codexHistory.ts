@@ -2,6 +2,7 @@ export interface CachedCall {
   callId: string;
   name: string;
   arguments: string;
+  namespace?: string;
   reasoningContent?: string;
 }
 
@@ -31,13 +32,14 @@ export class CodexHistoryStore {
 
   recordResponse(
     responseId: string,
-    items: Array<{ type: string; call_id?: string; name?: string; arguments?: string }>,
+    items: Array<{ type: string; call_id?: string; name?: string; namespace?: string; arguments?: string }>,
   ): void {
     const calls = items
       .filter((item) => item.type === 'function_call' && item.call_id)
       .map((item) => ({
         callId: item.call_id!,
         name: item.name ?? '',
+        namespace: item.namespace,
         arguments: item.arguments ?? '',
       }));
     if (calls.length === 0) return;
@@ -103,6 +105,7 @@ export class CodexHistoryStore {
               type: 'function_call',
               call_id: call.callId,
               name: call.name,
+              ...(call.namespace ? { namespace: call.namespace } : {}),
               arguments: call.arguments,
             });
             restored++;
