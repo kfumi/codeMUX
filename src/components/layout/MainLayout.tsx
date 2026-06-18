@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback, type ReactNode } from 'react';
 
 import { usePreviewStore } from '../../stores/previewStore';
+import { StatusBar } from './StatusBar';
 import { TitleBar } from './TitleBar';
 
 const SIDEBAR_MIN = 200;
@@ -113,6 +114,8 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
           {preview}
         </main>
       </div>
+
+      <StatusBar />
     </div>
   );
 }

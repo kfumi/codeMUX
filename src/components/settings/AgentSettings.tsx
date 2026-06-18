@@ -11,21 +11,13 @@ export function AgentSettingsPanel() {
   const config = useSettingsStore((state) => state.config);
   const getDefaultAgentKind = useSettingsStore((state) => state.getDefaultAgentKind);
   const setDefaultAgentKind = useSettingsStore((state) => state.setDefaultAgentKind);
+  const needsProxy = useSettingsStore((state) => state.getNeedsProxy());
   const proxyRunning = useSettingsStore((state) => state.proxyRunning);
   const proxyUrl = useSettingsStore((state) => state.proxyUrl);
   const startProxy = useSettingsStore((state) => state.startProxy);
   const stopProxy = useSettingsStore((state) => state.stopProxy);
 
   const selectedKind = config?.agent_defaults.default_agent_kind ?? getDefaultAgentKind();
-  const activeProvider = config?.providers.find((provider) => provider.id === config.active_provider_id) ?? null;
-  const codexBaseUrl = activeProvider?.openai_base_url ?? '';
-  const needsProxy = codexBaseUrl && (() => {
-    try {
-      return new URL(codexBaseUrl).host.toLowerCase() !== 'api.openai.com';
-    } catch {
-      return true;
-    }
-  })();
 
   return (
     <div className="space-y-5">

@@ -35,6 +35,7 @@ interface SettingsState {
   error: string | null;
   proxyRunning: boolean;
   proxyUrl: string | null;
+  proxyToggling: boolean;
   fetchConfig: () => Promise<void>;
   setTheme: (theme: Theme) => Promise<void>;
   setActiveProvider: (providerId: string) => Promise<void>;
@@ -43,6 +44,7 @@ interface SettingsState {
   fetchModels: (apiKey: string, baseUrl: string) => Promise<ModelInfo[]>;
   testProvider: (providerId: string) => Promise<string>;
   getActiveProvider: () => Provider | null;
+  getNeedsProxy: () => boolean;
   getDefaultAgentKind: () => AgentKind;
   setDefaultAgentKind: (agentKind: AgentKind) => Promise<void>;
   updateAgentConfig: <T extends keyof AgentConfigMap>(agentKind: T, config: AgentConfigUpdateMap[T]) => Promise<void>;
@@ -57,6 +59,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   error: null,
   proxyRunning: false,
   proxyUrl: null,
+  proxyToggling: false,
 
   fetchConfig: async () => {
     set({ isLoading: true, error: null });
@@ -152,6 +155,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     return config.providers.find((provider) => provider.id === config.active_provider_id) ?? null;
   },
 
+  getNeedsProxy: () => {
+    const provider = get().getActiveProvider();
+    if (!provider?.openai_base_url) return false;
+    try {
+      return new URL(provider.openai_base_url).host.toLowerCase() !== 'api.openai.com';
+    } catch {
+      return true;
+    }
+  },
+
   getDefaultAgentKind: () => {
     const config = get().config;
     return config?.agent_defaults.default_agent_kind ?? getDefaultAgentKind();
@@ -204,11 +217,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   startProxy: async () => {
+    if (get().proxyToggling) return;
     const provider = get().getActiveProvider();
     if (!provider?.api_key || !provider?.openai_base_url) {
       set({ error: 'No provider configured with api_key and openai_base_url' });
       return;
     }
+    set({ proxyToggling: true });
     try {
       const port = await agentApi.startProxy(provider.api_key, provider.openai_base_url, provider.name);
       set({
@@ -217,15 +232,21 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       });
     } catch (error) {
       set({ error: String(error) });
+    } finally {
+      set({ proxyToggling: false });
     }
   },
 
   stopProxy: async () => {
+    if (get().proxyToggling) return;
+    set({ proxyToggling: true });
     try {
       await agentApi.stopProxy();
       set({ proxyRunning: false, proxyUrl: null });
     } catch (error) {
       set({ error: String(error) });
+    } finally {
+      set({ proxyToggling: false });
     }
   },
 }));
