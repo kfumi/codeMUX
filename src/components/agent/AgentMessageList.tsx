@@ -17,7 +17,7 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
     <>
       {thinking && <StreamingThinkingBlock thinking={thinking} />}
       {text && (
-        <div className="animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease]">
+        <div className="animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
           <MarkdownRenderer content={text} />
           <span className="inline-block w-0.5 h-4 bg-foreground/60 animate-pulse ml-0.5 align-text-bottom rounded-full" />
         </div>
@@ -271,14 +271,14 @@ function renderEvent(sessionId: string, msg: AgentMessage, _prevMsg: AgentMessag
       const content = msg.data.content;
       if (isInterruptMarker(content)) {
         return (
-          <div className="text-xs text-muted-foreground/40 py-2 px-1 animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease]">
+          <div className="text-xs text-muted-foreground/40 py-2 px-1 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
             工具运行中断
           </div>
         );
       }
       return (
-        <div className="flex flex-col items-end animate-in fade-in slide-in-from-bottom-2 fill-mode-forwards [animation-duration:400ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
-          <div className="max-w-[80%] bg-gradient-to-br from-[hsl(var(--primary)/0.1)] to-[hsl(var(--primary)/0.05)] text-foreground rounded-2xl rounded-tr-md px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-all border border-[hsl(var(--primary)/0.08)]">
+        <div className="flex flex-col items-end animate-in fade-in slide-in-from-bottom-2 fill-mode-forwards animation-duration-[400ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+          <div className="max-w-[80%] bg-linear-to-br from-[hsl(var(--primary)/0.1)] to-[hsl(var(--primary)/0.05)] text-foreground rounded-2xl rounded-tr-md px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-all border border-[hsl(var(--primary)/0.08)]">
             {content}
           </div>
           <div className="flex items-center gap-1.5 mt-1">
@@ -309,7 +309,7 @@ function renderEvent(sessionId: string, msg: AgentMessage, _prevMsg: AgentMessag
       );
       if (filteredBlocks.length === 0) return null;
       return (
-        <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2 fill-mode-forwards [animation-duration:400ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+        <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2 fill-mode-forwards animation-duration-[400ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
           {filteredBlocks.map((block: any, i: number) => {
             if (block?.type === 'thinking' && block.thinking) {
               return <ThinkingBlock key={i} thinking={block.thinking} durationMs={thinkingDurations[eventIndex]} />;
@@ -378,7 +378,7 @@ function renderEvent(sessionId: string, msg: AgentMessage, _prevMsg: AgentMessag
       const displayTotal = ltu ? ltu.total_tokens : (displayInput + displayOutput);
       const assistantData = assistantTextMap?.[eventIndex];
       return (
-        <div className="border-t border-border/15 pt-3 mt-4 animate-in fade-in slide-in-from-bottom-2 fill-mode-forwards [animation-duration:400ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+        <div className="border-t border-border/15 pt-3 mt-4 animate-in fade-in slide-in-from-bottom-2 fill-mode-forwards animation-duration-[400ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground/40"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
@@ -413,7 +413,7 @@ function renderEvent(sessionId: string, msg: AgentMessage, _prevMsg: AgentMessag
 
     case 'error':
       return (
-        <div className="text-sm text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] rounded-xl p-3 border border-[hsl(var(--destructive)/0.12)] animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease]">
+        <div className="text-sm text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] rounded-xl p-3 border border-[hsl(var(--destructive)/0.12)] animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
           错误: {msg.data.error}
         </div>
       );
@@ -422,7 +422,7 @@ function renderEvent(sessionId: string, msg: AgentMessage, _prevMsg: AgentMessag
       const { attempt, max_retries, error_status, error } = msg.data;
       const isLastRetry = attempt >= max_retries;
       return (
-        <div className={`text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease] ${
+        <div className={`text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] ${
           isLastRetry
             ? 'text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]'
             : 'text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]'
@@ -705,10 +705,10 @@ function MessageNav({
             {hoveredBar === idx && (
               <div className="
                 absolute right-full top-1/2 -translate-y-1/2 mr-2
-                max-w-[220px] px-3 py-1.5 rounded-lg
+                max-w-55 px-3 py-1.5 rounded-lg
                 bg-[hsl(var(--popover))] border border-border/30 shadow-lg
                 text-xs text-popover-foreground whitespace-nowrap overflow-hidden text-ellipsis
-                animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease] pointer-events-none
+                animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] pointer-events-none
               ">
                 {getPreview(messages[idx])}
               </div>
@@ -819,11 +819,11 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
       >
         <div className="max-w-3xl mx-auto space-y-5">
           {events.length === 0 && !isRunning && (
-            <div className="flex flex-col items-center justify-center py-24 text-center animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease]">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[hsl(var(--primary)/0.1)] to-[hsl(var(--primary)/0.03)] flex items-center justify-center mb-5 border border-[hsl(var(--primary)/0.08)] shadow-[0_0_20px_hsl(var(--primary)/0.06)]">
+            <div className="flex flex-col items-center justify-center py-24 text-center animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+              <div className="w-14 h-14 rounded-2xl bg-linear-to-br from-[hsl(var(--primary)/0.1)] to-[hsl(var(--primary)/0.03)] flex items-center justify-center mb-5 border border-[hsl(var(--primary)/0.08)] shadow-[0_0_20px_hsl(var(--primary)/0.06)]">
                 <Sparkles className="h-6 w-6 text-[hsl(var(--primary)/0.4)]" />
               </div>
-              <p className="text-sm text-foreground/50 leading-relaxed max-w-[260px]">
+              <p className="text-sm text-foreground/50 leading-relaxed max-w-65">
                 输入任务描述，让 Claude Agent<br />自主完成编码工作
               </p>
             </div>
@@ -836,7 +836,7 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
           {/* Streaming content — isolated component to avoid re-rendering the entire list */}
           <StreamingContent sessionId={sessionId} />
           {isRunning && (
-            <div className="flex items-center gap-2.5 text-sm text-muted-foreground/40 py-2 animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease]">
+            <div className="flex items-center gap-2.5 text-sm text-muted-foreground/40 py-2 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
               <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
               <ElapsedTimer />
             </div>

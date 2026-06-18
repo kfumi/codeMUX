@@ -239,7 +239,7 @@ export function ProviderConfigPanel() {
         {/* Add card */}
         <div
           onClick={openNew}
-          className="p-3 border border-dashed rounded-lg cursor-pointer hover:border-primary/50 transition-colors flex items-center justify-center min-h-[88px]"
+          className="p-3 border border-dashed rounded-lg cursor-pointer hover:border-primary/50 transition-colors flex items-center justify-center min-h-22"
         >
           <span className="text-sm text-muted-foreground">+ 添加供应商</span>
         </div>
@@ -247,7 +247,7 @@ export function ProviderConfigPanel() {
 
       {/* Edit modal */}
       <Dialog open={!!editingProvider} onOpenChange={(open) => !open && closeModal()}>
-        <DialogContent className="sm:max-w-[480px]">
+        <DialogContent className="sm:max-w-120">
           <DialogHeader>
             <DialogTitle>{isNew ? '添加供应商' : '编辑供应商'}</DialogTitle>
           </DialogHeader>

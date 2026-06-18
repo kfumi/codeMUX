@@ -109,7 +109,7 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
     const label = match ? match[1].trim() : undefined;
     const message = match ? match[2].trim() : errorMsg;
     return (
-      <div className="text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease] text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]">
+      <div className="text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]">
         <div className="flex items-start gap-2">
           <XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
           <div className="min-w-0">
@@ -128,7 +128,7 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
     if (reconnectMatch) {
       const [, current, total, reason] = reconnectMatch;
       return (
-        <div className="text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]">
+        <div className="text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0 animate-pulse" />
             <span>正在重新连接 {current}/{total}{reason ? ` · ${reason}` : ''}</span>
@@ -139,7 +139,7 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
     // Non-reconnecting stream error (final failure)
     if (!is_reconnecting) {
       return (
-        <div className="text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease] text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]">
+        <div className="text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]">
           <div className="flex items-start gap-2">
             <XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <span className="break-all whitespace-pre-wrap">连接断开: {message}</span>
@@ -149,7 +149,7 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
     }
     // Generic reconnecting message
     return (
-      <div className="text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]">
+      <div className="text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]">
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 animate-pulse" />
           <span>{message}</span>
@@ -162,7 +162,7 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
     const { attempt, max_retries, error_status, error } = data.event.data as any;
     const isLastRetry = attempt >= max_retries;
     return (
-      <div className={`text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease] ${
+      <div className={`text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] ${
         isLastRetry
           ? 'text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]'
           : 'text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]'
@@ -176,7 +176,7 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
     const preTokens = data.event.data.compact_metadata?.pre_tokens;
     const tokenText = preTokens >= 1000 ? ` · 节省 ${(preTokens / 1000).toFixed(1)}k tokens` : preTokens > 0 ? ` · 节省 ${preTokens} tokens` : '';
     return (
-      <div className="text-center py-3 animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease]">
+      <div className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
         <span className="text-[11px] text-muted-foreground/35 tracking-wider font-medium">
           — 上下文已压缩{tokenText} —
         </span>

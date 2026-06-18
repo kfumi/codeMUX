@@ -22,7 +22,7 @@ export function TerminalBlock({ command, output, isRunning }: TerminalBlockProps
         {isRunning && <span className="ml-auto text-[11px] text-[hsl(var(--warning))] animate-pulse-soft">运行中...</span>}
       </button>
       {isExpanded && output && (
-        <div className="px-3 pb-3 text-foreground/60 whitespace-pre-wrap border-t border-border/20 pt-2.5 max-h-64 overflow-auto text-xs font-mono leading-relaxed animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease]">
+        <div className="px-3 pb-3 text-foreground/60 whitespace-pre-wrap border-t border-border/20 pt-2.5 max-h-64 overflow-auto text-xs font-mono leading-relaxed animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
           {output}
         </div>
       )}

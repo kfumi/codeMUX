@@ -351,7 +351,7 @@ export function McpSettingsPanel() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span
-                      className={`h-2 w-2 rounded-full flex-shrink-0 ${
+                      className={`h-2 w-2 rounded-full shrink-0 ${
                         anyEnabled
                           ? probeStatus[server.id] === 'connected' ? 'bg-green-500'
                             : probeStatus[server.id] === 'pending' ? 'bg-yellow-500'
@@ -411,7 +411,7 @@ export function McpSettingsPanel() {
 
       {/* 编辑/新建弹窗 */}
       <Dialog open={!!editing} onOpenChange={(open) => !open && closeModal()}>
-        <DialogContent className="sm:max-w-[560px] px-10 pt-8 pb-6">
+        <DialogContent className="sm:max-w-140 px-10 pt-8 pb-6">
           <DialogHeader>
             <DialogTitle>{isNew ? '添加 MCP Server' : '编辑 MCP Server'}</DialogTitle>
           </DialogHeader>
@@ -524,7 +524,7 @@ export function McpSettingsPanel() {
 
       {/* 删除确认弹窗 */}
       <Dialog open={deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(false)}>
-        <DialogContent className="sm:max-w-[400px]">
+        <DialogContent className="sm:max-w-100">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <span className="text-destructive">⚠</span>
@@ -555,7 +555,7 @@ export function McpSettingsPanel() {
 
       {/* MCP 配置向导弹窗 */}
       <Dialog open={wizardOpen} onOpenChange={(open) => !open && setWizardOpen(false)}>
-        <DialogContent className="sm:max-w-[520px] max-h-[80vh] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <DialogContent className="sm:max-w-130 max-h-[80vh] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] scrollbar-none">
           <DialogHeader>
             <DialogTitle>MCP 配置向导</DialogTitle>
           </DialogHeader>

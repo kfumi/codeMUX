@@ -61,7 +61,7 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
               >
                 复制
               </button>
-              <pre {...props} className="overflow-x-auto bg-muted/40 p-4 text-sm leading-relaxed !rounded-none !border-0 !m-0">
+              <pre {...props} className="overflow-x-auto bg-muted/40 p-4 text-sm leading-relaxed rounded-none! border-0! m-0!">
                 {children}
               </pre>
             </div>
@@ -81,7 +81,7 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
         hr() {
           return (
             <div className="my-6 flex items-center gap-3">
-              <div className="flex-1 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+              <div className="flex-1 h-px bg-linear-to-r from-transparent via-border to-transparent" />
             </div>
           );
         },

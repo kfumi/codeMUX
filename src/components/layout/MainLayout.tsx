@@ -98,7 +98,7 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
 
             <div className="group relative w-1 shrink-0 cursor-col-resize" onMouseDown={handleSidebarMouseDown}>
               <div className="absolute inset-y-0 -left-0.5 w-2 transition-colors duration-200 group-hover:bg-primary/12" />
-              <div className="absolute inset-y-2 left-0 w-[2px] rounded-full bg-transparent transition-all duration-300 group-hover:bg-primary/28" />
+              <div className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-transparent transition-all duration-300 group-hover:bg-primary/28" />
             </div>
           </>
         )}
@@ -108,7 +108,7 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
           {preview && previewOpen && (
             <div className="group relative w-1 shrink-0 cursor-col-resize" onMouseDown={handlePreviewMouseDown}>
               <div className="absolute inset-y-0 -left-0.5 w-2 transition-colors duration-200 group-hover:bg-primary/12" />
-              <div className="absolute inset-y-2 left-0 w-[2px] rounded-full bg-transparent transition-all duration-300 group-hover:bg-primary/28" />
+              <div className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-transparent transition-all duration-300 group-hover:bg-primary/28" />
             </div>
           )}
           {preview}

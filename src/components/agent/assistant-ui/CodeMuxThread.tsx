@@ -356,7 +356,7 @@ function MessageNav({
               }}
             />
             {hoveredBar === item.eventIndex ? (
-              <div className="pointer-events-none absolute right-full top-1/2 mr-3 max-w-[220px] -translate-y-1/2 overflow-hidden text-ellipsis whitespace-nowrap rounded-xl border border-border/35 bg-[hsl(var(--popover))]/95 px-3 py-1.5 text-xs text-popover-foreground shadow-[0_12px_32px_-18px_hsl(var(--foreground)/0.45)] backdrop-blur animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease]">
+              <div className="pointer-events-none absolute right-full top-1/2 mr-3 max-w-55 -translate-y-1/2 overflow-hidden text-ellipsis whitespace-nowrap rounded-xl border border-border/35 bg-[hsl(var(--popover))]/95 px-3 py-1.5 text-xs text-popover-foreground shadow-[0_12px_32px_-18px_hsl(var(--foreground)/0.45)] backdrop-blur animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
                 {item.preview}
               </div>
             ) : null}
@@ -510,7 +510,7 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
         {isRunning ? (
           <div
             className={cn(
-              'flex items-center gap-2.5 py-1 text-sm text-muted-foreground/60 animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease]',
+              'flex items-center gap-2.5 py-1 text-sm text-muted-foreground/60 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
               !thinking && !text && 'text-muted-foreground',
             )}
             style={{ fontFamily: "'JetBrains Mono', monospace" }}

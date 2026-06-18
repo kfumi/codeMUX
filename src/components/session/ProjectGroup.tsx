@@ -66,7 +66,7 @@ export function ProjectGroup({
         onClick={() => !renaming && setExpanded(!expanded)}
       >
         {isActiveProject && (
-          <div className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-[hsl(var(--sidebar-glow))] opacity-70" />
+          <div className="absolute left-0 top-1/2 h-4 w-0.75 -translate-y-1/2 rounded-r-full bg-[hsl(var(--sidebar-glow))] opacity-70" />
         )}
         <ChevronRight
           className={cn(

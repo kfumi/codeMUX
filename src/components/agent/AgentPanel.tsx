@@ -278,7 +278,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="surface-panel surface-panel-muted animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both [animation-duration:340ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex shrink-0 items-center gap-3 rounded-none border-x-0 border-t-0 border-b border-border/45 bg-[hsl(var(--background))]/82 px-6 py-3.5 backdrop-blur-xl dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.92,hsl(var(--surface-1))/0.84)]">
+      <div className="surface-panel surface-panel-muted animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[340ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex shrink-0 items-center gap-3 rounded-none border-x-0 border-t-0 border-b border-border/45 bg-[hsl(var(--background))]/82 px-6 py-3.5 backdrop-blur-xl dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.92,hsl(var(--surface-1))/0.84)]">
         <h2 className="truncate text-[13px] font-semibold text-foreground/88">{session?.title || '新对话'}</h2>
         <DropdownMenu
           trigger={(
@@ -304,7 +304,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         )}
         {project && (
           <div
-            className="surface-panel flex min-w-0 max-w-[300px] items-center gap-1.5 rounded-lg border border-border/45 bg-muted/24 px-2.5 py-1.5 text-[12px] text-foreground/78 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.84,hsl(var(--surface-2))/0.74)]"
+            className="surface-panel flex min-w-0 max-w-75 items-center gap-1.5 rounded-lg border border-border/45 bg-muted/24 px-2.5 py-1.5 text-[12px] text-foreground/78 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.84,hsl(var(--surface-2))/0.74)]"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             <FolderOpen className="h-3 w-3 shrink-0 text-foreground/62" />
@@ -353,7 +353,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       </CodeMuxAssistantRuntimeProvider>
 
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
-        <DialogContent className="sm:max-w-[400px]">
+        <DialogContent className="sm:max-w-100">
           <DialogHeader>
             <DialogTitle>重命名对话</DialogTitle>
           </DialogHeader>
@@ -372,7 +372,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       </Dialog>
 
       <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
-        <DialogContent className="sm:max-w-[480px]">
+        <DialogContent className="sm:max-w-120">
           <DialogHeader>
             <DialogTitle>{infoTitle}</DialogTitle>
           </DialogHeader>

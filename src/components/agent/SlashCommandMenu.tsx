@@ -77,7 +77,7 @@ export function SlashCommandMenu({ commands, selectedIndex, onSelect, visible }:
       <div
         ref={listRef}
         className={cn(
-          'max-h-[280px] overflow-y-auto rounded-xl border',
+          'max-h-70 overflow-y-auto rounded-xl border',
           'bg-[hsl(var(--card))] shadow-[0_-4px_24px_-4px_hsl(var(--foreground)/0.06)]',
           'border-[hsl(var(--border)/0.5)]',
           'backdrop-blur-xl'

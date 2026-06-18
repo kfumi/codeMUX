@@ -43,7 +43,7 @@ export function TodoList({ todos, className }: TodoListProps) {
     <div className={`relative ${className ?? ''}`}>
       {/* Expandable list */}
       {isExpanded && (
-        <div className="absolute bottom-full left-0 mb-2 w-[340px] max-h-[300px] overflow-auto rounded-xl border border-border/40 bg-[hsl(var(--card))] shadow-[0_-4px_24px_-4px_hsl(var(--foreground)/0.06)] z-50 animate-in fade-in zoom-in-95 fill-mode-forwards [animation-duration:300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+        <div className="absolute bottom-full left-0 mb-2 w-85 max-h-75 overflow-auto rounded-xl border border-border/40 bg-[hsl(var(--card))] shadow-[0_-4px_24px_-4px_hsl(var(--foreground)/0.06)] z-50 animate-in fade-in zoom-in-95 fill-mode-forwards animation-duration-[300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
           <div className="px-3 py-2.5 space-y-0.5 stagger-children">
             {todos.map((todo, i) => (
               <div key={i} className="flex items-start gap-2.5 py-1.5 text-xs leading-relaxed">
@@ -66,7 +66,7 @@ export function TodoList({ todos, className }: TodoListProps) {
           <div className="px-3 pb-2.5 pt-1">
             <div className="h-1 w-full rounded-full bg-muted/40 overflow-hidden">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-[hsl(var(--primary)/0.6)] to-[hsl(var(--primary))] transition-all duration-500"
+                className="h-full rounded-full bg-linear-to-r from-[hsl(var(--primary)/0.6)] to-[hsl(var(--primary))] transition-all duration-500"
                 style={{ width: `${progressPct}%` }}
               />
             </div>

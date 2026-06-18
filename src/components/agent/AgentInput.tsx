@@ -150,7 +150,7 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
               onKeyDown={handleKeyDown}
               onInput={handleInput}
               placeholder="输入任务描述... (/ 查看命令, Enter 发送, Shift+Enter 换行)"
-              className="min-h-[48px] max-h-[200px] w-full resize-none bg-transparent text-[14px] leading-[1.7] text-foreground focus:outline-none placeholder:text-muted-foreground/55"
+              className="min-h-12 max-h-50 w-full resize-none bg-transparent text-[14px] leading-[1.7] text-foreground focus:outline-none placeholder:text-muted-foreground/55"
               rows={2}
               disabled={isLoading}
             />

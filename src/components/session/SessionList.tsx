@@ -137,7 +137,7 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
       {projects.length === 0 && sessions.length > 0 && (
         <button
           onClick={onAddProject}
-          className="mt-1 flex w-full items-center gap-2.5 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-2.5 py-[7px] text-[12px] text-[hsl(var(--sidebar-fg))]/56 transition-all duration-200 hover:bg-[hsl(var(--sidebar-accent))]/80 hover:text-[hsl(var(--sidebar-fg))]"
+          className="mt-1 flex w-full items-center gap-2.5 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-2.5 py-1.75 text-[12px] text-[hsl(var(--sidebar-fg))]/56 transition-all duration-200 hover:bg-[hsl(var(--sidebar-accent))]/80 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <Plus className="h-3.5 w-3.5" />
           添加项目

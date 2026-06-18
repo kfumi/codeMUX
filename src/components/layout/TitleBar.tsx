@@ -147,7 +147,7 @@ export function TitleBar({ sidebarCollapsed, onToggleSidebar }: TitleBarProps) {
   return (
     <div
       data-tauri-drag-region
-      className="surface-panel surface-panel-muted relative z-20 flex h-[38px] shrink-0 select-none items-center border-b border-[hsl(var(--sidebar-border))] pl-0 pr-0 !border-x-0 !border-t-0"
+      className="surface-panel surface-panel-muted relative z-20 flex h-9.5 shrink-0 select-none items-center border-b border-[hsl(var(--sidebar-border))] pl-0 pr-0 border-x-0! border-t-0!"
       onContextMenu={handleContextMenu}
     >
       {onToggleSidebar && (
@@ -171,7 +171,7 @@ export function TitleBar({ sidebarCollapsed, onToggleSidebar }: TitleBarProps) {
       )}
 
       <div className="flex items-center gap-2.5 pl-3">
-        <div className="relative h-2.5 w-2.5 rounded-full bg-gradient-to-br from-[hsl(var(--primary))] to-[hsl(var(--primary))/0.65] shadow-[0_0_0_3px_hsl(var(--primary)/0.12)]" />
+        <div className="relative h-2.5 w-2.5 rounded-full bg-linear-to-br from-[hsl(var(--primary))] to-[hsl(var(--primary))/0.65] shadow-[0_0_0_3px_hsl(var(--primary)/0.12)]" />
         <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-foreground/88">
           codeMUX
         </span>
@@ -223,19 +223,19 @@ export function TitleBar({ sidebarCollapsed, onToggleSidebar }: TitleBarProps) {
       {appWindow && (
         <div className="flex h-full items-stretch self-stretch">
           <button
-            className="flex h-full w-[46px] items-center justify-center rounded-none text-foreground/62 transition-colors duration-150 hover:bg-muted/60 hover:text-foreground"
+            className="flex h-full w-11.5 items-center justify-center rounded-none text-foreground/62 transition-colors duration-150 hover:bg-muted/60 hover:text-foreground"
             onClick={() => appWindow.minimize()}
           >
             <Minus className="h-3.5 w-3.5" strokeWidth={1.5} />
           </button>
           <button
-            className="flex h-full w-[46px] items-center justify-center rounded-none text-foreground/62 transition-colors duration-150 hover:bg-muted/60 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.82]"
+            className="flex h-full w-11.5 items-center justify-center rounded-none text-foreground/62 transition-colors duration-150 hover:bg-muted/60 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.82]"
             onClick={() => appWindow.toggleMaximize()}
           >
             <MaximizeIcon restored={maximized} />
           </button>
           <button
-            className="flex h-full w-[50px] items-center justify-center rounded-none text-foreground/62 transition-colors duration-150 hover:bg-[hsl(var(--destructive)/0.92)] hover:text-white"
+            className="flex h-full w-12.5 items-center justify-center rounded-none text-foreground/62 transition-colors duration-150 hover:bg-[hsl(var(--destructive)/0.92)] hover:text-white"
             onClick={() => appWindow.close()}
           >
             <X className="h-3.5 w-3.5" strokeWidth={1.5} />

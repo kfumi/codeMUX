@@ -64,7 +64,7 @@ export function AgentSelector({ value, onChange, variant = 'inline' }: AgentSele
       {SELECTABLE_AGENTS.map((agent) => (
         <DropdownMenuItem key={agent.kind} onClick={() => onChange(agent.kind)}>
           <div className={cn(
-            'flex min-w-[180px] items-center gap-2',
+            'flex min-w-45 items-center gap-2',
             agent.kind === value && 'text-foreground'
           )}>
             <AgentBrandIcon agent={agent} size="sm" />

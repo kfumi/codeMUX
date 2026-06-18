@@ -93,7 +93,7 @@ export function SkillsSettingsPanel() {
                   className={`h-5 w-9 rounded-full relative cursor-pointer shrink-0 transition-colors ${skill.enabled ? 'bg-primary' : 'bg-muted-foreground/25'}`}
                   onClick={() => toggleSkill(skill.id, !skill.enabled)}
                 >
-                  <div className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${skill.enabled ? 'left-[18px]' : 'left-0.5'}`} />
+                  <div className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${skill.enabled ? 'left-4.5' : 'left-0.5'}`} />
                 </div>
                 <Button
                   variant="ghost"
@@ -111,7 +111,7 @@ export function SkillsSettingsPanel() {
 
       {/* Delete confirmation */}
       <Dialog open={deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(false)}>
-        <DialogContent className="sm:max-w-[400px]">
+        <DialogContent className="sm:max-w-100">
           <DialogHeader>
             <DialogTitle>卸载 Skill</DialogTitle>
           </DialogHeader>
@@ -127,7 +127,7 @@ export function SkillsSettingsPanel() {
 
       {/* Content preview */}
       <Dialog open={!!previewContent} onOpenChange={(open) => !open && setPreviewContent(null)}>
-        <DialogContent className="sm:max-w-[600px] max-h-[70vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-150 max-h-[70vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{previewTitle}</DialogTitle>
           </DialogHeader>
