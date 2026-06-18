@@ -15,7 +15,7 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 z-[220] bg-black/34 backdrop-blur-[4px] data-[state=open]:animate-fade-in dark:bg-black/70",
+      "fixed inset-0 z-[220] bg-black/34 backdrop-blur-[4px] data-[state=open]:animate-in data-[state=open]:fade-in data-[state=open]:fill-mode-forwards data-[state=open]:[animation-duration:350ms] data-[state=open]:[animation-timing-function:ease] dark:bg-black/70",
       className
     )}
     {...props}
@@ -32,7 +32,7 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-[230] grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-hidden border border-border/75 bg-popover p-6 shadow-[0_24px_70px_-30px_hsl(var(--foreground)/0.48),inset_0_1px_0_hsl(var(--foreground)/0.035)] duration-200 data-[state=open]:animate-dialog-in dark:border-[hsl(var(--surface-edge))/0.95] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.99,hsl(var(--surface-1))/0.97)] dark:shadow-[0_30px_88px_-34px_hsl(var(--surface-shadow-strong)/0.98),inset_0_1px_0_hsl(var(--foreground)/0.055),0_0_0_1px_hsl(var(--surface-glow)/0.045)] sm:rounded-lg",
+        "fixed left-[50%] top-[50%] z-[230] grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-hidden border border-border/75 bg-popover p-6 shadow-[0_24px_70px_-30px_hsl(var(--foreground)/0.48),inset_0_1px_0_hsl(var(--foreground)/0.035)] duration-200 data-[state=open]:animate-in data-[state=open]:fade-in data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-top-2 data-[state=open]:fill-mode-both data-[state=open]:[animation-duration:240ms] data-[state=open]:[animation-timing-function:cubic-bezier(0.16,1,0.3,1)] dark:border-[hsl(var(--surface-edge))/0.95] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.99,hsl(var(--surface-1))/0.97)] dark:shadow-[0_30px_88px_-34px_hsl(var(--surface-shadow-strong)/0.98),inset_0_1px_0_hsl(var(--foreground)/0.055),0_0_0_1px_hsl(var(--surface-glow)/0.045)] sm:rounded-lg",
         className
       )}
       {...props}

@@ -145,7 +145,7 @@ function App() {
               <NewSessionPanel onSubmit={handleStartNewSession} />
             </Suspense>
           ) : (
-            <div className="flex flex-1 items-center justify-center animate-fade-in">
+            <div className="flex flex-1 items-center justify-center animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease]">
               <div className="max-w-md space-y-5 text-center">
                 <div className="relative inline-flex">
                   <div className="absolute inset-0 scale-150 rounded-3xl bg-[hsl(var(--primary)/0.08)] blur-xl" />

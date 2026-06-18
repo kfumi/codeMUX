@@ -170,7 +170,7 @@ export function ToolCallCard({
       </div>
 
       {isExpanded && (
-        <div className="animate-fade-in space-y-2.5 border-t border-border/40 px-3.5 py-3">
+        <div className="animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease] space-y-2.5 border-t border-border/40 px-3.5 py-3">
           <div>
             <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
               参数

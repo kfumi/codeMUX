@@ -41,10 +41,10 @@ export function DropdownMenu({ trigger, children, align = 'left', panelClassName
         <div
           ref={panelRef}
           className={cn(
-            'surface-panel fixed z-[160] min-w-[160px] rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_50px_-28px_hsl(var(--foreground)/0.4),0_0_0_1px_hsl(var(--background)/0.7)] backdrop-blur-md animate-popover-in dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.98,hsl(var(--surface-1))/0.95)] dark:shadow-[0_24px_64px_-30px_hsl(var(--surface-shadow-strong)/0.98),0_0_0_1px_hsl(var(--foreground)/0.045)]',
+            'surface-panel fixed z-[160] min-w-[160px] rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_50px_-28px_hsl(var(--foreground)/0.4),0_0_0_1px_hsl(var(--background)/0.7)] backdrop-blur-md animate-in fade-in blur-in-4 fill-mode-both [animation-duration:180ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.98,hsl(var(--surface-1))/0.95)] dark:shadow-[0_24px_64px_-30px_hsl(var(--surface-shadow-strong)/0.98),0_0_0_1px_hsl(var(--foreground)/0.045)]',
             panelClassName,
           )}
-          style={align === 'left' ? { top: pos.top, left: pos.left } : { top: pos.top, left: pos.left, transform: 'translateX(-100%)' }}
+          style={align === 'left' ? { top: pos.top, left: pos.left } : { top: pos.top, left: pos.left, transform: 'translateX(-100%)', '--tw-enter-translate-x': '-100%' } as React.CSSProperties}
           onClick={() => setOpen(false)}
         >
           {children}

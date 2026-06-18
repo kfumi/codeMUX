@@ -145,7 +145,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           const input = usage.input_tokens || 0;
           const cacheRead = usage.cached_input_tokens || usage.cache_read_input_tokens || 0;
           const output = usage.output_tokens || 0;
-          const total = usage.total_tokens || (input + cacheRead + output);
+          const total = input + output;
           if (total > 0) {
             inputTokens = input;
             cachedTokens = cacheRead;
@@ -165,7 +165,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           const input = usage.input_tokens || 0;
           const cacheRead = usage.cached_input_tokens || usage.cache_read_input_tokens || 0;
           const output = usage.output_tokens || 0;
-          const total = usage.total_tokens || (input + cacheRead + output);
+          const total = input + output;
           if (total > 0) {
             inputTokens = input;
             cachedTokens = cacheRead;
@@ -278,7 +278,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="surface-panel surface-panel-muted animate-panel-reveal flex shrink-0 items-center gap-3 rounded-none border-x-0 border-t-0 border-b border-border/45 bg-[hsl(var(--background))]/82 px-6 py-3.5 backdrop-blur-xl dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.92,hsl(var(--surface-1))/0.84)]">
+      <div className="surface-panel surface-panel-muted animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both [animation-duration:340ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex shrink-0 items-center gap-3 rounded-none border-x-0 border-t-0 border-b border-border/45 bg-[hsl(var(--background))]/82 px-6 py-3.5 backdrop-blur-xl dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.92,hsl(var(--surface-1))/0.84)]">
         <h2 className="truncate text-[13px] font-semibold text-foreground/88">{session?.title || '新对话'}</h2>
         <DropdownMenu
           trigger={(

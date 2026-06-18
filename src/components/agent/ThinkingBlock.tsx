@@ -34,7 +34,7 @@ export function ThinkingBlock({ thinking, durationMs }: ThinkingBlockProps) {
         )}
       </button>
       {isExpanded && (
-        <div className="px-3 pb-3 text-sm text-muted-foreground/80 whitespace-pre-wrap border-t border-[hsl(var(--primary)/0.06)] pt-2.5 animate-fade-in leading-relaxed">
+        <div className="px-3 pb-3 text-sm text-muted-foreground/80 whitespace-pre-wrap border-t border-[hsl(var(--primary)/0.06)] pt-2.5 animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease] leading-relaxed">
           {thinking}
         </div>
       )}
@@ -68,7 +68,7 @@ export function StreamingThinkingBlock({ thinking }: { thinking: string }) {
   if (!thinking) return null;
 
   return (
-    <div className="rounded-xl bg-gradient-to-br from-[hsl(var(--primary)/0.04)] to-transparent border border-[hsl(var(--primary)/0.08)] my-2 overflow-hidden animate-fade-in">
+    <div className="rounded-xl bg-gradient-to-br from-[hsl(var(--primary)/0.04)] to-transparent border border-[hsl(var(--primary)/0.08)] my-2 overflow-hidden animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease]">
       <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
         <Brain className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.6)] animate-pulse-soft" />
         <span className="text-[13px]">思考中...</span>

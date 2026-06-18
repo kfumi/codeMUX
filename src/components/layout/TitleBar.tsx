@@ -147,7 +147,7 @@ export function TitleBar({ sidebarCollapsed, onToggleSidebar }: TitleBarProps) {
   return (
     <div
       data-tauri-drag-region
-      className="relative z-20 flex h-[38px] shrink-0 select-none items-center border-b border-border/60 bg-[hsl(var(--background))]/78 pl-0 pr-0 backdrop-blur-xl transition-[background-color,border-color] duration-300 dark:bg-[hsl(var(--surface-1))/0.74] dark:shadow-[0_1px_0_0_hsl(var(--foreground)/0.03),0_12px_30px_-22px_hsl(var(--surface-shadow-strong)/0.9)]"
+      className="surface-panel surface-panel-muted relative z-20 flex h-[38px] shrink-0 select-none items-center border-b border-[hsl(var(--sidebar-border))] pl-0 pr-0 !border-x-0 !border-t-0"
       onContextMenu={handleContextMenu}
     >
       {onToggleSidebar && (

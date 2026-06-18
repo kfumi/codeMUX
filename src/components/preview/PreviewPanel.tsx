@@ -24,7 +24,7 @@ function TabContextMenu({
 }) {
   return (
     <div
-      className="fixed z-50 min-w-[148px] rounded-xl border border-border/60 bg-popover/98 py-1.5 text-xs shadow-[0_18px_48px_-20px_hsl(var(--foreground)/0.35)] backdrop-blur-sm animate-scale-in"
+      className="fixed z-50 min-w-[148px] rounded-xl border border-border/60 bg-popover/98 py-1.5 text-xs shadow-[0_18px_48px_-20px_hsl(var(--foreground)/0.35)] backdrop-blur-sm animate-in fade-in zoom-in-95 fill-mode-forwards [animation-duration:300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]"
       style={style}
     >
       <button className="w-full px-3 py-1.5 text-left transition-colors hover:bg-muted/50" onClick={() => { onClose(filePath); }}>
@@ -96,7 +96,7 @@ export function PreviewPanel() {
 
   return (
     <div
-      className="animate-panel-shift h-full shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out"
+      className="animate-in fade-in slide-in-from-right-3 fill-mode-both [animation-duration:420ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] h-full shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out"
       style={{ width: isOpen ? panelWidth : 0 }}
     >
       <div

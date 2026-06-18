@@ -165,7 +165,7 @@ export function ChangedFilesList({ sessionId, projectPath, className }: ChangedF
   return (
     <div className={cn('relative', className)} ref={dropdownRef}>
       {isExpanded && (
-        <div className="absolute bottom-full right-0 mb-2 w-[380px] max-h-[400px] rounded-xl border border-border/40 bg-[hsl(var(--card))] shadow-[0_-4px_24px_-4px_hsl(var(--foreground)/0.06)] z-50 animate-scale-in flex flex-col">
+        <div className="absolute bottom-full right-0 mb-2 w-[380px] max-h-[400px] rounded-xl border border-border/40 bg-[hsl(var(--card))] shadow-[0_-4px_24px_-4px_hsl(var(--foreground)/0.06)] z-50 animate-in fade-in zoom-in-95 fill-mode-forwards [animation-duration:300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex flex-col">
           <div className="flex items-center justify-between px-3 py-2.5 border-b border-border/20">
             <span className="text-xs font-medium text-foreground/70">改动列表</span>
             <div className="flex items-center gap-1">

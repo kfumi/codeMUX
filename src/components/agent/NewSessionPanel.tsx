@@ -71,7 +71,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     <div className="flex flex-1 overflow-auto bg-[hsl(var(--background))] transition-[background] duration-300">
       <div className="mx-auto flex w-full max-w-6xl flex-col justify-center gap-5 px-6 py-8 lg:px-10">
         <div className="grid min-h-[min(720px,calc(100vh-8rem))] gap-5 lg:grid-cols-[minmax(260px,0.84fr)_minmax(520px,1.36fr)]">
-          <aside className="surface-panel surface-panel-muted flex animate-panel-reveal flex-col justify-between gap-5 rounded-xl border border-border/60 bg-card/76 p-5 dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.96,hsl(var(--surface-1))/0.9)]">
+          <aside className="surface-panel surface-panel-muted flex animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both [animation-duration:340ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex-col justify-between gap-5 rounded-xl border border-border/60 bg-card/76 p-5 dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.96,hsl(var(--surface-1))/0.9)]">
             <div className="space-y-6">
               <div className="space-y-3">
                 <span
@@ -134,7 +134,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
             </div>
           </aside>
 
-          <section className="flex animate-panel-shift flex-col gap-4" style={{ animationDelay: '0.06s' }}>
+          <section className="flex animate-in fade-in slide-in-from-right-3 fill-mode-both [animation-duration:420ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex-col gap-4" style={{ animationDelay: '0.06s' }}>
             <div className="grid gap-3 sm:grid-cols-3">
               {STARTER_PROMPTS.map(({ title, prompt, icon: Icon }) => (
                 <button
@@ -154,7 +154,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               ))}
             </div>
 
-            <div className="surface-panel animate-panel-reveal flex flex-1 flex-col rounded-xl border border-border/60 bg-card dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.95,hsl(var(--surface-1))/0.88)]">
+            <div className="surface-panel animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both [animation-duration:340ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex flex-1 flex-col rounded-xl border border-border/60 bg-card dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.95,hsl(var(--surface-1))/0.88)]">
               <div className="flex items-center justify-between gap-3 border-b border-border/45 px-4 py-3">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">任务输入</p>

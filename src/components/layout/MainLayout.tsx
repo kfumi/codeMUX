@@ -87,7 +87,7 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
         {!sidebarCollapsed && (
           <>
             <aside
-              className="surface-panel surface-panel-muted animate-panel-reveal relative shrink-0 rounded-none border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-bg))] sidebar-grain shadow-[inset_-1px_0_0_hsl(var(--foreground)/0.02)]"
+              className="surface-panel surface-panel-muted relative shrink-0 rounded-none border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-bg))] sidebar-grain shadow-[inset_-1px_0_0_hsl(var(--foreground)/0.02)]"
               style={{ width: sidebarWidth }}
             >
               <div className="relative z-10 flex h-full flex-col">
