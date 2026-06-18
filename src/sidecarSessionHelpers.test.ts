@@ -93,6 +93,56 @@ describe('buildCodexResultEvent', () => {
         output_tokens: 5,
         cache_read_input_tokens: 3,
       },
+      last_token_usage: {
+        input_tokens: 10,
+        output_tokens: 5,
+        cached_input_tokens: 3,
+        total_tokens: 18,
+      },
+    });
+  });
+
+  it('uses explicit last token usage when SDK usage is cumulative', () => {
+    expect(
+      buildCodexResultEvent({
+        sessionId: 'session-1',
+        usage: {
+          input_tokens: 1000,
+          cached_input_tokens: 300,
+          output_tokens: 500,
+          reasoning_output_tokens: 70,
+        },
+        lastTokenUsage: {
+          input_tokens: 10,
+          cached_input_tokens: 3,
+          output_tokens: 5,
+          reasoning_output_tokens: 7,
+          total_tokens: 25,
+        },
+        durationMs: 42,
+      }),
+    ).toEqual({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      session_id: 'session-1',
+      uuid: expect.any(String),
+      duration_ms: 42,
+      duration_api_ms: 42,
+      num_turns: 1,
+      result: 'ok',
+      total_cost_usd: 0,
+      usage: {
+        input_tokens: 1000,
+        output_tokens: 500,
+        cache_read_input_tokens: 300,
+      },
+      last_token_usage: {
+        input_tokens: 10,
+        output_tokens: 5,
+        cached_input_tokens: 3,
+        total_tokens: 25,
+      },
     });
   });
 });

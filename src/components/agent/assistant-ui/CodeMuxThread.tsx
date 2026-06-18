@@ -27,6 +27,7 @@ import {
   CodeMuxTextMessagePart,
   CodeMuxToolCallMessagePart,
 } from './CodeMuxMessageParts';
+import { buildAssistantResultTargetMap } from './assistantResultTargets';
 import { RunningElapsedTimer } from './running-elapsed';
 
 type CodeMuxThreadProps = {
@@ -656,26 +657,11 @@ function buildAssistantResultStatsMap(
   provider: Provider | null,
 ): Record<number, MessageFooterStats> {
   const statsMap: Record<number, MessageFooterStats> = {};
-  let lastAssistantIndex: number | undefined;
+  const resultIndexByAssistantIndex = buildAssistantResultTargetMap(events);
 
-  for (let index = 0; index < events.length; index++) {
-    const event = events[index];
-
-    if (event.kind === 'assistant') {
-      const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
-      const hasVisibleContent = blocks.some((block) =>
-        (block?.type === 'text' && block.text) ||
-        (block?.type === 'thinking' && block.thinking) ||
-        block?.type === 'tool_use',
-      );
-
-      if (hasVisibleContent) {
-        lastAssistantIndex = index;
-      }
-      continue;
-    }
-
-    if (event.kind !== 'result' || lastAssistantIndex == null) {
+  for (const [assistantIndex, resultIndex] of resultIndexByAssistantIndex) {
+    const event = events[resultIndex];
+    if (event?.kind !== 'result') {
       continue;
     }
 
@@ -684,7 +670,7 @@ function buildAssistantResultStatsMap(
     const usageForCost = ltu
       ? { input_tokens: ltu.input_tokens, output_tokens: ltu.output_tokens, cache_read_input_tokens: ltu.cached_input_tokens ?? 0 }
       : usage;
-    statsMap[lastAssistantIndex] = {
+    statsMap[assistantIndex] = {
       durationMs: event.data.duration_ms,
       numTurns: event.data.num_turns,
       costUsd: calculateCost(usageForCost, provider),

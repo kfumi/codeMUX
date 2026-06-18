@@ -331,4 +331,80 @@ describe('convertAgentEventsToAssistantMessages', () => {
       },
     ]);
   });
+
+  it('marks trailing assistant text as final when the result event arrives before it', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'tool-1',
+                name: 'shell_command',
+                input: { command: 'npm view mybatis version' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: '3.5.19' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'result-1',
+          session_id: 'session-1',
+          duration_ms: 42,
+          duration_api_ms: 42,
+          num_turns: 1,
+          result: '',
+          total_cost_usd: 0,
+          usage: {
+            input_tokens: 10,
+            output_tokens: 20,
+          },
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-text-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'MyBatis 最新版本是 3.5.19。' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.metadata.isFinalAssistantMessage).toBeUndefined();
+    expect(messages[1]?.metadata.isFinalAssistantMessage).toBe(true);
+  });
 });

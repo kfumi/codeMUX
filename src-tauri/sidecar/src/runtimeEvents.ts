@@ -9,6 +9,14 @@ import type {
 
 export type RuntimeFlavor = 'claude' | 'codex';
 
+export type CodexTokenUsage = {
+  input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+  reasoning_output_tokens?: number;
+  total_tokens?: number;
+};
+
 type AssistantContentBlock =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string }
@@ -70,13 +78,23 @@ export function buildToolResultEvent({
 export function buildCodexResultEvent({
   sessionId,
   usage,
+  lastTokenUsage,
   durationMs,
 }: {
   sessionId: string;
   usage: Usage;
+  lastTokenUsage?: CodexTokenUsage | null;
   durationMs: number;
 }) {
-  const totalTokens = usage.input_tokens + usage.cached_input_tokens + usage.output_tokens;
+  const lastUsage: CodexTokenUsage = lastTokenUsage ?? {
+    input_tokens: usage.input_tokens,
+    cached_input_tokens: usage.cached_input_tokens,
+    output_tokens: usage.output_tokens,
+    reasoning_output_tokens: usage.reasoning_output_tokens,
+  };
+  const totalTokens =
+    lastUsage.total_tokens ??
+    lastUsage.input_tokens + lastUsage.cached_input_tokens + lastUsage.output_tokens;
   return {
     type: 'result',
     subtype: 'success',
@@ -94,9 +112,9 @@ export function buildCodexResultEvent({
       cache_read_input_tokens: usage.cached_input_tokens,
     },
     last_token_usage: {
-      input_tokens: usage.input_tokens,
-      output_tokens: usage.output_tokens,
-      cached_input_tokens: usage.cached_input_tokens,
+      input_tokens: lastUsage.input_tokens,
+      output_tokens: lastUsage.output_tokens,
+      cached_input_tokens: lastUsage.cached_input_tokens,
       total_tokens: totalTokens,
     },
   };

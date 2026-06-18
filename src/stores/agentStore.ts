@@ -226,6 +226,27 @@ function clearSimulatedStream(sessionId: string) {
   pendingSimulatedStreams.delete(sessionId);
 }
 
+function commitPendingSimulatedStream(
+  sessionId: string,
+  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
+) {
+  const pendingSim = pendingSimulatedStreams.get(sessionId);
+  if (!pendingSim) {
+    return;
+  }
+
+  clearSimulatedStream(sessionId);
+  set((s) => {
+    const prev = s.events[sessionId] || [];
+    const timestamps = s.eventTimestamps[sessionId] || [];
+    return {
+      events: { ...s.events, [sessionId]: [...prev, pendingSim.event] },
+      eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...timestamps, Date.now()] },
+      streamingText: { ...s.streamingText, [sessionId]: '' },
+    };
+  });
+}
+
 function simulateStreamingText(
   sessionId: string,
   event: AgentMessage,
@@ -987,19 +1008,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         // that were already displayed via streaming to avoid duplicate display.
         if (event.kind === 'assistant') {
           // Commit any pending simulated stream immediately before processing.
-          const pendingSim = pendingSimulatedStreams.get(sessionId);
-          if (pendingSim) {
-            clearSimulatedStream(sessionId);
-            set((s) => {
-              const prev = s.events[sessionId] || [];
-              const timestamps = s.eventTimestamps[sessionId] || [];
-              return {
-                events: { ...s.events, [sessionId]: [...prev, pendingSim.event] },
-                eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...timestamps, Date.now()] },
-                streamingText: { ...s.streamingText, [sessionId]: '' },
-              };
-            });
-          }
+          commitPendingSimulatedStream(sessionId, set);
 
           flushPendingStreaming(sessionId, set);
           const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
@@ -1048,6 +1057,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             return updates;
           });
+        }
+
+        if (event.kind === 'result') {
+          commitPendingSimulatedStream(sessionId, set);
         }
 
         set((s) => {
@@ -1108,19 +1121,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
         if (isTerminalEvent) {
           clearPendingStreaming(sessionId);
-          // Commit any pending simulated stream before marking as done.
-          const pendingSim = pendingSimulatedStreams.get(sessionId);
-          if (pendingSim) {
-            clearSimulatedStream(sessionId);
-            set((s) => {
-              const prev = s.events[sessionId] || [];
-              const timestamps = s.eventTimestamps[sessionId] || [];
-              return {
-                events: { ...s.events, [sessionId]: [...prev, pendingSim.event] },
-                eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...timestamps, Date.now()] },
-              };
-            });
-          }
           set((s) => {
             const { [sessionId]: _removed, ...rest } = s.queryStartTime;
             return {

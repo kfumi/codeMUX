@@ -1,5 +1,6 @@
 ﻿import type { AgentMessage } from '../../../stores/agentStore';
 import type { ContentBlock } from '../../../types/agent';
+import { buildAssistantResultTargetSet } from './assistantResultTargets';
 
 type CodeMuxAssistantRole = 'user' | 'assistant' | 'system';
 
@@ -204,22 +205,7 @@ function markFinalAssistantMessages(
   messages: CodeMuxAssistantMessage[],
   events: AgentMessage[],
 ): void {
-  // Find which assistant event indices have an associated result event.
-  const assistantIndicesWithResult = new Set<number>();
-  let lastAssistantIndex: number | undefined;
-
-  for (let index = 0; index < events.length; index++) {
-    const event = events[index];
-
-    if (event.kind === 'assistant') {
-      lastAssistantIndex = index;
-      continue;
-    }
-
-    if (event.kind === 'result' && lastAssistantIndex != null) {
-      assistantIndicesWithResult.add(lastAssistantIndex);
-    }
-  }
+  const assistantIndicesWithResult = buildAssistantResultTargetSet(events);
 
   // Mark the message whose sourceEventIndex is in that set.
   for (const message of messages) {

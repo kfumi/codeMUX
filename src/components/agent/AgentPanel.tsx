@@ -20,6 +20,7 @@ import { ChangedFilesList } from './ChangedFilesList';
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
 import { CodeMuxThread } from './assistant-ui/CodeMuxThread';
+import { computeContextUsageFromEvents } from './contextUsage';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { TodoList } from './TodoList';
 import { supportsCapability } from './agentCapabilities';
@@ -30,9 +31,6 @@ interface AgentPanelProps {
 
 const EMPTY_EVENTS: import('../../stores/agentStore').AgentMessage[] = [];
 const EMPTY_TODOS: import('../../types/agent').TodoItem[] = [];
-const DEFAULT_CONTEXT_TOKENS = 200_000;
-const LARGE_CONTEXT_TOKENS = 1_000_000;
-const LARGE_CONTEXT_MODEL_SUFFIX = '[1m]';
 
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, updateSessionTitle, createSession } = useSessionStore();
@@ -129,69 +127,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     });
   }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, model, setProxyRunning]);
 
-  const contextUsage = useMemo(() => {
-    let usedTokens = 0;
-    let inputTokens = 0;
-    let cachedTokens = 0;
-    let outputTokens = 0;
-    let modelContextWindow: number | undefined;
-
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      const event = events[index];
-      if (usedTokens === 0 && event.kind === 'assistant') {
-        const data: any = event.data;
-        const usage = data?.last_token_usage || data?.message?.usage || data?.usage;
-        if (usage) {
-          const input = usage.input_tokens || 0;
-          const cacheRead = usage.cached_input_tokens || usage.cache_read_input_tokens || 0;
-          const output = usage.output_tokens || 0;
-          const total = input + output;
-          if (total > 0) {
-            inputTokens = input;
-            cachedTokens = cacheRead;
-            outputTokens = output;
-            usedTokens = total;
-          }
-        }
-        if (!modelContextWindow && data?.model_context_window) {
-          modelContextWindow = data.model_context_window;
-        }
-      }
-
-      if (usedTokens === 0 && event.kind === 'result') {
-        const data: any = event.data;
-        const usage = data?.last_token_usage || data?.usage;
-        if (usage) {
-          const input = usage.input_tokens || 0;
-          const cacheRead = usage.cached_input_tokens || usage.cache_read_input_tokens || 0;
-          const output = usage.output_tokens || 0;
-          const total = input + output;
-          if (total > 0) {
-            inputTokens = input;
-            cachedTokens = cacheRead;
-            outputTokens = output;
-            usedTokens = total;
-          }
-        }
-        if (!modelContextWindow && data?.model_context_window) {
-          modelContextWindow = data.model_context_window;
-        }
-      }
-
-      if (usedTokens > 0 && modelContextWindow) {
-        break;
-      }
-    }
-
-    const totalTokens = getSessionContextLimit({
+  const contextUsage = useMemo(
+    () => computeContextUsageFromEvents(events, {
       model: session?.model,
       sessionProviderUsesLargeContext: !!resolvedProvider?.context_1m,
       activeProviderUsesLargeContext: !!resolvedProvider?.context_1m,
-      modelContextWindow,
-    });
-
-    return { usedTokens, totalTokens, inputTokens, cachedTokens, outputTokens };
-  }, [events, session?.model, resolvedProvider?.context_1m]);
+    }),
+    [events, session?.model, resolvedProvider?.context_1m],
+  );
 
   const handleSend = async (content: string) => {
     const effectiveCwd = project?.path || cwd;
@@ -386,31 +329,4 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       </Dialog>
     </div>
   );
-}
-
-function getSessionContextLimit({
-  model,
-  sessionProviderUsesLargeContext,
-  activeProviderUsesLargeContext,
-  modelContextWindow,
-}: {
-  model?: string | null;
-  sessionProviderUsesLargeContext: boolean;
-  activeProviderUsesLargeContext: boolean;
-  modelContextWindow?: number;
-}) {
-  // Codex: use the real context window from the API if available
-  if (modelContextWindow && modelContextWindow > 0) {
-    return modelContextWindow;
-  }
-
-  if (typeof model === 'string' && model.trim().length > 0) {
-    return model.includes(LARGE_CONTEXT_MODEL_SUFFIX) ? LARGE_CONTEXT_TOKENS : DEFAULT_CONTEXT_TOKENS;
-  }
-
-  if (sessionProviderUsesLargeContext) {
-    return LARGE_CONTEXT_TOKENS;
-  }
-
-  return activeProviderUsesLargeContext ? LARGE_CONTEXT_TOKENS : DEFAULT_CONTEXT_TOKENS;
 }

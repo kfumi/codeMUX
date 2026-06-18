@@ -7,6 +7,7 @@ import {
 } from '@openai/codex-sdk';
 
 import type { SidecarCommand } from './types.js';
+import { readLatestCodexLastTokenUsage } from './codexSessionUsage.js';
 import {
   buildAssistantEvent,
   buildCodexResultEvent,
@@ -282,9 +283,14 @@ export class CodexSessionRuntime {
 
       const finalUsage = usageSeen ? usage : emptyUsage();
       if (!this.abortController?.signal.aborted && turnCompleted && !turnFailed) {
+        const lastTokenUsage = await readLatestCodexLastTokenUsage(this.thread.id).catch((error) => {
+          process.stderr.write(`[codex] Failed to read session last_token_usage: ${String(error)}\n`);
+          return null;
+        });
         emit(buildCodexResultEvent({
           sessionId,
           usage: finalUsage,
+          lastTokenUsage,
           durationMs: Date.now() - startedAt,
         }));
       } else if (!this.abortController?.signal.aborted) {

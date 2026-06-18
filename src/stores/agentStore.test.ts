@@ -44,6 +44,7 @@ vi.mock('../lib/tauri', () => ({
     delete: vi.fn(),
     updateTitle: vi.fn(),
     updateProvider: vi.fn(),
+    touch: vi.fn(() => Promise.resolve()),
     getMessages: vi.fn(),
   },
   configApi: {
@@ -223,6 +224,18 @@ describe('agent store Codex history loading', () => {
       .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
 
     expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+  });
+
+  it('commits pending simulated assistant text before the result event', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
+
+    const kinds = useAgentStore.getState().events[session.id]?.map((event) => event.kind) ?? [];
+    expect(kinds.indexOf('assistant')).toBeLessThan(kinds.indexOf('result'));
   });
 
   it.each([
