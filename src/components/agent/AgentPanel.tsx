@@ -278,7 +278,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="surface-panel surface-panel-muted animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[340ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex shrink-0 items-center gap-3 rounded-none border-x-0 border-t-0 border-b border-border/45 bg-[hsl(var(--background))]/82 px-6 py-3.5 backdrop-blur-xl dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.92,hsl(var(--surface-1))/0.84)]">
+      <div className="animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[340ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex shrink-0 items-center gap-3 rounded-none border-b border-border/62 bg-[hsl(var(--surface-1))]/90 px-5 py-3 shadow-[inset_0_-1px_0_hsl(var(--foreground)/0.012)] backdrop-blur-xl">
         <h2 className="truncate text-[13px] font-semibold text-foreground/88">{session?.title || '新对话'}</h2>
         <DropdownMenu
           trigger={(
@@ -304,7 +304,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         )}
         {project && (
           <div
-            className="surface-panel flex min-w-0 max-w-75 items-center gap-1.5 rounded-lg border border-border/45 bg-muted/24 px-2.5 py-1.5 text-[12px] text-foreground/78 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.84,hsl(var(--surface-2))/0.74)]"
+            className="flex min-w-0 max-w-75 items-center gap-1.5 rounded-md border border-border/56 bg-[hsl(var(--surface-2))]/72 px-2.5 py-1.5 text-[12px] text-foreground/72"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             <FolderOpen className="h-3 w-3 shrink-0 text-foreground/62" />
@@ -312,7 +312,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           </div>
         )}
         {mcpRuntimeStatus && mcpRuntimeStatus !== 'ready' && (
-          <div className="surface-panel rounded-lg border border-border/45 bg-muted/24 px-2 py-1 text-[11px] text-muted-foreground dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.8,hsl(var(--surface-2))/0.7)]">
+          <div className="rounded-md border border-border/56 bg-[hsl(var(--surface-2))]/72 px-2 py-1 text-[11px] text-muted-foreground">
             {mcpRuntimeStatus === 'warming' && 'MCP 正在后台预热'}
             {mcpRuntimeStatus === 'deferred' && 'MCP 将按需连接'}
             {mcpRuntimeStatus === 'fallback_live' && '对话已启动，MCP 继续后台接入'}

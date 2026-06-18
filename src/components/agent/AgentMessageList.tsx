@@ -278,7 +278,7 @@ function renderEvent(sessionId: string, msg: AgentMessage, _prevMsg: AgentMessag
       }
       return (
         <div className="flex flex-col items-end animate-in fade-in slide-in-from-bottom-2 fill-mode-forwards animation-duration-[400ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
-          <div className="max-w-[80%] bg-linear-to-br from-[hsl(var(--primary)/0.1)] to-[hsl(var(--primary)/0.05)] text-foreground rounded-2xl rounded-tr-md px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-all border border-[hsl(var(--primary)/0.08)]">
+          <div className="max-w-[80%] rounded-2xl rounded-tr-lg border border-[hsl(var(--primary)/0.18)] bg-[hsl(var(--primary)/0.88)] px-4 py-2.5 text-sm leading-relaxed text-primary-foreground whitespace-pre-wrap break-all shadow-[0_12px_28px_-18px_hsl(var(--primary)/0.48)]">
             {content}
           </div>
           <div className="flex items-center gap-1.5 mt-1">
@@ -437,7 +437,7 @@ function renderEvent(sessionId: string, msg: AgentMessage, _prevMsg: AgentMessag
       const tokenText = preTokens ? ` · 节省 ${formatTokenCount(preTokens)} tokens` : '';
       return (
         <div className="text-center py-3">
-          <span className="text-[11px] text-muted-foreground/35 tracking-wider font-medium">
+          <span className="text-[11px] text-muted-foreground/35 tracking-normal font-medium">
             — 上下文已压缩{tokenText} —
           </span>
         </div>
@@ -820,7 +820,7 @@ export function AgentMessageList({ sessionId }: AgentMessageListProps) {
         <div className="max-w-3xl mx-auto space-y-5">
           {events.length === 0 && !isRunning && (
             <div className="flex flex-col items-center justify-center py-24 text-center animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
-              <div className="w-14 h-14 rounded-2xl bg-linear-to-br from-[hsl(var(--primary)/0.1)] to-[hsl(var(--primary)/0.03)] flex items-center justify-center mb-5 border border-[hsl(var(--primary)/0.08)] shadow-[0_0_20px_hsl(var(--primary)/0.06)]">
+              <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-[hsl(var(--primary)/0.18)] bg-[hsl(var(--primary)/0.14)] shadow-[0_12px_28px_-22px_hsl(var(--primary)/0.34),inset_0_1px_0_hsl(var(--foreground)/0.025)]">
                 <Sparkles className="h-6 w-6 text-[hsl(var(--primary)/0.4)]" />
               </div>
               <p className="text-sm text-foreground/50 leading-relaxed max-w-65">

@@ -17,13 +17,13 @@ export function ThinkingBlock({ thinking, durationMs }: ThinkingBlockProps) {
   if (!thinking.trim()) return null;
 
   return (
-    <div className="rounded-xl bg-linear-to-br from-[hsl(var(--primary)/0.04)] to-transparent border border-[hsl(var(--primary)/0.08)] my-2 overflow-hidden">
+    <div className="my-2 overflow-hidden rounded-2xl border border-border/55 bg-muted/18">
       <button
-        className="flex items-center gap-2 w-full px-3 py-2 text-sm text-muted-foreground hover:bg-[hsl(var(--primary)/0.04)] transition-colors duration-200"
+        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted-foreground transition-colors duration-200 hover:bg-muted/36"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        <Brain className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.5)]" />
+        <Brain className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.46)]" />
         <span className="text-[13px]">思考过程</span>
         {durationMs != null && (
           <span className="ml-auto text-[11px] text-muted-foreground/40 tabular-nums px-1.5 py-0.5 rounded-md bg-muted/30"
@@ -34,7 +34,7 @@ export function ThinkingBlock({ thinking, durationMs }: ThinkingBlockProps) {
         )}
       </button>
       {isExpanded && (
-        <div className="px-3 pb-3 text-sm text-muted-foreground/80 whitespace-pre-wrap border-t border-[hsl(var(--primary)/0.06)] pt-2.5 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] leading-relaxed">
+        <div className="px-3 pb-3 text-sm text-muted-foreground/80 whitespace-pre-wrap border-t border-border/35 pt-2.5 animate-in fade-in fill-mode-forwards animation-duration-[260ms] [animation-timing-function:ease] leading-relaxed">
           {thinking}
         </div>
       )}
@@ -68,15 +68,15 @@ export function StreamingThinkingBlock({ thinking }: { thinking: string }) {
   if (!thinking) return null;
 
   return (
-    <div className="rounded-xl bg-linear-to-br from-[hsl(var(--primary)/0.04)] to-transparent border border-[hsl(var(--primary)/0.08)] my-2 overflow-hidden animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+    <div className="my-2 overflow-hidden rounded-2xl border border-border/55 bg-muted/18 animate-in fade-in fill-mode-forwards animation-duration-[260ms] [animation-timing-function:ease]">
       <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
-        <Brain className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.6)] animate-pulse-soft" />
+        <Brain className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.5)] animate-pulse-soft" />
         <span className="text-[13px]">思考中...</span>
-        <div className="ml-auto h-1 w-16 rounded-full bg-[hsl(var(--primary)/0.1)] overflow-hidden">
-          <div className="h-full w-1/3 rounded-full bg-[hsl(var(--primary)/0.3)]" style={{ animation: 'shimmer 1.5s ease-in-out infinite', backgroundSize: '200% 100%' }} />
+        <div className="ml-auto h-1 w-16 overflow-hidden rounded-full bg-muted/55">
+          <div className="h-full w-1/3 rounded-full bg-[hsl(var(--primary)/0.24)]" style={{ animation: 'shimmer 1.5s ease-in-out infinite', backgroundSize: '200% 100%' }} />
         </div>
       </div>
-      <div className="px-3 pb-3 text-sm text-muted-foreground/70 whitespace-pre-wrap border-t border-[hsl(var(--primary)/0.06)] pt-2.5 max-h-96 overflow-y-auto leading-relaxed">
+      <div className="px-3 pb-3 text-sm text-muted-foreground/70 whitespace-pre-wrap border-t border-border/35 pt-2.5 max-h-96 overflow-y-auto leading-relaxed">
         {thinking}
         <div ref={endRef} />
       </div>

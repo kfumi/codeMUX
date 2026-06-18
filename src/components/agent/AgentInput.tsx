@@ -138,8 +138,8 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
 
         <div
           className={cn(
-            'composer-glow rounded-[20px] border border-border/70 bg-[hsl(var(--card))]/96 shadow-[0_1px_0_0_hsl(var(--foreground)/0.03),0_18px_34px_-24px_hsl(var(--foreground)/0.18)] transition-all duration-300',
-            'focus-within:border-[hsl(var(--primary))/0.24] focus-within:shadow-[0_1px_0_0_hsl(var(--foreground)/0.03),0_24px_40px_-26px_hsl(var(--primary)/0.20)]',
+            'composer-glow rounded-2xl border border-border/75 bg-[hsl(var(--card))]/96 shadow-[0_1px_0_0_hsl(var(--foreground)/0.02),0_16px_34px_-26px_hsl(var(--foreground)/0.2)] transition-all duration-240',
+            'focus-within:border-[hsl(var(--primary)/0.3)] focus-within:shadow-[0_1px_0_0_hsl(var(--foreground)/0.02),0_18px_38px_-28px_hsl(var(--primary)/0.28)]',
           )}
         >
           <div className="px-4 pt-3.5 pb-1.5">
@@ -168,7 +168,7 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
                   }
                 }}
                 className={cn(
-                  'rounded-lg px-2.5 py-1 text-[12px] font-medium transition-all duration-200',
+                    'rounded-full px-2.5 py-1 text-[12px] font-medium transition-all duration-200',
                   'text-muted-foreground/46 hover:bg-muted/55 hover:text-muted-foreground',
                 )}
                 title="斜杠命令"
@@ -181,7 +181,7 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
             <div className="flex items-center gap-1.5">
               {modelName && (
                 <span
-                  className="rounded-lg border border-border/55 bg-muted/28 px-2.5 py-1 text-[11px] font-medium text-muted-foreground/48"
+                  className="rounded-full border border-border/55 bg-muted/28 px-2.5 py-1 text-[11px] font-medium text-muted-foreground/48"
                   style={{ fontFamily: "'JetBrains Mono', monospace" }}
                 >
                   {modelName}
@@ -206,9 +206,9 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
                   onClick={handleSend}
                   disabled={!hasContent}
                   className={cn(
-                    'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-300',
+                    'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200',
                     hasContent
-                      ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-14px_hsl(var(--primary)/0.65)] hover:brightness-105'
+                      ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-15px_hsl(var(--primary)/0.58)] hover:bg-primary/94'
                       : 'cursor-not-allowed bg-muted/45 text-muted-foreground/28',
                   )}
                   title="发送"

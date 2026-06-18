@@ -79,17 +79,17 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
     <>
       <div
         className={cn(
-          'group relative flex items-center gap-2.5 rounded-xl border border-transparent px-2.5 py-2 text-[13px] transition-all duration-200',
+          'group relative flex items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-2 text-[13px] transition-all duration-200',
           'cursor-pointer text-[hsl(var(--sidebar-fg))]/80',
-          'hover:border-[hsl(var(--sidebar-border))]/55 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]',
-          'dark:hover:border-[hsl(var(--sidebar-glow))]/12 dark:hover:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.88,hsl(var(--surface-2))/0.78)]',
-          isActive && 'border-[hsl(var(--sidebar-glow))]/28 bg-[hsl(var(--sidebar-glow))]/9 text-[hsl(var(--sidebar-fg))] dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.96,hsl(var(--surface-2))/0.84)] dark:shadow-[0_14px_30px_-24px_hsl(var(--surface-shadow-strong)/0.95),inset_0_1px_0_hsl(var(--foreground)/0.05),0_0_0_1px_hsl(var(--sidebar-glow)/0.08)]',
+          'hover:border-[hsl(var(--sidebar-border))]/64 hover:bg-[hsl(var(--sidebar-muted))]/76 hover:text-[hsl(var(--sidebar-fg))]',
+          'dark:hover:border-[hsl(var(--sidebar-glow))]/18 dark:hover:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.82,hsl(var(--surface-2))/0.72)]',
+          isActive && 'border-[hsl(var(--sidebar-border))]/70 bg-[hsl(var(--foreground)/0.105)] text-[hsl(var(--sidebar-fg))] shadow-[inset_0_1px_0_hsl(var(--foreground)/0.035)] dark:bg-[hsl(var(--foreground)/0.105)]',
         )}
         onClick={onClick}
         onContextMenu={handleContextMenu}
       >
         {isActive && (
-          <div className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-[hsl(var(--sidebar-glow))] opacity-80" />
+          <div className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-[hsl(var(--accent))] opacity-90" />
         )}
         {agentDef ? (
           <span className={cn('flex shrink-0 items-center transition-opacity duration-200', isActive ? 'opacity-100' : 'opacity-70')}>
@@ -98,7 +98,7 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
         ) : (
           <span
             className={cn(
-              'inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm text-[9px] font-semibold tracking-wider',
+              'inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm text-[9px] font-semibold tracking-normal',
               isActive ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64',
             )}
           >
@@ -152,7 +152,7 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
 
       {isMenuOpen && createPortal(
         <div
-          className="surface-panel fixed z-[180] min-w-[140px] rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_50px_-28px_hsl(var(--foreground)/0.42),0_0_0_1px_hsl(var(--background)/0.7)] backdrop-blur-md animate-in fade-in blur-in-4 fill-mode-both [animation-duration:180ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.98,hsl(var(--surface-1))/0.95)] dark:shadow-[0_24px_64px_-30px_hsl(var(--surface-shadow-strong)/0.98),0_0_0_1px_hsl(var(--foreground)/0.045)]"
+          className="surface-panel fixed z-[180] min-w-[140px] rounded-xl border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_48px_-28px_hsl(var(--foreground)/0.38),0_0_0_1px_hsl(var(--background)/0.68)] backdrop-blur-md animate-in fade-in blur-in-4 fill-mode-both [animation-duration:180ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.98,hsl(var(--surface-1))/0.95)] dark:shadow-[0_24px_64px_-34px_hsl(var(--surface-shadow-strong)/0.98),0_0_0_1px_hsl(var(--foreground)/0.04)]"
           style={{ left: menuPos.x, top: menuPos.y }}
         >
           <button

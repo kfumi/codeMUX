@@ -22,11 +22,11 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
-  session: 'text-[hsl(215_100%_60%)]',
+  session: 'text-[hsl(var(--primary))]',
   info: 'text-[hsl(var(--warning))]',
   builtin: 'text-[hsl(var(--success))]',
-  custom: 'text-purple-500',
-  skill: 'text-orange-500',
+  custom: 'text-muted-foreground',
+  skill: 'text-[hsl(var(--warning))]',
 };
 
 function getCommandIcon(name: string) {
@@ -78,7 +78,7 @@ export function SlashCommandMenu({ commands, selectedIndex, onSelect, visible }:
         ref={listRef}
         className={cn(
           'max-h-70 overflow-y-auto rounded-xl border',
-          'bg-[hsl(var(--card))] shadow-[0_-4px_24px_-4px_hsl(var(--foreground)/0.06)]',
+          'bg-[hsl(var(--card))] shadow-[0_-8px_34px_-24px_hsl(var(--foreground)/0.24)]',
           'border-[hsl(var(--border)/0.5)]',
           'backdrop-blur-xl'
         )}
@@ -86,7 +86,7 @@ export function SlashCommandMenu({ commands, selectedIndex, onSelect, visible }:
         <div className="py-1.5">
           {grouped.map((group) => (
             <div key={group.category}>
-              <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground/40 uppercase tracking-widest">
+              <div className="px-3 py-1.5 text-[10px] font-semibold text-muted-foreground/45 uppercase tracking-normal">
                 {CATEGORY_LABELS[group.category] || group.category}
               </div>
               {group.items.map((cmd) => {
@@ -128,12 +128,12 @@ export function SlashCommandMenu({ commands, selectedIndex, onSelect, visible }:
                       </span>
                     )}
                     {cmd.category === 'custom' && (
-                      <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-500 font-medium">
+                      <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md border border-border/45 bg-muted/45 text-muted-foreground font-medium">
                         自定义
                       </span>
                     )}
                     {cmd.category === 'skill' && (
-                      <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-orange-500/10 text-orange-500 font-medium">
+                      <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-[hsl(var(--warning)/0.1)] text-[hsl(var(--warning))] font-medium">
                         skill
                       </span>
                     )}

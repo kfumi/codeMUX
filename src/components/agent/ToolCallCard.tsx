@@ -112,7 +112,7 @@ export function ToolCallCard({
   const displayName = summaryParts[0]?.displayAs || toolName;
 
   return (
-    <div className="my-2 overflow-hidden rounded-2xl border border-border/60 bg-background shadow-sm transition-colors duration-200 hover:bg-muted/10">
+    <div className="my-2 overflow-hidden rounded-2xl border border-border/60 bg-background shadow-[0_1px_0_hsl(var(--foreground)/0.018)] transition-colors duration-200 hover:bg-muted/10">
       <div
         role="button"
         tabIndex={0}
@@ -172,11 +172,11 @@ export function ToolCallCard({
       {isExpanded && (
         <div className="animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] space-y-2.5 border-t border-border/40 px-3.5 py-3">
           <div>
-            <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+            <div className="mb-1.5 text-[11px] font-medium uppercase tracking-normal text-muted-foreground/60">
               参数
             </div>
             <pre
-              className="max-h-40 overflow-auto rounded-xl border border-border/30 bg-muted/25 p-3 text-xs"
+              className="max-h-40 overflow-auto rounded-xl border border-border/32 bg-muted/22 p-3 text-xs"
               style={{ fontFamily: "'JetBrains Mono', monospace" }}
             >
               {JSON.stringify(input, null, 2)}
@@ -185,11 +185,11 @@ export function ToolCallCard({
 
           {result && (
             <div>
-              <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+              <div className="mb-1.5 text-[11px] font-medium uppercase tracking-normal text-muted-foreground/60">
                 结果
               </div>
               <pre
-                className="max-h-40 overflow-auto whitespace-pre-wrap rounded-xl border border-border/30 bg-muted/25 p-3 text-xs"
+                className="max-h-40 overflow-auto whitespace-pre-wrap rounded-xl border border-border/32 bg-muted/22 p-3 text-xs"
                 style={{ fontFamily: "'JetBrains Mono', monospace" }}
               >
                 {result}

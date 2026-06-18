@@ -36,7 +36,7 @@ export function AgentStatusBar({ sessionId }: AgentStatusBarProps) {
             <span>running</span>
           </div>
         )}
-        {displayError && <span className="text-red-500">error: {displayError}</span>}
+        {displayError && <span className="text-[hsl(var(--destructive))]">error: {displayError}</span>}
         {lastResult && lastResult.kind === 'result' && !isRunning && (
           <span>
             done · {(lastResult.data.duration_ms / 1000).toFixed(1)}s{cost != null && ` · $${cost.toFixed(4)}`}

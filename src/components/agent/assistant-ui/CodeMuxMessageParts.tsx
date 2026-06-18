@@ -177,7 +177,7 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
     const tokenText = preTokens >= 1000 ? ` · 节省 ${(preTokens / 1000).toFixed(1)}k tokens` : preTokens > 0 ? ` · 节省 ${preTokens} tokens` : '';
     return (
       <div className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
-        <span className="text-[11px] text-muted-foreground/35 tracking-wider font-medium">
+        <span className="text-[11px] text-muted-foreground/35 tracking-normal font-medium">
           — 上下文已压缩{tokenText} —
         </span>
       </div>

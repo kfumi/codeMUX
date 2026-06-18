@@ -18,9 +18,9 @@ const ReasoningOpenContext = createContext(false);
 const reasoningVariants = cva('aui-reasoning-root mb-2 w-full', {
   variants: {
     variant: {
-      outline: 'rounded-lg border px-3 py-1.5',
+      outline: 'rounded-lg border border-border/62 bg-[hsl(var(--surface-2))]/48 px-3 py-1.5',
       ghost: '',
-      muted: 'bg-muted/50 rounded-lg px-3 py-1.5',
+      muted: 'rounded-lg border border-border/54 bg-[hsl(var(--surface-2))]/58 px-3 py-1.5',
     },
   },
   defaultVariants: {
@@ -117,7 +117,7 @@ function ReasoningTrigger({
     <CollapsibleTrigger
       data-slot="reasoning-trigger"
       className={cn(
-        'aui-reasoning-trigger group/trigger text-muted-foreground hover:text-foreground flex max-w-[75%] items-center gap-2 py-1 text-sm transition-colors',
+        'aui-reasoning-trigger group/trigger text-muted-foreground/78 hover:text-foreground flex max-w-[75%] items-center gap-2 py-1 text-sm transition-colors',
         className,
       )}
       {...props}

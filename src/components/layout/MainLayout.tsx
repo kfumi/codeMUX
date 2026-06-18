@@ -88,27 +88,31 @@ export function MainLayout({ sidebar, children, preview }: MainLayoutProps) {
         {!sidebarCollapsed && (
           <>
             <aside
-              className="surface-panel surface-panel-muted relative shrink-0 rounded-none border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-bg))] sidebar-grain shadow-[inset_-1px_0_0_hsl(var(--foreground)/0.02)]"
+              className="relative shrink-0 rounded-none border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-bg))] sidebar-grain shadow-[inset_-1px_0_0_hsl(var(--foreground)/0.025)]"
               style={{ width: sidebarWidth }}
             >
               <div className="relative z-10 flex h-full flex-col">
                 {sidebar}
               </div>
+              <div
+                className="group absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize"
+                onMouseDown={handleSidebarMouseDown}
+              >
+                <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-200 group-hover:bg-primary/22" />
+              </div>
             </aside>
-
-            <div className="group relative w-1 shrink-0 cursor-col-resize" onMouseDown={handleSidebarMouseDown}>
-              <div className="absolute inset-y-0 -left-0.5 w-2 transition-colors duration-200 group-hover:bg-primary/12" />
-              <div className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-transparent transition-all duration-300 group-hover:bg-primary/28" />
-            </div>
           </>
         )}
 
-        <main className="relative flex flex-1 overflow-hidden bg-[hsl(var(--background))]/92 transition-[background] duration-300">
+        <main className="relative flex flex-1 overflow-hidden bg-[hsl(var(--background))] transition-[background] duration-300">
           <div className="flex min-w-0 flex-1 flex-col">{children}</div>
           {preview && previewOpen && (
-            <div className="group relative w-1 shrink-0 cursor-col-resize" onMouseDown={handlePreviewMouseDown}>
-              <div className="absolute inset-y-0 -left-0.5 w-2 transition-colors duration-200 group-hover:bg-primary/12" />
-              <div className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-transparent transition-all duration-300 group-hover:bg-primary/28" />
+            <div
+              className="group absolute inset-y-0 z-20 w-2 cursor-col-resize"
+              style={{ right: previewWidth - 4 }}
+              onMouseDown={handlePreviewMouseDown}
+            >
+              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded-full bg-transparent transition-all duration-200 group-hover:bg-primary/22" />
             </div>
           )}
           {preview}

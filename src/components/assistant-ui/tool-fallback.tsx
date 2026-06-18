@@ -55,7 +55,7 @@ function ToolFallbackRoot({
       data-slot="tool-fallback-root"
       open={isOpen}
       onOpenChange={handleOpenChange}
-      className={cn('aui-tool-fallback-root group/tool-fallback-root w-full rounded-lg border py-3', className)}
+      className={cn('aui-tool-fallback-root group/tool-fallback-root w-full rounded-lg border border-border/62 bg-[hsl(var(--surface-2))]/56 py-2.5 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.018)]', className)}
       style={{ '--animation-duration': `${ANIMATION_DURATION}ms` } as React.CSSProperties}
       {...props}
     >
@@ -92,7 +92,7 @@ function ToolFallbackTrigger({
     <CollapsibleTrigger
       data-slot="tool-fallback-trigger"
       className={cn(
-        'aui-tool-fallback-trigger group/trigger flex w-full items-center gap-2 px-4 text-sm transition-colors',
+        'aui-tool-fallback-trigger group/trigger flex w-full items-center gap-2 px-3.5 text-sm text-foreground/76 transition-colors hover:text-foreground',
         className,
       )}
       {...props}
@@ -150,7 +150,7 @@ function ToolFallbackContent({
       )}
       {...props}
     >
-      <div className="mt-3 flex max-h-105 flex-col gap-2 overflow-y-auto border-t pt-2 pr-1 text-xs scrollbar-gutter-stable">{children}</div>
+      <div className="mt-2.5 flex max-h-105 flex-col gap-2 overflow-y-auto border-t border-border/50 pt-2 pr-1 text-xs scrollbar-gutter-stable">{children}</div>
     </CollapsibleContent>
   );
 }

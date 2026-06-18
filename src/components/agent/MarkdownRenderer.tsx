@@ -105,7 +105,7 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
         },
         th({ children, ...props }) {
           return (
-            <th className="px-4 py-2.5 text-left font-semibold text-foreground/70 text-xs uppercase tracking-wider border-b border-border/30" {...props}>
+            <th className="px-4 py-2.5 text-left font-semibold text-foreground/70 text-xs uppercase tracking-normal border-b border-border/30" {...props}>
               {children}
             </th>
           );

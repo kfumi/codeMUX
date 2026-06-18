@@ -148,13 +148,12 @@ function App() {
             <div className="flex flex-1 items-center justify-center animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease]">
               <div className="max-w-md space-y-5 text-center">
                 <div className="relative inline-flex">
-                  <div className="absolute inset-0 scale-150 rounded-3xl bg-[hsl(var(--primary)/0.08)] blur-xl" />
-                  <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-[hsl(var(--primary)/0.1)] bg-gradient-to-br from-[hsl(var(--primary)/0.12)] to-[hsl(var(--primary)/0.03)]">
-                    <Sparkles className="h-6 w-6 text-[hsl(var(--primary)/0.5)]" />
+                  <div className="relative flex h-14 w-14 items-center justify-center rounded-xl border border-border/70 bg-muted/35 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.025)]">
+                    <Sparkles className="h-6 w-6 text-[hsl(var(--primary)/0.58)]" />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <h2 className="text-[15px] font-medium text-foreground/80">开始新对话</h2>
+                  <h2 className="text-[15px] font-semibold text-foreground/84">开始新对话</h2>
                   <p className="text-sm leading-relaxed text-foreground/70">
                     在左侧创建对话，或选择一个项目开始编码任务
                   </p>

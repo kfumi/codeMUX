@@ -86,7 +86,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
           className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scroll-smooth scrollbar-gutter-stable"
           autoScroll
         >
-          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col pl-4 pr-14 pt-4">
+          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col pl-4 pr-14 pt-5">
             <ThreadPrimitive.Messages>
               {({ message }) =>
                 message.role === 'user' ? (
@@ -104,9 +104,9 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
             </ThreadPrimitive.Messages>
             {stopped ? <InterruptBanner /> : null}
             <StreamingContent sessionId={sessionId} />
-            <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-background pb-4 pt-4 md:pb-6">
+            <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pb-4 pt-5 md:pb-6">
             <ThreadPrimitive.ScrollToBottom
-              className="absolute -top-12 left-1/2 inline-flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-background text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--foreground)/0.35)] transition-all hover:-translate-y-0.5 hover:text-foreground disabled:invisible"
+              className="absolute -top-12 left-1/2 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--foreground)/0.35)] transition-all hover:-translate-y-0.5 hover:text-foreground disabled:invisible"
               aria-label="Scroll to bottom"
               title="Scroll to bottom"
               behavior="smooth"
@@ -154,10 +154,10 @@ function UserMessage({ message, sourceEventIndex }: { message: MessageState; sou
   return (
     <MessagePrimitive.Root
       id={sourceEventIndex != null ? `msg-${sourceEventIndex}` : undefined}
-      className="mb-4 flex w-full justify-end"
+      className="mb-5 flex w-full justify-end"
     >
       <div className="flex max-w-[78%] flex-col items-end">
-        <div className="rounded-3xl bg-muted px-4 py-2.5 text-sm leading-relaxed text-foreground shadow-sm">
+        <div className="rounded-xl rounded-tr-md border border-[hsl(var(--primary)/0.28)] bg-[linear-gradient(180deg,hsl(var(--primary)/0.92),hsl(var(--primary)/0.78))] px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-[0_12px_28px_-20px_hsl(var(--primary)/0.48)]">
           {text}
         </div>
         <MessageFooter timestamp={timestamp} className="justify-end" />
@@ -320,7 +320,7 @@ function MessageNav({
         )}
       >
         <div
-          className="absolute left-1/2 w-px -translate-x-1/2 rounded-full bg-linear-to-b from-border/20 via-muted-foreground/55 to-border/20 dark:from-border/40 dark:via-muted-foreground/50 dark:to-border/40"
+          className="absolute left-1/2 w-px -translate-x-1/2 rounded-full bg-muted-foreground/30"
           style={{
             top: `${navMetrics.railPadding}px`,
             bottom: `${navMetrics.railPadding}px`,
@@ -346,8 +346,8 @@ function MessageNav({
               className={cn(
                 'rounded-full border transition-all duration-150 hover:scale-105',
                 item.eventIndex === activeIdx
-                  ? 'border-white/85 bg-[hsl(var(--primary))] shadow-[0_0_0_3px_hsl(var(--background)),0_0_0_4px_hsl(var(--primary)/0.26),0_10px_18px_-10px_hsl(var(--primary)/0.65)] dark:border-white/75'
-                  : 'border-border/70 bg-[hsl(var(--muted-foreground)/0.34)] shadow-[0_0_0_2px_hsl(var(--background)/0.96)] hover:border-[hsl(var(--primary)/0.3)] hover:bg-[hsl(var(--muted-foreground)/0.42)] dark:border-white/45 dark:bg-[hsl(var(--muted-foreground)/0.52)]',
+                  ? 'border-[hsl(var(--background))] bg-[hsl(var(--primary)/0.82)] shadow-[0_0_0_3px_hsl(var(--background)),0_0_0_4px_hsl(var(--primary)/0.18),0_10px_18px_-12px_hsl(var(--primary)/0.38)]'
+                  : 'border-border/70 bg-[hsl(var(--muted-foreground)/0.28)] shadow-[0_0_0_2px_hsl(var(--background)/0.94)] hover:border-[hsl(var(--primary)/0.24)] hover:bg-[hsl(var(--muted-foreground)/0.36)] dark:bg-[hsl(var(--muted-foreground)/0.42)]',
               )}
               style={{
                 width: `${navMetrics.nodeSize}px`,

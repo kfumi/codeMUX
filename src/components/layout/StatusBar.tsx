@@ -15,7 +15,7 @@ export function StatusBar() {
   const port = proxyUrl?.match(/:(\d+)$/)?.[1];
 
   return (
-    <div className="flex h-6 shrink-0 items-center justify-between border-t border-border/40 bg-muted/30 px-3 text-[11px] text-muted-foreground select-none">
+    <div className="flex h-6 shrink-0 items-center justify-between border-t border-border/62 bg-[hsl(var(--surface-1))]/92 px-3 text-[11px] text-muted-foreground/74 select-none">
       {/* 左侧 */}
       <div className="flex items-center gap-3">
         {needsProxy && (
@@ -26,7 +26,7 @@ export function StatusBar() {
                 onClick={() => void (proxyRunning ? stopProxy() : startProxy())}
                 disabled={proxyToggling}
                 className={cn(
-                  'flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 transition-colors hover:bg-muted/60',
+                  'flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 transition-colors hover:bg-muted/54 hover:text-foreground/80',
                   proxyToggling && 'opacity-60',
                 )}
               >
@@ -36,7 +36,7 @@ export function StatusBar() {
                   <span
                     className={cn(
                       'inline-block h-2 w-2 rounded-full',
-                      proxyRunning ? 'bg-green-500' : 'bg-muted-foreground/50',
+                      proxyRunning ? 'bg-[hsl(var(--success))]' : 'bg-muted-foreground/50',
                     )}
                   />
                 )}

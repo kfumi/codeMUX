@@ -49,17 +49,17 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
   }
 
   return (
-    <div className="space-y-2.5 stagger-children">
+    <div className="space-y-2 stagger-children">
       {projects.length > 0 && (
         <div>
-          <div className="flex items-center justify-between px-2.5 py-1.5">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[hsl(var(--sidebar-fg))]/36">
+          <div className="flex items-center justify-between px-2 py-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-normal text-[hsl(var(--sidebar-fg))]/38">
               项目
             </span>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/55 transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-fg))]"
+                  className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/50 transition-colors hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]"
                   onClick={onAddProject}
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -96,8 +96,8 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
       {ungroupedSessions.length > 0 && (
         <div>
           {projects.length > 0 && (
-            <div className="px-2.5 py-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[hsl(var(--sidebar-fg))]/36">
+            <div className="px-2 py-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-normal text-[hsl(var(--sidebar-fg))]/38">
                 对话
               </span>
             </div>
@@ -123,7 +123,7 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
 
       {sessions.length === 0 && projects.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
-          <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent))]/70 text-[hsl(var(--sidebar-fg))]/60">
+          <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent))]/18 text-[hsl(var(--sidebar-accent))]">
             <MessageSquarePlus className="h-4 w-4" />
           </div>
           <p className="text-[12px] leading-relaxed text-[hsl(var(--sidebar-fg))]/50">
@@ -137,7 +137,7 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
       {projects.length === 0 && sessions.length > 0 && (
         <button
           onClick={onAddProject}
-          className="mt-1 flex w-full items-center gap-2.5 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-2.5 py-1.75 text-[12px] text-[hsl(var(--sidebar-fg))]/56 transition-all duration-200 hover:bg-[hsl(var(--sidebar-accent))]/80 hover:text-[hsl(var(--sidebar-fg))]"
+          className="mt-1 flex w-full items-center gap-2.5 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-2.5 py-1.75 text-[12px] text-[hsl(var(--sidebar-fg))]/56 transition-all duration-200 hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <Plus className="h-3.5 w-3.5" />
           添加项目

@@ -56,8 +56,8 @@ export function DiffView({ oldContent, newContent }: DiffViewProps) {
     <div className="font-mono text-xs">
       {/* Stats header */}
       <div className="px-4 py-2 border-b border-border/30 text-xs text-muted-foreground/60 flex gap-3">
-        <span className="text-green-500">+{stats.additions}</span>
-        <span className="text-red-500">-{stats.deletions}</span>
+        <span className="text-[hsl(var(--success))]">+{stats.additions}</span>
+        <span className="text-[hsl(var(--destructive))]">-{stats.deletions}</span>
       </div>
 
       {/* Diff lines */}
@@ -65,9 +65,9 @@ export function DiffView({ oldContent, newContent }: DiffViewProps) {
         {diffLinesData.map((line, index) => {
           const bgClass =
             line.type === 'added'
-              ? 'bg-green-500/10'
+              ? 'bg-[hsl(var(--success)/0.09)]'
               : line.type === 'removed'
-                ? 'bg-red-500/10'
+                ? 'bg-[hsl(var(--destructive)/0.09)]'
                 : '';
 
           const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';

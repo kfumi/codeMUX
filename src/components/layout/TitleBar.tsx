@@ -147,7 +147,7 @@ export function TitleBar({ sidebarCollapsed, onToggleSidebar }: TitleBarProps) {
   return (
     <div
       data-tauri-drag-region
-      className="surface-panel surface-panel-muted relative z-20 flex h-9.5 shrink-0 select-none items-center border-b border-[hsl(var(--sidebar-border))] pl-0 pr-0 border-x-0! border-t-0!"
+      className="relative z-20 flex h-10 shrink-0 select-none items-center border-b border-[hsl(var(--sidebar-border))] bg-[hsl(var(--surface-1))]/96 pl-0 pr-0 shadow-[inset_0_-1px_0_hsl(var(--foreground)/0.015)]"
       onContextMenu={handleContextMenu}
     >
       {onToggleSidebar && (
@@ -155,7 +155,7 @@ export function TitleBar({ sidebarCollapsed, onToggleSidebar }: TitleBarProps) {
           <TooltipTrigger asChild>
             <button
               onClick={onToggleSidebar}
-              className="ml-2 flex h-7 w-8 shrink-0 items-center justify-center rounded-lg text-foreground/62 transition-all duration-150 hover:bg-muted/60 hover:text-foreground"
+              className="ml-2 flex h-7 w-8 shrink-0 items-center justify-center rounded-md text-foreground/58 transition-all duration-150 hover:bg-muted/58 hover:text-foreground"
             >
               {sidebarCollapsed ? (
                 <PanelLeftOpen className="h-3.5 w-3.5" />
@@ -171,8 +171,8 @@ export function TitleBar({ sidebarCollapsed, onToggleSidebar }: TitleBarProps) {
       )}
 
       <div className="flex items-center gap-2.5 pl-3">
-        <div className="relative h-2.5 w-2.5 rounded-full bg-linear-to-br from-[hsl(var(--primary))] to-[hsl(var(--primary))/0.65] shadow-[0_0_0_3px_hsl(var(--primary)/0.12)]" />
-        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-foreground/88">
+        <div className="relative h-2 w-2 rounded-full border border-[hsl(var(--accent)/0.22)] bg-[hsl(var(--accent)/0.74)] shadow-[0_0_0_3px_hsl(var(--accent)/0.08)]" />
+        <span className="text-[11px] font-semibold uppercase tracking-normal text-foreground/84">
           codeMUX
         </span>
       </div>
@@ -188,7 +188,7 @@ export function TitleBar({ sidebarCollapsed, onToggleSidebar }: TitleBarProps) {
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  className="flex h-7 w-8 shrink-0 items-center justify-center rounded-lg text-foreground/62 transition-all duration-200 hover:bg-muted/60 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.86]"
+                  className="flex h-7 w-8 shrink-0 items-center justify-center rounded-md text-foreground/58 transition-all duration-200 hover:bg-muted/58 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.74]"
                 >
                   <ThemeIcon className="h-3.5 w-3.5" />
                 </button>
@@ -223,13 +223,13 @@ export function TitleBar({ sidebarCollapsed, onToggleSidebar }: TitleBarProps) {
       {appWindow && (
         <div className="flex h-full items-stretch self-stretch">
           <button
-            className="flex h-full w-11.5 items-center justify-center rounded-none text-foreground/62 transition-colors duration-150 hover:bg-muted/60 hover:text-foreground"
+            className="flex h-full w-11.5 items-center justify-center rounded-none text-foreground/62 transition-colors duration-150 hover:bg-muted/54 hover:text-foreground"
             onClick={() => appWindow.minimize()}
           >
             <Minus className="h-3.5 w-3.5" strokeWidth={1.5} />
           </button>
           <button
-            className="flex h-full w-11.5 items-center justify-center rounded-none text-foreground/62 transition-colors duration-150 hover:bg-muted/60 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.82]"
+            className="flex h-full w-11.5 items-center justify-center rounded-none text-foreground/62 transition-colors duration-150 hover:bg-muted/54 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.72]"
             onClick={() => appWindow.toggleMaximize()}
           >
             <MaximizeIcon restored={maximized} />

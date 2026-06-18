@@ -355,7 +355,7 @@ export function ProviderConfigPanel() {
                   </Button>
                 </div>
                 {fetchMessage && (
-                  <p className={`text-xs mt-1 ${fetchStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                  <p className={`text-xs mt-1 ${fetchStatus === 'success' ? 'text-[hsl(var(--success))]' : 'text-[hsl(var(--destructive))]'}`}>
                     {fetchMessage}
                   </p>
                 )}
@@ -401,7 +401,7 @@ export function ProviderConfigPanel() {
           )}
 
           {saveError && (
-            <p className="text-xs text-red-500 -mt-1">{saveError}</p>
+            <p className="text-xs text-[hsl(var(--destructive))] -mt-1">{saveError}</p>
           )}
 
           <DialogFooter className="flex justify-between">
@@ -409,12 +409,12 @@ export function ProviderConfigPanel() {
               {!isNew && (
                 deleteConfirm ? (
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-red-500">确认删除？</span>
+                    <span className="text-xs text-[hsl(var(--destructive))]">确认删除？</span>
                     <Button variant="destructive" size="sm" onClick={handleDelete}>确认</Button>
                     <Button variant="outline" size="sm" onClick={() => setDeleteConfirm(false)}>取消</Button>
                   </div>
                 ) : (
-                  <Button variant="ghost" size="sm" className="text-red-500" onClick={() => setDeleteConfirm(true)}>
+                  <Button variant="ghost" size="sm" className="text-[hsl(var(--destructive))]" onClick={() => setDeleteConfirm(true)}>
                     删除
                   </Button>
                 )
@@ -436,8 +436,8 @@ export function ProviderConfigPanel() {
         <div
           className={`fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium transition-all duration-300 ${
             toast.type === 'success'
-              ? 'bg-green-600 text-white'
-              : 'bg-red-600 text-white'
+              ? 'bg-[hsl(var(--success))] text-white'
+              : 'bg-[hsl(var(--destructive))] text-white'
           }`}
         >
           {toast.message}

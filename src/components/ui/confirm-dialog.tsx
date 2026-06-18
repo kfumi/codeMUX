@@ -41,8 +41,8 @@ export function ConfirmDialog({
         <DialogHeader className="px-6 pt-6 pb-4">
           <div className="flex items-start gap-3">
             {variant === 'destructive' && (
-              <div className="mt-0.5 shrink-0 w-9 h-9 rounded-full bg-red-500/10 flex items-center justify-center">
-                <AlertTriangle className="h-4.5 w-4.5 text-red-500" />
+              <div className="mt-0.5 shrink-0 w-9 h-9 rounded-full bg-[hsl(var(--destructive)/0.1)] flex items-center justify-center">
+                <AlertTriangle className="h-4.5 w-4.5 text-[hsl(var(--destructive))]" />
               </div>
             )}
             <div className="space-y-1.5">

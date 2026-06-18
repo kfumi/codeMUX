@@ -74,11 +74,11 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     <div className="flex flex-1 overflow-auto bg-[hsl(var(--background))] transition-[background] duration-300">
       <div className="mx-auto flex w-full max-w-6xl flex-col justify-center gap-5 px-6 py-8 lg:px-10">
         <div className="grid min-h-[min(720px,calc(100vh-8rem))] gap-5 lg:grid-cols-[minmax(260px,0.84fr)_minmax(520px,1.36fr)]">
-          <aside className="surface-panel surface-panel-muted flex animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[340ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex-col justify-between gap-5 rounded-xl border border-border/60 bg-card/76 p-5 dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.96,hsl(var(--surface-1))/0.9)]">
+          <aside className="surface-panel surface-panel-muted flex animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex-col justify-between gap-5 rounded-2xl border border-border/60 bg-card/76 p-5 dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.94,hsl(var(--surface-1))/0.9)]">
             <div className="space-y-6">
               <div className="space-y-3">
                 <span
-                  className="inline-flex rounded-md border border-border/55 bg-background/72 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground"
+                  className="inline-flex rounded-sm border border-border/55 bg-background/72 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-normal text-muted-foreground"
                   style={{ fontFamily: "'JetBrains Mono', monospace" }}
                 >
                   New Session
@@ -96,7 +96,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               <div className="surface-panel rounded-lg border border-border/55 bg-background/56 p-4 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.86,hsl(var(--surface-2))/0.76)]">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                    <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
                       Agent
                     </p>
                     <p className="truncate text-sm font-semibold text-foreground">
@@ -112,7 +112,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
 
               <div className="surface-panel rounded-lg border border-border/55 bg-background/56 p-4 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.86,hsl(var(--surface-2))/0.76)]">
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
                     Model
                   </p>
                   <Cpu className="h-4 w-4 text-muted-foreground" />
@@ -130,7 +130,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
 
             <div className="space-y-3">
               {draftProject ? (
-                <div className="surface-panel rounded-lg border border-[hsl(var(--primary)/0.18)] bg-[hsl(var(--primary)/0.07)] p-3 dark:bg-[linear-gradient(180deg,hsl(var(--surface-glow))/0.12,hsl(var(--surface-2))/0.72)]">
+                <div className="surface-panel rounded-xl border border-[hsl(var(--primary)/0.18)] bg-[hsl(var(--primary)/0.06)] p-3 dark:bg-[linear-gradient(180deg,hsl(var(--primary)/0.1),hsl(var(--surface-2))/0.68)]">
                   <div className="flex items-center gap-2 text-sm text-foreground">
                     <FolderKanban className="h-4 w-4 shrink-0 text-[hsl(var(--primary))]" />
                     <span className="font-medium">当前关联项目</span>
@@ -161,9 +161,9 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                   key={prompt}
                   type="button"
                   onClick={() => setMessage(prompt)}
-                  className="surface-panel surface-interactive group flex min-h-24 flex-col justify-between rounded-xl border border-border/55 bg-card/72 p-4 text-left dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.9,hsl(var(--surface-1))/0.82)]"
+                  className="surface-panel surface-interactive group flex min-h-24 flex-col justify-between rounded-2xl border border-border/55 bg-card/72 p-4 text-left dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.9,hsl(var(--surface-1))/0.84)]"
                 >
-                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border/50 bg-background text-muted-foreground transition-colors group-hover:text-foreground dark:bg-[hsl(var(--surface-3))/0.8]">
+                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-border/50 bg-background text-muted-foreground transition-colors group-hover:text-foreground dark:bg-[hsl(var(--surface-3))/0.8]">
                     <Icon className="h-4 w-4" />
                   </span>
                   <span className="space-y-1">
@@ -174,7 +174,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               ))}
             </div>
 
-            <div className="new-session-input surface-panel animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[340ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex flex-1 flex-col rounded-xl border border-border/60 bg-card dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.95,hsl(var(--surface-1))/0.88)]">
+            <div className="new-session-input surface-panel animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex flex-1 flex-col rounded-2xl border border-border/60 bg-card dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.94,hsl(var(--surface-1))/0.88)]">
               <div className="flex items-center justify-between gap-3 border-b border-border/45 px-4 py-3">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">任务输入</p>
@@ -183,7 +183,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                   </p>
                 </div>
                 <span
-                  className="surface-panel hidden rounded-md border border-border/45 bg-background/66 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground dark:bg-[hsl(var(--surface-3))/0.82] sm:inline-flex"
+                  className="surface-panel hidden rounded-sm border border-border/45 bg-background/66 px-2 py-1 text-[10px] font-semibold uppercase tracking-normal text-muted-foreground dark:bg-[hsl(var(--surface-3))/0.74] sm:inline-flex"
                   style={{ fontFamily: "'JetBrains Mono', monospace" }}
                 >
                   {selectedAgent?.label ?? 'Claude Code'}
@@ -216,9 +216,9 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                   onClick={() => void handleSubmit()}
                   disabled={!message.trim() || isSubmitting}
                   className={cn(
-                    'inline-flex h-10 min-w-10 shrink-0 items-center justify-center rounded-lg px-3 transition-all duration-200',
+                    'inline-flex h-10 min-w-10 shrink-0 items-center justify-center rounded-xl px-3 transition-all duration-200',
                     message.trim() && !isSubmitting
-                      ? 'bg-[hsl(var(--foreground))] text-[hsl(var(--background))] shadow-[0_14px_28px_-18px_hsl(var(--foreground)/0.55)] hover:scale-[1.02] hover:shadow-[0_18px_34px_-16px_hsl(var(--foreground)/0.45)] dark:bg-[hsl(var(--surface-glow))] dark:text-[hsl(var(--background))] dark:shadow-[0_16px_36px_-20px_hsl(var(--surface-glow)/0.55)] dark:hover:bg-[hsl(var(--surface-glow))/0.94] dark:hover:shadow-[0_22px_42px_-18px_hsl(var(--surface-glow)/0.48)]'
+                      ? 'bg-primary text-primary-foreground shadow-[0_12px_26px_-16px_hsl(var(--primary)/0.58)] hover:bg-primary/94 hover:shadow-[0_16px_32px_-20px_hsl(var(--primary)/0.56)]'
                       : 'cursor-not-allowed bg-muted text-muted-foreground/50 dark:bg-[hsl(var(--surface-3))/0.86]',
                   )}
                 >

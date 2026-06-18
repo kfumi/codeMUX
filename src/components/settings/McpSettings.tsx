@@ -290,9 +290,9 @@ export function McpSettingsPanel() {
 
   const transportBadge = (type: string) => {
     const colors: Record<string, string> = {
-      stdio: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
-      http: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
-      sse: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
+      stdio: 'bg-[hsl(var(--primary)/0.10)] text-[hsl(var(--primary))] border border-[hsl(var(--primary)/0.16)]',
+      http: 'bg-[hsl(var(--success)/0.10)] text-[hsl(var(--success))] border border-[hsl(var(--success)/0.16)]',
+      sse: 'bg-muted text-muted-foreground border border-border/50',
     };
     return (
       <span className={`text-xs px-1.5 py-0.5 rounded ${colors[type] ?? 'bg-gray-100 text-gray-700'}`}>
@@ -353,11 +353,11 @@ export function McpSettingsPanel() {
                     <span
                       className={`h-2 w-2 rounded-full shrink-0 ${
                         anyEnabled
-                          ? probeStatus[server.id] === 'connected' ? 'bg-green-500'
-                            : probeStatus[server.id] === 'pending' ? 'bg-yellow-500'
-                            : probeStatus[server.id] === 'failed' ? 'bg-red-500'
-                            : 'bg-gray-400'
-                          : 'bg-gray-300'
+                          ? probeStatus[server.id] === 'connected' ? 'bg-[hsl(var(--success))]'
+                            : probeStatus[server.id] === 'pending' ? 'bg-[hsl(var(--warning))]'
+                            : probeStatus[server.id] === 'failed' ? 'bg-[hsl(var(--destructive))]'
+                            : 'bg-muted-foreground/45'
+                          : 'bg-muted-foreground/28'
                       }`}
                     />
                     <span className="font-medium text-sm truncate">{server.name}</span>

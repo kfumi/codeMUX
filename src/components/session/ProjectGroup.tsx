@@ -58,15 +58,15 @@ export function ProjectGroup({
     <div className="mb-1">
       <div
         className={cn(
-          'group relative flex cursor-pointer items-center gap-2 rounded-xl border border-transparent px-2.5 py-2 transition-all duration-200',
-          'text-[hsl(var(--sidebar-fg))]/82 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]',
-          'dark:hover:border-[hsl(var(--sidebar-glow))]/10 dark:hover:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.84,hsl(var(--surface-2))/0.74)]',
-          isActiveProject && 'border-[hsl(var(--sidebar-glow))]/24 bg-[hsl(var(--sidebar-glow))]/8 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.92,hsl(var(--surface-2))/0.8)] dark:shadow-[0_14px_30px_-24px_hsl(var(--surface-shadow-strong)/0.85),0_0_0_1px_hsl(var(--sidebar-glow)/0.07)]',
+          'group relative flex cursor-pointer items-center gap-2 rounded-lg border border-transparent px-2.5 py-2 transition-all duration-200',
+          'text-[hsl(var(--sidebar-fg))]/82 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
+          'dark:hover:border-[hsl(var(--sidebar-glow))]/18 dark:hover:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.82,hsl(var(--surface-2))/0.72)]',
+          isActiveProject && 'border-[hsl(var(--sidebar-border))]/70 bg-[hsl(var(--foreground)/0.09)] shadow-[inset_0_1px_0_hsl(var(--foreground)/0.035)] dark:bg-[hsl(var(--foreground)/0.09)]',
         )}
         onClick={() => !renaming && setExpanded(!expanded)}
       >
         {isActiveProject && (
-          <div className="absolute left-0 top-1/2 h-4 w-0.75 -translate-y-1/2 rounded-r-full bg-[hsl(var(--sidebar-glow))] opacity-70" />
+          <div className="absolute left-0 top-1/2 h-5 w-0.75 -translate-y-1/2 rounded-r-full bg-[hsl(var(--accent))] opacity-80" />
         )}
         <ChevronRight
           className={cn(
@@ -129,7 +129,7 @@ export function ProjectGroup({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/45 transition-all duration-200 hover:bg-[hsl(var(--sidebar-glow)/0.08)] hover:text-[hsl(var(--sidebar-glow))]"
+                className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/45 transition-all duration-200 hover:bg-[hsl(var(--sidebar-glow)/0.06)] hover:text-[hsl(var(--sidebar-glow))]"
                 onClick={() => onNewSessionInProject(project.id)}
               >
                 <MessageSquarePlus className="h-3.5 w-3.5" />

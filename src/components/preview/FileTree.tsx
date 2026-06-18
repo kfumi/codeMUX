@@ -32,9 +32,9 @@ function TreeNode({ node, onFileClick, level = 0 }: { node: FileTreeNodeData; on
               <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
             )}
             {expanded ? (
-              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-yellow-500/70" />
+              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--warning)/0.72)]" />
             ) : (
-              <Folder className="h-3.5 w-3.5 shrink-0 text-yellow-500/70" />
+              <Folder className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--warning)/0.72)]" />
             )}
           </>
         ) : (

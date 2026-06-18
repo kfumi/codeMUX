@@ -40,7 +40,7 @@ export function AgentSettingsPanel() {
               className={cn(
                 'group flex items-start justify-between gap-4 rounded-2xl border px-4 py-4 text-left transition-all duration-200',
                 isSelected
-                  ? 'border-[hsl(var(--primary)/0.3)] bg-[hsl(var(--primary)/0.06)] shadow-[0_16px_34px_-30px_hsl(var(--primary)/0.55)]'
+                  ? 'border-[hsl(var(--primary)/0.32)] bg-[hsl(var(--primary)/0.08)] shadow-[0_16px_34px_-28px_hsl(var(--primary)/0.42)]'
                   : 'border-border/55 bg-background hover:border-border hover:bg-muted/25',
               )}
             >
@@ -84,7 +84,7 @@ export function AgentSettingsPanel() {
             <div className="space-y-1">
               <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 {proxyRunning ? (
-                  <CircleDot className="h-4 w-4 text-green-500" />
+                  <CircleDot className="h-4 w-4 text-[hsl(var(--success))]" />
                 ) : (
                   <CircleDot className="h-4 w-4 text-muted-foreground" />
                 )}
@@ -102,8 +102,8 @@ export function AgentSettingsPanel() {
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
                 proxyRunning
-                  ? 'border-red-500/30 bg-red-500/08 text-red-500 hover:bg-red-500/15'
-                  : 'border-green-500/30 bg-green-500/08 text-green-500 hover:bg-green-500/15',
+                  ? 'border-[hsl(var(--destructive)/0.28)] bg-[hsl(var(--destructive)/0.08)] text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive)/0.14)]'
+                  : 'border-[hsl(var(--success)/0.28)] bg-[hsl(var(--success)/0.08)] text-[hsl(var(--success))] hover:bg-[hsl(var(--success)/0.14)]',
               )}
             >
               {proxyRunning ? (

@@ -165,7 +165,7 @@ export function ChangedFilesList({ sessionId, projectPath, className }: ChangedF
   return (
     <div className={cn('relative', className)} ref={dropdownRef}>
       {isExpanded && (
-        <div className="absolute bottom-full right-0 mb-2 w-[380px] max-h-[400px] rounded-xl border border-border/40 bg-[hsl(var(--card))] shadow-[0_-4px_24px_-4px_hsl(var(--foreground)/0.06)] z-50 animate-in fade-in zoom-in-95 fill-mode-forwards [animation-duration:300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex flex-col">
+        <div className="absolute bottom-full right-0 mb-2 w-[380px] max-h-[400px] rounded-xl border border-border/50 bg-[hsl(var(--card))] shadow-[0_-8px_34px_-24px_hsl(var(--foreground)/0.24)] z-50 animate-in fade-in zoom-in-95 fill-mode-forwards [animation-duration:240ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex flex-col">
           <div className="flex items-center justify-between px-3 py-2.5 border-b border-border/20">
             <span className="text-xs font-medium text-foreground/70">改动列表</span>
             <div className="flex items-center gap-1">
@@ -217,8 +217,8 @@ export function ChangedFilesList({ sessionId, projectPath, className }: ChangedF
                         <TooltipContent side="bottom"><p>{file.path}</p></TooltipContent>
                       </Tooltip>
                       <div className="flex items-center gap-1 shrink-0" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                        {file.additions > 0 && <span className="text-[10px] text-green-500">+{file.additions}</span>}
-                        {file.deletions > 0 && <span className="text-[10px] text-red-500">-{file.deletions}</span>}
+                        {file.additions > 0 && <span className="text-[10px] text-[hsl(var(--success))]">+{file.additions}</span>}
+                        {file.deletions > 0 && <span className="text-[10px] text-[hsl(var(--destructive))]">-{file.deletions}</span>}
                       </div>
                     </div>
                     <div className="flex items-center gap-0.5 shrink-0">
@@ -249,8 +249,8 @@ export function ChangedFilesList({ sessionId, projectPath, className }: ChangedF
             <div className="flex items-center justify-between px-3 py-2 border-t border-border/20 text-[11px] text-muted-foreground/50">
               <span>共 {resolvedFiles.length} 个文件</span>
               <div className="flex items-center gap-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                <span className="text-green-500">+{totalAdditions}</span>
-                <span className="text-red-500">-{totalDeletions}</span>
+                <span className="text-[hsl(var(--success))]">+{totalAdditions}</span>
+                <span className="text-[hsl(var(--destructive))]">-{totalDeletions}</span>
               </div>
             </div>
           )}
@@ -302,10 +302,10 @@ export function ChangedFilesList({ sessionId, projectPath, className }: ChangedF
         <FileDiff className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.5)] shrink-0" />
         <span className="text-xs font-medium text-foreground/70">改动列表</span>
         <div className="flex items-center gap-1 ml-auto" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-          <span className={cn('text-[11px] tabular-nums', totalAdditions > 0 ? 'text-green-500' : 'text-muted-foreground/30')}>
+          <span className={cn('text-[11px] tabular-nums', totalAdditions > 0 ? 'text-[hsl(var(--success))]' : 'text-muted-foreground/30')}>
             +{totalAdditions}
           </span>
-          <span className={cn('text-[11px] tabular-nums', totalDeletions > 0 ? 'text-red-500' : 'text-muted-foreground/30')}>
+          <span className={cn('text-[11px] tabular-nums', totalDeletions > 0 ? 'text-[hsl(var(--destructive))]' : 'text-muted-foreground/30')}>
             -{totalDeletions}
           </span>
         </div>

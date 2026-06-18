@@ -112,7 +112,7 @@ export function AskUserQuestionCard({ sessionId, toolUseId, questions, submitted
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         <span className="font-medium">{questions[0]?.header || '需要你的输入'}</span>
-        {submitted && <Check className="h-4 w-4 text-green-500 ml-auto" />}
+        {submitted && <Check className="h-4 w-4 text-[hsl(var(--success))] ml-auto" />}
       </div>
       {isExpanded && (
         <div className="border-t px-3 py-3 space-y-3">
