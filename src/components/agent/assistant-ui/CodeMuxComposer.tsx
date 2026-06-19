@@ -5,10 +5,14 @@ import {
   type Unstable_DirectiveFormatter,
   type Unstable_TriggerItem,
 } from '@assistant-ui/react';
+import { LexicalComposerInput } from '@assistant-ui/react-lexical';
+import type { DirectiveChipProps } from '@assistant-ui/react-lexical';
 import {
   ArrowUp,
   ChevronLeft,
   ChevronRight,
+  FileCode2,
+  Folder,
   FolderPlus,
   Info,
   Layers,
@@ -20,24 +24,24 @@ import {
   Wrench,
   Zap,
 } from 'lucide-react';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type FC, type ReactNode } from 'react';
 
 import type { SlashCommand } from '../../../lib/slashCommands';
 import { getAllCommands } from '../../../lib/slashCommands';
 import { cn } from '../../../lib/utils';
 import { useAgentStore } from '../../../stores/agentStore';
+import { usePreviewStore, type FileTreeNodeData } from '../../../stores/previewStore';
+import { CodeMuxDirectiveChip, type CodeMuxDirectiveKind } from './CodeMuxDirectiveText';
 
 interface CodeMuxComposerProps {
   sessionId: string;
+  projectPath?: string | null;
   modelName?: string;
   modelSelector?: ReactNode;
   onStop?: () => void | Promise<void>;
 }
 
-type TriggerCategory = {
-  id: string;
-  label: string;
-};
+type TriggerCategory = { id: string; label: string };
 
 type TriggerAdapter = {
   categories(): readonly TriggerCategory[];
@@ -60,10 +64,49 @@ const COMMAND_FORMATTER: Unstable_DirectiveFormatter = {
   parse: (text) => (text ? [{ kind: 'text', text }] : []),
 };
 
-export function CodeMuxComposer({ sessionId, modelName, modelSelector, onStop }: CodeMuxComposerProps) {
+const FILE_FORMATTER: Unstable_DirectiveFormatter = {
+  serialize: (item) => `@${item.id} `,
+  parse: (text) => (text ? [{ kind: 'text', text }] : []),
+};
+
+const MAX_FILE_RESULTS = 50;
+
+type FileEntry = { name: string; relativePath: string; isDir: boolean };
+
+function flattenFileTree(nodes: FileTreeNodeData[], prefix = ''): FileEntry[] {
+  const result: FileEntry[] = [];
+  for (const node of nodes) {
+    const rel = prefix ? `${prefix}/${node.name}` : node.name;
+    if (node.isDir) {
+      result.push({ name: node.name, relativePath: rel, isDir: true });
+      if (node.children) result.push(...flattenFileTree(node.children, rel));
+    } else {
+      result.push({ name: node.name, relativePath: rel, isDir: false });
+    }
+  }
+  return result;
+}
+
+function matchFileName(query: string, fileName: string): boolean {
+  const q = query.toLowerCase();
+  const n = fileName.toLowerCase();
+  if (n.includes(q)) return true;
+  if (q.includes(' ') || q.includes('-') || q.includes('_')) {
+    return q.split(/[\s\-_]+/).filter(Boolean).every((seg) => n.includes(seg));
+  }
+  return false;
+}
+
+/** Custom inline chip for directives rendered by Lexical */
+function DirectiveChip({ directiveType, label }: DirectiveChipProps) {
+  return <CodeMuxDirectiveChip kind={getDirectiveKind(directiveType)} value={label} label={label} />;
+}
+
+const DIRECTIVE_CHIP: FC<DirectiveChipProps> = DirectiveChip;
+
+export function CodeMuxComposer({ sessionId, projectPath, modelName, modelSelector, onStop }: CodeMuxComposerProps) {
   const aui = useAui();
   const composerRootRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [isFocused, setIsFocused] = useState(false);
   const composerText = useAuiState((state) => state.composer.text);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
@@ -72,42 +115,57 @@ export function CodeMuxComposer({ sessionId, modelName, modelSelector, onStop }:
     itemsByCategory: Map<string, Unstable_TriggerItem[]>;
     categories: TriggerCategory[];
     commands: SlashCommand[];
-  }>({
-    itemsByCategory: new Map(),
-    categories: [],
-    commands: [],
-  });
+  }>({ itemsByCategory: new Map(), categories: [], commands: [] });
 
   const nextItemsByCategory = new Map<string, Unstable_TriggerItem[]>();
   for (const category of CATEGORY_ORDER) {
     nextItemsByCategory.set(
       category,
-      commands
-        .filter((command) => command.category === category)
-        .map((command) => toTriggerItem(command)),
+      commands.filter((c) => c.category === category).map((c) => toTriggerItem(c)),
     );
   }
-
   triggerDataRef.current = {
     itemsByCategory: nextItemsByCategory,
-    categories: CATEGORY_ORDER.filter(
-      (category) => (nextItemsByCategory.get(category)?.length ?? 0) > 0,
-    ).map((category) => ({
-      id: category,
-      label: CATEGORY_LABELS[category],
-    })),
+    categories: CATEGORY_ORDER.filter((c) => (nextItemsByCategory.get(c)?.length ?? 0) > 0)
+      .map((c) => ({ id: c, label: CATEGORY_LABELS[c] })),
     commands,
   };
 
   const slashAdapter = useMemo<TriggerAdapter>(
     () => ({
       categories: () => triggerDataRef.current.categories,
-      categoryItems: (categoryId: string) => triggerDataRef.current.itemsByCategory.get(categoryId) ?? [],
-      search: (query: string) => {
-        const lowered = query.trim().toLowerCase();
+      categoryItems: (id) => triggerDataRef.current.itemsByCategory.get(id) ?? [],
+      search: (query) => {
+        const q = query.trim().toLowerCase();
         return triggerDataRef.current.commands
-          .filter((command) => matchesCommand(command, lowered))
-          .map((command) => toTriggerItem(command));
+          .filter((c) => matchesCommand(c, q))
+          .map((c) => toTriggerItem(c));
+      },
+    }),
+    [],
+  );
+
+  const treeRoot = usePreviewStore((state) => state.treeRoot);
+  const fileItemsRef = useRef<FileEntry[]>([]);
+  if (projectPath && treeRoot) {
+    fileItemsRef.current = flattenFileTree(treeRoot);
+  } else {
+    fileItemsRef.current = [];
+  }
+
+  const fileAdapter = useMemo<TriggerAdapter>(
+    () => ({
+      categories: () => [],
+      categoryItems: () => [],
+      search: (query) => {
+        const items = fileItemsRef.current;
+        if (items.length === 0) return [];
+        const t = query.trim();
+        if (!t) return items.slice(0, MAX_FILE_RESULTS).map(toFileTriggerItem);
+        return items
+          .filter((f) => matchFileName(t, f.name) || matchFileName(t, f.relativePath))
+          .slice(0, MAX_FILE_RESULTS)
+          .map(toFileTriggerItem);
       },
     }),
     [],
@@ -117,43 +175,38 @@ export function CodeMuxComposer({ sessionId, modelName, modelSelector, onStop }:
 
   const insertSlash = () => {
     aui.composer().setText('/');
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(1, 1);
-    });
   };
 
   return (
     <div className="relative mx-auto flex w-full max-w-3xl flex-col">
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
+        {/* ── Slash command popover ── */}
         <ComposerPrimitive.Unstable_TriggerPopover
           char="/"
           adapter={slashAdapter}
           className="absolute bottom-full left-0 right-0 z-50 mb-3 flex max-h-[min(28rem,calc(100vh-6rem))] flex-col overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 shadow-[0_20px_54px_-30px_hsl(var(--foreground)/0.5)] backdrop-blur-lg"
         >
           <ComposerPrimitive.Unstable_TriggerPopover.Directive formatter={COMMAND_FORMATTER} />
-
           <ComposerPrimitive.Unstable_TriggerPopoverCategories className="min-h-0 overflow-y-auto py-2">
-            {(categories) =>
-              categories.map((category) => (
+            {(cats) =>
+              cats.map((cat) => (
                 <ComposerPrimitive.Unstable_TriggerPopoverCategoryItem
-                  key={category.id}
-                  categoryId={category.id}
+                  key={cat.id}
+                  categoryId={cat.id}
                   className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/46 data-highlighted:bg-muted/56"
                 >
                   <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-muted/74 text-muted-foreground">
-                    {getCategoryIcon(category.id)}
+                    {getCategoryIcon(cat.id)}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-foreground">{category.label}</div>
-                    <div className="text-xs text-muted-foreground">浏览{category.label}命令</div>
+                    <div className="text-sm font-medium text-foreground">{cat.label}</div>
+                    <div className="text-xs text-muted-foreground">浏览{cat.label}命令</div>
                   </div>
                   <ChevronRight className="h-4 w-4 text-muted-foreground" />
                 </ComposerPrimitive.Unstable_TriggerPopoverCategoryItem>
               ))
             }
           </ComposerPrimitive.Unstable_TriggerPopoverCategories>
-
           <ComposerPrimitive.Unstable_TriggerPopoverItems className="min-h-0 flex-1 overflow-y-auto py-2">
             {(items) => (
               <>
@@ -161,11 +214,8 @@ export function CodeMuxComposer({ sessionId, modelName, modelSelector, onStop }:
                   <ComposerPrimitive.Unstable_TriggerPopoverBack className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground">
                     <ChevronLeft className="h-4 w-4" />
                   </ComposerPrimitive.Unstable_TriggerPopoverBack>
-                  <div className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
-                    命令
-                  </div>
+                  <div className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">命令</div>
                 </div>
-
                 {items.map((item) => (
                   <ComposerPrimitive.Unstable_TriggerPopoverItem
                     key={item.id}
@@ -177,18 +227,50 @@ export function CodeMuxComposer({ sessionId, modelName, modelSelector, onStop }:
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span
-                          className="text-sm font-medium text-foreground"
-                          style={{ fontFamily: "'JetBrains Mono', monospace" }}
-                        >
+                        <span className="text-sm font-medium text-foreground" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
                           {item.label}
                         </span>
-                        {getItemArgsHint(item) && (
-                          <span className="text-xs text-muted-foreground">{getItemArgsHint(item)}</span>
-                        )}
+                        {getItemArgsHint(item) && <span className="text-xs text-muted-foreground">{getItemArgsHint(item)}</span>}
                       </div>
-                      {item.description && (
-                        <div className="truncate text-xs text-muted-foreground">{item.description}</div>
+                      {item.description && <div className="truncate text-xs text-muted-foreground">{item.description}</div>}
+                    </div>
+                  </ComposerPrimitive.Unstable_TriggerPopoverItem>
+                ))}
+              </>
+            )}
+          </ComposerPrimitive.Unstable_TriggerPopoverItems>
+        </ComposerPrimitive.Unstable_TriggerPopover>
+
+        {/* ── File mention popover ── */}
+        <ComposerPrimitive.Unstable_TriggerPopover
+          char="@"
+          adapter={fileAdapter}
+          className="absolute bottom-full left-0 right-0 z-50 mb-3 flex max-h-[min(20rem,calc(100vh-6rem))] flex-col overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 shadow-[0_20px_54px_-30px_hsl(var(--foreground)/0.5)] backdrop-blur-lg"
+        >
+          <ComposerPrimitive.Unstable_TriggerPopover.Directive formatter={FILE_FORMATTER} />
+          <ComposerPrimitive.Unstable_TriggerPopoverItems className="min-h-0 overflow-y-auto py-2">
+            {(items) => (
+              <>
+                <div className="flex items-center gap-2 px-3 pb-1.5">
+                  <FileCode2 className="h-3.5 w-3.5 text-muted-foreground" />
+                  <div className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">引用文件</div>
+                </div>
+                {items.length === 0 && <div className="px-3 py-4 text-center text-xs text-muted-foreground/60">无匹配文件</div>}
+                {items.map((item) => (
+                  <ComposerPrimitive.Unstable_TriggerPopoverItem
+                    key={item.id}
+                    item={item}
+                    className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/46 data-highlighted:bg-muted/56"
+                  >
+                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted/74 text-muted-foreground">
+                      {item.type === 'directory' ? <Folder className="h-3.5 w-3.5" /> : <FileCode2 className="h-3.5 w-3.5" />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <span className="truncate text-sm font-medium text-foreground" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                        {item.label}
+                      </span>
+                      {item.description && item.description !== item.label && (
+                        <div className="truncate text-xs text-muted-foreground/60">{item.description}</div>
                       )}
                     </div>
                   </ComposerPrimitive.Unstable_TriggerPopoverItem>
@@ -198,6 +280,7 @@ export function CodeMuxComposer({ sessionId, modelName, modelSelector, onStop }:
           </ComposerPrimitive.Unstable_TriggerPopoverItems>
         </ComposerPrimitive.Unstable_TriggerPopover>
 
+        {/* ── Composer ── */}
         <ComposerPrimitive.Root className="relative flex w-full flex-col">
           <div
             ref={composerRootRef}
@@ -214,19 +297,11 @@ export function CodeMuxComposer({ sessionId, modelName, modelSelector, onStop }:
                 : 'border-border/82 bg-[hsl(var(--surface-1))]/94 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.026)]',
             )}
           >
-            <ComposerPrimitive.Input
-              ref={inputRef}
+            <LexicalComposerInput
               submitMode="enter"
-              minRows={1}
-              maxRows={8}
-              placeholder="输入消息..."
-              className={cn(
-                'max-h-32 min-h-10 w-full resize-none border-0 px-2 py-1 text-sm leading-6 text-foreground outline-none ring-0 shadow-none placeholder:text-muted-foreground/70',
-                'rounded-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none',
-                'focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none',
-                '[box-shadow:none] [-webkit-appearance:none] appearance-none',
-                'bg-transparent',
-              )}
+              placeholder="输入消息... (@ 引用文件, / 命令)"
+              directiveChip={DIRECTIVE_CHIP}
+              className="relative min-h-10 w-full overflow-y-auto text-sm leading-6 text-foreground outline-none [&_.aui-lexical-input]:min-h-10 [&_.aui-lexical-input]:border-0 [&_.aui-lexical-input]:bg-transparent [&_.aui-lexical-input]:px-2 [&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:text-sm [&_.aui-lexical-input]:leading-6 [&_.aui-lexical-input]:text-foreground [&_.aui-lexical-input]:shadow-none [&_.aui-lexical-input]:outline-none [&_.aui-lexical-input]:ring-0 [&_.aui-lexical-input]:focus-visible:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:left-2 [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-sm [&_.aui-lexical-placeholder]:leading-6 [&_.aui-lexical-placeholder]:text-muted-foreground/70"
             />
 
             <div className="relative flex items-center justify-between pl-1">
@@ -241,20 +316,16 @@ export function CodeMuxComposer({ sessionId, modelName, modelSelector, onStop }:
                   /
                 </button>
               </div>
-
               <div className="flex items-center gap-2">
                 {modelSelector ?? (
                   <span className="max-w-54 truncate rounded-full border border-border/45 bg-[hsl(var(--surface-2))]/64 px-2.5 py-1 text-[11px] text-muted-foreground/74">
                     {modelName ?? ''}
                   </span>
                 )}
-
                 {isRunning ? (
                   <button
                     type="button"
-                    onClick={() => {
-                      void onStop?.();
-                    }}
+                    onClick={() => void onStop?.()}
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))] transition-all duration-200 hover:scale-105 hover:bg-[hsl(var(--destructive)/0.18)] active:scale-95"
                     title="停止"
                   >
@@ -288,75 +359,61 @@ function toTriggerItem(command: SlashCommand): Unstable_TriggerItem {
     type: 'command',
     label: `/${command.name}`,
     description: command.description,
-    metadata: {
-      category: command.category,
-      argsHint: command.argsHint ?? '',
-    },
+    metadata: { category: command.category, argsHint: command.argsHint ?? '' },
   };
 }
 
-function matchesCommand(command: SlashCommand, loweredQuery: string) {
-  if (!loweredQuery) {
-    return true;
-  }
+function toFileTriggerItem(file: FileEntry): Unstable_TriggerItem {
+  return {
+    id: file.relativePath,
+    type: file.isDir ? 'directory' : 'file',
+    label: file.name,
+    description: file.relativePath,
+  };
+}
 
+function matchesCommand(command: SlashCommand, q: string) {
+  if (!q) return true;
   return (
-    command.name.includes(loweredQuery) ||
-    command.description.toLowerCase().includes(loweredQuery) ||
-    command.alias?.some((alias) => alias.toLowerCase().includes(loweredQuery)) === true
+    command.name.includes(q) ||
+    command.description.toLowerCase().includes(q) ||
+    command.alias?.some((a) => a.toLowerCase().includes(q)) === true
   );
 }
 
 function getItemArgsHint(item: Unstable_TriggerItem) {
-  const hint = item.metadata?.argsHint;
-  return typeof hint === 'string' && hint.length > 0 ? hint : undefined;
+  const h = item.metadata?.argsHint;
+  return typeof h === 'string' && h.length > 0 ? h : undefined;
 }
 
-function getCategoryIcon(categoryId: string) {
-  switch (categoryId) {
-    case 'session':
-      return <FolderPlus className="h-4 w-4" />;
-    case 'info':
-      return <Info className="h-4 w-4" />;
-    case 'builtin':
-      return <Sparkles className="h-4 w-4" />;
-    case 'custom':
-      return <Wrench className="h-4 w-4" />;
-    case 'skill':
-      return <Zap className="h-4 w-4" />;
-    default:
-      return <Terminal className="h-4 w-4" />;
+function getCategoryIcon(id: string) {
+  switch (id) {
+    case 'session': return <FolderPlus className="h-4 w-4" />;
+    case 'info': return <Info className="h-4 w-4" />;
+    case 'builtin': return <Sparkles className="h-4 w-4" />;
+    case 'custom': return <Wrench className="h-4 w-4" />;
+    case 'skill': return <Zap className="h-4 w-4" />;
+    default: return <Terminal className="h-4 w-4" />;
   }
 }
 
-function getCommandIcon(commandId: string) {
-  switch (commandId) {
-    case 'new':
-      return <FolderPlus className="h-4 w-4" />;
-    case 'clear':
-      return <Layers className="h-4 w-4" />;
-    case 'compact':
-      return <Zap className="h-4 w-4" />;
-    case 'cost':
-    case 'status':
-    case 'explain':
-      return <Info className="h-4 w-4" />;
-    case 'review':
-    case 'code-review':
-    case 'security-review':
-    case 'deep-research':
-      return <Search className="h-4 w-4" />;
-    case 'test':
-    case 'verify':
-      return <TestTube2 className="h-4 w-4" />;
-    case 'fix':
-    case 'debug':
-    case 'refactor':
-      return <Wrench className="h-4 w-4" />;
-    case 'run':
-    case 'init':
-      return <Terminal className="h-4 w-4" />;
-    default:
-      return <Sparkles className="h-4 w-4" />;
+function getCommandIcon(id: string) {
+  switch (id) {
+    case 'new': return <FolderPlus className="h-4 w-4" />;
+    case 'clear': return <Layers className="h-4 w-4" />;
+    case 'compact': return <Zap className="h-4 w-4" />;
+    case 'cost': case 'status': case 'explain': return <Info className="h-4 w-4" />;
+    case 'review': case 'code-review': case 'security-review': case 'deep-research': return <Search className="h-4 w-4" />;
+    case 'test': case 'verify': return <TestTube2 className="h-4 w-4" />;
+    case 'fix': case 'debug': case 'refactor': return <Wrench className="h-4 w-4" />;
+    case 'run': case 'init': return <Terminal className="h-4 w-4" />;
+    default: return <Sparkles className="h-4 w-4" />;
   }
+}
+
+function getDirectiveKind(type: string): CodeMuxDirectiveKind {
+  if (type === 'file' || type === 'directory') {
+    return type;
+  }
+  return 'command';
 }

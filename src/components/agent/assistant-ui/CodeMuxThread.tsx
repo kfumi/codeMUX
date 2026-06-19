@@ -27,6 +27,7 @@ import {
   CodeMuxTextMessagePart,
   CodeMuxToolCallMessagePart,
 } from './CodeMuxMessageParts';
+import { CodeMuxDirectiveText } from './CodeMuxDirectiveText';
 import { buildAssistantResultTargetMap } from './assistantResultTargets';
 import { RunningElapsedTimer } from './running-elapsed';
 
@@ -159,7 +160,7 @@ function UserMessage({ message, sourceEventIndex }: { message: MessageState; sou
     >
       <div className="flex max-w-[78%] flex-col items-end">
         <div className="rounded-xl rounded-tr-md border border-[hsl(var(--primary)/0.28)] bg-[linear-gradient(180deg,hsl(var(--primary)/0.92),hsl(var(--primary)/0.78))] px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-[0_12px_28px_-20px_hsl(var(--primary)/0.48)]">
-          {text}
+          <CodeMuxDirectiveText text={text} tone="inverted" />
         </div>
         <MessageFooter timestamp={timestamp} className="justify-end" />
       </div>

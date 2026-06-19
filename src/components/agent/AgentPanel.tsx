@@ -378,6 +378,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
               </div>
               <CodeMuxComposer
                 sessionId={sessionId}
+                projectPath={project?.path}
                 modelSelector={(
                   <CodeMuxModelSelector
                     value={model || ''}

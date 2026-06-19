@@ -151,6 +151,10 @@ const groupedToolEvents: AgentMessage[] = [
   },
 ];
 
+const directiveUserEvents: AgentMessage[] = [
+  { kind: 'user', data: { content: '/review @src/App.tsx please check this' } },
+];
+
 const originalScrollTo = HTMLElement.prototype.scrollTo;
 
 function Harness({ sessionId }: { sessionId: string }) {
@@ -187,6 +191,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-timestamp': timestampOnlyAssistantEvents,
         'session-reasoning': reasoningEvents,
         'session-grouped-tools': groupedToolEvents,
+        'session-directives': directiveUserEvents,
       },
       eventTimestamps: {
         'session-1': [1, 2],
@@ -275,6 +280,15 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(toolGroup).toBeTruthy();
     expect(toolGroup?.getAttribute('data-variant')).toBe('ghost');
     expect(screen.getByText('2 次工具调用')).toBeTruthy();
+  });
+
+  it('renders directive text in user messages as chips', () => {
+    const { container } = render(<Harness sessionId="session-directives" />);
+
+    expect(screen.getByText('/review').closest('[data-directive-type="command"]')).toBeTruthy();
+    expect(screen.getByText('App.tsx').closest('[data-directive-type="file"]')).toBeTruthy();
+    expect(screen.getByText('please check this')).toBeTruthy();
+    expect(container.querySelector('[data-directive-value="@src/App.tsx"] svg')).toBeNull();
   });
 
   it('keeps the first completion time when duplicate live tool results arrive', () => {
