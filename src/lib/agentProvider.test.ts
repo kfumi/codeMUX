@@ -12,6 +12,7 @@ const config: AppConfig = {
       anthropic_base_url: 'https://api.anthropic.com',
       openai_base_url: 'https://openrouter.ai/api/v1',
       default_model: 'claude-sonnet-4-20250514',
+      models: ['claude-sonnet-4-20250514', 'claude-opus-4-1'],
     },
     {
       id: 'codex-provider',
@@ -20,6 +21,7 @@ const config: AppConfig = {
       anthropic_base_url: 'https://anthropic-proxy.internal',
       openai_base_url: 'https://api.openai.com/v1',
       default_model: 'o4-mini',
+      models: ['o4-mini', 'gpt-5'],
       context_1m: true,
     },
   ],
@@ -52,7 +54,8 @@ describe('resolveAgentProviderConfig', () => {
       provider: expect.objectContaining({ id: 'codex-provider' }),
       apiKey: 'openai-key',
       baseUrl: 'https://anthropic-proxy.internal',
-      model: 'o4-mini[1m]',
+      model: 'o4-mini',
+      runtimeModel: 'o4-mini[1m]',
     });
   });
 
@@ -67,6 +70,7 @@ describe('resolveAgentProviderConfig', () => {
       apiKey: 'openai-key',
       baseUrl: 'https://api.openai.com',
       model: 'o4-mini',
+      runtimeModel: 'o4-mini',
     });
   });
 
@@ -81,6 +85,47 @@ describe('resolveAgentProviderConfig', () => {
       provider: expect.objectContaining({ id: 'claude-provider' }),
       baseUrl: 'https://openrouter.ai/api',
       model: 'claude-sonnet-4-20250514',
+      runtimeModel: 'claude-sonnet-4-20250514',
+    });
+  });
+
+  it('lets the selected session model override the provider default model', () => {
+    expect(
+      resolveAgentProviderConfig({
+        agentKind: 'codex',
+        config,
+        sessionModel: 'gpt-5',
+      }),
+    ).toMatchObject({
+      provider: expect.objectContaining({ id: 'codex-provider' }),
+      model: 'gpt-5',
+      runtimeModel: 'gpt-5',
+    });
+  });
+
+  it('keeps the selected session model display-safe while applying the Claude 1M suffix only at runtime', () => {
+    expect(
+      resolveAgentProviderConfig({
+        agentKind: 'claude_code',
+        config,
+        sessionModel: 'claude-opus-4-1',
+      }),
+    ).toMatchObject({
+      model: 'claude-opus-4-1',
+      runtimeModel: 'claude-opus-4-1[1m]',
+    });
+  });
+
+  it('normalizes legacy Claude 1M session model names for display without duplicating the runtime suffix', () => {
+    expect(
+      resolveAgentProviderConfig({
+        agentKind: 'claude_code',
+        config,
+        sessionModel: 'claude-opus-4-1[1m]',
+      }),
+    ).toMatchObject({
+      model: 'claude-opus-4-1',
+      runtimeModel: 'claude-opus-4-1[1m]',
     });
   });
 });

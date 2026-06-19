@@ -65,6 +65,8 @@ pub struct Provider {
     pub anthropic_base_url: String,
     pub openai_base_url: String,
     pub default_model: String,
+    #[serde(default)]
+    pub models: Vec<String>,
     /// 输入 token 单价 ($/1M tokens)
     #[serde(default)]
     pub input_price: Option<f64>,
@@ -178,6 +180,7 @@ impl Default for AppConfig {
                 anthropic_base_url: "https://api.anthropic.com".to_string(),
                 openai_base_url: String::new(),
                 default_model: "claude-sonnet-4-20250514".to_string(),
+                models: vec!["claude-sonnet-4-20250514".to_string()],
                 input_price: None,
                 cache_read_price: None,
                 output_price: None,
@@ -209,5 +212,26 @@ mod tests {
         assert_eq!(config.agent_configs.claude_code.executable_mode, "auto");
         assert!(config.agent_configs.claude_code.resume_sessions);
         assert_eq!(config.agent_configs.codex.sdk_mode, "responses");
+    }
+
+    #[test]
+    fn old_provider_json_deserializes_without_models() {
+        let raw = serde_json::json!({
+            "providers": [{
+                "id": "provider-1",
+                "name": "Provider",
+                "api_key": "key",
+                "anthropic_base_url": "https://api.anthropic.com",
+                "openai_base_url": "https://api.openai.com/v1",
+                "default_model": "claude-sonnet-4-20250514"
+            }],
+            "active_provider_id": "provider-1",
+            "theme": "System"
+        });
+
+        let config: AppConfig = serde_json::from_value(raw).unwrap();
+
+        assert_eq!(config.providers[0].models, Vec::<String>::new());
+        assert_eq!(AppConfig::default().providers[0].models, vec!["claude-sonnet-4-20250514"]);
     }
 }

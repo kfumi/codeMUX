@@ -29,6 +29,7 @@ type CodexSessionBootstrap = {
   upstreamBaseUrl?: string;
   runtimeBaseUrl?: string;
   model?: string;
+  reasoningEffort?: string;
 };
 
 export function emit(obj: unknown): void {
@@ -88,6 +89,7 @@ export class CodexSessionRuntime {
       apiKey: cmd.apiKey,
       upstreamBaseUrl: cmd.baseUrl,
       model: cmd.model,
+      reasoningEffort: normalizeCodexReasoningEffort(cmd.reasoningEffort),
     };
     const nextFingerprint = JSON.stringify(requestedConfig);
 
@@ -348,6 +350,7 @@ export class CodexSessionRuntime {
       sandboxMode: 'danger-full-access' as const,
       approvalPolicy: 'never' as const,
       networkAccessEnabled: true,
+      ...(this.config.reasoningEffort ? { modelReasoningEffort: this.config.reasoningEffort as any } : {}),
     };
   }
 
@@ -562,4 +565,8 @@ export class CodexSessionRuntime {
     });
     this.streamingItemState.delete(itemId);
   }
+}
+
+function normalizeCodexReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | undefined {
+  return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
 }

@@ -32,6 +32,7 @@ pub struct Session {
     pub agent_kind: AgentKind,
     pub provider_id: Option<String>,
     pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub mode: Option<String>,
     pub project_id: Option<String>,
     pub created_at: String,
@@ -112,6 +113,7 @@ pub fn create_session_with_mode(conn: &Connection, title: &str, agent_kind: Agen
         agent_kind,
         provider_id: None,
         model: None,
+        reasoning_effort: Some("medium".to_string()),
         mode: Some(mode.to_string()),
         project_id: None,
         created_at: now.clone(),
@@ -134,6 +136,7 @@ pub fn create_session_for_project(conn: &Connection, title: &str, agent_kind: Ag
         agent_kind,
         provider_id: None,
         model: None,
+        reasoning_effort: Some("medium".to_string()),
         mode: Some(mode.to_string()),
         project_id: Some(project_id.to_string()),
         created_at: now.clone(),
@@ -142,7 +145,7 @@ pub fn create_session_for_project(conn: &Connection, title: &str, agent_kind: Ag
 }
 
 pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, mode, project_id, created_at, updated_at FROM sessions ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, project_id, created_at, updated_at FROM sessions ORDER BY updated_at DESC")?;
 
     let sessions = stmt
         .query_map([], |row| {
@@ -152,10 +155,11 @@ pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
                 agent_kind: validate_agent_kind(&row.get::<_, String>(2)?)?,
                 provider_id: row.get(3)?,
                 model: row.get(4)?,
-                mode: row.get(5)?,
-                project_id: row.get(6)?,
-                created_at: row.get(7)?,
-                updated_at: row.get(8)?,
+                reasoning_effort: row.get(5)?,
+                mode: row.get(6)?,
+                project_id: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
             })
         })?
         .collect::<Result<Vec<_>>>()?;
@@ -235,18 +239,18 @@ pub fn touch_session(conn: &Connection, session_id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn update_session_provider(conn: &Connection, session_id: &str, provider_id: &str, model: &str) -> Result<()> {
+pub fn update_session_provider(conn: &Connection, session_id: &str, provider_id: &str, model: &str, reasoning_effort: Option<&str>) -> Result<()> {
     let now = Utc::now().to_rfc3339();
     conn.execute(
-        "UPDATE sessions SET provider_id = ?1, model = ?2, updated_at = ?3 WHERE id = ?4",
-        params![provider_id, model, now, session_id],
+        "UPDATE sessions SET provider_id = ?1, model = ?2, reasoning_effort = COALESCE(?3, reasoning_effort, 'medium'), updated_at = ?4 WHERE id = ?5",
+        params![provider_id, model, reasoning_effort, now, session_id],
     )?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{get_agent_session_mapping, get_all_sessions, upsert_agent_session_mapping};
+    use super::{get_agent_session_mapping, get_all_sessions, update_session_provider, upsert_agent_session_mapping};
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
     use rusqlite::Connection;
@@ -303,5 +307,22 @@ mod tests {
 
         let loaded = get_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode).unwrap();
         assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn updates_session_reasoning_effort_with_provider() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-1", "Test", "codex", "agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+
+        update_session_provider(&conn, "session-1", "provider-1", "gpt-5", Some("high")).unwrap();
+
+        let sessions = get_all_sessions(&conn).unwrap();
+        assert_eq!(sessions[0].model.as_deref(), Some("gpt-5"));
+        assert_eq!(sessions[0].reasoning_effort.as_deref(), Some("high"));
     }
 }

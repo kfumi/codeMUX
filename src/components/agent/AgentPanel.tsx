@@ -3,8 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getStoredAgentCwd } from '../../lib/sessionCwd';
 import { resolveAgentProviderConfig } from '../../lib/agentProvider';
+import { getProviderModelList } from '../../lib/providerModels';
 import { cn } from '../../lib/utils';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
+import type { ReasoningEffort } from '../../types/session';
 import { agentApi, sessionApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
 import { usePreviewStore } from '../../stores/previewStore';
@@ -19,8 +21,10 @@ import { Input } from '../ui/input';
 import { ChangedFilesList } from './ChangedFilesList';
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
+import { CodeMuxModelSelector } from './assistant-ui/CodeMuxModelSelector';
 import { CodeMuxThread } from './assistant-ui/CodeMuxThread';
 import { computeContextUsageFromEvents } from './contextUsage';
+import { formatModelDisplayName } from './modelDisplay';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { TodoList } from './TodoList';
 import { supportsCapability } from './agentCapabilities';
@@ -42,14 +46,24 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const todos = useAgentStore((state) => state.todos[sessionId] ?? EMPTY_TODOS);
   const mcpRuntimeStatus = useAgentStore((state) => state.mcpRuntimeStatus[sessionId] ?? null);
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
+  const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
 
   const session = sessions.find((entry) => entry.id === sessionId);
   const project = session?.project_id ? projects.find((entry) => entry.id === session.project_id) : null;
-  const { provider: resolvedProvider, apiKey, baseUrl, model } = resolveAgentProviderConfig({
+  const { provider: resolvedProvider, apiKey, baseUrl, model, runtimeModel } = resolveAgentProviderConfig({
     agentKind: session?.agent_kind ?? 'claude_code',
     config,
     sessionProviderId: session?.provider_id,
+    sessionModel: session?.model,
   });
+  const providerModels = useMemo(() => getProviderModelList(resolvedProvider), [resolvedProvider]);
+  const reasoningEffort = session?.reasoning_effort ?? 'medium';
+  const agentKind = session?.agent_kind ?? 'claude_code';
+  const formatSelectedProviderModel = useCallback((item: string) => formatModelDisplayName({
+    model: item,
+    agentKind,
+    usesLargeContext: resolvedProvider?.context_1m,
+  }), [agentKind, resolvedProvider?.context_1m]);
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
@@ -100,7 +114,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       sessionId,
       cwd: effectiveCwd,
       providerId: resolvedProvider?.id || null,
-      model: model || null,
+      model: runtimeModel || null,
+      reasoningEffort,
       hasApiKey: Boolean(apiKey),
       baseUrl: baseUrl || null,
     });
@@ -110,7 +125,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
 
     ensuredSessionsRef.current.add(ensureKey);
-    agentApi.ensureSession(sessionId, effectiveCwd, undefined, apiKey, baseUrl, model).then(async () => {
+    agentApi.ensureSession(sessionId, effectiveCwd, undefined, apiKey, baseUrl, runtimeModel, reasoningEffort).then(async () => {
       if (baseUrl) {
         try {
           if (new URL(baseUrl).host.toLowerCase() !== 'api.openai.com') {
@@ -125,37 +140,105 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }).catch(() => {
       ensuredSessionsRef.current.delete(ensureKey);
     });
-  }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, model, setProxyRunning]);
+  }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, runtimeModel, reasoningEffort, setProxyRunning]);
 
   const contextUsage = useMemo(
     () => computeContextUsageFromEvents(events, {
-      model: session?.model,
+      model: runtimeModel,
       sessionProviderUsesLargeContext: !!resolvedProvider?.context_1m,
       activeProviderUsesLargeContext: !!resolvedProvider?.context_1m,
     }),
-    [events, session?.model, resolvedProvider?.context_1m],
+    [events, runtimeModel, resolvedProvider?.context_1m],
   );
 
   const handleSend = async (content: string) => {
     const effectiveCwd = project?.path || cwd;
+    const latestSession = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId) ?? session;
+    const latestReasoningEffort = latestSession?.reasoning_effort ?? reasoningEffort;
+    const latestProviderConfig = resolveAgentProviderConfig({
+      agentKind: latestSession?.agent_kind ?? session?.agent_kind ?? 'claude_code',
+      config,
+      sessionProviderId: latestSession?.provider_id ?? session?.provider_id,
+      sessionModel: latestSession?.model ?? session?.model ?? model,
+    });
 
-    if (session && !session.provider_id && resolvedProvider?.id && model) {
-      sessionApi.updateProvider(sessionId, resolvedProvider.id, model).catch(() => {});
+    if (latestSession && latestProviderConfig.provider?.id && latestProviderConfig.model) {
+      sessionApi.updateProvider(sessionId, latestProviderConfig.provider.id, latestProviderConfig.model, latestReasoningEffort).catch(() => {});
       useSessionStore.setState((state) => ({
         sessions: state.sessions.map((entry) =>
-          entry.id === sessionId ? { ...entry, provider_id: resolvedProvider.id, model } : entry,
+          entry.id === sessionId
+            ? {
+                ...entry,
+                provider_id: latestProviderConfig.provider!.id,
+                model: latestProviderConfig.model!,
+                reasoning_effort: latestReasoningEffort,
+              }
+            : entry,
         ),
       }));
     }
 
     try {
-      await startQuery(sessionId, content, effectiveCwd, apiKey, baseUrl, model);
+      await startQuery(
+        sessionId,
+        content,
+        effectiveCwd,
+        latestProviderConfig.apiKey,
+        latestProviderConfig.baseUrl,
+        latestProviderConfig.runtimeModel,
+        latestReasoningEffort,
+      );
     } catch (error) {
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
       }));
     }
   };
+
+  const handleModelChange = useCallback(async (nextModel: string) => {
+    if (!session || !resolvedProvider?.id || !nextModel || nextModel === (session.model || model)) {
+      return;
+    }
+
+    useSessionStore.setState((state) => ({
+      sessions: state.sessions.map((entry) =>
+        entry.id === sessionId ? { ...entry, provider_id: resolvedProvider.id, model: nextModel, reasoning_effort: reasoningEffort } : entry,
+      ),
+    }));
+
+    try {
+      await sessionApi.updateProvider(sessionId, resolvedProvider.id, nextModel, reasoningEffort);
+    } catch (error) {
+      useAgentStore.setState((state) => ({
+        error: { ...state.error, [sessionId]: String(error) },
+      }));
+    }
+  }, [model, reasoningEffort, resolvedProvider?.id, session, sessionId]);
+
+  const handleReasoningEffortChange = useCallback(async (nextEffort: ReasoningEffort) => {
+    if (!session || session.reasoning_effort === nextEffort) {
+      return;
+    }
+
+    const nextModel = model || session.model || '';
+    useSessionStore.setState((state) => ({
+      sessions: state.sessions.map((entry) =>
+        entry.id === sessionId ? { ...entry, reasoning_effort: nextEffort } : entry,
+      ),
+    }));
+
+    if (!resolvedProvider?.id || !nextModel) {
+      return;
+    }
+
+    try {
+      await sessionApi.updateProvider(sessionId, resolvedProvider.id, nextModel, nextEffort);
+    } catch (error) {
+      useAgentStore.setState((state) => ({
+        error: { ...state.error, [sessionId]: String(error) },
+      }));
+    }
+  }, [model, resolvedProvider?.id, session, sessionId]);
 
   const showInfoDialog = useCallback((title: string, content: string) => {
     setInfoTitle(title);
@@ -235,11 +318,11 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           </DropdownMenuItem>
         </DropdownMenu>
         <div className="flex-1" />
-        {contextUsage.usedTokens > 0 && supportsCapability(session?.agent_kind ?? 'claude_code', 'supports_cost') && (
+        {contextUsage.usedTokens > 0 && supportsCapability(agentKind, 'supports_cost') && (
           <ContextDisplay
             usedTokens={contextUsage.usedTokens}
             totalTokens={contextUsage.totalTokens}
-            modelName={session?.model || resolvedProvider?.default_model}
+            modelName={runtimeModel || model || resolvedProvider?.default_model}
             inputTokens={contextUsage.inputTokens}
             cachedTokens={contextUsage.cachedTokens}
             outputTokens={contextUsage.outputTokens}
@@ -287,7 +370,17 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
               </div>
               <CodeMuxComposer
                 sessionId={sessionId}
-                modelName={session?.model || resolvedProvider?.default_model}
+                modelSelector={(
+                  <CodeMuxModelSelector
+                    value={model || ''}
+                    models={providerModels}
+                    onChange={handleModelChange}
+                    reasoningEffort={reasoningEffort}
+                    onReasoningEffortChange={handleReasoningEffortChange}
+                    getDisplayName={formatSelectedProviderModel}
+                    disabled={isRunning}
+                  />
+                )}
                 onStop={() => interrupt(sessionId)}
               />
             </div>

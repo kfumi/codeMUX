@@ -1,5 +1,5 @@
 import { invoke, Channel } from '@tauri-apps/api/core';
-import type { AgentKind, Session, SessionMode } from '../types/session';
+import type { AgentKind, ReasoningEffort, Session, SessionMode } from '../types/session';
 import type { AgentConfigUpdateMap, AppConfig, Provider, Theme } from '../types/provider';
 import type { Project } from '../types/project';
 import type { McpServer } from '../types/mcp';
@@ -67,6 +67,7 @@ function summarizeInvokeArgs(args?: Record<string, unknown>) {
   if (typeof args.basePath === 'string') summary.basePath = args.basePath;
   if (typeof args.cwd === 'string') summary.cwd = args.cwd;
   if (typeof args.model === 'string') summary.model = args.model;
+  if (typeof args.reasoningEffort === 'string') summary.reasoningEffort = args.reasoningEffort;
   if (typeof args.theme === 'string') summary.theme = args.theme;
   if (typeof args.mode === 'string') summary.mode = args.mode;
   if (typeof args.name === 'string') summary.name = args.name;
@@ -106,7 +107,8 @@ export const sessionApi = {
   delete: (sessionId: string): Promise<void> => invokeLogged('delete_session', { sessionId }),
   updateTitle: (sessionId: string, title: string): Promise<void> => invokeLogged('update_session_title', { sessionId, title }),
   touch: (sessionId: string): Promise<void> => invokeLogged('touch_session', { sessionId }),
-  updateProvider: (sessionId: string, providerId: string, model: string): Promise<void> => invokeLogged('update_session_provider', { sessionId, providerId, model }),
+  updateProvider: (sessionId: string, providerId: string, model: string, reasoningEffort?: ReasoningEffort): Promise<void> =>
+    invokeLogged('update_session_provider', { sessionId, providerId, model, reasoningEffort }),
 };
 
 export const agentApi = {
@@ -117,12 +119,13 @@ export const agentApi = {
     apiKey?: string,
     baseUrl?: string,
     model?: string,
+    reasoningEffort?: ReasoningEffort,
   ): Promise<void> => {
     if (onEvent) {
       agentEventListeners.set(sessionId, onEvent);
     }
     const channel = getAgentChannel(sessionId);
-    return invokeLogged('ensure_agent_session', { sessionId, cwd, channel, apiKey, baseUrl, model });
+    return invokeLogged('ensure_agent_session', { sessionId, cwd, channel, apiKey, baseUrl, model, reasoningEffort });
   },
   sendInput: (
     sessionId: string,
@@ -136,9 +139,10 @@ export const agentApi = {
     apiKey?: string,
     baseUrl?: string,
     model?: string,
+    reasoningEffort?: ReasoningEffort,
   ): Promise<void> => {
     const channel = createAgentChannel(sessionId, onEvent);
-    return invokeLogged('start_agent_session', { sessionId, prompt, cwd, channel, apiKey, baseUrl, model });
+    return invokeLogged('start_agent_session', { sessionId, prompt, cwd, channel, apiKey, baseUrl, model, reasoningEffort });
   },
   interrupt: (sessionId: string): Promise<void> => invokeLogged('interrupt_agent_session', { sessionId }),
   shutdown: (sessionId: string): Promise<void> => invokeLogged('shutdown_agent', { sessionId }),

@@ -60,4 +60,35 @@ describe('computeContextUsageFromEvents', () => {
       outputTokens: 20,
     });
   });
+
+  it('uses the Claude 1M runtime model suffix for the fallback context limit', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Claude reply' }],
+            usage: {
+              input_tokens: 100,
+              output_tokens: 50,
+            },
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    expect(computeContextUsageFromEvents(events, {
+      model: 'claude-sonnet-4-20250514[1m]',
+      sessionProviderUsesLargeContext: true,
+      activeProviderUsesLargeContext: true,
+    })).toMatchObject({
+      usedTokens: 150,
+      totalTokens: 1_000_000,
+    });
+  });
 });

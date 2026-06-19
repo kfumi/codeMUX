@@ -6,6 +6,8 @@ describe('new session store', () => {
   beforeEach(() => {
     useNewSessionStore.setState({
       selectedAgentKind: 'claude_code',
+      selectedModel: null,
+      selectedReasoningEffort: 'medium',
       draftProjectId: null,
       isDraftOpen: false,
     });
@@ -19,6 +21,18 @@ describe('new session store', () => {
     useNewSessionStore.getState().setSelectedAgentKind('codex');
 
     expect(useNewSessionStore.getState().selectedAgentKind).toBe('codex');
+  });
+
+  it('tracks and clears the draft model selection', () => {
+    useNewSessionStore.getState().setSelectedModel('gpt-5');
+    useNewSessionStore.getState().setSelectedReasoningEffort('high');
+
+    expect(useNewSessionStore.getState().selectedModel).toBe('gpt-5');
+    expect(useNewSessionStore.getState().selectedReasoningEffort).toBe('high');
+
+    useNewSessionStore.getState().openDraft();
+    expect(useNewSessionStore.getState().selectedModel).toBeNull();
+    expect(useNewSessionStore.getState().selectedReasoningEffort).toBe('medium');
   });
 
   it('opens a global draft without a project', () => {

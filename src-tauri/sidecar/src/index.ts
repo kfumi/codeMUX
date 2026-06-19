@@ -31,6 +31,7 @@ type SessionBootstrap = {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  reasoningEffort?: string;
   skills?: string[];
 };
 
@@ -226,6 +227,7 @@ export class SessionRuntime {
       apiKey: cmd.apiKey,
       baseUrl: cmd.baseUrl,
       model: cmd.model,
+      reasoningEffort: normalizeReasoningEffort(cmd.reasoningEffort),
       skills: cmd.skills,
     };
   }
@@ -506,6 +508,9 @@ export class SessionRuntime {
     if (config.model) {
       options.model = config.model;
     }
+    if (config.reasoningEffort) {
+      options.effort = config.reasoningEffort;
+    }
     if (claudeSessionId) {
       options.resume = claudeSessionId;
       process.stderr.write(`[sidecar] Resuming Claude session: ${claudeSessionId}\n`);
@@ -681,6 +686,10 @@ export class SessionRuntime {
     this.turnActive = false;
     emit({ type: 'sidecar_query_done' });
   }
+}
+
+function normalizeReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | undefined {
+  return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
 }
 
 const runtime = new SessionRuntime();

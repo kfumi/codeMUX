@@ -20,6 +20,7 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             agent_kind TEXT NOT NULL DEFAULT 'claude_code',
             provider_id TEXT,
             model TEXT,
+            reasoning_effort TEXT DEFAULT 'medium',
             mode TEXT NOT NULL DEFAULT 'chat',
             project_id TEXT,
             created_at TEXT NOT NULL,
@@ -94,6 +95,14 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             "ALTER TABLE sessions ADD COLUMN agent_kind TEXT NOT NULL DEFAULT 'claude_code'",
             [],
         );
+    }
+
+    // Migration: add reasoning_effort column if missing
+    let has_reasoning_effort: bool = conn
+        .prepare("SELECT reasoning_effort FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_reasoning_effort {
+        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN reasoning_effort TEXT DEFAULT 'medium'", []);
     }
 
     let _ = conn.execute("DROP TABLE IF EXISTS tool_calls", []);

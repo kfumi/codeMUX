@@ -22,6 +22,7 @@ import type {
   TodoItem,
   ChangedFile,
 } from '../types/agent';
+import type { ReasoningEffort } from '../types/session';
 
 export type AgentMessage =
   | { kind: 'user'; data: { content: string } }
@@ -72,7 +73,7 @@ interface AgentState {
   acknowledgedFiles: Record<string, Set<string>>;
 
   /** Start a new agent query */
-  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => Promise<void>;
+  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort) => Promise<void>;
   /** Interrupt the current query for a specific session */
   interrupt: (sessionId: string) => Promise<void>;
   /** Clear events for a session */
@@ -736,15 +737,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   fileOriginals: {},
   acknowledgedFiles: {},
 
-  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string) => {
+  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort) => {
     clearPendingStreaming(sessionId);
-    logger.info('Starting agent query', {
+    logger.info('MODEL_TRACE startQuery dispatching to Tauri', {
       sessionId,
       cwd,
-      model: model || 'default',
+      runtimeModel: model || 'default',
+      reasoningEffort: reasoningEffort || 'medium',
       promptLength: prompt.length,
       hasApiKey: Boolean(apiKey),
-      hasBaseUrl: Boolean(baseUrl),
+      baseUrl: baseUrl || null,
     });
     // Clear force-stopped flag when starting a new query
     set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
@@ -1139,7 +1141,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             isError: event.kind === 'error' || (event.kind === 'result' && Boolean(event.data?.is_error)),
           });
         }
-      }, apiKey, baseUrl, model);
+      }, apiKey, baseUrl, model, reasoningEffort);
     } catch (err) {
       logger.error('Agent query failed to start or stream', { sessionId, cwd, model }, serializeError(err));
       set((s) => {

@@ -607,6 +607,7 @@ fn build_ensure_session_command(
     api_key: Option<String>,
     base_url: Option<String>,
     model: Option<String>,
+    reasoning_effort: Option<String>,
 ) -> serde_json::Value {
     let resolved_cwd = if cwd == "." {
         std::env::var("USERPROFILE")
@@ -630,6 +631,9 @@ fn build_ensure_session_command(
     }
     if let Some(m) = model {
         cmd["model"] = serde_json::Value::String(m);
+    }
+    if let Some(effort) = reasoning_effort {
+        cmd["reasoningEffort"] = serde_json::Value::String(effort);
     }
     if let Ok(parsed_agent_kind) = AgentKind::from_str(agent_kind) {
         match get_agent_session_id(state, session_id, parsed_agent_kind) {
@@ -682,13 +686,15 @@ pub async fn ensure_agent_session(
     api_key: Option<String>,
     base_url: Option<String>,
     model: Option<String>,
+    reasoning_effort: Option<String>,
 ) -> Result<(), String> {
     info!(
         target: "agent",
-        "Ensuring agent session session_id={} cwd={} model={} has_api_key={} has_base_url={}",
+        "Ensuring agent session session_id={} cwd={} model={} reasoning_effort={} has_api_key={} has_base_url={}",
         session_id,
         cwd,
         model.as_deref().unwrap_or("default"),
+        reasoning_effort.as_deref().unwrap_or("medium"),
         api_key.as_ref().map(|key| !key.is_empty()).unwrap_or(false),
         base_url.as_ref().map(|url| !url.is_empty()).unwrap_or(false)
     );
@@ -707,7 +713,7 @@ pub async fn ensure_agent_session(
         sidecars.get(&session_id).map(|h| h.stderr_lines.clone())
     };
 
-    let cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model);
+    let cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model, reasoning_effort);
 
     // If the proxy is already running (e.g. started manually from settings),
     // tell the sidecar to use it directly instead of starting a new one.
@@ -756,6 +762,7 @@ pub async fn start_agent_session(
     api_key: Option<String>,
     base_url: Option<String>,
     model: Option<String>,
+    reasoning_effort: Option<String>,
 ) -> Result<(), String> {
     info!(target: "agent", "Starting agent session wrapper for session_id={}", session_id);
 
@@ -766,7 +773,7 @@ pub async fn start_agent_session(
     };
 
     ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
-    let ensure_cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model);
+    let ensure_cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model, reasoning_effort);
 
     send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 

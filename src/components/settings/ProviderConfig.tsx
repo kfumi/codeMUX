@@ -1,27 +1,15 @@
 import { useState } from 'react';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Provider } from '../../types/provider';
-import type { ModelInfo } from '../../lib/tauri';
+import { getProviderModelList, modelsFromText, modelsToText } from '../../lib/providerModels';
 import { normalizeOpenAIBaseUrl } from '../../lib/providerUrls';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '../ui/select';
 import { Loader2, Eye, EyeOff, Zap } from 'lucide-react';
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
-}
-
-function groupModels(models: ModelInfo[]): Map<string, ModelInfo[]> {
-  const groups = new Map<string, ModelInfo[]>();
-  for (const m of models) {
-    const key = m.owned_by || 'unknown';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(m);
-  }
-  // Sort groups by key alphabetically
-  return new Map([...groups.entries()].sort(([a], [b]) => a.localeCompare(b)));
 }
 
 export function ProviderConfigPanel() {
@@ -30,9 +18,9 @@ export function ProviderConfigPanel() {
   const activeId = config?.active_provider_id ?? null;
 
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
+  const [modelText, setModelText] = useState('');
   const [isNew, setIsNew] = useState(false);
   const [showKey, setShowKey] = useState(false);
-  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -43,9 +31,9 @@ export function ProviderConfigPanel() {
 
   const openEdit = (provider: Provider) => {
     setEditingProvider({ ...provider });
+    setModelText(modelsToText(getProviderModelList(provider)));
     setIsNew(false);
     setShowKey(false);
-    setAvailableModels([]);
     setFetchStatus('idle');
     setDeleteConfirm(false);
     setSaveError('');
@@ -59,10 +47,11 @@ export function ProviderConfigPanel() {
       anthropic_base_url: '',
       openai_base_url: '',
       default_model: '',
+      models: [],
     });
+    setModelText('');
     setIsNew(true);
     setShowKey(false);
-    setAvailableModels([]);
     setFetchStatus('idle');
     setDeleteConfirm(false);
     setSaveError('');
@@ -80,19 +69,22 @@ export function ProviderConfigPanel() {
     setSaveError('');
 
     const missing: string[] = [];
+    const models = modelsFromText(modelText);
     if (!editingProvider.name?.trim()) missing.push('供应商名称');
     if (!editingProvider.api_key?.trim()) missing.push('API Key');
     if (!editingProvider.anthropic_base_url?.trim()) missing.push('Anthropic Base URL');
     if (!editingProvider.openai_base_url?.trim()) missing.push('OpenAI Base URL');
-    if (!editingProvider.default_model?.trim()) missing.push('默认模型');
+    if (models.length === 0) missing.push('模型列表');
 
     if (missing.length > 0) {
-      setSaveError(`请填写: ${missing.join('、')}`);
+      setSaveError(`请填写 ${missing.join('、')}`);
       return;
     }
 
     const normalizedProvider: Provider = {
       ...editingProvider,
+      default_model: models[0] ?? '',
+      models,
       openai_base_url: normalizeOpenAIBaseUrl(editingProvider.openai_base_url),
     };
 
@@ -153,7 +145,13 @@ export function ProviderConfigPanel() {
     setFetchMessage('');
     try {
       const models = await fetchModels(editingProvider.api_key, url);
-      setAvailableModels(models);
+      const fetchedModelIds = models.map((model) => model.id);
+      setModelText(modelsToText(fetchedModelIds));
+      setEditingProvider({
+        ...editingProvider,
+        default_model: fetchedModelIds[0] ?? editingProvider.default_model,
+        models: fetchedModelIds,
+      });
       setFetchStatus('success');
       setFetchMessage(`获取到 ${models.length} 个模型`);
     } catch (err) {
@@ -301,59 +299,51 @@ export function ProviderConfigPanel() {
               </div>
 
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">默认模型</label>
+                <label htmlFor="provider-models" className="text-xs text-muted-foreground mb-1 block">模型列表</label>
                 <div className="flex gap-2">
-                  <div className="flex-1">
-                    {availableModels.length > 0 ? (
-                      <Select
-                        value={editingProvider.default_model}
-                        onValueChange={(value) => updateField('default_model', value)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {[...groupModels(availableModels).entries()].map(([group, models]) => (
-                            <SelectGroup key={group}>
-                              <SelectLabel>{group}</SelectLabel>
-                              {models.map((m) => (
-                                <SelectItem key={m.id} value={m.id}>{m.id}</SelectItem>
-                              ))}
-                            </SelectGroup>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <Input
-                        value={editingProvider.default_model}
-                        onChange={(e) => updateField('default_model', e.target.value)}
-                        placeholder="如 claude-opus-4-8"
+                  <textarea
+                    id="provider-models"
+                    aria-label="模型列表"
+                    value={modelText}
+                    onChange={(e) => {
+                      const nextModelText = e.target.value;
+                      const models = modelsFromText(nextModelText);
+                      setModelText(nextModelText);
+                      setEditingProvider({
+                        ...editingProvider,
+                        default_model: models[0] ?? '',
+                        models,
+                      });
+                    }}
+                    placeholder="每行一个模型，第一行作为默认模型"
+                    className="min-h-28 flex-1 resize-y rounded-xl border border-input/88 bg-background/92 px-3 py-2 text-sm leading-6 text-foreground shadow-[0_1px_0_0_hsl(var(--foreground)/0.018)] outline-none ring-offset-background placeholder:text-muted-foreground/74 transition-all duration-200 focus:ring-2 focus:ring-ring/34 focus:ring-offset-2"
+                  />
+                  <div className="flex shrink-0 flex-col gap-2">
+                    <label className="flex items-center gap-1.5 px-2.5 py-2 rounded-md border border-input bg-background text-xs cursor-pointer select-none shrink-0 hover:bg-muted/65 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={!!editingProvider.context_1m}
+                        onChange={(e) => updateField('context_1m', e.target.checked ? true : undefined)}
+                        className="accent-primary w-3.5 h-3.5"
                       />
-                    )}
+                      <span className="text-muted-foreground">1M</span>
+                    </label>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleFetchModels}
+                      disabled={isFetchingModels || !editingProvider.api_key || !(editingProvider.anthropic_base_url || editingProvider.openai_base_url)}
+                      className="shrink-0"
+                    >
+                      {isFetchingModels ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        '获取列表'
+                      )}
+                    </Button>
                   </div>
-                  <label className="flex items-center gap-1.5 px-2.5 rounded-md border border-input bg-background text-xs cursor-pointer select-none shrink-0 hover:bg-muted/65 transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={!!editingProvider.context_1m}
-                      onChange={(e) => updateField('context_1m', e.target.checked ? true : undefined)}
-                      className="accent-primary w-3.5 h-3.5"
-                    />
-                    <span className="text-muted-foreground">1M</span>
-                  </label>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleFetchModels}
-                    disabled={isFetchingModels || !editingProvider.api_key || !(editingProvider.anthropic_base_url || editingProvider.openai_base_url)}
-                    className="shrink-0"
-                  >
-                    {isFetchingModels ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      '获取列表'
-                    )}
-                  </Button>
                 </div>
+                <p className="mt-1 text-xs text-muted-foreground">第一行会作为新建对话的默认模型。</p>
                 {fetchMessage && (
                   <p className={`text-xs mt-1 ${fetchStatus === 'success' ? 'text-[hsl(var(--success))]' : 'text-[hsl(var(--destructive))]'}`}>
                     {fetchMessage}

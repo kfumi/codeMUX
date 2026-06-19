@@ -20,7 +20,7 @@ import {
   Wrench,
   Zap,
 } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type { SlashCommand } from '../../../lib/slashCommands';
 import { getAllCommands } from '../../../lib/slashCommands';
@@ -30,6 +30,7 @@ import { useAgentStore } from '../../../stores/agentStore';
 interface CodeMuxComposerProps {
   sessionId: string;
   modelName?: string;
+  modelSelector?: ReactNode;
   onStop?: () => void | Promise<void>;
 }
 
@@ -59,7 +60,7 @@ const COMMAND_FORMATTER: Unstable_DirectiveFormatter = {
   parse: (text) => (text ? [{ kind: 'text', text }] : []),
 };
 
-export function CodeMuxComposer({ sessionId, modelName, onStop }: CodeMuxComposerProps) {
+export function CodeMuxComposer({ sessionId, modelName, modelSelector, onStop }: CodeMuxComposerProps) {
   const aui = useAui();
   const composerRootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -242,9 +243,11 @@ export function CodeMuxComposer({ sessionId, modelName, onStop }: CodeMuxCompose
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="max-w-54 truncate rounded-full border border-border/45 bg-[hsl(var(--surface-2))]/64 px-2.5 py-1 text-[11px] text-muted-foreground/74">
-                  {modelName ?? ''}
-                </span>
+                {modelSelector ?? (
+                  <span className="max-w-54 truncate rounded-full border border-border/45 bg-[hsl(var(--surface-2))]/64 px-2.5 py-1 text-[11px] text-muted-foreground/74">
+                    {modelName ?? ''}
+                  </span>
+                )}
 
                 {isRunning ? (
                   <button

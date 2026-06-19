@@ -1,13 +1,16 @@
 import { ArrowUp, FileCode2, FolderKanban, Loader2, MessageSquareText, Sparkles } from 'lucide-react';
-import { Cpu } from 'lucide-react';
 import { useMemo, useState, type KeyboardEvent } from 'react';
 
+import { getPrimaryProviderModel, getProviderModelList } from '../../lib/providerModels';
 import { cn } from '../../lib/utils';
 import { useNewSessionStore } from '../../stores/newSessionStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { getAgentDefinition } from '../../types/agentRegistry';
 import { AgentSelector } from './AgentSelector';
+import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
+import { CodeMuxModelSelector } from './assistant-ui/CodeMuxModelSelector';
+import { formatModelDisplayName } from './modelDisplay';
 
 interface NewSessionPanelProps {
   onSubmit: (message: string) => Promise<void> | void;
@@ -32,13 +35,37 @@ const STARTER_PROMPTS = [
 ];
 
 export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
-  const { selectedAgentKind, setSelectedAgentKind, draftProjectId } = useNewSessionStore();
+  const {
+    selectedAgentKind,
+    selectedModel,
+    selectedReasoningEffort,
+    setSelectedAgentKind,
+    setSelectedModel,
+    setSelectedReasoningEffort,
+    draftProjectId,
+  } = useNewSessionStore();
   const projects = useProjectStore((state) => state.projects);
   const activeProvider = useSettingsStore((s) => s.getActiveProvider());
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const selectedAgent = getAgentDefinition(selectedAgentKind);
+  const providerModels = useMemo(() => getProviderModelList(activeProvider), [activeProvider]);
+  const effectiveModel = selectedModel || getPrimaryProviderModel(activeProvider);
+  const displayedEffectiveModel = effectiveModel
+    ? formatModelDisplayName({
+      model: effectiveModel,
+      agentKind: selectedAgentKind,
+      usesLargeContext: activeProvider?.context_1m,
+    })
+    : '';
+  const formatSelectedProviderModel = useMemo(() => (
+    (item: string) => formatModelDisplayName({
+      model: item,
+      agentKind: selectedAgentKind,
+      usesLargeContext: activeProvider?.context_1m,
+    })
+  ), [activeProvider?.context_1m, selectedAgentKind]);
   const draftProject = useMemo(
     () => projects.find((project) => project.id === draftProjectId) ?? null,
     [draftProjectId, projects],
@@ -88,7 +115,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                     开始新的编码任务
                   </h1>
                   <p className="text-sm leading-6 text-muted-foreground">
-                    选好模型，描述目标，让这次会话从清楚的上下文开始。
+                    选好模型，描述目标，让这次会话从清晰的上下文开始。
                   </p>
                 </div>
               </div>
@@ -115,15 +142,29 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                   <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
                     Model
                   </p>
-                  <Cpu className="h-4 w-4 text-muted-foreground" />
                 </div>
                 <p className="truncate text-sm font-semibold text-foreground">
-                  {activeProvider?.default_model || '未配置模型'}
+                  {displayedEffectiveModel || '未配置模型'}
                 </p>
                 {activeProvider?.name && (
                   <p className="mt-1 truncate text-xs text-muted-foreground">
                     {activeProvider.name}
                   </p>
+                )}
+                {providerModels.length > 0 && (
+                  <div className="mt-3">
+                    <CodeMuxAssistantRuntimeProvider sessionId="new-session-draft" onSend={async () => {}} onCommand={() => {}}>
+                      <CodeMuxModelSelector
+                        value={effectiveModel}
+                        models={providerModels}
+                        onChange={setSelectedModel}
+                        reasoningEffort={selectedReasoningEffort}
+                        onReasoningEffortChange={setSelectedReasoningEffort}
+                        getDisplayName={formatSelectedProviderModel}
+                        className="w-full max-w-none"
+                      />
+                    </CodeMuxAssistantRuntimeProvider>
+                  </div>
                 )}
               </div>
             </div>
@@ -149,7 +190,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                 className="surface-panel rounded-lg border border-border/45 bg-background/42 px-3 py-2 text-[11px] text-muted-foreground dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.74,hsl(var(--surface-1))/0.64)]"
                 style={{ fontFamily: "'JetBrains Mono', monospace" }}
               >
-                Enter to send · Shift Enter for newline
+                Enter to send / Shift Enter for newline
               </div>
             </div>
           </aside>

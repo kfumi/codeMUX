@@ -90,28 +90,29 @@ function App() {
   };
 
   const handleStartNewSession = async (message: string) => {
-    const { selectedAgentKind, draftProjectId } = useNewSessionStore.getState();
+    const { selectedAgentKind, selectedModel, selectedReasoningEffort, draftProjectId } = useNewSessionStore.getState();
     const cwd = resolveSessionCwd(projects, draftProjectId, getStoredAgentCwd());
-    const { provider, apiKey, baseUrl, model } = resolveAgentProviderConfig({
+    const { provider, apiKey, baseUrl, model, runtimeModel } = resolveAgentProviderConfig({
       agentKind: selectedAgentKind,
       config,
+      sessionModel: selectedModel,
     });
 
     try {
       const session = await createSession('新对话', selectedAgentKind, 'agent', draftProjectId ?? undefined);
 
       if (provider?.id && model) {
-        sessionApi.updateProvider(session.id, provider.id, model).catch(() => {});
+        sessionApi.updateProvider(session.id, provider.id, model, selectedReasoningEffort).catch(() => {});
         useSessionStore.setState((state) => ({
           sessions: state.sessions.map((existingSession) =>
             existingSession.id === session.id
-              ? { ...existingSession, provider_id: provider.id, model }
+              ? { ...existingSession, provider_id: provider.id, model, reasoning_effort: selectedReasoningEffort }
               : existingSession,
           ),
         }));
       }
 
-      await startQuery(session.id, message, cwd, apiKey, baseUrl, model);
+      await startQuery(session.id, message, cwd, apiKey, baseUrl, runtimeModel, selectedReasoningEffort);
       closeDraft();
     } catch (error) {
       logger.error('Failed to start a new session from empty state', undefined, serializeError(error));

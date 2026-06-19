@@ -48,7 +48,7 @@ fn apply_agent_config_update(
 
 fn cleanup_provider_references(config: &mut AppConfig, provider_id: &str) {
     if config.active_provider_id.as_deref() == Some(provider_id) {
-        config.active_provider_id = config.providers.first().map(|p| p.id.clone());
+        config.active_provider_id = None;
     }
 }
 

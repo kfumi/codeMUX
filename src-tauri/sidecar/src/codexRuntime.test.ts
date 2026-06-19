@@ -5,6 +5,30 @@ import { CodexSessionRuntime } from './codexRuntime.js';
 import { buildCodexToolUseContent } from './runtimeEvents.js';
 
 describe('CodexSessionRuntime', () => {
+  it('includes reasoning effort in Codex thread options', () => {
+    const runtime = new CodexSessionRuntime();
+    (runtime as unknown as {
+      config: {
+        sessionId: string;
+        cwd: string;
+        model: string;
+        reasoningEffort: string;
+      };
+    }).config = {
+      sessionId: 'session-1',
+      cwd: 'D:/repo',
+      model: 'gpt-5',
+      reasoningEffort: 'high',
+    };
+
+    const options = (runtime as unknown as { threadOptions: () => Record<string, unknown> }).threadOptions();
+
+    expect(options).toMatchObject({
+      model: 'gpt-5',
+      modelReasoningEffort: 'high',
+    });
+  });
+
   it('emits incremental stream events from item.updated agent messages', () => {
     const writes: string[] = [];
     const stdoutSpy = vi
