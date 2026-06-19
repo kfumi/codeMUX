@@ -92,7 +92,7 @@ export function buildCodexResultEvent({
     output_tokens: usage.output_tokens,
     reasoning_output_tokens: usage.reasoning_output_tokens,
   };
-  const totalTokens = lastUsage.input_tokens + lastUsage.output_tokens;
+  const totalTokens = lastUsage.input_tokens + lastUsage.output_tokens + (lastUsage.reasoning_output_tokens ?? 0);
   return {
     type: 'result',
     subtype: 'success',

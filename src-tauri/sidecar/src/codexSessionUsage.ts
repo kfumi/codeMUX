@@ -122,7 +122,7 @@ function readLastTokenUsage(payload: Record<string, unknown>): CodexTokenUsage |
     cached_input_tokens: cached,
     output_tokens: output,
     reasoning_output_tokens: reasoning,
-    total_tokens: input + output,
+    total_tokens: input + output + reasoning,
   };
 }
 

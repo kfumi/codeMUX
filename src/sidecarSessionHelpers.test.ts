@@ -102,7 +102,7 @@ describe('buildCodexResultEvent', () => {
         input_tokens: 10,
         output_tokens: 5,
         cached_input_tokens: 3,
-        total_tokens: 15,
+        total_tokens: 22,
       },
     });
   });
@@ -146,7 +146,7 @@ describe('buildCodexResultEvent', () => {
         input_tokens: 10,
         output_tokens: 5,
         cached_input_tokens: 3,
-        total_tokens: 15,
+        total_tokens: 22,
       },
     });
   });

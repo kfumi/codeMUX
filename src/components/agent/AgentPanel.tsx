@@ -196,7 +196,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   };
 
   const handleModelChange = useCallback(async (nextModel: string) => {
-    if (!session || !resolvedProvider?.id || !nextModel || nextModel === (session.model || model)) {
+    if (!session || !resolvedProvider?.id || !nextModel || nextModel === session.model) {
       return;
     }
 
@@ -216,29 +216,37 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   }, [model, reasoningEffort, resolvedProvider?.id, session, sessionId]);
 
   const handleReasoningEffortChange = useCallback(async (nextEffort: ReasoningEffort) => {
-    if (!session || session.reasoning_effort === nextEffort) {
+    const latestSession = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
+    if (!latestSession || latestSession.reasoning_effort === nextEffort) {
       return;
     }
 
-    const nextModel = model || session.model || '';
+    const latestConfig = resolveAgentProviderConfig({
+      agentKind: latestSession.agent_kind ?? 'claude_code',
+      config,
+      sessionProviderId: latestSession.provider_id,
+      sessionModel: latestSession.model,
+    });
+    const nextModel = latestConfig.model || latestSession.model || '';
+
     useSessionStore.setState((state) => ({
       sessions: state.sessions.map((entry) =>
         entry.id === sessionId ? { ...entry, reasoning_effort: nextEffort } : entry,
       ),
     }));
 
-    if (!resolvedProvider?.id || !nextModel) {
+    if (!latestConfig.provider?.id || !nextModel) {
       return;
     }
 
     try {
-      await sessionApi.updateProvider(sessionId, resolvedProvider.id, nextModel, nextEffort);
+      await sessionApi.updateProvider(sessionId, latestConfig.provider.id, nextModel, nextEffort);
     } catch (error) {
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
       }));
     }
-  }, [model, resolvedProvider?.id, session, sessionId]);
+  }, [config, sessionId]);
 
   const showInfoDialog = useCallback((title: string, content: string) => {
     setInfoTitle(title);

@@ -190,6 +190,23 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
         let payload_type = payload.get("type")?.as_str()?;
         let role = payload.get("role").and_then(|r| r.as_str());
 
+        if payload_type == "reasoning" {
+            let thinking = extract_codex_reasoning_summary(payload)?;
+            return Some(serde_json::json!({
+                "type": "assistant",
+                "timestamp": timestamp,
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "thinking",
+                            "thinking": thinking
+                        }
+                    ]
+                }
+            }));
+        }
+
         // Assistant text message
         if role == Some("assistant") {
             let content_blocks = payload.get("content")?;
@@ -203,7 +220,9 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
                             claude_content.push(serde_json::json!({"type": "text", "text": text}));
                         }
                     } else if block_type == "reasoning" {
-                        // Skip reasoning blocks for now
+                        if let Some(thinking) = extract_codex_reasoning_summary(block) {
+                            claude_content.push(serde_json::json!({"type": "thinking", "thinking": thinking}));
+                        }
                     }
                 }
             }
@@ -428,7 +447,8 @@ pub async fn load_codex_session_events(
         let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
         let cached = usage.get("cached_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
         let output = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let total = input + output;
+        let reasoning = usage.get("reasoning_output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let total = input + output + reasoning;
 
         if input > 0 || output > 0 {
             if let Some(insert_at) = turn.last_assistant_msg_idx {
@@ -1075,7 +1095,7 @@ async fn get_live_proxy_port(agent_state: &State<'_, AgentState>) -> Option<u16>
 
 #[cfg(test)]
 mod tests {
-    use super::{find_codex_session_jsonl, parse_proxy_port_from_stderr};
+    use super::{convert_codex_item_to_claude_format, find_codex_session_jsonl, parse_proxy_port_from_stderr};
 
     #[test]
     fn find_codex_session_jsonl_matches_only_session_meta_payload_id() {
@@ -1120,6 +1140,59 @@ mod tests {
         assert_eq!(parse_proxy_port_from_stderr(&lines), Some(15722));
     }
 
+    #[test]
+    fn convert_codex_reasoning_summary_to_assistant_thinking_block() {
+        let value = serde_json::json!({
+            "timestamp": "2026-06-19T12:38:49.366Z",
+            "type": "response_item",
+            "payload": {
+                "type": "reasoning",
+                "summary": [
+                    {
+                        "type": "summary_text",
+                        "text": "**Crafting a concise response**\n\nI can answer directly."
+                    }
+                ]
+            }
+        });
+
+        let converted = convert_codex_item_to_claude_format(&value).expect("reasoning should be visible");
+
+        assert_eq!(converted, serde_json::json!({
+            "type": "assistant",
+            "timestamp": "2026-06-19T12:38:49.366Z",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "thinking",
+                        "thinking": "**Crafting a concise response**\n\nI can answer directly."
+                    }
+                ]
+            }
+        }));
+    }
+
+}
+
+fn extract_codex_reasoning_summary(value: &serde_json::Value) -> Option<String> {
+    let summary = value.get("summary")?.as_array()?;
+    let parts: Vec<String> = summary
+        .iter()
+        .filter_map(|entry| {
+            let entry_type = entry.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            if entry_type != "summary_text" {
+                return None;
+            }
+            entry.get("text").and_then(|text| text.as_str()).map(str::trim).filter(|text| !text.is_empty()).map(str::to_string)
+        })
+        .collect();
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
+    }
 }
 
 const PROXY_SESSION_ID: &str = "__codex_proxy__";

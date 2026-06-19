@@ -12,6 +12,7 @@ export interface ResponsesInputItem {
   content?: unknown;
   call_id?: string;
   name?: string;
+  namespace?: string;
   arguments?: string;
   output?: string;
   [key: string]: unknown;

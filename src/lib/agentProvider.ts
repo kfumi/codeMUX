@@ -85,7 +85,7 @@ export function resolveAgentProviderConfig({
     runtimeModel: resolveRuntimeModel(model, provider, agentKind),
     codexNeedsProxy:
       agentKind === 'codex'
-        ? provider?.codex_needs_proxy ?? inferCodexNeedsProxy(baseUrl)
+        ? inferCodexNeedsProxy(baseUrl) && (provider?.codex_needs_proxy ?? true)
         : undefined,
   };
 }

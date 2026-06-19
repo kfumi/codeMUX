@@ -48,7 +48,7 @@ fn apply_agent_config_update(
 
 fn cleanup_provider_references(config: &mut AppConfig, provider_id: &str) {
     if config.active_provider_id.as_deref() == Some(provider_id) {
-        config.active_provider_id = None;
+        config.active_provider_id = config.providers.first().map(|p| p.id.clone());
     }
 }
 
@@ -153,13 +153,14 @@ mod tests {
     }
 
     #[test]
-    fn deleting_provider_only_clears_active_provider_reference() {
+    fn deleting_provider_falls_back_to_first_remaining() {
         let mut app_config = AppConfig::default();
+        let fallback_id = app_config.providers.first().unwrap().id.clone();
         app_config.active_provider_id = Some("provider-1".to_string());
 
         cleanup_provider_references(&mut app_config, "provider-1");
 
-        assert_eq!(app_config.active_provider_id, None);
+        assert_eq!(app_config.active_provider_id, Some(fallback_id));
     }
 }
 
