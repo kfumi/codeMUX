@@ -6,7 +6,7 @@ import { TitleBar } from './TitleBar';
 
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 500;
-const SIDEBAR_DEFAULT = 260;
+const SIDEBAR_DEFAULT = 300;
 
 interface MainLayoutProps {
   sidebar: ReactNode;

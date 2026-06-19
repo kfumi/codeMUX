@@ -1068,7 +1068,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
         set((s) => {
           const prev = s.events[sessionId] || [];
-          const newEvents = [...prev, event];
+          // Replace the previous reconnecting status instead of stacking
+          let newEvents: AgentMessage[];
+          if (event.kind === 'stream_status' && event.data.is_reconnecting) {
+            let replaceIdx = -1;
+            for (let i = prev.length - 1; i >= 0; i--) {
+              const e = prev[i];
+              if (e.kind === 'stream_status' && e.data.is_reconnecting) {
+                replaceIdx = i;
+                break;
+              }
+            }
+            newEvents = replaceIdx >= 0
+              ? [...prev.slice(0, replaceIdx), event, ...prev.slice(replaceIdx + 1)]
+              : [...prev, event];
+          } else {
+            newEvents = [...prev, event];
+          }
 
           // Un-acknowledge files that have new edits/writes since last save
           let acknowledged = s.acknowledgedFiles[sessionId];

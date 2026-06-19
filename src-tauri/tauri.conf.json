@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "codeMUX - AI编码工具聚合平台",
-        "width": 1200,
-        "height": 800,
+        "width": 1280,
+        "height": 820,
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
