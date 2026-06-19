@@ -30,7 +30,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-155 flex-col overflow-hidden border-border/80 bg-card p-0 sm:max-w-245">
+      <DialogContent className="flex h-155 flex-col overflow-hidden border-0 bg-card p-0 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-245">
         <DialogDescription className="sr-only">
           Configure providers, agents, MCP, skills, appearance, and general application preferences.
         </DialogDescription>

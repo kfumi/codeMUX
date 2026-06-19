@@ -35,7 +35,15 @@ export function getProviderMode(baseUrl?: string | null): {
   };
 }
 
-export function shouldUseCodexChatCompatProxy(baseUrl?: string | null): boolean {
+export function buildMcpInstructions(): undefined {
+  return undefined;
+}
+
+export function shouldUseCodexChatCompatProxy(baseUrl?: string | null, explicitNeedsProxy?: boolean): boolean {
+  if (explicitNeedsProxy !== undefined) {
+    return explicitNeedsProxy;
+  }
+
   if (!baseUrl) {
     return false;
   }

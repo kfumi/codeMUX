@@ -61,4 +61,26 @@ describe('AgentSettingsPanel', () => {
     expect(screen.queryByText('Codex Default Provider')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Use Active Provider' })).toBeNull();
   });
+
+  it('keeps the local proxy controls visible when the active provider does not need proxy routing', () => {
+    useSettingsStore.setState((state) => ({
+      config: state.config
+        ? {
+            ...state.config,
+            providers: state.config.providers.map((provider) =>
+              provider.id === 'provider-active'
+                ? { ...provider, codex_needs_proxy: false }
+                : provider,
+            ),
+          }
+        : null,
+      proxyRunning: false,
+      proxyUrl: null,
+    }));
+
+    render(<AgentSettingsPanel />);
+
+    expect(screen.getByText('本地代理路由')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '不需要' })).toHaveProperty('disabled', true);
+  });
 });

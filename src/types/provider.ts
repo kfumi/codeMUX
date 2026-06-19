@@ -42,6 +42,8 @@ export interface Provider {
   output_price?: number;
   /** 1M 上下文窗口（模型名会追加 [1m]） */
   context_1m?: boolean;
+  /** Whether Codex should route this provider through the local chat-compat proxy. */
+  codex_needs_proxy?: boolean;
 }
 
 export interface AppConfig {

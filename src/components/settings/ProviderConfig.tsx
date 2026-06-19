@@ -12,6 +12,15 @@ function generateId(): string {
   return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
 }
 
+function inferCodexProxyDefault(baseUrl: string): boolean {
+  if (!baseUrl.trim()) return false;
+  try {
+    return new URL(normalizeOpenAIBaseUrl(baseUrl)).host.toLowerCase() !== 'api.openai.com';
+  } catch {
+    return true;
+  }
+}
+
 export function ProviderConfigPanel() {
   const { config, updateProvider, deleteProvider, setActiveProvider, fetchModels, testProvider } = useSettingsStore();
   const providers = config?.providers ?? [];
@@ -48,6 +57,7 @@ export function ProviderConfigPanel() {
       openai_base_url: '',
       default_model: '',
       models: [],
+      codex_needs_proxy: false,
     });
     setModelText('');
     setIsNew(true);
@@ -86,6 +96,7 @@ export function ProviderConfigPanel() {
       default_model: models[0] ?? '',
       models,
       openai_base_url: normalizeOpenAIBaseUrl(editingProvider.openai_base_url),
+      codex_needs_proxy: editingProvider.codex_needs_proxy ?? inferCodexProxyDefault(editingProvider.openai_base_url),
     };
 
     await updateProvider(normalizedProvider);
@@ -245,7 +256,7 @@ export function ProviderConfigPanel() {
 
       {/* Edit modal */}
       <Dialog open={!!editingProvider} onOpenChange={(open) => !open && closeModal()}>
-        <DialogContent className="sm:max-w-120">
+        <DialogContent className="border-0 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-120">
           <DialogHeader>
             <DialogTitle>{isNew ? '添加供应商' : '编辑供应商'}</DialogTitle>
           </DialogHeader>
@@ -297,6 +308,22 @@ export function ProviderConfigPanel() {
                   placeholder="https://api.openai.com/v1"
                 />
               </div>
+
+              <label className="flex items-center justify-between gap-4 rounded-xl border border-border/45 bg-muted/15 px-3 py-3">
+                <span className="min-w-0 space-y-1">
+                  <span className="block text-xs font-medium text-foreground/88">需要本地路由映射</span>
+                  <span className="block text-xs leading-5 text-muted-foreground">
+                    如果您的供应商不是原生 OpenAI Responses API，或者模型名不是 Codex 默认的 GPT 系列，请打开此开关。
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  aria-label="需要本地路由映射"
+                  checked={editingProvider.codex_needs_proxy ?? inferCodexProxyDefault(editingProvider.openai_base_url)}
+                  onChange={(e) => updateField('codex_needs_proxy', e.target.checked)}
+                  className="h-4 w-4 shrink-0 accent-primary"
+                />
+              </label>
 
               <div>
                 <label htmlFor="provider-models" className="text-xs text-muted-foreground mb-1 block">模型列表</label>

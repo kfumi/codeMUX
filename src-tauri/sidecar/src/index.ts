@@ -791,7 +791,7 @@ async function main(): Promise<void> {
         break;
       case 'start_proxy':
         try {
-          const result = await proxyManager.start(cmd.apiKey, cmd.baseUrl, cmd.providerName);
+          const result = await proxyManager.start(cmd.apiKey, cmd.baseUrl, cmd.providerName, cmd.codexNeedsProxy);
           emit({ type: 'proxy_status', ...proxyManager.getStatus() });
           if (result) {
             process.stderr.write(`[sidecar] Proxy started on port ${result.port}\n`);

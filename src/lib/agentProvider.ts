@@ -9,6 +9,7 @@ export interface AgentProviderConfig {
   baseUrl: string | undefined;
   model: string | undefined;
   runtimeModel: string | undefined;
+  codexNeedsProxy: boolean | undefined;
 }
 
 function getProviderById(config: AppConfig | null | undefined, providerId?: string | null): Provider | null {
@@ -44,6 +45,18 @@ function resolveRuntimeModel(model: string | undefined, provider: Provider | nul
   return model;
 }
 
+function inferCodexNeedsProxy(baseUrl: string | undefined): boolean | undefined {
+  if (!baseUrl) {
+    return undefined;
+  }
+
+  try {
+    return new URL(baseUrl).host.toLowerCase() !== 'api.openai.com';
+  } catch {
+    return true;
+  }
+}
+
 export function resolveAgentProviderConfig({
   agentKind,
   config,
@@ -59,15 +72,20 @@ export function resolveAgentProviderConfig({
   const activeProvider = getProviderById(config, config?.active_provider_id);
   const provider = sessionProvider ?? activeProvider;
   const model = resolveDisplayModel(provider, sessionModel);
+  const baseUrl =
+    agentKind === 'codex'
+      ? (provider?.openai_base_url ? normalizeOpenAIBaseUrl(provider.openai_base_url) : undefined)
+      : provider?.anthropic_base_url || undefined;
 
   return {
     provider,
     apiKey: provider?.api_key || undefined,
-    baseUrl:
-      agentKind === 'codex'
-        ? (provider?.openai_base_url ? normalizeOpenAIBaseUrl(provider.openai_base_url) : undefined)
-        : provider?.anthropic_base_url || undefined,
+    baseUrl,
     model,
     runtimeModel: resolveRuntimeModel(model, provider, agentKind),
+    codexNeedsProxy:
+      agentKind === 'codex'
+        ? provider?.codex_needs_proxy ?? inferCodexNeedsProxy(baseUrl)
+        : undefined,
   };
 }

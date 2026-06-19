@@ -53,11 +53,47 @@ describe('computeContextUsageFromEvents', () => {
       sessionProviderUsesLargeContext: false,
       activeProviderUsesLargeContext: false,
     })).toEqual({
-      usedTokens: 42,
+      usedTokens: 30,
       totalTokens: 258400,
       inputTokens: 10,
       cachedTokens: 5,
       outputTokens: 20,
+    });
+  });
+
+  it('excludes Claude cache tokens and upstream total_tokens from context total', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Claude reply' }],
+            usage: {
+              input_tokens: 100,
+              cache_read_input_tokens: 300,
+              cache_creation_input_tokens: 50,
+              output_tokens: 25,
+              total_tokens: 475,
+            },
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    expect(computeContextUsageFromEvents(events, {
+      model: 'claude-sonnet-4-20250514',
+      sessionProviderUsesLargeContext: false,
+      activeProviderUsesLargeContext: false,
+    })).toMatchObject({
+      usedTokens: 125,
+      inputTokens: 100,
+      cachedTokens: 300,
+      outputTokens: 25,
     });
   });
 

@@ -89,10 +89,8 @@ function readTokenUsage(usage: any): { input: number; cached: number; output: nu
 
   const input = readNumber(usage.input_tokens);
   const cached = readNumber(usage.cached_input_tokens ?? usage.cache_read_input_tokens);
-  const cacheCreation = readNumber(usage.cache_creation_input_tokens);
   const output = readNumber(usage.output_tokens);
-  const explicitTotal = readNumber(usage.total_tokens);
-  const total = explicitTotal > 0 ? explicitTotal : input + cached + cacheCreation + output;
+  const total = input + output;
 
   return { input, cached, output, total };
 }

@@ -158,6 +158,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   getNeedsProxy: () => {
     const provider = get().getActiveProvider();
     if (!provider?.openai_base_url) return false;
+    if (provider.codex_needs_proxy !== undefined) {
+      return provider.codex_needs_proxy;
+    }
     try {
       return new URL(provider.openai_base_url).host.toLowerCase() !== 'api.openai.com';
     } catch {
@@ -225,7 +228,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
     set({ proxyToggling: true });
     try {
-      const port = await agentApi.startProxy(provider.api_key, provider.openai_base_url, provider.name);
+      const port = await agentApi.startProxy(provider.api_key, provider.openai_base_url, provider.name, get().getNeedsProxy());
       set({
         proxyRunning: true,
         proxyUrl: port > 0 ? `http://127.0.0.1:${port}` : null,

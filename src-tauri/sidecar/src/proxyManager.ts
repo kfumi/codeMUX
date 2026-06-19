@@ -33,8 +33,8 @@ class ProxyManager {
    * If config changed, stops the old proxy and starts a new one.
    * Returns null if the baseUrl doesn't need a proxy (i.e. it's api.openai.com).
    */
-  async start(apiKey: string, baseUrl: string, providerName?: string): Promise<{ port: number } | null> {
-    if (!shouldUseCodexChatCompatProxy(baseUrl)) {
+  async start(apiKey: string, baseUrl: string, providerName?: string, explicitNeedsProxy?: boolean): Promise<{ port: number } | null> {
+    if (!shouldUseCodexChatCompatProxy(baseUrl, explicitNeedsProxy)) {
       process.stderr.write('[proxy-manager] Proxy not needed for this provider\n');
       return null;
     }

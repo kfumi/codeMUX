@@ -30,6 +30,7 @@ type CodexSessionBootstrap = {
   runtimeBaseUrl?: string;
   model?: string;
   reasoningEffort?: string;
+  codexNeedsProxy?: boolean;
 };
 
 export function emit(obj: unknown): void {
@@ -90,6 +91,7 @@ export class CodexSessionRuntime {
       upstreamBaseUrl: cmd.baseUrl,
       model: cmd.model,
       reasoningEffort: normalizeCodexReasoningEffort(cmd.reasoningEffort),
+      codexNeedsProxy: cmd.codexNeedsProxy,
     };
     const nextFingerprint = JSON.stringify(requestedConfig);
 
@@ -115,9 +117,14 @@ export class CodexSessionRuntime {
     if (
       requestedConfig.apiKey &&
       requestedConfig.upstreamBaseUrl &&
-      shouldUseCodexChatCompatProxy(requestedConfig.upstreamBaseUrl)
+      shouldUseCodexChatCompatProxy(requestedConfig.upstreamBaseUrl, requestedConfig.codexNeedsProxy)
     ) {
-      const result = await proxyManager.start(requestedConfig.apiKey, requestedConfig.upstreamBaseUrl);
+      const result = await proxyManager.start(
+        requestedConfig.apiKey,
+        requestedConfig.upstreamBaseUrl,
+        undefined,
+        requestedConfig.codexNeedsProxy,
+      );
       if (result) {
         runtimeBaseUrl = proxyManager.getBaseUrl() ?? runtimeBaseUrl;
         process.stderr.write(

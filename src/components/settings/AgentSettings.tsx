@@ -78,43 +78,48 @@ export function AgentSettingsPanel() {
         })}
       </div>
 
-      {needsProxy && (
-        <div className="space-y-3 rounded-2xl border border-border/45 bg-muted/15 p-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                {proxyRunning ? (
-                  <CircleDot className="h-4 w-4 text-[hsl(var(--success))]" />
-                ) : (
-                  <CircleDot className="h-4 w-4 text-muted-foreground" />
-                )}
-                本地代理路由
-              </h4>
-              <p className="text-xs leading-5 text-muted-foreground">
-                {proxyRunning
-                  ? <>运行中 · {proxyUrl || '等待地址...'}</>
-                  : '未运行 · Codex 需要代理将 Responses API 转换为 Chat Completions'}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void (proxyRunning ? stopProxy() : startProxy())}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-                proxyRunning
-                  ? 'border-[hsl(var(--destructive)/0.28)] bg-[hsl(var(--destructive)/0.08)] text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive)/0.14)]'
-                  : 'border-[hsl(var(--success)/0.28)] bg-[hsl(var(--success)/0.08)] text-[hsl(var(--success))] hover:bg-[hsl(var(--success)/0.14)]',
-              )}
-            >
+      <div className="space-y-3 rounded-2xl border border-border/45 bg-muted/15 p-4">
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
               {proxyRunning ? (
-                <><Square className="h-3 w-3" /> 停止</>
+                <CircleDot className="h-4 w-4 text-[hsl(var(--success))]" />
               ) : (
-                <><Play className="h-3 w-3" /> 启动</>
+                <CircleDot className="h-4 w-4 text-muted-foreground" />
               )}
-            </button>
+              本地代理路由
+            </h4>
+            <p className="text-xs leading-5 text-muted-foreground">
+              {proxyRunning
+                ? <>运行中 · {proxyUrl || '等待地址...'}</>
+                : needsProxy
+                  ? '未运行 · Codex 需要代理将 Responses API 转换为 Chat Completions'
+                  : '未运行 · 当前供应商配置为不需要路由代理'}
+            </p>
           </div>
+          <button
+            type="button"
+            onClick={() => void (proxyRunning ? stopProxy() : startProxy())}
+            disabled={!needsProxy && !proxyRunning}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+              proxyRunning
+                ? 'border-[hsl(var(--destructive)/0.28)] bg-[hsl(var(--destructive)/0.08)] text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive)/0.14)]'
+                : needsProxy
+                  ? 'border-[hsl(var(--success)/0.28)] bg-[hsl(var(--success)/0.08)] text-[hsl(var(--success))] hover:bg-[hsl(var(--success)/0.14)]'
+                  : 'cursor-not-allowed border-border/55 bg-muted/35 text-muted-foreground',
+            )}
+          >
+            {proxyRunning ? (
+              <><Square className="h-3 w-3" /> 停止</>
+            ) : !needsProxy ? (
+              <>不需要</>
+            ) : (
+              <><Play className="h-3 w-3" /> 启动</>
+            )}
+          </button>
         </div>
-      )}
+      </div>
     </div>
   );
 }

@@ -50,7 +50,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   const session = sessions.find((entry) => entry.id === sessionId);
   const project = session?.project_id ? projects.find((entry) => entry.id === session.project_id) : null;
-  const { provider: resolvedProvider, apiKey, baseUrl, model, runtimeModel } = resolveAgentProviderConfig({
+  const { provider: resolvedProvider, apiKey, baseUrl, model, runtimeModel, codexNeedsProxy } = resolveAgentProviderConfig({
     agentKind: session?.agent_kind ?? 'claude_code',
     config,
     sessionProviderId: session?.provider_id,
@@ -118,6 +118,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       reasoningEffort,
       hasApiKey: Boolean(apiKey),
       baseUrl: baseUrl || null,
+      codexNeedsProxy: codexNeedsProxy ?? null,
     });
 
     if (ensuredSessionsRef.current.has(ensureKey)) {
@@ -125,14 +126,12 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
 
     ensuredSessionsRef.current.add(ensureKey);
-    agentApi.ensureSession(sessionId, effectiveCwd, undefined, apiKey, baseUrl, runtimeModel, reasoningEffort).then(async () => {
-      if (baseUrl) {
+    agentApi.ensureSession(sessionId, effectiveCwd, undefined, apiKey, baseUrl, runtimeModel, reasoningEffort, codexNeedsProxy).then(async () => {
+      if (baseUrl && codexNeedsProxy) {
         try {
-          if (new URL(baseUrl).host.toLowerCase() !== 'api.openai.com') {
-            await new Promise((resolve) => setTimeout(resolve, 600));
-            const port = await agentApi.getProxyPort().catch(() => null);
-            setProxyRunning(true, port && port > 0 ? `http://127.0.0.1:${port}` : null);
-          }
+          await new Promise((resolve) => setTimeout(resolve, 600));
+          const port = await agentApi.getProxyPort().catch(() => null);
+          setProxyRunning(true, port && port > 0 ? `http://127.0.0.1:${port}` : null);
         } catch {
           // Ignore invalid base URLs and let the runtime surface the real error.
         }
@@ -140,7 +139,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }).catch(() => {
       ensuredSessionsRef.current.delete(ensureKey);
     });
-  }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, runtimeModel, reasoningEffort, setProxyRunning]);
+  }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, runtimeModel, reasoningEffort, codexNeedsProxy, setProxyRunning]);
 
   const contextUsage = useMemo(
     () => computeContextUsageFromEvents(events, {
@@ -187,6 +186,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         latestProviderConfig.baseUrl,
         latestProviderConfig.runtimeModel,
         latestReasoningEffort,
+        latestProviderConfig.codexNeedsProxy,
       );
     } catch (error) {
       useAgentStore.setState((state) => ({
@@ -267,7 +267,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           lines.push(`**输出 tokens**　${output.toLocaleString()}`);
           if (cacheRead) lines.push(`**缓存命中**　${cacheRead.toLocaleString()}`);
           if (cacheCreation) lines.push(`**缓存创建**　${cacheCreation.toLocaleString()}`);
-          lines.push(`**总计**　${(input + output + cacheRead + cacheCreation).toLocaleString()} tokens`);
+          lines.push(`**总计**　${(input + output).toLocaleString()} tokens`);
         }
         if (data.total_cost) lines.push(`**费用**　$${data.total_cost.toFixed(4)}`);
 

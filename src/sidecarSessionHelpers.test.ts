@@ -49,6 +49,11 @@ describe('shouldUseCodexChatCompatProxy', () => {
     expect(shouldUseCodexChatCompatProxy('https://api.openai.com/v1')).toBe(false);
     expect(shouldUseCodexChatCompatProxy('https://api.openai.com')).toBe(false);
   });
+
+  it('honors an explicit provider proxy override', () => {
+    expect(shouldUseCodexChatCompatProxy('https://openrouter.ai/api/v1', false)).toBe(false);
+    expect(shouldUseCodexChatCompatProxy('https://api.openai.com/v1', true)).toBe(true);
+  });
 });
 
 describe('getRuntimeFlavor', () => {
@@ -97,7 +102,7 @@ describe('buildCodexResultEvent', () => {
         input_tokens: 10,
         output_tokens: 5,
         cached_input_tokens: 3,
-        total_tokens: 18,
+        total_tokens: 15,
       },
     });
   });
@@ -141,7 +146,7 @@ describe('buildCodexResultEvent', () => {
         input_tokens: 10,
         output_tokens: 5,
         cached_input_tokens: 3,
-        total_tokens: 25,
+        total_tokens: 15,
       },
     });
   });

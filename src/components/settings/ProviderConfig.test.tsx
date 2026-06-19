@@ -94,4 +94,18 @@ describe('ProviderConfigPanel', () => {
     await waitFor(() => expect(fetchModels).toHaveBeenCalled());
     expect((screen.getByLabelText('模型列表') as HTMLTextAreaElement).value).toBe('gpt-5\nclaude-opus-4-1');
   });
+  it('persists the Codex local route mapping toggle', async () => {
+    render(<ProviderConfigPanel />);
+
+    fireEvent.click(screen.getByText('OpenRouter'));
+    fireEvent.click(screen.getByRole('checkbox', { name: '需要本地路由映射' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(updateProvider).toHaveBeenCalled());
+    expect(updateProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codex_needs_proxy: false,
+      }),
+    );
+  });
 });

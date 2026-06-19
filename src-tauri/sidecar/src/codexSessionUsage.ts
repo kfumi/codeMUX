@@ -112,9 +112,8 @@ function readLastTokenUsage(payload: Record<string, unknown>): CodexTokenUsage |
   const cached = readNumber(usage.cached_input_tokens);
   const output = readNumber(usage.output_tokens);
   const reasoning = readNumber(usage.reasoning_output_tokens);
-  const total = readNumber(usage.total_tokens);
 
-  if (input === 0 && cached === 0 && output === 0 && total === 0) {
+  if (input === 0 && cached === 0 && output === 0) {
     return null;
   }
 
@@ -123,7 +122,7 @@ function readLastTokenUsage(payload: Record<string, unknown>): CodexTokenUsage |
     cached_input_tokens: cached,
     output_tokens: output,
     reasoning_output_tokens: reasoning,
-    total_tokens: total || input + cached + output,
+    total_tokens: input + output,
   };
 }
 

@@ -372,10 +372,10 @@ function renderEvent(sessionId: string, msg: AgentMessage, _prevMsg: AgentMessag
         ? { input_tokens: ltu.input_tokens, output_tokens: ltu.output_tokens, cache_read_input_tokens: ltu.cached_input_tokens ?? 0 }
         : msg.data.usage;
       const cost = calculateCost(usageForCost, provider);
-      const displayInput = ltu ? ltu.input_tokens : (msg.data.usage?.input_tokens || 0) + (msg.data.usage?.cache_read_input_tokens || 0) + (msg.data.usage?.cache_creation_input_tokens || 0);
+      const displayInput = ltu ? ltu.input_tokens : (msg.data.usage?.input_tokens || 0);
       const displayOutput = ltu ? ltu.output_tokens : (msg.data.usage?.output_tokens || 0);
       const displayCache = ltu ? (ltu.cached_input_tokens || 0) : (msg.data.usage?.cache_read_input_tokens || 0);
-      const displayTotal = ltu ? ltu.total_tokens : (displayInput + displayOutput);
+      const displayTotal = displayInput + displayOutput;
       const assistantData = assistantTextMap?.[eventIndex];
       return (
         <div className="border-t border-border/15 pt-3 mt-4 animate-in fade-in slide-in-from-bottom-2 fill-mode-forwards animation-duration-[400ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">

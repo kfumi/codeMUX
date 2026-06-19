@@ -92,7 +92,7 @@ function App() {
   const handleStartNewSession = async (message: string) => {
     const { selectedAgentKind, selectedModel, selectedReasoningEffort, draftProjectId } = useNewSessionStore.getState();
     const cwd = resolveSessionCwd(projects, draftProjectId, getStoredAgentCwd());
-    const { provider, apiKey, baseUrl, model, runtimeModel } = resolveAgentProviderConfig({
+    const { provider, apiKey, baseUrl, model, runtimeModel, codexNeedsProxy } = resolveAgentProviderConfig({
       agentKind: selectedAgentKind,
       config,
       sessionModel: selectedModel,
@@ -112,7 +112,7 @@ function App() {
         }));
       }
 
-      await startQuery(session.id, message, cwd, apiKey, baseUrl, runtimeModel, selectedReasoningEffort);
+      await startQuery(session.id, message, cwd, apiKey, baseUrl, runtimeModel, selectedReasoningEffort, codexNeedsProxy);
       closeDraft();
     } catch (error) {
       logger.error('Failed to start a new session from empty state', undefined, serializeError(error));
@@ -146,7 +146,7 @@ function App() {
               <NewSessionPanel onSubmit={handleStartNewSession} />
             </Suspense>
           ) : (
-            <div className="flex flex-1 items-center justify-center animate-in fade-in fill-mode-forwards [animation-duration:350ms] [animation-timing-function:ease]">
+            <div className="flex flex-1 items-center justify-center animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
               <div className="max-w-md space-y-5 text-center">
                 <div className="relative inline-flex">
                   <div className="relative flex h-14 w-14 items-center justify-center rounded-xl border border-border/70 bg-muted/35 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.025)]">

@@ -1,12 +1,12 @@
 // Commands from Rust to sidecar (via stdin)
 export type SidecarCommand =
-  | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; apiKey?: string; baseUrl?: string; model?: string; reasoningEffort?: string; skills?: string[] }
+  | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; apiKey?: string; baseUrl?: string; model?: string; reasoningEffort?: string; codexNeedsProxy?: boolean; skills?: string[] }
   | { type: 'send_input'; prompt: string }
   | { type: 'reset_session'; sessionId: string }
   | { type: 'interrupt' }
   | { type: 'shutdown' }
   | { type: 'tool_response'; toolUseId: string; response: unknown }
-  | { type: 'start_proxy'; apiKey: string; baseUrl: string; providerName?: string }
+  | { type: 'start_proxy'; apiKey: string; baseUrl: string; providerName?: string; codexNeedsProxy?: boolean }
   | { type: 'stop_proxy' }
   | { type: 'proxy_status' };
 

@@ -101,4 +101,29 @@ describe('settings store agent config actions', () => {
     expect(deleteProviderMock).toHaveBeenCalledWith('provider-1');
     expect(useSettingsStore.getState().config?.active_provider_id).toBeNull();
   });
+
+  it('uses provider Codex proxy override when deciding if proxy is needed', async () => {
+    const { useSettingsStore } = await import('./settingsStore');
+    const provider: Provider = {
+      id: 'provider-1',
+      name: 'Provider 1',
+      api_key: 'key',
+      anthropic_base_url: '',
+      openai_base_url: 'https://openrouter.ai/api/v1',
+      default_model: 'gpt-5',
+      codex_needs_proxy: false,
+    };
+
+    useSettingsStore.setState((state) => ({
+      config: state.config
+        ? {
+            ...state.config,
+            providers: [provider],
+            active_provider_id: 'provider-1',
+          }
+        : null,
+    }));
+
+    expect(useSettingsStore.getState().getNeedsProxy()).toBe(false);
+  });
 });

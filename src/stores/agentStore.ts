@@ -73,7 +73,7 @@ interface AgentState {
   acknowledgedFiles: Record<string, Set<string>>;
 
   /** Start a new agent query */
-  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort) => Promise<void>;
+  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean) => Promise<void>;
   /** Interrupt the current query for a specific session */
   interrupt: (sessionId: string) => Promise<void>;
   /** Clear events for a session */
@@ -737,7 +737,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   fileOriginals: {},
   acknowledgedFiles: {},
 
-  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort) => {
+  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean) => {
     clearPendingStreaming(sessionId);
     logger.info('MODEL_TRACE startQuery dispatching to Tauri', {
       sessionId,
@@ -747,6 +747,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       promptLength: prompt.length,
       hasApiKey: Boolean(apiKey),
       baseUrl: baseUrl || null,
+      codexNeedsProxy: codexNeedsProxy ?? null,
     });
     // Clear force-stopped flag when starting a new query
     set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
@@ -1141,7 +1142,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             isError: event.kind === 'error' || (event.kind === 'result' && Boolean(event.data?.is_error)),
           });
         }
-      }, apiKey, baseUrl, model, reasoningEffort);
+      }, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy);
     } catch (err) {
       logger.error('Agent query failed to start or stream', { sessionId, cwd, model }, serializeError(err));
       set((s) => {

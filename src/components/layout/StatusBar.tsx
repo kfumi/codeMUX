@@ -18,38 +18,42 @@ export function StatusBar() {
     <div className="flex h-6 shrink-0 items-center justify-between border-t border-border/62 bg-[hsl(var(--surface-1))]/92 px-3 text-[11px] text-muted-foreground/74 select-none">
       {/* 左侧 */}
       <div className="flex items-center gap-3">
-        {needsProxy && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => void (proxyRunning ? stopProxy() : startProxy())}
-                disabled={proxyToggling}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 transition-colors hover:bg-muted/54 hover:text-foreground/80',
-                  proxyToggling && 'opacity-60',
-                )}
-              >
-                {proxyToggling ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <span
-                    className={cn(
-                      'inline-block h-2 w-2 rounded-full',
-                      proxyRunning ? 'bg-[hsl(var(--success))]' : 'bg-muted-foreground/50',
-                    )}
-                  />
-                )}
-                <span>
-                  {proxyRunning ? `Proxy :${port ?? '...'}` : 'Proxy 未运行'}
-                </span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              <p>{proxyRunning ? `点击停止代理 (${proxyUrl})` : '点击启动代理'}</p>
-            </TooltipContent>
-          </Tooltip>
-        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => void (proxyRunning ? stopProxy() : startProxy())}
+              disabled={proxyToggling || (!needsProxy && !proxyRunning)}
+              className={cn(
+                'flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 transition-colors hover:bg-muted/54 hover:text-foreground/80',
+                (proxyToggling || (!needsProxy && !proxyRunning)) && 'opacity-60',
+              )}
+            >
+              {proxyToggling ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <span
+                  className={cn(
+                    'inline-block h-2 w-2 rounded-full',
+                    proxyRunning ? 'bg-[hsl(var(--success))]' : 'bg-muted-foreground/50',
+                  )}
+                />
+              )}
+              <span>
+                {proxyRunning ? `Proxy :${port ?? '...'}` : 'Proxy 未运行'}
+              </span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            <p>
+              {proxyRunning
+                ? `点击停止代理 (${proxyUrl})`
+                : needsProxy
+                  ? '点击启动代理'
+                  : '当前供应商配置为不需要路由代理'}
+            </p>
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       {/* 右侧预留 */}

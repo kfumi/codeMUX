@@ -71,6 +71,41 @@ describe('resolveAgentProviderConfig', () => {
       baseUrl: 'https://api.openai.com',
       model: 'o4-mini',
       runtimeModel: 'o4-mini',
+      codexNeedsProxy: false,
+    });
+  });
+
+  it('lets provider config force Codex direct mode for a non-OpenAI endpoint', () => {
+    expect(
+      resolveAgentProviderConfig({
+        agentKind: 'codex',
+        config: {
+          ...config,
+          providers: [
+            {
+              ...config.providers[0],
+              codex_needs_proxy: false,
+            },
+          ],
+          active_provider_id: 'claude-provider',
+        },
+      }),
+    ).toMatchObject({
+      provider: expect.objectContaining({ id: 'claude-provider' }),
+      baseUrl: 'https://openrouter.ai/api',
+      codexNeedsProxy: false,
+    });
+  });
+
+  it('defaults legacy non-OpenAI Codex providers to proxy mode', () => {
+    expect(
+      resolveAgentProviderConfig({
+        agentKind: 'codex',
+        config,
+        sessionProviderId: 'claude-provider',
+      }),
+    ).toMatchObject({
+      codexNeedsProxy: true,
     });
   });
 

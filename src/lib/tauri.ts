@@ -77,6 +77,7 @@ function summarizeInvokeArgs(args?: Record<string, unknown>) {
   if (typeof args.eventsJson === 'string') summary.eventsLength = args.eventsJson.length;
   if (typeof args.apiKey === 'string') summary.hasApiKey = args.apiKey.length > 0;
   if (typeof args.baseUrl === 'string') summary.hasBaseUrl = args.baseUrl.length > 0;
+  if (typeof args.codexNeedsProxy === 'boolean') summary.codexNeedsProxy = args.codexNeedsProxy;
 
   return Object.keys(summary).length > 0 ? summary : undefined;
 }
@@ -120,12 +121,13 @@ export const agentApi = {
     baseUrl?: string,
     model?: string,
     reasoningEffort?: ReasoningEffort,
+    codexNeedsProxy?: boolean,
   ): Promise<void> => {
     if (onEvent) {
       agentEventListeners.set(sessionId, onEvent);
     }
     const channel = getAgentChannel(sessionId);
-    return invokeLogged('ensure_agent_session', { sessionId, cwd, channel, apiKey, baseUrl, model, reasoningEffort });
+    return invokeLogged('ensure_agent_session', { sessionId, cwd, channel, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy });
   },
   sendInput: (
     sessionId: string,
@@ -140,9 +142,10 @@ export const agentApi = {
     baseUrl?: string,
     model?: string,
     reasoningEffort?: ReasoningEffort,
+    codexNeedsProxy?: boolean,
   ): Promise<void> => {
     const channel = createAgentChannel(sessionId, onEvent);
-    return invokeLogged('start_agent_session', { sessionId, prompt, cwd, channel, apiKey, baseUrl, model, reasoningEffort });
+    return invokeLogged('start_agent_session', { sessionId, prompt, cwd, channel, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy });
   },
   interrupt: (sessionId: string): Promise<void> => invokeLogged('interrupt_agent_session', { sessionId }),
   shutdown: (sessionId: string): Promise<void> => invokeLogged('shutdown_agent', { sessionId }),
@@ -161,8 +164,8 @@ export const agentApi = {
   /** Load session events from Codex's JSONL session file. */
   loadCodexSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_codex_session_events', { appSessionId }),
-  startProxy: (apiKey: string, baseUrl: string, providerName: string): Promise<number> =>
-    invokeLogged('start_codex_proxy', { apiKey, baseUrl, providerName }),
+  startProxy: (apiKey: string, baseUrl: string, providerName: string, codexNeedsProxy?: boolean): Promise<number> =>
+    invokeLogged('start_codex_proxy', { apiKey, baseUrl, providerName, codexNeedsProxy }),
   stopProxy: (): Promise<void> => invokeLogged('stop_codex_proxy'),
   getProxyPort: (): Promise<number | null> => invokeLogged('get_codex_proxy_port'),
 };

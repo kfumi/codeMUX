@@ -428,7 +428,7 @@ pub async fn load_codex_session_events(
         let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
         let cached = usage.get("cached_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
         let output = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let total = usage.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(input + cached + output);
+        let total = input + output;
 
         if input > 0 || output > 0 {
             if let Some(insert_at) = turn.last_assistant_msg_idx {
@@ -608,6 +608,7 @@ fn build_ensure_session_command(
     base_url: Option<String>,
     model: Option<String>,
     reasoning_effort: Option<String>,
+    codex_needs_proxy: Option<bool>,
 ) -> serde_json::Value {
     let resolved_cwd = if cwd == "." {
         std::env::var("USERPROFILE")
@@ -634,6 +635,9 @@ fn build_ensure_session_command(
     }
     if let Some(effort) = reasoning_effort {
         cmd["reasoningEffort"] = serde_json::Value::String(effort);
+    }
+    if let Some(needs_proxy) = codex_needs_proxy {
+        cmd["codexNeedsProxy"] = serde_json::Value::Bool(needs_proxy);
     }
     if let Ok(parsed_agent_kind) = AgentKind::from_str(agent_kind) {
         match get_agent_session_id(state, session_id, parsed_agent_kind) {
@@ -687,6 +691,7 @@ pub async fn ensure_agent_session(
     base_url: Option<String>,
     model: Option<String>,
     reasoning_effort: Option<String>,
+    codex_needs_proxy: Option<bool>,
 ) -> Result<(), String> {
     info!(
         target: "agent",
@@ -713,7 +718,7 @@ pub async fn ensure_agent_session(
         sidecars.get(&session_id).map(|h| h.stderr_lines.clone())
     };
 
-    let cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model, reasoning_effort);
+    let cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model, reasoning_effort, codex_needs_proxy);
 
     // If the proxy is already running (e.g. started manually from settings),
     // tell the sidecar to use it directly instead of starting a new one.
@@ -763,6 +768,7 @@ pub async fn start_agent_session(
     base_url: Option<String>,
     model: Option<String>,
     reasoning_effort: Option<String>,
+    codex_needs_proxy: Option<bool>,
 ) -> Result<(), String> {
     info!(target: "agent", "Starting agent session wrapper for session_id={}", session_id);
 
@@ -773,7 +779,7 @@ pub async fn start_agent_session(
     };
 
     ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
-    let ensure_cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model, reasoning_effort);
+    let ensure_cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model, reasoning_effort, codex_needs_proxy);
 
     send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 
@@ -1125,6 +1131,7 @@ pub async fn start_codex_proxy(
     api_key: String,
     base_url: String,
     provider_name: String,
+    codex_needs_proxy: Option<bool>,
 ) -> Result<u16, String> {
     info!(target: "agent", "Starting codex proxy upstream={} provider={}", base_url, provider_name);
 
@@ -1158,12 +1165,15 @@ pub async fn start_codex_proxy(
         sidecars.get(&session_id).map(|h| h.stderr_lines.clone())
     };
 
-    let cmd = serde_json::json!({
+    let mut cmd = serde_json::json!({
         "type": "start_proxy",
         "apiKey": api_key,
         "baseUrl": base_url,
         "providerName": provider_name,
     });
+    if let Some(needs_proxy) = codex_needs_proxy {
+        cmd["codexNeedsProxy"] = serde_json::Value::Bool(needs_proxy);
+    }
     send_command_to_session(&agent_state, &session_id, cmd).await?;
 
     // Wait until stderr confirms either a fresh start or successful reuse.

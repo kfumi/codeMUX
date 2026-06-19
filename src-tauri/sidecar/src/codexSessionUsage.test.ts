@@ -69,7 +69,7 @@ describe('readLatestCodexLastTokenUsage', () => {
         cached_input_tokens: 2,
         output_tokens: 4,
         reasoning_output_tokens: 6,
-        total_tokens: 26,
+        total_tokens: 24,
       });
     } finally {
       await rm(root, { recursive: true, force: true });

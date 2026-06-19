@@ -79,6 +79,8 @@ pub struct Provider {
     /// 1M 上下文窗口（模型名会追加 [1m]）
     #[serde(default)]
     pub context_1m: Option<bool>,
+    #[serde(default)]
+    pub codex_needs_proxy: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,6 +187,7 @@ impl Default for AppConfig {
                 cache_read_price: None,
                 output_price: None,
                 context_1m: None,
+                codex_needs_proxy: None,
             }],
             active_provider_id: Some(id),
             agent_defaults: AgentDefaults::default(),
