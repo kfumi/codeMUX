@@ -225,6 +225,16 @@ export const skillApi = {
   getEnabledNames: (): Promise<string[]> => invokeLogged('get_enabled_skill_names'),
 };
 
+export interface LogFileInfo {
+  name: string;
+  path: string;
+  size: number;
+  modified: string;
+}
+
 export const appApi = {
   getLogDirectory: (): Promise<string> => invokeLogged('get_log_directory'),
+  getAppDataDirectory: (): Promise<string> => invokeLogged('get_app_data_directory'),
+  getLogFiles: (): Promise<LogFileInfo[]> => invokeLogged('get_log_files'),
+  readLogFile: (path: string): Promise<string> => invokeLogged('read_log_file', { path }),
 };
