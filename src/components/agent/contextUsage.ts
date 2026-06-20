@@ -1,6 +1,6 @@
 import type { AgentMessage } from '../../stores/agentStore';
 
-const DEFAULT_CONTEXT_TOKENS = 200_000;
+const DEFAULT_CONTEXT_TOKENS = 258_400;
 const LARGE_CONTEXT_TOKENS = 1_000_000;
 const LARGE_CONTEXT_MODEL_SUFFIX = '[1m]';
 

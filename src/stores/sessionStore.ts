@@ -137,7 +137,9 @@ export const useSessionStore = create<SessionState>((set) => ({
   touchSession: (sessionId: string) => {
     const now = new Date().toISOString();
     set((state) => ({
-      sessions: state.sessions.map((s) => s.id === sessionId ? { ...s, updated_at: now } : s),
+      sessions: state.sessions
+        .map((s) => s.id === sessionId ? { ...s, updated_at: now } : s)
+        .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)),
     }));
     sessionApi.touch(sessionId).catch(() => {});
   },

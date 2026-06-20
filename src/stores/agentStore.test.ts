@@ -238,6 +238,56 @@ describe('agent store Codex history loading', () => {
     expect(kinds.indexOf('assistant')).toBeLessThan(kinds.indexOf('result'));
   });
 
+  it('can send a runtime prompt while showing separate user-facing content', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'TEMPLATE: review current changes', 'D:\\project\\ai-code\\codeMUX', undefined, undefined, undefined, undefined, undefined, '/review');
+
+    expect(startSessionMock).toHaveBeenCalledWith(
+      session.id,
+      'TEMPLATE: review current changes',
+      'D:\\project\\ai-code\\codeMUX',
+      expect.any(Function),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(useAgentStore.getState().events[session.id]?.[0]).toEqual({
+      kind: 'user',
+      data: { content: '/review' },
+    });
+  });
+
+  it('restores Codex command prompt templates as user-facing slash directives', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { findCommand, renderCommandPrompt } = await import('../lib/slashCommands');
+    const session = await primeSession('codex');
+    const plan = findCommand('plan', 'codex')!;
+
+    loadCodexSessionEventsMock.mockResolvedValueOnce([
+      {
+        type: 'user',
+        timestamp: '2026-06-20T10:00:00.000Z',
+        message: {
+          role: 'user',
+          content: renderCommandPrompt(plan, 'add login flow'),
+        },
+      },
+    ]);
+
+    await useAgentStore.getState().loadSessionMessages(session.id);
+
+    expect(useAgentStore.getState().events[session.id]?.[0]).toEqual({
+      kind: 'user',
+      data: { content: '/plan add login flow' },
+    });
+  });
+
   it.each([
     ['codex', loadCodexSessionEventsMock],
     ['claude_code', loadClaudeSessionEventsMock],

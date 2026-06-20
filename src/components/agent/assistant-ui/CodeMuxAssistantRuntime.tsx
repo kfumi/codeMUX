@@ -6,6 +6,7 @@ import type { SlashCommand } from '../../../lib/slashCommands';
 import { findCommand } from '../../../lib/slashCommands';
 import { useAgentStore } from '../../../stores/agentStore';
 import type { AgentMessage } from '../../../stores/agentStore';
+import type { AgentKind } from '../../../types/session';
 import {
   convertAgentEventsToAssistantMessages,
   type CodeMuxAssistantMessage,
@@ -14,6 +15,7 @@ import {
 
 type CodeMuxAssistantRuntimeProviderProps = {
   sessionId: string;
+  agentKind?: AgentKind;
   onSend: (content: string) => Promise<void>;
   onCommand: (command: SlashCommand, args: string) => void | Promise<void>;
   children: ReactNode;
@@ -26,6 +28,7 @@ const EMPTY_TIMESTAMPS: number[] = [];
 
 export function CodeMuxAssistantRuntimeProvider({
   sessionId,
+  agentKind = 'claude_code',
   onSend,
   onCommand,
   children,
@@ -33,6 +36,7 @@ export function CodeMuxAssistantRuntimeProvider({
   return (
     <SessionScopedAssistantRuntime
       sessionId={sessionId}
+      agentKind={agentKind}
       onSend={onSend}
       onCommand={onCommand}
     >
@@ -43,6 +47,7 @@ export function CodeMuxAssistantRuntimeProvider({
 
 function SessionScopedAssistantRuntime({
   sessionId,
+  agentKind = 'claude_code',
   onSend,
   onCommand,
   children,
@@ -64,14 +69,10 @@ function SessionScopedAssistantRuntime({
         return;
       }
 
-      const slashCommand = parseSlashCommand(content);
+      const slashCommand = resolveSlashCommand(content, agentKind);
       if (slashCommand) {
-        const command = findCommand(slashCommand.name);
-
-        if (command) {
-          await onCommand(command, slashCommand.args);
-          return;
-        }
+        await onCommand(slashCommand.command, slashCommand.args);
+        return;
       }
 
       await onSend(content);
@@ -145,7 +146,7 @@ function getTextContent(message: AppendMessage): string {
     .trim();
 }
 
-function parseSlashCommand(content: string): { name: string; args: string } | null {
+export function resolveSlashCommand(content: string, agentKind: AgentKind = 'claude_code'): { command: SlashCommand; args: string } | null {
   if (!content.startsWith('/')) {
     return null;
   }
@@ -157,8 +158,8 @@ function parseSlashCommand(content: string): { name: string; args: string } | nu
     return null;
   }
 
-  return {
-    name,
-    args: firstSpaceIndex === -1 ? '' : content.slice(firstSpaceIndex + 1).trim(),
-  };
+  const command = findCommand(name, agentKind);
+  return command
+    ? { command, args: firstSpaceIndex === -1 ? '' : content.slice(firstSpaceIndex + 1).trim() }
+    : null;
 }

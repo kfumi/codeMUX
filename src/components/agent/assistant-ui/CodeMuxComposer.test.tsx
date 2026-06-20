@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CodeMuxComposer } from './CodeMuxComposer';
@@ -12,6 +12,13 @@ const lexicalProps: Array<{
     directiveType: string;
     label: string;
   }>;
+}> = [];
+
+const capturedPopovers: Array<{
+  char?: string;
+  adapter?: {
+    search?: (query: string) => Array<{ id: string }>;
+  };
 }> = [];
 
 vi.mock('@assistant-ui/react', () => {
@@ -27,7 +34,10 @@ vi.mock('@assistant-ui/react', () => {
       Root: passthrough('div'),
       Send: passthrough('button'),
       Unstable_TriggerPopoverRoot: passthrough('div'),
-      Unstable_TriggerPopover: Object.assign(passthrough('div'), {
+      Unstable_TriggerPopover: Object.assign(({ children, ...props }: any) => {
+        capturedPopovers.push(props);
+        return <div>{typeof children === 'function' ? children([]) : children}</div>;
+      }, {
         Directive: () => null,
       }),
       Unstable_TriggerPopoverCategories: passthrough('div'),
@@ -70,6 +80,7 @@ vi.mock('@assistant-ui/react-lexical', () => ({
 describe('CodeMuxComposer', () => {
   afterEach(() => {
     lexicalProps.length = 0;
+    capturedPopovers.length = 0;
     cleanup();
   });
 
@@ -106,5 +117,39 @@ describe('CodeMuxComposer', () => {
 
     expect(chip).toBeTruthy();
     expect(chip?.className).toContain('codemux-directive-command');
+  });
+
+  it('uses Codex slash commands for Codex sessions', () => {
+    render(<CodeMuxComposer sessionId="session-1" agentKind="codex" />);
+
+    const slashPopover = capturedPopovers.find((popover) => popover.char === '/');
+    const commandIds = slashPopover?.adapter?.search?.('').map((item) => item.id) ?? [];
+
+    expect(commandIds).toEqual(expect.arrayContaining(['plan', 'init', 'review']));
+    expect(commandIds).not.toContain('permissions');
+    expect(commandIds).not.toContain('diff');
+    expect(commandIds).not.toContain('model');
+    expect(commandIds).not.toContain('security-review');
+    expect(commandIds).not.toContain('claude-api');
+  });
+
+  it('shows a dismissible plan mode indicator', () => {
+    const onClear = vi.fn();
+    const { container } = render(
+      <CodeMuxComposer
+        sessionId="session-1"
+        agentKind="codex"
+        activeCommandMode={{ id: 'plan', label: '计划' }}
+        onClearCommandMode={onClear}
+      />,
+    );
+
+    expect(screen.getByText('计划')).toBeTruthy();
+    const indicator = container.querySelector('[data-active-command-mode="plan"]');
+    expect(indicator?.querySelector('.lucide-list-todo')).toBeTruthy();
+
+    fireEvent.click(screen.getByTitle('关闭计划模式'));
+
+    expect(onClear).toHaveBeenCalledTimes(1);
   });
 });

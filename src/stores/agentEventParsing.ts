@@ -3,6 +3,8 @@ import type {
   AgentResultMessage,
   AgentToolResult,
 } from '../types/agent';
+import type { AgentKind } from '../types/session';
+import { formatPromptAsCommandDisplay } from '../lib/slashCommands';
 
 export const INTERRUPT_MARKER = '[Request interrupted by user]';
 
@@ -63,7 +65,7 @@ export function parseSdkUserMessage(data: Record<string, unknown>): ParsedStoreE
   };
 }
 
-export function mapPersistedClaudeMessage(raw: Record<string, unknown>): ParsedStoreEvent | null {
+export function mapPersistedClaudeMessage(raw: Record<string, unknown>, agentKind: AgentKind = 'claude_code'): ParsedStoreEvent | null {
   const msgType = raw.type;
 
   if (msgType === 'assistant') {
@@ -75,7 +77,17 @@ export function mapPersistedClaudeMessage(raw: Record<string, unknown>): ParsedS
   }
 
   if (msgType === 'user') {
-    return parseSdkUserMessage(raw);
+    const event = parseSdkUserMessage(raw);
+    if (event.kind !== 'user' || agentKind !== 'codex') {
+      return event;
+    }
+
+    return {
+      ...event,
+      data: {
+        content: formatPromptAsCommandDisplay(event.data.content, agentKind) ?? event.data.content,
+      },
+    };
   }
 
   return null;

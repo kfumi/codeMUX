@@ -73,7 +73,7 @@ interface AgentState {
   acknowledgedFiles: Record<string, Set<string>>;
 
   /** Start a new agent query */
-  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean) => Promise<void>;
+  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string) => Promise<void>;
   /** Interrupt the current query for a specific session */
   interrupt: (sessionId: string) => Promise<void>;
   /** Clear events for a session */
@@ -737,7 +737,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   fileOriginals: {},
   acknowledgedFiles: {},
 
-  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean) => {
+  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string) => {
     clearPendingStreaming(sessionId);
     logger.info('MODEL_TRACE startQuery dispatching to Tauri', {
       sessionId,
@@ -754,8 +754,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // Auto-update session title from the first user message (skip slash commands)
     const state = get();
     const hasExistingUserMsg = (state.events[sessionId] || []).some(e => e.kind === 'user');
-    if (!hasExistingUserMsg && !prompt.startsWith('/')) {
-      const title = truncateTitle(prompt);
+    const userContent = displayContent ?? prompt;
+    if (!hasExistingUserMsg && !userContent.startsWith('/')) {
+      const title = truncateTitle(userContent);
       if (title) {
         useSessionStore.getState().updateSessionTitle(sessionId, title);
       }
@@ -765,7 +766,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     useSessionStore.getState().touchSession(sessionId);
 
     // 添加用户消息到事件列表
-    const userMsg: AgentMessage = { kind: 'user', data: { content: prompt } };
+    const userMsg: AgentMessage = { kind: 'user', data: { content: userContent } };
     const userTs = Date.now();
     set((s) => ({
       events: {
@@ -1291,7 +1292,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           ? new Date(rawMsg.timestamp).getTime() || 0
           : 0;
 
-        const event = mapPersistedClaudeMessage(rawMsg);
+        const event = mapPersistedClaudeMessage(rawMsg, agentKind ?? 'claude_code');
         if (event) {
           events.push(event as AgentMessage);
           timestamps.push(ts);

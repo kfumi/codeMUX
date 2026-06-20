@@ -6,6 +6,7 @@ import { resolveAgentProviderConfig } from '../../lib/agentProvider';
 import { getProviderModelList } from '../../lib/providerModels';
 import { cn } from '../../lib/utils';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
+import { findCommand, formatCommandDisplay, renderCommandPrompt } from '../../lib/slashCommands';
 import type { ReasoningEffort } from '../../types/session';
 import { agentApi, sessionApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
@@ -71,6 +72,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const [infoTitle, setInfoTitle] = useState('');
   const [infoContent, setInfoContent] = useState('');
   const [cwd, setCwd] = useState(() => getStoredAgentCwd());
+  const [codexPlanMode, setCodexPlanMode] = useState(false);
   const ensuredSessionsRef = useRef<Set<string>>(new Set());
 
   const handleRenameOpen = () => {
@@ -107,6 +109,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       setCwd(getStoredAgentCwd());
     }
   }, [sessionId, project?.path]);
+
+  useEffect(() => {
+    setCodexPlanMode(false);
+  }, [sessionId, agentKind]);
 
   useEffect(() => {
     const effectiveCwd = project?.path || cwd;
@@ -150,16 +156,20 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     [events, runtimeModel, resolvedProvider?.context_1m],
   );
 
-  const handleSend = async (content: string) => {
+  const handleSend = async (content: string, displayContent = content, options?: { skipCommandMode?: boolean }) => {
     const effectiveCwd = project?.path || cwd;
     const latestSession = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId) ?? session;
     const latestReasoningEffort = latestSession?.reasoning_effort ?? reasoningEffort;
+    const latestAgentKind = latestSession?.agent_kind ?? session?.agent_kind ?? 'claude_code';
     const latestProviderConfig = resolveAgentProviderConfig({
-      agentKind: latestSession?.agent_kind ?? session?.agent_kind ?? 'claude_code',
+      agentKind: latestAgentKind,
       config,
       sessionProviderId: latestSession?.provider_id ?? session?.provider_id,
       sessionModel: latestSession?.model ?? session?.model ?? model,
     });
+    const runtimeContent = !options?.skipCommandMode && latestAgentKind === 'codex' && codexPlanMode
+      ? renderCommandPrompt(findCommand('plan', 'codex')!, content)
+      : content;
 
     if (latestSession && latestProviderConfig.provider?.id && latestProviderConfig.model) {
       sessionApi.updateProvider(sessionId, latestProviderConfig.provider.id, latestProviderConfig.model, latestReasoningEffort).catch(() => {});
@@ -180,13 +190,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     try {
       await startQuery(
         sessionId,
-        content,
+        runtimeContent,
         effectiveCwd,
         latestProviderConfig.apiKey,
         latestProviderConfig.baseUrl,
         latestProviderConfig.runtimeModel,
         latestReasoningEffort,
         latestProviderConfig.codexNeedsProxy,
+        displayContent,
       );
     } catch (error) {
       useAgentStore.setState((state) => ({
@@ -305,10 +316,18 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
 
     if (command.handler === 'prompt' && command.prompt) {
-      const prompt = command.prompt.replace(/\{args\}/g, args || '');
-      await handleSend(prompt);
+      const displayContent = formatCommandDisplay(command, args);
+      if (agentKind === 'codex' && command.name === 'plan') {
+        setCodexPlanMode(true);
+        if (!args) {
+          return;
+        }
+      }
+
+      const prompt = renderCommandPrompt(command, args);
+      await handleSend(prompt, displayContent, { skipCommandMode: true });
     }
-  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, getCostInfo]);
+  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, getCostInfo, agentKind, handleSend]);
 
   return (
     <div className="flex h-full flex-col">
@@ -365,7 +384,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         </button>
       </div>
 
-      <CodeMuxAssistantRuntimeProvider sessionId={sessionId} onSend={handleSend} onCommand={handleCommand}>
+      <CodeMuxAssistantRuntimeProvider sessionId={sessionId} agentKind={agentKind} onSend={handleSend} onCommand={handleCommand}>
         <CodeMuxThread
           sessionId={sessionId}
           provider={resolvedProvider}
@@ -378,6 +397,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
               </div>
               <CodeMuxComposer
                 sessionId={sessionId}
+                agentKind={agentKind}
                 projectPath={project?.path}
                 modelSelector={(
                   <CodeMuxModelSelector
@@ -391,6 +411,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                   />
                 )}
                 onStop={() => interrupt(sessionId)}
+                activeCommandMode={agentKind === 'codex' && codexPlanMode ? { id: 'plan', label: '计划' } : null}
+                onClearCommandMode={() => setCodexPlanMode(false)}
               />
             </div>
           )}

@@ -16,12 +16,14 @@ import {
   FolderPlus,
   Info,
   Layers,
+  ListTodo,
   Search,
   Sparkles,
   Square,
   Terminal,
   TestTube2,
   Wrench,
+  X,
   Zap,
 } from 'lucide-react';
 import { useMemo, useRef, useState, type FC, type ReactNode } from 'react';
@@ -31,14 +33,18 @@ import { getAllCommands } from '../../../lib/slashCommands';
 import { cn } from '../../../lib/utils';
 import { useAgentStore } from '../../../stores/agentStore';
 import { usePreviewStore, type FileTreeNodeData } from '../../../stores/previewStore';
+import type { AgentKind } from '../../../types/session';
 import { CodeMuxDirectiveChip, type CodeMuxDirectiveKind } from './CodeMuxDirectiveText';
 
 interface CodeMuxComposerProps {
   sessionId: string;
+  agentKind?: AgentKind;
   projectPath?: string | null;
   modelName?: string;
   modelSelector?: ReactNode;
   onStop?: () => void | Promise<void>;
+  activeCommandMode?: { id: 'plan'; label: string } | null;
+  onClearCommandMode?: () => void;
 }
 
 type TriggerCategory = { id: string; label: string };
@@ -104,13 +110,22 @@ function DirectiveChip({ directiveType, label }: DirectiveChipProps) {
 
 const DIRECTIVE_CHIP: FC<DirectiveChipProps> = DirectiveChip;
 
-export function CodeMuxComposer({ sessionId, projectPath, modelName, modelSelector, onStop }: CodeMuxComposerProps) {
+export function CodeMuxComposer({
+  sessionId,
+  agentKind = 'claude_code',
+  projectPath,
+  modelName,
+  modelSelector,
+  onStop,
+  activeCommandMode,
+  onClearCommandMode,
+}: CodeMuxComposerProps) {
   const aui = useAui();
   const composerRootRef = useRef<HTMLDivElement>(null);
   const [isFocused, setIsFocused] = useState(false);
   const composerText = useAuiState((state) => state.composer.text);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
-  const commands = getAllCommands();
+  const commands = getAllCommands(agentKind);
   const triggerDataRef = useRef<{
     itemsByCategory: Map<string, Unstable_TriggerItem[]>;
     categories: TriggerCategory[];
@@ -315,6 +330,23 @@ export function CodeMuxComposer({ sessionId, projectPath, modelName, modelSelect
                 >
                   /
                 </button>
+                {activeCommandMode && (
+                  <span
+                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[hsl(var(--accent)/0.42)] bg-[hsl(var(--accent)/0.16)] px-2 text-xs font-medium text-[hsl(var(--accent))]"
+                    data-active-command-mode={activeCommandMode.id}
+                  >
+                    <ListTodo className="h-3.5 w-3.5" />
+                    <span>{activeCommandMode.label}</span>
+                    <button
+                      type="button"
+                      onClick={onClearCommandMode}
+                      className="-mr-0.5 inline-flex h-4 w-4 items-center justify-center rounded-sm text-[hsl(var(--accent)/0.82)] transition-colors hover:bg-[hsl(var(--accent)/0.16)] hover:text-[hsl(var(--accent))]"
+                      title={`关闭${activeCommandMode.label}模式`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {modelSelector ?? (

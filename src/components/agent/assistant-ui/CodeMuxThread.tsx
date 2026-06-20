@@ -5,7 +5,7 @@
   useAuiState,
   type MessageState,
 } from '@assistant-ui/react';
-import { ArrowDown, Loader2 } from 'lucide-react';
+import { ArrowDown, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 
 import { MessageFooter, type MessageFooterStats } from '@/components/assistant-ui/message-footer';
@@ -40,6 +40,7 @@ type CodeMuxThreadProps = {
 const EMPTY_EVENTS: AgentMessage[] = [];
 const EMPTY_TIMESTAMPS: number[] = [];
 const INTERRUPT_LABEL = '用户中断请求';
+const COLLAPSED_USER_MESSAGE_CLASS = 'max-h-80 overflow-hidden';
 const GROUP_BY_PART = groupPartByType({
   reasoning: ['group-thinking'],
   'tool-call': ['group-tool-call'],
@@ -138,6 +139,8 @@ function InterruptBanner() {
 function UserMessage({ message, sourceEventIndex }: { message: MessageState; sourceEventIndex?: number }) {
   const text = getMessageText(message);
   const timestamp = getSourceTimestamp(message);
+  const [expanded, setExpanded] = useState(false);
+  const canCollapse = isLongUserMessage(text);
 
   if (!text) {
     return null;
@@ -158,14 +161,36 @@ function UserMessage({ message, sourceEventIndex }: { message: MessageState; sou
       id={sourceEventIndex != null ? `msg-${sourceEventIndex}` : undefined}
       className="mb-5 flex w-full justify-end"
     >
-      <div className="flex max-w-[78%] flex-col items-end">
-        <div className="rounded-xl rounded-tr-md border border-[hsl(var(--primary)/0.28)] bg-[linear-gradient(180deg,hsl(var(--primary)/0.92),hsl(var(--primary)/0.78))] px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-[0_12px_28px_-20px_hsl(var(--primary)/0.48)]">
+      <div data-user-message-column="true" className="flex w-fit max-w-full min-w-0 flex-col items-end">
+        <div
+          data-user-message-bubble="true"
+          className={cn(
+            'min-w-0 max-w-full whitespace-pre-wrap break-words rounded-xl rounded-tr-md border border-[hsl(var(--primary)/0.28)] bg-[linear-gradient(180deg,hsl(var(--primary)/0.92),hsl(var(--primary)/0.78))] px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-[0_12px_28px_-20px_hsl(var(--primary)/0.48)] [overflow-wrap:anywhere]',
+            canCollapse && !expanded && COLLAPSED_USER_MESSAGE_CLASS,
+          )}
+        >
           <CodeMuxDirectiveText text={text} tone="inverted" />
         </div>
+        {canCollapse ? (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-label={expanded ? '收起' : '查看更多'}
+            onClick={() => setExpanded((value) => !value)}
+            className="mt-1.5 inline-flex items-center gap-1 self-start rounded-md border border-border/40 bg-muted/28 px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          >
+            <span>{expanded ? '收起' : '查看更多'}</span>
+            {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </button>
+        ) : null}
         <MessageFooter timestamp={timestamp} className="justify-end" />
       </div>
     </MessagePrimitive.Root>
   );
+}
+
+function isLongUserMessage(text: string): boolean {
+  return text.length > 900 || text.split(/\r?\n/).length > 12;
 }
 
 function MessageNav({

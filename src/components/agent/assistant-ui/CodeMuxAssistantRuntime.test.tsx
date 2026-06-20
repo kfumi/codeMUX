@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
-import { CodeMuxAssistantRuntimeProvider } from './CodeMuxAssistantRuntime';
+import { CodeMuxAssistantRuntimeProvider, resolveSlashCommand } from './CodeMuxAssistantRuntime';
 import { CodeMuxThread, buildToolDurationMap } from './CodeMuxThread';
 
 const sessionOneEvents: AgentMessage[] = [
@@ -155,6 +155,12 @@ const directiveUserEvents: AgentMessage[] = [
   { kind: 'user', data: { content: '/review @src/App.tsx please check this' } },
 ];
 
+const longUserText = Array.from({ length: 80 }, (_, index) => `line ${index + 1}`).join('\n');
+
+const longUserEvents: AgentMessage[] = [
+  { kind: 'user', data: { content: longUserText } },
+];
+
 const originalScrollTo = HTMLElement.prototype.scrollTo;
 
 function Harness({ sessionId }: { sessionId: string }) {
@@ -192,6 +198,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-reasoning': reasoningEvents,
         'session-grouped-tools': groupedToolEvents,
         'session-directives': directiveUserEvents,
+        'session-long-user': longUserEvents,
       },
       eventTimestamps: {
         'session-1': [1, 2],
@@ -282,6 +289,16 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('2 次工具调用')).toBeTruthy();
   });
 
+  it('does not resolve Claude-only slash commands in Codex sessions', () => {
+    expect(resolveSlashCommand('/security-review', 'codex')).toBeNull();
+    expect(resolveSlashCommand('/permissions', 'codex')).toBeNull();
+    expect(resolveSlashCommand('/plan add tests', 'codex')).toMatchObject({
+      command: expect.objectContaining({ name: 'plan' }),
+      args: 'add tests',
+    });
+    expect(resolveSlashCommand('/security-review', 'claude_code')?.command.name).toBe('security-review');
+  });
+
   it('renders directive text in user messages as chips', () => {
     const { container } = render(<Harness sessionId="session-directives" />);
 
@@ -289,6 +306,27 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('App.tsx').closest('[data-directive-type="file"]')).toBeTruthy();
     expect(screen.getByText('please check this')).toBeTruthy();
     expect(container.querySelector('[data-directive-value="@src/App.tsx"] svg')).toBeNull();
+  });
+
+  it('collapses very long user messages behind a show-more control', () => {
+    const { container } = render(<Harness sessionId="session-long-user" />);
+
+    expect(screen.getByText(/line 80/)).toBeTruthy();
+    const userMessageRoot = container.querySelector('[data-message-id="user-0"]');
+    const bubbleColumn = userMessageRoot?.querySelector('[data-user-message-column="true"]');
+    const bubble = userMessageRoot?.querySelector('[data-user-message-bubble="true"]');
+
+    expect(bubbleColumn?.className).toContain('max-w-full');
+    expect(bubbleColumn?.className).not.toContain('max-w-[78%]');
+    expect(bubble?.className).toContain('max-h-80');
+    expect(bubble?.className).toContain('overflow-hidden');
+    expect(bubble?.className).not.toContain('overflow-y-auto');
+
+    const showMore = screen.getByRole('button', { name: '查看更多' });
+    fireEvent.click(showMore);
+
+    expect(screen.getByRole('button', { name: '收起' })).toBeTruthy();
+    expect(bubble?.className).not.toContain('max-h-80');
   });
 
   it('keeps the first completion time when duplicate live tool results arrive', () => {

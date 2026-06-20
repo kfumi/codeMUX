@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../types/session';
 
 const createMock = vi.fn<(...args: unknown[]) => Promise<Session>>();
+const touchMock = vi.fn<(...args: unknown[]) => Promise<void>>();
 
 vi.mock('../lib/tauri', () => ({
   agentApi: {
@@ -26,6 +27,7 @@ vi.mock('../lib/tauri', () => ({
     getAll: vi.fn(),
     delete: vi.fn(),
     updateTitle: vi.fn(),
+    touch: touchMock,
   },
 }));
 
@@ -138,5 +140,55 @@ describe('session store createSession', () => {
 
     expect(created).toEqual(session);
     expect(createMock).toHaveBeenCalledWith('New', 'codex', 'agent', 'project-2');
+  });
+
+  it('moves a touched historical session to the front of the local list', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-20T08:00:00.000Z'));
+    touchMock.mockResolvedValue(undefined);
+
+    const oldSession: Session = {
+      id: 'session-old',
+      title: 'Old',
+      agent_kind: 'claude_code',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      project_id: 'project-1',
+      created_at: '2026-06-18T00:00:00.000Z',
+      updated_at: '2026-06-18T00:00:00.000Z',
+    };
+    const recentSession: Session = {
+      id: 'session-recent',
+      title: 'Recent',
+      agent_kind: 'claude_code',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      project_id: 'project-1',
+      created_at: '2026-06-19T00:00:00.000Z',
+      updated_at: '2026-06-19T00:00:00.000Z',
+    };
+
+    const { useSessionStore } = await import('./sessionStore');
+    useSessionStore.setState({
+      sessions: [recentSession, oldSession],
+      activeSessionId: oldSession.id,
+      isLoading: false,
+      error: null,
+    });
+
+    useSessionStore.getState().touchSession(oldSession.id);
+
+    expect(useSessionStore.getState().sessions.map((session) => session.id)).toEqual([
+      'session-old',
+      'session-recent',
+    ]);
+    expect(useSessionStore.getState().sessions[0].updated_at).toBe('2026-06-20T08:00:00.000Z');
+    expect(touchMock).toHaveBeenCalledWith('session-old');
+
+    vi.useRealTimers();
   });
 });
