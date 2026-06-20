@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MessageSquarePlus, Plus } from 'lucide-react';
 
 import { useSessionStore } from '../../stores/sessionStore';
@@ -13,7 +13,16 @@ interface SessionListProps {
 }
 
 export function SessionList({ onNewSessionInProject, onAddProject }: SessionListProps) {
-  const { sessions, activeSessionId, fetchSessions, setActiveSession, deleteSession, updateSessionTitle } = useSessionStore();
+  const {
+    sessions,
+    activeSessionId,
+    fetchSessions,
+    fetchArchivedSessions,
+    setActiveSession,
+    archiveSession,
+    deleteSession,
+    updateSessionTitle,
+  } = useSessionStore();
   const { projects, activeProjectId, fetchProjects, deleteProject, renameProject, setActiveProject } = useProjectStore();
   const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
 
@@ -32,21 +41,22 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
 
   useEffect(() => {
     fetchSessions();
+    fetchArchivedSessions();
     fetchProjects();
-  }, [fetchSessions, fetchProjects]);
+  }, [fetchSessions, fetchArchivedSessions, fetchProjects]);
 
-  const projectSessions = new Map<string, typeof sessions>();
-  const ungroupedSessions: typeof sessions = [];
-
-  for (const session of sessions) {
-    if (session.project_id) {
-      const list = projectSessions.get(session.project_id) || [];
+  const projectSessions = useMemo(() => {
+    const map = new Map<string, typeof sessions>();
+    for (const session of sessions) {
+      if (!session.project_id) continue;
+      const list = map.get(session.project_id) || [];
       list.push(session);
-      projectSessions.set(session.project_id, list);
-    } else {
-      ungroupedSessions.push(session);
+      map.set(session.project_id, list);
     }
-  }
+    return map;
+  }, [sessions]);
+
+  const ungroupedSessions = useMemo(() => sessions.filter((session) => !session.project_id), [sessions]);
 
   return (
     <div className="space-y-2 stagger-children">
@@ -80,6 +90,7 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
                 setActiveProject(project.id);
                 setActiveSession(id);
               }}
+              onArchiveSession={archiveSession}
               onDeleteSession={deleteSession}
               onRenameSession={updateSessionTitle}
               onNewSessionInProject={onNewSessionInProject}
@@ -111,6 +122,7 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
                 setActiveProject(null);
                 setActiveSession(session.id);
               }}
+              onArchive={() => archiveSession(session.id)}
               onDelete={() => deleteSession(session.id)}
               onRename={(title) => updateSessionTitle(session.id, title)}
               isMenuOpen={menuSessionId === session.id}

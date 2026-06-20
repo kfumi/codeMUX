@@ -11,7 +11,10 @@ fn validate_agent_kind(value: &str) -> Result<AgentKind> {
         rusqlite::Error::FromSqlConversionFailure(
             0,
             rusqlite::types::Type::Text,
-            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, message)),
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                message,
+            )),
         )
     })
 }
@@ -35,6 +38,7 @@ pub struct Session {
     pub reasoning_effort: Option<String>,
     pub mode: Option<String>,
     pub project_id: Option<String>,
+    pub is_archived: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -67,7 +71,9 @@ pub fn create_project(conn: &Connection, name: &str, path: &str) -> Result<Proje
 }
 
 pub fn get_all_projects(conn: &Connection) -> Result<Vec<Project>> {
-    let mut stmt = conn.prepare("SELECT id, name, path, created_at, updated_at FROM projects ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare(
+        "SELECT id, name, path, created_at, updated_at FROM projects ORDER BY updated_at DESC",
+    )?;
 
     let projects = stmt
         .query_map([], |row| {
@@ -98,7 +104,12 @@ pub fn rename_project(conn: &Connection, project_id: &str, name: &str) -> Result
     Ok(())
 }
 
-pub fn create_session_with_mode(conn: &Connection, title: &str, agent_kind: AgentKind, mode: &str) -> Result<Session> {
+pub fn create_session_with_mode(
+    conn: &Connection,
+    title: &str,
+    agent_kind: AgentKind,
+    mode: &str,
+) -> Result<Session> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
 
@@ -116,12 +127,19 @@ pub fn create_session_with_mode(conn: &Connection, title: &str, agent_kind: Agen
         reasoning_effort: Some("medium".to_string()),
         mode: Some(mode.to_string()),
         project_id: None,
+        is_archived: false,
         created_at: now.clone(),
         updated_at: now,
     })
 }
 
-pub fn create_session_for_project(conn: &Connection, title: &str, agent_kind: AgentKind, mode: &str, project_id: &str) -> Result<Session> {
+pub fn create_session_for_project(
+    conn: &Connection,
+    title: &str,
+    agent_kind: AgentKind,
+    mode: &str,
+    project_id: &str,
+) -> Result<Session> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
 
@@ -139,13 +157,14 @@ pub fn create_session_for_project(conn: &Connection, title: &str, agent_kind: Ag
         reasoning_effort: Some("medium".to_string()),
         mode: Some(mode.to_string()),
         project_id: Some(project_id.to_string()),
+        is_archived: false,
         created_at: now.clone(),
         updated_at: now,
     })
 }
 
 pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, project_id, created_at, updated_at FROM sessions ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, project_id, is_archived, created_at, updated_at FROM sessions WHERE is_archived = 0 ORDER BY updated_at DESC")?;
 
     let sessions = stmt
         .query_map([], |row| {
@@ -158,13 +177,56 @@ pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
                 reasoning_effort: row.get(5)?,
                 mode: row.get(6)?,
                 project_id: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                is_archived: row.get::<_, i32>(8)? != 0,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
             })
         })?
         .collect::<Result<Vec<_>>>()?;
 
     Ok(sessions)
+}
+
+pub fn get_all_archived_sessions(conn: &Connection) -> Result<Vec<Session>> {
+    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, project_id, is_archived, created_at, updated_at FROM sessions WHERE is_archived = 1 ORDER BY updated_at DESC")?;
+
+    let sessions = stmt
+        .query_map([], |row| {
+            Ok(Session {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                agent_kind: validate_agent_kind(&row.get::<_, String>(2)?)?,
+                provider_id: row.get(3)?,
+                model: row.get(4)?,
+                reasoning_effort: row.get(5)?,
+                mode: row.get(6)?,
+                project_id: row.get(7)?,
+                is_archived: row.get::<_, i32>(8)? != 0,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
+            })
+        })?
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(sessions)
+}
+
+pub fn archive_session(conn: &Connection, session_id: &str) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE sessions SET is_archived = 1, updated_at = ?1 WHERE id = ?2",
+        params![now, session_id],
+    )?;
+    Ok(())
+}
+
+pub fn unarchive_session(conn: &Connection, session_id: &str) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE sessions SET is_archived = 0, updated_at = ?1 WHERE id = ?2",
+        params![now, session_id],
+    )?;
+    Ok(())
 }
 
 pub fn upsert_agent_session_mapping(
@@ -239,7 +301,13 @@ pub fn touch_session(conn: &Connection, session_id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn update_session_provider(conn: &Connection, session_id: &str, provider_id: &str, model: &str, reasoning_effort: Option<&str>) -> Result<()> {
+pub fn update_session_provider(
+    conn: &Connection,
+    session_id: &str,
+    provider_id: &str,
+    model: &str,
+    reasoning_effort: Option<&str>,
+) -> Result<()> {
     let now = Utc::now().to_rfc3339();
     conn.execute(
         "UPDATE sessions SET provider_id = ?1, model = ?2, reasoning_effort = COALESCE(?3, reasoning_effort, 'medium'), updated_at = ?4 WHERE id = ?5",
@@ -250,7 +318,10 @@ pub fn update_session_provider(conn: &Connection, session_id: &str, provider_id:
 
 #[cfg(test)]
 mod tests {
-    use super::{get_agent_session_mapping, get_all_sessions, update_session_provider, upsert_agent_session_mapping};
+    use super::{
+        archive_session, get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
+        unarchive_session, update_session_provider, upsert_agent_session_mapping,
+    };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
     use rusqlite::Connection;
@@ -280,10 +351,14 @@ mod tests {
         )
         .unwrap();
 
-        let created = upsert_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode, "claude-a").unwrap();
+        let created =
+            upsert_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode, "claude-a")
+                .unwrap();
         assert_eq!(created.agent_session_id, "claude-a");
 
-        let updated = upsert_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode, "claude-b").unwrap();
+        let updated =
+            upsert_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode, "claude-b")
+                .unwrap();
         assert_eq!(updated.agent_session_id, "claude-b");
 
         let loaded = get_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode)
@@ -301,9 +376,11 @@ mod tests {
             rusqlite::params!["session-1", "Test", "claude_code", "agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
         )
         .unwrap();
-        upsert_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode, "claude-a").unwrap();
+        upsert_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode, "claude-a")
+            .unwrap();
 
-        conn.execute("DELETE FROM sessions WHERE id = ?1", ["session-1"]).unwrap();
+        conn.execute("DELETE FROM sessions WHERE id = ?1", ["session-1"])
+            .unwrap();
 
         let loaded = get_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode).unwrap();
         assert!(loaded.is_none());
@@ -324,5 +401,77 @@ mod tests {
         let sessions = get_all_sessions(&conn).unwrap();
         assert_eq!(sessions[0].model.as_deref(), Some("gpt-5"));
         assert_eq!(sessions[0].reasoning_effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn active_session_listing_excludes_archived_sessions() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                "session-active",
+                "Active",
+                "codex",
+                "agent",
+                "2026-06-19T00:00:00Z",
+                "2026-06-19T00:00:00Z"
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                "session-archived",
+                "Archived",
+                "codex",
+                "agent",
+                "2026-06-18T00:00:00Z",
+                "2026-06-18T00:00:00Z"
+            ],
+        )
+        .unwrap();
+
+        archive_session(&conn, "session-archived").unwrap();
+
+        let active = get_all_sessions(&conn).unwrap();
+        let archived = get_all_archived_sessions(&conn).unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, "session-active");
+        assert!(!active[0].is_archived);
+        assert_eq!(archived.len(), 1);
+        assert_eq!(archived[0].id, "session-archived");
+        assert!(archived[0].is_archived);
+    }
+
+    #[test]
+    fn unarchive_session_returns_it_to_active_listing() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at, is_archived)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                "session-archived",
+                "Archived",
+                "codex",
+                "agent",
+                "2026-06-18T00:00:00Z",
+                "2026-06-18T00:00:00Z",
+                1
+            ],
+        )
+        .unwrap();
+
+        unarchive_session(&conn, "session-archived").unwrap();
+
+        let active = get_all_sessions(&conn).unwrap();
+        let archived = get_all_archived_sessions(&conn).unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, "session-archived");
+        assert!(!active[0].is_archived);
+        assert!(archived.is_empty());
     }
 }

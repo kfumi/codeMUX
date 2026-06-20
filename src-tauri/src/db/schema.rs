@@ -23,6 +23,7 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             reasoning_effort TEXT DEFAULT 'medium',
             mode TEXT NOT NULL DEFAULT 'chat',
             project_id TEXT,
+            is_archived INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
@@ -67,15 +68,16 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
-        "
+        ",
     )?;
 
     // Migration: add mode column if missing
-    let has_mode: bool = conn
-        .prepare("SELECT mode FROM sessions LIMIT 0")
-        .is_ok();
+    let has_mode: bool = conn.prepare("SELECT mode FROM sessions LIMIT 0").is_ok();
     if !has_mode {
-        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'chat'", []);
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'chat'",
+            [],
+        );
     }
 
     // Migration: add project_id column if missing
@@ -102,7 +104,25 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         .prepare("SELECT reasoning_effort FROM sessions LIMIT 0")
         .is_ok();
     if !has_reasoning_effort {
-        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN reasoning_effort TEXT DEFAULT 'medium'", []);
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN reasoning_effort TEXT DEFAULT 'medium'",
+            [],
+        );
+    }
+
+    // Migration: archived_at → is_archived
+    let has_archived_at: bool = conn
+        .prepare("SELECT archived_at FROM sessions LIMIT 0")
+        .is_ok();
+    let has_is_archived: bool = conn
+        .prepare("SELECT is_archived FROM sessions LIMIT 0")
+        .is_ok();
+    if has_archived_at && !has_is_archived {
+        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0", []);
+        let _ = conn.execute("UPDATE sessions SET is_archived = 1 WHERE archived_at IS NOT NULL", []);
+        // SQLite doesn't support DROP COLUMN before 3.35; leave archived_at in place
+    } else if !has_is_archived {
+        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0", []);
     }
 
     let _ = conn.execute("DROP TABLE IF EXISTS tool_calls", []);
@@ -114,9 +134,7 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
     migrate_mcp_servers_table(conn)?;
 
     // Migration: add disk_path column to skills if missing
-    let has_disk_path: bool = conn
-        .prepare("SELECT disk_path FROM skills LIMIT 0")
-        .is_ok();
+    let has_disk_path: bool = conn.prepare("SELECT disk_path FROM skills LIMIT 0").is_ok();
     if !has_disk_path {
         let _ = conn.execute("ALTER TABLE skills ADD COLUMN disk_path TEXT", []);
     }
@@ -133,19 +151,28 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
 }
 
 fn migrate_mcp_servers_table(conn: &Connection) -> Result<()> {
-    let has_server_config = conn.prepare("SELECT server_config FROM mcp_servers LIMIT 0").is_ok();
+    let has_server_config = conn
+        .prepare("SELECT server_config FROM mcp_servers LIMIT 0")
+        .is_ok();
 
     if has_server_config {
         // Already on new schema — ensure description column exists
-        let has_description = conn.prepare("SELECT description FROM mcp_servers LIMIT 0").is_ok();
+        let has_description = conn
+            .prepare("SELECT description FROM mcp_servers LIMIT 0")
+            .is_ok();
         if !has_description {
-            conn.execute("ALTER TABLE mcp_servers ADD COLUMN description TEXT NOT NULL DEFAULT ''", [])?;
+            conn.execute(
+                "ALTER TABLE mcp_servers ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
         }
         return Ok(());
     }
 
     // No legacy enabled column either — fresh DB before any rows were inserted
-    let has_legacy_enabled = conn.prepare("SELECT enabled FROM mcp_servers LIMIT 0").is_ok();
+    let has_legacy_enabled = conn
+        .prepare("SELECT enabled FROM mcp_servers LIMIT 0")
+        .is_ok();
     if !has_legacy_enabled {
         return Ok(());
     }
@@ -330,7 +357,9 @@ mod tests {
 
         initialize_database(&conn).unwrap();
 
-        assert!(conn.prepare("SELECT app_session_id FROM agent_session_mappings LIMIT 0").is_ok());
+        assert!(conn
+            .prepare("SELECT app_session_id FROM agent_session_mappings LIMIT 0")
+            .is_ok());
         assert!(conn.prepare("SELECT id FROM messages LIMIT 0").is_err());
         assert!(conn.prepare("SELECT id FROM tool_calls LIMIT 0").is_err());
     }

@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Archive, Pencil, Trash2, Undo2 } from 'lucide-react';
 
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { ConfirmDialog } from '../ui/confirm-dialog';
@@ -12,7 +12,10 @@ interface SessionItemProps {
   session: Session;
   isActive: boolean;
   onClick: () => void;
+  onArchive: () => void;
   onDelete: () => void;
+  archiveLabel?: string;
+  archiveIcon?: 'archive' | 'unarchive';
   onRename: (title: string) => void;
   isMenuOpen: boolean;
   onOpenMenu: (x: number, y: number) => void;
@@ -34,26 +37,36 @@ function formatRelativeTime(dateStr: string): string {
 
   const month = date.getMonth() + 1;
   const day = date.getDate();
-  if (date.getFullYear() === now.getFullYear()) {
-    return `${month}-${day}`;
-  }
+  if (date.getFullYear() === now.getFullYear()) return `${month}-${day}`;
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
-export function SessionItem({ session, isActive, onClick, onDelete, onRename, isMenuOpen, onOpenMenu, onCloseMenu }: SessionItemProps) {
-  const [confirmOpen, setConfirmOpen] = useState(false);
+export function SessionItem({
+  session,
+  isActive,
+  onClick,
+  onArchive,
+  onDelete,
+  archiveLabel = '归档',
+  archiveIcon = 'archive',
+  onRename,
+  isMenuOpen,
+  onOpenMenu,
+  onCloseMenu,
+}: SessionItemProps) {
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const agentDef = getAgentDefinition(session.agent_kind);
-
   const timeLabel = formatRelativeTime(session.updated_at);
+  const ArchiveIcon = archiveIcon === 'archive' ? Archive : Undo2;
 
-  const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setMenuPos({ x: e.clientX, y: e.clientY });
-    onOpenMenu(e.clientX, e.clientY);
+  const handleContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setMenuPos({ x: event.clientX, y: event.clientY });
+    onOpenMenu(event.clientX, event.clientY);
   }, [onOpenMenu]);
 
   const handleRenameStart = () => {
@@ -68,6 +81,11 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
       onRename(trimmed);
     }
     setRenaming(false);
+  };
+
+  const handleArchive = () => {
+    onCloseMenu();
+    onArchive();
   };
 
   const handleDelete = () => {
@@ -88,20 +106,13 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
         onClick={onClick}
         onContextMenu={handleContextMenu}
       >
-        {isActive && (
-          <div className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-[hsl(var(--accent))] opacity-90" />
-        )}
+        {isActive && <div className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-[hsl(var(--accent))] opacity-90" />}
         {agentDef ? (
           <span className={cn('flex shrink-0 items-center transition-opacity duration-200', isActive ? 'opacity-100' : 'opacity-70')}>
             <AgentBrandIcon agent={agentDef} size="sm" />
           </span>
         ) : (
-          <span
-            className={cn(
-              'inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm text-[9px] font-semibold tracking-normal',
-              isActive ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64',
-            )}
-          >
+          <span className={cn('inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm text-[9px] font-semibold tracking-normal', isActive ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64')}>
             {session.agent_kind?.slice(0, 2).toUpperCase() || '??'}
           </span>
         )}
@@ -125,25 +136,21 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
               {session.title || '未命名对话'}
             </span>
             <span className="relative shrink-0 h-5">
-              <span className={cn(
-                'inline-flex items-center text-[10px] tabular-nums transition-opacity duration-150',
-                'text-[hsl(var(--sidebar-fg))]/30',
-                'group-hover:opacity-0',
-              )}>
+              <span className={cn('inline-flex items-center text-[10px] tabular-nums transition-opacity duration-150', 'text-[hsl(var(--sidebar-fg))]/30', 'group-hover:opacity-0')}>
                 {timeLabel}
               </span>
               <button
                 className={cn(
                   'absolute right-0 top-1/2 -translate-y-1/2 rounded-md p-1 transition-opacity duration-150',
                   'text-[hsl(var(--sidebar-fg))]/42 opacity-0 group-hover:opacity-100',
-                  'hover:bg-[hsl(var(--destructive)/0.1)] hover:text-[hsl(var(--destructive))]',
+                  'hover:bg-[hsl(var(--primary)/0.1)] hover:text-[hsl(var(--primary))]',
                 )}
                 onClick={(event) => {
                   event.stopPropagation();
-                  setConfirmOpen(true);
+                  handleArchive();
                 }}
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <ArchiveIcon className="h-3.5 w-3.5" />
               </button>
             </span>
           </>
@@ -163,7 +170,14 @@ export function SessionItem({ session, isActive, onClick, onDelete, onRename, is
             重命名
           </button>
           <button
-            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] text-destructive transition-colors hover:bg-destructive/10"
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] text-foreground/82 transition-colors hover:bg-muted/72 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.9]"
+            onClick={handleArchive}
+          >
+            <ArchiveIcon className="h-3.5 w-3.5" />
+            {archiveLabel}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] text-destructive transition-colors hover:bg-[hsl(var(--destructive)/0.1)] hover:text-destructive"
             onClick={handleDelete}
           >
             <Trash2 className="h-3.5 w-3.5" />

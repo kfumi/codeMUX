@@ -7,12 +7,17 @@ import { getDefaultAgentKind } from '../types/agentRegistry';
 
 interface SessionState {
   sessions: Session[];
+  archivedSessions: Session[];
   activeSessionId: string | null;
   isLoading: boolean;
+  isArchivedLoading: boolean;
   error: string | null;
   fetchSessions: () => Promise<void>;
+  fetchArchivedSessions: () => Promise<void>;
   createSession: CreateSessionAction;
   deleteSession: (sessionId: string) => Promise<void>;
+  archiveSession: (sessionId: string) => Promise<void>;
+  unarchiveSession: (sessionId: string) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   touchSession: (sessionId: string) => void;
@@ -83,8 +88,10 @@ function createSessionAction(
 
 export const useSessionStore = create<SessionState>((set) => ({
   sessions: [],
+  archivedSessions: [],
   activeSessionId: null,
   isLoading: false,
+  isArchivedLoading: false,
   error: null,
   fetchSessions: async () => {
     set({ isLoading: true, error: null });
@@ -93,6 +100,15 @@ export const useSessionStore = create<SessionState>((set) => ({
       set({ sessions, isLoading: false });
     } catch (error) {
       set({ error: String(error), isLoading: false });
+    }
+  },
+  fetchArchivedSessions: async () => {
+    set({ isArchivedLoading: true, error: null });
+    try {
+      const archivedSessions = await sessionApi.getArchived();
+      set({ archivedSessions, isArchivedLoading: false });
+    } catch (error) {
+      set({ error: String(error), isArchivedLoading: false });
     }
   },
   createSession: createSessionAction(set),
@@ -114,11 +130,55 @@ export const useSessionStore = create<SessionState>((set) => ({
       await sessionApi.delete(sessionId);
       set((state) => {
         const newSessions = state.sessions.filter((s) => s.id !== sessionId);
+        const newArchivedSessions = state.archivedSessions.filter((s) => s.id !== sessionId);
         const newActiveId = state.activeSessionId === sessionId ? (newSessions[0]?.id ?? null) : state.activeSessionId;
-        return { sessions: newSessions, activeSessionId: newActiveId, isLoading: false };
+        return {
+          sessions: newSessions,
+          archivedSessions: newArchivedSessions,
+          activeSessionId: newActiveId,
+          isLoading: false,
+        };
       });
     } catch (error) {
       set({ error: String(error), isLoading: false });
+    }
+  },
+  archiveSession: async (sessionId: string) => {
+    try {
+      await sessionApi.archive(sessionId);
+      set((state) => {
+        const session = state.sessions.find((entry) => entry.id === sessionId);
+        const remainingSessions = state.sessions.filter((entry) => entry.id !== sessionId);
+        const nextArchivedSessions = session
+          ? [{ ...session, is_archived: true }, ...state.archivedSessions.filter((entry) => entry.id !== sessionId)]
+          : state.archivedSessions;
+        const nextActiveId = state.activeSessionId === sessionId ? (remainingSessions[0]?.id ?? null) : state.activeSessionId;
+        return {
+          sessions: remainingSessions,
+          archivedSessions: nextArchivedSessions,
+          activeSessionId: nextActiveId,
+        };
+      });
+    } catch (error) {
+      set({ error: String(error) });
+    }
+  },
+  unarchiveSession: async (sessionId: string) => {
+    try {
+      await sessionApi.unarchive(sessionId);
+      set((state) => {
+        const session = state.archivedSessions.find((entry) => entry.id === sessionId);
+        if (!session) return state;
+        const restored = { ...session, is_archived: false };
+        const nextArchivedSessions = state.archivedSessions.filter((entry) => entry.id !== sessionId);
+        const nextSessions = [restored, ...state.sessions.filter((entry) => entry.id !== sessionId)];
+        return {
+          sessions: nextSessions.sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)),
+          archivedSessions: nextArchivedSessions,
+        };
+      });
+    } catch (error) {
+      set({ error: String(error) });
     }
   },
   setActiveSession: (sessionId: string | null) => {

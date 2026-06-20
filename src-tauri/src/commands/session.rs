@@ -39,6 +39,14 @@ pub fn get_all_sessions(state: State<'_, AppState>) -> Result<Vec<operations::Se
 }
 
 #[tauri::command]
+pub fn get_archived_sessions(
+    state: State<'_, AppState>,
+) -> Result<Vec<operations::Session>, String> {
+    let db = state.db.lock().unwrap();
+    operations::get_all_archived_sessions(&db).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn delete_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
     info!(target: "session", "Deleting session session_id={}", session_id);
     let db = state.db.lock().unwrap();
@@ -46,7 +54,25 @@ pub fn delete_session(state: State<'_, AppState>, session_id: String) -> Result<
 }
 
 #[tauri::command]
-pub fn update_session_title(state: State<'_, AppState>, session_id: String, title: String) -> Result<(), String> {
+pub fn archive_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+    info!(target: "session", "Archiving session session_id={}", session_id);
+    let db = state.db.lock().unwrap();
+    operations::archive_session(&db, &session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn unarchive_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+    info!(target: "session", "Unarchiving session session_id={}", session_id);
+    let db = state.db.lock().unwrap();
+    operations::unarchive_session(&db, &session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_session_title(
+    state: State<'_, AppState>,
+    session_id: String,
+    title: String,
+) -> Result<(), String> {
     debug!(target: "session", "Updating session title session_id={} title={}", session_id, title);
     let db = state.db.lock().unwrap();
     operations::update_session_title(&db, &session_id, &title).map_err(|e| e.to_string())
@@ -75,5 +101,12 @@ pub fn update_session_provider(
         reasoning_effort.as_deref().unwrap_or("unchanged")
     );
     let db = state.db.lock().unwrap();
-    operations::update_session_provider(&db, &session_id, &provider_id, &model, reasoning_effort.as_deref()).map_err(|e| e.to_string())
+    operations::update_session_provider(
+        &db,
+        &session_id,
+        &provider_id,
+        &model,
+        reasoning_effort.as_deref(),
+    )
+    .map_err(|e| e.to_string())
 }

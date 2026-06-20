@@ -4,6 +4,9 @@ import type { Session } from '../types/session';
 
 const createMock = vi.fn<(...args: unknown[]) => Promise<Session>>();
 const touchMock = vi.fn<(...args: unknown[]) => Promise<void>>();
+const getArchivedMock = vi.fn<(...args: unknown[]) => Promise<Session[]>>();
+const archiveMock = vi.fn<(...args: unknown[]) => Promise<void>>();
+const unarchiveMock = vi.fn<(...args: unknown[]) => Promise<void>>();
 
 vi.mock('../lib/tauri', () => ({
   agentApi: {
@@ -25,7 +28,10 @@ vi.mock('../lib/tauri', () => ({
   sessionApi: {
     create: createMock,
     getAll: vi.fn(),
+    getArchived: getArchivedMock,
     delete: vi.fn(),
+    archive: archiveMock,
+    unarchive: unarchiveMock,
     updateTitle: vi.fn(),
     touch: touchMock,
   },
@@ -38,8 +44,10 @@ describe('session store createSession', () => {
     const { useSettingsStore } = await import('./settingsStore');
     useSessionStore.setState({
       sessions: [],
+      archivedSessions: [],
       activeSessionId: null,
       isLoading: false,
+      isArchivedLoading: false,
       error: null,
     });
     useSettingsStore.setState({
@@ -190,5 +198,89 @@ describe('session store createSession', () => {
     expect(touchMock).toHaveBeenCalledWith('session-old');
 
     vi.useRealTimers();
+  });
+
+  it('archives a session and removes it from the active sidebar list', async () => {
+    archiveMock.mockResolvedValue(undefined);
+    const activeSession: Session = {
+      id: 'session-active',
+      title: 'Active',
+      agent_kind: 'codex',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      project_id: null,
+      created_at: '2026-06-20T00:00:00.000Z',
+      updated_at: '2026-06-20T00:00:00.000Z',
+    };
+    const nextSession: Session = {
+      id: 'session-next',
+      title: 'Next',
+      agent_kind: 'claude_code',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      project_id: null,
+      created_at: '2026-06-19T00:00:00.000Z',
+      updated_at: '2026-06-19T00:00:00.000Z',
+    };
+
+    const { useSessionStore } = await import('./sessionStore');
+    useSessionStore.setState({
+      sessions: [activeSession, nextSession],
+      archivedSessions: [],
+      activeSessionId: activeSession.id,
+      isLoading: false,
+      isArchivedLoading: false,
+      error: null,
+    });
+
+    await useSessionStore.getState().archiveSession(activeSession.id);
+
+    expect(archiveMock).toHaveBeenCalledWith(activeSession.id);
+    expect(useSessionStore.getState().sessions.map((session) => session.id)).toEqual(['session-next']);
+    expect(useSessionStore.getState().archivedSessions[0]).toMatchObject({
+      id: 'session-active',
+      is_archived: true,
+    });
+    expect(useSessionStore.getState().activeSessionId).toBe('session-next');
+  });
+
+  it('unarchives a session and returns it to the active sidebar list', async () => {
+    unarchiveMock.mockResolvedValue(undefined);
+    const archivedSession: Session = {
+      id: 'session-archived',
+      title: 'Archived',
+      agent_kind: 'codex',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      project_id: 'project-1',
+      created_at: '2026-06-18T00:00:00.000Z',
+      updated_at: '2026-06-19T00:00:00.000Z',
+      is_archived: true,
+    };
+
+    const { useSessionStore } = await import('./sessionStore');
+    useSessionStore.setState({
+      sessions: [],
+      archivedSessions: [archivedSession],
+      activeSessionId: null,
+      isLoading: false,
+      isArchivedLoading: false,
+      error: null,
+    });
+
+    await useSessionStore.getState().unarchiveSession(archivedSession.id);
+
+    expect(unarchiveMock).toHaveBeenCalledWith(archivedSession.id);
+    expect(useSessionStore.getState().archivedSessions).toEqual([]);
+    expect(useSessionStore.getState().sessions[0]).toMatchObject({
+      id: 'session-archived',
+      is_archived: false,
+    });
   });
 });

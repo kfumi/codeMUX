@@ -105,7 +105,10 @@ export const sessionApi = {
   create: (title: string, agentKind: AgentKind, mode?: SessionMode, projectId?: string): Promise<Session> =>
     invokeLogged('create_session', { title, agentKind, mode, projectId: projectId ?? null }),
   getAll: (): Promise<Session[]> => invokeLogged('get_all_sessions'),
+  getArchived: (): Promise<Session[]> => invokeLogged('get_archived_sessions'),
   delete: (sessionId: string): Promise<void> => invokeLogged('delete_session', { sessionId }),
+  archive: (sessionId: string): Promise<void> => invokeLogged('archive_session', { sessionId }),
+  unarchive: (sessionId: string): Promise<void> => invokeLogged('unarchive_session', { sessionId }),
   updateTitle: (sessionId: string, title: string): Promise<void> => invokeLogged('update_session_title', { sessionId, title }),
   touch: (sessionId: string): Promise<void> => invokeLogged('touch_session', { sessionId }),
   updateProvider: (sessionId: string, providerId: string, model: string, reasoningEffort?: ReasoningEffort): Promise<void> =>

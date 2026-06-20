@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Bot, Palette, Plug, Puzzle, Server, Settings } from 'lucide-react';
+import { Archive, Bot, Palette, Plug, Puzzle, Server, Settings } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { AgentSettingsPanel } from './AgentSettings';
+import { ArchivedSessionsPanel } from './ArchivedSessionsPanel';
 import { McpSettingsPanel } from './McpSettings';
 import { ProviderConfigPanel } from './ProviderConfig';
 import { SkillsSettingsPanel } from './SkillsSettings';
@@ -14,18 +15,19 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type SettingsTab = 'general' | 'appearance' | 'provider' | 'agents' | 'mcp' | 'skills';
+type SettingsTab = 'general' | 'appearance' | 'provider' | 'agents' | 'mcp' | 'skills' | 'archive';
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('provider');
 
   const tabs = [
+    { id: 'general' as const, label: '常规', icon: Settings },
     { id: 'provider' as const, label: '提供商配置', icon: Plug },
     { id: 'agents' as const, label: '智能体', icon: Bot },
     { id: 'mcp' as const, label: 'MCP', icon: Server },
     { id: 'skills' as const, label: 'Skills', icon: Puzzle },
     { id: 'appearance' as const, label: '外观', icon: Palette },
-    { id: 'general' as const, label: '常规', icon: Settings },
+    { id: 'archive' as const, label: '已归档对话', icon: Archive },
   ];
 
   return (
@@ -70,6 +72,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             {activeTab === 'agents' && <AgentSettingsPanel />}
             {activeTab === 'mcp' && <McpSettingsPanel />}
             {activeTab === 'skills' && <SkillsSettingsPanel />}
+            {activeTab === 'archive' && <ArchivedSessionsPanel />}
           </div>
         </div>
       </DialogContent>

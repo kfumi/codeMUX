@@ -13,6 +13,7 @@ export interface Session {
   project_id: string | null;
   created_at: string;
   updated_at: string;
+  is_archived: boolean;
 }
 
 export interface CreateSessionRequest {
