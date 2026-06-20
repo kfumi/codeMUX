@@ -179,10 +179,11 @@ export function ArchivedSessionsPanel() {
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title="删除归档对话"
-        description={`确定要删除“${deleteTarget?.title ?? ''}”吗？此操作不可撤销。`}
+        description={`确定要删除"${deleteTarget?.title ?? ''}"吗？此操作不可撤销。`}
         confirmLabel="删除"
         variant="destructive"
         onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
+        overlayClassName="z-230"
       />
 
       <ConfirmDialog
@@ -193,6 +194,7 @@ export function ArchivedSessionsPanel() {
         confirmLabel="全部删除"
         variant="destructive"
         onConfirm={handleClearAll}
+        overlayClassName="z-230"
       />
     </div>
   );

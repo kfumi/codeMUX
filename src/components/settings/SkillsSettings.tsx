@@ -111,7 +111,7 @@ export function SkillsSettingsPanel() {
 
       {/* Delete confirmation */}
       <Dialog open={deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(false)}>
-        <DialogContent className="border-0 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-100">
+        <DialogContent overlayClassName="z-230" className="border-0 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-100">
           <DialogHeader>
             <DialogTitle>卸载 Skill</DialogTitle>
           </DialogHeader>
@@ -127,7 +127,7 @@ export function SkillsSettingsPanel() {
 
       {/* Content preview */}
       <Dialog open={!!previewContent} onOpenChange={(open) => !open && setPreviewContent(null)}>
-        <DialogContent className="max-h-[70vh] overflow-y-auto border-0 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-150">
+        <DialogContent overlayClassName="z-230" className="max-h-[70vh] overflow-y-auto border-0 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-150">
           <DialogHeader>
             <DialogTitle>{previewTitle}</DialogTitle>
           </DialogHeader>

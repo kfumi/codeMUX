@@ -256,7 +256,7 @@ export function ProviderConfigPanel() {
 
       {/* Edit modal */}
       <Dialog open={!!editingProvider} onOpenChange={(open) => !open && closeModal()}>
-        <DialogContent className="border-0 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-120">
+        <DialogContent overlayClassName="z-230" className="border-0 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-120">
           <DialogHeader>
             <DialogTitle>{isNew ? '添加供应商' : '编辑供应商'}</DialogTitle>
           </DialogHeader>

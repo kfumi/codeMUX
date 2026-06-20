@@ -411,7 +411,7 @@ export function McpSettingsPanel() {
 
       {/* 编辑/新建弹窗 */}
       <Dialog open={!!editing} onOpenChange={(open) => !open && closeModal()}>
-        <DialogContent className="border-0 px-10 pt-8 pb-6 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-140">
+        <DialogContent overlayClassName="z-230" className="border-0 px-10 pt-8 pb-6 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-140">
           <DialogHeader>
             <DialogTitle>{isNew ? '添加 MCP Server' : '编辑 MCP Server'}</DialogTitle>
           </DialogHeader>
@@ -524,7 +524,7 @@ export function McpSettingsPanel() {
 
       {/* 删除确认弹窗 */}
       <Dialog open={deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(false)}>
-        <DialogContent className="border-0 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-100">
+        <DialogContent overlayClassName="z-230" className="border-0 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-100">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <span className="text-destructive">⚠</span>
@@ -555,7 +555,7 @@ export function McpSettingsPanel() {
 
       {/* MCP 配置向导弹窗 */}
       <Dialog open={wizardOpen} onOpenChange={(open) => !open && setWizardOpen(false)}>
-        <DialogContent className="max-h-[80vh] overflow-y-auto border-0 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-130 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] scrollbar-none">
+        <DialogContent overlayClassName="z-230" className="max-h-[80vh] overflow-y-auto border-0 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-130 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] scrollbar-none">
           <DialogHeader>
             <DialogTitle>MCP 配置向导</DialogTitle>
           </DialogHeader>

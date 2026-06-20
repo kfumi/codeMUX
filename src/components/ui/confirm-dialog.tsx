@@ -18,6 +18,7 @@ interface ConfirmDialogProps {
   cancelLabel?: string;
   variant?: 'default' | 'destructive';
   onConfirm: () => void;
+  overlayClassName?: string;
 }
 
 export function ConfirmDialog({
@@ -29,6 +30,7 @@ export function ConfirmDialog({
   cancelLabel = '取消',
   variant = 'default',
   onConfirm,
+  overlayClassName,
 }: ConfirmDialogProps) {
   const handleConfirm = () => {
     onConfirm();
@@ -37,7 +39,7 @@ export function ConfirmDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[380px] gap-0 p-0 overflow-hidden">
+      <DialogContent overlayClassName={overlayClassName} className="sm:max-w-95 gap-0 p-0 overflow-hidden">
         <DialogHeader className="px-6 pt-6 pb-4">
           <div className="flex items-start gap-3">
             {variant === 'destructive' && (
