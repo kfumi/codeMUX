@@ -992,16 +992,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         if (forceStopped && shouldSuppressLiveEventWhileStopped(event.kind)) {
           if (event.kind === 'result') {
             const resultData = event.data;
-            if (!resultData.is_error) {
-              return;
-            }
             clearPendingStreaming(sessionId);
             set((s) => {
               const { [sessionId]: _removed, ...rest } = s.queryStartTime;
               return {
                 isRunning: { ...s.isRunning, [sessionId]: false },
                 queryStartTime: rest,
-                error: { ...s.error, [sessionId]: resultData.result || 'Request interrupted' },
+                streamingText: { ...s.streamingText, [sessionId]: '' },
+                streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+                streamedToolUseIds: { ...s.streamedToolUseIds, [sessionId]: new Set() },
+                ...(resultData.is_error
+                  ? { error: { ...s.error, [sessionId]: resultData.result || 'Request interrupted' } }
+                  : {}),
               };
             });
           }

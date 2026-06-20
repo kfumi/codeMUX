@@ -10,7 +10,7 @@ export function LogSettings() {
   const [loading, setLoading] = useState(false);
   const [logDir, setLogDir] = useState<string>('');
   const [lastRefresh, setLastRefresh] = useState<string>('');
-  const logPathRef = useRef<string>('');
+  const [error, setError] = useState<string | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const wasAtBottomRef = useRef(true);
 
@@ -19,16 +19,15 @@ export function LogSettings() {
       const [files, dir] = await Promise.all([appApi.getLogFiles(), appApi.getLogDirectory()]);
       setLogDir(dir);
 
-      // Find the latest codemux log file
-      const codemuxLog = files.find((f) => f.name.startsWith('codemux'));
+      // Find the latest codemux log file (match .log extension to avoid picking up crash dumps, etc.)
+      const codemuxLog = files.find((f) => f.name.startsWith('codemux') && f.name.endsWith('.log'));
       if (!codemuxLog) {
         setLogContent('');
-        logPathRef.current = '';
+        setError(null);
         return;
       }
 
-      logPathRef.current = codemuxLog.path;
-      const content = await appApi.readLogFile(codemuxLog.path);
+      const content = await appApi.readLogFile(codemuxLog.name);
 
       // Check if user is near the bottom before updating
       const el = contentRef.current;
@@ -37,6 +36,7 @@ export function LogSettings() {
       }
 
       setLogContent(content);
+      setError(null);
       setLastRefresh(new Date().toLocaleTimeString('zh-CN'));
 
       // Auto-scroll to bottom if user was at the bottom
@@ -45,8 +45,8 @@ export function LogSettings() {
           contentRef.current.scrollTop = contentRef.current.scrollHeight;
         }
       });
-    } catch {
-      // ignore
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '读取日志失败');
     }
   }, []);
 
@@ -113,6 +113,12 @@ export function LogSettings() {
           </Button>
         </div>
       </div>
+
+      {error && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2 text-xs text-destructive">
+          {error}
+        </div>
+      )}
 
       <div className="rounded-xl border border-border/70 bg-card">
         <div

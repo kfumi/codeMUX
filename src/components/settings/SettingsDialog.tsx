@@ -21,7 +21,7 @@ interface SettingsDialogProps {
 type SettingsTab = 'general' | 'appearance' | 'provider' | 'agents' | 'mcp' | 'skills' | 'archive' | 'logs' | 'about';
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('provider');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
 
   const tabs = [
     { id: 'general' as const, label: '常规', icon: Settings },

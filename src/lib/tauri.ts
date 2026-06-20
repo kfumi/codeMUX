@@ -236,5 +236,5 @@ export const appApi = {
   getLogDirectory: (): Promise<string> => invokeLogged('get_log_directory'),
   getAppDataDirectory: (): Promise<string> => invokeLogged('get_app_data_directory'),
   getLogFiles: (): Promise<LogFileInfo[]> => invokeLogged('get_log_files'),
-  readLogFile: (path: string): Promise<string> => invokeLogged('read_log_file', { path }),
+  readLogFile: (fileName: string): Promise<string> => invokeLogged('read_log_file', { fileName }),
 };

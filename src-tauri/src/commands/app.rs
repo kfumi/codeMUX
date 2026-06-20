@@ -1,6 +1,5 @@
 use std::fs;
 
-use log::info;
 use serde::Serialize;
 use tauri::AppHandle;
 use tauri::Manager;
@@ -14,8 +13,6 @@ pub fn get_log_directory(app: AppHandle) -> Result<String, String> {
 
     fs::create_dir_all(&log_dir)
         .map_err(|error| format!("Failed to create log directory: {}", error))?;
-
-    info!(target: "app", "Resolved log directory at {}", log_dir.display());
 
     Ok(log_dir.to_string_lossy().to_string())
 }
@@ -85,8 +82,23 @@ pub fn get_log_files(app: AppHandle) -> Result<Vec<LogFileInfo>, String> {
     Ok(files)
 }
 
-/// Read the content of a log file by path.
+/// Read the content of a log file by name (resolved safely within the log directory).
 #[tauri::command]
-pub fn read_log_file(path: String) -> Result<String, String> {
-    fs::read_to_string(&path).map_err(|error| format!("Failed to read log file: {}", error))
+pub fn read_log_file(app: AppHandle, file_name: String) -> Result<String, String> {
+    // Security: reject names with path separators to prevent directory traversal
+    if file_name.contains('/') || file_name.contains('\\') {
+        return Err(format!("Invalid file name: must not contain path separators (got: {})", file_name));
+    }
+
+    let log_dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|error| format!("Failed to resolve log directory: {}", error))?;
+
+    // Ensure log directory exists (same as get_log_directory)
+    fs::create_dir_all(&log_dir)
+        .map_err(|error| format!("Failed to create log directory: {}", error))?;
+
+    let target = log_dir.join(&file_name);
+    fs::read_to_string(&target).map_err(|error| format!("Failed to read log file {}: {}", target.display(), error))
 }

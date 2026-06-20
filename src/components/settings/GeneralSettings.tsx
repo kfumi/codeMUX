@@ -13,7 +13,8 @@ export function GeneralSettings() {
     appApi.getAppDataDirectory().then(setConfigDir).catch(() => {});
   }, []);
 
-  const configPath = configDir ? `${configDir}\\config.json` : '';
+  const sep = configDir.includes('\\') ? '\\' : '/';
+  const configPath = configDir ? `${configDir}${sep}config.json` : '';
 
   const handleCopy = async () => {
     if (!configPath) return;
