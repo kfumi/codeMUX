@@ -13,6 +13,10 @@ describe('agent registry', () => {
     });
   });
 
+  it('marks Codex as supporting interactive user questions', () => {
+    expect(getAgentDefinition('codex')?.capabilities).toContain('supports_ask_user_question');
+  });
+
   it('marks unsupported registry lookups as missing', () => {
     expect(AGENT_REGISTRY.some((entry) => entry.kind === 'gemini_cli')).toBe(true);
     expect(getAgentDefinition('gemini_cli')).toBeDefined();

@@ -411,12 +411,18 @@ function renderEvent(sessionId: string, msg: AgentMessage, _prevMsg: AgentMessag
       );
     }
 
-    case 'error':
+    case 'error': {
+      // Suppress abort errors — these are expected when the user interrupts a turn.
+      const errText = msg.data.error;
+      if (/abort/i.test(errText) || errText.includes('The operation was aborted')) {
+        return null;
+      }
       return (
         <div className="text-sm text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] rounded-xl p-3 border border-[hsl(var(--destructive)/0.12)] animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
-          错误: {msg.data.error}
+          错误: {errText}
         </div>
       );
+    }
 
     case 'api_retry': {
       const { attempt, max_retries, error_status, error } = msg.data;

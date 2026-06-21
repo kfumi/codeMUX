@@ -38,7 +38,7 @@ export const AGENT_REGISTRY: AgentDefinition[] = [
     label: 'Codex',
     description: '基于 OpenAI Codex SDK 的编码智能体。',
     icon: 'codex',
-    capabilities: ['supports_tools', 'supports_file_snapshots', 'supports_cost'],
+    capabilities: ['supports_tools', 'supports_file_snapshots', 'supports_cost', 'supports_ask_user_question'],
   },
   {
     kind: 'gemini_cli',

@@ -11,6 +11,7 @@ import { inferReasoningConfig } from './codexReasoning.js';
 import { CodexChatHistory, convertChatCompletionToResponses } from './codexChatCompat.js';
 import { buildToolResultEvent } from './runtimeEvents.js';
 import crypto from 'node:crypto';
+import { waitForInteractiveToolResponse } from './interactiveToolResponses.js';
 
 export type ProxyConfig = {
   apiKey: string;
@@ -220,6 +221,20 @@ async function handleRequest(
         }
       }
 
+      const interactiveToolCalls = toolCalls.filter(isInteractiveUserInputToolCall);
+      if (interactiveToolCalls.length > 0) {
+        proxyLog(`stream intercepted ${interactiveToolCalls.length} interactive user input tool calls`);
+        await handleInteractiveUserInputToolCalls({
+          res,
+          chatRequest,
+          config,
+          interactiveToolCalls,
+          reasoningEnabled: reasoningConfig?.supports_thinking ?? false,
+          toolContext,
+        });
+        return;
+      }
+
       forwardResponsesSseEvents(res, events);
       proxyLog(`stream completed: ${eventCount} events forwarded`);
       await emitToolUseEventsFromStream(toolCalls);
@@ -359,7 +374,15 @@ function stringifyFunctionCallOutput(output: unknown): string {
 type StreamingToolCall = {
   id: string;
   name: string;
+  namespace?: string;
   arguments: string;
+};
+
+type InteractiveUserInputQuestion = {
+  question: string;
+  header?: string;
+  options: Array<{ label: string; description?: string }>;
+  multiSelect?: boolean;
 };
 
 function forwardResponsesSseEvents(res: ServerResponse, events: Array<Record<string, unknown>>): void {
@@ -400,6 +423,147 @@ async function emitToolUseEventsFromStream(toolCalls: StreamingToolCall[]): Prom
   for (const tc of toolCalls) {
     await emitToolUseEvent(tc, parseJsonObject(tc.arguments));
   }
+}
+
+async function handleInteractiveUserInputToolCalls({
+  res,
+  chatRequest,
+  config,
+  interactiveToolCalls,
+  reasoningEnabled,
+  toolContext,
+}: {
+  res: ServerResponse;
+  chatRequest: ReturnType<typeof convertResponsesToChatRequest>;
+  config: ProxyConfig;
+  interactiveToolCalls: StreamingToolCall[];
+  reasoningEnabled: boolean;
+  toolContext: Map<string, { kind: 'function' | 'custom' | 'tool_search'; name: string }>;
+}): Promise<void> {
+  const responses: unknown[] = [];
+  const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
+
+  for (const toolCall of interactiveToolCalls) {
+    const input = parseJsonObject(toolCall.arguments);
+    const questions = parseInteractiveQuestions(input.questions);
+    emitEvent({
+      type: 'ask_user_question',
+      tool_use_id: toolCall.id,
+      questions,
+    });
+
+    const response = await waitForInteractiveToolResponse(toolCall.id);
+    responses.push(response);
+    emitEvent(buildToolResultEvent({
+      sessionId: activeSessionId,
+      toolUseId: toolCall.id,
+      content: stringifyInteractiveToolResponse(response),
+    }));
+  }
+
+  const continuationRequest = buildInteractiveContinuationChatRequest(
+    chatRequest,
+    interactiveToolCalls,
+    responses,
+  );
+  const responseId = `resp_${crypto.randomUUID()}`;
+  const messageId = `msg_${crypto.randomUUID()}`;
+  const reasoningId = `rs_${crypto.randomUUID()}`;
+  const { chunks, response: upstreamRes } = await streamChatCompletion(continuationRequest, config);
+  const responsesEvents = convertChatStreamToResponsesEvents(chunks, {
+    responseId,
+    model: upstreamRes.headers.get('x-model') || continuationRequest.model || 'unknown',
+    reasoningId,
+    messageId,
+    reasoningEnabled,
+    toolContext,
+  });
+
+  const events: Array<Record<string, unknown>> = [];
+  const continuationToolCalls: StreamingToolCall[] = [];
+  let eventCount = 0;
+  for await (const event of responsesEvents) {
+    eventCount++;
+    logStreamingEvent(event, eventCount);
+    events.push(event);
+
+    if (event.type === 'response.output_item.done') {
+      const item = event.item as Record<string, unknown> | undefined;
+      if (item?.type === 'function_call') {
+        continuationToolCalls.push({
+          id: String(item.call_id ?? item.id ?? ''),
+          name: String(item.name ?? ''),
+          namespace: typeof item.namespace === 'string' ? item.namespace : undefined,
+          arguments: String(item.arguments ?? ''),
+        });
+      }
+    }
+  }
+
+  forwardResponsesSseEvents(res, events);
+  proxyLog(`interactive continuation completed: ${eventCount} events forwarded`);
+  await emitToolUseEventsFromStream(continuationToolCalls);
+}
+
+function isInteractiveUserInputToolCall(toolCall: StreamingToolCall): boolean {
+  return toolCall.name === 'request_user_input'
+    || toolCall.name === 'askUserQuestion'
+    || toolCall.name === 'AskUserQuestion';
+}
+
+function parseInteractiveQuestions(value: unknown): InteractiveUserInputQuestion[] {
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed as InteractiveUserInputQuestion[] : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return Array.isArray(value) ? value as InteractiveUserInputQuestion[] : [];
+}
+
+function stringifyInteractiveToolResponse(response: unknown): string {
+  if (typeof response === 'string') {
+    return response;
+  }
+
+  if (response == null) {
+    return '';
+  }
+
+  return JSON.stringify(response);
+}
+
+function buildInteractiveContinuationChatRequest(
+  chatRequest: ReturnType<typeof convertResponsesToChatRequest>,
+  interactiveToolCalls: StreamingToolCall[],
+  responses: unknown[],
+): ReturnType<typeof convertResponsesToChatRequest> {
+  return {
+    ...chatRequest,
+    messages: [
+      ...chatRequest.messages,
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: interactiveToolCalls.map((toolCall) => ({
+          id: toolCall.id,
+          type: 'function',
+          function: {
+            name: toolCall.name,
+            arguments: toolCall.arguments,
+          },
+        })),
+      },
+      ...interactiveToolCalls.map((toolCall, index) => ({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: stringifyInteractiveToolResponse(responses[index]),
+      })),
+    ],
+  } as ReturnType<typeof convertResponsesToChatRequest>;
 }
 
 async function emitToolUseEvent(toolCall: StreamingToolCall, input: Record<string, unknown>): Promise<void> {

@@ -104,6 +104,10 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
   if (isErrorData(data)) {
     const errorMsg = data.event.data.error?.trim();
     if (!errorMsg) return null;
+    // Suppress abort errors — these are expected when the user interrupts a turn.
+    if (/abort/i.test(errorMsg) || errorMsg.includes('The operation was aborted')) {
+      return null;
+    }
     // Parse codex stderr format: "[codex] <label>: <message>"
     const match = errorMsg.match(/^\[codex\]\s*(?:SDK\s*)?(\w[\w\s]*?):\s*(.+)$/s);
     const label = match ? match[1].trim() : undefined;

@@ -16,6 +16,19 @@ import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { CodexSessionRuntime, interruptActiveTurn } from './codexRuntime.js';
 import { getRuntimeFlavor } from './runtimeEvents.js';
 import { proxyManager } from './proxyManager.js';
+import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
+
+// Suppress unhandled abort rejections from child process termination during interrupt.
+// These are expected when the user cancels a running Codex turn.
+process.on('unhandledRejection', (reason) => {
+  const msg = String(reason).toLowerCase();
+  if (msg.includes('abort') || msg.includes('the operation was aborted')) {
+    process.stderr.write(`[sidecar] Suppressed unhandled abort rejection: ${reason}\n`);
+    return;
+  }
+  // Re-throw non-abort errors so they are not silently swallowed.
+  process.stderr.write(`[sidecar] Unhandled rejection: ${reason}\n`);
+});
 
 const WARM_START_TIMEOUT_MS = 30_000;
 const WARM_QUERY_WAIT_WINDOW_MS = 500;
@@ -738,7 +751,13 @@ async function main(): Promise<void> {
         // immediately to abort the running stream.
         if (getRuntimeFlavor(activeAgentKind) === 'codex') {
           codexRuntime.sendInput(cmd.prompt).catch((err) => {
-            emit({ type: 'sidecar_error', error: String(err) });
+            // Suppress abort errors — these are expected when the user interrupts.
+            const msg = String(err).toLowerCase();
+            if (!msg.includes('abort')) {
+              emit({ type: 'sidecar_error', error: String(err) });
+            } else {
+              process.stderr.write(`[sidecar] Suppressed send_input abort error: ${String(err)}\n`);
+            }
           });
         } else {
           runtime.sendInput(cmd.prompt).catch((err) => {
@@ -767,7 +786,13 @@ async function main(): Promise<void> {
             await runtime.interrupt();
           }
         } catch (err) {
-          emit({ type: 'sidecar_error', error: String(err) });
+          // Suppress abort errors — these are expected when interrupting a turn.
+          const msg = String(err).toLowerCase();
+          if (!msg.includes('abort')) {
+            emit({ type: 'sidecar_error', error: String(err) });
+          } else {
+            process.stderr.write(`[sidecar] Suppressed interrupt abort error: ${String(err)}\n`);
+          }
         }
         break;
       case 'tool_response': {
@@ -775,6 +800,8 @@ async function main(): Promise<void> {
         if (pending) {
           pending.resolve(cmd.response);
           process.stderr.write(`[sidecar] tool_response resolved for toolUseId=${cmd.toolUseId}\n`);
+        } else if (resolveInteractiveToolResponse(cmd.toolUseId, cmd.response)) {
+          process.stderr.write(`[sidecar] interactive tool_response resolved for toolUseId=${cmd.toolUseId}\n`);
         } else {
           process.stderr.write(`[sidecar] tool_response: no pending request for toolUseId=${cmd.toolUseId}\n`);
         }

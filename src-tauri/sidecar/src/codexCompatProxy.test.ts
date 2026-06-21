@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from 'node:http';
 
 import { createCodexCompatProxyServer } from './codexCompatProxy.js';
+import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
 
 function listen(server: ReturnType<typeof createServer>): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -27,6 +28,16 @@ function closeServer(server: ReturnType<typeof createServer>): Promise<void> {
       resolve();
     });
   });
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error('Timed out waiting for condition');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -565,6 +576,132 @@ describe('createCodexCompatProxyServer', () => {
     expect(body).toContain('"name":"resolve_library_id"');
     expect(body).toContain('"namespace":"mcp__context7"');
     expect(body).not.toContain('"name":"mcp__context7__resolve_library_id"');
+  });
+
+  it('bridges request_user_input tool calls through the frontend question flow', async () => {
+    const upstreamBodies: any[] = [];
+    const upstream = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      upstreamBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+
+      res.setHeader('content-type', 'text/event-stream');
+      res.setHeader('cache-control', 'no-cache');
+      const send = (data: Record<string, unknown>) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+      if (upstreamBodies.length === 1) {
+        send({
+          id: 'chunk-question',
+          model: 'mimo-v2-pro',
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: 'call_question',
+                type: 'function',
+                function: {
+                  name: 'request_user_input',
+                  arguments: JSON.stringify({
+                    questions: [{
+                      header: 'Preference',
+                      id: 'language',
+                      question: 'Favorite language?',
+                      options: [
+                        { label: 'TypeScript', description: 'Typed JavaScript' },
+                        { label: 'Rust', description: 'Systems programming' },
+                      ],
+                    }],
+                  }),
+                },
+              }],
+            },
+            finish_reason: 'tool_calls',
+          }],
+        });
+        res.end('data: [DONE]\n\n');
+        return;
+      }
+
+      send({
+        id: 'chunk-answer',
+        model: 'mimo-v2-pro',
+        choices: [{ delta: { role: 'assistant', content: 'Thanks for answering.' }, finish_reason: null }],
+      });
+      send({
+        id: 'chunk-done',
+        model: 'mimo-v2-pro',
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      });
+      res.end('data: [DONE]\n\n');
+    });
+
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const proxy = await createCodexCompatProxyServer({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+    }, 0);
+    cleanups.push(() => proxy.close());
+
+    const responsePromise = fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'mimo-v2-pro',
+        stream: true,
+        input: [{ role: 'user', content: 'Ask me a question' }],
+      }),
+    });
+
+    await waitUntil(() => stdoutWrites.some((line) => line.includes('"type":"ask_user_question"')));
+
+    const askEvent = stdoutWrites
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line))
+      .find((event) => event.type === 'ask_user_question');
+
+    expect(askEvent).toMatchObject({
+      type: 'ask_user_question',
+      tool_use_id: 'call_question',
+      questions: [
+        expect.objectContaining({
+          question: 'Favorite language?',
+        }),
+      ],
+    });
+    expect(upstreamBodies).toHaveLength(1);
+
+    expect(resolveInteractiveToolResponse('call_question', ['TypeScript'])).toBe(true);
+
+    const response = await responsePromise;
+    const body = await response.text();
+
+    expect(body).toContain('Thanks for answering.');
+    expect(body).not.toContain('request_user_input');
+    expect(upstreamBodies).toHaveLength(2);
+    expect(upstreamBodies[1].messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          tool_calls: [
+            expect.objectContaining({
+              id: 'call_question',
+              function: expect.objectContaining({
+                name: 'request_user_input',
+              }),
+            }),
+          ],
+        }),
+        expect.objectContaining({
+          role: 'tool',
+          tool_call_id: 'call_question',
+          content: JSON.stringify(['TypeScript']),
+        }),
+      ]),
+    );
   });
 
   it('sends only chat-completions-compatible function tools upstream', async () => {
