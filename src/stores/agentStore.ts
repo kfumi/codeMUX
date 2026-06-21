@@ -38,6 +38,7 @@ export type AgentMessage =
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
   | { kind: 'mcp_status'; data: { servers: Record<string, string>; status?: string } }
   | { kind: 'proxy_status'; data: { running: boolean; port: number | null; upstreamBaseUrl: string | null } }
+  | { kind: 'todo_list'; data: { todos: TodoItem[] } }
   | { kind: 'streaming'; data: { event: Record<string, unknown>; session_id?: string } }
   | { kind: 'file_snapshot'; data: { file_path: string; original_content: string; is_new: boolean; tool_use_id: string } }
   | { kind: 'done' }
@@ -323,6 +324,21 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'mcp_status', data: { servers: (data as any).servers || {}, status: (data as any).status } };
       case 'proxy_status':
         return { kind: 'proxy_status', data: { running: (data as any).running, port: (data as any).port, upstreamBaseUrl: (data as any).upstreamBaseUrl } };
+      case 'codex_todo_list':
+        return {
+          kind: 'todo_list',
+          data: {
+            todos: Array.isArray((data as any).todos)
+              ? (data as any).todos
+                .map((todo: any) => ({
+                  content: String(todo?.content || ''),
+                  status: (['pending', 'in_progress', 'completed'].includes(todo?.status) ? todo.status : 'pending') as TodoItem['status'],
+                  activeForm: todo?.activeForm || undefined,
+                }))
+                .filter((todo: TodoItem) => todo.content.length > 0)
+              : [],
+          },
+        };
       case 'assistant':
         return { kind: 'assistant', data };
       case 'user':
@@ -443,16 +459,17 @@ function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
       for (const block of blocks) {
         if (block?.type !== 'tool_use' || !block.name) continue;
 
-        // TodoWrite: replaces the entire todo list
-        if (block.name === 'TodoWrite') {
-          const inputTodos = (block.input as any)?.todos;
+        // TodoWrite / Codex update_plan: replaces the entire todo list
+        if (block.name === 'TodoWrite' || block.name === 'update_plan') {
+          const input = block.input as any;
+          const inputTodos = block.name === 'TodoWrite' ? input?.todos : input?.plan;
           if (Array.isArray(inputTodos)) {
             const newTodos = inputTodos.map((t: any) => ({
-              content: String(t.content || ''),
+              content: String(t.content || t.step || ''),
               status: (['pending', 'in_progress', 'completed'].includes(t.status) ? t.status : 'pending') as TodoItem['status'],
               activeForm: t.activeForm || undefined,
             }));
-            // Check if this TodoWrite has any non-pending status
+            // Check if this task update has any non-pending status
             if (newTodos.some((t) => t.status !== 'pending')) {
               hasExplicitUpdates = true;
             }
@@ -463,7 +480,7 @@ function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
               taskMap.set(String(i + 1), t);
             });
           }
-          continue; // skip inference for TodoWrite
+          continue; // skip inference for task-management tools
         }
 
         // TaskCreate: adds a single task
@@ -502,7 +519,7 @@ function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
         // Infer progress from tool calls: mark first pending task as in_progress
         // and record which task this tool call is associated with.
         // Skip task-management and read-only query tools — they don't represent work.
-        const skipInferenceTools = ['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'];
+        const skipInferenceTools = ['TodoWrite', 'update_plan', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'];
         if (!hasExplicitUpdates && todos.length > 0 && !skipInferenceTools.includes(block.name)) {
           const firstPending = todos.find((t) => t.status === 'pending');
           if (firstPending) {
@@ -801,6 +818,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           }
         }
 
+        if (event.kind === 'todo_list') {
+          const todoEvent = event;
+          set((s) => ({
+            todos: { ...s.todos, [sessionId]: todoEvent.data.todos },
+          }));
+          return;
+        }
+
         // Handle file_snapshot events: store original content captured before
         // Write/Edit tool execution, then re-extract changed files.
         if (event.kind === 'file_snapshot') {
@@ -953,6 +978,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               set((s) => {
                 const prev = s.events[sessionId] || [];
                 const newEvents = [...prev, syntheticEvent];
+                const extractedTodos = extractTodosFromEvents(newEvents);
                 const prevIds = s.streamedToolUseIds[sessionId] || new Set<string>();
                 const newIds = new Set(prevIds);
                 newIds.add(toolId);
@@ -972,7 +998,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 return {
                   events: { ...s.events, [sessionId]: newEvents },
                   eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
-                  todos: { ...s.todos, [sessionId]: extractTodosFromEvents(newEvents) },
+                  todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
                   changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
                   streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
                   streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
@@ -1088,6 +1114,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           } else {
             newEvents = [...prev, event];
           }
+          const extractedTodos = extractTodosFromEvents(newEvents);
 
           // Un-acknowledge files that have new edits/writes since last save
           let acknowledged = s.acknowledgedFiles[sessionId];
@@ -1115,7 +1142,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           return {
             events: { ...s.events, [sessionId]: newEvents },
             eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
-            todos: { ...s.todos, [sessionId]: extractTodosFromEvents(newEvents) },
+            todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
             changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
             ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
           };

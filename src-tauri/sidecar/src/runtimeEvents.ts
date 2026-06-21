@@ -134,18 +134,6 @@ export function buildCodexToolUseContent(item: ThreadItem): AssistantContentBloc
         name: formatMcpToolName(item.server, item.tool),
         input: (item.arguments as Record<string, unknown>) ?? {},
       };
-    case 'todo_list':
-      return {
-        type: 'tool_use',
-        id: item.id,
-        name: 'TodoWrite',
-        input: {
-          todos: item.items.map((todo) => ({
-            content: todo.text,
-            status: todo.completed ? 'completed' : 'pending',
-          })),
-        },
-      };
     case 'web_search':
       return {
         type: 'tool_use',
@@ -156,6 +144,23 @@ export function buildCodexToolUseContent(item: ThreadItem): AssistantContentBloc
     default:
       return null;
   }
+}
+
+export function buildCodexTodoListEvent({
+  sessionId,
+  item,
+}: {
+  sessionId: string;
+  item: TodoListItem;
+}) {
+  return {
+    type: 'codex_todo_list',
+    session_id: sessionId,
+    todos: item.items.map((todo) => ({
+      content: todo.text,
+      status: todo.completed ? 'completed' : 'pending',
+    })),
+  };
 }
 
 function formatMcpToolName(server: string, tool: string): string {
@@ -182,8 +187,6 @@ export function buildCodexToolResultContent(
         null,
         2,
       );
-    case 'todo_list':
-      return item.items.map((todo) => `${todo.completed ? '[x]' : '[ ]'} ${todo.text}`).join('\n');
     case 'web_search':
       return `Search completed for: ${item.query}`;
     default:

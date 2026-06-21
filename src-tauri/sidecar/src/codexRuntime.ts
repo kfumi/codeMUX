@@ -11,6 +11,7 @@ import { readLatestCodexLastTokenUsage } from './codexSessionUsage.js';
 import {
   buildAssistantEvent,
   buildCodexResultEvent,
+  buildCodexTodoListEvent,
   buildCodexToolResultContent,
   buildCodexToolUseContent,
   buildToolResultEvent,
@@ -77,6 +78,7 @@ export class CodexSessionRuntime {
   private client: Codex | null = null;
   private thread: Thread | null = null;
   private streamingItemState = new Map<string, { kind: 'text' | 'thinking'; text: string }>();
+  private todoListState = new Map<string, string>();
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     if (cmd.sessionId) setActiveSessionId(cmd.sessionId);
@@ -330,6 +332,7 @@ export class CodexSessionRuntime {
     this.abortController?.abort();
     this.abortController = null;
     this.streamingItemState.clear();
+    this.todoListState.clear();
     await this.teardownClient();
     this.config = null;
     this.configFingerprint = null;
@@ -340,6 +343,7 @@ export class CodexSessionRuntime {
     this.abortController?.abort();
     this.abortController = null;
     this.streamingItemState.clear();
+    this.todoListState.clear();
     await this.teardownClient();
     this.config = null;
     this.configFingerprint = null;
@@ -458,6 +462,16 @@ export class CodexSessionRuntime {
       return;
     }
 
+    if (item.type === 'todo_list') {
+      const todoEvent = buildCodexTodoListEvent({ sessionId, item });
+      const nextState = JSON.stringify(todoEvent.todos);
+      if (this.todoListState.get(item.id) !== nextState) {
+        this.todoListState.set(item.id, nextState);
+        emit(todoEvent);
+      }
+      return;
+    }
+
     const toolUse = buildCodexToolUseContent(item);
     if (eventType === 'item.started') {
       if (toolUse) {
@@ -473,7 +487,6 @@ export class CodexSessionRuntime {
     if (eventType === 'item.completed') {
       if (item.type === 'command_execution'
         || item.type === 'mcp_tool_call'
-        || item.type === 'todo_list'
         || item.type === 'web_search') {
         const result = buildCodexToolResultContent(item);
         if (result) {
@@ -500,6 +513,7 @@ export class CodexSessionRuntime {
     this.abortController?.abort();
     this.abortController = null;
     this.streamingItemState.clear();
+    this.todoListState.clear();
     this.thread = null;
     this.client = null;
   }

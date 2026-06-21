@@ -288,6 +288,164 @@ describe('agent store Codex history loading', () => {
     });
   });
 
+  it('restores Codex task progress from persisted update_plan calls', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    loadCodexSessionEventsMock.mockResolvedValueOnce([
+      {
+        type: 'assistant',
+        timestamp: '2026-06-21T08:00:01.174Z',
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: 'call-plan-1',
+            name: 'update_plan',
+            input: {
+              explanation: 'all done',
+              plan: [
+                { status: 'completed', step: 'Task 1' },
+                { status: 'completed', step: 'Task 2' },
+                { status: 'completed', step: 'Task 3' },
+              ],
+            },
+          }],
+        },
+        parent_tool_use_id: null,
+      },
+    ]);
+
+    await useAgentStore.getState().loadSessionMessages(session.id);
+
+    expect(useAgentStore.getState().todos[session.id]).toEqual([
+      { content: 'Task 1', status: 'completed', activeForm: undefined },
+      { content: 'Task 2', status: 'completed', activeForm: undefined },
+      { content: 'Task 3', status: 'completed', activeForm: undefined },
+    ]);
+  });
+
+  it('lets live Codex update_plan completion override an earlier todo list state', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'assistant',
+        uuid: 'todo-1',
+        session_id: sessionId,
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: 'todo-list-1',
+            name: 'TodoWrite',
+            input: {
+              todos: [
+                { content: 'Task 1', status: 'completed' },
+                { content: 'Task 2', status: 'completed' },
+                { content: 'Task 3', status: 'in_progress' },
+              ],
+            },
+          }],
+        },
+        parent_tool_use_id: null,
+      }));
+      onEvent(JSON.stringify({
+        type: 'assistant',
+        uuid: 'plan-1',
+        session_id: sessionId,
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: 'call-plan-1',
+            name: 'update_plan',
+            input: {
+              plan: [
+                { status: 'completed', step: 'Task 1' },
+                { status: 'completed', step: 'Task 2' },
+                { status: 'completed', step: 'Task 3' },
+              ],
+            },
+          }],
+        },
+        parent_tool_use_id: null,
+      }));
+      onEvent(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        uuid: 'result-1',
+        session_id: sessionId,
+        duration_ms: 5,
+        duration_api_ms: 4,
+        num_turns: 1,
+        result: '',
+        total_cost_usd: 0,
+        usage: {
+          input_tokens: 5,
+          output_tokens: 7,
+        },
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'continue', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useAgentStore.getState().todos[session.id]).toEqual([
+      { content: 'Task 1', status: 'completed', activeForm: undefined },
+      { content: 'Task 2', status: 'completed', activeForm: undefined },
+      { content: 'Task 3', status: 'completed', activeForm: undefined },
+    ]);
+  });
+
+  it('updates task progress from Codex todo state events without adding chat messages', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'codex_todo_list',
+        session_id: sessionId,
+        todos: [
+          { content: 'Task 1', status: 'completed' },
+          { content: 'Task 2', status: 'pending' },
+        ],
+      }));
+      onEvent(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        uuid: 'result-1',
+        session_id: sessionId,
+        duration_ms: 5,
+        duration_api_ms: 4,
+        num_turns: 1,
+        result: '',
+        total_cost_usd: 0,
+        usage: {
+          input_tokens: 5,
+          output_tokens: 7,
+        },
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'continue', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useAgentStore.getState().todos[session.id]).toEqual([
+      { content: 'Task 1', status: 'completed' },
+      { content: 'Task 2', status: 'pending' },
+    ]);
+    expect(useAgentStore.getState().events[session.id]).toEqual([
+      { kind: 'user', data: { content: 'continue' } },
+      expect.objectContaining({ kind: 'result' }),
+    ]);
+  });
+
   it.each([
     ['codex', loadCodexSessionEventsMock],
     ['claude_code', loadClaudeSessionEventsMock],

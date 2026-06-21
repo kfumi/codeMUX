@@ -189,6 +189,60 @@ describe('CodexSessionRuntime', () => {
     }
   });
 
+  it('emits Codex todo lists as state events instead of chat tool messages', () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      const emitItemEvent = (
+        runtime as unknown as {
+          emitItemEvent: (
+            sessionId: string,
+            eventType: 'item.started' | 'item.updated' | 'item.completed',
+            item: ThreadEvent extends { item: infer T } ? T : never,
+            emitFailure: (message: string) => void,
+          ) => void;
+        }
+      ).emitItemEvent.bind(runtime);
+
+      const todoList = {
+        id: 'todo-list-1',
+        type: 'todo_list',
+        items: [
+          { text: 'Task 1', completed: true },
+          { text: 'Task 2', completed: false },
+        ],
+      };
+
+      emitItemEvent('session-1', 'item.started', todoList as any, () => {});
+      emitItemEvent('session-1', 'item.completed', todoList as any, () => {});
+
+      const emittedEvents = writes
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line));
+
+      expect(emittedEvents).toEqual([
+        {
+          type: 'codex_todo_list',
+          session_id: 'session-1',
+          todos: [
+            { content: 'Task 1', status: 'completed' },
+            { content: 'Task 2', status: 'pending' },
+          ],
+        },
+      ]);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
   it('keeps global MCP helper tool names unprefixed for live rendering parity with history', () => {
     const toolUse = buildCodexToolUseContent({
       id: 'tool-1',
