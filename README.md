@@ -207,15 +207,31 @@
 
 ## 截图
 
-> TODO: 添加截图
+### 主页 — 新建会话
 
-<!-- 建议截图：
-  1. 主界面 — Agent 对话面板
-  2. 工具调用卡片展示
-  3. Diff 代码对比
-  4. MCP 服务器管理
-  5. 提供商配置
--->
+![主页](public/demo/home.png)
+
+### Agent 对话面板
+
+![对话面板](public/demo/chat.png)
+
+![对话面板 - 带深度思考和工具](public/demo/chat2.png)
+
+![对话面板 - 完整视图](public/demo/chat_full.png)
+
+### Diff 代码对比
+
+![对话面板](public/demo/diff.png)
+
+### 提供商配置
+
+![提供商列表](public/demo/provider.png)
+
+![提供商编辑](public/demo/provider_edit.png)
+
+### MCP 服务器管理
+
+![MCP 设置](public/demo/mcp.png)
 
 ---
 
