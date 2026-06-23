@@ -48,9 +48,13 @@ export const useProjectStore = create<ProjectState>((set) => ({
   deleteProject: async (projectId: string) => {
     set({ isLoading: true, error: null });
     try {
-      // Clean up agent session files for all sessions in this project
-      const sessions = useSessionStore.getState().sessions.filter((s) => s.project_id === projectId);
-      for (const session of sessions) {
+      // Clean up agent session files for all sessions in this project (including archived)
+      const sessionState = useSessionStore.getState();
+      const allSessions = [
+        ...sessionState.sessions,
+        ...sessionState.archivedSessions,
+      ].filter((s) => s.project_id === projectId);
+      for (const session of allSessions) {
         try {
           await agentApi.deleteClaudeSessionFiles(session.id);
           await agentApi.deleteCodexSessionFiles(session.id);
@@ -62,6 +66,12 @@ export const useProjectStore = create<ProjectState>((set) => ({
       }
 
       await projectApi.delete(projectId);
+
+      // 从本地状态中移除该项目下的已归档 session
+      useSessionStore.setState((state) => ({
+        archivedSessions: state.archivedSessions.filter((s) => s.project_id !== projectId),
+      }));
+
       set((state) => ({
         projects: state.projects.filter((p) => p.id !== projectId),
         activeProjectId: state.activeProjectId === projectId ? null : state.activeProjectId,

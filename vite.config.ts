@@ -14,7 +14,11 @@ export default defineConfig(async () => ({
             return;
           }
 
-          if (id.includes("@assistant-ui/react-markdown")) {
+          if (
+            id.includes("@assistant-ui/react-markdown") ||
+            id.includes("@assistant-ui/react-streamdown") ||
+            id.includes("streamdown")
+          ) {
             return "assistant-ui-markdown";
           }
 

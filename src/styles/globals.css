@@ -4,6 +4,29 @@
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
+@source "../../node_modules/streamdown/dist/*.js";
+@source "../../node_modules/@streamdown/code/dist/*.js";
+
+[data-streamdown="code-block"] {
+  padding: 0;
+  border-radius: var(--radius-md);
+}
+[data-streamdown="code-block-header"] {
+  color: var(--color-foreground);
+  background-color: hsl(var(--muted) / 0.8);
+  padding-block: calc(var(--spacing) * 2);
+  padding-inline: calc(var(--spacing) * 4);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+[data-streamdown="code-block-actions"] {
+    border-width: 0;
+}
+[data-streamdown="code-block-body"] {
+  border: none;
+  padding: calc(var(--spacing) * 3.5) 0;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {

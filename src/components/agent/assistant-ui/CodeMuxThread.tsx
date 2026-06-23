@@ -28,6 +28,8 @@ import {
   CodeMuxToolCallMessagePart,
 } from './CodeMuxMessageParts';
 import { CodeMuxDirectiveText } from './CodeMuxDirectiveText';
+import { Streamdown } from 'streamdown';
+import { code } from '@streamdown/code';
 import { buildAssistantResultTargetMap } from './assistantResultTargets';
 import { RunningElapsedTimer } from './running-elapsed';
 
@@ -161,7 +163,7 @@ function UserMessage({ message, sourceEventIndex }: { message: MessageState; sou
       id={sourceEventIndex != null ? `msg-${sourceEventIndex}` : undefined}
       className="mb-5 flex w-full justify-end"
     >
-      <div data-user-message-column="true" className="flex w-fit max-w-full min-w-0 flex-col items-end">
+      <div data-user-message-column="true" className="flex w-fit max-w-10/12 min-w-0 flex-col items-end">
         <div
           data-user-message-bubble="true"
           className={cn(
@@ -271,10 +273,9 @@ function MessageNav({
   const navMetrics = useMemo(() => {
     const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
     const count = items.length;
-    const railPadding = count >= 28 ? 10 : 12;
-    const availableHeight = Math.max(navHeight - railPadding * 2, 48);
     const nodeSize = 10;
     const minSpacing = nodeSize + 2;
+    const availableHeight = Math.max(navHeight, 48);
     const usableHeight = Math.max(availableHeight - nodeSize, 0);
     const maxVisibleCount =
       availableHeight > 0
@@ -285,14 +286,13 @@ function MessageNav({
     const spacing =
       visibleCount <= 1
         ? 0
-        : Math.max(usableHeight / Math.max(visibleCount - 1, 1), minSpacing);
+        : Math.min(usableHeight / Math.max(visibleCount - 1, 1), availableHeight * 0.6 / Math.max(visibleCount - 1, 1));
 
     return {
       hiddenCount,
-      railPadding,
       nodeSize: clamp(nodeSize, 10, 10),
       spacing,
-      topInset: railPadding + nodeSize / 2,
+      center: availableHeight / 2,
       usableHeight,
       visibleCount,
     };
@@ -305,10 +305,10 @@ function MessageNav({
         ...item,
         top:
           visibleItems.length <= 1
-            ? navMetrics.topInset + navMetrics.usableHeight
-            : navMetrics.topInset + index * navMetrics.spacing,
+            ? navMetrics.center
+            : navMetrics.center + (index - (visibleItems.length - 1) / 2) * navMetrics.spacing,
       })),
-    [navMetrics.spacing, navMetrics.topInset, navMetrics.usableHeight, visibleItems],
+    [navMetrics.spacing, navMetrics.center, visibleItems],
   );
 
   if (items.length <= 1) {
@@ -347,11 +347,8 @@ function MessageNav({
         )}
       >
         <div
-          className="absolute left-1/2 w-px -translate-x-1/2 rounded-full bg-muted-foreground/30"
-          style={{
-            top: `${navMetrics.railPadding}px`,
-            bottom: `${navMetrics.railPadding}px`,
-          }}
+          className="absolute left-1/2 top-0 bottom-0 w-px -translate-x-1/2 rounded-full"
+          style={{ background: 'linear-gradient(to bottom, transparent 0%, hsl(var(--border)) 20%, hsl(var(--border)) 80%, transparent 100%)' }}
         />
         {navMetrics.hiddenCount > 0 ? (
           <div className="absolute left-1/2 top-1.5 -translate-x-1/2 rounded-full border border-border/40 bg-background/90 px-1.5 py-0.5 text-[9px] font-medium leading-none text-muted-foreground shadow-sm backdrop-blur">
@@ -528,8 +525,16 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
         )}
 
         {text ? (
-          <div className="whitespace-pre-wrap text-sm leading-6 text-foreground">
-            {text}
+          <div className="aui-md relative text-sm leading-6 text-foreground">
+            <Streamdown
+              mode="streaming"
+              plugins={{ code }}
+              shikiTheme={["github-light", "github-dark"]}
+              parseIncompleteMarkdown
+              controls={{ code: { copy: true, download: false }, table: false }}
+            >
+              {text}
+            </Streamdown>
             <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse rounded-full bg-foreground/60 align-text-bottom" />
           </div>
         ) : null}
