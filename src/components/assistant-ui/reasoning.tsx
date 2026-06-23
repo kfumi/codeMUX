@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, memo, useCallback, useEffect, useState } from 'react';
+import { createContext, memo, useCallback, useState } from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { BrainIcon, ChevronDownIcon } from 'lucide-react';
 import {
@@ -104,14 +104,17 @@ function ReasoningFade({ className, ...props }: React.ComponentProps<'div'>) {
 function ReasoningTrigger({
   active,
   duration,
+  tokenCount,
   className,
   ...props
 }: React.ComponentProps<typeof CollapsibleTrigger> & {
   active?: boolean;
   duration?: number;
+  tokenCount?: number;
 }) {
   const durationText = duration != null ? ` (${duration}s)` : '';
-  const label = `深度思考${durationText}`;
+  const tokenText = tokenCount != null && tokenCount > 0 ? ` · ${tokenCount} tokens` : '';
+  const label = `深度思考${durationText}${tokenText}`;
 
   return (
     <CollapsibleTrigger
@@ -186,7 +189,7 @@ function ReasoningText({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="reasoning-text"
       className={cn(
-        'aui-reasoning-text relative z-0 max-h-64 space-y-3 overflow-y-auto ps-6 pe-2 pt-1.5 pb-1 leading-relaxed scrollbar-gutter-stable',
+        'aui-reasoning-text relative z-0 space-y-3 overflow-y-auto ps-6 pe-2 pt-1.5 pb-1 leading-relaxed scrollbar-gutter-stable',
         'transform-gpu transition-[transform,opacity]',
         'group-data-[state=open]/collapsible-content:animate-in',
         'group-data-[state=closed]/collapsible-content:animate-out',
@@ -214,11 +217,7 @@ const ReasoningGroupImpl: ReasoningGroupComponent = ({ children, startIndex, end
     if (lastType !== 'reasoning') return false;
     return lastIndex >= startIndex && lastIndex <= endIndex;
   });
-  const [isOpen, setIsOpen] = useState(isReasoningStreaming);
-
-  useEffect(() => {
-    setIsOpen(isReasoningStreaming);
-  }, [isReasoningStreaming]);
+  const [isOpen, setIsOpen] = useState(false);
 
   return (
     <ReasoningRoot open={isOpen} onOpenChange={setIsOpen} variant="ghost">

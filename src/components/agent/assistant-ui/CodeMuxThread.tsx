@@ -167,7 +167,7 @@ function UserMessage({ message, sourceEventIndex }: { message: MessageState; sou
         <div
           data-user-message-bubble="true"
           className={cn(
-            'min-w-0 max-w-full whitespace-pre-wrap break-words rounded-xl rounded-tr-md border border-[hsl(var(--primary)/0.28)] bg-[linear-gradient(180deg,hsl(var(--primary)/0.92),hsl(var(--primary)/0.78))] px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-[0_12px_28px_-20px_hsl(var(--primary)/0.48)] [overflow-wrap:anywhere]',
+            'min-w-0 max-w-full whitespace-pre-wrap wrap-break-word rounded-xl rounded-tr-md border border-[hsl(var(--primary)/0.28)] bg-[linear-gradient(180deg,hsl(var(--primary)/0.92),hsl(var(--primary)/0.78))] px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-[0_12px_28px_-20px_hsl(var(--primary)/0.48)]',
             canCollapse && !expanded && COLLAPSED_USER_MESSAGE_CLASS,
           )}
         >
@@ -480,11 +480,7 @@ function CodeMuxReasoningGroup({
   durationMs?: number;
 }) {
   const isRunning = useAuiState((state) => state.message.status?.type === 'running');
-  const [isOpen, setIsOpen] = useState(isRunning);
-
-  useEffect(() => {
-    setIsOpen(isRunning);
-  }, [isRunning]);
+  const [isOpen, setIsOpen] = useState(false);
 
   return (
     <ReasoningRoot open={isOpen} onOpenChange={setIsOpen} variant="ghost">
@@ -514,8 +510,8 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
     <div className="mb-5 flex w-full justify-start">
       <div className="w-full min-w-0 space-y-2 text-sm leading-relaxed">
         {thinking && (
-          <ReasoningRoot defaultOpen variant="ghost">
-            <ReasoningTrigger active />
+          <ReasoningRoot variant="ghost">
+            <ReasoningTrigger active tokenCount={Math.ceil(thinking.length / 4)} />
             <ReasoningContent aria-busy>
               <ReasoningText>
                 <div className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{thinking}</div>
