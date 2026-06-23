@@ -143,6 +143,13 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
             <br />
             <span className="text-[11px]">点击上方新建</span>
           </p>
+          <button
+            onClick={onAddProject}
+            className="mt-4 flex items-center gap-2 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-3 py-1.5 text-[12px] text-[hsl(var(--sidebar-fg))]/56 transition-all duration-200 hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            添加项目
+          </button>
         </div>
       )}
 

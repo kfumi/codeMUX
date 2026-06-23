@@ -13,6 +13,7 @@ import type {
 import type { SidecarCommand } from './types.js';
 import { getProviderMode } from './sessionRuntimeHelpers.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
+import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion.js';
 import { CodexSessionRuntime, interruptActiveTurn } from './codexRuntime.js';
 import { getRuntimeFlavor } from './runtimeEvents.js';
 import { proxyManager } from './proxyManager.js';
@@ -535,6 +536,7 @@ export class SessionRuntime {
   private async consumeQuery(queryHandle: Query, appSessionId?: string): Promise<void> {
     let msgCount = 0;
     let compacting = false;
+    let sawResult = false;
     let compactTimer: ReturnType<typeof setTimeout> | null = null;
 
     const clearCompactTimer = () => {
@@ -640,6 +642,7 @@ export class SessionRuntime {
         }
 
         if (msg.type === 'result') {
+          sawResult = true;
           this.finishTurn();
           this.closeQueryHandle('turn_complete');
           if (this.config) {
@@ -664,6 +667,14 @@ export class SessionRuntime {
       this.finishTurn();
     } finally {
       clearCompactTimer();
+      if (shouldEmitDoneOnClaudeIteratorCompletion({
+        turnActive: this.turnActive,
+        sawResult,
+        aborted: Boolean(this.abortController?.signal.aborted),
+      })) {
+        process.stderr.write('[sidecar] Claude query iterator ended without result; marking turn complete\n');
+        this.finishTurn();
+      }
       if (this.queryHandle === queryHandle && this.abortController?.signal.aborted) {
         this.queryHandle = null;
       }

@@ -115,6 +115,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   }, [sessionId, agentKind]);
 
   useEffect(() => {
+    if (isRunning) {
+      return;
+    }
+
     const effectiveCwd = project?.path || cwd;
     const ensureKey = JSON.stringify({
       sessionId,
@@ -145,7 +149,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }).catch(() => {
       ensuredSessionsRef.current.delete(ensureKey);
     });
-  }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, runtimeModel, reasoningEffort, codexNeedsProxy, setProxyRunning]);
+  }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, runtimeModel, reasoningEffort, codexNeedsProxy, setProxyRunning, isRunning]);
 
   const contextUsage = useMemo(
     () => computeContextUsageFromEvents(events, {
