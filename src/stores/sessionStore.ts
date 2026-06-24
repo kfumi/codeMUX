@@ -12,6 +12,8 @@ interface SessionState {
   isLoading: boolean;
   isArchivedLoading: boolean;
   error: string | null;
+  /** Session IDs that have unread status (completed or errored since last viewed) */
+  unreadSessions: Set<string>;
   fetchSessions: () => Promise<void>;
   fetchArchivedSessions: () => Promise<void>;
   createSession: CreateSessionAction;
@@ -21,6 +23,8 @@ interface SessionState {
   setActiveSession: (sessionId: string | null) => void;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   touchSession: (sessionId: string) => void;
+  markSessionRead: (sessionId: string) => void;
+  markSessionUnread: (sessionId: string) => void;
 }
 
 type CreateSessionAction = {
@@ -93,6 +97,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   isLoading: false,
   isArchivedLoading: false,
   error: null,
+  unreadSessions: new Set<string>(),
   fetchSessions: async () => {
     set({ isLoading: true, error: null });
     try {
@@ -182,7 +187,12 @@ export const useSessionStore = create<SessionState>((set) => ({
     }
   },
   setActiveSession: (sessionId: string | null) => {
-    set({ activeSessionId: sessionId });
+    set((state) => {
+      if (!sessionId) return { activeSessionId: null };
+      const next = new Set(state.unreadSessions);
+      next.delete(sessionId);
+      return { activeSessionId: sessionId, unreadSessions: next };
+    });
   },
   updateSessionTitle: async (sessionId: string, title: string) => {
     try {
@@ -202,5 +212,23 @@ export const useSessionStore = create<SessionState>((set) => ({
         .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)),
     }));
     sessionApi.touch(sessionId).catch(() => {});
+  },
+  markSessionRead: (sessionId: string) => {
+    set((state) => {
+      if (!state.unreadSessions.has(sessionId)) return state;
+      const next = new Set(state.unreadSessions);
+      next.delete(sessionId);
+      return { unreadSessions: next };
+    });
+  },
+  markSessionUnread: (sessionId: string) => {
+    set((state) => {
+      if (state.unreadSessions.has(sessionId)) return state;
+      // Don't mark active session as unread
+      if (state.activeSessionId === sessionId) return state;
+      const next = new Set(state.unreadSessions);
+      next.add(sessionId);
+      return { unreadSessions: next };
+    });
   },
 }));

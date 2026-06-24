@@ -1,11 +1,13 @@
 import { useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Archive, Pencil, Trash2, Undo2 } from 'lucide-react';
+import { Archive, Loader2, Pencil, Trash2, Undo2 } from 'lucide-react';
 
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { cn } from '../../lib/utils';
-import { getAgentDefinition } from '../../types/agentRegistry';
+import { getAgentDefinition, type AgentDefinition } from '../../types/agentRegistry';
+import { useAgentStore } from '../../stores/agentStore';
+import { useSessionStore } from '../../stores/sessionStore';
 import type { Session } from '../../types/session';
 
 interface SessionItemProps {
@@ -39,6 +41,58 @@ function formatRelativeTime(dateStr: string): string {
   const day = date.getDate();
   if (date.getFullYear() === now.getFullYear()) return `${month}-${day}`;
   return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function SessionStatusIcon({
+  session,
+  isActive,
+  agentDef,
+}: {
+  session: Session;
+  isActive: boolean;
+  agentDef: AgentDefinition | undefined;
+}) {
+  const isRunning = useAgentStore((s) => s.isRunning[session.id] ?? false);
+  const hasError = useAgentStore((s) => !!s.error[session.id]);
+  const isUnread = useSessionStore((s) => s.unreadSessions.has(session.id));
+
+  if (isRunning) {
+    return (
+      <span className="flex shrink-0 items-center justify-center h-4 w-4">
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--accent))]" />
+      </span>
+    );
+  }
+
+  if (hasError) {
+    return (
+      <span className="flex shrink-0 items-center justify-center h-4 w-4">
+        <span className="h-2 w-2 rounded-full bg-[hsl(var(--destructive))]" />
+      </span>
+    );
+  }
+
+  if (isUnread) {
+    return (
+      <span className="flex shrink-0 items-center justify-center h-4 w-4">
+        <span className="h-2 w-2 rounded-full bg-[hsl(var(--accent))]" />
+      </span>
+    );
+  }
+
+  if (agentDef) {
+    return (
+      <span className={cn('flex shrink-0 items-center transition-opacity duration-200', isActive ? 'opacity-100' : 'opacity-70')}>
+        <AgentBrandIcon agent={agentDef} size="sm" />
+      </span>
+    );
+  }
+
+  return (
+    <span className={cn('inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm text-[9px] font-semibold tracking-normal', isActive ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64')}>
+      {session.agent_kind?.slice(0, 2).toUpperCase() || '??'}
+    </span>
+  );
 }
 
 export function SessionItem({
@@ -107,15 +161,7 @@ export function SessionItem({
         onContextMenu={handleContextMenu}
       >
         {isActive && <div className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-[hsl(var(--accent))] opacity-90" />}
-        {agentDef ? (
-          <span className={cn('flex shrink-0 items-center transition-opacity duration-200', isActive ? 'opacity-100' : 'opacity-70')}>
-            <AgentBrandIcon agent={agentDef} size="sm" />
-          </span>
-        ) : (
-          <span className={cn('inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm text-[9px] font-semibold tracking-normal', isActive ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/64')}>
-            {session.agent_kind?.slice(0, 2).toUpperCase() || '??'}
-          </span>
-        )}
+        <SessionStatusIcon session={session} isActive={isActive} agentDef={agentDef} />
 
         {renaming ? (
           <input

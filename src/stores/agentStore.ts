@@ -1095,6 +1095,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   : {}),
               };
             });
+            useSessionStore.getState().markSessionUnread(sessionId);
           }
           return;
         }
@@ -1285,6 +1286,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               : s.error,
             };
           });
+          useSessionStore.getState().markSessionUnread(sessionId);
           logger.info('Agent query finished', {
             sessionId,
             terminalEvent: event.kind,
@@ -1302,6 +1304,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           error: { ...s.error, [sessionId]: String(err) },
         };
       });
+      useSessionStore.getState().markSessionUnread(sessionId);
     }
   },
 

@@ -373,7 +373,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
             {mcpRuntimeStatus === 'warming' && 'MCP 正在后台预热'}
             {mcpRuntimeStatus === 'deferred' && 'MCP 将按需连接'}
             {mcpRuntimeStatus === 'fallback_live' && '对话已启动，MCP 继续后台接入'}
-            {mcpRuntimeStatus === 'limited_provider' && '当前 Provider 的 MCP 工具发现能力受限'}
           </div>
         )}
         <button
