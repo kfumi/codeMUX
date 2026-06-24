@@ -52,11 +52,12 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
+  const streamingThinkingDurations = useAgentStore((state) => state.streamingThinkingDurations[sessionId]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const toolDurations = useMemo(() => buildToolDurationMap(events, eventTimestamps), [events, eventTimestamps]);
   const thinkingDurations = useMemo(
-    () => buildThinkingDurationMap(events, eventTimestamps),
-    [events, eventTimestamps],
+    () => buildThinkingDurationMap(events, streamingThinkingDurations),
+    [events, streamingThinkingDurations],
   );
   const resultStatsByAssistantIndex = useMemo(
     () => buildAssistantResultStatsMap(events, provider ?? null),
@@ -431,6 +432,10 @@ function AssistantLikeMessage({
                 return <CodeMuxReasoningGroup durationMs={thinkingDuration}>{children}</CodeMuxReasoningGroup>;
 
               case 'group-tool-call':
+                // 如果分组只有一个工具，直接展示工具，不用 ToolGroup
+                if (part.indices.length === 1) {
+                  return <>{children}</>;
+                }
                 return (
                   <ToolGroup startIndex={part.indices[0] ?? 0} endIndex={part.indices[part.indices.length - 1] ?? 0}>
                     {children}
@@ -656,8 +661,13 @@ export function buildToolDurationMap(events: AgentMessage[], eventTimestamps: nu
   return durations;
 }
 
-function buildThinkingDurationMap(events: AgentMessage[], eventTimestamps: number[]): Record<number, number> {
+function buildThinkingDurationMap(events: AgentMessage[], streamingDurations?: number[]): Record<number, number> {
+  // Only compute durations when streaming durations are available (live conversation)
+  // History loading doesn't have streaming durations, so no thinking duration will be shown
+  if (!streamingDurations || streamingDurations.length === 0) return {};
+
   const durations: Record<number, number> = {};
+  let streamingDurationIndex = 0;
 
   for (let index = 0; index < events.length; index++) {
     const event = events[index];
@@ -667,12 +677,9 @@ function buildThinkingDurationMap(events: AgentMessage[], eventTimestamps: numbe
     const hasThinking = blocks.some((block) => block?.type === 'thinking' && block.thinking);
     if (!hasThinking) continue;
 
-    const startTimestamp = eventTimestamps[index];
-    for (let nextIndex = index + 1; nextIndex < events.length; nextIndex++) {
-      if (eventTimestamps[nextIndex]) {
-        durations[index] = eventTimestamps[nextIndex] - startTimestamp;
-        break;
-      }
+    if (streamingDurationIndex < streamingDurations.length) {
+      durations[index] = streamingDurations[streamingDurationIndex];
+      streamingDurationIndex++;
     }
   }
 

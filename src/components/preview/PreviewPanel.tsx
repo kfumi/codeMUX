@@ -24,7 +24,7 @@ function TabContextMenu({
 }) {
   return (
     <div
-      className="fixed z-50 min-w-[148px] rounded-xl border border-border/60 bg-popover/98 py-1.5 text-xs shadow-[0_18px_48px_-20px_hsl(var(--foreground)/0.35)] backdrop-blur-sm animate-in fade-in zoom-in-95 fill-mode-forwards [animation-duration:300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]"
+      className="fixed z-50 min-w-37 rounded-xl border border-border/60 bg-popover/98 py-1.5 text-xs shadow-[0_18px_48px_-20px_hsl(var(--foreground)/0.35)] backdrop-blur-sm animate-in fade-in zoom-in-95 fill-mode-forwards animation-duration-[300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]"
       style={style}
     >
       <button className="w-full px-3 py-1.5 text-left transition-colors hover:bg-muted/50" onClick={() => { onClose(filePath); }}>
@@ -44,13 +44,17 @@ function TabContextMenu({
 
 export function PreviewPanel() {
   const {
-    isOpen, panelWidth, showFileTree, fileTreeWidth, openFiles, activeFilePath, viewMode,
+    isOpen, panelWidth, showFileTree, fileTreeWidth, diffFiles, activeDiffPath, openFiles, activeFilePath, viewMode,
     togglePanel, setActiveFile, setViewMode, closeFile, closeOtherFiles, closeAllFiles,
     toggleFileTree, setFileTreeWidth,
   } = usePreviewStore();
 
-  const activeFile = openFiles.find((file) => file.path === activeFilePath);
+  // 根据 viewMode 决定显示哪个 tab 列表和活动文件
+  const currentFiles = viewMode === 'diff' ? diffFiles : openFiles;
+  const currentActivePath = viewMode === 'diff' ? activeDiffPath : activeFilePath;
+  const activeFile = currentFiles.find((file) => file.path === currentActivePath);
   const hasOriginal = activeFile?.originalContent !== undefined;
+  const isDiffView = viewMode === 'diff' && hasOriginal;
 
   const [contextMenu, setContextMenu] = useState<{ path: string; x: number; y: number } | null>(null);
 
@@ -96,7 +100,7 @@ export function PreviewPanel() {
 
   return (
     <div
-      className="animate-in fade-in slide-in-from-right-3 fill-mode-both [animation-duration:420ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] h-full shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out"
+      className="animate-in fade-in slide-in-from-right-3 fill-mode-both animation-duration-[420ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] h-full shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out"
       style={{ width: isOpen ? panelWidth : 0 }}
     >
       <div
@@ -105,16 +109,18 @@ export function PreviewPanel() {
       >
         <div className="flex items-center justify-between border-b border-border/40 px-3.5 py-2.5">
           <div className="flex items-center gap-1">
-            <button
-              onClick={toggleFileTree}
-              className={cn(
-                'rounded-lg p-1.5 transition-all duration-200',
-                showFileTree ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/45 hover:bg-muted/50 hover:text-foreground/72',
-              )}
-              title="文件树"
-            >
-              <PanelLeft className="h-3.5 w-3.5" />
-            </button>
+            {!isDiffView && (
+              <button
+                onClick={toggleFileTree}
+                className={cn(
+                  'rounded-lg p-1.5 transition-all duration-200',
+                  showFileTree ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/45 hover:bg-muted/50 hover:text-foreground/72',
+                )}
+                title="文件树"
+              >
+                <PanelLeft className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
 
           <div className="surface-panel flex gap-0.5 rounded-xl border border-border/50 bg-muted/28 p-0.5 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.88,hsl(var(--surface-2))/0.8)]">
@@ -157,7 +163,7 @@ export function PreviewPanel() {
         </div>
 
         <div className="flex flex-1 overflow-hidden">
-          {showFileTree && (
+          {showFileTree && !isDiffView && (
             <>
               <div className="shrink-0 overflow-hidden border-r border-border/35 bg-muted/10 dark:bg-[hsl(var(--surface-3))/0.44]" style={{ width: fileTreeWidth }}>
                 <FileTree />
@@ -169,11 +175,11 @@ export function PreviewPanel() {
           )}
 
           <div className="flex min-w-0 flex-1 flex-col">
-            {openFiles.length > 0 && (
+            {currentFiles.length > 0 && (
               <div className="flex shrink-0 overflow-x-auto border-b border-border/35 bg-muted/8 dark:bg-[hsl(var(--surface-3))/0.36]">
-                {openFiles.map((file) => {
+                {currentFiles.map((file) => {
                   const fileName = file.path.split(/[/\\]/).pop() || file.path;
-                  const isActive = file.path === activeFilePath;
+                  const isActive = file.path === currentActivePath;
                   const fileIsModified = file.originalContent && file.currentContent && file.originalContent !== file.currentContent;
 
                   return (
@@ -189,9 +195,9 @@ export function PreviewPanel() {
                       onContextMenu={(event) => handleTabContextMenu(event, file.path)}
                     >
                       {isActive && (
-                        <div className="absolute left-0 right-0 top-0 h-[2px] bg-primary/70" />
+                        <div className="absolute left-0 right-0 top-0 h-0.5 bg-primary/70" />
                       )}
-                      <span className="max-w-[140px] truncate">{fileName}</span>
+                      <span className="max-w-35 truncate">{fileName}</span>
                       {fileIsModified && <span className="text-[hsl(var(--warning))] text-[10px]">●</span>}
                       <button
                         className="ml-0.5 rounded-sm p-0.5 text-muted-foreground/34 transition-colors hover:bg-muted/50 hover:text-muted-foreground/72"
@@ -239,7 +245,7 @@ export function PreviewPanel() {
         {contextMenu && (
           <TabContextMenu
             filePath={contextMenu.path}
-            filePaths={openFiles.map((file) => file.path)}
+            filePaths={currentFiles.map((file) => file.path)}
             onClose={closeFile}
             onCloseOthers={closeOtherFiles}
             onCloseAll={closeAllFiles}

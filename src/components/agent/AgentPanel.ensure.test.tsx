@@ -131,6 +131,7 @@ describe('AgentPanel session bootstrapping', () => {
       streamedToolUseIds: {},
       changedFiles: {},
       fileOriginals: {},
+      gitBaselines: {},
       acknowledgedFiles: {},
     });
   });

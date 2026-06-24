@@ -12,7 +12,8 @@ export type ParsedStoreEvent =
   | { kind: 'user'; data: { content: string } }
   | { kind: 'assistant'; data: AgentAssistantMessage }
   | { kind: 'tool_result'; data: AgentToolResult }
-  | { kind: 'result'; data: AgentResultMessage };
+  | { kind: 'result'; data: AgentResultMessage }
+  | { kind: 'file_snapshot'; data: { type: 'file_snapshot'; file_path: string; original_content: string; is_new: boolean; tool_use_id: string } };
 
 export function isInterruptMarker(text: string): boolean {
   const trimmed = text.trim();
@@ -74,6 +75,13 @@ export function mapPersistedClaudeMessage(raw: Record<string, unknown>, agentKin
 
   if (msgType === 'result') {
     return { kind: 'result', data: raw as unknown as AgentResultMessage };
+  }
+
+  if (msgType === 'file_snapshot') {
+    return {
+      kind: 'file_snapshot',
+      data: raw as { type: 'file_snapshot'; file_path: string; original_content: string; is_new: boolean; tool_use_id: string },
+    };
   }
 
   if (msgType === 'user') {

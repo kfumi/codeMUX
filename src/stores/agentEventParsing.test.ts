@@ -101,6 +101,27 @@ describe('mapPersistedClaudeMessage', () => {
       },
     });
   });
+
+  it('loads file snapshots from agent JSONL history', () => {
+    expect(
+      mapPersistedClaudeMessage({
+        type: 'file_snapshot',
+        file_path: 'D:\\project\\ai-code\\codeMUX\\src\\example.ts',
+        original_content: 'before\n',
+        is_new: false,
+        tool_use_id: 'tool-1',
+      }),
+    ).toEqual({
+      kind: 'file_snapshot',
+      data: {
+        type: 'file_snapshot',
+        file_path: 'D:\\project\\ai-code\\codeMUX\\src\\example.ts',
+        original_content: 'before\n',
+        is_new: false,
+        tool_use_id: 'tool-1',
+      },
+    });
+  });
 });
 
 describe('shouldSuppressLiveEventWhileStopped', () => {

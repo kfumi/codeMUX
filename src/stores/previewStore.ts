@@ -26,9 +26,14 @@ interface PreviewState {
   showFileTree: boolean;
   fileTreeWidth: number;
 
-  // 文件 Tab
+  // Diff Tab（通过改动列表打开的文件）
+  diffFiles: OpenFile[];
+  activeDiffPath: string | null;
+
+  // 文件 Tab（通过文件树或其他方式打开的文件）
   openFiles: OpenFile[];
   activeFilePath: string | null;
+
   viewMode: 'diff' | 'file';
 
   // 文件树
@@ -90,6 +95,8 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
   showFileTree: true,
   fileTreeWidth: FILE_TREE_WIDTH_DEFAULT,
 
+  diffFiles: [],
+  activeDiffPath: null,
   openFiles: [],
   activeFilePath: null,
   viewMode: 'file',
@@ -104,25 +111,33 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
   openFile: async (path: string, originalContent?: string) => {
     const normalizedPath = normalizeFilePath(path);
     const state = get();
+    const isDiffMode = originalContent !== undefined;
 
-    // If file is already open, just switch to it
-    // Compare normalized paths to handle mixed / and \ separators
-    const existing = state.openFiles.find((f) => normalizeFilePath(f.path) === normalizedPath);
+    // Check if file is already open in the appropriate list
+    const existingList = isDiffMode ? state.diffFiles : state.openFiles;
+    const existing = existingList.find((f) => normalizeFilePath(f.path) === normalizedPath);
+
     if (existing) {
-      const hasOriginal = originalContent ?? existing.originalContent;
-      const currentContent = existing.currentContent;
-      const shouldDiff = hasOriginal != null && currentContent != null && hasOriginal !== currentContent;
-      set({
-        activeFilePath: normalizedPath,
-        viewMode: shouldDiff ? 'diff' : 'file',
-        isOpen: true,
-      });
-      // Update originalContent if newly provided
-      if (originalContent && originalContent !== existing.originalContent) {
+      // File already open, just switch to it
+      if (isDiffMode) {
         set({
-          openFiles: state.openFiles.map((f) =>
-            normalizeFilePath(f.path) === normalizedPath ? { ...f, originalContent } : f
-          ),
+          activeDiffPath: normalizedPath,
+          viewMode: 'diff',
+          isOpen: true,
+        });
+        // Update originalContent if newly provided
+        if (originalContent && originalContent !== existing.originalContent) {
+          set({
+            diffFiles: state.diffFiles.map((f) =>
+              normalizeFilePath(f.path) === normalizedPath ? { ...f, originalContent } : f
+            ),
+          });
+        }
+      } else {
+        set({
+          activeFilePath: normalizedPath,
+          viewMode: 'file',
+          isOpen: true,
         });
       }
       return;
@@ -130,75 +145,140 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
 
     // Add new file entry with loading state
     const newFile: OpenFile = { path: normalizedPath, originalContent, isLoading: true };
-    set({
-      openFiles: [...state.openFiles, newFile],
-      activeFilePath: normalizedPath,
-      isOpen: true,
-    });
+
+    if (isDiffMode) {
+      set({
+        diffFiles: [...state.diffFiles, newFile],
+        activeDiffPath: normalizedPath,
+        viewMode: 'diff',
+        isOpen: true,
+      });
+    } else {
+      set({
+        openFiles: [...state.openFiles, newFile],
+        activeFilePath: normalizedPath,
+        viewMode: 'file',
+        isOpen: true,
+      });
+    }
 
     // Load file content from disk
     try {
       const content = await fileApi.readFile(normalizedPath, state.projectPath ?? undefined);
-      const shouldDiff = originalContent != null && originalContent !== content;
-      set((s) => ({
-        openFiles: s.openFiles.map((f) =>
-          normalizeFilePath(f.path) === normalizedPath ? { ...f, currentContent: content, isLoading: false } : f
-        ),
-        viewMode: shouldDiff ? 'diff' : 'file',
-      }));
+      if (isDiffMode) {
+        set((s) => ({
+          diffFiles: s.diffFiles.map((f) =>
+            normalizeFilePath(f.path) === normalizedPath ? { ...f, currentContent: content, isLoading: false } : f
+          ),
+        }));
+      } else {
+        set((s) => ({
+          openFiles: s.openFiles.map((f) =>
+            normalizeFilePath(f.path) === normalizedPath ? { ...f, currentContent: content, isLoading: false } : f
+          ),
+        }));
+      }
     } catch (error) {
-      set((s) => ({
-        openFiles: s.openFiles.map((f) =>
-          normalizeFilePath(f.path) === normalizedPath
-            ? { ...f, isLoading: false, error: String(error) }
-            : f
-        ),
-      }));
+      if (isDiffMode) {
+        set((s) => ({
+          diffFiles: s.diffFiles.map((f) =>
+            normalizeFilePath(f.path) === normalizedPath
+              ? { ...f, isLoading: false, error: String(error) }
+              : f
+          ),
+        }));
+      } else {
+        set((s) => ({
+          openFiles: s.openFiles.map((f) =>
+            normalizeFilePath(f.path) === normalizedPath
+              ? { ...f, isLoading: false, error: String(error) }
+              : f
+          ),
+        }));
+      }
     }
   },
 
   closeFile: (path: string) => {
     const normalizedPath = normalizeFilePath(path);
     const state = get();
-    const remaining = state.openFiles.filter((f) => normalizeFilePath(f.path) !== normalizedPath);
-    let newActive = state.activeFilePath;
 
-    if (state.activeFilePath && normalizeFilePath(state.activeFilePath) === normalizedPath) {
-      if (remaining.length === 0) {
-        newActive = null;
-      } else {
-        const closedIndex = state.openFiles.findIndex((f) => normalizeFilePath(f.path) === normalizedPath);
-        const nextIndex = Math.min(closedIndex, remaining.length - 1);
-        newActive = remaining[nextIndex].path;
+    // Check if it's a diff file
+    const isDiffFile = state.diffFiles.some((f) => normalizeFilePath(f.path) === normalizedPath);
+
+    if (isDiffFile) {
+      const remaining = state.diffFiles.filter((f) => normalizeFilePath(f.path) !== normalizedPath);
+      let newActive = state.activeDiffPath;
+
+      if (state.activeDiffPath && normalizeFilePath(state.activeDiffPath) === normalizedPath) {
+        if (remaining.length === 0) {
+          newActive = null;
+        } else {
+          const closedIndex = state.diffFiles.findIndex((f) => normalizeFilePath(f.path) === normalizedPath);
+          const nextIndex = Math.min(closedIndex, remaining.length - 1);
+          newActive = remaining[nextIndex].path;
+        }
       }
-    }
 
-    set({ openFiles: remaining, activeFilePath: newActive });
+      set({ diffFiles: remaining, activeDiffPath: newActive });
+    } else {
+      const remaining = state.openFiles.filter((f) => normalizeFilePath(f.path) !== normalizedPath);
+      let newActive = state.activeFilePath;
+
+      if (state.activeFilePath && normalizeFilePath(state.activeFilePath) === normalizedPath) {
+        if (remaining.length === 0) {
+          newActive = null;
+        } else {
+          const closedIndex = state.openFiles.findIndex((f) => normalizeFilePath(f.path) === normalizedPath);
+          const nextIndex = Math.min(closedIndex, remaining.length - 1);
+          newActive = remaining[nextIndex].path;
+        }
+      }
+
+      set({ openFiles: remaining, activeFilePath: newActive });
+    }
   },
 
   closeOtherFiles: (path: string) => {
     const normalizedPath = normalizeFilePath(path);
     const state = get();
-    const kept = state.openFiles.filter((f) => normalizeFilePath(f.path) === normalizedPath);
-    set({ openFiles: kept, activeFilePath: kept.length > 0 ? kept[0].path : null });
+
+    // Check if it's a diff file
+    const isDiffFile = state.diffFiles.some((f) => normalizeFilePath(f.path) === normalizedPath);
+
+    if (isDiffFile) {
+      const kept = state.diffFiles.filter((f) => normalizeFilePath(f.path) === normalizedPath);
+      set({ diffFiles: kept, activeDiffPath: kept.length > 0 ? kept[0].path : null });
+    } else {
+      const kept = state.openFiles.filter((f) => normalizeFilePath(f.path) === normalizedPath);
+      set({ openFiles: kept, activeFilePath: kept.length > 0 ? kept[0].path : null });
+    }
   },
 
   closeAllFiles: () => {
-    set({ openFiles: [], activeFilePath: null });
+    set({ diffFiles: [], activeDiffPath: null, openFiles: [], activeFilePath: null });
   },
 
   setActiveFile: (path: string) => {
     const normalizedPath = normalizeFilePath(path);
     const state = get();
+
+    // Check if it's a diff file
+    const diffFile = state.diffFiles.find((f) => normalizeFilePath(f.path) === normalizedPath);
+    if (diffFile) {
+      set({
+        activeDiffPath: diffFile.path,
+        viewMode: 'diff',
+      });
+      return;
+    }
+
     const file = state.openFiles.find((f) => normalizeFilePath(f.path) === normalizedPath);
     if (!file) return;
 
-    const hasOriginal = file.originalContent !== undefined;
-    const isModified = hasOriginal && file.currentContent !== undefined && file.originalContent !== file.currentContent;
-
     set({
-      activeFilePath: file.path,  // Use the path already stored (normalized)
-      viewMode: isModified ? 'diff' : 'file',
+      activeFilePath: file.path,
+      viewMode: 'file',
     });
   },
 
@@ -232,6 +312,8 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
   reset: () =>
     set({
       isOpen: false,
+      diffFiles: [],
+      activeDiffPath: null,
       openFiles: [],
       activeFilePath: null,
       viewMode: 'file',

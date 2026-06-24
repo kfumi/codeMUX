@@ -22,6 +22,18 @@ export interface FileTreeNode {
   children?: FileTreeNode[];
 }
 
+export interface GitChangeBaseline {
+  projectRoot: string;
+  baselineTree: string;
+}
+
+export interface GitChangedFile {
+  path: string;
+  status: 'added' | 'modified' | 'deleted';
+  originalContent: string | null;
+  currentContent: string;
+}
+
 function getAgentChannel(sessionId: string): Channel<string> {
   let channel = agentChannels.get(sessionId);
   if (!channel) {
@@ -199,6 +211,15 @@ export const fileApi = {
     invokeLogged('delete_file', { path, basePath }),
   listDirectory: (path: string, depth?: number, basePath?: string): Promise<FileTreeNode[]> =>
     invokeLogged('list_directory', { path, depth, basePath }),
+};
+
+export const gitApi = {
+  createChangeBaseline: (projectPath: string): Promise<GitChangeBaseline> =>
+    invokeLogged('create_git_change_baseline', { projectPath }),
+  getChangedFiles: (projectPath: string, baselineTree: string): Promise<GitChangedFile[]> =>
+    invokeLogged('get_git_changed_files', { projectPath, baselineTree }),
+  getChangedFilesSinceHead: (projectPath: string): Promise<GitChangedFile[]> =>
+    invokeLogged('get_git_changed_files_since_head', { projectPath }),
 };
 
 export const mcpApi = {

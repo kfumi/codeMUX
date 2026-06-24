@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { diffLines, Change } from 'diff';
+import { countDiffChanges, splitDiffLines } from '../../lib/diffStats';
 
 interface DiffViewProps {
   oldContent: string;
@@ -10,16 +11,7 @@ export function DiffView({ oldContent, newContent }: DiffViewProps) {
   const changes: Change[] = useMemo(() => diffLines(oldContent, newContent), [oldContent, newContent]);
 
   const stats = useMemo(() => {
-    let additions = 0;
-    let deletions = 0;
-    for (const change of changes) {
-      const lines = change.value.split('\n').filter((_l, i, arr) =>
-        i < arr.length - 1 || arr[arr.length - 1] !== ''
-      );
-      if (change.added) additions += lines.length;
-      if (change.removed) deletions += lines.length;
-    }
-    return { additions, deletions };
+    return countDiffChanges(changes);
   }, [changes]);
 
   // Build lines with line numbers
@@ -35,9 +27,7 @@ export function DiffView({ oldContent, newContent }: DiffViewProps) {
     let newLine = 1;
 
     for (const change of changes) {
-      const lines = change.value.split('\n').filter((_l, i, arr) =>
-        i < arr.length - 1 || arr[arr.length - 1] !== ''
-      );
+      const lines = splitDiffLines(change.value);
       for (const line of lines) {
         if (change.added) {
           result.push({ type: 'added', content: line, oldLineNum: null, newLineNum: newLine++ });

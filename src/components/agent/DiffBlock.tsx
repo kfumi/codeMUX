@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { diffLines, type Change } from 'diff';
 import { ChevronDown, ChevronRight, FileCode } from 'lucide-react';
+import { splitDiffLines } from '../../lib/diffStats';
 
 interface DiffBlockProps {
   filePath: string;
@@ -29,9 +30,7 @@ export function DiffBlock({ filePath, oldContent, newContent }: DiffBlockProps) 
       {isExpanded && (
         <div className="border-t border-border/20 font-mono text-xs overflow-auto max-h-80">
           {changes.map((change: Change, i: number) => {
-            const lines = change.value.split('\n').filter((l, idx, arr) =>
-              idx < arr.length - 1 || l !== ''
-            );
+            const lines = splitDiffLines(change.value);
             return lines.map((line, j) => {
               let bgClass = '';
               let prefix = ' ';

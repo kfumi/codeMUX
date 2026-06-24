@@ -5,9 +5,9 @@ import { fileApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
 import { usePreviewStore } from '../../stores/previewStore';
 import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
-import { diffLines } from 'diff';
 import type { ChangedFile } from '../../types/agent';
 import { createLogger, serializeError } from '../../lib/logger';
+import { countDiffLines } from '../../lib/diffStats';
 
 const EMPTY_FILES: ChangedFile[] = [];
 const logger = createLogger('ChangedFilesList');
@@ -31,16 +31,7 @@ async function resolvePendingEdits(file: ChangedFile, projectPath?: string): Pro
         current = current.slice(0, idx) + edit.newString + current.slice(idx + edit.oldString.length);
       }
     }
-    const changes = diffLines(original, current);
-    let additions = 0;
-    let deletions = 0;
-    for (const change of changes) {
-      const lines = change.value.split('\n').filter((_l: string, i: number, arr: string[]) =>
-        i < arr.length - 1 || arr[arr.length - 1] !== ''
-      );
-      if (change.added) additions += lines.length;
-      if (change.removed) deletions += lines.length;
-    }
+    const { additions, deletions } = countDiffLines(original, current);
     return {
       ...file,
       originalContent: original,
@@ -165,7 +156,7 @@ export function ChangedFilesList({ sessionId, projectPath, className }: ChangedF
   return (
     <div className={cn('relative', className)} ref={dropdownRef}>
       {isExpanded && (
-        <div className="absolute bottom-full right-0 mb-2 w-[380px] max-h-[400px] rounded-xl border border-border/50 bg-[hsl(var(--card))] shadow-[0_-8px_34px_-24px_hsl(var(--foreground)/0.24)] z-50 animate-in fade-in zoom-in-95 fill-mode-forwards [animation-duration:240ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex flex-col">
+        <div className="absolute bottom-full right-0 mb-2 w-95 max-h-100 rounded-xl border border-border/50 bg-[hsl(var(--card))] shadow-[0_-8px_34px_-24px_hsl(var(--foreground)/0.24)] z-50 animate-in fade-in zoom-in-95 fill-mode-forwards [animation-duration:240ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex flex-col">
           <div className="flex items-center justify-between px-3 py-2.5 border-b border-border/20">
             <span className="text-xs font-medium text-foreground/70">改动列表</span>
             <div className="flex items-center gap-1">

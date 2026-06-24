@@ -1,6 +1,5 @@
 ﻿import { create } from 'zustand';
-import { diffLines } from 'diff';
-import { agentApi, fileApi } from '../lib/tauri';
+import { agentApi, fileApi, gitApi, type GitChangeBaseline, type GitChangedFile } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 import {
   isTerminalAgentEvent,
@@ -12,6 +11,7 @@ import {
 import { useSessionStore } from './sessionStore';
 import { normalizeFilePath, usePreviewStore } from './previewStore';
 import { useSettingsStore } from './settingsStore';
+import { countDiffLines } from '../lib/diffStats';
 import type {
   AgentAssistantMessage,
   AgentToolResult,
@@ -63,6 +63,8 @@ interface AgentState {
   streamingThinking: Record<string, string>;
   /** Accumulated streaming text per session (from stream_event text deltas) */
   streamingText: Record<string, string>;
+  /** Thinking durations computed from streaming events (key: session_id, value: ms) */
+  streamingThinkingDurations: Record<string, number[]>;
   /** Sessions that were force-stopped (interrupt) — suppress streaming UI immediately */
   forceStopped: Record<string, boolean>;
   streamingToolInputs: Record<string, Record<string, string>>;
@@ -70,7 +72,8 @@ interface AgentState {
   streamingToolIndexMap: Record<string, Record<number, string>>;
   streamedToolUseIds: Record<string, Set<string>>;
   changedFiles: Record<string, ChangedFile[]>;
-  fileOriginals: Record<string, Record<string, { content: string; isNew: boolean; toolUseId?: string }>>;
+  fileOriginals: Record<string, Record<string, FileOriginalSnapshot>>;
+  gitBaselines: Record<string, GitChangeBaseline>;
   acknowledgedFiles: Record<string, Set<string>>;
 
   /** Start a new agent query */
@@ -94,6 +97,8 @@ const STREAMING_FRAME_FALLBACK_MS = 16;
 const logger = createLogger('agentStore');
 const pendingStreamingBuffers = new Map<string, StreamingBuffer>();
 const pendingStreamingFlushHandles = new Map<string, number>();
+/** Per-session thinking start timestamps (set on content_block_start, cleared on content_block_stop) */
+const pendingThinkingStartTimes = new Map<string, number>();
 
 function scheduleStreamingFlush(callback: FrameRequestCallback) {
   if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
@@ -380,6 +385,52 @@ function truncateTitle(text: string, maxLen = 30): string {
   return firstLine.slice(0, maxLen) + '...';
 }
 
+type FileOriginalSnapshot = { content: string; isNew: boolean; toolUseId?: string };
+
+function findOriginalSnapshotKey(
+  originals: Record<string, FileOriginalSnapshot>,
+  filePath: string,
+): string | undefined {
+  const normalized = normalizeFilePath(filePath).toLowerCase();
+  for (const key of Object.keys(originals)) {
+    if (normalizeFilePath(key).toLowerCase() === normalized) {
+      return key;
+    }
+  }
+  return undefined;
+}
+
+function preserveFirstOriginalSnapshot(
+  originals: Record<string, FileOriginalSnapshot>,
+  filePath: string,
+  snapshot: FileOriginalSnapshot,
+): Record<string, FileOriginalSnapshot> {
+  const existingKey = findOriginalSnapshotKey(originals, filePath);
+  if (existingKey) return originals;
+  return {
+    ...originals,
+    [filePath]: snapshot,
+  };
+}
+
+function changedFilesFromGit(changes: GitChangedFile[], acknowledged?: Set<string>): ChangedFile[] {
+  return changes
+    .map((change) => {
+      const originalContent = change.originalContent ?? '';
+      const currentContent = change.status === 'deleted' ? '' : change.currentContent;
+      const { additions, deletions } = countDiffLines(originalContent, currentContent);
+      return {
+        path: normalizeFilePath(change.path),
+        isNew: change.status === 'added',
+        originalContent,
+        currentContent,
+        additions,
+        deletions,
+      };
+    })
+    .filter((file) => !acknowledged?.has(file.path));
+}
+
 function getSessionAgentKind(sessionId: string) {
   return useSessionStore.getState().sessions.find((session) => session.id === sessionId)?.agent_kind;
 }
@@ -568,35 +619,35 @@ function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
   return todos;
 }
 
-function countDiff(oldStr: string, newStr: string): { additions: number; deletions: number } {
-  const changes = diffLines(oldStr, newStr);
-  let additions = 0;
-  let deletions = 0;
-  for (const change of changes) {
-    const lines = change.value.split('\n').filter((_l, i, arr) =>
-      i < arr.length - 1 || arr[arr.length - 1] !== ''
-    );
-    if (change.added) additions += lines.length;
-    if (change.removed) deletions += lines.length;
-  }
-  return { additions, deletions };
-}
-
 export function extractChangedFilesFromEvents(
   events: AgentMessage[],
   acknowledged?: Set<string>,
-  originals?: Record<string, { content: string; isNew: boolean; toolUseId?: string }>,
+  originals?: Record<string, FileOriginalSnapshot>,
 ): ChangedFile[] {
   const fileMap = new Map<string, ChangedFile>();
+  let effectiveOriginals = originals;
+
+  for (const evt of events) {
+    if (evt.kind !== 'file_snapshot') continue;
+    effectiveOriginals = preserveFirstOriginalSnapshot(
+      effectiveOriginals || {},
+      evt.data.file_path,
+      {
+        content: evt.data.original_content,
+        isNew: evt.data.is_new,
+        toolUseId: evt.data.tool_use_id,
+      },
+    );
+  }
 
   // Build a normalized lookup for originals (snapshot paths may differ from tool input paths)
-  const normalizedOriginals = new Map<string, { content: string; isNew: boolean; toolUseId?: string }>();
+  const normalizedOriginals = new Map<string, FileOriginalSnapshot>();
   // Also build a lookup by tool_use_id for matching when paths differ (relative vs absolute)
   const originalsByToolId = new Map<string, { content: string; isNew: boolean }>();
   // Also build a suffix lookup for relative-vs-absolute path matching
-  const originalsBySuffix = new Map<string, { content: string; isNew: boolean; toolUseId?: string }>();
-  if (originals) {
-    for (const [k, v] of Object.entries(originals)) {
+  const originalsBySuffix = new Map<string, FileOriginalSnapshot>();
+  if (effectiveOriginals) {
+    for (const [k, v] of Object.entries(effectiveOriginals)) {
       const normalized = normalizeFilePath(k);
       normalizedOriginals.set(normalized, v);
       if (v.toolUseId) {
@@ -649,14 +700,14 @@ export function extractChangedFilesFromEvents(
           existing.currentContent = fileContent;
           existing._pendingEdits = undefined;
           const orig = existing.originalContent ?? '';
-          const { additions, deletions } = countDiff(orig, fileContent);
+          const { additions, deletions } = countDiffLines(orig, fileContent);
           existing.additions = additions;
           existing.deletions = deletions;
         } else {
           const snapshot = findSnapshot(rawPath, toolUseId);
           const origContent = snapshot?.content ?? '';
           const isNew = snapshot?.isNew ?? true;
-          const { additions, deletions } = countDiff(origContent, fileContent);
+          const { additions, deletions } = countDiffLines(origContent, fileContent);
           fileMap.set(filePath, {
             path: filePath,
             isNew,
@@ -687,7 +738,7 @@ export function extractChangedFilesFromEvents(
                 existing.currentContent.slice(idx + oldString.length);
             }
             const orig = existing.originalContent ?? '';
-            const { additions, deletions } = countDiff(orig, existing.currentContent);
+            const { additions, deletions } = countDiffLines(orig, existing.currentContent);
             existing.additions = additions;
             existing.deletions = deletions;
           } else {
@@ -701,7 +752,7 @@ export function extractChangedFilesFromEvents(
             if (idx !== -1) {
               current = current.slice(0, idx) + newString + current.slice(idx + oldString.length);
             }
-            const { additions, deletions } = countDiff(snapshot.content, current);
+            const { additions, deletions } = countDiffLines(snapshot.content, current);
             fileMap.set(filePath, {
               path: filePath,
               isNew: false,
@@ -745,6 +796,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   todos: {},
   streamingThinking: {},
   streamingText: {},
+  streamingThinkingDurations: {},
   forceStopped: {},
   streamingToolInputs: {},
   streamingToolMeta: {},
@@ -752,10 +804,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   streamedToolUseIds: {},
   changedFiles: {},
   fileOriginals: {},
+  gitBaselines: {},
   acknowledgedFiles: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string) => {
     clearPendingStreaming(sessionId);
+    pendingThinkingStartTimes.delete(sessionId);
+    // Clear streaming thinking durations for new query
+    set((s) => ({
+      streamingThinkingDurations: { ...s.streamingThinkingDurations, [sessionId]: [] },
+    }));
     logger.info('MODEL_TRACE startQuery dispatching to Tauri', {
       sessionId,
       cwd,
@@ -781,6 +839,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     // Update session activity timestamp
     useSessionStore.getState().touchSession(sessionId);
+
+    // Git baseline is no longer needed since we use HEAD comparison directly
 
     // 添加用户消息到事件列表
     const userMsg: AgentMessage = { kind: 'user', data: { content: userContent } };
@@ -831,8 +891,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         if (event.kind === 'file_snapshot') {
           const { file_path, original_content, is_new, tool_use_id } = event.data;
           set((s) => {
-            const sessionOriginals = { ...(s.fileOriginals[sessionId] || {}) };
-            sessionOriginals[file_path] = { content: original_content, isNew: is_new, toolUseId: tool_use_id };
+            const sessionOriginals = preserveFirstOriginalSnapshot(
+              s.fileOriginals[sessionId] || {},
+              file_path,
+              { content: original_content, isNew: is_new, toolUseId: tool_use_id },
+            );
             const updatedOriginals = { ...s.fileOriginals, [sessionId]: sessionOriginals };
             const existingEvents = s.events[sessionId] || [];
             return {
@@ -866,6 +929,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             const contentBlock = streamEvent.content_block as Record<string, unknown> | undefined;
             if (contentBlock?.type === 'thinking') {
               flushPendingStreaming(sessionId, set);
+              pendingThinkingStartTimes.set(sessionId, Date.now());
               set((s) => ({ streamingThinking: { ...s.streamingThinking, [sessionId]: '' } }));
             } else if (contentBlock?.type === 'text') {
               flushPendingStreaming(sessionId, set);
@@ -937,13 +1001,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 const projectPath = usePreviewStore.getState().projectPath || undefined;
                 fileApi.readFile(filePath, projectPath).then((original) => {
                   set((s) => {
-                    const sessionOriginals = { ...(s.fileOriginals[sessionId] || {}) };
-                    // Don't overwrite an existing snapshot -- the sidecar's PreToolUse
-                    // snapshot is the authoritative pre-edit content; a later readFile
-                    // may return post-edit content due to the race with tool execution.
-                    if (!sessionOriginals[filePath]) {
-                      sessionOriginals[filePath] = { content: original, isNew: false, toolUseId: toolId };
-                    }
+                    const sessionOriginals = preserveFirstOriginalSnapshot(
+                      s.fileOriginals[sessionId] || {},
+                      filePath,
+                      { content: original, isNew: false, toolUseId: toolId },
+                    );
                     const events = s.events[sessionId] || [];
                     return {
                       fileOriginals: { ...s.fileOriginals, [sessionId]: sessionOriginals },
@@ -952,10 +1014,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   });
                 }).catch(() => {
                   set((s) => {
-                    const sessionOriginals = { ...(s.fileOriginals[sessionId] || {}) };
-                    if (!sessionOriginals[filePath]) {
-                      sessionOriginals[filePath] = { content: '', isNew: true, toolUseId: toolId };
-                    }
+                    const sessionOriginals = preserveFirstOriginalSnapshot(
+                      s.fileOriginals[sessionId] || {},
+                      filePath,
+                      { content: '', isNew: true, toolUseId: toolId },
+                    );
                     return { fileOriginals: { ...s.fileOriginals, [sessionId]: sessionOriginals } };
                   });
                 });
@@ -1080,6 +1143,24 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             return;
           }
 
+          // Compute thinking duration from streaming timestamps
+          const hasThinkingBlock = filtered.some((b: any) => b?.type === 'thinking');
+          if (hasThinkingBlock) {
+            const thinkingStart = pendingThinkingStartTimes.get(sessionId);
+            pendingThinkingStartTimes.delete(sessionId);
+            if (thinkingStart) {
+              const duration = Date.now() - thinkingStart;
+              if (duration > 0) {
+                set((s) => ({
+                  streamingThinkingDurations: {
+                    ...s.streamingThinkingDurations,
+                    [sessionId]: [...(s.streamingThinkingDurations[sessionId] || []), duration],
+                  },
+                }));
+              }
+            }
+          }
+
           set((s) => {
             const updates: Partial<AgentState> = {};
             if (s.streamingThinking[sessionId]) updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
@@ -1170,6 +1251,28 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
         if (isTerminalEvent) {
           clearPendingStreaming(sessionId);
+          // Use git HEAD comparison for consistent changed files display
+          gitApi.getChangedFilesSinceHead(cwd).then((gitChanges) => {
+            set((s) => {
+              const changedPaths = new Set(gitChanges.map((change) => normalizeFilePath(change.path)));
+              const acknowledged = s.acknowledgedFiles[sessionId];
+              const nextAcknowledged = acknowledged
+                ? new Set(Array.from(acknowledged).filter((path) => !changedPaths.has(path)))
+                : acknowledged;
+              return {
+                changedFiles: {
+                  ...s.changedFiles,
+                  [sessionId]: changedFilesFromGit(gitChanges, nextAcknowledged),
+                },
+                ...(nextAcknowledged !== acknowledged
+                  ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: nextAcknowledged } }
+                  : {}),
+              };
+            });
+          }).catch((err) => {
+            logger.error('Failed to read git changed files since HEAD', { sessionId, cwd }, serializeError(err));
+          });
+
           set((s) => {
             const { [sessionId]: _removed, ...rest } = s.queryStartTime;
             return {
@@ -1205,6 +1308,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   interrupt: async (sessionId: string) => {
     clearPendingStreaming(sessionId);
     clearSimulatedStream(sessionId);
+    pendingThinkingStartTimes.delete(sessionId);
     const state = get();
     const isRunning = state.isRunning[sessionId] ?? false;
     const forceStopped = state.forceStopped[sessionId] ?? false;
@@ -1245,6 +1349,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   clearEvents: (sessionId: string) => {
     clearPendingStreaming(sessionId);
     clearSimulatedStream(sessionId);
+    pendingThinkingStartTimes.delete(sessionId);
     set((state) => {
       const newEvents = { ...state.events };
       delete newEvents[sessionId];
@@ -1262,9 +1367,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       delete newStreaming[sessionId];
       const newStreamingText = { ...state.streamingText };
       delete newStreamingText[sessionId];
+      const newStreamingDurations = { ...state.streamingThinkingDurations };
+      delete newStreamingDurations[sessionId];
       const newForceStopped = { ...state.forceStopped };
       delete newForceStopped[sessionId];
-      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, mcpRuntimeStatus: newMcpRuntimeStatus, todos: newTodos, streamingThinking: newStreaming, streamingText: newStreamingText, forceStopped: newForceStopped };
+      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, mcpRuntimeStatus: newMcpRuntimeStatus, todos: newTodos, streamingThinking: newStreaming, streamingText: newStreamingText, streamingThinkingDurations: newStreamingDurations, forceStopped: newForceStopped };
     });
   },
 
@@ -1282,16 +1389,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // Don't reload if we already have events for this session
     const existing = get().events[sessionId];
     if (existing && existing.length > 0) {
-      const acknowledged = restoredAcknowledged ?? get().acknowledgedFiles[sessionId];
-      if (!get().changedFiles[sessionId] || get().changedFiles[sessionId]!.length === 0) {
-        const sessionOriginals = get().fileOriginals[sessionId];
+      if (restoredAcknowledged) {
         set((s) => ({
-          acknowledgedFiles: restoredAcknowledged ? { ...s.acknowledgedFiles, [sessionId]: restoredAcknowledged } : s.acknowledgedFiles,
-          changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(existing, acknowledged, sessionOriginals) },
-        }));
-      } else if (restoredAcknowledged) {
-        set((s) => ({
-          acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: restoredAcknowledged! },
+          acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: restoredAcknowledged },
         }));
       }
       return;
@@ -1397,7 +1497,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
         todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
         acknowledgedFiles: restoredAcknowledged ? { ...state.acknowledgedFiles, [sessionId]: restoredAcknowledged } : state.acknowledgedFiles,
-        changedFiles: { ...state.changedFiles, [sessionId]: extractChangedFilesFromEvents(events, restoredAcknowledged) },
       }));
       logger.info('Loaded session events from agent JSONL', {
         sessionId,
