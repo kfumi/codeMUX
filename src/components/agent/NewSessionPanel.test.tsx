@@ -4,14 +4,71 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useNewSessionStore } from '../../stores/newSessionStore';
+import { usePreviewStore } from '../../stores/previewStore';
+import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import type { AgentKind } from '../../types/session';
 import { NewSessionPanel } from './NewSessionPanel';
+
+const composerProps: Array<{
+  agentKind?: AgentKind;
+  placeholder?: string;
+  projectPath?: string | null;
+  onSend?: (content: string) => Promise<void>;
+}> = [];
+
+vi.mock('./assistant-ui/CodeMuxAssistantRuntime', () => ({
+  CodeMuxAssistantRuntimeProvider: ({ children, agentKind, onSend }: any) => {
+    composerProps.push({ agentKind, onSend });
+    return <div>{children}</div>;
+  },
+}));
+
+vi.mock('./assistant-ui/CodeMuxComposer', () => ({
+  CodeMuxComposer: (props: any) => {
+    composerProps.push(props);
+    return (
+      <div>
+        <button type="button" onClick={() => props.onSend?.('Ship the feature')}>
+          Mock Composer
+        </button>
+        {props.modelSelector}
+      </div>
+    );
+  },
+}));
+
+vi.mock('./assistant-ui/CodeMuxModelSelector', () => ({
+  CodeMuxModelSelector: ({ models, onChange }: any) => (
+    <select aria-label="Models" onChange={(event) => onChange(event.target.value)}>
+      {models.map((model: string) => (
+        <option key={model} value={model}>
+          {model}
+        </option>
+      ))}
+    </select>
+  ),
+}));
 
 describe('NewSessionPanel', () => {
   beforeEach(() => {
+    composerProps.length = 0;
+    useProjectStore.setState({
+      projects: [
+        { id: 'project-1', name: 'codeMUX', path: 'D:/project/ai-code/codeMUX', created_at: '', updated_at: '' },
+      ],
+    });
+    usePreviewStore.setState({
+      loadFileTree: vi.fn(),
+      setProjectPath: vi.fn(),
+      treeRoot: null,
+      treeRootPath: null,
+    });
     useNewSessionStore.setState({
       selectedAgentKind: 'claude_code',
       selectedModel: null,
+      selectedReasoningEffort: 'medium',
+      draftProjectId: null,
     });
     useSettingsStore.setState((state) => ({
       ...state,
@@ -42,39 +99,57 @@ describe('NewSessionPanel', () => {
     cleanup();
   });
 
-  it('shows Claude Code as the default placeholder target', () => {
+  it('centers the new conversation prompt and reuses the shared composer', () => {
     render(<NewSessionPanel onSubmit={vi.fn()} />);
 
-    expect(screen.getByPlaceholderText('给 Claude Code 发送第一条任务指令...')).toBeTruthy();
+    expect(screen.getByText('我们应该做什么？')).toBeTruthy();
+    expect(screen.getByText('Mock Composer')).toBeTruthy();
+    expect(composerProps.at(-1)?.placeholder).toBe('给 Claude Code 发送第一条任务指令... (@ 引用文件, / 查看命令)');
   });
 
-  it('switches the placeholder when Codex is selected', () => {
+  it('uses the project folder name in the prompt when starting from a project', () => {
+    useNewSessionStore.setState({ draftProjectId: 'project-1' });
+
     render(<NewSessionPanel onSubmit={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Claude Code' }));
+    expect(screen.getByText('我们应该在 codeMUX 中构建什么？')).toBeTruthy();
+  });
+
+  it('passes the selected agent to the composer when Codex is selected', () => {
+    render(<NewSessionPanel onSubmit={vi.fn()} />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Claude Code' }).find((element) => element.tagName === 'BUTTON')!);
     fireEvent.click(screen.getByRole('button', { name: 'Codex' }));
 
-    expect(screen.getByPlaceholderText('给 Codex 发送第一条任务指令...')).toBeTruthy();
+    expect(composerProps.at(-1)?.agentKind).toBe('codex');
+    expect(composerProps.at(-1)?.placeholder).toBe('给 Codex 发送第一条任务指令... (@ 引用文件, / 查看命令)');
+  });
+
+  it('passes the draft project path so @ file search is available', () => {
+    useNewSessionStore.setState({ draftProjectId: 'project-1' });
+
+    render(<NewSessionPanel onSubmit={vi.fn()} />);
+
+    expect(composerProps.at(-1)?.projectPath).toBe('D:/project/ai-code/codeMUX');
+    expect(screen.queryByText('D:/project/ai-code/codeMUX')).toBeNull();
   });
 
   it('lets the draft choose a provider model', () => {
     render(<NewSessionPanel onSubmit={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole('combobox'));
-    fireEvent.click(screen.getByRole('option', { name: /claude-opus-4-1/ }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Models' }), {
+      target: { value: 'claude-opus-4-1' },
+    });
 
     expect(useNewSessionStore.getState().selectedModel).toBe('claude-opus-4-1');
   });
 
-  it('submits the typed message', () => {
+  it('submits through the shared runtime send handler', async () => {
     const onSubmit = vi.fn();
 
     render(<NewSessionPanel onSubmit={onSubmit} />);
 
-    fireEvent.change(screen.getByPlaceholderText('给 Claude Code 发送第一条任务指令...'), {
-      target: { value: 'Ship the feature' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await composerProps[0]?.onSend?.('Ship the feature');
 
     expect(onSubmit).toHaveBeenCalledWith('Ship the feature');
   });

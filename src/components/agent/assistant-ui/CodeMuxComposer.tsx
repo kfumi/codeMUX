@@ -41,6 +41,7 @@ interface CodeMuxComposerProps {
   agentKind?: AgentKind;
   projectPath?: string | null;
   modelName?: string;
+  placeholder?: string;
   modelSelector?: ReactNode;
   onStop?: () => void | Promise<void>;
   activeCommandMode?: { id: 'plan'; label: string } | null;
@@ -115,6 +116,7 @@ export function CodeMuxComposer({
   agentKind = 'claude_code',
   projectPath,
   modelName,
+  placeholder = '输入消息... (@ 引用文件, / 命令)',
   modelSelector,
   onStop,
   activeCommandMode,
@@ -314,7 +316,7 @@ export function CodeMuxComposer({
           >
             <LexicalComposerInput
               submitMode="enter"
-              placeholder="输入消息... (@ 引用文件, / 命令)"
+              placeholder={placeholder}
               directiveChip={DIRECTIVE_CHIP}
               className="relative min-h-10 max-h-50 w-full overflow-y-auto text-sm leading-6 text-foreground outline-none [&_.aui-lexical-input]:min-h-10 [&_.aui-lexical-input]:max-h-50 [&_.aui-lexical-input]:overflow-y-auto [&_.aui-lexical-input]:border-0 [&_.aui-lexical-input]:bg-transparent [&_.aui-lexical-input]:px-2 [&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:text-sm [&_.aui-lexical-input]:leading-6 [&_.aui-lexical-input]:text-foreground [&_.aui-lexical-input]:shadow-none [&_.aui-lexical-input]:outline-none [&_.aui-lexical-input]:ring-0 [&_.aui-lexical-input]:focus-visible:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:left-2 [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-sm [&_.aui-lexical-placeholder]:leading-6 [&_.aui-lexical-placeholder]:text-muted-foreground/70"
             />
