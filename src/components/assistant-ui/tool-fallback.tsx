@@ -86,7 +86,6 @@ function ToolFallbackTrigger({
   const isRunning = statusType === 'running';
   const isCancelled = status?.type === 'incomplete' && status.reason === 'cancelled';
   const Icon = statusIconMap[statusType];
-  const label = isCancelled ? '已取消工具' : '已使用工具';
 
   return (
     <CollapsibleTrigger
@@ -114,7 +113,7 @@ function ToolFallbackTrigger({
         )}
       >
         <span>
-          {label}: <b>{toolName}</b>
+          <b>{toolName}</b>
         </span>
         {children}
       </span>

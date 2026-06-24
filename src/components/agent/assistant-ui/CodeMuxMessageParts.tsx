@@ -1,5 +1,4 @@
 import type { AgentMessage } from '../../../stores/agentStore';
-import { usePreviewStore } from '../../../stores/previewStore';
 import { MarkdownText } from '@/components/assistant-ui/markdown-text';
 import {
   ToolFallbackContent,
@@ -10,9 +9,10 @@ import {
 } from '@/components/assistant-ui/tool-fallback';
 import { AskUserQuestionCard } from '../AskUserQuestionCard';
 import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
-import { cn } from '@/lib/utils';
 import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
 import { AlertTriangle, XCircle } from 'lucide-react';
+import { getCodeChangeFilePath, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
+import { getDisplayableArgs, getToolHeaderSummary } from '../toolHeaderSummary';
 
 type CodeMuxToolCallPartProps = {
   toolName: string;
@@ -69,28 +69,31 @@ export function CodeMuxToolCallMessagePart({
   durationMs,
   status,
 }: CodeMuxToolCallPartProps) {
-  const openFile = usePreviewStore((state) => state.openFile);
-  const summary = getToolSummary(args, openFile);
-  const resolvedArgsText = argsText ?? JSON.stringify(args, null, 2);
   const resolvedStatus = resolveToolStatus(status, result, isError);
+  const headerSummary = getToolHeaderSummary(toolName, args);
+  const codeFilePath = isCodeChangeTool(toolName, args) ? getCodeChangeFilePath(args) : undefined;
+  const headerText = codeFilePath || headerSummary.text;
+  const displayableArgs = codeFilePath ? null : getDisplayableArgs(args, headerSummary.consumedKeys);
+  const resolvedArgsText = argsText && displayableArgs ? JSON.stringify(displayableArgs, null, 2) : displayableArgs ? JSON.stringify(displayableArgs, null, 2) : undefined;
 
   return (
     <ToolFallbackRoot defaultOpen={resolvedStatus?.type === 'requires-action'}>
-      <ToolFallbackTrigger toolName={toolName} status={resolvedStatus}>
+      <ToolFallbackTrigger toolName={headerSummary.displayName || toolName} status={resolvedStatus}>
+        {headerText && (
+          <span className="ml-2 inline-block max-w-[min(34rem,56vw)] truncate align-middle text-xs font-normal text-muted-foreground/72">
+            {headerText}
+          </span>
+        )}
         {durationMs != null && (
-          <span className="ml-2 inline-flex rounded-md bg-muted px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground/70">
+          <span className="ml-2 inline-flex rounded-md bg-muted px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground/70 float-end">
             {formatDuration(durationMs)}
           </span>
         )}
       </ToolFallbackTrigger>
       <ToolFallbackContent>
-        {summary && (
-          <div className="px-4 text-sm text-muted-foreground">
-            {summary}
-          </div>
-        )}
-        <ToolFallbackArgs argsText={resolvedArgsText} />
-        <ToolFallbackResult result={stringifyResult(result)} />
+        {displayableArgs && <ToolFallbackArgs argsText={resolvedArgsText} />}
+        <ToolCodeDiff toolName={toolName} input={args} />
+        {!codeFilePath && <ToolFallbackResult result={stringifyResult(result)} />}
       </ToolFallbackContent>
     </ToolFallbackRoot>
   );
@@ -331,33 +334,6 @@ function resolveToolStatus(
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function getToolSummary(
-  args: Record<string, unknown>,
-  openFile: (path: string, originalContent?: string) => void,
-) {
-  const filePath = typeof args.file_path === 'string' ? normalizePath(args.file_path) : undefined;
-  if (!filePath) {
-    return null;
-  }
-
-  const originalContent = typeof args.old_string === 'string' ? args.old_string : undefined;
-  return (
-    <button
-      className={cn('text-primary hover:text-primary/80 underline underline-offset-2')}
-      onClick={(event) => {
-        event.stopPropagation();
-        openFile(filePath, originalContent);
-      }}
-    >
-      {filePath}
-    </button>
-  );
-}
-
-function normalizePath(path: string): string {
-  return path.replace(/\\\\/g, '\\');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

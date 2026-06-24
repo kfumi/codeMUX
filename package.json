@@ -42,6 +42,7 @@
     "highlight.js": "^11.11.1",
     "lexical": "^0.45.0",
     "lucide-react": "^0.460.0",
+    "parse-diff": "^0.12.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
