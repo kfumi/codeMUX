@@ -44,7 +44,7 @@ function TabContextMenu({
 
 export function PreviewPanel() {
   const {
-    isOpen, panelWidth, showFileTree, fileTreeWidth, diffFiles, activeDiffPath, openFiles, activeFilePath, viewMode,
+    isOpen, panelWidth, showFileTree, fileTreeWidth, diffFiles, activeDiffPath, openFiles, activeFilePath, viewMode, isResizing,
     togglePanel, setActiveFile, setViewMode, closeFile, closeOtherFiles, closeAllFiles,
     toggleFileTree, setFileTreeWidth,
   } = usePreviewStore();
@@ -100,14 +100,16 @@ export function PreviewPanel() {
 
   return (
     <div
-      className="animate-in fade-in slide-in-from-right-3 fill-mode-both animation-duration-[420ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] h-full shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out"
+      className={cn(
+        'animate-in fade-in slide-in-from-right-3 fill-mode-both animation-duration-[420ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] h-full shrink-0 overflow-hidden shadow-[-0.5px_0_0_0_hsl(var(--border)/0.3)]',
+        isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
+      )}
       style={{ width: isOpen ? panelWidth : 0 }}
     >
       <div
-        className="surface-panel surface-panel-muted flex h-full flex-col rounded-none border-l border-border/50 bg-[hsl(var(--background))]/88 shadow-[inset_1px_0_0_hsl(var(--foreground)/0.03)] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.92,hsl(var(--surface-1))/0.86)]"
-        style={{ width: panelWidth }}
+        className="surface-panel surface-panel-muted flex h-full w-full flex-col rounded-none bg-[hsl(var(--background))]"
       >
-        <div className="flex items-center justify-between border-b border-border/40 px-3.5 py-2.5">
+        <div className="flex items-center justify-between border-b border-[hsl(var(--border))]/30 px-3.5 py-2.5">
           <div className="flex items-center gap-1">
             {!isDiffView && (
               <button
@@ -165,7 +167,7 @@ export function PreviewPanel() {
         <div className="flex flex-1 overflow-hidden">
           {showFileTree && !isDiffView && (
             <>
-              <div className="shrink-0 overflow-hidden border-r border-border/35 bg-muted/10 dark:bg-[hsl(var(--surface-3))/0.44]" style={{ width: fileTreeWidth }}>
+              <div className="shrink-0 overflow-hidden shadow-[0.5px_0_0_0_hsl(var(--border)/0.25)] bg-muted/10 dark:bg-[hsl(var(--surface-3))/0.44]" style={{ width: fileTreeWidth }}>
                 <FileTree />
               </div>
               <div className="group relative w-1 shrink-0 cursor-col-resize" onMouseDown={handleTreeMouseDown}>
@@ -176,7 +178,7 @@ export function PreviewPanel() {
 
           <div className="flex min-w-0 flex-1 flex-col">
             {currentFiles.length > 0 && (
-              <div className="flex shrink-0 overflow-x-auto border-b border-border/35 bg-muted/8 dark:bg-[hsl(var(--surface-3))/0.36]">
+              <div className="flex shrink-0 overflow-x-auto border-b border-[hsl(var(--border))]/25 bg-muted/8 dark:bg-[hsl(var(--surface-3))/0.36]">
                 {currentFiles.map((file) => {
                   const fileName = file.path.split(/[/\\]/).pop() || file.path;
                   const isActive = file.path === currentActivePath;

@@ -59,39 +59,40 @@
 
 @layer base {
   :root {
-    --background: 218 22% 96%;
+    --background: 220 20% 97%;
     --foreground: 222 18% 10%;
     --card: 0 0% 100%;
     --card-foreground: 222 18% 10%;
     --popover: 0 0% 100%;
     --popover-foreground: 222 18% 10%;
-    --primary: 198 45% 46%;
+    --primary: 217 42% 48%;
     --primary-foreground: 210 24% 98%;
     --secondary: 216 22% 92%;
     --secondary-foreground: 220 13% 17%;
     --muted: 216 20% 92%;
     --muted-foreground: 220 8% 40%;
-    --accent: 163 46% 43%;
+    --accent: 14 66% 60%;
     --accent-foreground: 210 20% 98%;
     --destructive: 358 70% 62%;
     --destructive-foreground: 210 24% 98%;
     --success: 142 55% 40%;
     --warning: 38 88% 55%;
-    --border: 218 18% 81%;
-    --input: 218 18% 80%;
-    --ring: 198 45% 46%;
-    --radius: 0.625rem;
-    --glow: 198 45% 46%;
-    --sidebar-bg: 218 22% 94%;
+    --border: 218 16% 84%;
+    --input: 218 16% 82%;
+    --ring: 217 42% 48%;
+    --radius: 0.5rem;
+    --glow: 217 42% 48%;
+    --sidebar-bg: 218 18% 92%;
     --sidebar-fg: 222 16% 17%;
-    --sidebar-border: 218 18% 80%;
-    --sidebar-muted: 216 22% 90%;
-    --sidebar-accent: 198 45% 46%;
-    --sidebar-glow: 198 45% 46%;
-    --shell-bg: linear-gradient(180deg, hsl(218 24% 97%), hsl(218 24% 94%));
+    --sidebar-border: 218 14% 82%;
+    --sidebar-muted: 218 14% 87%;
+    --sidebar-accent: 14 66% 60%;
+    --sidebar-glow: 222 14% 44%;
+    --settings-sidebar-bg: 218 18% 93%;
+    --shell-bg: linear-gradient(180deg, hsl(220 24% 98%), hsl(218 18% 95%));
     --surface-1: 0 0% 100%;
-    --surface-2: 216 22% 95%;
-    --surface-3: 216 20% 90%;
+    --surface-2: 218 18% 95%;
+    --surface-3: 218 15% 89%;
     --surface-shadow: 222 22% 16%;
     --surface-shadow-strong: 222 26% 8%;
     --surface-edge: 218 18% 81%;
@@ -127,6 +128,7 @@
     --sidebar-muted: 220 7% 13%;
     --sidebar-accent: 198 42% 49%;
     --sidebar-glow: 198 42% 49%;
+    --settings-sidebar-bg: 220 7% 9%;
     --shell-bg: linear-gradient(180deg, hsl(220 7% 8%), hsl(220 7% 7%));
     --surface-1: 220 7% 9%;
     --surface-2: 220 7% 11%;
@@ -219,6 +221,11 @@ input[type='password']::-ms-reveal {
   background-size: 128px 128px;
 }
 
+html:not(.dark) .sidebar-grain::before,
+html:not(.dark) .sidebar-grain::after {
+  opacity: 0;
+}
+
 .composer-glow {
   position: relative;
 }
@@ -264,7 +271,7 @@ input[type='password']::-ms-reveal {
       transparent 1px,
       transparent 72px
     );
-  opacity: 0.42;
+  opacity: 0.18;
 }
 
 .dark .app-shell::before {
@@ -281,7 +288,7 @@ input[type='password']::-ms-reveal {
 }
 
 .surface-panel {
-  border: 1px solid hsl(var(--border) / 0.72);
+  border-left: 1px solid hsl(var(--border) / 0.72);
   background:
     linear-gradient(180deg, hsl(var(--surface-1) / 0.96), hsl(var(--surface-2) / 0.9));
   box-shadow:

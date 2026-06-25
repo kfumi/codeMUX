@@ -1,10 +1,8 @@
-import { FolderOpen, MoreHorizontal, PanelRightClose, PanelRightOpen, Pencil } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getStoredAgentCwd } from '../../lib/sessionCwd';
 import { resolveAgentProviderConfig } from '../../lib/agentProvider';
 import { getProviderModelList } from '../../lib/providerModels';
-import { cn } from '../../lib/utils';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { findCommand, formatCommandDisplay, renderCommandPrompt } from '../../lib/slashCommands';
 import type { ReasoningEffort } from '../../types/session';
@@ -14,21 +12,16 @@ import { usePreviewStore } from '../../stores/previewStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { ContextDisplay } from '../assistant-ui/context-display';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
-import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
-import { Input } from '../ui/input';
 import { ChangedFilesList } from './ChangedFilesList';
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
 import { CodeMuxModelSelector } from './assistant-ui/CodeMuxModelSelector';
 import { CodeMuxThread } from './assistant-ui/CodeMuxThread';
-import { computeContextUsageFromEvents } from './contextUsage';
 import { formatModelDisplayName } from './modelDisplay';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { TodoList } from './TodoList';
-import { supportsCapability } from './agentCapabilities';
 
 interface AgentPanelProps {
   sessionId: string;
@@ -38,14 +31,13 @@ const EMPTY_EVENTS: import('../../stores/agentStore').AgentMessage[] = [];
 const EMPTY_TODOS: import('../../types/agent').TodoItem[] = [];
 
 export function AgentPanel({ sessionId }: AgentPanelProps) {
-  const { sessions, updateSessionTitle, createSession } = useSessionStore();
+  const { sessions, createSession } = useSessionStore();
   const { projects } = useProjectStore();
   const { startQuery, interrupt, loadSessionMessages, clearEvents } = useAgentStore();
   const { config, getActiveProvider, setProxyRunning } = useSettingsStore();
-  const { isOpen: previewOpen, togglePanel: togglePreview, loadFileTree, setProjectPath } = usePreviewStore();
+  const { loadFileTree, setProjectPath } = usePreviewStore();
 
   const todos = useAgentStore((state) => state.todos[sessionId] ?? EMPTY_TODOS);
-  const mcpRuntimeStatus = useAgentStore((state) => state.mcpRuntimeStatus[sessionId] ?? null);
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
 
@@ -65,28 +57,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     agentKind,
     usesLargeContext: resolvedProvider?.context_1m,
   }), [agentKind, resolvedProvider?.context_1m]);
+  const modelNameWithSuffix = useMemo(() => model ? formatSelectedProviderModel(model) : undefined, [model, formatSelectedProviderModel]);
 
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [renameValue, setRenameValue] = useState('');
   const [infoOpen, setInfoOpen] = useState(false);
   const [infoTitle, setInfoTitle] = useState('');
   const [infoContent, setInfoContent] = useState('');
   const [cwd, setCwd] = useState(() => getStoredAgentCwd());
   const [codexPlanMode, setCodexPlanMode] = useState(false);
   const ensuredSessionsRef = useRef<Set<string>>(new Set());
-
-  const handleRenameOpen = () => {
-    setRenameValue(session?.title || '');
-    setRenameOpen(true);
-  };
-
-  const handleRenameSave = async () => {
-    const trimmed = renameValue.trim();
-    if (trimmed && trimmed !== session?.title) {
-      await updateSessionTitle(sessionId, trimmed);
-    }
-    setRenameOpen(false);
-  };
 
   useEffect(() => {
     loadSessionMessages(sessionId);
@@ -150,15 +128,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       ensuredSessionsRef.current.delete(ensureKey);
     });
   }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, runtimeModel, reasoningEffort, codexNeedsProxy, setProxyRunning, isRunning]);
-
-  const contextUsage = useMemo(
-    () => computeContextUsageFromEvents(events, {
-      model: runtimeModel,
-      sessionProviderUsesLargeContext: !!resolvedProvider?.context_1m,
-      activeProviderUsesLargeContext: !!resolvedProvider?.context_1m,
-    }),
-    [events, runtimeModel, resolvedProvider?.context_1m],
-  );
 
   const handleSend = async (content: string, displayContent = content, options?: { skipCommandMode?: boolean }) => {
     const effectiveCwd = project?.path || cwd;
@@ -335,58 +304,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[340ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] flex shrink-0 items-center gap-3 rounded-none border-b border-border/62 bg-[hsl(var(--surface-1))]/90 px-5 py-3 shadow-[inset_0_-1px_0_hsl(var(--foreground)/0.012)] backdrop-blur-xl">
-        <h2 className="truncate text-[13px] font-semibold text-foreground/88">{session?.title || '新对话'}</h2>
-        <DropdownMenu
-          trigger={(
-            <button className="rounded-lg p-1 text-muted-foreground/66 transition-colors hover:bg-muted/55 hover:text-foreground">
-              <MoreHorizontal className="h-4 w-4" />
-            </button>
-          )}
-        >
-          <DropdownMenuItem icon={<Pencil className="h-3.5 w-3.5" />} onClick={handleRenameOpen}>
-            重命名
-          </DropdownMenuItem>
-        </DropdownMenu>
-        <div className="flex-1" />
-        {contextUsage.usedTokens > 0 && supportsCapability(agentKind, 'supports_cost') && (
-          <ContextDisplay
-            usedTokens={contextUsage.usedTokens}
-            totalTokens={contextUsage.totalTokens}
-            modelName={runtimeModel || model || resolvedProvider?.default_model}
-            inputTokens={contextUsage.inputTokens}
-            cachedTokens={contextUsage.cachedTokens}
-            outputTokens={contextUsage.outputTokens}
-          />
-        )}
-        {project && (
-          <div
-            className="flex min-w-0 max-w-75 items-center gap-1.5 rounded-md border border-border/56 bg-[hsl(var(--surface-2))]/72 px-2.5 py-1.5 text-[12px] text-foreground/72"
-            style={{ fontFamily: "'JetBrains Mono', monospace" }}
-          >
-            <FolderOpen className="h-3 w-3 shrink-0 text-foreground/62" />
-            <span className="truncate">{project.path}</span>
-          </div>
-        )}
-        {mcpRuntimeStatus && mcpRuntimeStatus !== 'ready' && (
-          <div className="rounded-md border border-border/56 bg-[hsl(var(--surface-2))]/72 px-2 py-1 text-[11px] text-muted-foreground">
-            {mcpRuntimeStatus === 'warming' && 'MCP 正在后台预热'}
-            {mcpRuntimeStatus === 'deferred' && 'MCP 将按需连接'}
-            {mcpRuntimeStatus === 'fallback_live' && '对话已启动，MCP 继续后台接入'}
-          </div>
-        )}
-        <button
-          onClick={togglePreview}
-          className={cn(
-            'rounded-lg p-1.5 transition-all duration-200',
-            previewOpen ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/66 hover:bg-muted/45 hover:text-foreground',
-          )}
-          title={previewOpen ? '收起预览面板' : '展开预览面板'}
-        >
-          {previewOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-        </button>
-      </div>
-
       <CodeMuxAssistantRuntimeProvider sessionId={sessionId} agentKind={agentKind} onSend={handleSend} onCommand={handleCommand}>
         <CodeMuxThread
           sessionId={sessionId}
@@ -396,12 +313,13 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
               <div className="flex items-end justify-between gap-3">
                 {todos.length > 0 && <TodoList todos={todos} />}
                 <div className="flex-1" />
-                <ChangedFilesList sessionId={sessionId} projectPath={project?.path} />
+                {project && <ChangedFilesList sessionId={sessionId} projectPath={project.path} />}
               </div>
               <CodeMuxComposer
                 sessionId={sessionId}
                 agentKind={agentKind}
                 projectPath={project?.path}
+                modelName={modelNameWithSuffix}
                 modelSelector={(
                   <CodeMuxModelSelector
                     value={model || ''}
@@ -421,25 +339,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           )}
         />
       </CodeMuxAssistantRuntimeProvider>
-
-      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
-        <DialogContent className="sm:max-w-100">
-          <DialogHeader>
-            <DialogTitle>重命名对话</DialogTitle>
-          </DialogHeader>
-          <Input
-            value={renameValue}
-            onChange={(event) => setRenameValue(event.target.value)}
-            onKeyDown={(event) => { if (event.key === 'Enter') void handleRenameSave(); }}
-            placeholder="输入对话名称"
-            autoFocus
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenameOpen(false)}>取消</Button>
-            <Button onClick={() => void handleRenameSave()}>保存</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
         <DialogContent className="sm:max-w-120">

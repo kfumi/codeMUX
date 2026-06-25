@@ -10,9 +10,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 interface SessionListProps {
   onNewSessionInProject: (projectId: string) => void;
   onAddProject: () => void;
+  onNavigateHome: () => void;
 }
 
-export function SessionList({ onNewSessionInProject, onAddProject }: SessionListProps) {
+export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHome }: SessionListProps) {
   const {
     sessions,
     activeSessionId,
@@ -87,6 +88,7 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
               activeSessionId={activeSessionId}
               isActiveProject={project.id === activeProjectId}
               onSelectSession={(id) => {
+                onNavigateHome();
                 setActiveProject(project.id);
                 setActiveSession(id);
               }}
@@ -119,6 +121,7 @@ export function SessionList({ onNewSessionInProject, onAddProject }: SessionList
               session={session}
               isActive={session.id === activeSessionId}
               onClick={() => {
+                onNavigateHome();
                 setActiveProject(null);
                 setActiveSession(session.id);
               }}

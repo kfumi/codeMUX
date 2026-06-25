@@ -1,8 +1,7 @@
 import { useState } from 'react';
-import { Archive, Bot, FileText, Info, Palette, Plug, Puzzle, Server, Settings } from 'lucide-react';
+import { Archive, ArrowLeft, Bot, FileText, Info, Palette, Plug, Puzzle, Server, Settings } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { AboutSettings } from './AboutSettings';
 import { AgentSettingsPanel } from './AgentSettings';
 import { ArchivedSessionsPanel } from './ArchivedSessionsPanel';
@@ -13,92 +12,96 @@ import { ProviderConfigPanel } from './ProviderConfig';
 import { SkillsSettingsPanel } from './SkillsSettings';
 import { ThemeToggle } from './ThemeToggle';
 
-interface SettingsDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+interface SettingsViewProps {
+  onBack: () => void;
 }
 
 type SettingsTab = 'general' | 'appearance' | 'provider' | 'agents' | 'mcp' | 'skills' | 'archive' | 'logs' | 'about';
 
-export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
+const primaryTabs = [
+  { id: 'general' as const, label: '常规', icon: Settings },
+  { id: 'appearance' as const, label: '外观', icon: Palette },
+  { id: 'provider' as const, label: '供应商配置', icon: Plug },
+  { id: 'agents' as const, label: '智能体', icon: Bot },
+  { id: 'mcp' as const, label: 'MCP', icon: Server },
+  { id: 'skills' as const, label: 'Skills', icon: Puzzle },
+  { id: 'archive' as const, label: '已归档对话', icon: Archive },
+];
+
+const secondaryTabs = [
+  { id: 'logs' as const, label: '日志', icon: FileText },
+  { id: 'about' as const, label: '关于', icon: Info },
+];
+
+const allTabs = [...primaryTabs, ...secondaryTabs];
+
+export function SettingsView({ onBack }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const activeLabel = allTabs.find((tab) => tab.id === activeTab)?.label ?? '设置';
 
-  const tabs = [
-    { id: 'general' as const, label: '常规', icon: Settings },
-    { id: 'appearance' as const, label: '外观', icon: Palette },
-    { id: 'provider' as const, label: '提供商配置', icon: Plug },
-    { id: 'agents' as const, label: '智能体', icon: Bot },
-    { id: 'mcp' as const, label: 'MCP', icon: Server },
-    { id: 'skills' as const, label: 'Skills', icon: Puzzle },
-    { id: 'archive' as const, label: '已归档对话', icon: Archive },
-  ];
-
-  const bottomTabs = [
-    { id: 'logs' as const, label: '日志', icon: FileText },
-    { id: 'about' as const, label: '关于', icon: Info },
-  ];
+  const renderNavItem = ({ id, label, icon: Icon }: (typeof allTabs)[number]) => (
+    <button
+      key={id}
+      type="button"
+      onClick={() => setActiveTab(id)}
+      className={cn(
+        'relative flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-[13px] transition-colors duration-150',
+        activeTab === id
+          ? 'bg-card font-medium text-foreground shadow-[0_0_0_1px_hsl(var(--border)/0.72)]'
+          : 'text-foreground/66 hover:bg-card/70 hover:text-foreground',
+      )}
+    >
+      <Icon className={cn('h-4 w-4 shrink-0 transition-colors', activeTab === id ? 'text-foreground/82' : 'text-foreground/45')} />
+      <span className="truncate">{label}</span>
+    </button>
+  );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-155 flex-col overflow-hidden border-0 bg-card p-0 shadow-[0_26px_70px_-42px_hsl(var(--foreground)/0.55)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:max-w-245">
-        <DialogDescription className="sr-only">
-          Configure providers, agents, MCP, skills, appearance, and general application preferences.
-        </DialogDescription>
-        <div className="flex flex-1 overflow-hidden bg-card">
-          <div className="flex w-52 shrink-0 flex-col border-r border-border/65 bg-muted/38 dark:bg-muted/24">
-            <DialogHeader className="px-5 pb-4 pt-4">
-              <DialogTitle className="text-sm font-semibold text-foreground/90">设置</DialogTitle>
-            </DialogHeader>
-            <nav className="flex-1 space-y-1 px-3">
-              {tabs.map(({ id, label, icon: Icon }) => (
-                <button
-                  key={id}
-                  onClick={() => setActiveTab(id)}
-                  className={cn(
-                    'relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[13px] transition-all duration-200',
-                    activeTab === id
-                      ? 'border border-border/80 bg-background font-medium text-foreground shadow-[0_10px_28px_-22px_hsl(var(--foreground)/0.34)]'
-                      : 'text-foreground/72 hover:bg-background/68 hover:text-foreground',
-                  )}
-                >
-                  <Icon className={cn('h-4 w-4 transition-colors', activeTab === id ? 'text-primary' : 'text-foreground/50')} />
-                  {label}
-                </button>
-              ))}
-            </nav>
-            {/* Bottom pinned tabs */}
-            <nav className="space-y-1 border-t border-border/50 px-3 pt-3 pb-3">
-              {bottomTabs.map(({ id, label, icon: Icon }) => (
-                <button
-                  key={id}
-                  onClick={() => setActiveTab(id)}
-                  className={cn(
-                    'relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[13px] transition-all duration-200',
-                    activeTab === id
-                      ? 'border border-border/80 bg-background font-medium text-foreground shadow-[0_10px_28px_-22px_hsl(var(--foreground)/0.34)]'
-                      : 'text-foreground/72 hover:bg-background/68 hover:text-foreground',
-                  )}
-                >
-                  <Icon className={cn('h-4 w-4 transition-colors', activeTab === id ? 'text-primary' : 'text-foreground/50')} />
-                  {label}
-                </button>
-              ))}
-            </nav>
-          </div>
-
-          <div className="flex-1 overflow-auto bg-background p-6">
-            {activeTab === 'general' && <GeneralSettings />}
-            {activeTab === 'appearance' && <ThemeToggle />}
-            {activeTab === 'provider' && <ProviderConfigPanel />}
-            {activeTab === 'agents' && <AgentSettingsPanel />}
-            {activeTab === 'mcp' && <McpSettingsPanel />}
-            {activeTab === 'skills' && <SkillsSettingsPanel />}
-            {activeTab === 'archive' && <ArchivedSessionsPanel />}
-            {activeTab === 'logs' && <LogSettings />}
-            {activeTab === 'about' && <AboutSettings />}
+    <div role="main" aria-label="设置" className="flex min-h-0 flex-1 overflow-hidden bg-background">
+      <aside className="flex w-62 shrink-0 flex-col border-r border-border/55 bg-[hsl(var(--settings-sidebar-bg))]">
+        <div className="px-3 pb-4 pt-4">
+          <button
+            type="button"
+            onClick={onBack}
+            className="mb-5 flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] font-medium text-foreground/70 transition-colors hover:bg-muted/62 hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            返回应用
+          </button>
+          <div className="px-2">
+            <h1 className="text-[26px] font-semibold leading-tight text-foreground">设置</h1>
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+
+        <nav className="flex-1 space-y-1 px-3">
+          {primaryTabs.map(renderNavItem)}
+        </nav>
+
+        <nav className="space-y-1 border-t border-border/50 px-3 py-3">
+          {secondaryTabs.map(renderNavItem)}
+        </nav>
+      </aside>
+
+      <section className="min-w-0 flex-1 overflow-auto">
+        <div className="mx-auto w-full max-w-6xl px-10 py-8">
+          <div className="rounded-lg border border-border/64 bg-card shadow-[0_18px_42px_-38px_hsl(var(--foreground)/0.35)]">
+            <div className="border-b border-border/55 px-6 py-4">
+              <h2 className="text-[15px] font-semibold text-foreground/90">{activeLabel}</h2>
+            </div>
+            <div className="p-6">
+              {activeTab === 'general' && <GeneralSettings />}
+              {activeTab === 'appearance' && <ThemeToggle />}
+              {activeTab === 'provider' && <ProviderConfigPanel />}
+              {activeTab === 'agents' && <AgentSettingsPanel />}
+              {activeTab === 'mcp' && <McpSettingsPanel />}
+              {activeTab === 'skills' && <SkillsSettingsPanel />}
+              {activeTab === 'archive' && <ArchivedSessionsPanel />}
+              {activeTab === 'logs' && <LogSettings />}
+              {activeTab === 'about' && <AboutSettings />}
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }

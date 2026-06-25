@@ -239,7 +239,7 @@ export function CodeMuxModelSelector({
         disabled={disabled || !selectedModel}
         onClick={() => setOpen((next) => !next)}
         className={cn(
-          'inline-flex h-8 min-w-40 max-w-72 items-center justify-between gap-2 overflow-hidden rounded-md border border-border/45 bg-[hsl(var(--surface-2))]/64 px-2.5 py-1 text-xs text-foreground/88 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50',
+          'inline-flex h-8 min-w-40 max-w-72 items-center justify-between gap-2 overflow-hidden rounded-md border-border/45 bg-[hsl(var(--surface-2))]/64 px-2.5 py-1 text-xs text-foreground/88 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50',
           className,
         )}
       >

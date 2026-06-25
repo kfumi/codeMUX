@@ -28,12 +28,15 @@ import {
 } from 'lucide-react';
 import { useMemo, useRef, useState, type FC, type ReactNode } from 'react';
 
+import type { AgentMessage } from '../../../stores/agentStore';
 import type { SlashCommand } from '../../../lib/slashCommands';
 import { getAllCommands } from '../../../lib/slashCommands';
 import { cn } from '../../../lib/utils';
 import { useAgentStore } from '../../../stores/agentStore';
 import { usePreviewStore, type FileTreeNodeData } from '../../../stores/previewStore';
 import type { AgentKind } from '../../../types/session';
+import { ContextDisplay } from '../../assistant-ui/context-display';
+import { computeContextUsageFromEvents } from '../contextUsage';
 import { CodeMuxDirectiveChip, type CodeMuxDirectiveKind } from './CodeMuxDirectiveText';
 
 interface CodeMuxComposerProps {
@@ -77,6 +80,7 @@ const FILE_FORMATTER: Unstable_DirectiveFormatter = {
 };
 
 const MAX_FILE_RESULTS = 50;
+const EMPTY_EVENTS: AgentMessage[] = [];
 
 type FileEntry = { name: string; relativePath: string; isDir: boolean };
 
@@ -127,6 +131,12 @@ export function CodeMuxComposer({
   const [isFocused, setIsFocused] = useState(false);
   const composerText = useAuiState((state) => state.composer.text);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
+  const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
+  const contextUsage = useMemo(() => computeContextUsageFromEvents(events, {
+    model: modelName,
+    sessionProviderUsesLargeContext: false,
+    activeProviderUsesLargeContext: false,
+  }), [events, modelName]);
   const commands = getAllCommands(agentKind);
   const triggerDataRef = useRef<{
     itemsByCategory: Map<string, Unstable_TriggerItem[]>;
@@ -351,6 +361,16 @@ export function CodeMuxComposer({
                 )}
               </div>
               <div className="flex items-center gap-2">
+                {contextUsage.usedTokens > 0 && (
+                  <ContextDisplay
+                    usedTokens={contextUsage.usedTokens}
+                    totalTokens={contextUsage.totalTokens}
+                    modelName={modelName}
+                    inputTokens={contextUsage.inputTokens}
+                    cachedTokens={contextUsage.cachedTokens}
+                    outputTokens={contextUsage.outputTokens}
+                  />
+                )}
                 {modelSelector ?? (
                   <span className="max-w-54 truncate rounded-full border border-border/45 bg-[hsl(var(--surface-2))]/64 px-2.5 py-1 text-[11px] text-muted-foreground/74">
                     {modelName ?? ''}

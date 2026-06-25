@@ -23,14 +23,14 @@ vi.mock('./ThemeToggle', () => ({
   ThemeToggle: () => <div>Theme toggle</div>,
 }));
 
-describe('SettingsDialog', () => {
-  it('renders the settings dialog without an outer border', async () => {
-    const { SettingsDialog } = await import('./SettingsDialog');
+describe('SettingsView', () => {
+  it('renders settings as an embedded page rather than a dialog', async () => {
+    const { SettingsView } = await import('./SettingsDialog');
 
-    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+    render(<SettingsView onBack={vi.fn()} />);
 
-    const dialogClassName = screen.getByRole('dialog').className;
-    expect(dialogClassName).toContain('border-0');
-    expect(dialogClassName).not.toContain('inset_0_1px');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('main', { name: '设置' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '返回应用' })).toBeTruthy();
   });
 });

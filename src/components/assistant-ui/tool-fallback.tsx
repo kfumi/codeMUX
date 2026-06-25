@@ -55,7 +55,7 @@ function ToolFallbackRoot({
       data-slot="tool-fallback-root"
       open={isOpen}
       onOpenChange={handleOpenChange}
-      className={cn('aui-tool-fallback-root group/tool-fallback-root w-full rounded-lg border border-border/62 bg-[hsl(var(--surface-2))]/56 py-2.5 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.018)]', className)}
+      className={cn('aui-tool-fallback-root group/tool-fallback-root w-full py-1', className)}
       style={{ '--animation-duration': `${ANIMATION_DURATION}ms` } as React.CSSProperties}
       {...props}
     >
@@ -91,14 +91,14 @@ function ToolFallbackTrigger({
     <CollapsibleTrigger
       data-slot="tool-fallback-trigger"
       className={cn(
-        'aui-tool-fallback-trigger group/trigger flex w-full items-center gap-2 px-3.5 text-sm text-foreground/76 transition-colors hover:text-foreground',
+        'aui-tool-fallback-trigger group/trigger flex w-full items-center gap-2 text-sm text-foreground/76 transition-colors hover:text-foreground',
         className,
       )}
       {...props}
     >
       <Icon
         className={cn(
-          'size-4 shrink-0',
+          'size-3.5 shrink-0',
           isCancelled && 'text-muted-foreground',
           isRunning && 'animate-spin text-primary',
           statusType === 'complete' && 'text-[hsl(var(--success))]',
@@ -108,7 +108,7 @@ function ToolFallbackTrigger({
       <span
         data-slot="tool-fallback-trigger-label"
         className={cn(
-          'relative inline-block grow text-start leading-none',
+          'relative inline-flex items-center gap-2 text-start leading-none',
           isCancelled && 'text-muted-foreground line-through',
         )}
       >
@@ -119,7 +119,7 @@ function ToolFallbackTrigger({
       </span>
       <ChevronDownIcon
         className={cn(
-          'size-4 shrink-0 transition-transform duration-(--animation-duration) ease-out',
+          'size-3.5 shrink-0 transition-transform duration-(--animation-duration) ease-out',
           'group-data-[state=closed]/trigger:-rotate-90',
           'group-data-[state=open]/trigger:rotate-0',
         )}
@@ -149,7 +149,7 @@ function ToolFallbackContent({
       )}
       {...props}
     >
-      <div className="mt-2.5 flex max-h-105 flex-col gap-2 overflow-y-auto border-t border-border/50 pt-2 pr-1 text-xs scrollbar-gutter-stable">{children}</div>
+      <div className="mt-1 flex max-h-105 flex-col gap-2 overflow-y-auto pr-1 text-xs scrollbar-gutter-stable">{children}</div>
     </CollapsibleContent>
   );
 }
@@ -266,7 +266,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   }, [isRequiresAction]);
 
   return (
-    <ToolFallbackRoot open={open} onOpenChange={setOpen} className={cn(isCancelled && 'border-muted-foreground/30 bg-muted/30')}>
+    <ToolFallbackRoot open={open} onOpenChange={setOpen} className={cn(isCancelled && 'opacity-60')}>
       <ToolFallbackTrigger toolName={toolName} status={status} />
       <ToolFallbackContent>
         <ToolFallbackError status={status} />

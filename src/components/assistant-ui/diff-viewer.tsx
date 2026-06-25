@@ -372,7 +372,7 @@ function DiffViewerLine({
       {...props}
     >
       {showLineNumbers && (
-        <span data-slot="diff-viewer-line-number" className="w-12 shrink-0 px-2 text-end text-muted-foreground select-none">
+        <span data-slot="diff-viewer-line-number" className="w-8 shrink-0 px-2 text-end text-muted-foreground select-none">
           {line.type === 'add' ? line.newLineNumber : line.oldLineNumber}
         </span>
       )}

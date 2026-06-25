@@ -15,7 +15,13 @@ import { cn } from '@/lib/utils';
 const ANIMATION_DURATION = 200;
 const ReasoningOpenContext = createContext(false);
 
-const reasoningVariants = cva('aui-reasoning-root mb-2 w-full', {
+function formatCompactTokens(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m tokens`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k tokens`;
+  return `${value} tokens`;
+}
+
+const reasoningVariants = cva('aui-reasoning-root w-full', {
   variants: {
     variant: {
       outline: 'rounded-lg border border-border/62 bg-[hsl(var(--surface-2))]/48 px-3 py-1.5',
@@ -113,7 +119,7 @@ function ReasoningTrigger({
   tokenCount?: number;
 }) {
   const durationText = duration != null ? ` (${duration}s)` : '';
-  const tokenText = tokenCount != null && tokenCount > 0 ? ` · ${tokenCount} tokens` : '';
+  const tokenText = tokenCount != null && tokenCount > 0 ? ` · ${formatCompactTokens(tokenCount)}` : '';
   const label = `深度思考${durationText}${tokenText}`;
 
   return (

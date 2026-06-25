@@ -36,6 +36,9 @@ interface PreviewState {
 
   viewMode: 'diff' | 'file';
 
+  // 拖拽调整大小状态
+  isResizing: boolean;
+
   // 文件树
   treeRoot: FileTreeNodeData[] | null;
   treeRootPath: string | null;
@@ -52,8 +55,9 @@ interface PreviewState {
   setActiveFile: (path: string) => void;
   togglePanel: () => void;
   toggleFileTree: () => void;
-  setPanelWidth: (width: number) => void;
+  setPanelWidth: (width: number, sidebarWidth?: number) => void;
   setFileTreeWidth: (width: number) => void;
+  setResizing: (resizing: boolean) => void;
   setViewMode: (mode: 'diff' | 'file') => void;
   loadFileTree: (rootPath: string) => Promise<void>;
   reset: () => void;
@@ -94,6 +98,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
   panelWidth: PANEL_WIDTH_DEFAULT,
   showFileTree: true,
   fileTreeWidth: FILE_TREE_WIDTH_DEFAULT,
+  isResizing: false,
 
   diffFiles: [],
   activeDiffPath: null,
@@ -286,8 +291,9 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
 
   toggleFileTree: () => set((s) => ({ showFileTree: !s.showFileTree })),
 
-  setPanelWidth: (width: number) => {
-    const dynamicMax = Math.min(PANEL_WIDTH_MAX, Math.floor(window.innerWidth / 2));
+  setPanelWidth: (width: number, sidebarWidth = 0) => {
+    const availableWidth = window.innerWidth - sidebarWidth;
+    const dynamicMax = Math.min(PANEL_WIDTH_MAX, Math.floor(availableWidth / 2));
     const clamped = Math.min(dynamicMax, Math.max(PANEL_WIDTH_MIN, width));
     set({ panelWidth: clamped });
   },
@@ -296,6 +302,8 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
     const clamped = Math.min(FILE_TREE_WIDTH_MAX, Math.max(FILE_TREE_WIDTH_MIN, width));
     set({ fileTreeWidth: clamped });
   },
+
+  setResizing: (resizing: boolean) => set({ isResizing: resizing }),
 
   setViewMode: (mode: 'diff' | 'file') => set({ viewMode: mode }),
 

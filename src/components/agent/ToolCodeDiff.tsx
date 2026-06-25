@@ -147,7 +147,7 @@ function PatchDiffLine({ line }: { line: string }) {
     <div
       data-slot="diff-viewer-line"
       data-type={type}
-      className={cn('flex leading-5', type === 'add' && 'bg-[var(--diff-add-bg)]', type === 'del' && 'bg-[var(--diff-del-bg)]')}
+      className={cn('flex min-w-full leading-5', type === 'add' && 'bg-[var(--diff-add-bg)]', type === 'del' && 'bg-[var(--diff-del-bg)]')}
     >
       <span className="w-12 shrink-0 px-2 text-end text-muted-foreground select-none" />
       <span
@@ -161,7 +161,7 @@ function PatchDiffLine({ line }: { line: string }) {
       </span>
       <span
         className={cn(
-          'flex-1 break-all whitespace-pre-wrap',
+          'flex-1 whitespace-pre',
           type === 'add' && 'text-[var(--diff-add-text-dark,_#3fb950)]',
           type === 'del' && 'text-[var(--diff-del-text-dark,_#f85149)]',
         )}

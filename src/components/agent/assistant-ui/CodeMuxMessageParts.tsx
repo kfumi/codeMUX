@@ -85,7 +85,7 @@ export function CodeMuxToolCallMessagePart({
           </span>
         )}
         {durationMs != null && (
-          <span className="ml-2 inline-flex rounded-md bg-muted px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground/70 float-end">
+          <span className="inline-flex rounded-md bg-muted/60 px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground/60">
             {formatDuration(durationMs)}
           </span>
         )}

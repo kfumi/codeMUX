@@ -110,7 +110,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
             </ThreadPrimitive.Messages>
             {stopped ? <InterruptBanner /> : null}
             <StreamingContent sessionId={sessionId} />
-            <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pb-4 pt-5 md:pb-6">
+            <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pb-4 md:pb-6">
             <ThreadPrimitive.ScrollToBottom
               className="absolute -top-12 left-1/2 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--foreground)/0.35)] transition-all hover:-translate-y-0.5 hover:text-foreground disabled:invisible"
               aria-label="Scroll to bottom"
@@ -168,7 +168,7 @@ function UserMessage({ message, sourceEventIndex }: { message: MessageState; sou
         <div
           data-user-message-bubble="true"
           className={cn(
-            'min-w-0 max-w-full whitespace-pre-wrap wrap-break-word rounded-xl rounded-tr-md border border-[hsl(var(--primary)/0.28)] bg-[linear-gradient(180deg,hsl(var(--primary)/0.92),hsl(var(--primary)/0.78))] px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-[0_12px_28px_-20px_hsl(var(--primary)/0.48)]',
+            'min-w-0 max-w-full whitespace-pre-wrap wrap-break-word rounded-xl rounded-tr-md border-border/50 bg-muted px-4 py-2.5 text-sm leading-relaxed text-foreground',
             canCollapse && !expanded && COLLAPSED_USER_MESSAGE_CLASS,
           )}
         >

@@ -23,7 +23,8 @@ const logger = createLogger('App');
 const AgentPanel = lazy(async () => ({ default: (await import('./components/agent/AgentPanel')).AgentPanel }));
 const NewSessionPanel = lazy(async () => ({ default: (await import('./components/agent/NewSessionPanel')).NewSessionPanel }));
 const PreviewPanel = lazy(async () => ({ default: (await import('./components/preview/PreviewPanel')).PreviewPanel }));
-const SettingsDialog = lazy(async () => ({ default: (await import('./components/settings/SettingsDialog')).SettingsDialog }));
+const SettingsView = lazy(async () => ({ default: (await import('./components/settings/SettingsDialog')).SettingsView }));
+const SessionHeader = lazy(async () => ({ default: (await import('./components/layout/SessionHeader')).SessionHeader }));
 
 const panelFallback = (
   <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground/60">
@@ -43,7 +44,7 @@ function App() {
   const isDraftOpen = useNewSessionStore((state) => state.isDraftOpen);
   const openDraft = useNewSessionStore((state) => state.openDraft);
   const closeDraft = useNewSessionStore((state) => state.closeDraft);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeView, setActiveView] = useState<'app' | 'settings'>('app');
 
   useTheme();
 
@@ -84,6 +85,7 @@ function App() {
   }, [activeSessionId, closeDraft, isDraftOpen]);
 
   const handleNewSession = (projectId?: string) => {
+    setActiveView('app');
     setActiveSession(null);
     setActiveProject(projectId ?? null);
     openDraft(projectId);
@@ -123,21 +125,32 @@ function App() {
   return (
     <TooltipProvider>
       <MainLayout
-        sidebar={(
+        sidebar={activeView === 'settings' ? undefined : (
           <Sidebar
             onNewSession={() => handleNewSession()}
             onNewSessionInProject={(projectId) => handleNewSession(projectId)}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onNavigateHome={() => setActiveView('app')}
+            onOpenSettings={() => setActiveView('settings')}
           />
         )}
-        preview={(
+        previewAvailable={activeView === 'app'}
+        preview={activeView === 'app' ? (
           <Suspense fallback={null}>
             <PreviewPanel />
           </Suspense>
-        )}
+        ) : undefined}
+        headerContent={activeView === 'app' && activeSessionId ? (
+          <Suspense fallback={null}>
+            <SessionHeader sessionId={activeSessionId} />
+          </Suspense>
+        ) : undefined}
       >
         <ErrorBoundary>
-          {activeSessionId ? (
+          {activeView === 'settings' ? (
+            <Suspense fallback={panelFallback}>
+              <SettingsView onBack={() => setActiveView('app')} />
+            </Suspense>
+          ) : activeSessionId ? (
             <Suspense fallback={panelFallback}>
               <AgentPanel sessionId={activeSessionId} />
             </Suspense>
@@ -164,11 +177,6 @@ function App() {
           )}
         </ErrorBoundary>
       </MainLayout>
-      {settingsOpen && (
-        <Suspense fallback={null}>
-          <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
-        </Suspense>
-      )}
       <Toaster position="top-center" richColors />
     </TooltipProvider>
   );

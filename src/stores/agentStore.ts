@@ -1252,7 +1252,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
         if (isTerminalEvent) {
           clearPendingStreaming(sessionId);
-          // Use git HEAD comparison for consistent changed files display
+          // Use git HEAD comparison for consistent changed files display (skip if no project)
+          const sessionHasProject = !!useSessionStore.getState().sessions.find((s) => s.id === sessionId)?.project_id;
+          if (!sessionHasProject) return;
           gitApi.getChangedFilesSinceHead(cwd).then((gitChanges) => {
             set((s) => {
               const changedPaths = new Set(gitChanges.map((change) => normalizeFilePath(change.path)));

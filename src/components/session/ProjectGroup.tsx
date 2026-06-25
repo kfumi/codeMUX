@@ -60,16 +60,13 @@ export function ProjectGroup({
     <div className="mb-1">
       <div
         className={cn(
-          'group relative flex cursor-pointer items-center gap-2 rounded-lg border border-transparent px-2.5 py-2 transition-all duration-200',
+          'group relative flex cursor-pointer items-center gap-2 rounded-md border border-transparent px-2.5 py-2 transition-colors duration-150',
           'text-[hsl(var(--sidebar-fg))]/82 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
-          'dark:hover:border-[hsl(var(--sidebar-glow))]/18 dark:hover:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.82,hsl(var(--surface-2))/0.72)]',
-          isActiveProject && 'border-[hsl(var(--sidebar-border))]/70 bg-[hsl(var(--foreground)/0.09)] shadow-[inset_0_1px_0_hsl(var(--foreground)/0.035)] dark:bg-[hsl(var(--foreground)/0.09)]',
+          'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
+          isActiveProject && 'bg-[hsl(var(--sidebar-muted))] text-[hsl(var(--sidebar-fg))] dark:border-[hsl(var(--sidebar-border))]/70 dark:bg-[hsl(var(--foreground)/0.09)]',
         )}
         onClick={() => !renaming && setExpanded(!expanded)}
       >
-        {isActiveProject && (
-          <div className="absolute left-0 top-1/2 h-5 w-0.75 -translate-y-1/2 rounded-r-full bg-[hsl(var(--accent))] opacity-80" />
-        )}
         <ChevronRight
           className={cn(
             'h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/64 transition-transform duration-200',
@@ -142,7 +139,7 @@ export function ProjectGroup({
         </div>
       </div>
       {expanded && (
-        <div className="ml-4 mt-1 border-l border-[hsl(var(--sidebar-border))]/60 pl-2.5">
+        <div className="ml-4 mt-1 space-y-0.5 border-l border-[hsl(var(--sidebar-border))]/45 pl-2.5">
           {sessions.map((session) => (
             <SessionItem
               key={session.id}
