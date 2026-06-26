@@ -5,3 +5,4 @@ pub mod mcp;
 pub mod project;
 pub mod provider;
 pub mod session;
+pub mod terminal;

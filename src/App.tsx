@@ -22,7 +22,6 @@ import { useSkillStore } from './stores/skillStore';
 const logger = createLogger('App');
 const AgentPanel = lazy(async () => ({ default: (await import('./components/agent/AgentPanel')).AgentPanel }));
 const NewSessionPanel = lazy(async () => ({ default: (await import('./components/agent/NewSessionPanel')).NewSessionPanel }));
-const PreviewPanel = lazy(async () => ({ default: (await import('./components/preview/PreviewPanel')).PreviewPanel }));
 const SettingsView = lazy(async () => ({ default: (await import('./components/settings/SettingsDialog')).SettingsView }));
 const SessionHeader = lazy(async () => ({ default: (await import('./components/layout/SessionHeader')).SessionHeader }));
 
@@ -35,6 +34,7 @@ const panelFallback = (
 function App() {
   const createSession = useSessionStore((state) => state.createSession);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
+  const sessions = useSessionStore((state) => state.sessions);
   const setActiveSession = useSessionStore((state) => state.setActiveSession);
   const startQuery = useAgentStore((state) => state.startQuery);
   const config = useSettingsStore((state) => state.config);
@@ -42,9 +42,15 @@ function App() {
   const projects = useProjectStore((state) => state.projects);
   const setActiveProject = useProjectStore((state) => state.setActiveProject);
   const isDraftOpen = useNewSessionStore((state) => state.isDraftOpen);
+  const draftProjectId = useNewSessionStore((state) => state.draftProjectId);
   const openDraft = useNewSessionStore((state) => state.openDraft);
   const closeDraft = useNewSessionStore((state) => state.closeDraft);
   const [activeView, setActiveView] = useState<'app' | 'settings'>('app');
+
+  const activeSession = activeSessionId ? sessions.find((session) => session.id === activeSessionId) : null;
+  const activeProjectId = activeSession?.project_id ?? draftProjectId ?? null;
+  const sidePanelProjectPath = activeProjectId ? projects.find((project) => project.id === activeProjectId)?.path ?? null : null;
+  const sidePanelScopeId = activeSessionId ?? (isDraftOpen ? `draft:${draftProjectId ?? 'none'}` : 'home');
 
   useTheme();
 
@@ -133,12 +139,9 @@ function App() {
             onOpenSettings={() => setActiveView('settings')}
           />
         )}
-        previewAvailable={activeView === 'app'}
-        preview={activeView === 'app' ? (
-          <Suspense fallback={null}>
-            <PreviewPanel />
-          </Suspense>
-        ) : undefined}
+        sidePanelAvailable={activeView === 'app'}
+        sidePanelProjectPath={activeView === 'app' ? sidePanelProjectPath : null}
+        sidePanelScopeId={activeView === 'app' ? sidePanelScopeId : 'settings'}
         headerContent={activeView === 'app' && activeSessionId ? (
           <Suspense fallback={null}>
             <SessionHeader sessionId={activeSessionId} />

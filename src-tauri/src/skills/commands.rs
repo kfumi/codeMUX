@@ -1,21 +1,25 @@
-use tauri::State;
-use crate::AppState;
-use super::types::Skill;
-use super::db;
 use super::builtin;
+use super::db;
+use super::types::Skill;
+use crate::AppState;
+use tauri::State;
 
 fn skills_dir() -> std::path::PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_default();
-    std::path::PathBuf::from(home).join(".claude").join("skills")
+    std::path::PathBuf::from(home)
+        .join(".claude")
+        .join("skills")
 }
 
 fn agents_skills_dir() -> std::path::PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_default();
-    std::path::PathBuf::from(home).join(".agents").join("skills")
+    std::path::PathBuf::from(home)
+        .join(".agents")
+        .join("skills")
 }
 
 /// Scan a single skills directory and register all skills with SKILL.md found there.
@@ -100,7 +104,9 @@ fn scan_plugin_skills(db_guard: &rusqlite::Connection) -> Vec<Skill> {
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_default();
     let manifest_path = std::path::PathBuf::from(&home)
-        .join(".claude").join("plugins").join("installed_plugins.json");
+        .join(".claude")
+        .join("plugins")
+        .join("installed_plugins.json");
 
     let manifest_content = match std::fs::read_to_string(&manifest_path) {
         Ok(c) => c,
@@ -129,7 +135,11 @@ fn scan_plugin_skills(db_guard: &rusqlite::Connection) -> Vec<Skill> {
         };
 
         // Use the latest install (first entry)
-        let install_path_str = match install_arr.first().and_then(|i| i.get("installPath")).and_then(|p| p.as_str()) {
+        let install_path_str = match install_arr
+            .first()
+            .and_then(|i| i.get("installPath"))
+            .and_then(|p| p.as_str())
+        {
             Some(p) => p,
             None => continue,
         };
@@ -213,8 +223,8 @@ pub fn uninstall_skill(state: State<'_, AppState>, id: String) -> Result<bool, S
         return Err("Cannot uninstall builtin skills".to_string());
     }
 
-    let deleted = db::delete_skill(&db_guard, &id)
-        .map_err(|e| format!("Failed to delete skill: {}", e))?;
+    let deleted =
+        db::delete_skill(&db_guard, &id).map_err(|e| format!("Failed to delete skill: {}", e))?;
 
     if deleted {
         // Try to remove from all known directories
@@ -232,7 +242,9 @@ pub fn uninstall_skill(state: State<'_, AppState>, id: String) -> Result<bool, S
 pub fn toggle_skill(state: State<'_, AppState>, id: String, enabled: bool) -> Result<bool, String> {
     let db_guard = state.db.lock().unwrap();
     // Builtins are always enabled
-    if let Some(skill) = db::get_skill(&db_guard, &id).map_err(|e| format!("Failed to get skill: {}", e))? {
+    if let Some(skill) =
+        db::get_skill(&db_guard, &id).map_err(|e| format!("Failed to get skill: {}", e))?
+    {
         if skill.is_builtin && !enabled {
             return Err("Cannot disable builtin skills".to_string());
         }
@@ -301,12 +313,18 @@ pub fn sync_builtin_skills(state: State<'_, AppState>) -> Result<Vec<Skill>, Str
 
         let existing = db::get_skill_by_name(&db_guard, name).unwrap_or(None);
         let skill = Skill {
-            id: existing.as_ref().map(|s| s.id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            id: existing
+                .as_ref()
+                .map(|s| s.id.clone())
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             name: name.to_string(),
             display_name,
             description,
-            installed_at: existing.as_ref().map(|s| s.installed_at.clone()).unwrap_or_else(|| now.clone()),
-            enabled: true,  // Builtins are always enabled
+            installed_at: existing
+                .as_ref()
+                .map(|s| s.installed_at.clone())
+                .unwrap_or_else(|| now.clone()),
+            enabled: true, // Builtins are always enabled
             is_builtin: true,
             disk_path: Some(skill_dir.to_string_lossy().to_string()),
         };
@@ -340,8 +358,8 @@ pub fn sync_builtin_skills(state: State<'_, AppState>) -> Result<Vec<Skill>, Str
 pub fn register_skill_from_disk(state: State<'_, AppState>, name: String) -> Result<Skill, String> {
     let db_guard = state.db.lock().unwrap();
     // Search both directories
-    let dir = find_skill_path(&name)
-        .ok_or_else(|| format!("Skill '{}' not found on disk", name))?;
+    let dir =
+        find_skill_path(&name).ok_or_else(|| format!("Skill '{}' not found on disk", name))?;
     db::register_skill_from_disk(&db_guard, &dir.parent().unwrap_or(&dir), &name)
         .map_err(|e| format!("Failed to register skill from disk: {}", e))
 }
@@ -349,5 +367,6 @@ pub fn register_skill_from_disk(state: State<'_, AppState>, name: String) -> Res
 #[tauri::command]
 pub fn get_enabled_skill_names(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let db_guard = state.db.lock().unwrap();
-    db::get_enabled_skill_names(&db_guard).map_err(|e| format!("Failed to get enabled skills: {}", e))
+    db::get_enabled_skill_names(&db_guard)
+        .map_err(|e| format!("Failed to get enabled skills: {}", e))
 }

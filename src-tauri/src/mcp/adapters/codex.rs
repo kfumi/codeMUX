@@ -6,13 +6,18 @@ fn codex_config_path() -> std::path::PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_default();
-    std::path::PathBuf::from(home).join(".codex").join("config.toml")
+    std::path::PathBuf::from(home)
+        .join(".codex")
+        .join("config.toml")
 }
 
 /// Convert a unified JSON server spec into a TOML table for Codex config.
 pub fn json_server_to_toml_table(spec: &serde_json::Value) -> Result<toml_edit::Table, String> {
     let mut table = toml_edit::Table::new();
-    let server_type = spec.get("type").and_then(|value| value.as_str()).unwrap_or("stdio");
+    let server_type = spec
+        .get("type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("stdio");
     table["type"] = toml_edit::value(server_type);
 
     match server_type {
@@ -49,9 +54,10 @@ fn read_codex_config() -> Result<toml_edit::DocumentMut, String> {
     if !path.exists() {
         return Ok(toml_edit::DocumentMut::new());
     }
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read config.toml: {}", e))?;
-    content.parse::<toml_edit::DocumentMut>()
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read config.toml: {}", e))?;
+    content
+        .parse::<toml_edit::DocumentMut>()
         .map_err(|e| format!("Failed to parse config.toml: {}", e))
 }
 
@@ -71,7 +77,11 @@ impl McpAdapter for CodexAdapter {
         codex_config_path().parent().map_or(false, |p| p.exists())
     }
 
-    fn sync_single_server(&self, name: &str, server_spec: &serde_json::Value) -> McpAdapterResult<()> {
+    fn sync_single_server(
+        &self,
+        name: &str,
+        server_spec: &serde_json::Value,
+    ) -> McpAdapterResult<()> {
         let mut doc = read_codex_config()?;
         let table = json_server_to_toml_table(server_spec)?;
         doc["mcp_servers"][name] = toml_edit::Item::Table(table);
@@ -80,7 +90,10 @@ impl McpAdapter for CodexAdapter {
 
     fn remove_server(&self, name: &str) -> McpAdapterResult<()> {
         let mut doc = read_codex_config()?;
-        if let Some(mcp_servers) = doc.get_mut("mcp_servers").and_then(|v| v.as_table_like_mut()) {
+        if let Some(mcp_servers) = doc
+            .get_mut("mcp_servers")
+            .and_then(|v| v.as_table_like_mut())
+        {
             mcp_servers.remove(name);
         }
         write_codex_config(&doc)
@@ -97,10 +110,18 @@ impl McpAdapter for CodexAdapter {
 
         let mut result = Vec::new();
         for (name, item) in mcp_servers.iter() {
-            let Some(table) = item.as_table_like() else { continue };
-            let server_type = table.get("type").and_then(|v| v.as_str()).unwrap_or("stdio");
+            let Some(table) = item.as_table_like() else {
+                continue;
+            };
+            let server_type = table
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("stdio");
             let mut spec = serde_json::Map::new();
-            spec.insert("type".into(), serde_json::Value::String(server_type.to_string()));
+            spec.insert(
+                "type".into(),
+                serde_json::Value::String(server_type.to_string()),
+            );
 
             match server_type {
                 "stdio" => {
@@ -108,8 +129,11 @@ impl McpAdapter for CodexAdapter {
                         spec.insert("command".into(), serde_json::Value::String(cmd.to_string()));
                     }
                     if let Some(args) = table.get("args").and_then(|v| v.as_array()) {
-                        let arr: Vec<serde_json::Value> = args.iter()
-                            .filter_map(|v| v.as_str().map(|s| serde_json::Value::String(s.to_string())))
+                        let arr: Vec<serde_json::Value> = args
+                            .iter()
+                            .filter_map(|v| {
+                                v.as_str().map(|s| serde_json::Value::String(s.to_string()))
+                            })
                             .collect();
                         spec.insert("args".into(), serde_json::Value::Array(arr));
                     }
@@ -118,7 +142,8 @@ impl McpAdapter for CodexAdapter {
                     if let Some(url) = table.get("url").and_then(|v| v.as_str()) {
                         spec.insert("url".into(), serde_json::Value::String(url.to_string()));
                     }
-                    if let Some(headers) = table.get("http_headers").and_then(|v| v.as_table_like()) {
+                    if let Some(headers) = table.get("http_headers").and_then(|v| v.as_table_like())
+                    {
                         let mut h = serde_json::Map::new();
                         for (k, v) in headers.iter() {
                             if let Some(s) = v.as_str() {
@@ -152,7 +177,10 @@ mod tests {
         let table = json_server_to_toml_table(&spec).unwrap();
         assert_eq!(table["type"].as_str(), Some("http"));
         assert_eq!(table["url"].as_str(), Some("https://mcp.example.com"));
-        assert_eq!(table["http_headers"]["Authorization"].as_str(), Some("Bearer token"));
+        assert_eq!(
+            table["http_headers"]["Authorization"].as_str(),
+            Some("Bearer token")
+        );
     }
 
     #[test]
@@ -195,7 +223,8 @@ args = ["/c", "npx", "-y", "other-server"]
         let mut names: Vec<&str> = Vec::new();
         for (name, item) in mcp_servers.iter() {
             if item.as_table_like().is_some() {
-                let has_cmd = item.as_table_like()
+                let has_cmd = item
+                    .as_table_like()
                     .and_then(|t| t.get("command"))
                     .and_then(|v| v.as_str())
                     .is_some();

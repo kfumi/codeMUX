@@ -6,12 +6,17 @@ fn gemini_config_path() -> std::path::PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_default();
-    std::path::PathBuf::from(home).join(".gemini").join("settings.json")
+    std::path::PathBuf::from(home)
+        .join(".gemini")
+        .join("settings.json")
 }
 
 /// Convert a Gemini-format server to unified format.
 pub fn convert_from_gemini_server(spec: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let mut obj = spec.as_object().cloned().ok_or("gemini server must be an object")?;
+    let mut obj = spec
+        .as_object()
+        .cloned()
+        .ok_or("gemini server must be an object")?;
     if let Some(url) = obj.remove("httpUrl") {
         obj.insert("type".into(), serde_json::Value::String("http".into()));
         obj.insert("url".into(), url);
@@ -25,7 +30,10 @@ pub fn convert_from_gemini_server(spec: &serde_json::Value) -> Result<serde_json
 
 /// Convert unified format to Gemini format.
 pub fn convert_to_gemini_server(spec: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let mut obj = spec.as_object().cloned().ok_or("server spec must be an object")?;
+    let mut obj = spec
+        .as_object()
+        .cloned()
+        .ok_or("server spec must be an object")?;
     if obj.get("type").and_then(|value| value.as_str()) == Some("http") {
         if let Some(url) = obj.remove("url") {
             obj.insert("httpUrl".into(), url);
@@ -42,8 +50,7 @@ fn read_gemini_json() -> Result<serde_json::Value, String> {
     }
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read gemini settings: {}", e))?;
-    serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse gemini settings: {}", e))
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse gemini settings: {}", e))
 }
 
 fn write_gemini_json(config: &serde_json::Value) -> Result<(), String> {
@@ -64,7 +71,11 @@ impl McpAdapter for GeminiAdapter {
         gemini_config_path().parent().map_or(false, |p| p.exists())
     }
 
-    fn sync_single_server(&self, name: &str, server_spec: &serde_json::Value) -> McpAdapterResult<()> {
+    fn sync_single_server(
+        &self,
+        name: &str,
+        server_spec: &serde_json::Value,
+    ) -> McpAdapterResult<()> {
         let mut config = read_gemini_json()?;
         let gemini_spec = convert_to_gemini_server(server_spec)?;
         config["mcpServers"][name] = gemini_spec;

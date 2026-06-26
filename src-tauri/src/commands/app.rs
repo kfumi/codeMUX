@@ -73,7 +73,12 @@ pub fn get_log_files(app: AppHandle) -> Result<Vec<LogFileInfo>, String> {
             })
             .unwrap_or_default();
 
-        files.push(LogFileInfo { name, path, size, modified });
+        files.push(LogFileInfo {
+            name,
+            path,
+            size,
+            modified,
+        });
     }
 
     // Sort by modified time, newest first
@@ -87,7 +92,10 @@ pub fn get_log_files(app: AppHandle) -> Result<Vec<LogFileInfo>, String> {
 pub fn read_log_file(app: AppHandle, file_name: String) -> Result<String, String> {
     // Security: reject names with path separators to prevent directory traversal
     if file_name.contains('/') || file_name.contains('\\') {
-        return Err(format!("Invalid file name: must not contain path separators (got: {})", file_name));
+        return Err(format!(
+            "Invalid file name: must not contain path separators (got: {})",
+            file_name
+        ));
     }
 
     let log_dir = app
@@ -100,5 +108,6 @@ pub fn read_log_file(app: AppHandle, file_name: String) -> Result<String, String
         .map_err(|error| format!("Failed to create log directory: {}", error))?;
 
     let target = log_dir.join(&file_name);
-    fs::read_to_string(&target).map_err(|error| format!("Failed to read log file {}: {}", target.display(), error))
+    fs::read_to_string(&target)
+        .map_err(|error| format!("Failed to read log file {}: {}", target.display(), error))
 }

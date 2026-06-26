@@ -6,7 +6,10 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 fn get_config_path(app: &AppHandle) -> PathBuf {
-    let app_dir = app.path().app_data_dir().expect("Failed to get app data dir");
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .expect("Failed to get app data dir");
     std::fs::create_dir_all(&app_dir).expect("Failed to create app data dir");
     app_dir.join("config.json")
 }
@@ -18,10 +21,8 @@ fn write_default_config_to_path(config_path: &Path) -> AppConfig {
 }
 
 fn backup_unreadable_config(config_path: &Path) -> Result<PathBuf, String> {
-    let backup_path = config_path.with_extension(format!(
-        "json.unreadable.{}.bak",
-        uuid::Uuid::new_v4()
-    ));
+    let backup_path =
+        config_path.with_extension(format!("json.unreadable.{}.bak", uuid::Uuid::new_v4()));
     std::fs::rename(config_path, &backup_path).map_err(|e| {
         format!(
             "Failed to preserve unreadable config {}: {}",
@@ -89,7 +90,8 @@ mod tests {
     use crate::config::types::AppConfig;
 
     fn temp_config_dir() -> std::path::PathBuf {
-        let temp_dir = std::env::temp_dir().join(format!("codemux-config-test-{}", uuid::Uuid::new_v4()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("codemux-config-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&temp_dir).unwrap();
         temp_dir
     }
@@ -107,11 +109,19 @@ mod tests {
             .unwrap()
             .filter_map(Result::ok)
             .map(|entry| entry.path())
-            .find(|path| path.file_name().unwrap().to_string_lossy().contains(".unreadable."))
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .contains(".unreadable.")
+            })
             .unwrap();
         let preserved = std::fs::read_to_string(&backup_path).unwrap();
 
-        assert_eq!(config.agent_defaults.default_agent_kind.as_str(), "claude_code");
+        assert_eq!(
+            config.agent_defaults.default_agent_kind.as_str(),
+            "claude_code"
+        );
         assert_ne!(rewritten, invalid_content);
         assert_eq!(preserved, invalid_content);
 
@@ -128,14 +138,26 @@ mod tests {
         std::fs::write(&config_path, invalid_content).unwrap();
 
         let config = load_config_from_path(&config_path);
-        save_config_to_path(&config_path, &AppConfig { theme: config.theme, ..config }).unwrap();
+        save_config_to_path(
+            &config_path,
+            &AppConfig {
+                theme: config.theme,
+                ..config
+            },
+        )
+        .unwrap();
 
         let current = std::fs::read_to_string(&config_path).unwrap();
         let backup_path = std::fs::read_dir(&temp_dir)
             .unwrap()
             .filter_map(Result::ok)
             .map(|entry| entry.path())
-            .find(|path| path.file_name().unwrap().to_string_lossy().contains(".unreadable."))
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .contains(".unreadable.")
+            })
             .unwrap();
         let preserved = std::fs::read_to_string(&backup_path).unwrap();
 
@@ -160,11 +182,19 @@ mod tests {
             .unwrap()
             .filter_map(Result::ok)
             .map(|entry| entry.path())
-            .find(|path| path.file_name().unwrap().to_string_lossy().contains(".unreadable."))
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .contains(".unreadable.")
+            })
             .unwrap();
         let preserved = std::fs::read(&backup_path).unwrap();
 
-        assert_eq!(config.agent_defaults.default_agent_kind.as_str(), "claude_code");
+        assert_eq!(
+            config.agent_defaults.default_agent_kind.as_str(),
+            "claude_code"
+        );
         assert_ne!(current, invalid_bytes);
         assert_eq!(preserved, invalid_bytes);
 

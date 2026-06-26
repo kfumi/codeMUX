@@ -4,7 +4,10 @@ use tauri::AppHandle;
 
 /// Resolve a file path against an optional base path, with security validation.
 /// Returns the canonical path if it passes the security check.
-fn resolve_secure_path(path: &str, base_path: Option<String>) -> Result<std::path::PathBuf, String> {
+fn resolve_secure_path(
+    path: &str,
+    base_path: Option<String>,
+) -> Result<std::path::PathBuf, String> {
     let base = if let Some(bp) = base_path {
         std::path::PathBuf::from(bp)
     } else {
@@ -21,9 +24,7 @@ fn resolve_secure_path(path: &str, base_path: Option<String>) -> Result<std::pat
     let canonical = full_path
         .canonicalize()
         .map_err(|e| format!("File not found: {} (path: {})", e, full_path.display()))?;
-    let canonical_base = base
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
+    let canonical_base = base.canonicalize().map_err(|e| e.to_string())?;
     if !canonical.starts_with(&canonical_base) {
         return Err("Access denied: path outside project directory".to_string());
     }
@@ -33,7 +34,10 @@ fn resolve_secure_path(path: &str, base_path: Option<String>) -> Result<std::pat
 
 /// Resolve a file path for write/delete operations.
 /// For new files, the parent directory must exist and be within the base path.
-fn resolve_secure_path_for_write(path: &str, base_path: Option<String>) -> Result<std::path::PathBuf, String> {
+fn resolve_secure_path_for_write(
+    path: &str,
+    base_path: Option<String>,
+) -> Result<std::path::PathBuf, String> {
     let base = if let Some(bp) = base_path {
         std::path::PathBuf::from(bp)
     } else {
@@ -47,13 +51,17 @@ fn resolve_secure_path_for_write(path: &str, base_path: Option<String>) -> Resul
     };
 
     // For write operations, check the parent directory exists and is within base
-    let parent = full_path.parent().ok_or("Invalid path: no parent directory")?;
-    let canonical_parent = parent
-        .canonicalize()
-        .map_err(|e| format!("Parent directory not found: {} (path: {})", e, parent.display()))?;
-    let canonical_base = base
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
+    let parent = full_path
+        .parent()
+        .ok_or("Invalid path: no parent directory")?;
+    let canonical_parent = parent.canonicalize().map_err(|e| {
+        format!(
+            "Parent directory not found: {} (path: {})",
+            e,
+            parent.display()
+        )
+    })?;
+    let canonical_base = base.canonicalize().map_err(|e| e.to_string())?;
     if !canonical_parent.starts_with(&canonical_base) {
         return Err("Access denied: path outside project directory".to_string());
     }
@@ -90,7 +98,11 @@ pub fn open_in_explorer(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn read_file(_app: AppHandle, path: String, base_path: Option<String>) -> Result<String, String> {
+pub fn read_file(
+    _app: AppHandle,
+    path: String,
+    base_path: Option<String>,
+) -> Result<String, String> {
     let canonical = resolve_secure_path(&path, base_path)?;
     debug!(target: "file", "Reading file path={}", canonical.display());
     std::fs::read_to_string(&canonical).map_err(|e| format!("Failed to read file: {}", e))
@@ -98,12 +110,18 @@ pub fn read_file(_app: AppHandle, path: String, base_path: Option<String>) -> Re
 
 /// Write content to a file. Creates the file if it doesn't exist.
 #[tauri::command]
-pub fn write_file(_app: AppHandle, path: String, content: String, base_path: Option<String>) -> Result<(), String> {
+pub fn write_file(
+    _app: AppHandle,
+    path: String,
+    content: String,
+    base_path: Option<String>,
+) -> Result<(), String> {
     let full_path = resolve_secure_path_for_write(&path, base_path)?;
     info!(target: "file", "Writing file path={} bytes={}", full_path.display(), content.len());
     // Create parent directories if they don't exist
     if let Some(parent) = full_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
     }
     std::fs::write(&full_path, content).map_err(|e| format!("Failed to write file: {}", e))
 }
@@ -130,7 +148,12 @@ pub struct FileNode {
 /// List directory contents as a tree structure.
 /// Excludes common large/hidden directories. Default depth = 2, max depth = 5.
 #[tauri::command]
-pub fn list_directory(_app: AppHandle, path: String, base_path: Option<String>, depth: Option<u32>) -> Result<Vec<FileNode>, String> {
+pub fn list_directory(
+    _app: AppHandle,
+    path: String,
+    base_path: Option<String>,
+    depth: Option<u32>,
+) -> Result<Vec<FileNode>, String> {
     debug!(target: "file", "Listing directory path={} depth={}", path, depth.unwrap_or(2));
     // Use provided base_path as security base, or fall back to current_dir
     let base = if let Some(bp) = base_path {
@@ -138,13 +161,17 @@ pub fn list_directory(_app: AppHandle, path: String, base_path: Option<String>, 
     } else {
         std::env::current_dir().map_err(|e| e.to_string())?
     };
-    let canonical_base = base.canonicalize().map_err(|e| format!("Base path not found: {}", e))?;
+    let canonical_base = base
+        .canonicalize()
+        .map_err(|e| format!("Base path not found: {}", e))?;
 
     let dir = std::path::PathBuf::from(&path);
     if !dir.is_dir() {
         return Err(format!("Not a directory: {}", path));
     }
-    let canonical = dir.canonicalize().map_err(|e| format!("Path not found: {}", e))?;
+    let canonical = dir
+        .canonicalize()
+        .map_err(|e| format!("Path not found: {}", e))?;
     if !canonical.starts_with(&canonical_base) {
         return Err("Access denied: path outside project directory".to_string());
     }
@@ -154,10 +181,22 @@ pub fn list_directory(_app: AppHandle, path: String, base_path: Option<String>, 
     list_dir_recursive(&canonical, max_depth, &canonical_base)
 }
 
-fn list_dir_recursive(dir: &std::path::Path, remaining_depth: u32, canonical_base: &std::path::Path) -> Result<Vec<FileNode>, String> {
+fn list_dir_recursive(
+    dir: &std::path::Path,
+    remaining_depth: u32,
+    canonical_base: &std::path::Path,
+) -> Result<Vec<FileNode>, String> {
     let excluded = [
-        ".git", "node_modules", "target", ".next", "dist",
-        ".venv", "__pycache__", ".turbo", ".cache", "build",
+        ".git",
+        "node_modules",
+        "target",
+        ".next",
+        "dist",
+        ".venv",
+        "__pycache__",
+        ".turbo",
+        ".cache",
+        "build",
     ];
 
     let mut entries: Vec<FileNode> = Vec::new();
@@ -209,7 +248,11 @@ fn list_dir_recursive(dir: &std::path::Path, remaining_depth: u32, canonical_bas
         };
 
         let children = if is_dir && remaining_depth > 0 {
-            Some(list_dir_recursive(&path, remaining_depth - 1, canonical_base)?)
+            Some(list_dir_recursive(
+                &path,
+                remaining_depth - 1,
+                canonical_base,
+            )?)
         } else {
             None
         };
@@ -223,12 +266,10 @@ fn list_dir_recursive(dir: &std::path::Path, remaining_depth: u32, canonical_bas
     }
 
     // Sort: directories first, then files, each alphabetically
-    entries.sort_by(|a, b| {
-        match (a.is_dir, b.is_dir) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-        }
+    entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     });
 
     Ok(entries)

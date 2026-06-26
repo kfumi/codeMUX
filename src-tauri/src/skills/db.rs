@@ -1,6 +1,6 @@
-use rusqlite::{Connection, Result, params};
-use uuid::Uuid;
 use chrono::Utc;
+use rusqlite::{params, Connection, Result};
+use uuid::Uuid;
 
 use super::types::Skill;
 
@@ -22,9 +22,10 @@ fn row_to_skill(row: &rusqlite::Row) -> rusqlite::Result<Skill> {
 pub fn list_skills(conn: &Connection) -> Result<Vec<Skill>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, display_name, description, enabled, is_builtin, installed_at, disk_path
-         FROM skills ORDER BY is_builtin DESC, name ASC"
+         FROM skills ORDER BY is_builtin DESC, name ASC",
     )?;
-    let skills = stmt.query_map([], |row| row_to_skill(row))?
+    let skills = stmt
+        .query_map([], |row| row_to_skill(row))?
         .collect::<Result<Vec<_>>>()?;
     Ok(skills)
 }
@@ -32,7 +33,7 @@ pub fn list_skills(conn: &Connection) -> Result<Vec<Skill>> {
 pub fn get_skill(conn: &Connection, id: &str) -> Result<Option<Skill>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, display_name, description, enabled, is_builtin, installed_at, disk_path
-         FROM skills WHERE id = ?1"
+         FROM skills WHERE id = ?1",
     )?;
     let mut rows = stmt.query_map(params![id], |row| row_to_skill(row))?;
     match rows.next() {
@@ -44,7 +45,7 @@ pub fn get_skill(conn: &Connection, id: &str) -> Result<Option<Skill>> {
 pub fn get_skill_by_name(conn: &Connection, name: &str) -> Result<Option<Skill>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, display_name, description, enabled, is_builtin, installed_at, disk_path
-         FROM skills WHERE name = ?1"
+         FROM skills WHERE name = ?1",
     )?;
     let mut rows = stmt.query_map(params![name], |row| row_to_skill(row))?;
     match rows.next() {
@@ -91,12 +92,17 @@ pub fn delete_skill(conn: &Connection, id: &str) -> Result<bool> {
 
 pub fn get_enabled_skill_names(conn: &Connection) -> Result<Vec<String>> {
     let mut stmt = conn.prepare("SELECT name FROM skills WHERE enabled = 1 ORDER BY name")?;
-    let names = stmt.query_map([], |row| row.get::<_, String>(0))?
+    let names = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>>>()?;
     Ok(names)
 }
 
-pub fn register_skill_from_disk(conn: &Connection, skills_dir: &std::path::Path, name: &str) -> Result<Skill> {
+pub fn register_skill_from_disk(
+    conn: &Connection,
+    skills_dir: &std::path::Path,
+    name: &str,
+) -> Result<Skill> {
     let skill_dir = skills_dir.join(name);
     let skill_md = skill_dir.join("SKILL.md");
 

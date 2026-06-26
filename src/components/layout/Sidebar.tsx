@@ -92,7 +92,7 @@ export function Sidebar({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="px-3 pb-2 pt-3">
+      <div className="space-y-1 px-3 pb-2 pt-11">
         <button
           onClick={onNewSession}
           className="flex w-full items-center gap-2.5 rounded-md border-[hsl(var(--sidebar-border))]/48 px-3 py-2 text-[13px] font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"

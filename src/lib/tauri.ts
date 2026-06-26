@@ -34,6 +34,22 @@ export interface GitChangedFile {
   currentContent: string;
 }
 
+export type GitStatusArea = 'unstaged' | 'staged';
+
+export interface GitStatusChange {
+  path: string;
+  status: 'added' | 'modified' | 'deleted';
+  originalContent: string | null;
+  currentContent: string;
+  additions: number;
+  deletions: number;
+}
+
+export type TerminalEvent =
+  | { type: 'output'; terminalId: string; data: string }
+  | { type: 'exit'; terminalId: string; code: number | null }
+  | { type: 'error'; terminalId: string; error: string };
+
 function getAgentChannel(sessionId: string): Channel<string> {
   let channel = agentChannels.get(sessionId);
   if (!channel) {
@@ -220,6 +236,35 @@ export const gitApi = {
     invokeLogged('get_git_changed_files', { projectPath, baselineTree }),
   getChangedFilesSinceHead: (projectPath: string): Promise<GitChangedFile[]> =>
     invokeLogged('get_git_changed_files_since_head', { projectPath }),
+  getStatusChanges: (projectPath: string, area: GitStatusArea): Promise<GitStatusChange[]> =>
+    invokeLogged('get_git_status_changes', { projectPath, area }),
+  getStatusChangeDetail: (projectPath: string, area: GitStatusArea, filePath: string): Promise<GitStatusChange> =>
+    invokeLogged('get_git_status_change_detail', { projectPath, area, filePath }),
+};
+
+export const terminalApi = {
+  start: (
+    projectPath: string,
+    cols: number,
+    rows: number,
+    onEvent: (event: TerminalEvent) => void,
+  ): Promise<string> => {
+    const channel = new Channel<string>();
+    channel.onmessage = (event: string) => {
+      try {
+        onEvent(JSON.parse(event) as TerminalEvent);
+      } catch {
+        onEvent({ type: 'error', terminalId: '', error: event });
+      }
+    };
+    return invokeLogged('start_terminal_session', { projectPath, cols, rows, channel });
+  },
+  write: (terminalId: string, data: string): Promise<void> =>
+    invokeLogged('write_terminal_session', { terminalId, data }),
+  resize: (terminalId: string, cols: number, rows: number): Promise<void> =>
+    invokeLogged('resize_terminal_session', { terminalId, cols, rows }),
+  close: (terminalId: string): Promise<void> =>
+    invokeLogged('close_terminal_session', { terminalId }),
 };
 
 export const mcpApi = {

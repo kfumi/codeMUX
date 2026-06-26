@@ -1,16 +1,15 @@
-use rusqlite::{Connection, Result, params};
+use rusqlite::{params, Connection, Result};
 
-use super::types::{McpServer, McpApps};
+use super::types::{McpApps, McpServer};
 
 const SELECT_COLUMNS: &str = "id, name, description, server_config, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode";
 
 /// 从数据库行构建 McpServer（新 schema）
 fn row_to_mcp_server(row: &rusqlite::Row) -> rusqlite::Result<McpServer> {
     let server_config_str: String = row.get(3)?;
-    let server: serde_json::Value = serde_json::from_str(&server_config_str)
-        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-            3, rusqlite::types::Type::Text, Box::new(e),
-        ))?;
+    let server: serde_json::Value = serde_json::from_str(&server_config_str).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
+    })?;
 
     Ok(McpServer {
         id: row.get(0)?,
@@ -27,10 +26,11 @@ fn row_to_mcp_server(row: &rusqlite::Row) -> rusqlite::Result<McpServer> {
 }
 
 pub fn get_all_mcp_servers(conn: &Connection) -> Result<Vec<McpServer>> {
-    let mut stmt = conn.prepare(
-        &format!("SELECT {SELECT_COLUMNS} FROM mcp_servers ORDER BY name ASC")
-    )?;
-    let servers = stmt.query_map([], |row| row_to_mcp_server(row))?
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLUMNS} FROM mcp_servers ORDER BY name ASC"
+    ))?;
+    let servers = stmt
+        .query_map([], |row| row_to_mcp_server(row))?
         .collect::<Result<Vec<_>>>()?;
     Ok(servers)
 }
@@ -45,9 +45,11 @@ pub fn get_servers_enabled_for_app(conn: &Connection, app: &str) -> Result<Vec<M
         _ => return Ok(Vec::new()),
     };
 
-    let sql = format!("SELECT {SELECT_COLUMNS} FROM mcp_servers WHERE {column} = 1 ORDER BY name ASC");
+    let sql =
+        format!("SELECT {SELECT_COLUMNS} FROM mcp_servers WHERE {column} = 1 ORDER BY name ASC");
     let mut stmt = conn.prepare(&sql)?;
-    let servers = stmt.query_map([], |row| row_to_mcp_server(row))?
+    let servers = stmt
+        .query_map([], |row| row_to_mcp_server(row))?
         .collect::<Result<Vec<_>>>()?;
     Ok(servers)
 }
@@ -81,9 +83,9 @@ pub fn delete_mcp_server(conn: &Connection, id: &str) -> Result<bool> {
 }
 
 pub fn get_mcp_server(conn: &Connection, id: &str) -> Result<Option<McpServer>> {
-    let mut stmt = conn.prepare(
-        &format!("SELECT {SELECT_COLUMNS} FROM mcp_servers WHERE id = ?1")
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLUMNS} FROM mcp_servers WHERE id = ?1"
+    ))?;
     let mut rows = stmt.query_map(params![id], |row| row_to_mcp_server(row))?;
     match rows.next() {
         Some(row) => Ok(Some(row?)),
@@ -101,7 +103,10 @@ pub fn set_mcp_app_enabled(conn: &Connection, id: &str, app: &str, enabled: bool
     };
 
     let sql = format!("UPDATE mcp_servers SET {column} = ?1 WHERE id = ?2");
-    conn.execute(&sql, rusqlite::params![if enabled { 1i32 } else { 0i32 }, id])?;
+    conn.execute(
+        &sql,
+        rusqlite::params![if enabled { 1i32 } else { 0i32 }, id],
+    )?;
     Ok(())
 }
 

@@ -16,8 +16,7 @@ fn read_claude_json() -> Result<serde_json::Value, String> {
     }
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read ~/.claude.json: {}", e))?;
-    serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse ~/.claude.json: {}", e))
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse ~/.claude.json: {}", e))
 }
 
 fn write_claude_json(config: &serde_json::Value) -> Result<(), String> {
@@ -25,8 +24,7 @@ fn write_claude_json(config: &serde_json::Value) -> Result<(), String> {
     let content = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
     let tmp_path = path.with_extension("json.tmp");
-    std::fs::write(&tmp_path, &content)
-        .map_err(|e| format!("Failed to write temp file: {}", e))?;
+    std::fs::write(&tmp_path, &content).map_err(|e| format!("Failed to write temp file: {}", e))?;
     if path.exists() {
         std::fs::remove_file(&path)
             .map_err(|e| format!("Failed to remove old ~/.claude.json: {}", e))?;
@@ -50,7 +48,11 @@ impl McpAdapter for ClaudeAdapter {
             .exists()
     }
 
-    fn sync_single_server(&self, name: &str, server_spec: &serde_json::Value) -> McpAdapterResult<()> {
+    fn sync_single_server(
+        &self,
+        name: &str,
+        server_spec: &serde_json::Value,
+    ) -> McpAdapterResult<()> {
         let mut config = read_claude_json()?;
         let mcp_servers = config
             .get_mut("mcpServers")
@@ -62,7 +64,11 @@ impl McpAdapter for ClaudeAdapter {
         if let serde_json::Value::Object(ref mut obj) = spec {
             if !obj.contains_key("type") {
                 // Infer type: if url exists -> http, else stdio
-                let t = if obj.contains_key("url") { "http" } else { "stdio" };
+                let t = if obj.contains_key("url") {
+                    "http"
+                } else {
+                    "stdio"
+                };
                 obj.insert("type".into(), serde_json::Value::String(t.into()));
             }
         }
@@ -97,7 +103,11 @@ impl McpAdapter for ClaudeAdapter {
                 obj.remove("alwaysLoad");
                 // For stdio, Claude SDK omits type — add it back for unified format
                 if !obj.contains_key("type") {
-                    let t = if obj.contains_key("url") { "http" } else { "stdio" };
+                    let t = if obj.contains_key("url") {
+                        "http"
+                    } else {
+                        "stdio"
+                    };
                     obj.insert("type".into(), serde_json::Value::String(t.into()));
                 }
             }

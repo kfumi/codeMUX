@@ -1,6 +1,6 @@
-pub mod types;
-pub mod db;
 pub mod adapter;
 pub mod adapters;
-pub mod validation;
+pub mod db;
 pub mod service;
+pub mod types;
+pub mod validation;

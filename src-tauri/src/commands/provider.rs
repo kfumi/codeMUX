@@ -1,12 +1,12 @@
-use tauri::{AppHandle, State};
-use crate::AppState;
-use crate::config::types::{
-    AgentKind, ClaudeCodeAgentConfigUpdate, CodexAgentConfigUpdate, AppConfig, Provider, Theme,
-};
 use crate::config;
+use crate::config::types::{
+    AgentKind, AppConfig, ClaudeCodeAgentConfigUpdate, CodexAgentConfigUpdate, Provider, Theme,
+};
+use crate::AppState;
 use futures::StreamExt;
 use log::{debug, info};
 use std::str::FromStr;
+use tauri::{AppHandle, State};
 
 fn apply_agent_config_update(
     app_config: &mut AppConfig,
@@ -20,7 +20,10 @@ fn apply_agent_config_update(
 
             if let Some(executable_mode) = update.executable_mode {
                 if !matches!(executable_mode.as_str(), "auto" | "bundled" | "path") {
-                    return Err(format!("Unsupported Claude Code executable_mode: {}", executable_mode));
+                    return Err(format!(
+                        "Unsupported Claude Code executable_mode: {}",
+                        executable_mode
+                    ));
                 }
                 app_config.agent_configs.claude_code.executable_mode = executable_mode;
             }
@@ -59,7 +62,11 @@ pub fn get_config(state: State<'_, AppState>) -> AppConfig {
 }
 
 #[tauri::command]
-pub fn update_provider(state: State<'_, AppState>, app: AppHandle, provider: Provider) -> Result<(), String> {
+pub fn update_provider(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    provider: Provider,
+) -> Result<(), String> {
     info!(target: "provider", "Upserting provider provider_id={} name={}", provider.id, provider.name);
     let mut config = state.config.lock().unwrap();
 
@@ -74,7 +81,11 @@ pub fn update_provider(state: State<'_, AppState>, app: AppHandle, provider: Pro
 }
 
 #[tauri::command]
-pub fn delete_provider(state: State<'_, AppState>, app: AppHandle, provider_id: String) -> Result<(), String> {
+pub fn delete_provider(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    provider_id: String,
+) -> Result<(), String> {
     info!(target: "provider", "Deleting provider provider_id={}", provider_id);
     let mut config = state.config.lock().unwrap();
     config.providers.retain(|p| p.id != provider_id);
@@ -85,7 +96,11 @@ pub fn delete_provider(state: State<'_, AppState>, app: AppHandle, provider_id: 
 }
 
 #[tauri::command]
-pub fn set_active_provider(state: State<'_, AppState>, app: AppHandle, provider_id: String) -> Result<(), String> {
+pub fn set_active_provider(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    provider_id: String,
+) -> Result<(), String> {
     info!(target: "provider", "Setting active provider provider_id={}", provider_id);
     let mut config = state.config.lock().unwrap();
     config.active_provider_id = Some(provider_id);
@@ -94,7 +109,11 @@ pub fn set_active_provider(state: State<'_, AppState>, app: AppHandle, provider_
 }
 
 #[tauri::command]
-pub fn set_default_agent_kind(state: State<'_, AppState>, app: AppHandle, agent_kind: String) -> Result<(), String> {
+pub fn set_default_agent_kind(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    agent_kind: String,
+) -> Result<(), String> {
     info!(target: "provider", "Setting default agent kind agent_kind={}", agent_kind);
     let mut config = state.config.lock().unwrap();
     config.agent_defaults.default_agent_kind = AgentKind::from_str(&agent_kind)?;
@@ -215,7 +234,10 @@ fn build_model_urls(base_url: &str) -> Vec<String> {
 }
 
 #[tauri::command]
-pub async fn fetch_provider_models(api_key: String, base_url: String) -> Result<Vec<ModelInfo>, String> {
+pub async fn fetch_provider_models(
+    api_key: String,
+    base_url: String,
+) -> Result<Vec<ModelInfo>, String> {
     info!(target: "provider", "Fetching provider models base_url={}", base_url);
     if base_url.trim().is_empty() {
         return Err("请填写 Base URL".to_string());
@@ -273,9 +295,7 @@ pub async fn fetch_provider_models(api_key: String, base_url: String) -> Result<
             .await
             .map_err(|_| "该接口不支持获取模型".to_string())?;
 
-        let data = body["data"]
-            .as_array()
-            .ok_or("该接口不支持获取模型")?;
+        let data = body["data"].as_array().ok_or("该接口不支持获取模型")?;
 
         let mut models: Vec<ModelInfo> = data
             .iter()
@@ -302,11 +322,18 @@ pub async fn fetch_provider_models(api_key: String, base_url: String) -> Result<
 
 /// Test a provider by sending a streaming request. Returns model name on success.
 #[tauri::command]
-pub async fn test_provider(state: State<'_, AppState>, provider_id: String) -> Result<String, String> {
+pub async fn test_provider(
+    state: State<'_, AppState>,
+    provider_id: String,
+) -> Result<String, String> {
     info!(target: "provider", "Testing provider provider_id={}", provider_id);
     let provider = {
         let config = state.config.lock().unwrap();
-        config.providers.iter().find(|p| p.id == provider_id).cloned()
+        config
+            .providers
+            .iter()
+            .find(|p| p.id == provider_id)
+            .cloned()
             .ok_or("供应商不存在")?
     };
 
@@ -319,7 +346,10 @@ pub async fn test_provider(state: State<'_, AppState>, provider_id: String) -> R
             Err(e) => {
                 last_error = e;
                 // Only retry on timeout-like errors
-                if last_error.contains("超时") || last_error.contains("timeout") || last_error.contains("连接") {
+                if last_error.contains("超时")
+                    || last_error.contains("timeout")
+                    || last_error.contains("连接")
+                {
                     if attempt < max_retries {
                         continue;
                     }
@@ -359,7 +389,8 @@ async fn test_provider_once(provider: &Provider) -> Result<String, String> {
 
     // Try OpenAI endpoint
     if !provider.openai_base_url.is_empty() && !provider.api_key.is_empty() {
-        return test_openai_stream(&provider.openai_base_url, &provider.api_key, &model).await
+        return test_openai_stream(&provider.openai_base_url, &provider.api_key, &model)
+            .await
             .map(|_| model);
     }
 
@@ -382,14 +413,21 @@ async fn test_anthropic_stream(base_url: &str, api_key: &str, model: &str) -> Re
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
-    let resp = client.post(&url)
+    let resp = client
+        .post(&url)
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
         .json(&body)
         .send()
         .await
-        .map_err(|e| if e.is_timeout() { "请求超时".to_string() } else { format!("连接失败: {}", e) })?;
+        .map_err(|e| {
+            if e.is_timeout() {
+                "请求超时".to_string()
+            } else {
+                format!("连接失败: {}", e)
+            }
+        })?;
 
     let status = resp.status().as_u16();
     if status == 401 || status == 403 {
@@ -425,13 +463,20 @@ async fn test_openai_stream(base_url: &str, api_key: &str, model: &str) -> Resul
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
-    let resp = client.post(&url)
+    let resp = client
+        .post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("content-type", "application/json")
         .json(&body)
         .send()
         .await
-        .map_err(|e| if e.is_timeout() { "请求超时".to_string() } else { format!("连接失败: {}", e) })?;
+        .map_err(|e| {
+            if e.is_timeout() {
+                "请求超时".to_string()
+            } else {
+                format!("连接失败: {}", e)
+            }
+        })?;
 
     let status = resp.status().as_u16();
     if status == 401 || status == 403 {

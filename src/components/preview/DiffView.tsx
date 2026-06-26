@@ -51,30 +51,38 @@ export function DiffView({ oldContent, newContent }: DiffViewProps) {
       </div>
 
       {/* Diff lines */}
-      <div className="leading-relaxed overflow-x-auto">
-        {diffLinesData.map((line, index) => {
-          const bgClass =
-            line.type === 'added'
-              ? 'bg-[hsl(var(--success)/0.09)]'
-              : line.type === 'removed'
-                ? 'bg-[hsl(var(--destructive)/0.09)]'
-                : '';
+      <div className="overflow-x-auto">
+        <div className="table w-max min-w-full leading-relaxed">
+          {diffLinesData.map((line, index) => {
+            const bgClass =
+              line.type === 'added'
+                ? 'bg-[#dafbe1] text-[#116329] dark:bg-[#12361f] dark:text-[#d8f7df]'
+                : line.type === 'removed'
+                  ? 'bg-[#ffebe9] text-[#82071e] dark:bg-[#4a1515] dark:text-[#ffd7d5]'
+                  : '';
+            const gutterClass =
+              line.type === 'added'
+                ? 'text-[#1a7f37]/70 dark:text-[#7ee787]/70'
+                : line.type === 'removed'
+                  ? 'text-[#cf222e]/70 dark:text-[#ff7b72]/75'
+                  : 'text-muted-foreground/40';
 
-          const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
+            const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
 
-          return (
-            <div key={index} className={`px-4 whitespace-pre ${bgClass}`}>
-              <span className="text-muted-foreground/40 select-none inline-block w-8 text-right mr-3 tabular-nums">
-                {line.oldLineNum ?? ''}
-              </span>
-              <span className="text-muted-foreground/40 select-none inline-block w-8 text-right mr-3 tabular-nums">
-                {line.newLineNum ?? ''}
-              </span>
-              <span className="text-muted-foreground/50 select-none mr-1">{prefix}</span>
-              <span>{line.content}</span>
-            </div>
-          );
-        })}
+            return (
+              <div key={index} className={`table-row whitespace-pre ${bgClass}`}>
+                <span className={`${gutterClass} table-cell w-8 select-none pl-4 pr-3 text-right tabular-nums`}>
+                  {line.oldLineNum ?? ''}
+                </span>
+                <span className={`${gutterClass} table-cell w-8 select-none pr-3 text-right tabular-nums`}>
+                  {line.newLineNum ?? ''}
+                </span>
+                <span className={`${gutterClass} table-cell select-none pr-1`}>{prefix}</span>
+                <span className="table-cell pr-4">{line.content}</span>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

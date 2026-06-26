@@ -118,11 +118,20 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         .prepare("SELECT is_archived FROM sessions LIMIT 0")
         .is_ok();
     if has_archived_at && !has_is_archived {
-        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0", []);
-        let _ = conn.execute("UPDATE sessions SET is_archived = 1 WHERE archived_at IS NOT NULL", []);
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "UPDATE sessions SET is_archived = 1 WHERE archived_at IS NOT NULL",
+            [],
+        );
         // SQLite doesn't support DROP COLUMN before 3.35; leave archived_at in place
     } else if !has_is_archived {
-        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0", []);
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
     }
 
     let _ = conn.execute("DROP TABLE IF EXISTS tool_calls", []);

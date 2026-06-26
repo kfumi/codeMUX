@@ -306,7 +306,7 @@ export function McpSettingsPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between pr-12">
+      <div className="flex items-center justify-between">
         <h3 className="font-medium">MCP Servers</h3>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={handleImport} disabled={importing}>

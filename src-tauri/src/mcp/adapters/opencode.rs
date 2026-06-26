@@ -4,12 +4,17 @@ pub struct OpenCodeAdapter;
 
 fn opencode_config_path() -> std::path::PathBuf {
     // opencode.json lives in the project root (current working directory)
-    std::env::current_dir().unwrap_or_default().join("opencode.json")
+    std::env::current_dir()
+        .unwrap_or_default()
+        .join("opencode.json")
 }
 
 /// Convert unified format to OpenCode format.
 pub fn convert_to_opencode_server(spec: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let server_type = spec.get("type").and_then(|value| value.as_str()).unwrap_or("stdio");
+    let server_type = spec
+        .get("type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("stdio");
     match server_type {
         "stdio" => Ok(serde_json::json!({
             "type": "local",
@@ -40,16 +45,14 @@ fn read_opencode_json() -> Result<serde_json::Value, String> {
     }
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read opencode.json: {}", e))?;
-    serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse opencode.json: {}", e))
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse opencode.json: {}", e))
 }
 
 fn write_opencode_json(config: &serde_json::Value) -> Result<(), String> {
     let path = opencode_config_path();
     let content = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize opencode.json: {}", e))?;
-    std::fs::write(&path, &content)
-        .map_err(|e| format!("Failed to write opencode.json: {}", e))?;
+    std::fs::write(&path, &content).map_err(|e| format!("Failed to write opencode.json: {}", e))?;
     Ok(())
 }
 
@@ -58,7 +61,11 @@ impl McpAdapter for OpenCodeAdapter {
         opencode_config_path().exists()
     }
 
-    fn sync_single_server(&self, name: &str, server_spec: &serde_json::Value) -> McpAdapterResult<()> {
+    fn sync_single_server(
+        &self,
+        name: &str,
+        server_spec: &serde_json::Value,
+    ) -> McpAdapterResult<()> {
         let mut config = read_opencode_json()?;
         let oc_spec = convert_to_opencode_server(server_spec)?;
         config["mcp"][name] = oc_spec;

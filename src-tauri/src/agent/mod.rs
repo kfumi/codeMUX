@@ -4,9 +4,9 @@ use log::{debug, info, warn};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use tauri::Manager;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
-use tauri::Manager;
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
 
 const SIDECAR_RELATIVE_DIR: &str = "sidecar";
@@ -135,7 +135,8 @@ pub async fn spawn_sidecar(
     let resource_dir = app_handle.path().resource_dir().ok();
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let environment = build_environment();
-    let script_path = resolve_sidecar_script_path(resource_dir.as_deref(), &manifest_dir, environment)?;
+    let script_path =
+        resolve_sidecar_script_path(resource_dir.as_deref(), &manifest_dir, environment)?;
     let node_path = resolve_node_runtime_path(resource_dir.as_deref(), environment)?;
 
     info!(target: "agent", "Spawning sidecar from {}", script_path.display());
@@ -148,15 +149,14 @@ pub async fn spawn_sidecar(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .creation_flags(0x08000000); // CREATE_NO_WINDOW
-        cmd.spawn()
-            .map_err(|e| {
-                format!(
-                    "Failed to spawn sidecar with node={} script={}: {}",
-                    node_path.display(),
-                    script_path.display(),
-                    e
-                )
-            })?
+        cmd.spawn().map_err(|e| {
+            format!(
+                "Failed to spawn sidecar with node={} script={}: {}",
+                node_path.display(),
+                script_path.display(),
+                e
+            )
+        })?
     } else {
         Command::new(&node_path)
             .arg(&script_path)
@@ -283,7 +283,12 @@ pub async fn spawn_sidecar(
 
     debug!(target: "agent", "Sidecar spawn completed successfully");
     let channel = Arc::new(AsyncMutex::new(channel));
-    let handle = SidecarHandle { child, stdin_tx, channel, stderr_lines };
+    let handle = SidecarHandle {
+        child,
+        stdin_tx,
+        channel,
+        stderr_lines,
+    };
     Ok((handle, event_rx))
 }
 
@@ -321,7 +326,10 @@ mod tests {
         )
         .expect("dev builds should always use the source tree sidecar");
 
-        assert_eq!(path, manifest_dir.join("sidecar").join("dist").join("index.js"));
+        assert_eq!(
+            path,
+            manifest_dir.join("sidecar").join("dist").join("index.js")
+        );
     }
 
     #[test]

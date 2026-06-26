@@ -1,17 +1,17 @@
-mod db;
-mod config;
-mod commands;
 mod agent;
 mod agent_runtime;
+mod commands;
+mod config;
+mod db;
 mod mcp;
 mod skills;
 
 use log::info;
+use std::sync::Mutex;
 use tauri::menu::MenuBuilder;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, Window, WindowEvent};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
-use std::sync::Mutex;
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_OPEN_ID: &str = "tray_open";
@@ -103,6 +103,7 @@ pub fn run() {
                 app_data_dir: app.path().app_data_dir()?,
             });
             app.manage(agent::commands::AgentState::default());
+            app.manage(commands::terminal::TerminalState::default());
 
             let tray_menu = MenuBuilder::new(app)
                 .text(TRAY_OPEN_ID, "打开 codeMUX")
@@ -159,6 +160,12 @@ pub fn run() {
             commands::git::create_git_change_baseline,
             commands::git::get_git_changed_files,
             commands::git::get_git_changed_files_since_head,
+            commands::git::get_git_status_change_detail,
+            commands::git::get_git_status_changes,
+            commands::terminal::start_terminal_session,
+            commands::terminal::write_terminal_session,
+            commands::terminal::resize_terminal_session,
+            commands::terminal::close_terminal_session,
             commands::mcp::get_mcp_servers,
             commands::mcp::upsert_mcp_server,
             commands::mcp::delete_mcp_server,

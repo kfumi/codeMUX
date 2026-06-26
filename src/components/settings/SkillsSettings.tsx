@@ -42,7 +42,7 @@ export function SkillsSettingsPanel() {
   };
 
   return (
-    <div className="space-y-4 pr-12">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="font-medium flex items-center gap-2">
           <Puzzle className="h-4 w-4" />

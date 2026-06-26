@@ -211,7 +211,10 @@ mod tests {
 
         let config: AppConfig = serde_json::from_value(raw).unwrap();
 
-        assert_eq!(config.agent_defaults.default_agent_kind, AgentKind::ClaudeCode);
+        assert_eq!(
+            config.agent_defaults.default_agent_kind,
+            AgentKind::ClaudeCode
+        );
         assert_eq!(config.agent_configs.claude_code.executable_mode, "auto");
         assert!(config.agent_configs.claude_code.resume_sessions);
         assert_eq!(config.agent_configs.codex.sdk_mode, "responses");
@@ -235,6 +238,9 @@ mod tests {
         let config: AppConfig = serde_json::from_value(raw).unwrap();
 
         assert_eq!(config.providers[0].models, Vec::<String>::new());
-        assert_eq!(AppConfig::default().providers[0].models, vec!["claude-sonnet-4-20250514"]);
+        assert_eq!(
+            AppConfig::default().providers[0].models,
+            vec!["claude-sonnet-4-20250514"]
+        );
     }
 }

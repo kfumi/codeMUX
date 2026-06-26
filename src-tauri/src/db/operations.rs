@@ -92,7 +92,10 @@ pub fn get_all_projects(conn: &Connection) -> Result<Vec<Project>> {
 
 pub fn delete_project(conn: &Connection, project_id: &str) -> Result<()> {
     // 先删除该项目下的所有会话（含已归档），外键 CASCADE 会清理 agent_session_mappings
-    conn.execute("DELETE FROM sessions WHERE project_id = ?1", params![project_id])?;
+    conn.execute(
+        "DELETE FROM sessions WHERE project_id = ?1",
+        params![project_id],
+    )?;
     // 再删除项目本身
     conn.execute("DELETE FROM projects WHERE id = ?1", params![project_id])?;
     Ok(())

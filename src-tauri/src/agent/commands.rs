@@ -149,8 +149,7 @@ pub async fn load_claude_session_events(
 
     debug!(target: "agent", "Reading JSONL from {}", jsonl_path.display());
 
-    let file =
-        fs::File::open(&jsonl_path).map_err(|e| format!("Failed to open JSONL: {}", e))?;
+    let file = fs::File::open(&jsonl_path).map_err(|e| format!("Failed to open JSONL: {}", e))?;
     let reader = BufReader::new(file);
 
     for line_result in reader.lines() {
@@ -221,7 +220,9 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
                         }
                     } else if block_type == "reasoning" {
                         if let Some(thinking) = extract_codex_reasoning_summary(block) {
-                            claude_content.push(serde_json::json!({"type": "thinking", "thinking": thinking}));
+                            claude_content.push(
+                                serde_json::json!({"type": "thinking", "thinking": thinking}),
+                            );
                         }
                     }
                 }
@@ -276,11 +277,13 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
             let name = payload.get("name")?.as_str()?;
             let call_id = payload.get("call_id")?.as_str()?;
             let arguments = payload.get("arguments");
-            let input: serde_json::Value = if let Some(args_str) = arguments.and_then(|a| a.as_str()) {
-                serde_json::from_str(args_str).unwrap_or_else(|_| serde_json::json!({"raw": args_str}))
-            } else {
-                arguments.cloned().unwrap_or(serde_json::json!({}))
-            };
+            let input: serde_json::Value =
+                if let Some(args_str) = arguments.and_then(|a| a.as_str()) {
+                    serde_json::from_str(args_str)
+                        .unwrap_or_else(|_| serde_json::json!({"raw": args_str}))
+                } else {
+                    arguments.cloned().unwrap_or(serde_json::json!({}))
+                };
             return Some(serde_json::json!({
                 "type": "assistant",
                 "timestamp": timestamp,
@@ -329,7 +332,8 @@ pub async fn load_codex_session_events(
     debug!(target: "agent", "Loading Codex session events for app_session_id={}", app_session_id);
 
     let mut messages = Vec::new();
-    let Some(codex_session_id) = get_agent_session_id(state.inner(), &app_session_id, AgentKind::Codex)?
+    let Some(codex_session_id) =
+        get_agent_session_id(state.inner(), &app_session_id, AgentKind::Codex)?
     else {
         info!(target: "agent", "No Codex mapping found for app_session_id={}", app_session_id);
         return Ok(messages);
@@ -402,7 +406,9 @@ pub async fn load_codex_session_events(
                                 current_turn.last_token_usage = Some(usage.clone());
                             }
                             // Also capture model_context_window for the frontend
-                            if let Some(ctx) = info.get("model_context_window").and_then(|v| v.as_u64()) {
+                            if let Some(ctx) =
+                                info.get("model_context_window").and_then(|v| v.as_u64())
+                            {
                                 current_turn.model_context_window = Some(ctx);
                             }
                         }
@@ -444,10 +450,22 @@ pub async fn load_codex_session_events(
             None => continue,
         };
 
-        let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let cached = usage.get("cached_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let output = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let reasoning = usage.get("reasoning_output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let input = usage
+            .get("input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let cached = usage
+            .get("cached_input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let output = usage
+            .get("output_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let reasoning = usage
+            .get("reasoning_output_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         let total = input + output + reasoning;
 
         if input > 0 || output > 0 {
@@ -564,10 +582,7 @@ fn handle_agent_session_mapping_event(app: &AppHandle, event: &str) -> bool {
         return false;
     }
 
-    let Some(app_session_id) = value
-        .get("app_session_id")
-        .and_then(|entry| entry.as_str())
-    else {
+    let Some(app_session_id) = value.get("app_session_id").and_then(|entry| entry.as_str()) else {
         warn!(target: "agent", "Dropping mapping event without app_session_id");
         return true;
     };
@@ -595,7 +610,12 @@ fn handle_agent_session_mapping_event(app: &AppHandle, event: &str) -> bool {
 
     let state = app.state::<crate::AppState>();
     let db = state.db.lock().unwrap();
-    match operations::upsert_agent_session_mapping(&db, app_session_id, agent_kind, agent_session_id) {
+    match operations::upsert_agent_session_mapping(
+        &db,
+        app_session_id,
+        agent_kind,
+        agent_session_id,
+    ) {
         Ok(_) => {
             info!(
                 target: "agent",
@@ -738,7 +758,17 @@ pub async fn ensure_agent_session(
         sidecars.get(&session_id).map(|h| h.stderr_lines.clone())
     };
 
-    let cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model, reasoning_effort, codex_needs_proxy);
+    let cmd = build_ensure_session_command(
+        &state,
+        &session_id,
+        &agent_kind,
+        cwd,
+        api_key,
+        base_url,
+        model,
+        reasoning_effort,
+        codex_needs_proxy,
+    );
 
     // If the proxy is already running (e.g. started manually from settings),
     // tell the sidecar to use it directly instead of starting a new one.
@@ -799,7 +829,17 @@ pub async fn start_agent_session(
     };
 
     ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
-    let ensure_cmd = build_ensure_session_command(&state, &session_id, &agent_kind, cwd, api_key, base_url, model, reasoning_effort, codex_needs_proxy);
+    let ensure_cmd = build_ensure_session_command(
+        &state,
+        &session_id,
+        &agent_kind,
+        cwd,
+        api_key,
+        base_url,
+        model,
+        reasoning_effort,
+        codex_needs_proxy,
+    );
 
     send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 
@@ -894,7 +934,8 @@ pub async fn delete_claude_session_files(
     use std::fs;
     let claude_dir = home_dir()?.join(".claude");
 
-    let Some(claude_session_id) = get_agent_session_id(state.inner(), &app_session_id, AgentKind::ClaudeCode)?
+    let Some(claude_session_id) =
+        get_agent_session_id(state.inner(), &app_session_id, AgentKind::ClaudeCode)?
     else {
         debug!(target: "agent", "No Claude session mapping found for session_id={}", app_session_id);
         return Ok(vec![]);
@@ -950,7 +991,9 @@ pub async fn delete_claude_session_files(
         }
     }
 
-    let debug_file = claude_dir.join("debug").join(format!("{}.txt", claude_session_id));
+    let debug_file = claude_dir
+        .join("debug")
+        .join(format!("{}.txt", claude_session_id));
     if debug_file.exists() {
         let _ = fs::remove_file(&debug_file);
         deleted.push(debug_file.to_string_lossy().to_string());
@@ -988,7 +1031,8 @@ pub async fn delete_codex_session_files(
 ) -> Result<Vec<String>, String> {
     use std::fs;
 
-    let Some(codex_session_id) = get_agent_session_id(state.inner(), &app_session_id, AgentKind::Codex)?
+    let Some(codex_session_id) =
+        get_agent_session_id(state.inner(), &app_session_id, AgentKind::Codex)?
     else {
         debug!(target: "agent", "No Codex session mapping found for session_id={}", app_session_id);
         return Ok(vec![]);
@@ -1028,9 +1072,7 @@ pub async fn delete_codex_session_files(
 
 /// Find any active sidecar to send a global command (e.g. proxy management).
 /// Skips the dedicated proxy sidecar — it has no Codex session initialized.
-fn find_any_active_sidecar(
-    sidecars: &HashMap<String, SidecarHandle>,
-) -> Option<String> {
+fn find_any_active_sidecar(sidecars: &HashMap<String, SidecarHandle>) -> Option<String> {
     sidecars
         .keys()
         .find(|id| id.as_str() != PROXY_SESSION_ID)
@@ -1095,13 +1137,16 @@ async fn get_live_proxy_port(agent_state: &State<'_, AgentState>) -> Option<u16>
 
 #[cfg(test)]
 mod tests {
-    use super::{convert_codex_item_to_claude_format, find_codex_session_jsonl, parse_proxy_port_from_stderr};
+    use super::{
+        convert_codex_item_to_claude_format, find_codex_session_jsonl, parse_proxy_port_from_stderr,
+    };
 
     #[test]
     fn find_codex_session_jsonl_matches_only_session_meta_payload_id() {
         use std::fs;
 
-        let base = std::env::temp_dir().join(format!("codemux-codex-test-{}", uuid::Uuid::new_v4()));
+        let base =
+            std::env::temp_dir().join(format!("codemux-codex-test-{}", uuid::Uuid::new_v4()));
         let sessions_dir = base.join("2026").join("06").join("11");
         fs::create_dir_all(&sessions_dir).unwrap();
         fs::write(
@@ -1121,7 +1166,8 @@ mod tests {
         )
         .unwrap();
 
-        let matched = find_codex_session_jsonl(&base, "target-session").expect("matching file should exist");
+        let matched =
+            find_codex_session_jsonl(&base, "target-session").expect("matching file should exist");
         assert_eq!(matched, sessions_dir.join("target.jsonl"));
 
         let missing = find_codex_session_jsonl(&base, "missing-session");
@@ -1156,23 +1202,26 @@ mod tests {
             }
         });
 
-        let converted = convert_codex_item_to_claude_format(&value).expect("reasoning should be visible");
+        let converted =
+            convert_codex_item_to_claude_format(&value).expect("reasoning should be visible");
 
-        assert_eq!(converted, serde_json::json!({
-            "type": "assistant",
-            "timestamp": "2026-06-19T12:38:49.366Z",
-            "message": {
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "thinking",
-                        "thinking": "**Crafting a concise response**\n\nI can answer directly."
-                    }
-                ]
-            }
-        }));
+        assert_eq!(
+            converted,
+            serde_json::json!({
+                "type": "assistant",
+                "timestamp": "2026-06-19T12:38:49.366Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "thinking",
+                            "thinking": "**Crafting a concise response**\n\nI can answer directly."
+                        }
+                    ]
+                }
+            })
+        );
     }
-
 }
 
 fn extract_codex_reasoning_summary(value: &serde_json::Value) -> Option<String> {
@@ -1184,7 +1233,12 @@ fn extract_codex_reasoning_summary(value: &serde_json::Value) -> Option<String> 
             if entry_type != "summary_text" {
                 return None;
             }
-            entry.get("text").and_then(|text| text.as_str()).map(str::trim).filter(|text| !text.is_empty()).map(str::to_string)
+            entry
+                .get("text")
+                .and_then(|text| text.as_str())
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string)
         })
         .collect();
 
@@ -1218,7 +1272,8 @@ pub async fn start_codex_proxy(
         Some(id) => id,
         None => {
             info!(target: "agent", "No active sidecar, spawning dedicated proxy sidecar");
-            let (handle, mut rx) = spawn_sidecar(&app, tauri::ipc::Channel::new(|_| Ok(()))).await?;
+            let (handle, mut rx) =
+                spawn_sidecar(&app, tauri::ipc::Channel::new(|_| Ok(()))).await?;
 
             // Drain the event stream in the background
             let session_id_clone = PROXY_SESSION_ID.to_string();
@@ -1227,7 +1282,11 @@ pub async fn start_codex_proxy(
                 info!(target: "agent", "Proxy sidecar stream closed for {}", session_id_clone);
             });
 
-            agent_state.sidecars.lock().await.insert(PROXY_SESSION_ID.to_string(), handle);
+            agent_state
+                .sidecars
+                .lock()
+                .await
+                .insert(PROXY_SESSION_ID.to_string(), handle);
             PROXY_SESSION_ID.to_string()
         }
     };
@@ -1277,9 +1336,7 @@ pub async fn start_codex_proxy(
 }
 
 #[tauri::command]
-pub async fn stop_codex_proxy(
-    agent_state: State<'_, AgentState>,
-) -> Result<(), String> {
+pub async fn stop_codex_proxy(agent_state: State<'_, AgentState>) -> Result<(), String> {
     info!(target: "agent", "Stopping codex proxy");
 
     let session_id = {

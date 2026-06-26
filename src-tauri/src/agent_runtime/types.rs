@@ -98,9 +98,18 @@ mod tests {
 
     #[test]
     fn resolves_claude_and_codex_runtime_variants() {
-        assert_eq!(AgentRuntimeKind::from_agent_kind("claude_code"), AgentRuntimeKind::ClaudeCode);
-        assert_eq!(AgentRuntimeKind::from_agent_kind("codex"), AgentRuntimeKind::Codex);
-        assert_eq!(AgentRuntimeKind::from_agent_kind("unknown"), AgentRuntimeKind::ClaudeCode);
+        assert_eq!(
+            AgentRuntimeKind::from_agent_kind("claude_code"),
+            AgentRuntimeKind::ClaudeCode
+        );
+        assert_eq!(
+            AgentRuntimeKind::from_agent_kind("codex"),
+            AgentRuntimeKind::Codex
+        );
+        assert_eq!(
+            AgentRuntimeKind::from_agent_kind("unknown"),
+            AgentRuntimeKind::ClaudeCode
+        );
     }
 
     #[test]
