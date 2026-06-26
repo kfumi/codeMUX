@@ -37,11 +37,11 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
 
   return (
     <>
-      <span className="truncate text-[14px] font-semibold text-foreground/88" data-tauri-drag-region>
+      <span className="min-w-0 truncate text-[14px] font-semibold text-foreground/88" data-tauri-drag-region>
         {session?.title || '新对话'}
       </span>
       {project && (
-        <div className="flex shrink-0 items-center gap-1.5 rounded-md bg-[hsl(var(--surface-2))]/72 px-2 py-1 text-[12px] text-foreground/60">
+        <div className="hidden shrink-0 items-center gap-1.5 rounded-md bg-[hsl(var(--surface-2))]/72 px-2 py-1 text-[12px] text-foreground/60 min-[640px]:flex">
           <FolderOpen className="h-3 w-3 shrink-0 text-foreground/50" />
           <span>{project.name}</span>
         </div>

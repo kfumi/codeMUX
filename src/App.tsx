@@ -5,6 +5,7 @@ import { Toaster } from 'sonner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { MainLayout } from './components/layout/MainLayout';
 import { Sidebar } from './components/layout/Sidebar';
+import { TodoList } from './components/agent/TodoList';
 import { TooltipProvider } from './components/ui/tooltip';
 import { resolveAgentProviderConfig } from './lib/agentProvider';
 import { useTheme } from './hooks/useTheme';
@@ -18,12 +19,14 @@ import { useProjectStore } from './stores/projectStore';
 import { useSessionStore } from './stores/sessionStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useSkillStore } from './stores/skillStore';
+import type { TodoItem } from './types/agent';
 
 const logger = createLogger('App');
 const AgentPanel = lazy(async () => ({ default: (await import('./components/agent/AgentPanel')).AgentPanel }));
 const NewSessionPanel = lazy(async () => ({ default: (await import('./components/agent/NewSessionPanel')).NewSessionPanel }));
 const SettingsView = lazy(async () => ({ default: (await import('./components/settings/SettingsDialog')).SettingsView }));
 const SessionHeader = lazy(async () => ({ default: (await import('./components/layout/SessionHeader')).SessionHeader }));
+const EMPTY_TODOS: TodoItem[] = [];
 
 const panelFallback = (
   <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground/60">
@@ -37,6 +40,7 @@ function App() {
   const sessions = useSessionStore((state) => state.sessions);
   const setActiveSession = useSessionStore((state) => state.setActiveSession);
   const startQuery = useAgentStore((state) => state.startQuery);
+  const activeTodos = useAgentStore((state) => activeSessionId ? state.todos[activeSessionId] ?? EMPTY_TODOS : EMPTY_TODOS);
   const config = useSettingsStore((state) => state.config);
   const fetchConfig = useSettingsStore((state) => state.fetchConfig);
   const projects = useProjectStore((state) => state.projects);
@@ -146,6 +150,9 @@ function App() {
           <Suspense fallback={null}>
             <SessionHeader sessionId={activeSessionId} />
           </Suspense>
+        ) : undefined}
+        titleBarControls={activeView === 'app' && activeSessionId && activeTodos.length > 0 ? (
+          <TodoList todos={activeTodos} dropdownSide="down" align="right" className="mr-1" />
         ) : undefined}
       >
         <ErrorBoundary>

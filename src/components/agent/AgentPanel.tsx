@@ -14,21 +14,18 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
-import { ChangedFilesList } from './ChangedFilesList';
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
 import { CodeMuxModelSelector } from './assistant-ui/CodeMuxModelSelector';
 import { CodeMuxThread } from './assistant-ui/CodeMuxThread';
 import { formatModelDisplayName } from './modelDisplay';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { TodoList } from './TodoList';
 
 interface AgentPanelProps {
   sessionId: string;
 }
 
 const EMPTY_EVENTS: import('../../stores/agentStore').AgentMessage[] = [];
-const EMPTY_TODOS: import('../../types/agent').TodoItem[] = [];
 
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, createSession } = useSessionStore();
@@ -37,7 +34,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { config, getActiveProvider, setProxyRunning } = useSettingsStore();
   const { loadFileTree, setProjectPath } = usePreviewStore();
 
-  const todos = useAgentStore((state) => state.todos[sessionId] ?? EMPTY_TODOS);
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
 
@@ -310,11 +306,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           provider={resolvedProvider}
           footer={(
             <div className="flex w-full flex-col gap-3">
-              <div className="flex items-end justify-between gap-3">
-                {todos.length > 0 && <TodoList todos={todos} />}
-                <div className="flex-1" />
-                {project && <ChangedFilesList sessionId={sessionId} projectPath={project.path} />}
-              </div>
               <CodeMuxComposer
                 sessionId={sessionId}
                 agentKind={agentKind}

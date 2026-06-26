@@ -1,5 +1,5 @@
 ﻿import { create } from 'zustand';
-import { agentApi, fileApi, gitApi, type GitChangeBaseline, type GitChangedFile } from '../lib/tauri';
+import { agentApi, fileApi, type GitChangeBaseline } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 import {
   isTerminalAgentEvent,
@@ -411,24 +411,6 @@ function preserveFirstOriginalSnapshot(
     ...originals,
     [filePath]: snapshot,
   };
-}
-
-function changedFilesFromGit(changes: GitChangedFile[], acknowledged?: Set<string>): ChangedFile[] {
-  return changes
-    .map((change) => {
-      const originalContent = change.originalContent ?? '';
-      const currentContent = change.status === 'deleted' ? '' : change.currentContent;
-      const { additions, deletions } = countDiffLines(originalContent, currentContent);
-      return {
-        path: normalizeFilePath(change.path),
-        isNew: change.status === 'added',
-        originalContent,
-        currentContent,
-        additions,
-        deletions,
-      };
-    })
-    .filter((file) => !acknowledged?.has(file.path));
 }
 
 function getSessionAgentKind(sessionId: string) {
@@ -1252,30 +1234,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
         if (isTerminalEvent) {
           clearPendingStreaming(sessionId);
-          // Use git HEAD comparison for consistent changed files display (skip if no project)
-          const sessionHasProject = !!useSessionStore.getState().sessions.find((s) => s.id === sessionId)?.project_id;
-          if (!sessionHasProject) return;
-          gitApi.getChangedFilesSinceHead(cwd).then((gitChanges) => {
-            set((s) => {
-              const changedPaths = new Set(gitChanges.map((change) => normalizeFilePath(change.path)));
-              const acknowledged = s.acknowledgedFiles[sessionId];
-              const nextAcknowledged = acknowledged
-                ? new Set(Array.from(acknowledged).filter((path) => !changedPaths.has(path)))
-                : acknowledged;
-              return {
-                changedFiles: {
-                  ...s.changedFiles,
-                  [sessionId]: changedFilesFromGit(gitChanges, nextAcknowledged),
-                },
-                ...(nextAcknowledged !== acknowledged
-                  ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: nextAcknowledged } }
-                  : {}),
-              };
-            });
-          }).catch((err) => {
-            logger.error('Failed to read git changed files since HEAD', { sessionId, cwd }, serializeError(err));
-          });
-
           set((s) => {
             const { [sessionId]: _removed, ...rest } = s.queryStartTime;
             return {

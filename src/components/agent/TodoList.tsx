@@ -5,6 +5,8 @@ import type { TodoItem } from '../../types/agent';
 interface TodoListProps {
   todos: TodoItem[];
   className?: string;
+  dropdownSide?: 'up' | 'down';
+  align?: 'left' | 'right';
 }
 
 function getStatusIcon(status: TodoItem['status']) {
@@ -29,7 +31,7 @@ function getStatusIcon(status: TodoItem['status']) {
   }
 }
 
-export function TodoList({ todos, className }: TodoListProps) {
+export function TodoList({ todos, className, dropdownSide = 'up', align = 'left' }: TodoListProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   if (todos.length === 0) return null;
@@ -43,7 +45,15 @@ export function TodoList({ todos, className }: TodoListProps) {
     <div className={`relative ${className ?? ''}`}>
       {/* Expandable list */}
       {isExpanded && (
-        <div className="absolute bottom-full left-0 mb-2 w-85 max-h-75 overflow-auto rounded-xl border border-border/40 bg-[hsl(var(--card))] shadow-[0_-4px_24px_-4px_hsl(var(--foreground)/0.06)] z-50 animate-in fade-in zoom-in-95 fill-mode-forwards animation-duration-[300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+        <div
+          className={[
+            'absolute z-50 w-85 max-h-75 overflow-auto rounded-xl border border-border/40 bg-[hsl(var(--card))] animate-in fade-in zoom-in-95 fill-mode-forwards animation-duration-[300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]',
+            dropdownSide === 'up'
+              ? 'bottom-full mb-2 shadow-[0_-4px_24px_-4px_hsl(var(--foreground)/0.06)]'
+              : 'top-full mt-2 shadow-[0_12px_34px_-18px_hsl(var(--foreground)/0.34)]',
+            align === 'right' ? 'right-0' : 'left-0',
+          ].join(' ')}
+        >
           <div className="px-3 py-2.5 space-y-0.5 stagger-children">
             {todos.map((todo, i) => (
               <div key={i} className="flex items-start gap-2.5 py-1.5 text-xs leading-relaxed">
@@ -80,12 +90,16 @@ export function TodoList({ todos, className }: TodoListProps) {
         className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/30 bg-[hsl(var(--card))]/50 hover:bg-muted/30 transition-all duration-200 text-left"
       >
         {isExpanded ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+          dropdownSide === 'up'
+            ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+            : <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
         ) : (
-          <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+          dropdownSide === 'up'
+            ? <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+            : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
         )}
         <ListTodo className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.5)] shrink-0" />
-        <span className="text-xs font-medium text-foreground/70">任务进度</span>
+        <span className="text-xs font-medium text-foreground/70">任务</span>
         <span className="text-xs text-muted-foreground/50 tabular-nums ml-auto"
           style={{ fontFamily: "'JetBrains Mono', monospace" }}
         >

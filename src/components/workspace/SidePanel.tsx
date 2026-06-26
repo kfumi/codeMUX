@@ -73,7 +73,7 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
   return (
     <aside
       className={cn(
-        'relative h-full shrink-0 overflow-hidden border-l border-border/35 bg-background',
+        'relative h-full shrink-0 overflow-hidden rounded-l-xl border-l border-border/35 bg-background',
         isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
       )}
       style={{ width: isOpen ? panelWidth : 0 }}

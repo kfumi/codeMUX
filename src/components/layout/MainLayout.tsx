@@ -13,6 +13,7 @@ interface MainLayoutProps {
   sidebar?: ReactNode;
   children: ReactNode;
   headerContent?: ReactNode;
+  titleBarControls?: ReactNode;
   sidePanelAvailable?: boolean;
   sidePanelProjectPath?: string | null;
   sidePanelScopeId?: string;
@@ -22,6 +23,7 @@ export function MainLayout({
   sidebar,
   children,
   headerContent,
+  titleBarControls,
   sidePanelAvailable = true,
   sidePanelProjectPath,
   sidePanelScopeId = 'global',
@@ -87,7 +89,7 @@ export function MainLayout({
   ) : null;
 
   return (
-    <div className="app-shell flex h-screen bg-background text-foreground">
+    <div className={cn('app-shell flex h-screen text-foreground', sidebar != null && !sidebarCollapsed ? 'bg-[hsl(var(--sidebar-bg))]' : 'bg-background')}>
       {sidebar != null && !sidebarCollapsed && (
         <div className="fixed left-2 top-2 z-40">
           {sidebarToggleButton}
@@ -114,15 +116,16 @@ export function MainLayout({
         </aside>
       )}
 
-      <section className={cn('flex min-w-0 flex-1 flex-col bg-[hsl(var(--background))]', sidebar != null && !sidebarCollapsed && 'rounded-l-xl')}>
+      <section className={cn('flex min-w-0 flex-1 flex-col bg-[hsl(var(--background))]', sidebar != null && !sidebarCollapsed && 'overflow-hidden rounded-l-xl')}>
         <TitleBar
           leftContent={sidebarCollapsed ? sidebarToggleButton : undefined}
           rightContent={headerContent}
+          controlsContent={titleBarControls}
           sidePanelAvailable={sidePanelAvailable}
         />
 
-        <main className="relative z-10 flex min-h-0 flex-1 overflow-hidden">
-          <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+        <main className="relative z-10 flex min-h-0 flex-1 overflow-hidden bg-[hsl(var(--sidebar-bg))]">
+          <div className="flex min-w-0 flex-1 flex-col bg-[hsl(var(--background))]">{children}</div>
           {sidePanelAvailable && <SidePanel projectPath={sidePanelProjectPath} scopeId={sidePanelScopeId} />}
         </main>
       </section>

@@ -34,10 +34,6 @@ vi.mock('../assistant-ui/context-display', () => ({
   ContextDisplay: () => null,
 }));
 
-vi.mock('./ChangedFilesList', () => ({
-  ChangedFilesList: () => null,
-}));
-
 vi.mock('./TodoList', () => ({
   TodoList: () => null,
 }));

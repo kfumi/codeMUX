@@ -19,11 +19,7 @@ const saveEventsMock = vi.fn<(sessionId: string, eventsJson: string) => Promise<
 const getEventsMock = vi.fn<(sessionId: string) => Promise<string>>();
 const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
-const createGitChangeBaselineMock = vi.fn<(projectPath: string) => Promise<{ projectRoot: string; baselineTree: string }>>();
-const getGitChangedFilesMock = vi.fn<(
-  projectPath: string,
-  baselineTree: string,
-) => Promise<Array<{ path: string; status: string; originalContent: string | null; currentContent: string }>>>();
+const getChangedFilesSinceHeadMock = vi.fn();
 
 vi.mock('../lib/tauri', () => ({
   agentApi: {
@@ -70,8 +66,7 @@ vi.mock('../lib/tauri', () => ({
     listDirectory: vi.fn(),
   },
   gitApi: {
-    createChangeBaseline: createGitChangeBaselineMock,
-    getChangedFiles: getGitChangedFilesMock,
+    getChangedFilesSinceHead: getChangedFilesSinceHeadMock,
   },
   mcpApi: {
     getAll: vi.fn(),
@@ -182,12 +177,6 @@ describe('agent store Codex history loading', () => {
     }));
     loadClaudeSessionEventsMock.mockResolvedValue([]);
     loadCodexSessionEventsMock.mockResolvedValue([]);
-    createGitChangeBaselineMock.mockResolvedValue({
-      projectRoot: 'D:\\project\\ai-code\\codeMUX',
-      baselineTree: 'baseline-tree',
-    });
-    getGitChangedFilesMock.mockResolvedValue([]);
-
     localStorage.clear();
   });
 
@@ -242,15 +231,6 @@ describe('agent store Codex history loading', () => {
   });
 
   it('keeps the first file snapshot as the diff baseline across repeated edits', async () => {
-    getGitChangedFilesMock.mockResolvedValueOnce([
-      {
-        path: 'D:\\project\\ai-code\\codeMUX\\src\\example.ts',
-        status: 'modified',
-        originalContent: 'alpha\nbeta\ngamma\n',
-        currentContent: 'ALPHA\nbeta\nGAMMA\n',
-      },
-    ]);
-
     startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
       const filePath = 'D:\\project\\ai-code\\codeMUX\\src\\example.ts';
 
@@ -321,16 +301,7 @@ describe('agent store Codex history loading', () => {
     expect(changedFile.deletions).toBe(2);
   });
 
-  it('uses git workspace diff for Codex changes that do not emit Write or Edit tools', async () => {
-    getGitChangedFilesMock.mockResolvedValueOnce([
-      {
-        path: 'D:\\project\\ai-code\\codeMUX\\src\\codex-change.ts',
-        status: 'modified',
-        originalContent: 'export const value = 1;\n',
-        currentContent: 'export const value = 2;\nexport const extra = true;\n',
-      },
-    ]);
-
+  it('does not scan git changes after terminal events', async () => {
     const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');
 
@@ -338,18 +309,8 @@ describe('agent store Codex history loading', () => {
       .getState()
       .startQuery(session.id, 'Change a file with apply_patch', 'D:\\project\\ai-code\\codeMUX');
 
-    expect(createGitChangeBaselineMock).toHaveBeenCalledWith('D:\\project\\ai-code\\codeMUX');
-    expect(getGitChangedFilesMock).toHaveBeenCalledWith('D:\\project\\ai-code\\codeMUX', 'baseline-tree');
-    expect(useAgentStore.getState().changedFiles[session.id]).toEqual([
-      expect.objectContaining({
-        path: 'D:\\project\\ai-code\\codeMUX\\src\\codex-change.ts',
-        isNew: false,
-        originalContent: 'export const value = 1;\n',
-        currentContent: 'export const value = 2;\nexport const extra = true;\n',
-        additions: 2,
-        deletions: 1,
-      }),
-    ]);
+    expect(getChangedFilesSinceHeadMock).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
   });
 
   it('commits pending simulated assistant text before the result event', async () => {

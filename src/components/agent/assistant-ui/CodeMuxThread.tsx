@@ -110,7 +110,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
             </ThreadPrimitive.Messages>
             {stopped ? <InterruptBanner /> : null}
             <StreamingContent sessionId={sessionId} />
-            <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pb-4 md:pb-6">
+            <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pt-2 pb-4">
             <ThreadPrimitive.ScrollToBottom
               className="absolute -top-12 left-1/2 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--foreground)/0.35)] transition-all hover:-translate-y-0.5 hover:text-foreground disabled:invisible"
               aria-label="Scroll to bottom"

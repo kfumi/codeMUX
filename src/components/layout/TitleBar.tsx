@@ -50,12 +50,14 @@ function MaximizeIcon({ restored }: { restored: boolean }) {
 interface TitleBarProps {
   leftContent?: ReactNode;
   rightContent?: ReactNode;
+  controlsContent?: ReactNode;
   sidePanelAvailable?: boolean;
 }
 
 export function TitleBar({
   leftContent,
   rightContent,
+  controlsContent,
   sidePanelAvailable = true,
 }: TitleBarProps) {
   const [appWindow, setAppWindow] = useState<AppWindowLike | null>(null);
@@ -138,14 +140,19 @@ export function TitleBar({
       )}
 
       {rightContent && (
-        <div className={cn('flex min-w-0 items-center gap-2', leftContent ? 'pl-1' : 'pl-3')}>
+        <div className={cn('flex min-w-0 shrink items-center gap-2 overflow-hidden', leftContent ? 'pl-1' : 'pl-3')}>
           {rightContent}
         </div>
       )}
 
-      <div className="flex-1" data-tauri-drag-region />
+      <div className="min-w-2 flex-1" data-tauri-drag-region />
 
-      <div className="flex h-full items-center">
+      <div className="flex h-full shrink-0 items-center gap-1">
+        {controlsContent ? (
+          <div className="hidden shrink-0 items-center min-[760px]:flex">
+            {controlsContent}
+          </div>
+        ) : null}
         {sidePanelAvailable && (
           <Tooltip>
             <TooltipTrigger asChild>
