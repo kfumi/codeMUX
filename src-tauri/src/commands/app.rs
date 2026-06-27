@@ -1,4 +1,5 @@
 use std::fs;
+use std::process::Command;
 
 use serde::Serialize;
 use tauri::AppHandle;
@@ -110,4 +111,256 @@ pub fn read_log_file(app: AppHandle, file_name: String) -> Result<String, String
     let target = log_dir.join(&file_name);
     fs::read_to_string(&target)
         .map_err(|error| format!("Failed to read log file {}: {}", target.display(), error))
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EnvironmentCheckStatus {
+    Ok,
+    Warning,
+    Missing,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeVersionStatus {
+    Ok,
+    Warning,
+    Invalid,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentToolCheck {
+    pub name: String,
+    pub command: String,
+    pub status: EnvironmentCheckStatus,
+    pub version: Option<String>,
+    pub path: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DevelopmentEnvironmentCheck {
+    pub checked_at: String,
+    pub tools: Vec<EnvironmentToolCheck>,
+}
+
+#[tauri::command]
+pub fn check_development_environment() -> DevelopmentEnvironmentCheck {
+    let checked_at = chrono::Local::now().to_rfc3339();
+    DevelopmentEnvironmentCheck {
+        checked_at,
+        tools: vec![check_node(), check_git()],
+    }
+}
+
+fn check_node() -> EnvironmentToolCheck {
+    match run_version_command("node", "--version") {
+        Ok(output) => match classify_node_version(&output) {
+            NodeVersionStatus::Ok => EnvironmentToolCheck {
+                name: "Node.js".into(),
+                command: "node".into(),
+                status: EnvironmentCheckStatus::Ok,
+                version: parse_node_version(&output),
+                path: find_command_path("node"),
+                message: "Node.js 可用。".into(),
+            },
+            NodeVersionStatus::Warning => EnvironmentToolCheck {
+                name: "Node.js".into(),
+                command: "node".into(),
+                status: EnvironmentCheckStatus::Warning,
+                version: parse_node_version(&output),
+                path: find_command_path("node"),
+                message: "Node.js 版本低于 18.0.0，请升级到 Node.js 18+。".into(),
+            },
+            NodeVersionStatus::Invalid => EnvironmentToolCheck {
+                name: "Node.js".into(),
+                command: "node".into(),
+                status: EnvironmentCheckStatus::Error,
+                version: None,
+                path: find_command_path("node"),
+                message: format!("无法解析 Node.js 版本输出：{}", output.trim()),
+            },
+        },
+        Err(EnvironmentCommandError::Missing) => EnvironmentToolCheck {
+            name: "Node.js".into(),
+            command: "node".into(),
+            status: EnvironmentCheckStatus::Missing,
+            version: None,
+            path: None,
+            message: "未找到 Node.js，请安装 Node.js 18+ 并确认 PATH 已生效。".into(),
+        },
+        Err(EnvironmentCommandError::Failed(message)) => EnvironmentToolCheck {
+            name: "Node.js".into(),
+            command: "node".into(),
+            status: EnvironmentCheckStatus::Error,
+            version: None,
+            path: find_command_path("node"),
+            message,
+        },
+    }
+}
+
+fn check_git() -> EnvironmentToolCheck {
+    match run_version_command("git", "--version") {
+        Ok(output) => match parse_git_version(&output) {
+            Some(version) => EnvironmentToolCheck {
+                name: "Git".into(),
+                command: "git".into(),
+                status: EnvironmentCheckStatus::Ok,
+                version: Some(version),
+                path: find_command_path("git"),
+                message: "Git 可用。".into(),
+            },
+            None => EnvironmentToolCheck {
+                name: "Git".into(),
+                command: "git".into(),
+                status: EnvironmentCheckStatus::Error,
+                version: None,
+                path: find_command_path("git"),
+                message: format!("无法解析 Git 版本输出：{}", output.trim()),
+            },
+        },
+        Err(EnvironmentCommandError::Missing) => EnvironmentToolCheck {
+            name: "Git".into(),
+            command: "git".into(),
+            status: EnvironmentCheckStatus::Missing,
+            version: None,
+            path: None,
+            message: "未找到 Git，请安装 Git 并确认 PATH 已生效。".into(),
+        },
+        Err(EnvironmentCommandError::Failed(message)) => EnvironmentToolCheck {
+            name: "Git".into(),
+            command: "git".into(),
+            status: EnvironmentCheckStatus::Error,
+            version: None,
+            path: find_command_path("git"),
+            message,
+        },
+    }
+}
+
+enum EnvironmentCommandError {
+    Missing,
+    Failed(String),
+}
+
+fn run_version_command(command: &str, arg: &str) -> Result<String, EnvironmentCommandError> {
+    let output = Command::new(command).arg(arg).output().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            EnvironmentCommandError::Missing
+        } else {
+            EnvironmentCommandError::Failed(format!("执行 {} {} 失败：{}", command, arg, error))
+        }
+    })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let detail = if stderr.is_empty() {
+            format!("退出码 {:?}", output.status.code())
+        } else {
+            stderr
+        };
+        return Err(EnvironmentCommandError::Failed(format!(
+            "{} {} 执行失败：{}",
+            command, arg, detail
+        )));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+pub fn classify_node_version(output: &str) -> NodeVersionStatus {
+    let Some(version) = parse_node_version(output) else {
+        return NodeVersionStatus::Invalid;
+    };
+    let major = version
+        .split('.')
+        .next()
+        .and_then(|part| part.parse::<u64>().ok());
+
+    match major {
+        Some(value) if value >= 18 => NodeVersionStatus::Ok,
+        Some(_) => NodeVersionStatus::Warning,
+        None => NodeVersionStatus::Invalid,
+    }
+}
+
+fn parse_node_version(output: &str) -> Option<String> {
+    let trimmed = output.trim();
+    let version = trimmed.strip_prefix('v').unwrap_or(trimmed);
+    if version
+        .split('.')
+        .take(3)
+        .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        Some(version.to_string())
+    } else {
+        None
+    }
+}
+
+pub fn parse_git_version(output: &str) -> Option<String> {
+    output
+        .trim()
+        .strip_prefix("git version ")
+        .map(str::trim)
+        .filter(|version| !version.is_empty())
+        .map(str::to_string)
+}
+
+fn find_command_path(command: &str) -> Option<String> {
+    let mut cmd = if cfg!(target_os = "windows") {
+        let mut cmd = Command::new("where");
+        cmd.arg(if command == "node" {
+            "node.exe"
+        } else {
+            command
+        });
+        cmd
+    } else {
+        let mut cmd = Command::new("which");
+        cmd.arg(command);
+        cmd
+    };
+
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify_node_version, parse_git_version, NodeVersionStatus};
+
+    #[test]
+    fn classifies_supported_node_versions_as_ok() {
+        assert_eq!(classify_node_version("v18.0.0"), NodeVersionStatus::Ok);
+        assert_eq!(classify_node_version("v22.17.0"), NodeVersionStatus::Ok);
+    }
+
+    #[test]
+    fn classifies_old_node_versions_as_warning() {
+        assert_eq!(
+            classify_node_version("v16.20.0"),
+            NodeVersionStatus::Warning
+        );
+    }
+
+    #[test]
+    fn parses_git_version_from_command_output() {
+        assert_eq!(
+            parse_git_version("git version 2.34.1.windows.1"),
+            Some("2.34.1.windows.1".to_string())
+        );
+    }
 }

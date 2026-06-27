@@ -29,8 +29,7 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "sidecar/": "sidecar/",
-      "target/node-runtime/": "runtime/node/"
+      "sidecar/": "sidecar/"
     },
     "icon": [
       "icons/32x32.png",

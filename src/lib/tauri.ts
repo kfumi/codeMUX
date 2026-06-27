@@ -298,9 +298,27 @@ export interface LogFileInfo {
   modified: string;
 }
 
+export type EnvironmentCheckStatus = 'ok' | 'warning' | 'missing' | 'error';
+
+export interface EnvironmentToolCheck {
+  name: 'Node.js' | 'Git';
+  command: 'node' | 'git';
+  status: EnvironmentCheckStatus;
+  version: string | null;
+  path: string | null;
+  message: string;
+}
+
+export interface DevelopmentEnvironmentCheck {
+  checkedAt: string;
+  tools: EnvironmentToolCheck[];
+}
+
 export const appApi = {
   getLogDirectory: (): Promise<string> => invokeLogged('get_log_directory'),
   getAppDataDirectory: (): Promise<string> => invokeLogged('get_app_data_directory'),
+  checkDevelopmentEnvironment: (): Promise<DevelopmentEnvironmentCheck> =>
+    invokeLogged('check_development_environment'),
   getLogFiles: (): Promise<LogFileInfo[]> => invokeLogged('get_log_files'),
   readLogFile: (fileName: string): Promise<string> => invokeLogged('read_log_file', { fileName }),
 };

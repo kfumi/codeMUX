@@ -11,7 +11,6 @@ use tokio::sync::{mpsc, Mutex as AsyncMutex};
 
 const SIDECAR_RELATIVE_DIR: &str = "sidecar";
 const SIDECAR_ENTRYPOINT: &str = "dist/index.js";
-const NODE_RUNTIME_RELATIVE_DIR: &str = "runtime/node";
 const SIDECAR_STDERR_CAPTURE_LIMIT: usize = 200;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -66,10 +65,6 @@ fn sidecar_relative_path() -> PathBuf {
     PathBuf::from(SIDECAR_RELATIVE_DIR).join(SIDECAR_ENTRYPOINT)
 }
 
-fn bundled_node_relative_path() -> PathBuf {
-    PathBuf::from(NODE_RUNTIME_RELATIVE_DIR).join(node_binary_name())
-}
-
 fn node_binary_name() -> &'static str {
     if cfg!(target_os = "windows") {
         "node.exe"
@@ -103,26 +98,10 @@ fn resolve_sidecar_script_path(
 }
 
 fn resolve_node_runtime_path(
-    resource_dir: Option<&Path>,
-    environment: BuildEnvironment,
+    _resource_dir: Option<&Path>,
+    _environment: BuildEnvironment,
 ) -> Result<PathBuf, String> {
-    let bundled_rel = bundled_node_relative_path();
-
-    if let Some(resource_dir) = resource_dir {
-        let bundled_path = resource_dir.join(&bundled_rel);
-        if bundled_path.exists() {
-            return Ok(bundled_path);
-        }
-    }
-
-    if environment == BuildEnvironment::Development {
-        return Ok(PathBuf::from(node_binary_name()));
-    }
-
-    Err(format!(
-        "Bundled Node.js runtime was not found at {}. Rebuild the installer so the runtime is copied into bundle resources.",
-        bundled_rel.display()
-    ))
+    Ok(PathBuf::from(node_binary_name()))
 }
 
 /// Spawn the sidecar process and return a handle + event receiver.
@@ -152,7 +131,7 @@ pub async fn spawn_sidecar(
             .creation_flags(0x08000000); // CREATE_NO_WINDOW
         cmd.spawn().map_err(|e| {
             format!(
-                "Failed to spawn sidecar with node={} script={}: {}",
+                "Failed to spawn sidecar with node={} script={}: {}. Please install Node.js 18+ and make sure it is available in PATH.",
                 node_path.display(),
                 script_path.display(),
                 e
@@ -167,7 +146,7 @@ pub async fn spawn_sidecar(
             .spawn()
             .map_err(|e| {
                 format!(
-                    "Failed to spawn sidecar with node={} script={}: {}",
+                    "Failed to spawn sidecar with node={} script={}: {}. Please install Node.js 18+ and make sure it is available in PATH.",
                     node_path.display(),
                     script_path.display(),
                     e
@@ -335,10 +314,10 @@ mod tests {
     }
 
     #[test]
-    fn release_build_requires_bundled_node_runtime() {
-        let err = resolve_node_runtime_path(None, BuildEnvironment::Release)
-            .expect_err("release builds should require a bundled Node.js runtime");
+    fn release_build_uses_system_node_command() {
+        let path = resolve_node_runtime_path(None, BuildEnvironment::Release)
+            .expect("release builds should use the system Node.js command");
 
-        assert!(err.contains("Bundled Node.js runtime was not found"));
+        assert_eq!(path, std::path::PathBuf::from(super::node_binary_name()));
     }
 }

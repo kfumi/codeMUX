@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Archive, ArrowLeft, Bot, FileText, Info, Palette, Plug, Puzzle, Server, Settings } from 'lucide-react';
+import { Archive, ArrowLeft, Bot, FileText, Info, Palette, Plug, Puzzle, Server, Settings, Terminal } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
 import { AboutSettings } from './AboutSettings';
 import { AgentSettingsPanel } from './AgentSettings';
 import { ArchivedSessionsPanel } from './ArchivedSessionsPanel';
+import { EnvironmentSettings } from './EnvironmentSettings';
 import { GeneralSettings } from './GeneralSettings';
 import { LogSettings } from './LogSettings';
 import { McpSettingsPanel } from './McpSettings';
@@ -16,7 +17,7 @@ interface SettingsViewProps {
   onBack: () => void;
 }
 
-type SettingsTab = 'general' | 'appearance' | 'provider' | 'agents' | 'mcp' | 'skills' | 'archive' | 'logs' | 'about';
+type SettingsTab = 'general' | 'appearance' | 'provider' | 'agents' | 'mcp' | 'skills' | 'archive' | 'environment' | 'logs' | 'about';
 
 const primaryTabs = [
   { id: 'general' as const, label: '常规', icon: Settings },
@@ -29,6 +30,7 @@ const primaryTabs = [
 ];
 
 const secondaryTabs = [
+  { id: 'environment' as const, label: '环境检测', icon: Terminal },
   { id: 'logs' as const, label: '日志', icon: FileText },
   { id: 'about' as const, label: '关于', icon: Info },
 ];
@@ -96,6 +98,7 @@ export function SettingsView({ onBack }: SettingsViewProps) {
               {activeTab === 'mcp' && <McpSettingsPanel />}
               {activeTab === 'skills' && <SkillsSettingsPanel />}
               {activeTab === 'archive' && <ArchivedSessionsPanel />}
+              {activeTab === 'environment' && <EnvironmentSettings />}
               {activeTab === 'logs' && <LogSettings />}
               {activeTab === 'about' && <AboutSettings />}
             </div>

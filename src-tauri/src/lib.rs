@@ -137,6 +137,7 @@ pub fn run() {
             commands::provider::test_provider,
             commands::app::get_log_directory,
             commands::app::get_app_data_directory,
+            commands::app::check_development_environment,
             commands::app::get_log_files,
             commands::app::read_log_file,
             commands::session::create_session,

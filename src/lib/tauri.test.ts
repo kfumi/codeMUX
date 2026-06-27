@@ -31,6 +31,15 @@ describe('appApi', () => {
       fileName: 'codemux.log',
     });
   });
+
+  it('checks the development environment without arguments', async () => {
+    invokeMock.mockResolvedValue({ checkedAt: '2026-06-27T00:00:00Z', tools: [] });
+    const { appApi } = await import('./tauri');
+
+    await appApi.checkDevelopmentEnvironment();
+
+    expect(invokeMock).toHaveBeenCalledWith('check_development_environment', undefined);
+  });
 });
 
 describe('gitApi', () => {
