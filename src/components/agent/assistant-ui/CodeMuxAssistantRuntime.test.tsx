@@ -248,10 +248,9 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
   it('renders failed tool calls as errors instead of leaving them running', () => {
     const { container } = render(<Harness sessionId="session-tool" />);
 
-    expect(screen.getByText(/工具/i)).toBeTruthy();
+    expect(screen.getByText('Bash')).toBeTruthy();
     expect(screen.queryByText(/Error: Command failed with exit code 1/)).toBeNull();
 
-    // Single tool call is now wrapped in a collapsed ToolGroup — expand it to check the icon
     const trigger = container.querySelector('[data-slot="tool-group-trigger"]');
     if (trigger) fireEvent.click(trigger);
 
@@ -287,7 +286,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     expect(toolGroup).toBeTruthy();
     expect(toolGroup?.getAttribute('data-variant')).toBe('ghost');
-    expect(screen.getByText('2 次工具调用')).toBeTruthy();
+    expect(container.querySelector('[data-slot="tool-group-trigger"]')).toBeTruthy();
   });
 
   it('does not resolve Claude-only slash commands in Codex sessions', () => {
@@ -309,6 +308,54 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(container.querySelector('[data-directive-value="@src/App.tsx"] svg')).toBeNull();
   });
 
+  it('keeps short streaming thinking complete but renders only the latest window for very long thinking', () => {
+    const shortThinking = 'short thinking stays fully visible';
+    const longThinkingHead = 'long-thinking-head';
+    const longThinkingTail = 'long-thinking-tail';
+    const longThinking = `${longThinkingHead}${'x'.repeat(21_000)}${longThinkingTail}`;
+
+    useAgentStore.setState((state) => ({
+      isRunning: { ...state.isRunning, 'session-stream-short': true, 'session-stream-long': true },
+      queryStartTime: { ...state.queryStartTime, 'session-stream-short': Date.now(), 'session-stream-long': Date.now() },
+      streamingThinking: {
+        ...state.streamingThinking,
+        'session-stream-short': shortThinking,
+        'session-stream-long': longThinking,
+      },
+    }));
+
+    const view = render(<Harness sessionId="session-stream-short" />);
+    fireEvent.click(view.container.querySelector('[data-slot="reasoning-trigger"]')!);
+
+    expect(screen.getByText(shortThinking)).toBeTruthy();
+
+    view.unmount();
+    const longView = render(<Harness sessionId="session-stream-long" />);
+    fireEvent.click(longView.container.querySelector('[data-slot="reasoning-trigger"]')!);
+
+    expect(longView.container.textContent).not.toContain(longThinkingHead);
+    expect(screen.getByText(new RegExp(`${longThinkingTail}$`))).toBeTruthy();
+  });
+
+  it('renders live streaming text without markdown parsing while the model is still running', () => {
+    const streamingText = '**streaming bold**\n\n```ts\nconst value = 1;\n```';
+
+    useAgentStore.setState((state) => ({
+      isRunning: { ...state.isRunning, 'session-stream-text': true },
+      queryStartTime: { ...state.queryStartTime, 'session-stream-text': Date.now() },
+      streamingText: {
+        ...state.streamingText,
+        'session-stream-text': streamingText,
+      },
+    }));
+
+    const { container } = render(<Harness sessionId="session-stream-text" />);
+
+    expect(screen.getByText((content) => content.includes('**streaming bold**'))).toBeTruthy();
+    expect(container.querySelector('[data-streaming-text="plain"]')).toBeTruthy();
+    expect(container.querySelector('.aui-md')).toBeNull();
+  });
+
   it('collapses very long user messages behind a show-more control', () => {
     const { container } = render(<Harness sessionId="session-long-user" />);
 
@@ -317,7 +364,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     const bubbleColumn = userMessageRoot?.querySelector('[data-user-message-column="true"]');
     const bubble = userMessageRoot?.querySelector('[data-user-message-bubble="true"]');
 
-    expect(bubbleColumn?.className).toContain('max-w-full');
+    expect(bubbleColumn?.className).toContain('max-w-10/12');
     expect(bubbleColumn?.className).not.toContain('max-w-[78%]');
     expect(bubble?.className).toContain('max-h-80');
     expect(bubble?.className).toContain('overflow-hidden');

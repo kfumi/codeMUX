@@ -19,8 +19,12 @@ import {
 } from './runtimeEvents.js';
 import { shouldUseCodexChatCompatProxy } from './sessionRuntimeHelpers.js';
 import { proxyManager } from './proxyManager.js';
+import { emit } from './streamEventBatcher.js';
+
+export { emit } from './streamEventBatcher.js';
 
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
+const DEBUG_STREAM_LOGS = process.env.CODEMUX_STREAM_DEBUG === '1';
 
 type CodexSessionBootstrap = {
   sessionId?: string;
@@ -33,10 +37,6 @@ type CodexSessionBootstrap = {
   reasoningEffort?: string;
   codexNeedsProxy?: boolean;
 };
-
-export function emit(obj: unknown): void {
-  process.stdout.write(JSON.stringify(obj) + '\n');
-}
 
 /** Current active session ID — shared with the proxy for event routing. */
 export let activeSessionId = '';
@@ -254,15 +254,17 @@ export class CodexSessionRuntime {
         for await (const event of events) {
           if (this.abortController?.signal.aborted || forceBreak) break;
 
-          const eventDetail =
-            event.type === 'error'
-              ? ` message=${event.message}`
-              : event.type === 'turn.failed'
-                ? ` message=${event.error.message}`
-                : 'item' in event
-                  ? ` item=${event.item.type}`
-                  : '';
-          process.stderr.write(`[codex] SDK event: ${event.type}${eventDetail}\n`);
+          if (DEBUG_STREAM_LOGS) {
+            const eventDetail =
+              event.type === 'error'
+                ? ` message=${event.message}`
+                : event.type === 'turn.failed'
+                  ? ` message=${event.error.message}`
+                  : 'item' in event
+                    ? ` item=${event.item.type}`
+                    : '';
+            process.stderr.write(`[codex] SDK event: ${event.type}${eventDetail}\n`);
+          }
 
           if (event.type === 'turn.completed') {
             usage = event.usage;

@@ -35,6 +35,8 @@ export type ChatStreamToolCall = {
   arguments: string;
 };
 
+const DEBUG_STREAM_LOGS = process.env.CODEMUX_STREAM_DEBUG === '1';
+
 function parseMcpFunctionName(name: string): { server: string; tool: string } | null {
   if (!name.startsWith('mcp__')) {
     return null;
@@ -90,7 +92,7 @@ export async function* parseChatCompletionSseStream(
     const text = typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
     buffer += text;
 
-    if (chunkCount <= 2) {
+    if (DEBUG_STREAM_LOGS && chunkCount <= 2) {
       process.stderr.write(`[sse-parser] raw chunk#${chunkCount} len=${text.length} preview=${JSON.stringify(text.slice(0, 200))}\n`);
     }
 
@@ -105,13 +107,15 @@ export async function* parseChatCompletionSseStream(
       sseLineCount++;
       const payload = line.slice(5).trim();
       if (payload === '[DONE]') {
-        process.stderr.write(`[sse-parser] stream done: ${chunkCount} raw chunks, ${sseLineCount} SSE data lines\n`);
+        if (DEBUG_STREAM_LOGS) {
+          process.stderr.write(`[sse-parser] stream done: ${chunkCount} raw chunks, ${sseLineCount} SSE data lines\n`);
+        }
         return;
       }
 
       try {
         const parsed = JSON.parse(payload) as ChatCompletionChunk;
-        if (sseLineCount <= 3) {
+        if (DEBUG_STREAM_LOGS && sseLineCount <= 3) {
           process.stderr.write(`[sse-parser] data#${sseLineCount} choices=${parsed.choices?.length ?? 0} delta_keys=${Object.keys(parsed.choices?.[0]?.delta ?? {}).join(',')}\n`);
         }
         yield parsed;
@@ -120,7 +124,9 @@ export async function* parseChatCompletionSseStream(
       }
     }
   }
-  process.stderr.write(`[sse-parser] stream ended: ${chunkCount} raw chunks, ${sseLineCount} SSE data lines\n`);
+  if (DEBUG_STREAM_LOGS) {
+    process.stderr.write(`[sse-parser] stream ended: ${chunkCount} raw chunks, ${sseLineCount} SSE data lines\n`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -357,7 +363,9 @@ export async function* convertChatStreamToResponsesEvents(
   function* closeText(): EventGenerator {
     if (!startedText || outputTextClosed) return;
     outputTextClosed = true;
-    process.stderr.write(`[stream-transform] closeText: accumulatedText length=${accumulatedText.length} preview=${JSON.stringify(accumulatedText.slice(0, 100))}\n`);
+    if (DEBUG_STREAM_LOGS) {
+      process.stderr.write(`[stream-transform] closeText: accumulatedText length=${accumulatedText.length} preview=${JSON.stringify(accumulatedText.slice(0, 100))}\n`);
+    }
     yield {
       type: 'response.output_text.done',
       item_id: messageId,
@@ -626,7 +634,9 @@ export async function* convertChatStreamToResponsesEvents(
   }
 
   const finalStatus = toolCalls.size > 0 ? 'requires_action' : 'completed';
-  process.stderr.write(`[stream-transform] response.completed: startedReasoning=${startedReasoning} startedText=${startedText} accumulatedText.length=${accumulatedText.length} toolCalls=${toolCalls.size} output_items=${output.length}\n`);
+  if (DEBUG_STREAM_LOGS) {
+    process.stderr.write(`[stream-transform] response.completed: startedReasoning=${startedReasoning} startedText=${startedText} accumulatedText.length=${accumulatedText.length} toolCalls=${toolCalls.size} output_items=${output.length}\n`);
+  }
   const usage = lastUsage ? {
     input_tokens: lastUsage.prompt_tokens ?? 0,
     input_tokens_details: { cached_tokens: 0 },

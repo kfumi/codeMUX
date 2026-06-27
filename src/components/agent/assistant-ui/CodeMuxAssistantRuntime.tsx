@@ -35,6 +35,7 @@ export function CodeMuxAssistantRuntimeProvider({
 }: CodeMuxAssistantRuntimeProviderProps) {
   return (
     <SessionScopedAssistantRuntime
+      key={sessionId}
       sessionId={sessionId}
       agentKind={agentKind}
       onSend={onSend}

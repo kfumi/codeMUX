@@ -40,3 +40,15 @@ Pull requests should include a summary, linked issues when applicable, change ty
 ## Security & Configuration Tips
 
 Do not commit local credentials, API keys, generated logs, or machine-specific configuration. Keep provider, MCP, and agent settings changes documented when they affect runtime behavior.
+
+## assistant-ui
+
+This project uses assistant-ui for chat interfaces.
+
+Documentation: https://www.assistant-ui.com/llms-full.txt
+
+Key patterns:
+- Use AssistantRuntimeProvider at the app root
+- Thread component for full chat interface
+- AssistantModal for floating chat widget
+- useChatRuntime hook with AI SDK transport

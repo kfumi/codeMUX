@@ -18,6 +18,7 @@ import { CodexSessionRuntime, interruptActiveTurn } from './codexRuntime.js';
 import { getRuntimeFlavor } from './runtimeEvents.js';
 import { proxyManager } from './proxyManager.js';
 import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
+import { emit } from './streamEventBatcher.js';
 
 // Suppress unhandled abort rejections from child process termination during interrupt.
 // These are expected when the user cancels a running Codex turn.
@@ -87,10 +88,6 @@ function loadClaudeSettingsEnv(): void {
   } catch (err) {
     process.stderr.write(`[sidecar] Warning: failed to load Claude settings: ${err}\n`);
   }
-}
-
-function emit(obj: unknown): void {
-  process.stdout.write(JSON.stringify(obj) + '\n');
 }
 
 async function* createPromptStream(prompt: string): AsyncGenerator<SDKUserMessage, void, void> {

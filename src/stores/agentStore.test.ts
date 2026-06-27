@@ -533,6 +533,218 @@ describe('agent store Codex history loading', () => {
     ]);
   });
 
+  it('throttles streaming thinking flushes instead of updating on every animation frame', async () => {
+    vi.useFakeTimers();
+    const requestAnimationFrameMock = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => window.setTimeout(() => callback(Date.now()), 16));
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((handle: number) => clearTimeout(handle));
+
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: { type: 'content_block_start', content_block: { type: 'thinking' } },
+      }));
+
+      for (let index = 0; index < 5; index += 1) {
+        onEvent(JSON.stringify({
+          type: 'stream_event',
+          session_id: sessionId,
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'thinking_delta', thinking: `chunk-${index};` },
+          },
+        }));
+      }
+    });
+
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('codex');
+
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'stream thinking', 'D:\\project\\ai-code\\codeMUX');
+
+      expect(useAgentStore.getState().streamingThinking[session.id] ?? '').toBe('');
+
+      await vi.advanceTimersByTimeAsync(50);
+      expect(useAgentStore.getState().streamingThinking[session.id] ?? '').toBe('');
+
+      await vi.advanceTimersByTimeAsync(70);
+      expect(useAgentStore.getState().streamingThinking[session.id]).toBe(
+        'chunk-0;chunk-1;chunk-2;chunk-3;chunk-4;',
+      );
+    } finally {
+      requestAnimationFrameMock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('throttles simulated streaming text instead of updating visible state for every chunk', async () => {
+    vi.useFakeTimers();
+
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'assistant',
+        uuid: 'assistant-simulated-stream',
+        session_id: sessionId,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'simulated-stream-text'.repeat(80) }],
+        },
+        parent_tool_use_id: null,
+      }));
+    });
+
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('codex');
+
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'simulate stream', 'D:\\project\\ai-code\\codeMUX');
+
+      await vi.advanceTimersByTimeAsync(80);
+      expect(useAgentStore.getState().streamingText[session.id] ?? '').toBe('');
+
+      await vi.advanceTimersByTimeAsync(80);
+      expect(useAgentStore.getState().streamingText[session.id] ?? '').toContain('simulated-stream-text');
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(useAgentStore.getState().streamingText[session.id] ?? '').toBe('');
+      expect(useAgentStore.getState().events[session.id]).toContainEqual(
+        expect.objectContaining({ kind: 'assistant' }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('buffers streaming tool input deltas without notifying the store for every partial json chunk', async () => {
+    vi.useFakeTimers();
+
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'tool_use', id: 'tool-1', name: 'Bash' },
+        },
+      }));
+
+      for (let index = 0; index < 10; index += 1) {
+        onEvent(JSON.stringify({
+          type: 'stream_event',
+          session_id: sessionId,
+          event: {
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'input_json_delta', partial_json: index === 0 ? '{"command":"' : `part-${index}` },
+          },
+        }));
+      }
+    });
+
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('codex');
+      let toolInputNotifications = 0;
+      const unsubscribe = useAgentStore.subscribe((state, previousState) => {
+        if (state.streamingToolInputs !== previousState.streamingToolInputs) {
+          toolInputNotifications += 1;
+        }
+      });
+
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'stream tool args', 'D:\\project\\ai-code\\codeMUX');
+
+      unsubscribe();
+      expect(toolInputNotifications).toBe(1);
+      expect(useAgentStore.getState().streamingToolInputs[session.id]?.['tool-1']).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drops sidecar debug events instead of appending them to the conversation event list', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      for (let index = 0; index < 20; index += 1) {
+        onEvent(JSON.stringify({
+          type: 'sidecar_debug',
+          message: `[debug] noisy stream log ${index}`,
+        }));
+      }
+
+      onEvent(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        uuid: 'result-debug',
+        session_id: sessionId,
+        duration_ms: 1,
+        duration_api_ms: 1,
+        num_turns: 1,
+        result: '',
+        total_cost_usd: 0,
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+        },
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'debug noise', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useAgentStore.getState().events[session.id]).toEqual([
+      { kind: 'user', data: { content: 'debug noise' } },
+      expect.objectContaining({ kind: 'result' }),
+    ]);
+  });
+
+  it('processes batched stream events without appending the batch to the conversation event list', async () => {
+    vi.useFakeTimers();
+
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'stream_event_batch',
+        session_id: sessionId,
+        events: [
+          { type: 'content_block_start', content_block: { type: 'text' } },
+          { type: 'content_block_delta', delta: { type: 'text_delta', text: 'hello ' } },
+          { type: 'content_block_delta', delta: { type: 'text_delta', text: 'world' } },
+        ],
+      }));
+    });
+
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('codex');
+
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'batched stream', 'D:\\project\\ai-code\\codeMUX');
+
+      await vi.advanceTimersByTimeAsync(120);
+
+      expect(useAgentStore.getState().streamingText[session.id]).toBe('hello world');
+      expect(useAgentStore.getState().events[session.id]).toEqual([
+        { kind: 'user', data: { content: 'batched stream' } },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ['codex', loadCodexSessionEventsMock],
     ['claude_code', loadClaudeSessionEventsMock],

@@ -12,6 +12,7 @@ use tokio::sync::{mpsc, Mutex as AsyncMutex};
 const SIDECAR_RELATIVE_DIR: &str = "sidecar";
 const SIDECAR_ENTRYPOINT: &str = "dist/index.js";
 const NODE_RUNTIME_RELATIVE_DIR: &str = "runtime/node";
+const SIDECAR_STDERR_CAPTURE_LIMIT: usize = 200;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BuildEnvironment {
@@ -198,8 +199,6 @@ pub async fn spawn_sidecar(
     let (event_tx, event_rx) = mpsc::channel::<String>(256);
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
 
-    // Clone for stderr task (needs to send debug events to same channel)
-    let stderr_event_tx = event_tx.clone();
     let stderr_lines = Arc::new(AsyncMutex::new(Vec::<String>::new()));
     let stderr_lines_for_task = stderr_lines.clone();
 
@@ -210,18 +209,21 @@ pub async fn spawn_sidecar(
             {
                 let mut captured = stderr_lines_for_task.lock().await;
                 captured.push(line.clone());
+                if captured.len() > SIDECAR_STDERR_CAPTURE_LIMIT {
+                    let overflow = captured.len() - SIDECAR_STDERR_CAPTURE_LIMIT;
+                    captured.drain(0..overflow);
+                }
             }
 
             if line.contains("Stream closed") || line.contains("Error in hook callback") {
                 debug!(target: "sidecar_stderr", "(suppressed abort cleanup) {}", line);
                 continue;
             }
-            warn!(target: "sidecar_stderr", "{}", line);
-            let debug_msg = serde_json::json!({
-                "type": "sidecar_debug",
-                "message": line
-            });
-            let _ = stderr_event_tx.send(debug_msg.to_string()).await;
+            if line.to_ascii_lowercase().contains("error") {
+                warn!(target: "sidecar_stderr", "{}", line);
+            } else {
+                debug!(target: "sidecar_stderr", "{}", line);
+            }
         }
     });
 

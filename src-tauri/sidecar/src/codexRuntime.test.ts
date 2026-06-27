@@ -3,6 +3,7 @@ import type { ThreadEvent } from '@openai/codex-sdk';
 
 import { CodexSessionRuntime } from './codexRuntime.js';
 import { buildCodexToolUseContent } from './runtimeEvents.js';
+import { flushStreamEvents } from './streamEventBatcher.js';
 
 describe('CodexSessionRuntime', () => {
   it('includes reasoning effort in Codex thread options', () => {
@@ -71,11 +72,15 @@ describe('CodexSessionRuntime', () => {
         },
         () => {},
       );
+      flushStreamEvents();
 
       const streamEvents = writes
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
         .map((line) => JSON.parse(line))
+        .flatMap((event) => event.type === 'stream_event_batch'
+          ? event.events.map((streamEvent: unknown) => ({ type: 'stream_event', session_id: event.session_id, event: streamEvent }))
+          : [event])
         .filter((event) => event.type === 'stream_event');
 
       expect(streamEvents).toEqual([

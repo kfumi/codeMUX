@@ -139,7 +139,7 @@ async function handleRequest(
   }
 
   const requestBody = await readJsonBody(req) as Parameters<typeof convertResponsesToChatRequest>[0];
-  emitToolResultEventsFromRequest(requestBody, emittedToolResultIds);
+  await emitToolResultEventsFromRequest(requestBody, emittedToolResultIds);
   proxyLog(`responses request ${summarizeResponsesRequest(requestBody)}`);
   if (Array.isArray(requestBody.tools) && requestBody.tools.length > 0) {
     proxyLog(`responses tool names ${requestBody.tools.map((tool) => summarizeToolName(tool)).join(', ')}`);
@@ -314,10 +314,10 @@ async function handleRequest(
   writeJson(res, 200, compatResponse);
 }
 
-function emitToolResultEventsFromRequest(
+async function emitToolResultEventsFromRequest(
   requestBody: Parameters<typeof convertResponsesToChatRequest>[0],
   emittedToolResultIds: Set<string>,
-): void {
+): Promise<void> {
   const inputItems = Array.isArray(requestBody.input) ? requestBody.input : [requestBody.input];
   const functionCallOutputs = inputItems.filter(isFunctionCallOutputItem);
 
@@ -325,7 +325,8 @@ function emitToolResultEventsFromRequest(
     return;
   }
 
-  void import('./codexRuntime.js').then(({ emit: emitEvent, activeSessionId }) => {
+  try {
+    const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
     for (const item of functionCallOutputs) {
       const emittedKey = `${activeSessionId}\0${item.call_id}`;
       if (emittedToolResultIds.has(emittedKey)) {
@@ -338,9 +339,9 @@ function emitToolResultEventsFromRequest(
         content: stringifyFunctionCallOutput(item.output),
       }));
     }
-  }).catch((error) => {
+  } catch (error) {
     proxyLog(`failed to emit tool_result event: ${error instanceof Error ? error.message : String(error)}`);
-  });
+  }
 }
 
 function isFunctionCallOutputItem(

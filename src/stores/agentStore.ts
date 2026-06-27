@@ -40,6 +40,7 @@ export type AgentMessage =
   | { kind: 'proxy_status'; data: { running: boolean; port: number | null; upstreamBaseUrl: string | null } }
   | { kind: 'todo_list'; data: { todos: TodoItem[] } }
   | { kind: 'streaming'; data: { event: Record<string, unknown>; session_id?: string } }
+  | { kind: 'streaming_batch'; data: { events: Record<string, unknown>[]; session_id?: string } }
   | { kind: 'file_snapshot'; data: { file_path: string; original_content: string; is_new: boolean; tool_use_id: string } }
   | { kind: 'done' }
   | { kind: 'raw'; data: Record<string, unknown> };
@@ -93,28 +94,32 @@ type StreamingBuffer = {
   text: string;
 };
 
-const STREAMING_FRAME_FALLBACK_MS = 16;
+const STREAMING_FLUSH_THROTTLE_MS = 100;
 const logger = createLogger('agentStore');
 const pendingStreamingBuffers = new Map<string, StreamingBuffer>();
-const pendingStreamingFlushHandles = new Map<string, number>();
+const pendingStreamingFlushHandles = new Map<string, ReturnType<typeof setTimeout>>();
 /** Per-session thinking start timestamps (set on content_block_start, cleared on content_block_stop) */
 const pendingThinkingStartTimes = new Map<string, number>();
+const streamingTelemetry = new Map<string, { deltas: number; flushes: number; uiUpdates: number }>();
 
-function scheduleStreamingFlush(callback: FrameRequestCallback) {
-  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-    return window.requestAnimationFrame(callback);
-  }
-
-  return window.setTimeout(() => callback(Date.now()), STREAMING_FRAME_FALLBACK_MS);
+function scheduleStreamingFlush(callback: () => void) {
+  return setTimeout(callback, STREAMING_FLUSH_THROTTLE_MS);
 }
 
-function cancelScheduledStreamingFlush(handle: number) {
-  if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
-    window.cancelAnimationFrame(handle);
-    return;
-  }
-
+function cancelScheduledStreamingFlush(handle: ReturnType<typeof setTimeout>) {
   clearTimeout(handle);
+}
+
+function recordStreamingTelemetry(sessionId: string, key: keyof { deltas: number; flushes: number; uiUpdates: number }) {
+  const stats = streamingTelemetry.get(sessionId) ?? { deltas: 0, flushes: 0, uiUpdates: 0 };
+  stats[key] += 1;
+  streamingTelemetry.set(sessionId, stats);
+}
+
+function logStreamingTelemetry(sessionId: string, reason: string) {
+  const stats = streamingTelemetry.get(sessionId);
+  if (!stats || stats.deltas === 0) return;
+  logger.debug('Streaming flush telemetry', { sessionId, reason, ...stats });
 }
 
 function applyStreamingBuffer(
@@ -126,6 +131,7 @@ function applyStreamingBuffer(
     return;
   }
 
+  recordStreamingTelemetry(sessionId, 'uiUpdates');
   set((state) => {
     const updates: Partial<AgentState> = {};
 
@@ -163,6 +169,7 @@ function flushPendingStreaming(
   }
 
   pendingStreamingBuffers.delete(sessionId);
+  recordStreamingTelemetry(sessionId, 'flushes');
   applyStreamingBuffer(sessionId, buffer, set);
 }
 
@@ -174,6 +181,25 @@ function clearPendingStreaming(sessionId: string) {
   }
 
   pendingStreamingBuffers.delete(sessionId);
+  logStreamingTelemetry(sessionId, 'clear');
+  streamingTelemetry.delete(sessionId);
+}
+
+function clearStreamingTextField(
+  sessionId: string,
+  field: 'streamingThinking' | 'streamingText',
+  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
+  get: () => AgentState,
+) {
+  if (!get()[field][sessionId]) {
+    return;
+  }
+
+  set((state) => {
+    return {
+      [field]: { ...state[field], [sessionId]: '' },
+    } as Partial<AgentState>;
+  });
 }
 
 function queueStreamingDelta(
@@ -186,6 +212,7 @@ function queueStreamingDelta(
     return;
   }
 
+  recordStreamingTelemetry(sessionId, 'deltas');
   const buffer = pendingStreamingBuffers.get(sessionId) ?? { thinking: '', text: '' };
   buffer[key] += chunk;
   pendingStreamingBuffers.set(sessionId, buffer);
@@ -202,6 +229,7 @@ function queueStreamingDelta(
     }
 
     pendingStreamingBuffers.delete(sessionId);
+    recordStreamingTelemetry(sessionId, 'flushes');
     applyStreamingBuffer(sessionId, pending, set);
   });
 
@@ -215,8 +243,8 @@ function queueStreamingDelta(
 // appearing all at once.
 // ---------------------------------------------------------------------------
 
-const SIM_CHUNK_MIN = 8;
-const SIM_CHUNK_MAX = 32;
+const SIM_CHARS_PER_TICK = 320;
+const SIM_TICK_MS = 50;
 
 type SimulatedStreamEntry = {
   event: AgentMessage;
@@ -225,6 +253,27 @@ type SimulatedStreamEntry = {
 };
 
 const pendingSimulatedStreams = new Map<string, SimulatedStreamEntry>();
+const pendingStreamingToolInputBuffers = new Map<string, Map<string, string>>();
+
+function appendPendingStreamingToolInput(sessionId: string, toolId: string, chunk: string) {
+  if (!chunk) {
+    return;
+  }
+
+  const sessionBuffers = pendingStreamingToolInputBuffers.get(sessionId) ?? new Map<string, string>();
+  sessionBuffers.set(toolId, (sessionBuffers.get(toolId) ?? '') + chunk);
+  pendingStreamingToolInputBuffers.set(sessionId, sessionBuffers);
+}
+
+function readPendingStreamingToolInput(sessionId: string, toolId: string, state: AgentState): string {
+  const committedInput = state.streamingToolInputs[sessionId]?.[toolId] ?? '';
+  const pendingInput = pendingStreamingToolInputBuffers.get(sessionId)?.get(toolId) ?? '';
+  return `${committedInput}${pendingInput}`;
+}
+
+function clearPendingStreamingToolInputs(sessionId: string) {
+  pendingStreamingToolInputBuffers.delete(sessionId);
+}
 
 function clearSimulatedStream(sessionId: string) {
   const entry = pendingSimulatedStreams.get(sessionId);
@@ -243,6 +292,7 @@ function commitPendingSimulatedStream(
   }
 
   clearSimulatedStream(sessionId);
+  clearPendingStreaming(sessionId);
   set((s) => {
     const prev = s.events[sessionId] || [];
     const timestamps = s.eventTimestamps[sessionId] || [];
@@ -291,24 +341,13 @@ function simulateStreamingText(
       return;
     }
 
-    // Take a random-sized chunk for a natural feel.
-    const size = Math.min(
-      SIM_CHUNK_MIN + Math.floor(Math.random() * (SIM_CHUNK_MAX - SIM_CHUNK_MIN + 1)),
-      current.remaining.length,
-    );
+    const size = Math.min(SIM_CHARS_PER_TICK, current.remaining.length);
     const chunk = current.remaining.slice(0, size);
     current.remaining = current.remaining.slice(size);
 
-    set((s) => ({
-      streamingText: {
-        ...s.streamingText,
-        [sessionId]: (s.streamingText[sessionId] || '') + chunk,
-      },
-    }));
+    queueStreamingDelta(sessionId, 'text', chunk, set);
 
-    // Schedule next chunk — faster for small remaining text.
-    const delay = current.remaining.length > 0 ? 16 + Math.random() * 24 : 0;
-    current.timer = window.setTimeout(tick, delay);
+    current.timer = window.setTimeout(tick, SIM_TICK_MS);
   };
 
   // Start on the next frame so the UI renders the empty streaming state first.
@@ -367,6 +406,8 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'file_snapshot', data };
       case 'stream_event':
         return { kind: 'streaming', data: { event: data.event, session_id: data.session_id } };
+      case 'stream_event_batch':
+        return { kind: 'streaming_batch', data: { events: Array.isArray(data.events) ? data.events : [], session_id: data.session_id } };
       case 'sidecar_debug':
         return { kind: 'raw', data };
       case 'sidecar_stream_status':
@@ -791,6 +832,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string) => {
     clearPendingStreaming(sessionId);
+    clearPendingStreamingToolInputs(sessionId);
     pendingThinkingStartTimes.delete(sessionId);
     // Clear streaming thinking durations for new query
     set((s) => ({
@@ -845,6 +887,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         let event = parseAgentEvent(raw);
         const now = Date.now();
 
+        if (event.kind === 'raw' && event.data?.type === 'sidecar_debug') {
+          return;
+        }
+
         if (event.kind === 'error' && /Codex session not initialized\. Call ensure_session first\./i.test(event.data.error)) {
           const existingEvents = get().events[sessionId] || [];
           const alreadyFailedProxyStartup = existingEvents.some((existingEvent) =>
@@ -892,9 +938,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
 
         // Handle streaming events (thinking/text deltas + tool_use) separately
-        if (event.kind === 'streaming') {
+        if (event.kind === 'streaming' || event.kind === 'streaming_batch') {
           if (!get().isRunning[sessionId] || get().forceStopped[sessionId]) return;
-          const streamEvent = event.data.event as Record<string, unknown>;
+          const streamEvents = event.kind === 'streaming_batch' ? event.data.events : [event.data.event];
+          for (const rawStreamEvent of streamEvents) {
+          const streamEvent = rawStreamEvent as Record<string, unknown>;
           const eventType = streamEvent.type as string;
           const findToolId = (idx: number | undefined): string | undefined => {
             if (idx !== undefined) {
@@ -912,10 +960,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             if (contentBlock?.type === 'thinking') {
               flushPendingStreaming(sessionId, set);
               pendingThinkingStartTimes.set(sessionId, Date.now());
-              set((s) => ({ streamingThinking: { ...s.streamingThinking, [sessionId]: '' } }));
+              clearStreamingTextField(sessionId, 'streamingThinking', set, get);
             } else if (contentBlock?.type === 'text') {
               flushPendingStreaming(sessionId, set);
-              set((s) => ({ streamingText: { ...s.streamingText, [sessionId]: '' } }));
+              clearStreamingTextField(sessionId, 'streamingText', set, get);
             } else if (contentBlock?.type === 'tool_use') {
               const toolId = contentBlock.id as string;
               const toolName = contentBlock.name as string;
@@ -939,15 +987,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
               const toolId = findToolId(streamEvent.index as number | undefined);
               if (toolId) {
-                set((s) => ({
-                  streamingToolInputs: {
-                    ...s.streamingToolInputs,
-                    [sessionId]: {
-                      ...(s.streamingToolInputs[sessionId] || {}),
-                      [toolId]: ((s.streamingToolInputs[sessionId] || {})[toolId] || '') + delta.partial_json,
-                    },
-                  },
-                }));
+                appendPendingStreamingToolInput(sessionId, toolId, delta.partial_json);
               }
             } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
               queueStreamingDelta(sessionId, 'thinking', delta.thinking, set);
@@ -955,6 +995,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               queueStreamingDelta(sessionId, 'text', delta.text, set);
             }
           } else if (eventType === 'content_block_stop') {
+            logStreamingTelemetry(sessionId, 'content_block_stop');
+            streamingTelemetry.delete(sessionId);
             const blockIndex = streamEvent.index as number | undefined;
             const toolId = findToolId(blockIndex);
             const toolMeta = toolId ? get().streamingToolMeta[sessionId]?.[toolId] : undefined;
@@ -964,6 +1006,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 evt.kind === 'assistant' && (evt.data?.message?.content || []).some((b: any) => b?.type === 'tool_use' && b.id === toolId)
               );
               if (alreadyExists) {
+                clearPendingStreamingToolInputs(sessionId);
                 set((s) => ({
                   streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
                   streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
@@ -971,7 +1014,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 }));
                 return;
               }
-              const rawJson = get().streamingToolInputs[sessionId]?.[toolId] || '{}';
+              const rawJson = readPendingStreamingToolInput(sessionId, toolId, get()) || '{}';
               let parsedInput: Record<string, unknown> = {};
               try { parsedInput = JSON.parse(rawJson); } catch {}
 
@@ -1020,6 +1063,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 parent_tool_use_id: null,
               };
               const syntheticEvent: AgentMessage = { kind: 'assistant', data: syntheticAssistant };
+              clearPendingStreamingToolInputs(sessionId);
               set((s) => {
                 const prev = s.events[sessionId] || [];
                 const newEvents = [...prev, syntheticEvent];
@@ -1056,6 +1100,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               flushPendingStreaming(sessionId, set);
             }
           }
+          }
           return;
         }
 
@@ -1071,6 +1116,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 queryStartTime: rest,
                 streamingText: { ...s.streamingText, [sessionId]: '' },
                 streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+                streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
+                streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
+                streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
                 streamedToolUseIds: { ...s.streamedToolUseIds, [sessionId]: new Set() },
                 ...(resultData.is_error
                   ? { error: { ...s.error, [sessionId]: resultData.result || 'Request interrupted' } }
@@ -1234,6 +1282,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
         if (isTerminalEvent) {
           clearPendingStreaming(sessionId);
+          clearPendingStreamingToolInputs(sessionId);
           set((s) => {
             const { [sessionId]: _removed, ...rest } = s.queryStartTime;
             return {
@@ -1270,6 +1319,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   interrupt: async (sessionId: string) => {
     clearPendingStreaming(sessionId);
+    clearPendingStreamingToolInputs(sessionId);
     clearSimulatedStream(sessionId);
     pendingThinkingStartTimes.delete(sessionId);
     const state = get();

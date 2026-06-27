@@ -103,3 +103,15 @@ Agent backends are registered in `src/types/agentRegistry.ts`. Each agent kind (
 Conventional Commits format: `feat: ...`, `fix(agent): ...`, `docs(readme): ...`, `chore(deps): ...`
 
 Common scopes: `agent`, `mcp`, `skills`, `ui`, `store`, `db`, `sidecar`, `config`
+
+## assistant-ui
+
+This project uses assistant-ui for chat interfaces.
+
+Documentation: https://www.assistant-ui.com/llms-full.txt
+
+Key patterns:
+- Use AssistantRuntimeProvider at the app root
+- Thread component for full chat interface
+- AssistantModal for floating chat widget
+- useChatRuntime hook with AI SDK transport

@@ -28,8 +28,6 @@ import {
   CodeMuxToolCallMessagePart,
 } from './CodeMuxMessageParts';
 import { CodeMuxDirectiveText } from './CodeMuxDirectiveText';
-import { Streamdown } from 'streamdown';
-import { code } from '@streamdown/code';
 import { buildAssistantResultTargetMap } from './assistantResultTargets';
 import { RunningElapsedTimer } from './running-elapsed';
 
@@ -43,6 +41,8 @@ const EMPTY_EVENTS: AgentMessage[] = [];
 const EMPTY_TIMESTAMPS: number[] = [];
 const INTERRUPT_LABEL = '用户中断请求';
 const COLLAPSED_USER_MESSAGE_CLASS = 'max-h-80 overflow-hidden';
+const STREAMING_THINKING_PROTECTION_THRESHOLD = 20_000;
+const STREAMING_THINKING_VISIBLE_CHARS = 8_000;
 const GROUP_BY_PART = groupPartByType({
   reasoning: ['group-thinking'],
   'tool-call': ['group-tool-call'],
@@ -51,6 +51,7 @@ const GROUP_BY_PART = groupPartByType({
 export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProps) {
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
+  const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
   const streamingThinkingDurations = useAgentStore((state) => state.streamingThinkingDurations[sessionId]);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -89,7 +90,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <ThreadPrimitive.Viewport
           ref={viewportRef}
-          className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scroll-smooth scrollbar-gutter-stable"
+          className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scrollbar-gutter-stable"
           autoScroll
         >
           <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col pl-4 pr-14 pt-5">
@@ -123,7 +124,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
           </ThreadPrimitive.ViewportFooter>
         </div>
       </ThreadPrimitive.Viewport>
-      <MessageNav items={userNavItems} scrollContainer={viewportRef} />
+      <MessageNav items={userNavItems} scrollContainer={viewportRef} disabled={isRunning} />
       </div>
     </ThreadPrimitive.Root>
   );
@@ -199,9 +200,11 @@ function isLongUserMessage(text: string): boolean {
 function MessageNav({
   items,
   scrollContainer,
+  disabled,
 }: {
   items: Array<{ eventIndex: number; preview: string }>;
   scrollContainer: RefObject<HTMLDivElement | null>;
+  disabled?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   const [hoveredBar, setHoveredBar] = useState<number | null>(null);
@@ -210,12 +213,15 @@ function MessageNav({
 
   useEffect(() => {
     const container = scrollContainer.current;
-    if (!container || items.length === 0) {
+    if (!container || items.length === 0 || disabled) {
       setActiveIdx(null);
       return;
     }
 
+    let animationFrame: number | null = null;
+
     const updateActive = () => {
+      animationFrame = null;
       const anchorTop = container.getBoundingClientRect().top + 40;
       let lastPassed: number | null = null;
       let nextUpcoming: { eventIndex: number; top: number } | null = null;
@@ -238,13 +244,27 @@ function MessageNav({
         }
       }
 
-      setActiveIdx(lastPassed ?? nextUpcoming?.eventIndex ?? items[0]?.eventIndex ?? null);
+      const nextActiveIdx = lastPassed ?? nextUpcoming?.eventIndex ?? items[0]?.eventIndex ?? null;
+      setActiveIdx((current) => (current === nextActiveIdx ? current : nextActiveIdx));
+    };
+
+    const scheduleUpdateActive = () => {
+      if (animationFrame !== null) {
+        return;
+      }
+
+      animationFrame = window.requestAnimationFrame(updateActive);
     };
 
     updateActive();
-    container.addEventListener('scroll', updateActive, { passive: true });
-    return () => container.removeEventListener('scroll', updateActive);
-  }, [items, scrollContainer]);
+    container.addEventListener('scroll', scheduleUpdateActive, { passive: true });
+    return () => {
+      if (animationFrame !== null) {
+        window.cancelAnimationFrame(animationFrame);
+      }
+      container.removeEventListener('scroll', scheduleUpdateActive);
+    };
+  }, [disabled, items, scrollContainer]);
 
   useEffect(() => {
     const container = scrollContainer.current;
@@ -511,6 +531,8 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
     return null;
   }
 
+  const visibleThinking = getVisibleStreamingThinking(thinking);
+
   return (
     <div className="mb-5 flex w-full justify-start">
       <div className="w-full min-w-0 space-y-2 text-sm leading-relaxed">
@@ -519,23 +541,18 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
             <ReasoningTrigger active tokenCount={Math.ceil(thinking.length / 4)} />
             <ReasoningContent aria-busy>
               <ReasoningText>
-                <div className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{thinking}</div>
+                <div className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{visibleThinking}</div>
               </ReasoningText>
             </ReasoningContent>
           </ReasoningRoot>
         )}
 
         {text ? (
-          <div className="aui-md relative text-sm leading-6 text-foreground">
-            <Streamdown
-              mode="streaming"
-              plugins={{ code }}
-              shikiTheme={["github-light", "github-dark"]}
-              parseIncompleteMarkdown
-              controls={{ code: { copy: true, download: false }, table: false }}
-            >
-              {text}
-            </Streamdown>
+          <div
+            data-streaming-text="plain"
+            className="relative whitespace-pre-wrap wrap-break-word text-sm leading-6 text-foreground"
+          >
+            {text}
             <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse rounded-full bg-foreground/60 align-text-bottom" />
           </div>
         ) : null}
@@ -546,7 +563,6 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
               'flex items-center gap-2.5 py-1 text-sm text-muted-foreground/60 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
               !thinking && !text && 'text-muted-foreground',
             )}
-            style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
             <RunningElapsedTimer startTime={queryStartTime} />
@@ -555,6 +571,14 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
       </div>
     </div>
   );
+}
+
+function getVisibleStreamingThinking(thinking: string): string {
+  if (thinking.length <= STREAMING_THINKING_PROTECTION_THRESHOLD) {
+    return thinking;
+  }
+
+  return thinking.slice(-STREAMING_THINKING_VISIBLE_CHARS);
 }
 
 function getMessageText(message: MessageState) {
