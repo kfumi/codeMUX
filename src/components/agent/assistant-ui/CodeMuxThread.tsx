@@ -28,6 +28,8 @@ import {
   CodeMuxToolCallMessagePart,
 } from './CodeMuxMessageParts';
 import { CodeMuxDirectiveText } from './CodeMuxDirectiveText';
+import { Streamdown } from 'streamdown';
+import { code } from '@streamdown/code';
 import { buildAssistantResultTargetMap } from './assistantResultTargets';
 import { RunningElapsedTimer } from './running-elapsed';
 
@@ -548,12 +550,15 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
         )}
 
         {text ? (
-          <div
-            data-streaming-text="plain"
-            className="relative whitespace-pre-wrap wrap-break-word text-sm leading-6 text-foreground"
-          >
-            {text}
-            <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse rounded-full bg-foreground/60 align-text-bottom" />
+          <div data-streaming-text="markdown" className="relative aui-md">
+            <Streamdown
+              plugins={{ code }}
+              shikiTheme={['github-light', 'github-dark']}
+              className="text-sm leading-6 text-foreground"
+              caret="block"
+            >
+              {text}
+            </Streamdown>
           </div>
         ) : null}
 

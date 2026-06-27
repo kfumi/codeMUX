@@ -4,6 +4,7 @@ import { ChevronRight, Folder, FolderOpen, MessageSquarePlus, MoreHorizontal, Pe
 
 import { Session } from '../../types/session';
 import { Project } from '../../types/project';
+import { useProjectStore } from '../../stores/projectStore';
 import { SessionItem } from './SessionItem';
 import { Button } from '../ui/button';
 import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
@@ -44,7 +45,9 @@ export function ProjectGroup({
   onOpenMenu,
   onCloseMenu,
 }: ProjectGroupProps) {
-  const [expanded, setExpanded] = useState(true);
+  const collapsedProjects = useProjectStore((state) => state.collapsedProjects);
+  const toggleProjectExpanded = useProjectStore((state) => state.toggleProjectExpanded);
+  const expanded = !collapsedProjects.has(project.id);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(project.name);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -65,7 +68,7 @@ export function ProjectGroup({
           'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
           isActiveProject && 'bg-[hsl(var(--sidebar-muted))] text-[hsl(var(--sidebar-fg))] dark:border-[hsl(var(--sidebar-border))]/70 dark:bg-[hsl(var(--foreground)/0.09)]',
         )}
-        onClick={() => !renaming && setExpanded(!expanded)}
+        onClick={() => !renaming && toggleProjectExpanded(project.id)}
       >
         <ChevronRight
           className={cn(

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { File, Folder, Terminal } from 'lucide-react';
 
 import { cn } from '../../../lib/utils';
 
@@ -25,17 +26,20 @@ export function CodeMuxDirectiveChip({
   tone?: DirectiveTone;
 }) {
   const isCommand = kind === 'command';
+  const isDirectory = kind === 'directory';
+
+  const Icon = isCommand ? Terminal : isDirectory ? Folder : File;
 
   return (
     <span
       data-directive-type={kind}
       data-directive-value={value}
       className={cn(
-        'inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs font-medium align-baseline',
+        'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs font-medium align-baseline',
         tone === 'inverted'
           ? isCommand
-            ? 'codemux-directive-command border-[hsl(var(--accent)/0.42)] bg-[hsl(var(--accent)/0.22)] text-primary-foreground'
-            : 'codemux-directive-file border-[hsl(var(--primary-foreground)/0.24)] bg-[hsl(var(--primary-foreground)/0.14)] text-primary-foreground'
+            ? 'codemux-directive-command border-[hsl(var(--accent)/0.42)] bg-[hsl(var(--accent)/0.22)] text-[hsl(var(--accent))]'
+            : 'codemux-directive-file border-[hsl(var(--primary)/0.24)] bg-[hsl(var(--primary)/0.14)] text-[hsl(var(--primary))]'
           : isCommand
             ? 'codemux-directive-command border-[hsl(var(--accent)/0.26)] bg-[hsl(var(--accent)/0.14)] text-[hsl(var(--accent))]'
             : 'codemux-directive-file border-[hsl(var(--primary)/0.2)] bg-[hsl(var(--primary)/0.12)] text-[hsl(var(--primary))]',
@@ -43,6 +47,7 @@ export function CodeMuxDirectiveChip({
       )}
       contentEditable={false}
     >
+      <Icon className="h-3 w-3 shrink-0" />
       <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{label}</span>
     </span>
   );

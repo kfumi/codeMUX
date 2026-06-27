@@ -4,16 +4,41 @@ import { projectApi, agentApi } from '../lib/tauri';
 import { useSessionStore } from './sessionStore';
 import { useAgentStore } from './agentStore';
 
+const COLLAPSED_PROJECTS_KEY = 'codemux-collapsed-projects';
+
+function loadCollapsedProjects(): Set<string> {
+  try {
+    const stored = localStorage.getItem(COLLAPSED_PROJECTS_KEY);
+    if (stored) {
+      return new Set(JSON.parse(stored));
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return new Set();
+}
+
+function saveCollapsedProjects(collapsed: Set<string>): void {
+  try {
+    localStorage.setItem(COLLAPSED_PROJECTS_KEY, JSON.stringify([...collapsed]));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 interface ProjectState {
   projects: Project[];
   activeProjectId: string | null;
   isLoading: boolean;
   error: string | null;
+  collapsedProjects: Set<string>;
   fetchProjects: () => Promise<void>;
   createProject: (name: string, path: string) => Promise<Project>;
   deleteProject: (projectId: string) => Promise<void>;
   renameProject: (projectId: string, name: string) => Promise<void>;
   setActiveProject: (projectId: string | null) => void;
+  toggleProjectExpanded: (projectId: string) => void;
+  setProjectExpanded: (projectId: string, expanded: boolean) => void;
 }
 
 export const useProjectStore = create<ProjectState>((set) => ({
@@ -21,6 +46,31 @@ export const useProjectStore = create<ProjectState>((set) => ({
   activeProjectId: null,
   isLoading: false,
   error: null,
+  collapsedProjects: loadCollapsedProjects(),
+  toggleProjectExpanded: (projectId: string) => {
+    set((state) => {
+      const newCollapsed = new Set(state.collapsedProjects);
+      if (newCollapsed.has(projectId)) {
+        newCollapsed.delete(projectId);
+      } else {
+        newCollapsed.add(projectId);
+      }
+      saveCollapsedProjects(newCollapsed);
+      return { collapsedProjects: newCollapsed };
+    });
+  },
+  setProjectExpanded: (projectId: string, expanded: boolean) => {
+    set((state) => {
+      const newCollapsed = new Set(state.collapsedProjects);
+      if (expanded) {
+        newCollapsed.delete(projectId);
+      } else {
+        newCollapsed.add(projectId);
+      }
+      saveCollapsedProjects(newCollapsed);
+      return { collapsedProjects: newCollapsed };
+    });
+  },
   fetchProjects: async () => {
     set({ isLoading: true, error: null });
     try {
@@ -34,11 +84,18 @@ export const useProjectStore = create<ProjectState>((set) => ({
     set({ isLoading: true, error: null });
     try {
       const project = await projectApi.create(name, path);
-      set((state) => ({
-        projects: [project, ...state.projects],
-        activeProjectId: project.id,
-        isLoading: false,
-      }));
+      // Remove from collapsed list if somehow present (new projects should be expanded)
+      set((state) => {
+        const newCollapsed = new Set(state.collapsedProjects);
+        newCollapsed.delete(project.id);
+        saveCollapsedProjects(newCollapsed);
+        return {
+          projects: [project, ...state.projects],
+          activeProjectId: project.id,
+          collapsedProjects: newCollapsed,
+          isLoading: false,
+        };
+      });
       return project;
     } catch (error) {
       set({ error: String(error), isLoading: false });

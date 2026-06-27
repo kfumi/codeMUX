@@ -99,15 +99,16 @@ describe('CodeMuxComposer', () => {
     expect(className).toContain('[&_.aui-lexical-input]:ring-0');
   });
 
-  it('renders file mention chips without a leading icon', () => {
+  it('renders file mention chips with a file icon', () => {
     const { container } = render(<CodeMuxComposer sessionId="session-1" />);
 
     const chipLabel = screen.getByText('App.tsx');
     const chip = chipLabel.closest('[data-directive-type="file"]');
 
     expect(chip).toBeTruthy();
-    expect(container.querySelector('.lucide-file-code-2')).toBeNull();
-    expect(chip?.querySelector('svg')).toBeNull();
+    // Now file chips have a leading file icon
+    const icon = chip?.querySelector('svg.lucide-file');
+    expect(icon).toBeTruthy();
   });
 
   it('renders slash command chips with the command directive treatment', () => {

@@ -31,16 +31,15 @@ function formatRelativeTime(dateStr: string): string {
   const diffMin = Math.floor(diffMs / 60_000);
   const diffHour = Math.floor(diffMs / 3_600_000);
   const diffDay = Math.floor(diffMs / 86_400_000);
+  const diffMonth = Math.floor(diffDay / 30);
+  const diffYear = Math.floor(diffDay / 365);
 
   if (diffMin < 1) return '刚刚';
-  if (diffMin < 60) return `${diffMin}分钟前`;
-  if (diffHour < 24) return `${diffHour}小时前`;
-  if (diffDay < 30) return `${diffDay}天前`;
-
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-  if (date.getFullYear() === now.getFullYear()) return `${month}-${day}`;
-  return `${date.getFullYear()}-${month}-${day}`;
+  if (diffMin < 60) return `${diffMin}分`;
+  if (diffHour < 24) return `${diffHour}时`;
+  if (diffMonth < 12) return `${diffDay}天`;
+  if (diffYear < 1) return `${diffMonth}月`;
+  return `${diffYear}年`;
 }
 
 function SessionStatusIcon({
@@ -75,7 +74,7 @@ function SessionStatusIcon({
   if (isUnread) {
     return (
       <span className="flex shrink-0 items-center justify-center h-4 w-4">
-        <span className="h-2 w-2 rounded-full bg-[hsl(var(--accent))]" />
+        <span className="h-2 w-2 rounded-full bg-[hsl(var(--success))]" />
       </span>
     );
   }
@@ -204,7 +203,7 @@ export function SessionItem({
 
       {isMenuOpen && createPortal(
         <div
-          className="surface-panel fixed z-[180] min-w-[140px] rounded-xl border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_48px_-28px_hsl(var(--foreground)/0.38),0_0_0_1px_hsl(var(--background)/0.68)] backdrop-blur-md animate-in fade-in blur-in-4 fill-mode-both [animation-duration:180ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.98,hsl(var(--surface-1))/0.95)] dark:shadow-[0_24px_64px_-34px_hsl(var(--surface-shadow-strong)/0.98),0_0_0_1px_hsl(var(--foreground)/0.04)]"
+          className="surface-panel fixed z-180 min-w-35 rounded-xl border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_48px_-28px_hsl(var(--foreground)/0.38),0_0_0_1px_hsl(var(--background)/0.68)] backdrop-blur-md animate-in fade-in blur-in-4 fill-mode-both [animation-duration:180ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.98,hsl(var(--surface-1))/0.95)] dark:shadow-[0_24px_64px_-34px_hsl(var(--surface-shadow-strong)/0.98),0_0_0_1px_hsl(var(--foreground)/0.04)]"
           style={{ left: menuPos.x, top: menuPos.y }}
         >
           <button
