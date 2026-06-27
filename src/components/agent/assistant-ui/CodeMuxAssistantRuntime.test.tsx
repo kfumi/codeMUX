@@ -305,7 +305,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('/review').closest('[data-directive-type="command"]')).toBeTruthy();
     expect(screen.getByText('App.tsx').closest('[data-directive-type="file"]')).toBeTruthy();
     expect(screen.getByText('please check this')).toBeTruthy();
-    expect(container.querySelector('[data-directive-value="@src/App.tsx"] svg')).toBeNull();
+    // Now file chips have a leading icon
+    expect(container.querySelector('[data-directive-value="@src/App.tsx"] svg')).toBeTruthy();
   });
 
   it('keeps short streaming thinking complete but renders only the latest window for very long thinking', () => {
@@ -337,7 +338,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText(new RegExp(`${longThinkingTail}$`))).toBeTruthy();
   });
 
-  it('renders live streaming text without markdown parsing while the model is still running', () => {
+  it('renders live streaming text with markdown parsing using Streamdown', () => {
     const streamingText = '**streaming bold**\n\n```ts\nconst value = 1;\n```';
 
     useAgentStore.setState((state) => ({
@@ -351,9 +352,9 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     const { container } = render(<Harness sessionId="session-stream-text" />);
 
-    expect(screen.getByText((content) => content.includes('**streaming bold**'))).toBeTruthy();
-    expect(container.querySelector('[data-streaming-text="plain"]')).toBeTruthy();
-    expect(container.querySelector('.aui-md')).toBeNull();
+    // Now uses Streamdown for real-time markdown rendering
+    expect(container.querySelector('[data-streaming-text="markdown"]')).toBeTruthy();
+    expect(container.querySelector('.aui-md')).toBeTruthy();
   });
 
   it('collapses very long user messages behind a show-more control', () => {
@@ -377,7 +378,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(bubble?.className).not.toContain('max-h-80');
   });
 
-  it('keeps the first completion time when duplicate live tool results arrive', () => {
+  it('returns tool durations from event-reported data only', () => {
     const events: AgentMessage[] = [
       {
         kind: 'assistant',
@@ -406,22 +407,52 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         },
       },
       {
+        kind: 'raw',
+        data: {
+          type: 'tool_progress',
+          tool_use_id: 'call-repeat',
+          elapsed_time_seconds: 0.25,
+        },
+      },
+    ];
+
+    // Now uses event-reported durations only
+    expect(buildToolDurationMap(events)).toEqual({
+      'call-repeat': 250,
+    });
+  });
+
+  it('returns empty durations when no tool_progress or task_notification events', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-no-progress',
+          session_id: 'session-tool-no-progress',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'call-1', name: 'Read', input: {} }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
         kind: 'tool_result',
         data: {
           type: 'user',
-          uuid: 'tool-result-duplicate',
-          session_id: 'session-tool-repeat',
+          uuid: 'tool-result-1',
+          session_id: 'session-tool-no-progress',
           message: {
             role: 'user',
-            content: [{ type: 'tool_result', tool_use_id: 'call-repeat', content: 'duplicate' }],
+            content: [{ type: 'tool_result', tool_use_id: 'call-1', content: 'result' }],
           },
           parent_tool_use_id: null,
         },
       },
     ];
 
-    expect(buildToolDurationMap(events, [1_000, 1_250, 5_000])).toEqual({
-      'call-repeat': 250,
-    });
+    // No event-reported durations, so returns empty
+    expect(buildToolDurationMap(events)).toEqual({});
   });
 });

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { getCodeChangeFilePath, isCodeChangeTool, ToolCodeDiff } from './ToolCodeDiff';
 import { getDisplayableArgs, getToolHeaderSummary } from './toolHeaderSummary';
+import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
 
 interface ToolCallCardProps {
   toolName: string;
@@ -57,9 +58,22 @@ export function ToolCallCard({
         {status && <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[status]}`} />}
         <span className="text-[13px] font-medium text-foreground">{displayName}</span>
         {headerText && (
-          <span className="min-w-0 truncate font-mono text-xs text-muted-foreground/72">
-            {headerText}
-          </span>
+          headerSummary.fullPath ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="min-w-0 truncate font-mono text-xs text-muted-foreground/72">
+                  {headerText}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p className="break-all">{headerSummary.fullPath}</p>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <span className="min-w-0 truncate font-mono text-xs text-muted-foreground/72">
+              {headerText}
+            </span>
+          )
         )}
         <span className="flex-1 truncate text-left text-xs text-muted-foreground" />
         {durationMs != null && (

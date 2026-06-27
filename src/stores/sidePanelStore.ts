@@ -69,7 +69,7 @@ function createTab(scopeId: string, kind: SidePanelTabKind, projectPath: string)
   return {
     id: tabId(scopeId, kind, projectPath),
     kind,
-    title: kind === 'review' ? '审核' : '终端',
+    title: kind === 'review' ? '审查' : '终端',
     projectPath,
   };
 }

@@ -19,7 +19,7 @@ describe('side panel store', () => {
     expect(state.activeTabId).toBe(state.tabs[1].id);
     expect(state.tabs[0]).toMatchObject({
       kind: 'review',
-      title: '审核',
+      title: '审查',
       projectPath: 'D:/project/app',
     });
   });

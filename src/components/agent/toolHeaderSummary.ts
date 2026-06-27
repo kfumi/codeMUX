@@ -1,6 +1,8 @@
 export interface ToolHeaderSummary {
   displayName?: string;
   text?: string;
+  /** Original full path for path-based tools (Read/Write/Edit/etc.), shown in tooltip */
+  fullPath?: string;
   consumedKeys: string[];
 }
 
@@ -91,11 +93,21 @@ function fromFirstKey(input: Record<string, unknown>, keys: string[]): ToolHeade
   const key = firstPresentKey(input, keys);
   if (!key) return { consumedKeys: [] };
 
-  const value = key.toLowerCase().includes('path') ? normalizePath(asDisplayText(input[key])) : asDisplayText(input[key]);
+  const rawValue = asDisplayText(input[key]);
+  // For file paths, show only the filename (last segment), keep full path for tooltip
+  const isPath = key.toLowerCase().includes('path');
+  const value = isPath ? getFileName(normalizePath(rawValue)) : rawValue;
   return {
     text: value,
+    fullPath: isPath ? normalizePath(rawValue) : undefined,
     consumedKeys: [key],
   };
+}
+
+function getFileName(path: string): string {
+  // Extract filename from path (handles both / and \ separators)
+  const parts = path.split(/[/\\]/);
+  return parts[parts.length - 1] || path;
 }
 
 function taskUpdateSummary(input: Record<string, unknown>): ToolHeaderSummary {

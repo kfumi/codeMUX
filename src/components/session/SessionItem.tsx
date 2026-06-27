@@ -150,7 +150,7 @@ export function SessionItem({
     <>
       <div
         className={cn(
-          'group relative flex items-center gap-2.5 rounded-md border border-transparent px-2.5 py-2 text-[13px] transition-colors duration-150',
+          'group relative flex items-center gap-2.5 rounded-md border border-transparent px-2.5 py-1 text-[13px] transition-colors duration-150',
           'cursor-pointer text-[hsl(var(--sidebar-fg))]/80',
           'hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
           'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
@@ -180,7 +180,7 @@ export function SessionItem({
               {session.title || '未命名对话'}
             </span>
             <span className="relative shrink-0 h-5">
-              <span className={cn('inline-flex items-center text-[10px] tabular-nums transition-opacity duration-150', 'text-[hsl(var(--sidebar-fg))]/30', 'group-hover:opacity-0')}>
+              <span className={cn('inline-flex items-center text-[12px] tabular-nums transition-opacity duration-150', 'text-[hsl(var(--sidebar-fg))]/40', 'group-hover:opacity-0')}>
                 {timeLabel}
               </span>
               <button

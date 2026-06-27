@@ -28,8 +28,6 @@ import {
   CodeMuxToolCallMessagePart,
 } from './CodeMuxMessageParts';
 import { CodeMuxDirectiveText } from './CodeMuxDirectiveText';
-import { Streamdown } from 'streamdown';
-import { code } from '@streamdown/code';
 import { buildAssistantResultTargetMap } from './assistantResultTargets';
 import { RunningElapsedTimer } from './running-elapsed';
 
@@ -40,7 +38,6 @@ type CodeMuxThreadProps = {
 };
 
 const EMPTY_EVENTS: AgentMessage[] = [];
-const EMPTY_TIMESTAMPS: number[] = [];
 const INTERRUPT_LABEL = '用户中断请求';
 const COLLAPSED_USER_MESSAGE_CLASS = 'max-h-80 overflow-hidden';
 const STREAMING_THINKING_PROTECTION_THRESHOLD = 20_000;
@@ -52,40 +49,79 @@ const GROUP_BY_PART = groupPartByType({
 
 export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProps) {
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
-  const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
-  const streamingThinkingDurations = useAgentStore((state) => state.streamingThinkingDurations[sessionId]);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const toolDurations = useMemo(() => buildToolDurationMap(events, eventTimestamps), [events, eventTimestamps]);
-  const thinkingDurations = useMemo(
-    () => buildThinkingDurationMap(events, streamingThinkingDurations),
-    [events, streamingThinkingDurations],
-  );
-  const resultStatsByAssistantIndex = useMemo(
-    () => buildAssistantResultStatsMap(events, provider ?? null),
-    [events, provider],
-  );
-  const userNavItems = useMemo(
-    () =>
-      events.reduce<Array<{ eventIndex: number; preview: string }>>((items, event, eventIndex) => {
-        if (event.kind !== 'user') {
-          return items;
-        }
 
+  // Incremental tool duration calculation - only use event-reported durations
+  const toolDurationCacheRef = useRef<{ events: AgentMessage[]; result: Record<string, number> }>({ events: [], result: {} });
+  const toolDurations = useMemo(() => {
+    const cache = toolDurationCacheRef.current;
+    if (cache.events === events) {
+      return cache.result;
+    }
+    const prevLen = cache.events.length;
+    if (prevLen > 0 && prevLen < events.length && cache.events[0] === events[0]) {
+      const newResult = incrementToolDurationMap(cache.result, events, prevLen);
+      toolDurationCacheRef.current = { events, result: newResult };
+      return newResult;
+    }
+    const newResult = buildToolDurationMap(events);
+    toolDurationCacheRef.current = { events, result: newResult };
+    return newResult;
+  }, [events]);
+
+  // Incremental result stats calculation
+  const resultStatsCacheRef = useRef<{ events: AgentMessage[]; provider: Provider | null; result: Record<number, MessageFooterStats> }>({ events: [], provider: null, result: {} });
+  const resultStatsByAssistantIndex = useMemo(() => {
+    const cache = resultStatsCacheRef.current;
+    if (cache.events === events && cache.provider === (provider ?? null)) {
+      return cache.result;
+    }
+    const prevLen = cache.events.length;
+    if (prevLen > 0 && prevLen < events.length && cache.events[0] === events[0]) {
+      const newResult = incrementAssistantResultStatsMap(cache.result, events, provider ?? null, prevLen);
+      resultStatsCacheRef.current = { events, provider: provider ?? null, result: newResult };
+      return newResult;
+    }
+    const newResult = buildAssistantResultStatsMap(events, provider ?? null);
+    resultStatsCacheRef.current = { events, provider: provider ?? null, result: newResult };
+    return newResult;
+  }, [events, provider]);
+
+  // Incremental user nav items calculation
+  const userNavCacheRef = useRef<{ events: AgentMessage[]; result: Array<{ eventIndex: number; preview: string }> }>({ events: [], result: [] });
+  const userNavItems = useMemo(() => {
+    const cache = userNavCacheRef.current;
+    if (cache.events === events) {
+      return cache.result;
+    }
+    const prevLen = cache.events.length;
+    if (prevLen > 0 && prevLen < events.length && cache.events[0] === events[0]) {
+      const newItems = [...cache.result];
+      for (let eventIndex = prevLen; eventIndex < events.length; eventIndex++) {
+        const event = events[eventIndex];
+        if (event.kind !== 'user') continue;
         const text = event.data.content.trim();
-        if (text.length === 0 || isInterruptMarker(text)) {
-          return items;
-        }
-
-        items.push({
+        if (text.length === 0 || isInterruptMarker(text)) continue;
+        newItems.push({
           eventIndex,
           preview: text.length > 20 ? `${text.slice(0, 20)}...` : text,
         });
-        return items;
-      }, []),
-    [events],
-  );
+      }
+      userNavCacheRef.current = { events, result: newItems };
+      return newItems;
+    }
+    const newResult = events.reduce<Array<{ eventIndex: number; preview: string }>>((items, event, eventIndex) => {
+      if (event.kind !== 'user') return items;
+      const text = event.data.content.trim();
+      if (text.length === 0 || isInterruptMarker(text)) return items;
+      items.push({ eventIndex, preview: text.length > 20 ? `${text.slice(0, 20)}...` : text });
+      return items;
+    }, []);
+    userNavCacheRef.current = { events, result: newResult };
+    return newResult;
+  }, [events]);
 
   return (
     <ThreadPrimitive.Root className="flex h-full min-h-0 flex-col text-sm">
@@ -105,7 +141,6 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
                     message={message}
                     sessionId={sessionId}
                     toolDurations={toolDurations}
-                    thinkingDurations={thinkingDurations}
                     resultStatsByAssistantIndex={resultStatsByAssistantIndex}
                   />
                 )
@@ -418,13 +453,11 @@ function AssistantLikeMessage({
   message,
   sessionId,
   toolDurations,
-  thinkingDurations,
   resultStatsByAssistantIndex,
 }: {
   message: MessageState;
   sessionId: string;
   toolDurations: Record<string, number>;
-  thinkingDurations: Record<number, number>;
   resultStatsByAssistantIndex: Record<number, MessageFooterStats>;
 }) {
   if (message.content.length === 0) {
@@ -432,7 +465,6 @@ function AssistantLikeMessage({
   }
 
   const sourceEventIndex = getSourceEventIndex(message);
-  const thinkingDuration = sourceEventIndex != null ? thinkingDurations[sourceEventIndex] : undefined;
   const sourceTimestamp = getSourceTimestamp(message);
   const footerStats = sourceEventIndex != null ? resultStatsByAssistantIndex[sourceEventIndex] : undefined;
   const isFinal = message.metadata.custom?.isFinalAssistantMessage === true;
@@ -451,15 +483,20 @@ function AssistantLikeMessage({
           {({ part, children }) => {
             switch (part.type) {
               case 'group-thinking':
-                return <CodeMuxReasoningGroup durationMs={thinkingDuration}>{children}</CodeMuxReasoningGroup>;
+                return <CodeMuxReasoningGroup>{children}</CodeMuxReasoningGroup>;
 
               case 'group-tool-call':
                 // 如果分组只有一个工具，直接展示工具，不用 ToolGroup
                 if (part.indices.length === 1) {
                   return <>{children}</>;
                 }
+                // Get tool names from message content
+                const toolNames = part.indices
+                  .map((idx) => message.content[idx])
+                  .filter((c) => c?.type === 'tool-call')
+                  .map((c) => (c as { toolName: string }).toolName);
                 return (
-                  <ToolGroup startIndex={part.indices[0] ?? 0} endIndex={part.indices[part.indices.length - 1] ?? 0}>
+                  <ToolGroup startIndex={part.indices[0] ?? 0} endIndex={part.indices[part.indices.length - 1] ?? 0} toolNames={toolNames}>
                     {children}
                   </ToolGroup>
                 );
@@ -501,20 +538,15 @@ function AssistantLikeMessage({
 
 function CodeMuxReasoningGroup({
   children,
-  durationMs,
 }: {
   children?: ReactNode;
-  durationMs?: number;
 }) {
   const isRunning = useAuiState((state) => state.message.status?.type === 'running');
   const [isOpen, setIsOpen] = useState(false);
 
   return (
     <ReasoningRoot open={isOpen} onOpenChange={setIsOpen} variant="ghost">
-      <ReasoningTrigger
-        active={isRunning}
-        duration={durationMs != null && !isRunning ? Number((durationMs / 1000).toFixed(1)) : undefined}
-      />
+      <ReasoningTrigger active={isRunning} />
       <ReasoningContent aria-busy={isRunning}>
         <ReasoningText>{children}</ReasoningText>
       </ReasoningContent>
@@ -550,15 +582,12 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
         )}
 
         {text ? (
-          <div data-streaming-text="markdown" className="relative aui-md">
-            <Streamdown
-              plugins={{ code }}
-              shikiTheme={['github-light', 'github-dark']}
-              className="text-sm leading-6 text-foreground"
-              caret="block"
-            >
-              {text}
-            </Streamdown>
+          <div
+            data-streaming-text="plain"
+            className="relative whitespace-pre-wrap wrap-break-word text-sm leading-6 text-foreground"
+          >
+            {text}
+            <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse rounded-full bg-foreground/60 align-text-bottom" />
           </div>
         ) : null}
 
@@ -609,110 +638,98 @@ function getSourceTimestamp(message: MessageState): number | undefined {
   return typeof value === 'number' && value > 0 ? value : undefined;
 }
 
-export function buildToolDurationMap(events: AgentMessage[], eventTimestamps: number[]): Record<string, number> {
-  const durations: Record<string, number> = {};
-  const startTimes: Record<string, number> = {};
+export function incrementToolDurationMap(
+  prevDurations: Record<string, number>,
+  events: AgentMessage[],
+  fromIndex: number,
+): Record<string, number> {
+  const durations = { ...prevDurations };
 
-  for (let index = 0; index < events.length; index++) {
+  // Only process new events for tool_progress and task_notification
+  for (let index = fromIndex; index < events.length; index++) {
     const event = events[index];
-    const timestamp = eventTimestamps[index];
-    if (!timestamp) continue;
 
-    if (event.kind === 'assistant') {
-      const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
-      for (const block of blocks) {
-        if (block?.type === 'tool_use' && block.id && !startTimes[block.id]) {
-          startTimes[block.id] = timestamp;
-        }
+    if (event.kind === 'raw' && event.data.type === 'tool_progress') {
+      const toolUseId = event.data.tool_use_id;
+      const elapsed = event.data.elapsed_time_seconds;
+      if (typeof toolUseId === 'string' && typeof elapsed === 'number') {
+        durations[toolUseId] = Math.round(elapsed * 1000);
       }
     }
 
-    if (event.kind === 'tool_result') {
-      const data = event.data as unknown as Record<string, unknown>;
-      const rawContent = isRecord(data.message) ? data.message.content : undefined;
-
-      if (Array.isArray(rawContent)) {
-        for (const result of rawContent) {
-          if (!isRecord(result) || result.type !== 'tool_result' || typeof result.tool_use_id !== 'string') {
-            continue;
-          }
-
-          if (startTimes[result.tool_use_id] && durations[result.tool_use_id] == null) {
-            durations[result.tool_use_id] = timestamp - startTimes[result.tool_use_id];
-          }
-        }
+    if ((event.kind === 'raw' || event.kind === 'system') && event.data?.type === 'system' && event.data?.subtype === 'task_notification') {
+      const data = event.data as Record<string, unknown>;
+      const toolUseId = data.tool_use_id;
+      const usage = isRecord(data.usage) ? data.usage : undefined;
+      const durationMs = usage?.duration_ms;
+      if (typeof toolUseId === 'string' && typeof durationMs === 'number' && durationMs > 0) {
+        durations[toolUseId] = durationMs;
       }
-
-      const toolUseResult = isRecord(data.tool_use_result) ? data.tool_use_result : undefined;
-      if (
-        toolUseResult &&
-        typeof toolUseResult.tool_use_id === 'string' &&
-        startTimes[toolUseResult.tool_use_id] &&
-        durations[toolUseResult.tool_use_id] == null
-      ) {
-        durations[toolUseResult.tool_use_id] = timestamp - startTimes[toolUseResult.tool_use_id];
-      }
-
-      if (
-        typeof data.parent_tool_use_id === 'string' &&
-        startTimes[data.parent_tool_use_id] &&
-        durations[data.parent_tool_use_id] == null
-      ) {
-        durations[data.parent_tool_use_id] = timestamp - startTimes[data.parent_tool_use_id];
-      }
-    }
-  }
-
-  for (const event of events) {
-    if (event.kind !== 'raw') continue;
-    const data = event.data;
-    if (data.type !== 'tool_progress') continue;
-    const toolUseId = data.tool_use_id;
-    const elapsed = data.elapsed_time_seconds;
-    if (typeof toolUseId === 'string' && typeof elapsed === 'number') {
-      durations[toolUseId] = Math.round(elapsed * 1000);
-    }
-  }
-
-  for (const event of events) {
-    if (event.kind !== 'raw' && event.kind !== 'system') continue;
-    const data = event.data as Record<string, unknown>;
-    if (data?.type !== 'system' || data?.subtype !== 'task_notification') continue;
-    const toolUseId = data.tool_use_id;
-    const usage = isRecord(data.usage) ? data.usage : undefined;
-    const durationMs = usage?.duration_ms;
-
-    if (typeof toolUseId === 'string' && typeof durationMs === 'number' && durationMs > 0) {
-      durations[toolUseId] = durationMs;
     }
   }
 
   return durations;
 }
 
-function buildThinkingDurationMap(events: AgentMessage[], streamingDurations?: number[]): Record<number, number> {
-  // Only compute durations when streaming durations are available (live conversation)
-  // History loading doesn't have streaming durations, so no thinking duration will be shown
-  if (!streamingDurations || streamingDurations.length === 0) return {};
+export function buildToolDurationMap(events: AgentMessage[]): Record<string, number> {
+  const durations: Record<string, number> = {};
 
-  const durations: Record<number, number> = {};
-  let streamingDurationIndex = 0;
+  // Only use event-reported durations
+  for (const event of events) {
+    if (event.kind === 'raw' && event.data.type === 'tool_progress') {
+      const toolUseId = event.data.tool_use_id;
+      const elapsed = event.data.elapsed_time_seconds;
+      if (typeof toolUseId === 'string' && typeof elapsed === 'number') {
+        durations[toolUseId] = Math.round(elapsed * 1000);
+      }
+    }
 
-  for (let index = 0; index < events.length; index++) {
-    const event = events[index];
-    if (event.kind !== 'assistant') continue;
-
-    const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
-    const hasThinking = blocks.some((block) => block?.type === 'thinking' && block.thinking);
-    if (!hasThinking) continue;
-
-    if (streamingDurationIndex < streamingDurations.length) {
-      durations[index] = streamingDurations[streamingDurationIndex];
-      streamingDurationIndex++;
+    if ((event.kind === 'raw' || event.kind === 'system') && event.data?.type === 'system' && event.data?.subtype === 'task_notification') {
+      const data = event.data as Record<string, unknown>;
+      const toolUseId = data.tool_use_id;
+      const usage = isRecord(data.usage) ? data.usage : undefined;
+      const durationMs = usage?.duration_ms;
+      if (typeof toolUseId === 'string' && typeof durationMs === 'number' && durationMs > 0) {
+        durations[toolUseId] = durationMs;
+      }
     }
   }
 
   return durations;
+}
+
+function incrementAssistantResultStatsMap(
+  prevStats: Record<number, MessageFooterStats>,
+  events: AgentMessage[],
+  provider: Provider | null,
+  fromIndex: number,
+): Record<number, MessageFooterStats> {
+  const statsMap = { ...prevStats };
+  const resultIndexByAssistantIndex = buildAssistantResultTargetMap(events);
+
+  for (const [assistantIndex, resultIndex] of resultIndexByAssistantIndex) {
+    // Only process new results
+    if (resultIndex < fromIndex) continue;
+    const event = events[resultIndex];
+    if (event?.kind !== 'result') continue;
+
+    const ltu = (event.data as any).last_token_usage;
+    const usage = event.data.usage;
+    const usageForCost = ltu
+      ? { input_tokens: ltu.input_tokens, output_tokens: ltu.output_tokens, cache_read_input_tokens: ltu.cached_input_tokens ?? 0 }
+      : usage;
+    statsMap[assistantIndex] = {
+      durationMs: event.data.duration_ms,
+      numTurns: event.data.num_turns,
+      costUsd: calculateCost(usageForCost, provider),
+      inputTokens: ltu ? ltu.input_tokens : (usage?.input_tokens || 0),
+      outputTokens: ltu ? ltu.output_tokens : (usage?.output_tokens || 0),
+      cacheReadTokens: ltu ? (ltu.cached_input_tokens || 0) : (usage?.cache_read_input_tokens || 0),
+      cacheCreationTokens: ltu ? 0 : (usage?.cache_creation_input_tokens || 0),
+    };
+  }
+
+  return statsMap;
 }
 
 function buildAssistantResultStatsMap(

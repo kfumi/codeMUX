@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useState, type FC, type PropsWithChildren } from 'react';
+import { memo, useCallback, useMemo, useState, type FC, type PropsWithChildren } from 'react';
 import { ChevronDownIcon, LoaderIcon } from 'lucide-react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -68,14 +68,42 @@ function ToolGroupRoot({
 
 function ToolGroupTrigger({
   count,
+  toolNames,
   active = false,
   className,
   ...props
 }: React.ComponentProps<typeof CollapsibleTrigger> & {
   count: number;
+  toolNames?: string[];
   active?: boolean;
 }) {
-  const label = `${count} 次工具调用`;
+  // Generate label based on tool names if available
+  const label = useMemo(() => {
+    if (!toolNames || toolNames.length === 0) {
+      return `${count} 次工具调用`;
+    }
+
+    // Count by tool name
+    const counts = new Map<string, number>();
+    for (const name of toolNames) {
+      counts.set(name, (counts.get(name) || 0) + 1);
+    }
+
+    // Build summary
+    const parts: string[] = [];
+    for (const [name, count] of counts) {
+      parts.push(`${count} 次 ${name}`);
+    }
+
+    if (parts.length === 1) {
+      return `已执行 ${parts[0]}`;
+    }
+    if (parts.length <= 3) {
+      return `已执行 ${parts.join('、')}`;
+    }
+    // Too many types, just show count
+    return `${count} 次工具调用`;
+  }, [count, toolNames]);
 
   return (
     <CollapsibleTrigger
@@ -154,22 +182,23 @@ function ToolGroupContent({
   );
 }
 
-type ToolGroupComponent = FC<PropsWithChildren<{ startIndex: number; endIndex: number }>> & {
+type ToolGroupComponent = FC<PropsWithChildren<{ startIndex: number; endIndex: number; toolNames?: string[] }>> & {
   Root: typeof ToolGroupRoot;
   Trigger: typeof ToolGroupTrigger;
   Content: typeof ToolGroupContent;
 };
 
-const ToolGroupImpl: FC<PropsWithChildren<{ startIndex: number; endIndex: number }>> = ({
+const ToolGroupImpl: FC<PropsWithChildren<{ startIndex: number; endIndex: number; toolNames?: string[] }>> = ({
   children,
   startIndex,
   endIndex,
+  toolNames,
 }) => {
   const toolCount = endIndex - startIndex + 1;
 
   return (
     <ToolGroupRoot variant="ghost">
-      <ToolGroupTrigger count={toolCount} />
+      <ToolGroupTrigger count={toolCount} toolNames={toolNames} />
       <ToolGroupContent>{children}</ToolGroupContent>
     </ToolGroupRoot>
   );

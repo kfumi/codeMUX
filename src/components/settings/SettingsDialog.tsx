@@ -47,8 +47,8 @@ export function SettingsView({ onBack }: SettingsViewProps) {
       className={cn(
         'relative flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-[13px] transition-colors duration-150',
         activeTab === id
-          ? 'bg-card font-medium text-foreground shadow-[0_0_0_1px_hsl(var(--border)/0.72)]'
-          : 'text-foreground/66 hover:bg-card/70 hover:text-foreground',
+          ? 'bg-[hsl(var(--sidebar-muted))] font-medium text-foreground dark:bg-[hsl(var(--foreground)/0.11)]'
+          : 'text-foreground/66 hover:bg-[hsl(var(--sidebar-muted))]/50 hover:text-foreground dark:hover:bg-[hsl(var(--foreground)/0.06)]',
       )}
     >
       <Icon className={cn('h-4 w-4 shrink-0 transition-colors', activeTab === id ? 'text-foreground/82' : 'text-foreground/45')} />

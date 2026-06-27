@@ -13,6 +13,7 @@ import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
 import { AlertTriangle, XCircle } from 'lucide-react';
 import { getCodeChangeFilePath, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
 import { getDisplayableArgs, getToolHeaderSummary } from '../toolHeaderSummary';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
 type CodeMuxToolCallPartProps = {
   toolName: string;
@@ -76,13 +77,28 @@ export function CodeMuxToolCallMessagePart({
   const displayableArgs = codeFilePath ? null : getDisplayableArgs(args, headerSummary.consumedKeys);
   const resolvedArgsText = argsText && displayableArgs ? JSON.stringify(displayableArgs, null, 2) : displayableArgs ? JSON.stringify(displayableArgs, null, 2) : undefined;
 
+  const tooltipPath = headerSummary.fullPath;
+
   return (
     <ToolFallbackRoot defaultOpen={resolvedStatus?.type === 'requires-action'}>
       <ToolFallbackTrigger toolName={headerSummary.displayName || toolName} status={resolvedStatus}>
         {headerText && (
-          <span className="ml-2 inline-block max-w-[min(34rem,56vw)] truncate align-middle text-xs font-normal text-muted-foreground/72">
-            {headerText}
-          </span>
+          tooltipPath ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="ml-2 inline-block max-w-[min(34rem,56vw)] truncate align-middle text-xs font-normal text-muted-foreground/72">
+                  {headerText}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p className="break-all">{tooltipPath}</p>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <span className="ml-2 inline-block max-w-[min(34rem,56vw)] truncate align-middle text-xs font-normal text-muted-foreground/72">
+              {headerText}
+            </span>
+          )
         )}
         {durationMs != null && (
           <span className="inline-flex rounded-md bg-muted/60 px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground/60">

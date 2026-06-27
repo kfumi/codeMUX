@@ -119,7 +119,7 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
               )}
             >
               <DropdownMenuItem onClick={openReview} icon={<FileSearch className="h-3.5 w-3.5" />}>
-                审核
+                审查
               </DropdownMenuItem>
               <DropdownMenuItem onClick={openTerminal} icon={<Terminal className="h-3.5 w-3.5" />}>
                 终端
@@ -216,7 +216,7 @@ function SidePanelEmpty({
           onClick={onOpenReview}
         >
           <FileSearch className="h-5 w-5" />
-          <span className="text-sm">审核</span>
+          <span className="text-sm">审查</span>
         </button>
         <button
           className="flex h-24 flex-col items-center justify-center gap-2 rounded-lg bg-muted/45 text-foreground/82 transition-colors hover:bg-muted/70 disabled:cursor-not-allowed disabled:opacity-45"

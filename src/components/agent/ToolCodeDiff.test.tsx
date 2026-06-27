@@ -1,7 +1,13 @@
+// @vitest-environment jsdom
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { ToolCallCard } from './ToolCallCard';
 import { ToolCodeDiff } from './ToolCodeDiff';
+import { TooltipProvider } from '../ui/tooltip';
+
+function renderWithTooltip(ui: React.ReactElement) {
+  return render(<TooltipProvider>{ui}</TooltipProvider>);
+}
 
 describe('ToolCodeDiff', () => {
   it('renders edit arguments as an inline diff', () => {
@@ -34,8 +40,8 @@ describe('ToolCodeDiff', () => {
     expect(container.querySelector('[data-slot="diff-viewer-line"][data-type="add"]')?.textContent).toContain('<!DOCTYPE html>');
   });
 
-  it('shows write and edit paths on the tool block without making them clickable', () => {
-    const { container } = render(
+  it('shows write and edit file names (not full paths) on the tool block without making them clickable', () => {
+    const { container } = renderWithTooltip(
       <ToolCallCard
         toolName="Edit"
         input={{
@@ -48,8 +54,9 @@ describe('ToolCodeDiff', () => {
       />,
     );
 
-    expect(screen.getAllByText('D:\\project\\index.html').length).toBeGreaterThan(0);
-    expect(screen.queryByRole('button', { name: 'D:\\project\\index.html' })).toBeNull();
+    // Now shows only filename, not full path
+    expect(screen.getAllByText('index.html').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'index.html' })).toBeNull();
 
     fireEvent.click(within(container).getByRole('button'));
 
@@ -69,7 +76,7 @@ describe('ToolCodeDiff', () => {
 *** End Patch
 PATCH`;
 
-    const { container } = render(
+    const { container } = renderWithTooltip(
       <ToolCallCard
         toolName="Bash"
         input={{
@@ -81,8 +88,9 @@ PATCH`;
       />,
     );
 
-    expect(screen.getByText('src/App.tsx')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'src/App.tsx' })).toBeNull();
+    // Now shows only filename, not full path
+    expect(screen.getByText('App.tsx')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'App.tsx' })).toBeNull();
 
     fireEvent.click(within(container).getByRole('button'));
 

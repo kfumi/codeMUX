@@ -149,7 +149,7 @@ function ToolFallbackContent({
       )}
       {...props}
     >
-      <div className="mt-1 flex max-h-105 flex-col gap-2 overflow-y-auto pr-1 text-xs scrollbar-gutter-stable">{children}</div>
+      <div className="mt-1 flex max-h-90 flex-col gap-2 overflow-y-auto pr-1 text-xs scrollbar-gutter-stable">{children}</div>
     </CollapsibleContent>
   );
 }
@@ -161,7 +161,7 @@ function ToolFallbackArgs({
 }: React.ComponentProps<'div'> & { argsText?: string }) {
   if (!argsText) return null;
   return (
-    <div className={cn('aui-tool-fallback-args px-4', className)} {...props}>
+    <div className={cn('aui-tool-fallback-args-value bg-muted/50 text-foreground/90 rounded-md p-2.5 text-xs whitespace-pre-wrap', className)} {...props}>
       <pre className="whitespace-pre-wrap">{argsText}</pre>
     </div>
   );
@@ -174,9 +174,13 @@ function ToolFallbackResult({
 }: React.ComponentProps<'div'> & { result?: unknown }) {
   if (result === undefined) return null;
   return (
-    <div className={cn('border-t border-dashed px-4 pt-2', className)} {...props}>
-      <p className="font-semibold">结果：</p>
-      <pre className="whitespace-pre-wrap">
+    <div
+        data-slot="tool-fallback-result"
+        className={cn('aui-tool-fallback-result max-h-50', className)}
+        {...props}
+    >
+      <p className="aui-tool-fallback-result-header text-muted-foreground text-xs font-medium">结果：</p>
+      <pre className="aui-tool-fallback-result-content bg-muted/50 text-foreground/90 mt-1 rounded-md p-2.5 text-xs whitespace-pre-wrap">
         {typeof result === 'string' ? result : JSON.stringify(result, null, 2)}
       </pre>
     </div>
@@ -195,9 +199,13 @@ function ToolFallbackError({
   const isCancelled = status.reason === 'cancelled';
   const headerText = isCancelled ? '取消原因：' : '错误：';
   return (
-    <div className={cn('px-4', className)} {...props}>
-      <p className="text-muted-foreground font-semibold">{headerText}</p>
-      <p className="text-muted-foreground">{errorText}</p>
+    <div
+        data-slot="tool-fallback-error"
+        className={cn("aui-tool-fallback-error", className)}
+        {...props}
+    >
+      <p className="aui-tool-fallback-error-header text-muted-foreground font-semibold">{headerText}</p>
+      <p className="aui-tool-fallback-error-reason text-muted-foreground">{errorText}</p>
     </div>
   );
 }

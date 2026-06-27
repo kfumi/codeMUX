@@ -9,7 +9,10 @@ type DirectiveSegment =
   | { kind: 'text'; text: string }
   | { kind: 'directive'; directiveKind: CodeMuxDirectiveKind; value: string; label: string };
 
-const DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w-]*|@[^\s]+)/g;
+// Match commands only at line start (not in paths like root/root/dist)
+// Commands: /command must be at start of line or after whitespace
+// File mentions: @path anywhere
+const DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w-]*)(?=\s|$)|(@[^\s]+)/g;
 type DirectiveTone = 'default' | 'inverted';
 
 export function CodeMuxDirectiveChip({
@@ -80,7 +83,8 @@ export function parseDirectiveText(text: string): DirectiveSegment[] {
 
   for (const match of text.matchAll(DIRECTIVE_RE)) {
     const leading = match[1] ?? '';
-    const value = match[2] ?? '';
+    // Group 2 is slash command, Group 3 is @file
+    const value = match[2] || match[3] || '';
     const valueStart = match.index + leading.length;
 
     if (valueStart > lastIndex) {

@@ -1,5 +1,6 @@
 import { type MouseEvent, type ReactNode, useEffect, useState } from 'react';
 import {
+  Check,
   Minus,
   Monitor,
   Moon,
@@ -202,13 +203,13 @@ export function TitleBar({
                 void setTheme(value);
               }}
             >
-              <div className="flex w-full items-center gap-2 text-[12px]">
+              <div className={cn('flex w-full items-center gap-2 rounded-sm px-0.5 py-0.5 text-[12px] -mx-0.5 -my-0.5', currentTheme === value && 'bg-muted/70')}>
                 <Icon className="h-3.5 w-3.5" />
                 <span className={currentTheme === value ? 'font-medium text-foreground' : 'text-foreground/76'}>
                   {label}
                 </span>
                 {currentTheme === value && (
-                  <span className="ml-auto text-[10px] text-primary">+</span>
+                  <Check className="ml-auto h-3.5 w-3.5 text-primary" />
                 )}
               </div>
             </DropdownMenuItem>

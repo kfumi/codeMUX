@@ -3,14 +3,13 @@ import {
   useAui,
   useAuiState,
   type Unstable_DirectiveFormatter,
+  type Unstable_DirectiveSegment,
   type Unstable_TriggerItem,
 } from '@assistant-ui/react';
 import { LexicalComposerInput } from '@assistant-ui/react-lexical';
 import type { DirectiveChipProps } from '@assistant-ui/react-lexical';
 import {
   ArrowUp,
-  ChevronLeft,
-  ChevronRight,
   FileCode2,
   Folder,
   FolderPlus,
@@ -26,7 +25,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { useMemo, useRef, useState, type FC, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FC, type KeyboardEvent, type ReactNode } from 'react';
 
 import type { AgentMessage } from '../../../stores/agentStore';
 import type { SlashCommand } from '../../../lib/slashCommands';
@@ -53,12 +52,6 @@ interface CodeMuxComposerProps {
 
 type TriggerCategory = { id: string; label: string };
 
-type TriggerAdapter = {
-  categories(): readonly TriggerCategory[];
-  categoryItems(categoryId: string): readonly Unstable_TriggerItem[];
-  search?(query: string): readonly Unstable_TriggerItem[];
-};
-
 const CATEGORY_ORDER = ['session', 'info', 'builtin', 'custom', 'skill'] as const;
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -69,18 +62,15 @@ const CATEGORY_LABELS: Record<string, string> = {
   skill: '技能',
 };
 
-const COMMAND_FORMATTER: Unstable_DirectiveFormatter = {
-  serialize: (item) => `/${item.id} `,
-  parse: (text) => (text ? [{ kind: 'text', text }] : []),
-};
-
-const FILE_FORMATTER: Unstable_DirectiveFormatter = {
-  serialize: (item) => `@${item.id} `,
-  parse: (text) => (text ? [{ kind: 'text', text }] : []),
+const CODEMUX_FORMATTER: Unstable_DirectiveFormatter = {
+  serialize: (item) => (item.type === 'file' || item.type === 'directory' ? `@${item.id} ` : `/${item.id} `),
+  parse: parseComposerDirectives,
 };
 
 const MAX_FILE_RESULTS = 50;
 const EMPTY_EVENTS: AgentMessage[] = [];
+const TRIGGER_RE = /(^|\s)([/@])([^\s]*)$/;
+const PARSE_DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w-]*)(?=\s|$)|(@[^\s]+)/g;
 
 type FileEntry = { name: string; relativePath: string; isDir: boolean };
 
@@ -137,40 +127,7 @@ export function CodeMuxComposer({
     sessionProviderUsesLargeContext: false,
     activeProviderUsesLargeContext: false,
   }), [events, modelName]);
-  const commands = getAllCommands(agentKind);
-  const triggerDataRef = useRef<{
-    itemsByCategory: Map<string, Unstable_TriggerItem[]>;
-    categories: TriggerCategory[];
-    commands: SlashCommand[];
-  }>({ itemsByCategory: new Map(), categories: [], commands: [] });
-
-  const nextItemsByCategory = new Map<string, Unstable_TriggerItem[]>();
-  for (const category of CATEGORY_ORDER) {
-    nextItemsByCategory.set(
-      category,
-      commands.filter((c) => c.category === category).map((c) => toTriggerItem(c)),
-    );
-  }
-  triggerDataRef.current = {
-    itemsByCategory: nextItemsByCategory,
-    categories: CATEGORY_ORDER.filter((c) => (nextItemsByCategory.get(c)?.length ?? 0) > 0)
-      .map((c) => ({ id: c, label: CATEGORY_LABELS[c] })),
-    commands,
-  };
-
-  const slashAdapter = useMemo<TriggerAdapter>(
-    () => ({
-      categories: () => triggerDataRef.current.categories,
-      categoryItems: (id) => triggerDataRef.current.itemsByCategory.get(id) ?? [],
-      search: (query) => {
-        const q = query.trim().toLowerCase();
-        return triggerDataRef.current.commands
-          .filter((c) => matchesCommand(c, q))
-          .map((c) => toTriggerItem(c));
-      },
-    }),
-    [],
-  );
+  const commands = useMemo(() => getAllCommands(agentKind), [agentKind]);
 
   const treeRoot = usePreviewStore((state) => state.treeRoot);
   const fileItemsRef = useRef<FileEntry[]>([]);
@@ -180,135 +137,81 @@ export function CodeMuxComposer({
     fileItemsRef.current = [];
   }
 
-  const fileAdapter = useMemo<TriggerAdapter>(
-    () => ({
-      categories: () => [],
-      categoryItems: () => [],
-      search: (query) => {
-        const items = fileItemsRef.current;
-        if (items.length === 0) return [];
-        const t = query.trim();
-        if (!t) return items.slice(0, MAX_FILE_RESULTS).map(toFileTriggerItem);
-        return items
-          .filter((f) => matchFileName(t, f.name) || matchFileName(t, f.relativePath))
-          .slice(0, MAX_FILE_RESULTS)
-          .map(toFileTriggerItem);
-      },
-    }),
-    [],
-  );
+  const [manualTrigger, setManualTrigger] = useState<'/' | '@' | null>(null);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const activeTrigger = useMemo(() => detectTrailingTrigger(composerText), [composerText]);
+  const activeChar = activeTrigger?.char ?? manualTrigger;
+  const activeQuery = activeTrigger?.query ?? '';
+  const slashItemsByCategory = useMemo(() => groupCommands(commands, activeQuery), [commands, activeQuery]);
+  const slashItems = useMemo(() => slashItemsByCategory.flatMap((group) => group.items), [slashItemsByCategory]);
+  const fileItems = useMemo(() => {
+    if (activeChar !== '@') return [];
+    const items = fileItemsRef.current;
+    const query = activeQuery.trim();
+    if (!query) return items.slice(0, MAX_FILE_RESULTS).map(toFileTriggerItem);
+    return items
+      .filter((f) => matchFileName(query, f.name) || matchFileName(query, f.relativePath))
+      .slice(0, MAX_FILE_RESULTS)
+      .map(toFileTriggerItem);
+  }, [activeChar, activeQuery, treeRoot]);
+  const menuItems = activeChar === '/' ? slashItems : fileItems;
+  const menuVisible = activeChar !== null && menuItems.length > 0;
+
+  useEffect(() => {
+    setHighlightedIndex(0);
+  }, [activeChar, activeQuery, menuItems.length]);
 
   const hasInput = composerText.trim().length > 0;
 
   const insertSlash = () => {
+    setManualTrigger('/');
     aui.composer().setText('/');
   };
 
+  const selectTriggerItem = (item: Unstable_TriggerItem) => {
+    setManualTrigger(null);
+    aui.composer().setText(replaceActiveTrigger(composerText, activeTrigger, item));
+  };
+
+  const handleComposerKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!menuVisible) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setHighlightedIndex((index) => (index + 1) % menuItems.length);
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setHighlightedIndex((index) => (index - 1 + menuItems.length) % menuItems.length);
+      return;
+    }
+    if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
+      event.preventDefault();
+      const selected = menuItems[highlightedIndex] ?? menuItems[0];
+      if (selected) selectTriggerItem(selected);
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setManualTrigger(null);
+    }
+  };
+
   return (
-    <div className="relative mx-auto flex w-full max-w-3xl flex-col">
-      <ComposerPrimitive.Unstable_TriggerPopoverRoot>
-        {/* ── Slash command popover ── */}
-        <ComposerPrimitive.Unstable_TriggerPopover
-          char="/"
-          adapter={slashAdapter}
-          className="absolute bottom-full left-0 right-0 z-50 mb-3 flex max-h-[min(28rem,calc(100vh-6rem))] flex-col overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 shadow-[0_20px_54px_-30px_hsl(var(--foreground)/0.5)] backdrop-blur-lg"
-        >
-          <ComposerPrimitive.Unstable_TriggerPopover.Directive formatter={COMMAND_FORMATTER} />
-          <ComposerPrimitive.Unstable_TriggerPopoverCategories className="min-h-0 overflow-y-auto py-2">
-            {(cats) =>
-              cats.map((cat) => (
-                <ComposerPrimitive.Unstable_TriggerPopoverCategoryItem
-                  key={cat.id}
-                  categoryId={cat.id}
-                  className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/46 data-highlighted:bg-muted/56"
-                >
-                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-muted/74 text-muted-foreground">
-                    {getCategoryIcon(cat.id)}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-foreground">{cat.label}</div>
-                    <div className="text-xs text-muted-foreground">浏览{cat.label}命令</div>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </ComposerPrimitive.Unstable_TriggerPopoverCategoryItem>
-              ))
-            }
-          </ComposerPrimitive.Unstable_TriggerPopoverCategories>
-          <ComposerPrimitive.Unstable_TriggerPopoverItems className="min-h-0 flex-1 overflow-y-auto py-2">
-            {(items) => (
-              <>
-                <div className="flex items-center gap-2 px-3 pb-1.5">
-                  <ComposerPrimitive.Unstable_TriggerPopoverBack className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground">
-                    <ChevronLeft className="h-4 w-4" />
-                  </ComposerPrimitive.Unstable_TriggerPopoverBack>
-                  <div className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">命令</div>
-                </div>
-                {items.map((item) => (
-                  <ComposerPrimitive.Unstable_TriggerPopoverItem
-                    key={item.id}
-                    item={item}
-                    className="flex w-full items-start gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/46 data-highlighted:bg-muted/56"
-                  >
-                    <span className="mt-0.5 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-muted/74 text-muted-foreground">
-                      {getCommandIcon(item.id)}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-foreground" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                          {item.label}
-                        </span>
-                        {getItemArgsHint(item) && <span className="text-xs text-muted-foreground">{getItemArgsHint(item)}</span>}
-                      </div>
-                      {item.description && <div className="truncate text-xs text-muted-foreground">{item.description}</div>}
-                    </div>
-                  </ComposerPrimitive.Unstable_TriggerPopoverItem>
-                ))}
-              </>
-            )}
-          </ComposerPrimitive.Unstable_TriggerPopoverItems>
-        </ComposerPrimitive.Unstable_TriggerPopover>
+    <div className="relative mx-auto flex w-full max-w-3xl flex-col" onKeyDownCapture={handleComposerKeyDown}>
+      {menuVisible && (
+        <TriggerMenu
+          char={activeChar ?? '/'}
+          slashGroups={slashItemsByCategory}
+          fileItems={fileItems}
+          highlightedIndex={highlightedIndex}
+          onHighlight={setHighlightedIndex}
+          onSelect={selectTriggerItem}
+        />
+      )}
 
-        {/* ── File mention popover ── */}
-        <ComposerPrimitive.Unstable_TriggerPopover
-          char="@"
-          adapter={fileAdapter}
-          className="absolute bottom-full left-0 right-0 z-50 mb-3 flex max-h-[min(20rem,calc(100vh-6rem))] flex-col overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 shadow-[0_20px_54px_-30px_hsl(var(--foreground)/0.5)] backdrop-blur-lg"
-        >
-          <ComposerPrimitive.Unstable_TriggerPopover.Directive formatter={FILE_FORMATTER} />
-          <ComposerPrimitive.Unstable_TriggerPopoverItems className="min-h-0 overflow-y-auto py-2">
-            {(items) => (
-              <>
-                <div className="flex items-center gap-2 px-3 pb-1.5">
-                  <FileCode2 className="h-3.5 w-3.5 text-muted-foreground" />
-                  <div className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">引用文件</div>
-                </div>
-                {items.length === 0 && <div className="px-3 py-4 text-center text-xs text-muted-foreground/60">无匹配文件</div>}
-                {items.map((item) => (
-                  <ComposerPrimitive.Unstable_TriggerPopoverItem
-                    key={item.id}
-                    item={item}
-                    className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/46 data-highlighted:bg-muted/56"
-                  >
-                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted/74 text-muted-foreground">
-                      {item.type === 'directory' ? <Folder className="h-3.5 w-3.5" /> : <FileCode2 className="h-3.5 w-3.5" />}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <span className="truncate text-sm font-medium text-foreground" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                        {item.label}
-                      </span>
-                      {item.description && item.description !== item.label && (
-                        <div className="truncate text-xs text-muted-foreground/60">{item.description}</div>
-                      )}
-                    </div>
-                  </ComposerPrimitive.Unstable_TriggerPopoverItem>
-                ))}
-              </>
-            )}
-          </ComposerPrimitive.Unstable_TriggerPopoverItems>
-        </ComposerPrimitive.Unstable_TriggerPopover>
-
-        {/* ── Composer ── */}
-        <ComposerPrimitive.Root className="relative flex w-full flex-col">
+      {/* ── Composer ── */}
+      <ComposerPrimitive.Root className="relative flex w-full flex-col">
           <div
             ref={composerRootRef}
             onFocusCapture={() => setIsFocused(true)}
@@ -328,6 +231,7 @@ export function CodeMuxComposer({
               submitMode="enter"
               placeholder={placeholder}
               directiveChip={DIRECTIVE_CHIP}
+              formatter={CODEMUX_FORMATTER}
               className="relative min-h-10 max-h-50 w-full overflow-y-auto text-sm leading-6 text-foreground outline-none [&_.aui-lexical-input]:min-h-10 [&_.aui-lexical-input]:max-h-50 [&_.aui-lexical-input]:overflow-y-auto [&_.aui-lexical-input]:border-0 [&_.aui-lexical-input]:bg-transparent [&_.aui-lexical-input]:px-2 [&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:text-sm [&_.aui-lexical-input]:leading-6 [&_.aui-lexical-input]:text-foreground [&_.aui-lexical-input]:shadow-none [&_.aui-lexical-input]:outline-none [&_.aui-lexical-input]:ring-0 [&_.aui-lexical-input]:focus-visible:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:left-2 [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-sm [&_.aui-lexical-placeholder]:leading-6 [&_.aui-lexical-placeholder]:text-muted-foreground/70"
             />
 
@@ -402,9 +306,184 @@ export function CodeMuxComposer({
             </div>
           </div>
         </ComposerPrimitive.Root>
-      </ComposerPrimitive.Unstable_TriggerPopoverRoot>
     </div>
   );
+}
+
+function TriggerMenu({
+  char,
+  slashGroups,
+  fileItems,
+  highlightedIndex,
+  onHighlight,
+  onSelect,
+}: {
+  char: '/' | '@';
+  slashGroups: Array<{ category: TriggerCategory; items: Unstable_TriggerItem[] }>;
+  fileItems: Unstable_TriggerItem[];
+  highlightedIndex: number;
+  onHighlight: (index: number) => void;
+  onSelect: (item: Unstable_TriggerItem) => void;
+}) {
+  let index = 0;
+
+  return (
+    <div className="absolute bottom-full left-0 right-0 z-50 mb-3 max-h-[min(28rem,calc(100vh-6rem))] overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 shadow-[0_20px_54px_-30px_hsl(var(--foreground)/0.5)] backdrop-blur-lg">
+      <div className="max-h-[inherit] overflow-y-auto py-2">
+        {char === '/' ? (
+          slashGroups.map((group) => (
+            <div key={group.category.id}>
+              <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-normal text-muted-foreground/60">
+                {getCategoryIcon(group.category.id)}
+                <span>{group.category.label}</span>
+              </div>
+              {group.items.map((item) => {
+                const itemIndex = index++;
+                return (
+                  <TriggerMenuItem
+                    key={item.id}
+                    item={item}
+                    index={itemIndex}
+                    highlighted={itemIndex === highlightedIndex}
+                    onHighlight={onHighlight}
+                    onSelect={onSelect}
+                  />
+                );
+              })}
+            </div>
+          ))
+        ) : (
+          <>
+            <div className="flex items-center gap-2 px-3 pb-1.5 text-xs font-semibold uppercase tracking-normal text-muted-foreground">
+              <FileCode2 className="h-3.5 w-3.5" />
+              <span>引用文件</span>
+            </div>
+            {fileItems.map((item, itemIndex) => (
+              <TriggerMenuItem
+                key={item.id}
+                item={item}
+                index={itemIndex}
+                highlighted={itemIndex === highlightedIndex}
+                onHighlight={onHighlight}
+                onSelect={onSelect}
+              />
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TriggerMenuItem({
+  item,
+  index,
+  highlighted,
+  onHighlight,
+  onSelect,
+}: {
+  item: Unstable_TriggerItem;
+  index: number;
+  highlighted: boolean;
+  onHighlight: (index: number) => void;
+  onSelect: (item: Unstable_TriggerItem) => void;
+}) {
+  const isFile = item.type === 'file' || item.type === 'directory';
+
+  return (
+    <button
+      type="button"
+      data-command-id={item.type === 'command' ? item.id : undefined}
+      data-file-id={isFile ? item.id : undefined}
+      onMouseEnter={() => onHighlight(index)}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => onSelect(item)}
+      className={cn(
+        'flex w-full items-start gap-3 px-3 py-2 text-left transition-colors',
+        highlighted ? 'bg-muted/56' : 'hover:bg-muted/46',
+      )}
+    >
+      <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-muted/74 text-muted-foreground">
+        {isFile ? (item.type === 'directory' ? <Folder className="h-4 w-4" /> : <FileCode2 className="h-4 w-4" />) : getCommandIcon(item.id)}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-medium text-foreground" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+            {item.label}
+          </span>
+          {getItemArgsHint(item) && <span className="shrink-0 text-xs text-muted-foreground">{getItemArgsHint(item)}</span>}
+        </div>
+        {item.description && <div className="truncate text-xs text-muted-foreground">{item.description}</div>}
+      </div>
+    </button>
+  );
+}
+
+function groupCommands(commands: SlashCommand[], query: string) {
+  const q = query.trim().toLowerCase();
+  return CATEGORY_ORDER.map((category) => ({
+    category: { id: category, label: CATEGORY_LABELS[category] },
+    items: commands.filter((command) => command.category === category && matchesCommand(command, q)).map(toTriggerItem),
+  })).filter((group) => group.items.length > 0);
+}
+
+type ActiveTrigger = { char: '/' | '@'; start: number; query: string };
+
+function detectTrailingTrigger(text: string): ActiveTrigger | null {
+  const match = text.match(TRIGGER_RE);
+  if (!match || (match[2] !== '/' && match[2] !== '@')) return null;
+  return {
+    char: match[2],
+    start: (match.index ?? 0) + (match[1]?.length ?? 0),
+    query: match[3] ?? '',
+  };
+}
+
+function replaceActiveTrigger(text: string, active: ActiveTrigger | null, item: Unstable_TriggerItem) {
+  const directive = CODEMUX_FORMATTER.serialize(item);
+  if (!active) return directive;
+  return `${text.slice(0, active.start)}${directive}`;
+}
+
+function parseComposerDirectives(text: string): Unstable_DirectiveSegment[] {
+  const segments: Unstable_DirectiveSegment[] = [];
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(PARSE_DIRECTIVE_RE)) {
+    const leading = match[1] ?? '';
+    const raw = match[2] || match[3] || '';
+    const start = match.index + leading.length;
+    if (start > lastIndex) {
+      segments.push({ kind: 'text', text: text.slice(lastIndex, start) });
+    }
+    segments.push(toDirectiveMention(raw));
+    lastIndex = start + raw.length;
+  }
+
+  if (lastIndex < text.length) {
+    segments.push({ kind: 'text', text: text.slice(lastIndex) });
+  }
+
+  return segments;
+}
+
+function toDirectiveMention(raw: string): Unstable_DirectiveSegment {
+  if (raw.startsWith('/')) {
+    return { kind: 'mention', type: 'command', label: raw, id: raw.slice(1) };
+  }
+
+  const id = raw.slice(1);
+  return {
+    kind: 'mention',
+    type: id.endsWith('/') ? 'directory' : 'file',
+    label: getPathLabel(id),
+    id,
+  };
+}
+
+function getPathLabel(path: string) {
+  const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
+  return normalized.split('/').filter(Boolean).pop() || path;
 }
 
 function toTriggerItem(command: SlashCommand): Unstable_TriggerItem {

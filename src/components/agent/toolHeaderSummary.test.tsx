@@ -1,10 +1,16 @@
+// @vitest-environment jsdom
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { ToolCallCard } from './ToolCallCard';
+import { TooltipProvider } from '../ui/tooltip';
+
+function renderWithTooltip(ui: React.ReactElement) {
+  return render(<TooltipProvider>{ui}</TooltipProvider>);
+}
 
 describe('tool header summaries', () => {
-  it('shows Read file path in the header and removes it from expanded args', () => {
-    const { container } = render(
+  it('shows Read file name in the header (not full path) and removes it from expanded args', () => {
+    const { container } = renderWithTooltip(
       <ToolCallCard
         toolName="Read"
         input={{
@@ -14,7 +20,8 @@ describe('tool header summaries', () => {
       />,
     );
 
-    expect(screen.getByText('D:\\project\\src\\App.tsx')).toBeTruthy();
+    // Now shows only filename, not full path
+    expect(screen.getByText('App.tsx')).toBeTruthy();
 
     fireEvent.click(within(container).getByRole('button'));
 
@@ -22,7 +29,7 @@ describe('tool header summaries', () => {
   });
 
   it('shows Bash description in the header while keeping command in expanded args', () => {
-    const { container } = render(
+    const { container } = renderWithTooltip(
       <ToolCallCard
         toolName="Bash"
         input={{
@@ -43,7 +50,7 @@ describe('tool header summaries', () => {
   });
 
   it('shows Grep pattern and Agent description in the header', () => {
-    render(
+    renderWithTooltip(
       <>
         <ToolCallCard toolName="Grep" input={{ pattern: 'ToolCallCard', path: 'src' }} status="done" />
         <ToolCallCard toolName="Agent" input={{ description: 'Explore tool message rendering', prompt: 'Full prompt' }} status="done" />

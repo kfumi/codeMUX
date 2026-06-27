@@ -27,13 +27,18 @@ type PatchFile = {
 export function getCodeChangeFilePath(input: Record<string, unknown>): string | undefined {
   const filePath = input.file_path;
   if (typeof filePath === 'string' && filePath.trim()) {
-    return normalizePath(filePath);
+    return getFileName(normalizePath(filePath));
   }
 
   const patchFiles = getApplyPatchFiles(input);
   if (!patchFiles.length) return undefined;
 
-  return patchFiles.map((file) => normalizePath(file.path)).join(', ');
+  return patchFiles.map((file) => getFileName(normalizePath(file.path))).join(', ');
+}
+
+function getFileName(path: string): string {
+  const parts = path.split(/[/\\]/);
+  return parts[parts.length - 1] || path;
 }
 
 export function getCodeChangeDiff(input: Record<string, unknown>): ContentDiff | PatchDiff | null {

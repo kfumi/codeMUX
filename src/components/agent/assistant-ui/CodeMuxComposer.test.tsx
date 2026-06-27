@@ -7,12 +7,19 @@ import { CodeMuxComposer } from './CodeMuxComposer';
 
 const lexicalProps: Array<{
   className?: string;
+  formatter?: {
+    parse: (text: string) => Array<{ kind: string; type?: string; id?: string; label?: string; text?: string }>;
+  };
   directiveChip?: React.FC<{
     directiveId: string;
     directiveType: string;
     label: string;
   }>;
 }> = [];
+
+const { setComposerTextMock } = vi.hoisted(() => ({
+  setComposerTextMock: vi.fn(),
+}));
 
 const capturedPopovers: Array<{
   char?: string;
@@ -48,7 +55,7 @@ vi.mock('@assistant-ui/react', () => {
     },
     useAui: () => ({
       composer: () => ({
-        setText: vi.fn(),
+        setText: setComposerTextMock,
       }),
     }),
     useAuiState: (selector: (state: any) => unknown) =>
@@ -81,6 +88,7 @@ describe('CodeMuxComposer', () => {
   afterEach(() => {
     lexicalProps.length = 0;
     capturedPopovers.length = 0;
+    setComposerTextMock.mockClear();
     cleanup();
   });
 
@@ -120,11 +128,40 @@ describe('CodeMuxComposer', () => {
     expect(chip?.className).toContain('codemux-directive-command');
   });
 
+  it('does not render assistant-ui unstable trigger popovers', () => {
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    expect(capturedPopovers).toHaveLength(0);
+  });
+
+  it('inserts a selected slash command by updating composer text directly', () => {
+    render(<CodeMuxComposer sessionId="session-1" agentKind="codex" />);
+
+    fireEvent.click(screen.getByText('/'));
+    fireEvent.click(document.querySelector('[data-command-id="review"]')!);
+
+    expect(setComposerTextMock).toHaveBeenLastCalledWith('/review ');
+  });
+
+  it('parses slash and file directives for Lexical chips without trigger resources', () => {
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    const segments = lexicalProps[0]?.formatter?.parse('/review @src/App.tsx plain') ?? [];
+
+    expect(segments).toEqual([
+      { kind: 'mention', type: 'command', label: '/review', id: 'review' },
+      { kind: 'text', text: ' ' },
+      { kind: 'mention', type: 'file', label: 'App.tsx', id: 'src/App.tsx' },
+      { kind: 'text', text: ' plain' },
+    ]);
+  });
+
   it('uses Codex slash commands for Codex sessions', () => {
     render(<CodeMuxComposer sessionId="session-1" agentKind="codex" />);
 
-    const slashPopover = capturedPopovers.find((popover) => popover.char === '/');
-    const commandIds = slashPopover?.adapter?.search?.('').map((item) => item.id) ?? [];
+    fireEvent.click(screen.getByText('/'));
+    const commandIds = Array.from(document.querySelectorAll('[data-command-id]'))
+      .map((item) => item.getAttribute('data-command-id'));
 
     expect(commandIds).toEqual(expect.arrayContaining(['plan', 'init', 'review']));
     expect(commandIds).not.toContain('permissions');
