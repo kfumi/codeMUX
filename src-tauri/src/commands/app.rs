@@ -1,4 +1,6 @@
 use std::fs;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::process::Command;
 
 use serde::Serialize;
@@ -247,8 +249,18 @@ enum EnvironmentCommandError {
     Failed(String),
 }
 
+fn configure_command(command: &mut Command) -> &mut Command {
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    command
+}
+
 fn run_version_command(command: &str, arg: &str) -> Result<String, EnvironmentCommandError> {
-    let output = Command::new(command).arg(arg).output().map_err(|error| {
+    let mut process = Command::new(command);
+    configure_command(process.arg(arg));
+
+    let output = process.output().map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             EnvironmentCommandError::Missing
         } else {
@@ -325,6 +337,7 @@ fn find_command_path(command: &str) -> Option<String> {
         cmd.arg(command);
         cmd
     };
+    configure_command(&mut cmd);
 
     let output = cmd.output().ok()?;
     if !output.status.success() {

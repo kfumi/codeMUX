@@ -360,15 +360,27 @@ export function convertResponsesToChatRequest(
   request: ResponsesRequest,
   history: CodexHistoryStore,
   reasoningConfig: ReasoningConfig | null,
-): ChatCompletionsRequest {
+): ChatCompletionsRequest & { _previousMessageCount?: number } {
   const { model, instructions, input, previous_response_id, stream, max_output_tokens, tool_choice, tools, reasoning, ...rest } = request;
 
   // Retrieve previous messages from history for multi-turn conversations
   const previousMessages = previous_response_id ? history.getMessages(previous_response_id) : undefined;
 
+  // Collect tool_call_ids already present in previous messages to avoid duplicates
+  const existingCallIds = new Set<string>();
+  if (previousMessages) {
+    for (const msg of previousMessages) {
+      if (msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
+        for (const tc of msg.tool_calls) {
+          if (tc.id) existingCallIds.add(tc.id);
+        }
+      }
+    }
+  }
+
   // Enrich input with any missing function_call items from history
   const enrichedInput = [...input] as Array<Record<string, unknown>>;
-  history.enrichRequest(enrichedInput, previous_response_id);
+  history.enrichRequest(enrichedInput, previous_response_id, existingCallIds);
 
   // Build chat messages from input items, merging consecutive function_calls
   const messages: ChatMessage[] = [];
@@ -385,6 +397,15 @@ export function convertResponsesToChatRequest(
   while (i < enrichedInput.length) {
     const item = enrichedInput[i] as ResponsesInputItem;
     const type = item.type as string | undefined;
+
+    // Skip function_call items whose tool_call_id is already in previousMessages
+    // (the assistant message with tool_calls is already prepended from history).
+    // Do NOT skip function_call_output — the tool response is not in previousMessages
+    // and must be included for the upstream API to accept the request.
+    if (type === 'function_call' && existingCallIds.size > 0 && item.call_id && existingCallIds.has(item.call_id as string)) {
+      i++;
+      continue;
+    }
 
     if (type === 'function_call' && item.call_id) {
       // Collect consecutive function_calls into a single assistant message
@@ -491,6 +512,9 @@ export function convertResponsesToChatRequest(
 
   // Apply reasoning options
   applyReasoningOptions(chatBody, request as unknown as Record<string, unknown>, model, reasoningConfig);
+
+  // Track how many messages came from history so the caller can store only new messages
+  chatBody._previousMessageCount = previousMessages?.length ?? 0;
 
   return chatBody;
 }

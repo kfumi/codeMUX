@@ -176,7 +176,7 @@ function ToolFallbackResult({
   return (
     <div
         data-slot="tool-fallback-result"
-        className={cn('aui-tool-fallback-result max-h-50', className)}
+        className={cn('aui-tool-fallback-result max-h-35', className)}
         {...props}
     >
       <p className="aui-tool-fallback-result-header text-muted-foreground text-xs font-medium">结果：</p>

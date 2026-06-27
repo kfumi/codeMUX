@@ -86,7 +86,7 @@ export function CodeMuxToolCallMessagePart({
           tooltipPath ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="ml-2 inline-block max-w-[min(34rem,56vw)] truncate align-middle text-xs font-normal text-muted-foreground/72">
+                <span className="ml-2 inline-block max-w-[min(33rem,54vw)] truncate align-middle text-xs font-normal text-muted-foreground/72">
                   {headerText}
                 </span>
               </TooltipTrigger>
@@ -95,7 +95,7 @@ export function CodeMuxToolCallMessagePart({
               </TooltipContent>
             </Tooltip>
           ) : (
-            <span className="ml-2 inline-block max-w-[min(34rem,56vw)] truncate align-middle text-xs font-normal text-muted-foreground/72">
+            <span className="ml-2 inline-block max-w-[min(33rem,56vw)] truncate align-middle text-xs font-normal text-muted-foreground/72">
               {headerText}
             </span>
           )

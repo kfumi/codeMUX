@@ -152,6 +152,9 @@ async function handleRequest(
   }
   const reasoningConfig = inferReasoningConfig(requestBody.model, config.baseUrl, config.providerName ?? '');
   const chatRequest = convertResponsesToChatRequest(requestBody, historyStore, reasoningConfig);
+  // Extract and remove the metadata field so it doesn't get sent to the upstream API
+  const previousMessageCount = (chatRequest as Record<string, unknown>)._previousMessageCount as number ?? 0;
+  delete (chatRequest as Record<string, unknown>)._previousMessageCount;
   proxyLog(`chat request ${summarizeChatRequest(chatRequest)}`);
   if (Array.isArray(chatRequest.tools) && chatRequest.tools.length > 0) {
     // proxyLog(`chat tool names ${chatRequest.tools.map((tool) => summarizeChatToolName(tool)).join(', ')}`);
@@ -284,13 +287,11 @@ async function handleRequest(
   const compatResponse = convertChatCompletionToResponses(completion, requestBody as Parameters<typeof convertChatCompletionToResponses>[1], legacyHistory);
 
   // Store messages in legacy history so the next request can reconstruct the full
-  // conversation chain. The new convertResponsesToChatRequest doesn't do this
-  // internally, so we do it here for non-streaming requests.
+  // conversation chain. Only store NEW messages from this turn — chatRequest.messages
+  // already contains previousMessages prepended by convertResponsesToChatRequest,
+  // and storing those would cause exponential duplication on the next request.
   const historyMessages: Array<{ role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string }> = [];
-  if (requestBody.instructions) {
-    historyMessages.push({ role: 'system', content: requestBody.instructions });
-  }
-  for (const msg of chatRequest.messages) {
+  for (const msg of chatRequest.messages.slice(previousMessageCount)) {
     historyMessages.push(msg as { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string });
   }
   // Build assistant message with original tool_call IDs from the chat request,

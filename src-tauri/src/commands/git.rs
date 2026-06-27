@@ -400,16 +400,34 @@ pub fn read_git_changed_files_for_tree(
         .map_err(|e| format!("Project path not found: {}", e))?;
     ensure_git_repo(&root)?;
 
-    // Use git diff to get only changed files (much faster than comparing all files)
-    let diff_output = run_git(
+    let index_file = temp_index_path();
+    if let Err(err) = run_git_with_env(&root, &["read-tree", baseline_tree], Some(&index_file)) {
+        let _ = std::fs::remove_file(&index_file);
+        return Err(err);
+    }
+    let add_result = run_git_with_env(&root, &["add", "-A", "--", "."], Some(&index_file));
+    if let Err(err) = add_result {
+        let _ = std::fs::remove_file(&index_file);
+        return Err(err);
+    }
+    let diff_output = match run_git_with_env(
         &root,
-        &["diff", "--name-status", "--no-renames", baseline_tree],
-    )?;
+        &[
+            "diff",
+            "--cached",
+            "--name-status",
+            "--no-renames",
+            baseline_tree,
+        ],
+        Some(&index_file),
+    ) {
+        Ok(output) => output,
+        Err(err) => {
+            let _ = std::fs::remove_file(&index_file);
+            return Err(err);
+        }
+    };
     let diff_text = String::from_utf8_lossy(&diff_output);
-
-    // Also get untracked files
-    let untracked_output = run_git(&root, &["ls-files", "-o", "--exclude-standard", "-z"])?;
-    let untracked_paths = parse_nul_paths(&untracked_output);
 
     let mut changed_files = Vec::new();
 
@@ -456,24 +474,7 @@ pub fn read_git_changed_files_for_tree(
         });
     }
 
-    // Add untracked files
-    for relative_path in untracked_paths {
-        let absolute_path = root.join(&relative_path);
-        if !absolute_path.is_file() {
-            continue;
-        }
-        let current = std::fs::read(&absolute_path)
-            .ok()
-            .and_then(|content| decode_text_bytes(&content));
-        if let Some(content) = current {
-            changed_files.push(GitChangedFile {
-                path: relative_path_to_absolute(&root, &relative_path),
-                status: "added".to_string(),
-                original_content: None,
-                current_content: content,
-            });
-        }
-    }
+    let _ = std::fs::remove_file(&index_file);
 
     Ok(changed_files)
 }

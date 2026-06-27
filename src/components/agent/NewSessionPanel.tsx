@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { findCommand, renderCommandPrompt } from '../../lib/slashCommands';
@@ -98,7 +98,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
         deleteClaudeSessionFiles: () => agentApi.deleteClaudeSessionFiles('new-session-draft'),
         getActiveProvider: () => getActiveProvider(),
         getTheme: () => config?.theme || 'System',
-        getCostInfo: () => '新对话还没有费用信息',
+        getCostInfo: () => '新建对话还没有费用信息',
       };
       await command.action(context, args);
       return;
@@ -126,8 +126,8 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
       >
         <div className="mx-auto flex min-h-full w-full flex-col items-center justify-center px-6 py-10">
           <div className="w-full max-w-2xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[360ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
-            <div className="mb-10 flex items-center justify-center gap-4">
-              <AgentSelector value={selectedAgentKind} onChange={setSelectedAgentKind} />
+            <div className="mb-10 flex flex-col items-center gap-4">
+              <AgentSelector value={selectedAgentKind} onChange={setSelectedAgentKind} variant="hero" />
               <h1 className="text-center text-[26px] font-semibold leading-tight text-foreground sm:text-[30px]">
                 {title}
               </h1>

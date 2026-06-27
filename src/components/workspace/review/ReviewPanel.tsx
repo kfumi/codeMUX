@@ -161,7 +161,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
                 <button
                   onClick={() => toggleFile(file)}
                   className={cn(
-                    'flex w-full items-center gap-2 px-4 py-3 text-left transition-colors',
+                    'flex w-full items-center gap-2 px-4 py-2 text-left transition-colors',
                     expanded ? 'bg-muted/52' : 'hover:bg-muted/28',
                   )}
                 >
@@ -176,7 +176,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
                     {statusLabel(file.status)}
                   </span>
                   <FileText className="h-4 w-4 shrink-0 text-muted-foreground/55" />
-                  <span className="min-w-0 flex-1 truncate text-base text-foreground/88">
+                  <span className="min-w-0 flex-1 truncate text-sm text-foreground/88">
                     {name}
                     {directory && <span className="ml-2 text-sm text-muted-foreground/55">{directory}</span>}
                   </span>

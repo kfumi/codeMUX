@@ -90,6 +90,7 @@ export class CodexHistoryStore {
   enrichRequest(
     input: Array<Record<string, unknown>>,
     previousResponseId: string | undefined,
+    existingCallIds?: Set<string>,
   ): number {
     let restored = 0;
     let i = 0;
@@ -98,7 +99,9 @@ export class CodexHistoryStore {
       if (item?.type === 'function_call_output' && typeof item.call_id === 'string') {
         const prev = i > 0 ? input[i - 1] : null;
         const alreadyHasCall = prev?.type === 'function_call' && prev.call_id === item.call_id;
-        if (!alreadyHasCall) {
+        // Skip if this call_id already exists in the prepended previous messages
+        const alreadyInHistory = existingCallIds?.has(item.call_id);
+        if (!alreadyHasCall && !alreadyInHistory) {
           const call = this.lookupCall(previousResponseId, item.call_id);
           if (call) {
             input.splice(i, 0, {

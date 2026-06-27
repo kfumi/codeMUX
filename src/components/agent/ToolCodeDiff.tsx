@@ -152,14 +152,14 @@ function PatchDiffLine({ line }: { line: string }) {
     <div
       data-slot="diff-viewer-line"
       data-type={type}
-      className={cn('flex min-w-full leading-5', type === 'add' && 'bg-[var(--diff-add-bg)]', type === 'del' && 'bg-[var(--diff-del-bg)]')}
+      className={cn('flex min-w-full leading-5', type === 'add' && 'bg-(--diff-add-bg)', type === 'del' && 'bg-(--diff-del-bg)')}
     >
       <span className="w-12 shrink-0 px-2 text-end text-muted-foreground select-none" />
       <span
         className={cn(
           'w-4 shrink-0 text-center select-none',
-          type === 'add' && 'text-[var(--diff-add-text-dark,_#3fb950)]',
-          type === 'del' && 'text-[var(--diff-del-text-dark,_#f85149)]',
+          type === 'add' && 'text-(--diff-add-text-dark,#3fb950)',
+          type === 'del' && 'text-(--diff-del-text-dark,#f85149)',
         )}
       >
         {prefix}
@@ -167,8 +167,8 @@ function PatchDiffLine({ line }: { line: string }) {
       <span
         className={cn(
           'flex-1 whitespace-pre',
-          type === 'add' && 'text-[var(--diff-add-text-dark,_#3fb950)]',
-          type === 'del' && 'text-[var(--diff-del-text-dark,_#f85149)]',
+          type === 'add' && 'text-(--diff-add-text-dark,#3fb950)',
+          type === 'del' && 'text-(--diff-del-text-dark,#f85149)',
         )}
       >
         {content}
