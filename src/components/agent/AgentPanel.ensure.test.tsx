@@ -107,6 +107,7 @@ describe('AgentPanel session bootstrapping', () => {
           opencode: {},
         },
         theme: 'System',
+        compact_ai_output: false,
       },
     }));
 

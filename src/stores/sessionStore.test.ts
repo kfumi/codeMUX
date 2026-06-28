@@ -69,6 +69,7 @@ describe('session store createSession', () => {
           opencode: {},
         },
         theme: 'System',
+        compact_ai_output: false,
       },
       isLoading: false,
       error: null,

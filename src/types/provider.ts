@@ -51,5 +51,6 @@ export interface AppConfig {
   active_provider_id: string | null;
   agent_defaults: AgentDefaults;
   agent_configs: AgentConfigMap;
+  compact_ai_output: boolean;
   theme: Theme;
 }

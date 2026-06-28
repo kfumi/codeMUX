@@ -3,11 +3,15 @@ import { invoke } from '@tauri-apps/api/core';
 import { Copy, FolderOpen, Check } from 'lucide-react';
 
 import { appApi } from '../../lib/tauri';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { Button } from '../ui/button';
+import { Switch } from '../ui/switch';
 
 export function GeneralSettings() {
   const [configDir, setConfigDir] = useState<string>('');
   const [copied, setCopied] = useState(false);
+  const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
+  const setCompactAiOutput = useSettingsStore((state) => state.setCompactAiOutput);
 
   useEffect(() => {
     appApi.getAppDataDirectory().then(setConfigDir).catch(() => {});
@@ -37,6 +41,25 @@ export function GeneralSettings() {
       <div>
         <h3 className="text-sm font-semibold text-foreground/90">常规设置</h3>
         <p className="mt-1 text-xs text-foreground/60">应用级的通用信息与偏好设置。</p>
+      </div>
+
+      <div className="space-y-3">
+        <label className="text-sm text-foreground/74">显示偏好</label>
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-border/70 bg-card p-4">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground/90">精简 AI 输出</div>
+            <p className="mt-1 text-xs leading-relaxed text-foreground/60">
+              开启后，每轮完成时折叠总结前的过程消息，仅保留最终总结。
+            </p>
+          </div>
+          <Switch
+            aria-label="精简 AI 输出"
+            checked={compactAiOutput}
+            onCheckedChange={(checked) => {
+              void setCompactAiOutput(checked);
+            }}
+          />
+        </div>
       </div>
 
       {/* Config file section */}

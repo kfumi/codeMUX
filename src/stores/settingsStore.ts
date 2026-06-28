@@ -38,6 +38,7 @@ interface SettingsState {
   proxyToggling: boolean;
   fetchConfig: () => Promise<void>;
   setTheme: (theme: Theme) => Promise<void>;
+  setCompactAiOutput: (enabled: boolean) => Promise<void>;
   setActiveProvider: (providerId: string) => Promise<void>;
   updateProvider: (provider: Provider) => Promise<void>;
   deleteProvider: (providerId: string) => Promise<void>;
@@ -86,6 +87,23 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       applyThemeLocally(previousTheme);
       set((state) => ({
         config: state.config ? { ...state.config, theme: previousTheme } : state.config,
+        error: String(error),
+      }));
+    }
+  },
+
+  setCompactAiOutput: async (enabled: boolean) => {
+    const previousValue = get().config?.compact_ai_output ?? false;
+    set((state) => ({
+      config: state.config ? { ...state.config, compact_ai_output: enabled } : state.config,
+      error: null,
+    }));
+
+    try {
+      await configApi.setCompactAiOutput(enabled);
+    } catch (error) {
+      set((state) => ({
+        config: state.config ? { ...state.config, compact_ai_output: previousValue } : state.config,
         error: String(error),
       }));
     }

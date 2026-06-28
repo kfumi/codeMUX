@@ -82,6 +82,7 @@ Agent backends are registered in `src/types/agentRegistry.ts`. Each agent kind (
 - Base components in `src/components/ui/` are from **shadcn/ui** (Radix UI + Tailwind + CSS variables)
 - Add new shadcn components with: `npx shadcn@latest add <component>`
 - Styling uses Tailwind CSS v4 with `class-variance-authority`, `clsx`, and `tailwind-merge`
+- Prefer existing `src/components/ui/` components for UI implementation before creating custom controls or raw HTML elements. Use built-in variants and sizes, such as `Button` with `variant="ghost"`, whenever they fit the interaction.
 
 ## Coding Conventions
 

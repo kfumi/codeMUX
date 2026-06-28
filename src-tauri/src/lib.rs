@@ -133,6 +133,7 @@ pub fn run() {
             commands::provider::set_default_agent_kind,
             commands::provider::update_agent_config,
             commands::provider::set_theme,
+            commands::provider::set_compact_ai_output,
             commands::provider::fetch_provider_models,
             commands::provider::test_provider,
             commands::app::get_log_directory,

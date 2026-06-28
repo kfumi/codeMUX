@@ -2,7 +2,7 @@
 import { agentApi, fileApi } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 import {
-  isCodexInjectedSystemUserMessage,
+  isAgentInjectedUserMessage,
   isTerminalAgentEvent,
   mapPersistedClaudeMessage,
   parseSdkUserMessage,
@@ -388,7 +388,7 @@ function parseAgentEvent(raw: string): AgentMessage {
       case 'user':
         {
           const event = parseSdkUserMessage(data);
-          if (event.kind === 'user' && isCodexInjectedSystemUserMessage(event.data.content)) {
+          if (event.kind === 'user' && isAgentInjectedUserMessage(event.data.content)) {
             return { kind: 'raw', data };
           }
           return event;

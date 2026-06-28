@@ -90,6 +90,63 @@ describe('mapPersistedClaudeMessage', () => {
     ).toBeNull();
   });
 
+  it('suppresses Codex injected skill instructions from user-visible history', () => {
+    expect(
+      mapPersistedClaudeMessage(
+        {
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: [
+                  'Base directory for this skill: C:\\Users\\94910\\.claude\\plugins\\cache\\claude-plugins-official\\superpowers\\5.1.0\\skills\\using-superpowers',
+                  '',
+                  '<SUBAGENT-STOP>',
+                  'If you were dispatched as a subagent to execute a specific task, skip this skill.',
+                  '</SUBAGENT-STOP>',
+                  '',
+                  '<EXTREMELY-IMPORTANT>',
+                  'If you think there is even a 1% chance a skill might apply to what you are doing, you ABSOLUTELY MUST invoke the skill.',
+                ].join('\n'),
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        'codex',
+      ),
+    ).toBeNull();
+  });
+
+  it('suppresses Claude Code injected skill instructions from user-visible history', () => {
+    expect(
+      mapPersistedClaudeMessage(
+        {
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: [
+                  'Base directory for this skill: C:\\Users\\94910\\.claude\\plugins\\cache\\claude-plugins-official\\superpowers\\5.1.0\\skills\\using-superpowers',
+                  '',
+                  '<SUBAGENT-STOP>',
+                  'If you were dispatched as a subagent to execute a specific task, skip this skill.',
+                  '</SUBAGENT-STOP>',
+                ].join('\n'),
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        'claude_code',
+      ),
+    ).toBeNull();
+  });
+
   it('loads result messages from Claude JSONL history', () => {
     expect(
       mapPersistedClaudeMessage({

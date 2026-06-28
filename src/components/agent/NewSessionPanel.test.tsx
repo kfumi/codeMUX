@@ -91,6 +91,7 @@ describe('NewSessionPanel', () => {
           opencode: {},
         },
         theme: 'System',
+        compact_ai_output: false,
       },
     }));
   });

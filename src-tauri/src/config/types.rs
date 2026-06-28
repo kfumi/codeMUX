@@ -57,6 +57,10 @@ fn default_codex_sdk_mode() -> String {
     "responses".to_string()
 }
 
+fn default_false() -> bool {
+    false
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
     pub id: String,
@@ -161,6 +165,8 @@ pub struct AppConfig {
     pub agent_defaults: AgentDefaults,
     #[serde(default)]
     pub agent_configs: AgentConfigs,
+    #[serde(default = "default_false")]
+    pub compact_ai_output: bool,
     pub theme: Theme,
 }
 
@@ -192,6 +198,7 @@ impl Default for AppConfig {
             active_provider_id: Some(id),
             agent_defaults: AgentDefaults::default(),
             agent_configs: AgentConfigs::default(),
+            compact_ai_output: false,
             theme: Theme::System,
         }
     }
@@ -218,6 +225,7 @@ mod tests {
         assert_eq!(config.agent_configs.claude_code.executable_mode, "auto");
         assert!(config.agent_configs.claude_code.resume_sessions);
         assert_eq!(config.agent_configs.codex.sdk_mode, "responses");
+        assert!(!config.compact_ai_output);
     }
 
     #[test]

@@ -5,6 +5,7 @@ import type { AppConfig, Provider } from '../types/provider';
 const setDefaultAgentKindMock = vi.fn<(agentKind: string) => Promise<void>>();
 const updateAgentConfigMock = vi.fn<(agentKind: string, config: Record<string, unknown>) => Promise<void>>();
 const deleteProviderMock = vi.fn<(providerId: string) => Promise<void>>();
+const setCompactAiOutputMock = vi.fn<(enabled: boolean) => Promise<void>>();
 
 vi.mock('../lib/tauri', () => ({
   configApi: {
@@ -17,6 +18,7 @@ vi.mock('../lib/tauri', () => ({
     testProvider: vi.fn(),
     setDefaultAgentKind: setDefaultAgentKindMock,
     updateAgentConfig: updateAgentConfigMock,
+    setCompactAiOutput: setCompactAiOutputMock,
   },
 }));
 
@@ -38,6 +40,7 @@ const baseConfig: AppConfig = {
     opencode: {},
   },
   theme: 'System',
+  compact_ai_output: false,
 };
 
 describe('settings store agent config actions', () => {
@@ -73,6 +76,15 @@ describe('settings store agent config actions', () => {
     expect(useSettingsStore.getState().config?.agent_configs.codex).toEqual({
       sdk_mode: 'agent',
     });
+  });
+
+  it('persists compact AI output preference', async () => {
+    const { useSettingsStore } = await import('./settingsStore');
+
+    await useSettingsStore.getState().setCompactAiOutput(true);
+
+    expect(setCompactAiOutputMock).toHaveBeenCalledWith(true);
+    expect(useSettingsStore.getState().config?.compact_ai_output).toBe(true);
   });
 
   it('keeps the active provider consistent when the active provider is deleted', async () => {

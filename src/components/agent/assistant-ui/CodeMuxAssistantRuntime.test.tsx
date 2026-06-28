@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
+import { useSettingsStore } from '../../../stores/settingsStore';
 import { CodeMuxAssistantRuntimeProvider, resolveSlashCommand } from './CodeMuxAssistantRuntime';
 import { CodeMuxThread, buildToolDurationMap } from './CodeMuxThread';
 
@@ -161,6 +162,55 @@ const longUserEvents: AgentMessage[] = [
   { kind: 'user', data: { content: longUserText } },
 ];
 
+const completedTurnEvents: AgentMessage[] = [
+  { kind: 'user', data: { content: 'please fix it' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-process',
+      session_id: 'session-completed-turn',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'I am checking files first.' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-final',
+      session_id: 'session-completed-turn',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Fixed and verified.' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'result',
+    data: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      uuid: 'result-1',
+      session_id: 'session-completed-turn',
+      duration_ms: 73_000,
+      duration_api_ms: 0,
+      num_turns: 1,
+      result: '',
+      total_cost_usd: 0,
+      usage: {
+        input_tokens: 10,
+        output_tokens: 20,
+      },
+    },
+  },
+];
+
 const originalScrollTo = HTMLElement.prototype.scrollTo;
 
 function Harness({ sessionId }: { sessionId: string }) {
@@ -199,12 +249,19 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-grouped-tools': groupedToolEvents,
         'session-directives': directiveUserEvents,
         'session-long-user': longUserEvents,
+        'session-completed-turn': completedTurnEvents,
       },
       eventTimestamps: {
         'session-1': [1, 2],
         'session-2': [3, 4],
         'session-tool': [5, 6],
         'session-timestamp': [Date.parse('2026-06-12T21:40:00+08:00')],
+        'session-completed-turn': [
+          Date.parse('2026-06-28T10:00:00Z'),
+          Date.parse('2026-06-28T10:00:12Z'),
+          Date.parse('2026-06-28T10:01:13Z'),
+          Date.parse('2026-06-28T10:01:13Z'),
+        ],
       },
       isRunning: {},
       error: {},
@@ -221,6 +278,30 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       fileOriginals: {},
       acknowledgedFiles: {},
     });
+
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: {
+        providers: [],
+        active_provider_id: null,
+        agent_defaults: {
+          default_agent_kind: 'claude_code',
+        },
+        agent_configs: {
+          claude_code: {
+            executable_mode: 'auto',
+            resume_sessions: true,
+          },
+          codex: {
+            sdk_mode: 'responses',
+          },
+          gemini_cli: {},
+          opencode: {},
+        },
+        theme: 'System',
+        compact_ai_output: false,
+      },
+    }));
   });
 
   afterEach(() => {
@@ -375,6 +456,26 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     expect(screen.getByRole('button', { name: '收起' })).toBeTruthy();
     expect(bubble?.className).not.toContain('max-h-80');
+  });
+
+  it('collapses completed assistant process messages when compact output is enabled', () => {
+    useSettingsStore.setState((state) => ({
+      config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
+    }));
+
+    render(<Harness sessionId="session-completed-turn" />);
+
+    expect(screen.getByText('Fixed and verified.')).toBeTruthy();
+    expect(screen.queryByText('I am checking files first.')).toBeNull();
+
+    const toggle = screen.getByRole('button', { name: /灞曞紑AI杩囩▼|展开AI过程/ });
+    expect(toggle.textContent).toContain('已处理');
+    expect(toggle.textContent).toContain('1m 13s');
+
+    fireEvent.click(toggle);
+
+    expect(screen.getByText('I am checking files first.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /鏀惰捣AI杩囩▼|收起AI过程/ })).toBeTruthy();
   });
 
   it('returns tool durations from event-reported data only', () => {

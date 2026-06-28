@@ -44,6 +44,7 @@ describe('StatusBar', () => {
           opencode: {},
         },
         theme: 'System',
+        compact_ai_output: false,
       },
       proxyRunning: false,
       proxyUrl: null,

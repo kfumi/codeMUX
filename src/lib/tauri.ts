@@ -208,6 +208,8 @@ export const configApi = {
     config: AgentConfigUpdateMap[T],
   ): Promise<void> => invokeLogged('update_agent_config', { agentKind, config }),
   setTheme: (theme: Theme): Promise<void> => invokeLogged('set_theme', { theme: theme.toLowerCase() }),
+  setCompactAiOutput: (enabled: boolean): Promise<void> =>
+    invokeLogged('set_compact_ai_output', { enabled }),
   fetchModels: (apiKey: string, baseUrl: string): Promise<ModelInfo[]> =>
     invokeLogged('fetch_provider_models', { apiKey, baseUrl }),
   testProvider: (providerId: string): Promise<string> =>

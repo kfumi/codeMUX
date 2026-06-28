@@ -27,6 +27,8 @@ codeMUX is a Tauri 2 desktop app: React/Vite frontend, Rust backend, and TypeScr
 
 Follow `.editorconfig`: spaces, LF endings, UTF-8, final newline, 2-space indentation for TypeScript/JSON/TOML/YAML, and 4-space indentation for Rust. Use strict TypeScript and the `@/*` import alias. Prefer functional React components, hooks, Zustand state, and Tailwind/CSS variables. Use `PascalCase` for components, `camelCase` for functions and variables, and `snake_case` for Rust modules.
 
+For UI work, prefer existing components in `src/components/ui/` (shadcn/ui built on Radix UI) before creating custom controls or raw HTML elements. Use their variants and sizes, such as `Button` with `variant="ghost"`, whenever they fit the interaction.
+
 ## Testing Guidelines
 
 Tests use Vitest and Testing Library. Name tests `*.test.ts` or `*.test.tsx` and colocate them near covered code. Add focused tests for stores, parsing, sidecar transforms, Rust-adjacent TypeScript behavior, and React behavior. Keep tests deterministic; avoid local paths unless path handling is under test.

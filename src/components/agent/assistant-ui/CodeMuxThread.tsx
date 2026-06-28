@@ -5,11 +5,13 @@
   useAuiState,
   type MessageState,
 } from '@assistant-ui/react';
-import { ArrowDown, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { ArrowDown, ChevronRight, ChevronDown, Loader2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Streamdown } from 'streamdown';
 
 import { MessageFooter, type MessageFooterStats } from '@/components/assistant-ui/message-footer';
 import { ToolGroup } from '@/components/assistant-ui/tool-group';
+import { Button } from '@/components/ui/button';
 import {
   ReasoningContent,
   ReasoningRoot,
@@ -20,6 +22,7 @@ import { cn } from '../../../lib/utils';
 import { calculateCost } from '../../../lib/pricing';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { isInterruptMarker } from '../../../stores/agentEventParsing';
+import { useSettingsStore } from '../../../stores/settingsStore';
 import type { Provider } from '../../../types/provider';
 import {
   CodeMuxDataMessagePart,
@@ -37,7 +40,14 @@ type CodeMuxThreadProps = {
   footer?: ReactNode;
 };
 
+type AssistantCollapseInfo = {
+  turnKey: string;
+  isToggleMessage: boolean;
+  durationMs?: number;
+};
+
 const EMPTY_EVENTS: AgentMessage[] = [];
+const EMPTY_TIMESTAMPS: number[] = [];
 const INTERRUPT_LABEL = '用户中断请求';
 const COLLAPSED_USER_MESSAGE_CLASS = 'max-h-80 overflow-hidden';
 const STREAMING_THINKING_PROTECTION_THRESHOLD = 20_000;
@@ -49,9 +59,28 @@ const GROUP_BY_PART = groupPartByType({
 
 export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProps) {
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
+  const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
+  const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    setExpandedTurnKeys(new Set());
+  }, [sessionId, compactAiOutput]);
+
+  const toggleExpandedTurn = (turnKey: string) => {
+    setExpandedTurnKeys((current) => {
+      const next = new Set(current);
+      if (next.has(turnKey)) {
+        next.delete(turnKey);
+      } else {
+        next.add(turnKey);
+      }
+      return next;
+    });
+  };
 
   // Incremental tool duration calculation - only use event-reported durations
   const toolDurationCacheRef = useRef<{ events: AgentMessage[]; result: Record<string, number> }>({ events: [], result: {} });
@@ -123,6 +152,11 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
     return newResult;
   }, [events]);
 
+  const collapseInfoByEventIndex = useMemo(
+    () => buildAssistantCollapseInfoMap(events, eventTimestamps),
+    [events, eventTimestamps],
+  );
+
   return (
     <ThreadPrimitive.Root className="flex h-full min-h-0 flex-col text-sm">
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
@@ -140,6 +174,10 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
                   <AssistantLikeMessage
                     message={message}
                     sessionId={sessionId}
+                    compactAiOutput={compactAiOutput}
+                    collapseInfoByEventIndex={collapseInfoByEventIndex}
+                    expandedTurnKeys={expandedTurnKeys}
+                    onToggleExpandedTurn={toggleExpandedTurn}
                     toolDurations={toolDurations}
                     resultStatsByAssistantIndex={resultStatsByAssistantIndex}
                   />
@@ -221,7 +259,7 @@ function UserMessage({ message, sourceEventIndex }: { message: MessageState; sou
             className="mt-1.5 inline-flex items-center gap-1 self-start rounded-md border border-border/40 bg-muted/28 px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
           >
             <span>{expanded ? '收起' : '查看更多'}</span>
-            {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           </button>
         ) : null}
         <MessageFooter timestamp={timestamp} className="justify-end" />
@@ -452,11 +490,19 @@ function MessageNav({
 function AssistantLikeMessage({
   message,
   sessionId,
+  compactAiOutput,
+  collapseInfoByEventIndex,
+  expandedTurnKeys,
+  onToggleExpandedTurn,
   toolDurations,
   resultStatsByAssistantIndex,
 }: {
   message: MessageState;
   sessionId: string;
+  compactAiOutput: boolean;
+  collapseInfoByEventIndex: Map<number, AssistantCollapseInfo>;
+  expandedTurnKeys: Set<string>;
+  onToggleExpandedTurn: (turnKey: string) => void;
   toolDurations: Record<string, number>;
   resultStatsByAssistantIndex: Record<number, MessageFooterStats>;
 }) {
@@ -465,6 +511,14 @@ function AssistantLikeMessage({
   }
 
   const sourceEventIndex = getSourceEventIndex(message);
+  const collapseInfo = compactAiOutput ? getMessageCollapseInfo(message, collapseInfoByEventIndex) : undefined;
+  const isCollapseExpanded = collapseInfo ? expandedTurnKeys.has(collapseInfo.turnKey) : false;
+  const shouldHideCollapsedContent = collapseInfo && !isCollapseExpanded;
+
+  if (shouldHideCollapsedContent && !collapseInfo.isToggleMessage) {
+    return null;
+  }
+
   const sourceTimestamp = getSourceTimestamp(message);
   const footerStats = sourceEventIndex != null ? resultStatsByAssistantIndex[sourceEventIndex] : undefined;
   const isFinal = message.metadata.custom?.isFinalAssistantMessage === true;
@@ -479,60 +533,95 @@ function AssistantLikeMessage({
           message.metadata.custom?.sourceRole === 'system' && 'text-muted-foreground',
         )}
       >
-        <MessagePrimitive.GroupedParts groupBy={GROUP_BY_PART} indicator="never">
-          {({ part, children }) => {
-            switch (part.type) {
-              case 'group-thinking':
-                return <CodeMuxReasoningGroup>{children}</CodeMuxReasoningGroup>;
+        {collapseInfo?.isToggleMessage ? (
+          <AssistantCollapseToggle
+            expanded={isCollapseExpanded}
+            durationMs={collapseInfo.durationMs}
+            onClick={() => onToggleExpandedTurn(collapseInfo.turnKey)}
+          />
+        ) : null}
+        {!shouldHideCollapsedContent ? (
+          <MessagePrimitive.GroupedParts groupBy={GROUP_BY_PART} indicator="never">
+            {({ part, children }) => {
+              switch (part.type) {
+                case 'group-thinking':
+                  return <CodeMuxReasoningGroup>{children}</CodeMuxReasoningGroup>;
 
-              case 'group-tool-call':
-                // 如果分组只有一个工具，直接展示工具，不用 ToolGroup
-                if (part.indices.length === 1) {
-                  return <>{children}</>;
-                }
-                // Get tool names from message content
-                const toolNames = part.indices
-                  .map((idx) => message.content[idx])
-                  .filter((c) => c?.type === 'tool-call')
-                  .map((c) => (c as { toolName: string }).toolName);
-                return (
-                  <ToolGroup startIndex={part.indices[0] ?? 0} endIndex={part.indices[part.indices.length - 1] ?? 0} toolNames={toolNames}>
-                    {children}
-                  </ToolGroup>
-                );
+                case 'group-tool-call':
+                  // 如果分组只有一个工具，直接展示工具，不用 ToolGroup
+                  if (part.indices.length === 1) {
+                    return <>{children}</>;
+                  }
+                  // Get tool names from message content
+                  const toolNames = part.indices
+                    .map((idx) => message.content[idx])
+                    .filter((c) => c?.type === 'tool-call')
+                    .map((c) => (c as { toolName: string }).toolName);
+                  return (
+                    <ToolGroup startIndex={part.indices[0] ?? 0} endIndex={part.indices[part.indices.length - 1] ?? 0} toolNames={toolNames}>
+                      {children}
+                    </ToolGroup>
+                  );
 
-              case 'text':
-                return <CodeMuxTextMessagePart />;
+                case 'text':
+                  return <CodeMuxTextMessagePart />;
 
-              case 'reasoning':
-                return <CodeMuxReasoningMessagePart />;
+                case 'reasoning':
+                  return <CodeMuxReasoningMessagePart />;
 
-              case 'tool-call':
-                return (
-                  <CodeMuxToolCallMessagePart
-                    toolName={part.toolName}
-                    args={asRecord(part.args)}
-                    argsText={part.argsText}
-                    result={part.result}
-                    isError={part.isError}
-                    status={part.status}
-                    durationMs={typeof part.toolCallId === 'string' ? toolDurations[part.toolCallId] : undefined}
-                  />
-                );
+                case 'tool-call':
+                  return (
+                    <CodeMuxToolCallMessagePart
+                      toolName={part.toolName}
+                      args={asRecord(part.args)}
+                      argsText={part.argsText}
+                      result={part.result}
+                      isError={part.isError}
+                      status={part.status}
+                      durationMs={typeof part.toolCallId === 'string' ? toolDurations[part.toolCallId] : undefined}
+                    />
+                  );
 
-              case 'data':
-                return <CodeMuxDataMessagePart name={part.name} data={part.data} sessionId={sessionId} />;
+                case 'data':
+                  return <CodeMuxDataMessagePart name={part.name} data={part.data} sessionId={sessionId} />;
 
-              default:
-                return null;
-            }
-          }}
-        </MessagePrimitive.GroupedParts>
-        {shouldRenderFooter ? (
+                default:
+                  return null;
+              }
+            }}
+          </MessagePrimitive.GroupedParts>
+        ) : null}
+        {!shouldHideCollapsedContent && shouldRenderFooter ? (
           <MessageFooter timestamp={sourceTimestamp} stats={footerStats} />
         ) : null}
       </div>
     </MessagePrimitive.Root>
+  );
+}
+
+function AssistantCollapseToggle({
+  expanded,
+  durationMs,
+  onClick,
+}: {
+  expanded: boolean;
+  durationMs?: number;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      aria-expanded={expanded}
+      aria-label={expanded ? '收起AI过程' : '展开AI过程'}
+      onClick={onClick}
+      className="mb-2 h-8 gap-1.5 rounded-md pl-0 text-xs font-medium text-muted-foreground/80"
+    >
+      <span>已处理</span>
+      {durationMs != null ? <span className="tabular-nums">{formatCompactDuration(durationMs)}</span> : null}
+      {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+    </Button>
   );
 }
 
@@ -583,10 +672,12 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
 
         {text ? (
           <div
-            data-streaming-text="plain"
-            className="relative whitespace-pre-wrap wrap-break-word text-sm leading-6 text-foreground"
+            data-streaming-text="markdown"
+            className="relative text-sm leading-6 text-foreground"
           >
-            {text}
+            <Streamdown mode="streaming" className="aui-md">
+              {text}
+            </Streamdown>
             <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse rounded-full bg-foreground/60 align-text-bottom" />
           </div>
         ) : null}
@@ -620,6 +711,149 @@ function getMessageText(message: MessageState) {
     .map((part) => (part.type === 'text' ? part.text : ''))
     .join('')
     .trim();
+}
+
+function buildAssistantCollapseInfoMap(
+  events: AgentMessage[],
+  timestamps: number[],
+): Map<number, AssistantCollapseInfo> {
+  const resultTargets = buildAssistantResultTargetMap(events);
+  const collapseInfoByEventIndex = new Map<number, AssistantCollapseInfo>();
+
+  for (const [finalAssistantIndex, resultIndex] of resultTargets) {
+    const userIndex = findTurnUserIndex(events, finalAssistantIndex, resultIndex);
+    if (userIndex == null) {
+      continue;
+    }
+
+    const collapsibleEventIndices: number[] = [];
+    for (let index = userIndex + 1; index < finalAssistantIndex; index++) {
+      if (isCollapsibleProcessEvent(events[index])) {
+        collapsibleEventIndices.push(index);
+      }
+    }
+
+    if (collapsibleEventIndices.length === 0) {
+      continue;
+    }
+
+    const turnKey = `${userIndex}-${finalAssistantIndex}-${resultIndex}`;
+    const firstCollapsibleIndex = collapsibleEventIndices[0];
+    const durationMs = getTurnDurationMs(events, timestamps, userIndex, finalAssistantIndex, resultIndex);
+
+    for (const eventIndex of collapsibleEventIndices) {
+      collapseInfoByEventIndex.set(eventIndex, {
+        turnKey,
+        isToggleMessage: eventIndex === firstCollapsibleIndex,
+        durationMs,
+      });
+    }
+  }
+
+  return collapseInfoByEventIndex;
+}
+
+function findTurnUserIndex(
+  events: AgentMessage[],
+  finalAssistantIndex: number,
+  resultIndex: number,
+): number | undefined {
+  const searchStartIndex = Math.min(finalAssistantIndex, resultIndex) - 1;
+  for (let index = searchStartIndex; index >= 0; index--) {
+    const event = events[index];
+    if (event.kind === 'user') {
+      return index;
+    }
+    if (event.kind === 'result') {
+      break;
+    }
+  }
+
+  return undefined;
+}
+
+function isCollapsibleProcessEvent(event: AgentMessage | undefined): boolean {
+  if (!event) {
+    return false;
+  }
+
+  return event.kind === 'assistant'
+    || event.kind === 'ask_user_question'
+    || event.kind === 'api_retry'
+    || event.kind === 'compact'
+    || event.kind === 'error'
+    || event.kind === 'stream_status';
+}
+
+function getTurnDurationMs(
+  events: AgentMessage[],
+  timestamps: number[],
+  userIndex: number,
+  finalAssistantIndex: number,
+  resultIndex: number,
+): number | undefined {
+  const result = events[resultIndex];
+  if (result?.kind === 'result' && typeof result.data.duration_ms === 'number' && result.data.duration_ms > 0) {
+    return result.data.duration_ms;
+  }
+
+  const startTime = timestamps[userIndex];
+  const endTime = timestamps[resultIndex] || timestamps[finalAssistantIndex];
+  if (typeof startTime === 'number' && startTime > 0 && typeof endTime === 'number' && endTime > startTime) {
+    return endTime - startTime;
+  }
+
+  return undefined;
+}
+
+function getMessageCollapseInfo(
+  message: MessageState,
+  collapseInfoByEventIndex: Map<number, AssistantCollapseInfo>,
+): AssistantCollapseInfo | undefined {
+  const sourceEventIndices = getSourceEventIndices(message);
+  let firstInfo: AssistantCollapseInfo | undefined;
+  let hasToggleMessage = false;
+
+  for (const sourceEventIndex of sourceEventIndices) {
+    const info = collapseInfoByEventIndex.get(sourceEventIndex);
+    if (!info) {
+      continue;
+    }
+
+    firstInfo ??= info;
+    hasToggleMessage = hasToggleMessage || info.isToggleMessage;
+  }
+
+  if (!firstInfo) {
+    return undefined;
+  }
+
+  return {
+    ...firstInfo,
+    isToggleMessage: hasToggleMessage,
+  };
+}
+
+function getSourceEventIndices(message: MessageState): number[] {
+  const value = message.metadata.custom?.sourceEventIndices;
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is number => typeof entry === 'number');
+  }
+
+  const sourceEventIndex = getSourceEventIndex(message);
+  return sourceEventIndex != null ? [sourceEventIndex] : [];
+}
+
+function formatCompactDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+
+  return `${seconds}s`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

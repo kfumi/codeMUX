@@ -196,6 +196,19 @@ pub fn set_theme(state: State<'_, AppState>, app: AppHandle, theme: String) -> R
     Ok(())
 }
 
+#[tauri::command]
+pub fn set_compact_ai_output(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    info!(target: "provider", "Setting compact AI output enabled={}", enabled);
+    let mut config = state.config.lock().unwrap();
+    config.compact_ai_output = enabled;
+    config::save_config(&app, &config)?;
+    Ok(())
+}
+
 #[derive(serde::Serialize)]
 pub struct ModelInfo {
     pub id: String,

@@ -66,11 +66,17 @@ export function parseSdkUserMessage(data: Record<string, unknown>): ParsedStoreE
   };
 }
 
-export function isCodexInjectedSystemUserMessage(text: string): boolean {
+export function isAgentInjectedUserMessage(text: string): boolean {
   const normalized = text.trimStart();
   return (
-    normalized.startsWith('# AGENTS.md instructions for ') &&
-    normalized.includes('<INSTRUCTIONS>')
+    (
+      normalized.startsWith('# AGENTS.md instructions for ') &&
+      normalized.includes('<INSTRUCTIONS>')
+    ) ||
+    (
+      normalized.startsWith('Base directory for this skill: ') &&
+      normalized.includes('<SUBAGENT-STOP>')
+    )
   );
 }
 
@@ -94,12 +100,12 @@ export function mapPersistedClaudeMessage(raw: Record<string, unknown>, agentKin
 
   if (msgType === 'user') {
     const event = parseSdkUserMessage(raw);
-    if (event.kind !== 'user' || agentKind !== 'codex') {
-      return event;
+    if (event.kind === 'user' && isAgentInjectedUserMessage(event.data.content)) {
+      return null;
     }
 
-    if (isCodexInjectedSystemUserMessage(event.data.content)) {
-      return null;
+    if (event.kind !== 'user' || agentKind !== 'codex') {
+      return event;
     }
 
     return {

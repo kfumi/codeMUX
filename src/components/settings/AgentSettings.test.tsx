@@ -45,6 +45,7 @@ describe('AgentSettingsPanel', () => {
           opencode: {},
         },
         theme: 'System',
+        compact_ai_output: false,
       },
       setDefaultAgentKind: vi.fn(),
       getDefaultAgentKind: () => 'codex',

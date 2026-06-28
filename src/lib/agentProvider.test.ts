@@ -41,6 +41,7 @@ const config: AppConfig = {
     opencode: {},
   },
   theme: 'System',
+  compact_ai_output: false,
 };
 
 describe('resolveAgentProviderConfig', () => {
