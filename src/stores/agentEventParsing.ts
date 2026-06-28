@@ -5,11 +5,12 @@ import type {
 } from '../types/agent';
 import type { AgentKind } from '../types/session';
 import { formatPromptAsCommandDisplay } from '../lib/slashCommands';
+import type { UserAttachmentPreview } from '../types/agentInput';
 
 export const INTERRUPT_MARKER = '[Request interrupted by user]';
 
 export type ParsedStoreEvent =
-  | { kind: 'user'; data: { content: string } }
+  | { kind: 'user'; data: { content: string; attachments?: UserAttachmentPreview[] } }
   | { kind: 'assistant'; data: AgentAssistantMessage }
   | { kind: 'tool_result'; data: AgentToolResult }
   | { kind: 'result'; data: AgentResultMessage }
@@ -59,11 +60,73 @@ export function parseSdkUserMessage(data: Record<string, unknown>): ParsedStoreE
     ?.filter((block) => isRecord(block) && block.type === 'text')
     .map((block) => String(block.text || ''))
     .filter((text) => text.length > 0) ?? [];
+  const attachments = extractImageAttachments(content ?? []);
 
   return {
     kind: 'user',
-    data: { content: textParts.join('\n') },
+    data: {
+      content: textParts.join('\n'),
+      ...(attachments.length > 0 ? { attachments } : {}),
+    },
   };
+}
+
+function extractImageAttachments(content: unknown[]): UserAttachmentPreview[] {
+  const attachments: UserAttachmentPreview[] = [];
+
+  for (const block of content) {
+    if (!isRecord(block) || block.type !== 'image') {
+      continue;
+    }
+
+    const source = asRecord(block.source);
+    const mediaType = typeof source?.media_type === 'string'
+      ? source.media_type
+      : typeof source?.mediaType === 'string'
+        ? source.mediaType
+        : undefined;
+    const data = typeof source?.data === 'string' ? source.data : undefined;
+    const sourceType = typeof source?.type === 'string' ? source.type : undefined;
+    const dataUrl = sourceType === 'base64' && mediaType && data
+      ? `data:${mediaType};base64,${data}`
+      : typeof source?.url === 'string' && source.url.startsWith('data:image/')
+        ? source.url
+        : undefined;
+
+    if (!dataUrl) {
+      continue;
+    }
+
+    attachments.push({
+      type: 'image',
+      name: typeof block.name === 'string' && block.name.trim()
+        ? block.name
+        : `image-${attachments.length + 1}.${extensionForMediaType(mediaTypeFromDataUrl(dataUrl) ?? mediaType ?? 'image/png')}`,
+      mediaType: mediaTypeFromDataUrl(dataUrl) ?? mediaType ?? 'image/png',
+      dataUrl,
+    });
+  }
+
+  return attachments;
+}
+
+function mediaTypeFromDataUrl(dataUrl: string): string | undefined {
+  return dataUrl.match(/^data:([^;,]+)[;,]/)?.[1];
+}
+
+function extensionForMediaType(mediaType: string): string {
+  switch (mediaType.toLowerCase()) {
+    case 'image/jpeg':
+    case 'image/jpg':
+      return 'jpg';
+    case 'image/webp':
+      return 'webp';
+    case 'image/gif':
+      return 'gif';
+    case 'image/png':
+    default:
+      return 'png';
+  }
 }
 
 export function isAgentInjectedUserMessage(text: string): boolean {
@@ -111,6 +174,7 @@ export function mapPersistedClaudeMessage(raw: Record<string, unknown>, agentKin
     return {
       ...event,
       data: {
+        ...event.data,
         content: formatPromptAsCommandDisplay(event.data.content, agentKind) ?? event.data.content,
       },
     };

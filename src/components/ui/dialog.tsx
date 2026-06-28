@@ -36,7 +36,7 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-230 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-hidden border border-border/75 bg-popover p-6 shadow-[0_22px_56px_-36px_hsl(var(--foreground)/0.38),inset_0_1px_0_hsl(var(--foreground)/0.024)] duration-200 data-[state=open]:animate-in data-[state=open]:fade-in data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-top-2 data-[state=open]:fill-mode-both data-[state=open]:animation-duration-[220ms] data-[state=open]:[animation-timing-function:cubic-bezier(0.16,1,0.3,1)] dark:border-[hsl(var(--surface-edge))/0.92] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.99,hsl(var(--surface-1))/0.97)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92),inset_0_1px_0_hsl(var(--foreground)/0.036),0_0_0_1px_hsl(var(--foreground)/0.018)] sm:rounded-md",
+        "fixed left-[50%] top-[50%] z-230 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-hidden border-0 bg-popover p-6 shadow-[0_22px_56px_-36px_hsl(var(--foreground)/0.38)] duration-200 data-[state=open]:animate-in data-[state=open]:fade-in data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-top-2 data-[state=open]:fill-mode-both data-[state=open]:animation-duration-[220ms] data-[state=open]:[animation-timing-function:cubic-bezier(0.16,1,0.3,1)] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.99,hsl(var(--surface-1))/0.97)] dark:shadow-[0_26px_70px_-42px_hsl(var(--surface-shadow-strong)/0.92)] sm:rounded-md",
         className
       )}
       {...props}

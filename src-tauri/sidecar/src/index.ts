@@ -19,6 +19,12 @@ import { getRuntimeFlavor } from './runtimeEvents.js';
 import { proxyManager } from './proxyManager.js';
 import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
 import { emit } from './streamEventBatcher.js';
+import {
+  buildClaudeUserMessageContent,
+  isImageUnsupportedError,
+  normalizeAgentInputPayload,
+  type AgentInputPayload,
+} from './agentInputPayload.js';
 
 // Suppress unhandled abort rejections from child process termination during interrupt.
 // These are expected when the user cancels a running Codex turn.
@@ -90,17 +96,13 @@ function loadClaudeSettingsEnv(): void {
   }
 }
 
-async function* createPromptStream(prompt: string): AsyncGenerator<SDKUserMessage, void, void> {
+async function* createPromptStream(prompt: string, inputPayload?: AgentInputPayload, includeImages = true): AsyncGenerator<SDKUserMessage, void, void> {
+  const payload = normalizeAgentInputPayload(prompt, inputPayload);
   yield {
     type: 'user',
     message: {
       role: 'user',
-      content: [
-        {
-          type: 'text',
-          text: prompt,
-        },
-      ],
+      content: buildClaudeUserMessageContent(payload, includeImages) as SDKUserMessage['message']['content'],
     },
     parent_tool_use_id: null,
   };
@@ -161,7 +163,7 @@ export class SessionRuntime {
     this.startWarmup(this.activeConfigGeneration);
   }
 
-  async sendInput(prompt: string): Promise<void> {
+  async sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void> {
     if (!this.config) {
       throw new Error('Session has not been bootstrapped. Call ensure_session first.');
     }
@@ -177,7 +179,7 @@ export class SessionRuntime {
     this.turnActive = true;
     this.generation += 1;
 
-    await this.startPersistentQuery(prompt, this.generation, this.activeConfigGeneration);
+    await this.startPersistentQuery(prompt, this.generation, this.activeConfigGeneration, inputPayload);
   }
 
   async interrupt(): Promise<void> {
@@ -327,7 +329,7 @@ export class SessionRuntime {
       });
   }
 
-  private async startPersistentQuery(prompt: string, queryGeneration: number, configGeneration: number): Promise<void> {
+  private async startPersistentQuery(prompt: string, queryGeneration: number, configGeneration: number, inputPayload?: AgentInputPayload, includeImages = true): Promise<void> {
     if (!this.config) {
       throw new Error('Missing runtime config');
     }
@@ -346,7 +348,7 @@ export class SessionRuntime {
     if (warm) {
       process.stderr.write('[sidecar] Starting persistent query from pre-warmed session\n');
       this.warmQuery = null;
-      this.queryHandle = warm.query(createPromptStream(prompt));
+      this.queryHandle = warm.query(createPromptStream(prompt, inputPayload, includeImages));
     } else {
       process.stderr.write('[sidecar] Starting persistent query directly via query()\n');
       emit({
@@ -355,12 +357,12 @@ export class SessionRuntime {
         status: this.providerMode.supportsDeferredToolSearch ? 'fallback_live' : 'limited_provider',
       });
       this.queryHandle = query({
-        prompt: createPromptStream(prompt),
+        prompt: createPromptStream(prompt, inputPayload, includeImages),
         options: this.buildOptions(this.config) as any,
       });
     }
 
-    void this.consumeQuery(this.queryHandle, this.config.sessionId);
+    void this.consumeQuery(this.queryHandle, this.config.sessionId, prompt, inputPayload, includeImages);
   }
 
   private closeQueryHandle(reason: string): void {
@@ -530,7 +532,7 @@ export class SessionRuntime {
     return options;
   }
 
-  private async consumeQuery(queryHandle: Query, appSessionId?: string): Promise<void> {
+  private async consumeQuery(queryHandle: Query, appSessionId?: string, prompt?: string, inputPayload?: AgentInputPayload, includeImages = true): Promise<void> {
     let msgCount = 0;
     let compacting = false;
     let sawResult = false;
@@ -648,6 +650,18 @@ export class SessionRuntime {
         }
       }
     } catch (err: unknown) {
+      if (includeImages && isImageUnsupportedError(err) && prompt) {
+        emit({
+          type: 'vision_unsupported',
+          model: this.config?.model,
+          message: String(err),
+        });
+        process.stderr.write(`[sidecar] Vision payload unsupported; retrying text-only: ${String(err)}\n`);
+        this.closeQueryHandle('vision_unsupported_retry');
+        this.queryHandle = null;
+        await this.startPersistentQuery(prompt, this.generation, this.activeConfigGeneration, inputPayload, false);
+        return;
+      }
       const errorMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
       const normalizedError = errorMsg.toLowerCase();
       const isAbort = normalizedError.includes('abort');
@@ -758,7 +772,7 @@ async function main(): Promise<void> {
         // responsive. The interrupt command can then call interruptActiveTurn()
         // immediately to abort the running stream.
         if (getRuntimeFlavor(activeAgentKind) === 'codex') {
-          codexRuntime.sendInput(cmd.prompt).catch((err) => {
+          codexRuntime.sendInput(cmd.prompt, cmd.inputPayload).catch((err) => {
             // Suppress abort errors — these are expected when the user interrupts.
             const msg = String(err).toLowerCase();
             if (!msg.includes('abort')) {
@@ -768,7 +782,7 @@ async function main(): Promise<void> {
             }
           });
         } else {
-          runtime.sendInput(cmd.prompt).catch((err) => {
+          runtime.sendInput(cmd.prompt, cmd.inputPayload).catch((err) => {
             emit({ type: 'sidecar_error', error: String(err) });
           });
         }

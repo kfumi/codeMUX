@@ -244,17 +244,35 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
         if role == Some("user") {
             let content_blocks = payload.get("content")?;
             let mut text_parts = Vec::new();
+            let mut claude_content = Vec::new();
             if let Some(arr) = content_blocks.as_array() {
                 for block in arr {
                     let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
                     if block_type == "input_text" {
                         if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                            if is_codex_image_text_marker(text) {
+                                continue;
+                            }
                             text_parts.push(text.to_string());
+                            claude_content.push(serde_json::json!({"type": "text", "text": text}));
+                        }
+                    } else if block_type == "input_image" {
+                        if let Some(image_url) = block.get("image_url").and_then(|t| t.as_str()) {
+                            if let Some((media_type, data)) = parse_image_data_url(image_url) {
+                                claude_content.push(serde_json::json!({
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": data
+                                    }
+                                }));
+                            }
                         }
                     }
                 }
             }
-            if text_parts.is_empty() {
+            if claude_content.is_empty() {
                 return None;
             }
             let content = text_parts.join("\n");
@@ -267,7 +285,7 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
                 "timestamp": timestamp,
                 "message": {
                     "role": "user",
-                    "content": content
+                    "content": claude_content
                 }
             }));
         }
@@ -321,14 +339,51 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
     None
 }
 
+fn is_codex_image_text_marker(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.starts_with("<image ") || trimmed == "<image>" || trimmed == "</image>"
+}
+
+fn parse_image_data_url(data_url: &str) -> Option<(String, String)> {
+    let rest = data_url.strip_prefix("data:")?;
+    let (media_type, data) = rest.split_once(";base64,")?;
+    if !media_type.starts_with("image/") || data.is_empty() {
+        return None;
+    }
+    Some((media_type.to_string(), data.to_string()))
+}
+
+fn read_json_stream_values(path: &Path) -> Result<Vec<serde_json::Value>, String> {
+    use std::fs;
+
+    let content = fs::read_to_string(path).map_err(|e| format!("Failed to read JSONL: {}", e))?;
+    let stream = serde_json::Deserializer::from_str(&content).into_iter::<serde_json::Value>();
+    let mut values = Vec::new();
+
+    for item in stream {
+        match item {
+            Ok(value) => values.push(value),
+            Err(error) => {
+                warn!(
+                    target: "agent",
+                    "Stopped parsing JSON stream from {} after {} values: {}",
+                    path.display(),
+                    values.len(),
+                    error
+                );
+                break;
+            }
+        }
+    }
+
+    Ok(values)
+}
+
 #[tauri::command]
 pub async fn load_codex_session_events(
     state: State<'_, crate::AppState>,
     app_session_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    use std::fs;
-    use std::io::{BufRead, BufReader};
-
     debug!(target: "agent", "Loading Codex session events for app_session_id={}", app_session_id);
 
     let mut messages = Vec::new();
@@ -352,19 +407,8 @@ pub async fn load_codex_session_events(
     };
 
     debug!(target: "agent", "Reading Codex JSONL from {}", jsonl_path.display());
-    let file = match fs::File::open(&jsonl_path) {
-        Ok(file) => file,
-        Err(error) => return Err(format!("Failed to open Codex JSONL: {}", error)),
-    };
-    let reader = BufReader::new(file);
-
     // Collect all raw events for two-pass processing
-    let raw_events: Vec<serde_json::Value> = reader
-        .lines()
-        .filter_map(|line_result| line_result.ok())
-        .filter(|line| !line.trim().is_empty())
-        .filter_map(|line| serde_json::from_str(line.trim()).ok())
-        .collect();
+    let raw_events = read_json_stream_values(&jsonl_path)?;
 
     // --- Pass 1: Identify turns and collect per-turn stats ---
     // Each turn starts with a turn_context and has its own task_complete + token_counts.
@@ -795,11 +839,15 @@ pub async fn send_agent_input(
     agent_state: State<'_, AgentState>,
     session_id: String,
     prompt: String,
+    input_payload: Option<serde_json::Value>,
 ) -> Result<(), String> {
-    let cmd = serde_json::json!({
+    let mut cmd = serde_json::json!({
         "type": "send_input",
         "prompt": prompt,
     });
+    if let Some(payload) = input_payload {
+        cmd["inputPayload"] = payload;
+    }
     send_command_to_session(&agent_state, &session_id, cmd).await?;
     info!(target: "agent", "Agent input command sent for session_id={}", session_id);
     Ok(())
@@ -819,6 +867,7 @@ pub async fn start_agent_session(
     model: Option<String>,
     reasoning_effort: Option<String>,
     codex_needs_proxy: Option<bool>,
+    input_payload: Option<serde_json::Value>,
 ) -> Result<(), String> {
     info!(target: "agent", "Starting agent session wrapper for session_id={}", session_id);
 
@@ -843,10 +892,13 @@ pub async fn start_agent_session(
 
     send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 
-    let input_cmd = serde_json::json!({
+    let mut input_cmd = serde_json::json!({
         "type": "send_input",
         "prompt": prompt,
     });
+    if let Some(payload) = input_payload {
+        input_cmd["inputPayload"] = payload;
+    }
     send_command_to_session(&agent_state, &session_id, input_cmd).await
 }
 
@@ -1138,7 +1190,8 @@ async fn get_live_proxy_port(agent_state: &State<'_, AgentState>) -> Option<u16>
 #[cfg(test)]
 mod tests {
     use super::{
-        convert_codex_item_to_claude_format, find_codex_session_jsonl, parse_proxy_port_from_stderr,
+        convert_codex_item_to_claude_format, find_codex_session_jsonl,
+        parse_proxy_port_from_stderr, read_json_stream_values,
     };
 
     #[test]
@@ -1221,6 +1274,96 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn convert_codex_user_input_image_to_claude_image_block() {
+        let value = serde_json::json!({
+            "timestamp": "2026-06-28T13:04:49.643Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "<image name=[Image #1] path=\"C:\\Users\\94910\\AppData\\Local\\Temp\\screen.jpg\">"
+                    },
+                    {
+                        "type": "input_image",
+                        "image_url": "data:image/jpeg;base64,abc123",
+                        "detail": "high"
+                    },
+                    {
+                        "type": "input_text",
+                        "text": "</image>"
+                    },
+                    {
+                        "type": "input_text",
+                        "text": "这是谁"
+                    }
+                ]
+            }
+        });
+
+        let converted =
+            convert_codex_item_to_claude_format(&value).expect("user image should be visible");
+
+        assert_eq!(
+            converted,
+            serde_json::json!({
+                "type": "user",
+                "timestamp": "2026-06-28T13:04:49.643Z",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": "abc123"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "这是谁"
+                        }
+                    ]
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn read_json_stream_values_accepts_pretty_and_concatenated_values() {
+        use std::fs;
+
+        let path = std::env::temp_dir().join(format!(
+            "codemux-json-stream-test-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"session-1\"}}\n",
+                "{\n",
+                "  \"type\": \"response_item\",\n",
+                "  \"payload\": {\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_image\",\"image_url\":\"data:image/png;base64,abc\"}]}\n",
+                "}{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        let values = read_json_stream_values(&path).expect("stream should parse");
+
+        assert_eq!(values.len(), 3);
+        assert_eq!(
+            values[1].get("type").and_then(|value| value.as_str()),
+            Some("response_item")
+        );
+
+        let _ = fs::remove_file(path);
     }
 }
 

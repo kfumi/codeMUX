@@ -333,6 +333,7 @@ describe('agent store Codex history loading', () => {
       undefined,
       undefined,
       undefined,
+      { text: 'TEMPLATE: review current changes' },
     );
     expect(useAgentStore.getState().events[session.id]?.[0]).toEqual({
       kind: 'user',
@@ -747,6 +748,104 @@ describe('agent store Codex history loading', () => {
     expect(loaderMock).toHaveBeenCalledWith(session.id);
     expect(getEventsMock).not.toHaveBeenCalled();
     expect(useAgentStore.getState().events[session.id]).toBeUndefined();
+  });
+
+  it('sends image payloads for unknown models by default', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+    const inputPayload = {
+      text: 'inspect this',
+      images: [{ name: 'screen.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
+    };
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, inputPayload.text, 'D:\\project\\ai-code\\codeMUX', undefined, undefined, 'future-model-7', undefined, undefined, undefined, inputPayload);
+
+    expect(startSessionMock).toHaveBeenCalledWith(
+      session.id,
+      'inspect this',
+      'D:\\project\\ai-code\\codeMUX',
+      expect.any(Function),
+      undefined,
+      undefined,
+      'future-model-7',
+      undefined,
+      undefined,
+      inputPayload,
+    );
+  });
+
+  it.each([
+    'deepseek-v4-flash',
+    'deepseek-v4-pro',
+    'mimo-v2.5-pro',
+  ])('drops image payloads for explicit no-vision model %s but keeps local preview', async (model) => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+    const inputPayload = {
+      text: 'inspect this',
+      images: [{ name: 'screen.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
+    };
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, inputPayload.text, 'D:\\project\\ai-code\\codeMUX', undefined, undefined, model, undefined, undefined, undefined, inputPayload);
+
+    expect(startSessionMock).toHaveBeenCalledWith(
+      session.id,
+      'inspect this',
+      'D:\\project\\ai-code\\codeMUX',
+      expect.any(Function),
+      undefined,
+      undefined,
+      model,
+      undefined,
+      undefined,
+      { text: 'inspect this' },
+    );
+    expect(useAgentStore.getState().events[session.id]?.[0]).toEqual({
+      kind: 'user',
+      data: {
+        content: 'inspect this',
+        attachments: [{ type: 'image', name: 'screen.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
+      },
+    });
+  });
+
+  it('restores image previews directly from agent JSONL image blocks', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+    loadCodexSessionEventsMock.mockResolvedValueOnce([
+      {
+        type: 'user',
+        timestamp: '2026-06-28T12:00:00.000Z',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'inspect this' },
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/png',
+                data: 'abc',
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    await useAgentStore.getState().loadSessionMessages(session.id);
+
+    expect(useAgentStore.getState().events[session.id]?.[0]).toEqual({
+      kind: 'user',
+      data: {
+        content: 'inspect this',
+        attachments: [{ type: 'image', name: 'image-1.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
+      },
+    });
   });
 
   it('does not restore acknowledged changed-file state while loading history', async () => {

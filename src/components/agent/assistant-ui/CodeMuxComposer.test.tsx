@@ -17,8 +17,9 @@ const lexicalProps: Array<{
   }>;
 }> = [];
 
-const { setComposerTextMock } = vi.hoisted(() => ({
+const { setComposerTextMock, addAttachmentMock } = vi.hoisted(() => ({
   setComposerTextMock: vi.fn(),
+  addAttachmentMock: vi.fn(),
 }));
 
 const capturedPopovers: Array<{
@@ -40,6 +41,20 @@ vi.mock('@assistant-ui/react', () => {
     ComposerPrimitive: {
       Root: passthrough('div'),
       Send: passthrough('button'),
+      AttachmentDropzone: passthrough('div'),
+      Attachments: ({ children }: any) => (
+        <div data-testid="composer-attachments">
+          {children({
+            attachment: {
+              id: 'image-1',
+              type: 'image',
+              name: 'screenshot.png',
+              contentType: 'image/png',
+              status: { type: 'complete' },
+            },
+          })}
+        </div>
+      ),
       Unstable_TriggerPopoverRoot: passthrough('div'),
       Unstable_TriggerPopover: Object.assign(({ children, ...props }: any) => {
         capturedPopovers.push(props);
@@ -56,11 +71,26 @@ vi.mock('@assistant-ui/react', () => {
     useAui: () => ({
       composer: () => ({
         setText: setComposerTextMock,
+        addAttachment: addAttachmentMock,
       }),
     }),
+    AttachmentPrimitive: {
+      Root: passthrough('div'),
+      unstable_Thumb: (props: any) => <img alt="" {...props} />,
+      Name: (props: any) => <span {...props}>screenshot.png</span>,
+      Remove: passthrough('button'),
+    },
     useAuiState: (selector: (state: any) => unknown) =>
       selector({
-        composer: { text: '' },
+        composer: { text: '', attachments: [] },
+        attachment: {
+          id: 'image-1',
+          type: 'image',
+          name: 'screenshot.png',
+          contentType: 'image/png',
+          status: { type: 'complete' },
+          content: [{ type: 'image', image: 'data:image/png;base64,abc123' }],
+        },
       }),
   };
 });
@@ -70,7 +100,7 @@ vi.mock('@assistant-ui/react-lexical', () => ({
     lexicalProps.push(props);
     const Chip = props.directiveChip;
     return (
-      <div className={props.className} data-testid="lexical-composer-input">
+      <div className={props.className} data-testid="lexical-composer-input" onPaste={props.onPaste}>
         <div className="aui-lexical-input" />
         <div className="aui-lexical-placeholder">{props.placeholder}</div>
         {Chip ? (
@@ -89,6 +119,7 @@ describe('CodeMuxComposer', () => {
     lexicalProps.length = 0;
     capturedPopovers.length = 0;
     setComposerTextMock.mockClear();
+    addAttachmentMock.mockClear();
     cleanup();
   });
 
@@ -141,6 +172,49 @@ describe('CodeMuxComposer', () => {
     fireEvent.click(document.querySelector('[data-command-id="review"]')!);
 
     expect(setComposerTextMock).toHaveBeenLastCalledWith('/review ');
+  });
+
+  it('renders the add menu before the slash command button', () => {
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    fireEvent.click(screen.getByTitle('添加附件或功能'));
+
+    const addButton = screen.getByTitle('添加附件或功能');
+    const slashButton = screen.getByTitle('插入斜杠命令');
+    expect(addButton.compareDocumentPosition(slashButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText('选择文件')).toBeTruthy();
+    expect(screen.getByText('计划模式')).toBeTruthy();
+  });
+
+  it('renders assistant-ui image attachment previews without a filename label', () => {
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    expect(screen.getByTestId('composer-attachments')).toBeTruthy();
+    const image = screen.getByAltText('screenshot.png') as HTMLImageElement;
+    expect(image.src).toBe('data:image/png;base64,abc123');
+    expect(screen.queryByText('screenshot.png')).toBeNull();
+  });
+
+  it('opens an image preview from composer attachment thumbnails', () => {
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '预览图片 screenshot.png' }));
+
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getAllByAltText('screenshot.png')).toHaveLength(2);
+  });
+
+  it('adds pasted image files as attachments from the Lexical input', () => {
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    const image = new File(['image-bytes'], 'pasted.png', { type: 'image/png' });
+    fireEvent.paste(screen.getByTestId('lexical-composer-input'), {
+      clipboardData: {
+        files: [image],
+      },
+    });
+
+    expect(addAttachmentMock).toHaveBeenCalledWith(image);
   });
 
   it('parses slash and file directives for Lexical chips without trigger resources', () => {

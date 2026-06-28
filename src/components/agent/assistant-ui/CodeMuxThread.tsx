@@ -33,6 +33,7 @@ import {
 import { CodeMuxDirectiveText } from './CodeMuxDirectiveText';
 import { buildAssistantResultTargetMap } from './assistantResultTargets';
 import { RunningElapsedTimer } from './running-elapsed';
+import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 
 type CodeMuxThreadProps = {
   sessionId: string;
@@ -220,8 +221,9 @@ function UserMessage({ message, sourceEventIndex }: { message: MessageState; sou
   const timestamp = getSourceTimestamp(message);
   const [expanded, setExpanded] = useState(false);
   const canCollapse = isLongUserMessage(text);
+  const imageAttachments = getImageAttachmentItems(message);
 
-  if (!text) {
+  if (!text && imageAttachments.length === 0) {
     return null;
   }
 
@@ -241,15 +243,29 @@ function UserMessage({ message, sourceEventIndex }: { message: MessageState; sou
       className="mb-5 flex w-full justify-end"
     >
       <div data-user-message-column="true" className="flex w-fit max-w-10/12 min-w-0 flex-col items-end">
-        <div
-          data-user-message-bubble="true"
-          className={cn(
-            'min-w-0 max-w-full whitespace-pre-wrap wrap-break-word rounded-xl rounded-tr-md border-border/50 bg-muted px-4 py-2.5 text-sm leading-relaxed text-foreground',
-            canCollapse && !expanded && COLLAPSED_USER_MESSAGE_CLASS,
-          )}
-        >
-          <CodeMuxDirectiveText text={text} tone="inverted" />
-        </div>
+        {imageAttachments.length > 0 ? (
+          <div className={cn('mb-2 flex max-w-[18.5rem] flex-row-reverse flex-wrap gap-2', text.length === 0 && 'mb-0')}>
+            {imageAttachments.map((attachment) => (
+              <ImageAttachmentPreview
+                key={attachment.id}
+                src={attachment.src}
+                alt={attachment.name}
+                thumbnailClassName="h-20 w-20 rounded-md"
+              />
+            ))}
+          </div>
+        ) : null}
+        {text ? (
+          <div
+            data-user-message-bubble="true"
+            className={cn(
+              'min-w-0 max-w-full whitespace-pre-wrap wrap-break-word rounded-xl rounded-tr-md border-border/50 bg-muted px-4 py-2.5 text-sm leading-relaxed text-foreground',
+              canCollapse && !expanded && COLLAPSED_USER_MESSAGE_CLASS,
+            )}
+          >
+            <CodeMuxDirectiveText text={text} tone="inverted" />
+          </div>
+        ) : null}
         {canCollapse ? (
           <button
             type="button"
@@ -266,6 +282,23 @@ function UserMessage({ message, sourceEventIndex }: { message: MessageState; sou
       </div>
     </MessagePrimitive.Root>
   );
+}
+
+function getImageAttachmentItems(message: MessageState): Array<{ id: string; name: string; src: string }> {
+  return (message.attachments ?? [])
+    .filter((attachment) => attachment.type === 'image')
+    .flatMap((attachment, index) => {
+      const imagePart = attachment.content?.find((part) => part.type === 'image') as { type: 'image'; image?: string } | undefined;
+      if (!imagePart?.image) {
+        return [];
+      }
+
+      return [{
+        id: `${attachment.id}-${index}`,
+        name: attachment.name,
+        src: imagePart.image,
+      }];
+    });
 }
 
 function isLongUserMessage(text: string): boolean {

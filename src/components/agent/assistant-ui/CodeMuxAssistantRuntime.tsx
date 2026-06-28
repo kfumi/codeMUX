@@ -1,4 +1,4 @@
-import { AssistantRuntimeProvider, useExternalStoreRuntime } from '@assistant-ui/react';
+import { AssistantRuntimeProvider, SimpleImageAttachmentAdapter, useExternalStoreRuntime } from '@assistant-ui/react';
 import type { AppendMessage, ThreadMessageLike } from '@assistant-ui/react';
 import { useCallback, useMemo, type ReactNode } from 'react';
 
@@ -6,6 +6,7 @@ import type { SlashCommand } from '../../../lib/slashCommands';
 import { findCommand } from '../../../lib/slashCommands';
 import { useAgentStore } from '../../../stores/agentStore';
 import type { AgentMessage } from '../../../stores/agentStore';
+import type { AgentInputPayload } from '../../../types/agentInput';
 import type { AgentKind } from '../../../types/session';
 import {
   convertAgentEventsToAssistantMessages,
@@ -16,7 +17,7 @@ import {
 type CodeMuxAssistantRuntimeProviderProps = {
   sessionId: string;
   agentKind?: AgentKind;
-  onSend: (content: string) => Promise<void>;
+  onSend: (content: AgentInputPayload) => Promise<void>;
   onCommand: (command: SlashCommand, args: string) => void | Promise<void>;
   children: ReactNode;
 };
@@ -56,6 +57,7 @@ function SessionScopedAssistantRuntime({
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
+  const attachmentAdapter = useMemo(() => new SimpleImageAttachmentAdapter(), []);
 
   const messages = useMemo(
     () => convertAgentEventsToAssistantMessages(events),
@@ -64,19 +66,21 @@ function SessionScopedAssistantRuntime({
 
   const handleNew = useCallback(
     async (message: AppendMessage) => {
-      const content = getTextContent(message);
+      const payload = buildAgentInputPayloadFromAppendMessage(message);
 
-      if (content.length === 0) {
+      if (payload.text.length === 0 && (payload.images?.length ?? 0) === 0) {
         return;
       }
 
-      const slashCommand = resolveSlashCommand(content, agentKind);
+      const slashCommand = (payload.images?.length ?? 0) === 0
+        ? resolveSlashCommand(payload.text, agentKind)
+        : null;
       if (slashCommand) {
         await onCommand(slashCommand.command, slashCommand.args);
         return;
       }
 
-      await onSend(content);
+      await onSend(payload);
     },
     [onCommand, onSend],
   );
@@ -86,6 +90,9 @@ function SessionScopedAssistantRuntime({
     isRunning,
     convertMessage: (message) => convertCodeMuxMessageToThreadMessageLike(message, eventTimestamps),
     onNew: handleNew,
+    adapters: {
+      attachments: attachmentAdapter,
+    },
   });
 
   return <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>;
@@ -105,6 +112,16 @@ function convertCodeMuxMessageToThreadMessageLike(
     role: message.role === 'system' ? 'assistant' : message.role,
     createdAt: sourceTimestamp ? new Date(sourceTimestamp) : undefined,
     content: message.content.map(convertCodeMuxPartToThreadPart),
+    attachments: message.role === 'user'
+      ? message.metadata.attachments?.map((attachment) => ({
+        id: `${message.id}-${attachment.name}`,
+        type: 'image',
+        name: attachment.name,
+        contentType: attachment.mediaType,
+        status: { type: 'complete' as const },
+        content: [{ type: 'image' as const, image: attachment.dataUrl }],
+      }))
+      : undefined,
     metadata: {
       custom: {
         ...message.metadata,
@@ -145,6 +162,32 @@ function getTextContent(message: AppendMessage): string {
     .map((part) => (part.type === 'text' ? part.text : ''))
     .join('')
     .trim();
+}
+
+export function buildAgentInputPayloadFromAppendMessage(message: AppendMessage): AgentInputPayload {
+  const text = getTextContent(message);
+  const images = (message.attachments ?? [])
+    .filter((attachment) => attachment.type === 'image')
+    .flatMap((attachment) => {
+      const imageParts = (attachment.content ?? []).filter(
+        (part): part is { type: 'image'; image: string } =>
+          part.type === 'image' && typeof (part as { image?: unknown }).image === 'string',
+      );
+
+      return imageParts.map((part) => ({
+        name: attachment.name,
+        mediaType: attachment.contentType || mediaTypeFromDataUrl(part.image) || 'image/png',
+        dataUrl: part.image,
+        size: attachment.file?.size,
+      }));
+    });
+
+  return images.length > 0 ? { text, images } : { text };
+}
+
+function mediaTypeFromDataUrl(dataUrl: string): string | undefined {
+  const match = dataUrl.match(/^data:([^;,]+)[;,]/);
+  return match?.[1];
 }
 
 export function resolveSlashCommand(content: string, agentKind: AgentKind = 'claude_code'): { command: SlashCommand; args: string } | null {

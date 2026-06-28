@@ -1,5 +1,6 @@
 ﻿import type { AgentMessage } from '../../../stores/agentStore';
 import type { ContentBlock } from '../../../types/agent';
+import type { UserAttachmentPreview } from '../../../types/agentInput';
 import { buildAssistantResultTargetSet } from './assistantResultTargets';
 
 type CodeMuxAssistantRole = 'user' | 'assistant' | 'system';
@@ -36,6 +37,7 @@ export type CodeMuxAssistantMessage = {
     sourceEventIndices: number[];
     sourceKind: AgentMessage['kind'];
     isFinalAssistantMessage?: boolean;
+    attachments?: UserAttachmentPreview[];
   };
 };
 
@@ -52,8 +54,9 @@ export function convertAgentEventsToAssistantMessages(
   events.forEach((event, index) => {
     if (event.kind === 'user') {
       const text = event.data.content.trim();
+      const hasAttachments = (event.data.attachments?.length ?? 0) > 0;
 
-      if (text.length > 0) {
+      if (text.length > 0 || hasAttachments) {
         messages.push(createMessage(`user-${index}`, 'user', [{ type: 'text', text }], event, index));
       }
 
@@ -602,6 +605,9 @@ function createMessage(
       sourceEventIndex: index,
       sourceEventIndices: [index],
       sourceKind: event.kind,
+      ...(event.kind === 'user' && event.data.attachments?.length
+        ? { attachments: event.data.attachments }
+        : {}),
     },
   };
 }

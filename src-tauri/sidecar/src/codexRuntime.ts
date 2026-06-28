@@ -20,6 +20,14 @@ import {
 import { shouldUseCodexChatCompatProxy } from './sessionRuntimeHelpers.js';
 import { proxyManager } from './proxyManager.js';
 import { emit } from './streamEventBatcher.js';
+import {
+  buildCodexInputEntries,
+  cleanupTempImageFiles,
+  isImageUnsupportedError,
+  normalizeAgentInputPayload,
+  writePayloadImagesToTempFiles,
+  type AgentInputPayload,
+} from './agentInputPayload.js';
 
 export { emit } from './streamEventBatcher.js';
 
@@ -193,7 +201,27 @@ export class CodexSessionRuntime {
     emit({ type: 'proxy_status', ...proxyManager.getStatus() });
   }
 
-  async sendInput(prompt: string): Promise<void> {
+  async sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void> {
+    try {
+      await this.runInput(prompt, inputPayload, true);
+    } catch (error) {
+      if (!isImageUnsupportedError(error)) {
+        throw error;
+      }
+
+      emit({
+        type: 'vision_unsupported',
+        model: this.config?.model || 'o4-mini',
+        message: String(error),
+      });
+      process.stderr.write(`[codex] Vision payload unsupported; retrying text-only: ${String(error)}\n`);
+      activeAbortController = null;
+      this.abortController = null;
+      await this.runInput(prompt, inputPayload, false);
+    }
+  }
+
+  private async runInput(prompt: string, inputPayload: AgentInputPayload | undefined, includeImages: boolean): Promise<void> {
     if (!this.config || !this.thread) {
       throw new Error('Codex session not initialized. Call ensure_session first.');
     }
@@ -207,11 +235,15 @@ export class CodexSessionRuntime {
     let turnFailed = false;
     let failureEmitted = false;
     let pendingStreamError: string | null = null;
+    let retryingWithoutImages = false;
 
     this.abortController = new AbortController();
     activeAbortController = this.abortController;
 
-    process.stderr.write(`[codex] Processing input via SDK: ${prompt.slice(0, 80)}...\n`);
+    const payload = normalizeAgentInputPayload(prompt, inputPayload);
+    const imagePaths = includeImages ? await writePayloadImagesToTempFiles(payload) : [];
+
+    process.stderr.write(`[codex] Processing input via SDK: ${payload.text.slice(0, 80)}...\n`);
 
     emit({
       type: 'system',
@@ -239,7 +271,7 @@ export class CodexSessionRuntime {
     };
 
     try {
-      const { events } = await this.thread.runStreamed(prompt, {
+      const { events } = await this.thread.runStreamed(buildCodexInputEntries(payload, imagePaths, includeImages) as any, {
         signal: this.abortController.signal,
       });
 
@@ -280,6 +312,10 @@ export class CodexSessionRuntime {
         this.abortController?.signal.removeEventListener('abort', onAbort);
       }
     } catch (error) {
+      if (includeImages && isImageUnsupportedError(error)) {
+        retryingWithoutImages = true;
+        throw error;
+      }
       if (!this.abortController?.signal.aborted) {
         const message = error instanceof Error
           ? `${error.message}${error.stack ? `\n${error.stack}` : ''}`
@@ -290,12 +326,12 @@ export class CodexSessionRuntime {
         process.stderr.write('[codex] SDK turn aborted\n');
       }
     } finally {
-      if (!this.abortController?.signal.aborted && !turnCompleted && !turnFailed && pendingStreamError) {
+      if (!retryingWithoutImages && !this.abortController?.signal.aborted && !turnCompleted && !turnFailed && pendingStreamError) {
         emitFailure(pendingStreamError);
       }
 
       const finalUsage = usageSeen ? usage : emptyUsage();
-      if (!this.abortController?.signal.aborted && turnCompleted && !turnFailed) {
+      if (!retryingWithoutImages && !this.abortController?.signal.aborted && turnCompleted && !turnFailed) {
         const lastTokenUsage = await readLatestCodexLastTokenUsage(this.thread.id).catch((error) => {
           process.stderr.write(`[codex] Failed to read session last_token_usage: ${String(error)}\n`);
           return null;
@@ -306,7 +342,7 @@ export class CodexSessionRuntime {
           lastTokenUsage,
           durationMs: Date.now() - startedAt,
         }));
-      } else if (!this.abortController?.signal.aborted) {
+      } else if (!retryingWithoutImages && !this.abortController?.signal.aborted) {
         process.stderr.write(
           `[codex] Skipping success result: completed=${turnCompleted} failed=${turnFailed}\n`,
         );
@@ -314,7 +350,10 @@ export class CodexSessionRuntime {
 
       activeAbortController = null;
       this.abortController = null;
-      this.finishTurn();
+      await cleanupTempImageFiles(imagePaths);
+      if (!retryingWithoutImages) {
+        this.finishTurn();
+      }
     }
   }
 

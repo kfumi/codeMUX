@@ -6,6 +6,7 @@ import { getProviderModelList } from '../../lib/providerModels';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { findCommand, formatCommandDisplay, renderCommandPrompt } from '../../lib/slashCommands';
 import type { ReasoningEffort } from '../../types/session';
+import type { AgentInputPayload } from '../../types/agentInput';
 import { agentApi, sessionApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
 import { usePreviewStore } from '../../stores/previewStore';
@@ -125,11 +126,12 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     });
   }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, runtimeModel, reasoningEffort, codexNeedsProxy, setProxyRunning, isRunning]);
 
-  const handleSend = async (content: string, displayContent = content, options?: { skipCommandMode?: boolean }) => {
+  const handleSend = async (input: AgentInputPayload, displayContent = input.text, options?: { skipCommandMode?: boolean }) => {
     const effectiveCwd = project?.path || cwd;
     const latestSession = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId) ?? session;
     const latestReasoningEffort = latestSession?.reasoning_effort ?? reasoningEffort;
     const latestAgentKind = latestSession?.agent_kind ?? session?.agent_kind ?? 'claude_code';
+    const content = input.text;
     const latestProviderConfig = resolveAgentProviderConfig({
       agentKind: latestAgentKind,
       config,
@@ -167,6 +169,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         latestReasoningEffort,
         latestProviderConfig.codexNeedsProxy,
         displayContent,
+        { ...input, text: runtimeContent },
       );
     } catch (error) {
       useAgentStore.setState((state) => ({
@@ -294,7 +297,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       }
 
       const prompt = renderCommandPrompt(command, args);
-      await handleSend(prompt, displayContent, { skipCommandMode: true });
+      await handleSend({ text: prompt }, displayContent, { skipCommandMode: true });
     }
   }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, getCostInfo, agentKind, handleSend]);
 

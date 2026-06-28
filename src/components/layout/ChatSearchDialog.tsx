@@ -162,7 +162,7 @@ export function ChatSearchDialog({ open, onOpenChange, onNavigateHome }: ChatSea
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="top-[18vh] w-[min(46rem,calc(100vw-2rem))] translate-y-0 gap-0 overflow-hidden rounded-2xl border border-border/70 bg-[hsl(var(--surface-2))] p-0 shadow-[0_28px_80px_-42px_hsl(var(--foreground)/0.78),0_0_0_1px_hsl(var(--foreground)/0.035)] dark:bg-[hsl(var(--surface-2))] sm:rounded-2xl"
+        className="top-[18vh] w-[min(46rem,calc(100vw-2rem))] translate-y-0 gap-0 overflow-hidden rounded-2xl border-0 bg-[hsl(var(--surface-2))] p-0 shadow-[0_28px_80px_-42px_hsl(var(--foreground)/0.78)] dark:bg-[hsl(var(--surface-2))] sm:rounded-2xl"
         overlayClassName="bg-black/18 backdrop-blur-[0.5px] dark:bg-black/28"
       >
         <DialogHeader className="sr-only">

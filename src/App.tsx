@@ -10,6 +10,7 @@ import { TooltipProvider } from './components/ui/tooltip';
 import { resolveAgentProviderConfig } from './lib/agentProvider';
 import { useTheme } from './hooks/useTheme';
 import { createLogger, serializeError } from './lib/logger';
+import type { AgentInputPayload } from './types/agentInput';
 import { getStoredAgentCwd, resolveSessionCwd } from './lib/sessionCwd';
 import { registerSkillCommands } from './lib/slashCommands';
 import { sessionApi } from './lib/tauri';
@@ -101,7 +102,7 @@ function App() {
     openDraft(projectId);
   };
 
-  const handleStartNewSession = async (message: string) => {
+  const handleStartNewSession = async (input: AgentInputPayload) => {
     const { selectedAgentKind, selectedModel, selectedReasoningEffort, draftProjectId } = useNewSessionStore.getState();
     const cwd = resolveSessionCwd(projects, draftProjectId, getStoredAgentCwd());
     const { provider, apiKey, baseUrl, model, runtimeModel, codexNeedsProxy } = resolveAgentProviderConfig({
@@ -124,7 +125,7 @@ function App() {
         }));
       }
 
-      await startQuery(session.id, message, cwd, apiKey, baseUrl, runtimeModel, selectedReasoningEffort, codexNeedsProxy);
+      await startQuery(session.id, input.text, cwd, apiKey, baseUrl, runtimeModel, selectedReasoningEffort, codexNeedsProxy, undefined, input);
       closeDraft();
     } catch (error) {
       logger.error('Failed to start a new session from empty state', undefined, serializeError(error));

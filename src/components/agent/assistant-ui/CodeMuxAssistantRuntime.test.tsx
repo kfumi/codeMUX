@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { useSettingsStore } from '../../../stores/settingsStore';
-import { CodeMuxAssistantRuntimeProvider, resolveSlashCommand } from './CodeMuxAssistantRuntime';
+import {
+  buildAgentInputPayloadFromAppendMessage,
+  CodeMuxAssistantRuntimeProvider,
+  resolveSlashCommand,
+} from './CodeMuxAssistantRuntime';
 import { CodeMuxThread, buildToolDurationMap } from './CodeMuxThread';
 
 const sessionOneEvents: AgentMessage[] = [
@@ -162,6 +166,40 @@ const longUserEvents: AgentMessage[] = [
   { kind: 'user', data: { content: longUserText } },
 ];
 
+const imageOnlyUserEvents: AgentMessage[] = [
+  {
+    kind: 'user',
+    data: {
+      content: '',
+      attachments: [
+        {
+          type: 'image',
+          name: 'screen.png',
+          mediaType: 'image/png',
+          dataUrl: 'data:image/png;base64,abc123',
+        },
+      ],
+    },
+  },
+];
+
+const imageAndTextUserEvents: AgentMessage[] = [
+  {
+    kind: 'user',
+    data: {
+      content: 'what is in this screenshot?',
+      attachments: [
+        {
+          type: 'image',
+          name: 'screen.png',
+          mediaType: 'image/png',
+          dataUrl: 'data:image/png;base64,abc123',
+        },
+      ],
+    },
+  },
+];
+
 const completedTurnEvents: AgentMessage[] = [
   { kind: 'user', data: { content: 'please fix it' } },
   {
@@ -249,6 +287,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-grouped-tools': groupedToolEvents,
         'session-directives': directiveUserEvents,
         'session-long-user': longUserEvents,
+        'session-image-only': imageOnlyUserEvents,
+        'session-image-text': imageAndTextUserEvents,
         'session-completed-turn': completedTurnEvents,
       },
       eventTimestamps: {
@@ -377,6 +417,89 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       args: 'add tests',
     });
     expect(resolveSlashCommand('/security-review', 'claude_code')?.command.name).toBe('security-review');
+  });
+
+  it('builds image payloads from assistant-ui attachments', () => {
+    const payload = buildAgentInputPayloadFromAppendMessage({
+      role: 'user',
+      parentId: null,
+      sourceId: null,
+      runConfig: undefined,
+      content: [{ type: 'text', text: 'look at this' }],
+      attachments: [
+        {
+          id: 'image-1',
+          type: 'image',
+          name: 'screenshot.png',
+          contentType: 'image/png',
+          status: { type: 'complete' },
+          content: [{ type: 'image', image: 'data:image/png;base64,abc123' }],
+        },
+      ],
+      metadata: { custom: {} },
+      createdAt: new Date(),
+    });
+
+    expect(payload).toEqual({
+      text: 'look at this',
+      images: [
+        {
+          name: 'screenshot.png',
+          mediaType: 'image/png',
+          dataUrl: 'data:image/png;base64,abc123',
+        },
+      ],
+    });
+  });
+
+  it('renders historical user image attachments without requiring text', () => {
+    const { container } = render(<Harness sessionId="session-image-only" />);
+
+    const image = container.querySelector('img[alt="screen.png"]') as HTMLImageElement | null;
+    expect(image).toBeTruthy();
+    expect(image?.src).toBe('data:image/png;base64,abc123');
+  });
+
+  it('renders user image thumbnails above the text bubble and opens a preview', () => {
+    const { container } = render(<Harness sessionId="session-image-text" />);
+
+    const bubble = container.querySelector('[data-user-message-bubble="true"]');
+    const thumbnail = container.querySelector('img[alt="screen.png"]') as HTMLImageElement | null;
+
+    expect(thumbnail).toBeTruthy();
+    expect(bubble?.contains(thumbnail)).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: '预览图片 screen.png' }));
+
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getAllByAltText('screen.png')).toHaveLength(2);
+  });
+
+  it('does not treat slash text as a command when an image is attached', () => {
+    const payload = buildAgentInputPayloadFromAppendMessage({
+      role: 'user',
+      parentId: null,
+      sourceId: null,
+      runConfig: undefined,
+      content: [{ type: 'text', text: '/plan inspect this screenshot' }],
+      attachments: [
+        {
+          id: 'image-1',
+          type: 'image',
+          name: 'plan.png',
+          contentType: 'image/png',
+          status: { type: 'complete' },
+          content: [{ type: 'image', image: 'data:image/png;base64,abc123' }],
+        },
+      ],
+      metadata: { custom: {} },
+      createdAt: new Date(),
+    });
+
+    expect(payload.images).toHaveLength(1);
+    expect(resolveSlashCommand(payload.text, 'codex')).toMatchObject({
+      command: expect.objectContaining({ name: 'plan' }),
+    });
   });
 
   it('renders directive text in user messages as chips', () => {

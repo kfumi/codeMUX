@@ -10,6 +10,7 @@ import { usePreviewStore } from '../../stores/previewStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { getAgentDefinition } from '../../types/agentRegistry';
+import type { AgentInputPayload } from '../../types/agentInput';
 import { AgentSelector } from './AgentSelector';
 import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
@@ -17,7 +18,7 @@ import { CodeMuxModelSelector } from './assistant-ui/CodeMuxModelSelector';
 import { formatModelDisplayName } from './modelDisplay';
 
 interface NewSessionPanelProps {
-  onSubmit: (message: string) => Promise<void> | void;
+  onSubmit: (input: AgentInputPayload) => Promise<void> | void;
 }
 
 export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
@@ -77,13 +78,12 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     }
   }, [draftProject?.path, loadFileTree, setProjectPath]);
 
-  const handleSend = async (content: string) => {
+  const handleSend = async (input: AgentInputPayload) => {
     const planCommand = findCommand('plan', 'codex');
-    await onSubmit(
-      selectedAgentKind === 'codex' && codexPlanMode && planCommand
-        ? renderCommandPrompt(planCommand, content)
-        : content,
-    );
+    const text = selectedAgentKind === 'codex' && codexPlanMode && planCommand
+      ? renderCommandPrompt(planCommand, input.text)
+      : input.text;
+    await onSubmit({ ...input, text });
   };
 
   const handleCommand = async (command: SlashCommand, args: string) => {
@@ -112,7 +112,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
         }
       }
 
-      await onSubmit(renderCommandPrompt(command, args));
+      await onSubmit({ text: renderCommandPrompt(command, args) });
     }
   };
 

@@ -24,9 +24,11 @@ import type {
   ChangedFile,
 } from '../types/agent';
 import type { ReasoningEffort } from '../types/session';
+import type { AgentInputPayload, UserAttachmentPreview } from '../types/agentInput';
+import { inferModelSupportsVision, markModelVisionUnsupported } from '../lib/modelVisionCapabilities';
 
 export type AgentMessage =
-  | { kind: 'user'; data: { content: string } }
+  | { kind: 'user'; data: { content: string; attachments?: UserAttachmentPreview[] } }
   | { kind: 'assistant'; data: AgentAssistantMessage }
   | { kind: 'tool_result'; data: AgentToolResult }
   | { kind: 'system'; data: AgentSystemMessage }
@@ -78,7 +80,7 @@ interface AgentState {
   acknowledgedFiles: Record<string, Set<string>>;
 
   /** Start a new agent query */
-  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string) => Promise<void>;
+  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string, inputPayload?: AgentInputPayload) => Promise<void>;
   /** Interrupt the current query for a specific session */
   interrupt: (sessionId: string) => Promise<void>;
   /** Clear events for a session */
@@ -418,6 +420,8 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'raw', data };
       case 'sidecar_stream_status':
         return { kind: 'stream_status', data: { message: data.message, is_reconnecting: data.is_reconnecting } };
+      case 'vision_unsupported':
+        return { kind: 'raw', data };
       default:
         return { kind: 'raw', data };
     }
@@ -835,7 +839,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   fileOriginals: {},
   acknowledgedFiles: {},
 
-  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string) => {
+  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string, inputPayload?: AgentInputPayload) => {
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
     pendingThinkingStartTimes.delete(sessionId);
@@ -858,7 +862,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // Auto-update session title from the first user message (skip slash commands)
     const state = get();
     const hasExistingUserMsg = (state.events[sessionId] || []).some(e => e.kind === 'user');
-    const userContent = displayContent ?? prompt;
+    const originalPayload = inputPayload ?? { text: prompt };
+    const shouldSendImages = (originalPayload.images?.length ?? 0) > 0 && inferModelSupportsVision(model);
+    const payloadForModel: AgentInputPayload = shouldSendImages
+      ? originalPayload
+      : { text: originalPayload.text };
+    const droppedImages = (originalPayload.images?.length ?? 0) > 0 && !shouldSendImages;
+    const userContent = displayContent ?? originalPayload.text;
+    const userAttachments = originalPayload.images?.map((image) => ({
+      type: 'image' as const,
+      name: image.name,
+      mediaType: image.mediaType,
+      dataUrl: image.dataUrl,
+    }));
     if (!hasExistingUserMsg && !userContent.startsWith('/')) {
       const title = truncateTitle(userContent);
       if (title) {
@@ -872,7 +888,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // Git baseline is no longer needed since we use HEAD comparison directly
 
     // 添加用户消息到事件列表
-    const userMsg: AgentMessage = { kind: 'user', data: { content: userContent } };
+    const userMsg: AgentMessage = {
+      kind: 'user',
+      data: {
+        content: userContent,
+        attachments: userAttachments,
+      },
+    };
     const userTs = Date.now();
     set((s) => ({
       events: {
@@ -888,9 +910,34 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       error: { ...s.error, [sessionId]: null },
     }));
     try {
-      await agentApi.startSession(sessionId, prompt, cwd, (raw: string) => {
+      if (droppedImages) {
+        logger.info('Skipping image payload for model without vision support', {
+          sessionId,
+          model: model || 'default',
+        });
+      }
+
+      await agentApi.startSession(sessionId, payloadForModel.text, cwd, (raw: string) => {
         let event = parseAgentEvent(raw);
         const now = Date.now();
+
+        if (event.kind === 'raw' && event.data?.type === 'vision_unsupported') {
+          markModelVisionUnsupported(typeof event.data.model === 'string' ? event.data.model : model);
+          set((s) => ({
+            events: {
+              ...s.events,
+              [sessionId]: [
+                ...(s.events[sessionId] || []),
+                { kind: 'stream_status', data: { message: '当前模型不支持图片识别，已自动改为仅发送文本。', is_reconnecting: false } },
+              ],
+            },
+            eventTimestamps: {
+              ...s.eventTimestamps,
+              [sessionId]: [...(s.eventTimestamps[sessionId] || []), now],
+            },
+          }));
+          return;
+        }
 
         if (event.kind === 'raw' && event.data?.type === 'sidecar_debug') {
           return;
@@ -1307,7 +1354,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             isError: event.kind === 'error' || (event.kind === 'result' && Boolean(event.data?.is_error)),
           });
         }
-      }, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy);
+      }, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy, payloadForModel);
     } catch (err) {
       logger.error('Agent query failed to start or stream', { sessionId, cwd, model }, serializeError(err));
       set((s) => {

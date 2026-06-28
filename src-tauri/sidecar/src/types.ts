@@ -1,7 +1,9 @@
+import type { AgentInputPayload } from './agentInputPayload.js';
+
 // Commands from Rust to sidecar (via stdin)
 export type SidecarCommand =
   | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; apiKey?: string; baseUrl?: string; model?: string; reasoningEffort?: string; codexNeedsProxy?: boolean; skills?: string[] }
-  | { type: 'send_input'; prompt: string }
+  | { type: 'send_input'; prompt: string; inputPayload?: AgentInputPayload }
   | { type: 'reset_session'; sessionId: string }
   | { type: 'interrupt' }
   | { type: 'shutdown' }

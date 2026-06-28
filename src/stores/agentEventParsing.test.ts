@@ -40,6 +40,41 @@ describe('parseSdkUserMessage', () => {
     });
   });
 
+  it('extracts Claude base64 image blocks as user attachments', () => {
+    expect(
+      parseSdkUserMessage({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'who is this' },
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/jpeg',
+                data: 'abc123',
+              },
+            },
+          ],
+        },
+      }),
+    ).toEqual({
+      kind: 'user',
+      data: {
+        content: 'who is this',
+        attachments: [
+          {
+            type: 'image',
+            name: 'image-1.jpg',
+            mediaType: 'image/jpeg',
+            dataUrl: 'data:image/jpeg;base64,abc123',
+          },
+        ],
+      },
+    });
+  });
+
   it('keeps tool results as tool_result events', () => {
     const event = parseSdkUserMessage({
       type: 'user',

@@ -1,4 +1,5 @@
 import {
+  AttachmentPrimitive,
   ComposerPrimitive,
   useAui,
   useAuiState,
@@ -11,6 +12,7 @@ import type { DirectiveChipProps } from '@assistant-ui/react-lexical';
 import {
   ArrowUp,
   FileCode2,
+  FilePlus2,
   Folder,
   FolderPlus,
   Info,
@@ -24,8 +26,9 @@ import {
   Wrench,
   X,
   Zap,
+  Plus,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type FC, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FC, type KeyboardEvent, type ReactNode } from 'react';
 
 import type { AgentMessage } from '../../../stores/agentStore';
 import type { SlashCommand } from '../../../lib/slashCommands';
@@ -37,6 +40,7 @@ import type { AgentKind } from '../../../types/session';
 import { ContextDisplay } from '../../assistant-ui/context-display';
 import { computeContextUsageFromEvents } from '../contextUsage';
 import { CodeMuxDirectiveChip, type CodeMuxDirectiveKind } from './CodeMuxDirectiveText';
+import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 
 interface CodeMuxComposerProps {
   sessionId: string;
@@ -118,8 +122,11 @@ export function CodeMuxComposer({
 }: CodeMuxComposerProps) {
   const aui = useAui();
   const composerRootRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isFocused, setIsFocused] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   const composerText = useAuiState((state) => state.composer.text);
+  const attachmentCount = useAuiState((state) => state.composer.attachments.length);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const contextUsage = useMemo(() => computeContextUsageFromEvents(events, {
@@ -161,11 +168,42 @@ export function CodeMuxComposer({
     setHighlightedIndex(0);
   }, [activeChar, activeQuery, menuItems.length]);
 
-  const hasInput = composerText.trim().length > 0;
+  const hasInput = composerText.trim().length > 0 || attachmentCount > 0;
 
   const insertSlash = () => {
     setManualTrigger('/');
+    setAddMenuOpen(false);
     aui.composer().setText('/');
+  };
+
+  const openFilePicker = () => {
+    setAddMenuOpen(false);
+    fileInputRef.current?.click();
+  };
+
+  const addSelectedFiles = async (files: File[]) => {
+    await addFilesToComposer(files, {
+      addAttachment: (file) => aui.composer().addAttachment(file),
+      insertReference: (reference) => aui.composer().setText(appendComposerReference(composerText, reference)),
+      projectPath,
+      fileItems: fileItemsRef.current,
+    });
+  };
+
+  const handleFileSelection = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = '';
+    await addSelectedFiles(files);
+  };
+
+  const handleComposerPaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    const files = Array.from(event.clipboardData?.files ?? []);
+    if (files.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    void addSelectedFiles(files);
   };
 
   const selectTriggerItem = (item: Unstable_TriggerItem) => {
@@ -212,6 +250,7 @@ export function CodeMuxComposer({
 
       {/* ── Composer ── */}
       <ComposerPrimitive.Root className="relative flex w-full flex-col">
+        <ComposerPrimitive.AttachmentDropzone className="relative flex w-full flex-col">
           <div
             ref={composerRootRef}
             onFocusCapture={() => setIsFocused(true)}
@@ -221,22 +260,49 @@ export function CodeMuxComposer({
               });
             }}
             className={cn(
-              'aui-composer-root flex w-full flex-col gap-2 overflow-hidden rounded-2xl border p-2.5 transition-all duration-200',
+              'aui-composer-root flex w-full flex-col gap-2 overflow-visible rounded-2xl border p-2.5 transition-all duration-200',
               isFocused
                 ? 'border-[hsl(var(--primary)/0.38)] bg-[hsl(var(--surface-1))]/98 shadow-[0_18px_42px_-30px_hsl(var(--primary)/0.36),inset_0_1px_0_hsl(var(--foreground)/0.035)]'
                 : 'border-border/82 bg-[hsl(var(--surface-1))]/94 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.026)]',
             )}
           >
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              multiple
+              onChange={(event) => void handleFileSelection(event)}
+            />
+            <ComposerPrimitive.Attachments>
+              {() => <ComposerAttachmentPreview />}
+            </ComposerPrimitive.Attachments>
             <LexicalComposerInput
               submitMode="enter"
               placeholder={placeholder}
               directiveChip={DIRECTIVE_CHIP}
               formatter={CODEMUX_FORMATTER}
+              onPaste={handleComposerPaste}
               className="relative min-h-10 max-h-50 w-full overflow-y-auto text-sm leading-6 text-foreground outline-none [&_.aui-lexical-input]:min-h-10 [&_.aui-lexical-input]:max-h-50 [&_.aui-lexical-input]:overflow-y-auto [&_.aui-lexical-input]:border-0 [&_.aui-lexical-input]:bg-transparent [&_.aui-lexical-input]:px-2 [&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:text-sm [&_.aui-lexical-input]:leading-6 [&_.aui-lexical-input]:text-foreground [&_.aui-lexical-input]:shadow-none [&_.aui-lexical-input]:outline-none [&_.aui-lexical-input]:ring-0 [&_.aui-lexical-input]:focus-visible:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:left-2 [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-sm [&_.aui-lexical-placeholder]:leading-6 [&_.aui-lexical-placeholder]:text-muted-foreground/70"
             />
 
             <div className="relative flex items-center justify-between pl-1">
               <div className="flex items-center gap-2">
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setAddMenuOpen((value) => !value)}
+                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/76 transition-all duration-200 hover:bg-muted/58 hover:text-foreground"
+                    title="添加附件或功能"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                  {addMenuOpen ? (
+                    <AddMenu
+                      onSelectFile={openFilePicker}
+                      onClose={() => setAddMenuOpen(false)}
+                    />
+                  ) : null}
+                </div>
                 <button
                   type="button"
                   onClick={insertSlash}
@@ -305,9 +371,175 @@ export function CodeMuxComposer({
               </div>
             </div>
           </div>
+        </ComposerPrimitive.AttachmentDropzone>
         </ComposerPrimitive.Root>
     </div>
   );
+}
+
+function ComposerAttachmentPreview() {
+  const attachment = useAuiState((state) => state.attachment);
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const imagePart = attachment?.content?.find((part): part is { type: 'image'; image: string } =>
+    part.type === 'image' && typeof (part as { image?: unknown }).image === 'string',
+  );
+  const imageSrc = imagePart?.image ?? objectUrl;
+
+  useEffect(() => {
+    if (!attachment?.file || !attachment.type.startsWith('image')) {
+      setObjectUrl(null);
+      return;
+    }
+
+    const nextUrl = URL.createObjectURL(attachment.file);
+    setObjectUrl(nextUrl);
+
+    return () => {
+      URL.revokeObjectURL(nextUrl);
+    };
+  }, [attachment?.file, attachment?.type]);
+
+  return (
+    <AttachmentPrimitive.Root className="mb-1.5 flex flex-wrap gap-2">
+      <div className="group relative flex h-18 w-18">
+        {imageSrc ? (
+          <ImageAttachmentPreview
+            src={imageSrc}
+            alt={attachment?.name ?? 'Attachment'}
+            thumbnailClassName="h-18 w-18"
+          />
+        ) : (
+          <div className="flex h-18 w-18 overflow-hidden rounded-lg border border-border/70 bg-[hsl(var(--surface-2))] shadow-[0_8px_22px_-18px_hsl(var(--foreground)/0.45)]">
+            <AttachmentPrimitive.unstable_Thumb className="flex h-full w-full items-center justify-center text-xs text-muted-foreground" />
+          </div>
+        )}
+        <AttachmentPrimitive.Remove
+          className="absolute right-1 top-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-background/92 text-muted-foreground opacity-100 shadow-sm ring-1 ring-border/50 transition-colors hover:text-foreground"
+          title="移除附件"
+        >
+          <X className="h-3.5 w-3.5" />
+        </AttachmentPrimitive.Remove>
+      </div>
+    </AttachmentPrimitive.Root>
+  );
+}
+
+function AddMenu({
+  onSelectFile,
+  onClose,
+}: {
+  onSelectFile: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="absolute bottom-full left-0 z-50 mb-2 w-44 overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 p-1 shadow-[0_18px_46px_-28px_hsl(var(--foreground)/0.48)] backdrop-blur-lg">
+      <button
+        type="button"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onSelectFile}
+        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted/56"
+      >
+        <FilePlus2 className="h-4 w-4 text-muted-foreground" />
+        <span>选择文件</span>
+      </button>
+      <button
+        type="button"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onClose}
+        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground"
+      >
+        <ListTodo className="h-4 w-4" />
+        <span>计划模式</span>
+      </button>
+    </div>
+  );
+}
+
+type AddFilesOptions = {
+  addAttachment: (file: File) => Promise<unknown>;
+  insertReference: (reference: string) => void;
+  projectPath?: string | null;
+  fileItems: FileEntry[];
+};
+
+async function addFilesToComposer(files: File[], options: AddFilesOptions): Promise<void> {
+  for (const file of files) {
+    const imageFile = normalizeImageFile(file);
+    if (imageFile) {
+      await options.addAttachment(imageFile);
+      continue;
+    }
+
+    const reference = getProjectRelativeReference(file, options.projectPath, options.fileItems);
+    if (reference) {
+      options.insertReference(reference);
+    }
+  }
+}
+
+function normalizeImageFile(file: File): File | null {
+  if (file.type.startsWith('image/')) {
+    return file;
+  }
+
+  const mediaType = inferImageMediaType(file.name);
+  if (!mediaType) {
+    return null;
+  }
+
+  return new File([file], file.name, {
+    type: mediaType,
+    lastModified: file.lastModified,
+  });
+}
+
+function inferImageMediaType(name: string): string | null {
+  const extension = name.split('.').pop()?.toLowerCase();
+  switch (extension) {
+    case 'apng':
+      return 'image/apng';
+    case 'avif':
+      return 'image/avif';
+    case 'gif':
+      return 'image/gif';
+    case 'jpg':
+    case 'jpeg':
+    case 'jfif':
+    case 'pjpeg':
+    case 'pjp':
+      return 'image/jpeg';
+    case 'png':
+      return 'image/png';
+    case 'svg':
+      return 'image/svg+xml';
+    case 'webp':
+      return 'image/webp';
+    default:
+      return null;
+  }
+}
+
+function getProjectRelativeReference(file: File, projectPath: string | null | undefined, fileItems: FileEntry[]): string | null {
+  const webkitRelativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+  const candidate = normalizeReferencePath(webkitRelativePath || file.name);
+  if (fileItems.some((item) => normalizeReferencePath(item.relativePath) === candidate)) {
+    return candidate;
+  }
+
+  if (!projectPath) {
+    return null;
+  }
+
+  return fileItems.find((item) => item.name === file.name)?.relativePath ?? null;
+}
+
+function appendComposerReference(text: string, reference: string): string {
+  const prefix = text.length === 0 || /\s$/.test(text) ? text : `${text} `;
+  return `${prefix}@${reference} `;
+}
+
+function normalizeReferencePath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/^\/+/, '');
 }
 
 function TriggerMenu({

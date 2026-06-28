@@ -1,5 +1,6 @@
 import { invoke, Channel } from '@tauri-apps/api/core';
 import type { AgentKind, ReasoningEffort, Session, SessionMode } from '../types/session';
+import type { AgentInputPayload } from '../types/agentInput';
 import type { AgentConfigUpdateMap, AppConfig, Provider, Theme } from '../types/provider';
 import type { Project } from '../types/project';
 import type { McpServer } from '../types/mcp';
@@ -158,7 +159,8 @@ export const agentApi = {
   sendInput: (
     sessionId: string,
     prompt: string,
-  ): Promise<void> => invokeLogged('send_agent_input', { sessionId, prompt }),
+    inputPayload?: AgentInputPayload,
+  ): Promise<void> => invokeLogged('send_agent_input', { sessionId, prompt, inputPayload }),
   startSession: (
     sessionId: string,
     prompt: string,
@@ -169,9 +171,10 @@ export const agentApi = {
     model?: string,
     reasoningEffort?: ReasoningEffort,
     codexNeedsProxy?: boolean,
+    inputPayload?: AgentInputPayload,
   ): Promise<void> => {
     const channel = createAgentChannel(sessionId, onEvent);
-    return invokeLogged('start_agent_session', { sessionId, prompt, cwd, channel, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy });
+    return invokeLogged('start_agent_session', { sessionId, prompt, cwd, channel, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy, inputPayload });
   },
   interrupt: (sessionId: string): Promise<void> => invokeLogged('interrupt_agent_session', { sessionId }),
   shutdown: (sessionId: string): Promise<void> => invokeLogged('shutdown_agent', { sessionId }),
