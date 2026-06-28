@@ -19,7 +19,6 @@ const saveEventsMock = vi.fn<(sessionId: string, eventsJson: string) => Promise<
 const getEventsMock = vi.fn<(sessionId: string) => Promise<string>>();
 const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
-const getChangedFilesSinceHeadMock = vi.fn();
 
 vi.mock('../lib/tauri', () => ({
   agentApi: {
@@ -65,9 +64,7 @@ vi.mock('../lib/tauri', () => ({
     deleteFile: vi.fn(),
     listDirectory: vi.fn(),
   },
-  gitApi: {
-    getChangedFilesSinceHead: getChangedFilesSinceHeadMock,
-  },
+  gitApi: {},
   mcpApi: {
     getAll: vi.fn(),
     upsert: vi.fn(),
@@ -129,7 +126,6 @@ describe('agent store Codex history loading', () => {
       streamedToolUseIds: {},
       changedFiles: {},
       fileOriginals: {},
-      gitBaselines: {},
       acknowledgedFiles: {},
     });
 
@@ -301,16 +297,10 @@ describe('agent store Codex history loading', () => {
     expect(changedFile.deletions).toBe(2);
   });
 
-  it('does not scan git changes after terminal events', async () => {
+  it('does not expose unused git baseline state', async () => {
     const { useAgentStore } = await import('./agentStore');
-    const session = await primeSession('codex');
 
-    await useAgentStore
-      .getState()
-      .startQuery(session.id, 'Change a file with apply_patch', 'D:\\project\\ai-code\\codeMUX');
-
-    expect(getChangedFilesSinceHeadMock).not.toHaveBeenCalled();
-    expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+    expect(useAgentStore.getState()).not.toHaveProperty('gitBaselines');
   });
 
   it('commits pending simulated assistant text before the result event', async () => {
@@ -757,5 +747,26 @@ describe('agent store Codex history loading', () => {
     expect(loaderMock).toHaveBeenCalledWith(session.id);
     expect(getEventsMock).not.toHaveBeenCalled();
     expect(useAgentStore.getState().events[session.id]).toBeUndefined();
+  });
+
+  it('does not restore acknowledged changed-file state while loading history', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    localStorage.setItem(`acknowledged-files-${session.id}`, JSON.stringify(['src/old.ts']));
+    loadCodexSessionEventsMock.mockResolvedValueOnce([
+      {
+        type: 'assistant',
+        timestamp: '2026-06-18T12:00:00.000Z',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'history' }],
+        },
+      },
+    ]);
+
+    await useAgentStore.getState().loadSessionMessages(session.id);
+
+    expect(useAgentStore.getState().acknowledgedFiles[session.id]).toBeUndefined();
   });
 });

@@ -1,5 +1,5 @@
 ﻿import { create } from 'zustand';
-import { agentApi, fileApi, type GitChangeBaseline } from '../lib/tauri';
+import { agentApi, fileApi } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 import {
   isTerminalAgentEvent,
@@ -74,7 +74,6 @@ interface AgentState {
   streamedToolUseIds: Record<string, Set<string>>;
   changedFiles: Record<string, ChangedFile[]>;
   fileOriginals: Record<string, Record<string, FileOriginalSnapshot>>;
-  gitBaselines: Record<string, GitChangeBaseline>;
   acknowledgedFiles: Record<string, Set<string>>;
 
   /** Start a new agent query */
@@ -827,7 +826,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   streamedToolUseIds: {},
   changedFiles: {},
   fileOriginals: {},
-  gitBaselines: {},
   acknowledgedFiles: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string) => {
@@ -1389,24 +1387,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   loadSessionMessages: async (sessionId: string) => {
-    // Restore acknowledgedFiles from localStorage
-    let restoredAcknowledged: Set<string> | undefined;
-    try {
-      const stored = localStorage.getItem(`acknowledged-files-${sessionId}`);
-      if (stored) {
-        const arr = JSON.parse(stored);
-        if (Array.isArray(arr)) restoredAcknowledged = new Set(arr);
-      }
-    } catch {}
-
     // Don't reload if we already have events for this session
     const existing = get().events[sessionId];
     if (existing && existing.length > 0) {
-      if (restoredAcknowledged) {
-        set((s) => ({
-          acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: restoredAcknowledged },
-        }));
-      }
       return;
     }
 
@@ -1509,7 +1492,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         events: { ...state.events, [sessionId]: events },
         eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
         todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
-        acknowledgedFiles: restoredAcknowledged ? { ...state.acknowledgedFiles, [sessionId]: restoredAcknowledged } : state.acknowledgedFiles,
       }));
       logger.info('Loaded session events from agent JSONL', {
         sessionId,

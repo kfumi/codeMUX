@@ -11,13 +11,6 @@ const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf899d69f3612f4bf";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GitChangeBaseline {
-    pub project_root: String,
-    pub baseline_tree: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct GitChangedFile {
     pub path: String,
     pub status: String,
@@ -128,34 +121,6 @@ fn path_to_display_string(path: &Path) -> String {
         }
     }
     text.replace('\\', "/")
-}
-
-pub fn create_git_baseline_for_path(project_path: &Path) -> Result<GitChangeBaseline, String> {
-    let root = project_path
-        .canonicalize()
-        .map_err(|e| format!("Project path not found: {}", e))?;
-    ensure_git_repo(&root)?;
-
-    let index_file = temp_index_path();
-    let add_result = run_git_with_env(&root, &["add", "-A", "--", "."], Some(&index_file));
-    if let Err(err) = add_result {
-        let _ = std::fs::remove_file(&index_file);
-        return Err(err);
-    }
-
-    let tree = match run_git_with_env(&root, &["write-tree"], Some(&index_file)) {
-        Ok(output) => String::from_utf8_lossy(&output).trim().to_string(),
-        Err(err) => {
-            let _ = std::fs::remove_file(&index_file);
-            return Err(err);
-        }
-    };
-    let _ = std::fs::remove_file(&index_file);
-
-    Ok(GitChangeBaseline {
-        project_root: path_to_display_string(&root),
-        baseline_tree: tree,
-    })
 }
 
 fn read_tree_file(root: &Path, tree: &str, relative_path: &str) -> Result<Option<String>, String> {
@@ -480,11 +445,6 @@ pub fn read_git_changed_files_for_tree(
 }
 
 #[tauri::command]
-pub fn create_git_change_baseline(project_path: String) -> Result<GitChangeBaseline, String> {
-    create_git_baseline_for_path(Path::new(&project_path))
-}
-
-#[tauri::command]
 pub fn get_git_changed_files(
     project_path: String,
     baseline_tree: String,
@@ -529,8 +489,8 @@ pub fn get_git_status_change_detail(
 #[cfg(test)]
 mod tests {
     use super::{
-        create_git_baseline_for_path, decode_text_bytes, read_git_changed_files_for_tree,
-        read_git_status_change_detail, read_git_status_changes, GitStatusArea,
+        decode_text_bytes, read_git_changed_files_for_tree, read_git_status_change_detail,
+        read_git_status_changes, GitStatusArea,
     };
     use std::fs;
     use std::process::Command;
@@ -558,23 +518,42 @@ mod tests {
     }
 
     #[test]
-    fn git_baseline_tracks_modified_added_and_deleted_files_without_committing() {
+    fn git_tree_diff_tracks_modified_added_and_deleted_files_without_committing() {
         if !git_available() {
             return;
         }
 
         let project = temp_project();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .arg("init")
+            .output()
+            .unwrap();
         fs::write(project.join("modified.txt"), "one\ntwo\n").unwrap();
         fs::write(project.join("deleted.txt"), "gone\n").unwrap();
 
-        let baseline = create_git_baseline_for_path(&project).unwrap();
-        assert!(project.join(".git").is_dir());
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["add", "-A"])
+            .output()
+            .unwrap();
+        let baseline_tree = Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["write-tree"])
+            .output()
+            .unwrap();
+        let baseline_tree = String::from_utf8_lossy(&baseline_tree.stdout)
+            .trim()
+            .to_string();
 
         fs::write(project.join("modified.txt"), "ONE\ntwo\nTHREE\n").unwrap();
         fs::remove_file(project.join("deleted.txt")).unwrap();
         fs::write(project.join("added.txt"), "new\n").unwrap();
 
-        let changed = read_git_changed_files_for_tree(&project, &baseline.baseline_tree).unwrap();
+        let changed = read_git_changed_files_for_tree(&project, &baseline_tree).unwrap();
         let paths: Vec<_> = changed
             .iter()
             .map(|file| (file.status.as_str(), file.path.ends_with(".txt")))

@@ -158,7 +158,6 @@ pub fn run() {
             commands::file::delete_file,
             commands::file::open_in_explorer,
             commands::file::list_directory,
-            commands::git::create_git_change_baseline,
             commands::git::get_git_changed_files,
             commands::git::get_git_changed_files_since_head,
             commands::git::get_git_status_change_detail,

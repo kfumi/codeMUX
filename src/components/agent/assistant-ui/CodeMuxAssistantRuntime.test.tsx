@@ -219,7 +219,6 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       streamedToolUseIds: {},
       changedFiles: {},
       fileOriginals: {},
-      gitBaselines: {},
       acknowledgedFiles: {},
     });
   });

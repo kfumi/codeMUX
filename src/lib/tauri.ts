@@ -22,11 +22,6 @@ export interface FileTreeNode {
   children?: FileTreeNode[];
 }
 
-export interface GitChangeBaseline {
-  projectRoot: string;
-  baselineTree: string;
-}
-
 export interface GitChangedFile {
   path: string;
   status: 'added' | 'modified' | 'deleted';
@@ -230,8 +225,6 @@ export const fileApi = {
 };
 
 export const gitApi = {
-  createChangeBaseline: (projectPath: string): Promise<GitChangeBaseline> =>
-    invokeLogged('create_git_change_baseline', { projectPath }),
   getChangedFiles: (projectPath: string, baselineTree: string): Promise<GitChangedFile[]> =>
     invokeLogged('get_git_changed_files', { projectPath, baselineTree }),
   getChangedFilesSinceHead: (projectPath: string): Promise<GitChangedFile[]> =>

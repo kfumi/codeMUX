@@ -1,6 +1,7 @@
 pub mod commands;
 
 use log::{debug, info, warn};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -104,6 +105,13 @@ fn resolve_node_runtime_path(
     Ok(PathBuf::from(node_binary_name()))
 }
 
+fn missing_node_prerequisite_error(node_command: &str, script_path: &str) -> String {
+    format!(
+        "Node.js 18+ is required to run agent sessions. Install Node.js from https://nodejs.org/, make sure `{}` is available in PATH, then restart codeMUX. Sidecar script: {}",
+        node_command, script_path
+    )
+}
+
 /// Spawn the sidecar process and return a handle + event receiver.
 ///
 /// Events are raw JSON strings (one per line) from the sidecar's stdout.
@@ -130,8 +138,14 @@ pub async fn spawn_sidecar(
             .stderr(Stdio::piped())
             .creation_flags(0x08000000); // CREATE_NO_WINDOW
         cmd.spawn().map_err(|e| {
+            if e.kind() == io::ErrorKind::NotFound {
+                return missing_node_prerequisite_error(
+                    &node_path.display().to_string(),
+                    &script_path.display().to_string(),
+                );
+            }
             format!(
-                "Failed to spawn sidecar with node={} script={}: {}. Please install Node.js 18+ and make sure it is available in PATH.",
+                "Failed to spawn sidecar with node={} script={}: {}",
                 node_path.display(),
                 script_path.display(),
                 e
@@ -145,8 +159,14 @@ pub async fn spawn_sidecar(
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| {
+                if e.kind() == io::ErrorKind::NotFound {
+                    return missing_node_prerequisite_error(
+                        &node_path.display().to_string(),
+                        &script_path.display().to_string(),
+                    );
+                }
                 format!(
-                    "Failed to spawn sidecar with node={} script={}: {}. Please install Node.js 18+ and make sure it is available in PATH.",
+                    "Failed to spawn sidecar with node={} script={}: {}",
                     node_path.display(),
                     script_path.display(),
                     e
@@ -275,7 +295,10 @@ pub async fn spawn_sidecar(
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_node_runtime_path, resolve_sidecar_script_path, BuildEnvironment};
+    use super::{
+        missing_node_prerequisite_error, resolve_node_runtime_path, resolve_sidecar_script_path,
+        BuildEnvironment,
+    };
     use std::path::Path;
 
     #[test]
@@ -319,5 +342,14 @@ mod tests {
             .expect("release builds should use the system Node.js command");
 
         assert_eq!(path, std::path::PathBuf::from(super::node_binary_name()));
+    }
+
+    #[test]
+    fn missing_node_error_tells_user_how_to_recover() {
+        let message = missing_node_prerequisite_error("node.exe", "sidecar/dist/index.js");
+
+        assert!(message.contains("Node.js 18+ is required"));
+        assert!(message.contains("https://nodejs.org/"));
+        assert!(message.contains("restart codeMUX"));
     }
 }
