@@ -39,7 +39,7 @@ export function getToolHeaderSummary(toolName: string, input: Record<string, unk
 
     case 'Bash':
     case 'shell_command':
-      return fromFirstKey(input, ['description', 'command', 'cmd', 'script']);
+      return shellCommandSummary(input);
 
     case 'Agent':
     case 'Task':
@@ -83,6 +83,16 @@ export function getDisplayableArgs(input: Record<string, unknown>, consumedKeys:
   const entries = Object.entries(input).filter(([key]) => !consumed.has(key));
   if (entries.length === 0) return null;
   return Object.fromEntries(entries);
+}
+
+function shellCommandSummary(input: Record<string, unknown>): ToolHeaderSummary {
+  const key = firstPresentKey(input, ['description', 'command', 'cmd', 'script']);
+  if (!key) return { consumedKeys: [] };
+
+  return {
+    text: asDisplayText(input[key]),
+    consumedKeys: Object.keys(input),
+  };
 }
 
 export function normalizePath(path: string): string {

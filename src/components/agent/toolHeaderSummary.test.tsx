@@ -28,7 +28,7 @@ describe('tool header summaries', () => {
     expect(container.textContent).not.toContain('"file_path"');
   });
 
-  it('shows Bash description in the header while keeping command in expanded args', () => {
+  it('shows Bash description in the header without expanded args', () => {
     const { container } = renderWithTooltip(
       <ToolCallCard
         toolName="Bash"
@@ -45,8 +45,30 @@ describe('tool header summaries', () => {
     fireEvent.click(within(container).getByRole('button'));
 
     expect(container.textContent).not.toContain('"description"');
-    expect(container.textContent).toContain('"command"');
-    expect(container.textContent).toContain('npm run build');
+    expect(container.textContent).not.toContain('"command"');
+    expect(container.textContent).not.toContain('npm run build');
+  });
+
+  it('shows shell_command command in the header and keeps it in expanded args', () => {
+    const { container } = renderWithTooltip(
+      <ToolCallCard
+        toolName="shell_command"
+        input={{
+          command: 'node --check script.js',
+          timeout_ms: 10000,
+          workdir: 'D:\\project\\ai-code\\code-demo',
+        }}
+        status="done"
+      />,
+    );
+
+    expect(screen.getByText('node --check script.js')).toBeTruthy();
+
+    fireEvent.click(within(container).getByRole('button'));
+
+    expect(container.textContent).not.toContain('"command"');
+    expect(container.textContent).not.toContain('"timeout_ms"');
+    expect(container.textContent).not.toContain('"workdir"');
   });
 
   it('shows Grep pattern and Agent description in the header', () => {

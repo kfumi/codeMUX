@@ -29,6 +29,65 @@ describe('CodexSessionRuntime', () => {
     });
   });
 
+  it('renders Codex command executions as shell_command tool calls with user-facing commands', () => {
+    expect(buildCodexToolUseContent({
+      id: 'cmd-1',
+      type: 'command_execution',
+      command: '"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem"',
+      aggregated_output: '',
+      status: 'in_progress',
+    })).toEqual({
+      type: 'tool_use',
+      id: 'cmd-1',
+      name: 'shell_command',
+      input: { command: 'Get-ChildItem' },
+    });
+  });
+
+  it('includes runtime shell command metadata for live Codex command executions', () => {
+    expect(buildCodexToolUseContent({
+      id: 'cmd-1',
+      type: 'command_execution',
+      command: 'node --check script.js',
+      aggregated_output: '',
+      status: 'in_progress',
+    }, {
+      workdir: 'D:\\project\\ai-code\\code-demo',
+      timeoutMs: 10000,
+    })).toEqual({
+      type: 'tool_use',
+      id: 'cmd-1',
+      name: 'shell_command',
+      input: {
+        command: 'node --check script.js',
+        timeout_ms: 10000,
+        workdir: 'D:\\project\\ai-code\\code-demo',
+      },
+    });
+  });
+
+  it('renders Codex file changes as apply_patch tool calls', () => {
+    expect(buildCodexToolUseContent({
+      id: 'patch-1',
+      type: 'file_change',
+      changes: [
+        { path: 'src/app.ts', kind: 'update' },
+        { path: 'src/new.ts', kind: 'add' },
+      ],
+      status: 'completed',
+    })).toEqual({
+      type: 'tool_use',
+      id: 'patch-1',
+      name: 'apply_patch',
+      input: {
+        changes: [
+          { path: 'src/app.ts', kind: 'update' },
+          { path: 'src/new.ts', kind: 'add' },
+        ],
+      },
+    });
+  });
+
   it('drains the Codex SDK stream after turn.completed instead of closing it early', async () => {
     const writes: string[] = [];
     let returnedEarly = false;
@@ -357,6 +416,92 @@ describe('CodexSessionRuntime', () => {
                 tool_use_id: 'tool-1',
                 content: 'unsupported call: mcp__context7__resolve_library_id',
                 is_error: true,
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      ]);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it('emits completed-only Codex file changes as a tool call and result', () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      const emitItemEvent = (
+        runtime as unknown as {
+          emitItemEvent: (
+            sessionId: string,
+            eventType: 'item.started' | 'item.updated' | 'item.completed',
+            item: ThreadEvent extends { item: infer T } ? T : never,
+            emitFailure: (message: string) => void,
+          ) => void;
+        }
+      ).emitItemEvent.bind(runtime);
+
+      emitItemEvent(
+        'session-1',
+        'item.completed',
+        {
+          id: 'patch-1',
+          type: 'file_change',
+          changes: [
+            { path: 'src/app.ts', kind: 'update' },
+          ],
+          status: 'completed',
+        },
+        () => {},
+      );
+
+      const emittedEvents = writes
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line));
+
+      expect(emittedEvents).toEqual([
+        {
+          type: 'assistant',
+          session_id: 'session-1',
+          uuid: expect.any(String),
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'patch-1',
+                name: 'apply_patch',
+                input: {
+                  changes: [
+                    { path: 'src/app.ts', kind: 'update' },
+                  ],
+                },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'user',
+          session_id: 'session-1',
+          uuid: expect.any(String),
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'patch-1',
+                content: 'Patch completed: update src/app.ts',
+                is_error: false,
               },
             ],
           },

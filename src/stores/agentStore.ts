@@ -286,6 +286,54 @@ function clearPendingStreamingToolInputs(sessionId: string) {
   pendingStreamingToolInputBuffers.delete(sessionId);
 }
 
+function replaceToolUseBlocksInEvents(
+  events: AgentMessage[],
+  replacementsById: Map<string, unknown>,
+): { events: AgentMessage[]; changed: boolean } {
+  if (replacementsById.size === 0) {
+    return { events, changed: false };
+  }
+
+  let changed = false;
+  const nextEvents = events.map((event) => {
+    if (event.kind !== 'assistant') {
+      return event;
+    }
+
+    let contentChanged = false;
+    const nextContent = event.data.message.content.map((block) => {
+      if (
+        block?.type === 'tool_use'
+        && typeof block.id === 'string'
+        && replacementsById.has(block.id)
+      ) {
+        contentChanged = true;
+        changed = true;
+        return replacementsById.get(block.id) as typeof block;
+      }
+
+      return block;
+    });
+
+    if (!contentChanged) {
+      return event;
+    }
+
+    return {
+      ...event,
+      data: {
+        ...event.data,
+        message: {
+          ...event.data.message,
+          content: nextContent,
+        },
+      },
+    };
+  });
+
+  return { events: nextEvents, changed };
+}
+
 function clearSimulatedStream(sessionId: string) {
   const entry = pendingSimulatedStreams.get(sessionId);
   if (!entry) return;
@@ -1200,7 +1248,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
           flushPendingStreaming(sessionId, set);
           const blocks = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
-          const streamedIds = get().streamedToolUseIds[sessionId];
           // Collect all tool_use IDs already present in events (covers race condition)
           const existingToolIds = new Set<string>();
           for (const prevEvt of (get().events[sessionId] || [])) {
@@ -1210,10 +1257,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               }
             }
           }
+          const toolUseReplacements = new Map<string, unknown>();
           const filtered = blocks.filter((b: any) => {
-            if (b?.type === 'tool_use' && (existingToolIds.has(b.id) || streamedIds?.has(b.id))) return false;
+            if (b?.type === 'tool_use' && existingToolIds.has(b.id)) {
+              if (typeof b.id === 'string') toolUseReplacements.set(b.id, b);
+              return false;
+            }
             return true;
           });
+          const replacedExistingTools = toolUseReplacements.size > 0
+            ? replaceToolUseBlocksInEvents(get().events[sessionId] || [], toolUseReplacements)
+            : { events: get().events[sessionId] || [], changed: false };
           if (filtered.length !== blocks.length) {
             event = {
               ...event,
@@ -1268,6 +1322,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
           set((s) => {
             const updates: Partial<AgentState> = {};
+            if (replacedExistingTools.changed) {
+              updates.events = { ...s.events, [sessionId]: replacedExistingTools.events };
+              const extractedTodos = extractTodosFromEvents(replacedExistingTools.events);
+              updates.todos = {
+                ...s.todos,
+                [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []),
+              };
+              updates.changedFiles = {
+                ...s.changedFiles,
+                [sessionId]: extractChangedFilesFromEvents(
+                  replacedExistingTools.events,
+                  s.acknowledgedFiles[sessionId],
+                  s.fileOriginals[sessionId],
+                ),
+              };
+            }
             if (s.streamingThinking[sessionId]) updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
             if (s.streamingText[sessionId]) updates.streamingText = { ...s.streamingText, [sessionId]: '' };
             if (finalTextReplacesLiveText) {
@@ -1278,6 +1348,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             return updates;
           });
+
+          if (filtered.length === 0 && replacedExistingTools.changed) {
+            return;
+          }
         }
 
         if (event.kind === 'result') {

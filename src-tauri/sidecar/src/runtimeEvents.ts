@@ -1,5 +1,6 @@
 import type {
   CommandExecutionItem,
+  FileChangeItem,
   McpToolCallItem,
   ThreadItem,
   TodoListItem,
@@ -21,6 +22,11 @@ type AssistantContentBlock =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> };
+
+type ToolUseContext = {
+  workdir?: string;
+  timeoutMs?: number;
+};
 
 export function getRuntimeFlavor(agentKind?: string): RuntimeFlavor {
   return agentKind === 'codex' ? 'codex' : 'claude';
@@ -118,15 +124,23 @@ export function buildCodexResultEvent({
   };
 }
 
-export function buildCodexToolUseContent(item: ThreadItem): AssistantContentBlock | null {
+export function buildCodexToolUseContent(item: ThreadItem, context: ToolUseContext = {}): AssistantContentBlock | null {
   switch (item.type) {
-    case 'command_execution':
+    case 'command_execution': {
+      const input: Record<string, unknown> = { command: unwrapWindowsPowerShellCommand(item.command) };
+      if (context.timeoutMs !== undefined) {
+        input.timeout_ms = context.timeoutMs;
+      }
+      if (context.workdir) {
+        input.workdir = context.workdir;
+      }
       return {
         type: 'tool_use',
         id: item.id,
-        name: 'Bash',
-        input: { command: item.command },
+        name: 'shell_command',
+        input,
       };
+    }
     case 'mcp_tool_call':
       return {
         type: 'tool_use',
@@ -141,9 +155,33 @@ export function buildCodexToolUseContent(item: ThreadItem): AssistantContentBloc
         name: 'WebSearch',
         input: { query: item.query },
       };
+    case 'file_change':
+      return {
+        type: 'tool_use',
+        id: item.id,
+        name: 'apply_patch',
+        input: { changes: item.changes },
+      };
     default:
       return null;
   }
+}
+
+function unwrapWindowsPowerShellCommand(command: string): string {
+  const match = command.match(/^(?:"[^"]*powershell(?:\.exe)?"|[^"\s]*powershell(?:\.exe)?)\s+-Command\s+([\s\S]+)$/i);
+  if (!match) {
+    return command;
+  }
+
+  const rawInnerCommand = match[1].trim();
+  if (rawInnerCommand.startsWith('"') && rawInnerCommand.endsWith('"')) {
+    return rawInnerCommand.slice(1, -1);
+  }
+  if (rawInnerCommand.startsWith("'") && rawInnerCommand.endsWith("'")) {
+    return rawInnerCommand.slice(1, -1);
+  }
+
+  return rawInnerCommand;
 }
 
 export function buildCodexTodoListEvent({
@@ -173,7 +211,7 @@ function formatMcpToolName(server: string, tool: string): string {
 }
 
 export function buildCodexToolResultContent(
-  item: CommandExecutionItem | McpToolCallItem | TodoListItem | WebSearchItem,
+  item: CommandExecutionItem | FileChangeItem | McpToolCallItem | TodoListItem | WebSearchItem,
 ): string | null {
   switch (item.type) {
     case 'command_execution':
@@ -189,17 +227,22 @@ export function buildCodexToolResultContent(
       );
     case 'web_search':
       return `Search completed for: ${item.query}`;
+    case 'file_change':
+      return item.changes.length > 0
+        ? `Patch ${item.status}: ${item.changes.map((change) => `${change.kind} ${change.path}`).join(', ')}`
+        : `Patch ${item.status}`;
     default:
       return null;
   }
 }
 
 export function isCodexToolResultError(
-  item: CommandExecutionItem | McpToolCallItem | TodoListItem | WebSearchItem,
+  item: CommandExecutionItem | FileChangeItem | McpToolCallItem | TodoListItem | WebSearchItem,
 ): boolean {
   switch (item.type) {
     case 'command_execution':
     case 'mcp_tool_call':
+    case 'file_change':
       return item.status === 'failed';
     default:
       return false;

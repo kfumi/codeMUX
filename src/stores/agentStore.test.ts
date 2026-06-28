@@ -708,6 +708,136 @@ describe('agent store Codex history loading', () => {
     }
   });
 
+  it('replaces a live streamed tool placeholder with the complete assistant tool call', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'tool_use', id: 'tool-1', name: 'Bash' },
+        },
+      }));
+      onEvent(JSON.stringify({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: {
+          type: 'content_block_delta',
+          index: 0,
+          delta: {
+            type: 'input_json_delta',
+            partial_json: '{"command":"powershell.exe -Command Get-Content src\\\\stores\\\\agentStore.ts"}',
+          },
+        },
+      }));
+      onEvent(JSON.stringify({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: {
+          type: 'content_block_stop',
+          index: 0,
+        },
+      }));
+      onEvent(JSON.stringify({
+        type: 'assistant',
+        uuid: 'assistant-complete-tool',
+        session_id: sessionId,
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: 'tool-1',
+            name: 'shell_command',
+            input: {
+              command: 'Get-Content src\\stores\\agentStore.ts',
+              timeout_ms: 10000,
+              workdir: 'D:\\project\\ai-code\\codeMUX',
+            },
+          }],
+        },
+        parent_tool_use_id: null,
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'inspect store', 'D:\\project\\ai-code\\codeMUX');
+
+    const toolBlocks = (useAgentStore.getState().events[session.id] ?? [])
+      .filter((event) => event.kind === 'assistant')
+      .flatMap((event) => event.data.message.content)
+      .filter((block) => block.type === 'tool_use' && block.id === 'tool-1');
+
+    expect(toolBlocks).toHaveLength(1);
+    expect(toolBlocks[0]).toEqual({
+      type: 'tool_use',
+      id: 'tool-1',
+      name: 'shell_command',
+      input: {
+        command: 'Get-Content src\\stores\\agentStore.ts',
+        timeout_ms: 10000,
+        workdir: 'D:\\project\\ai-code\\codeMUX',
+      },
+    });
+  });
+
+  it('keeps a complete assistant tool call when a streamed id exists without a replaceable tool block', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      const { useAgentStore } = await import('./agentStore');
+      useAgentStore.setState((state) => ({
+        streamedToolUseIds: {
+          ...state.streamedToolUseIds,
+          [sessionId]: new Set(['tool-race']),
+        },
+      }));
+
+      onEvent(JSON.stringify({
+        type: 'assistant',
+        uuid: 'assistant-complete-tool-race',
+        session_id: sessionId,
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: 'tool-race',
+            name: 'shell_command',
+            input: {
+              command: 'rg --files',
+              workdir: 'D:\\project\\ai-code\\codeMUX',
+            },
+          }],
+        },
+        parent_tool_use_id: null,
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'inspect files', 'D:\\project\\ai-code\\codeMUX');
+
+    const toolBlocks = (useAgentStore.getState().events[session.id] ?? [])
+      .filter((event) => event.kind === 'assistant')
+      .flatMap((event) => event.data.message.content)
+      .filter((block) => block.type === 'tool_use' && block.id === 'tool-race');
+
+    expect(toolBlocks).toEqual([{
+      type: 'tool_use',
+      id: 'tool-race',
+      name: 'shell_command',
+      input: {
+        command: 'rg --files',
+        workdir: 'D:\\project\\ai-code\\codeMUX',
+      },
+    }]);
+  });
+
   it('drops sidecar debug events instead of appending them to the conversation event list', async () => {
     startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
       for (let index = 0; index < 20; index += 1) {

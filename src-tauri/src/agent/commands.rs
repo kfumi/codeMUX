@@ -334,6 +334,63 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
                 }
             }));
         }
+
+        // Custom tool call -> tool_use. Codex records tools such as apply_patch
+        // this way in JSONL, so history loading needs to preserve them.
+        if payload_type == "custom_tool_call" {
+            let name = payload.get("name")?.as_str()?;
+            let call_id = payload.get("call_id")?.as_str()?;
+            let input_value = payload
+                .get("input")
+                .cloned()
+                .unwrap_or(serde_json::json!({}));
+            let input = if input_value.is_object() {
+                input_value
+            } else if input_value.is_null() {
+                serde_json::json!({})
+            } else {
+                serde_json::json!({ "input": input_value })
+            };
+            return Some(serde_json::json!({
+                "type": "assistant",
+                "timestamp": timestamp,
+                "message": {
+                    "role": "assistant",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": call_id,
+                        "name": name,
+                        "input": input
+                    }]
+                }
+            }));
+        }
+
+        // Custom tool call output -> user tool_result.
+        if payload_type == "custom_tool_call_output" {
+            let call_id = payload.get("call_id")?.as_str()?;
+            let output = payload
+                .get("output")
+                .and_then(|o| o.as_str().map(ToOwned::to_owned))
+                .unwrap_or_else(|| {
+                    payload
+                        .get("output")
+                        .map(|o| o.to_string())
+                        .unwrap_or_default()
+                });
+            return Some(serde_json::json!({
+                "type": "user",
+                "timestamp": timestamp,
+                "message": {
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": call_id,
+                        "content": output
+                    }]
+                }
+            }));
+        }
     }
 
     None
@@ -1269,6 +1326,78 @@ mod tests {
                         {
                             "type": "thinking",
                             "thinking": "**Crafting a concise response**\n\nI can answer directly."
+                        }
+                    ]
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn convert_codex_custom_tool_call_to_tool_use() {
+        let value = serde_json::json!({
+            "timestamp": "2026-06-29T10:00:00.000Z",
+            "type": "response_item",
+            "payload": {
+                "type": "custom_tool_call",
+                "call_id": "call_apply_patch_1",
+                "name": "apply_patch",
+                "input": "*** Begin Patch\n*** Update File: src/app.ts\n@@\n-old\n+new\n*** End Patch"
+            }
+        });
+
+        let converted = convert_codex_item_to_claude_format(&value)
+            .expect("custom tool call should be visible");
+
+        assert_eq!(
+            converted,
+            serde_json::json!({
+                "type": "assistant",
+                "timestamp": "2026-06-29T10:00:00.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call_apply_patch_1",
+                            "name": "apply_patch",
+                            "input": {
+                                "input": "*** Begin Patch\n*** Update File: src/app.ts\n@@\n-old\n+new\n*** End Patch"
+                            }
+                        }
+                    ]
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn convert_codex_custom_tool_call_output_to_tool_result() {
+        let value = serde_json::json!({
+            "timestamp": "2026-06-29T10:00:01.000Z",
+            "type": "response_item",
+            "payload": {
+                "type": "custom_tool_call_output",
+                "call_id": "call_apply_patch_1",
+                "output": "Success. Updated the following files:\nM src/app.ts"
+            }
+        });
+
+        let converted = convert_codex_item_to_claude_format(&value)
+            .expect("custom tool output should be visible");
+
+        assert_eq!(
+            converted,
+            serde_json::json!({
+                "type": "user",
+                "timestamp": "2026-06-29T10:00:01.000Z",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "call_apply_patch_1",
+                            "content": "Success. Updated the following files:\nM src/app.ts"
                         }
                     ]
                 }

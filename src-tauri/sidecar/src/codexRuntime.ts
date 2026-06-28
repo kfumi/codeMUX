@@ -33,6 +33,7 @@ export { emit } from './streamEventBatcher.js';
 
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
 const DEBUG_STREAM_LOGS = process.env.CODEMUX_STREAM_DEBUG === '1';
+const DEFAULT_SHELL_COMMAND_TIMEOUT_MS = 10000;
 
 type CodexSessionBootstrap = {
   sessionId?: string;
@@ -87,6 +88,7 @@ export class CodexSessionRuntime {
   private thread: Thread | null = null;
   private streamingItemState = new Map<string, { kind: 'text' | 'thinking'; text: string }>();
   private todoListState = new Map<string, string>();
+  private emittedToolUseIds = new Set<string>();
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     if (cmd.sessionId) setActiveSessionId(cmd.sessionId);
@@ -373,6 +375,7 @@ export class CodexSessionRuntime {
     this.abortController = null;
     this.streamingItemState.clear();
     this.todoListState.clear();
+    this.emittedToolUseIds.clear();
     await this.teardownClient();
     this.config = null;
     this.configFingerprint = null;
@@ -384,6 +387,7 @@ export class CodexSessionRuntime {
     this.abortController = null;
     this.streamingItemState.clear();
     this.todoListState.clear();
+    this.emittedToolUseIds.clear();
     await this.teardownClient();
     this.config = null;
     this.configFingerprint = null;
@@ -512,9 +516,13 @@ export class CodexSessionRuntime {
       return;
     }
 
-    const toolUse = buildCodexToolUseContent(item);
+    const toolUse = buildCodexToolUseContent(item, {
+      workdir: this.config?.cwd,
+      timeoutMs: item.type === 'command_execution' ? DEFAULT_SHELL_COMMAND_TIMEOUT_MS : undefined,
+    });
     if (eventType === 'item.started') {
       if (toolUse) {
+        this.emittedToolUseIds.add(item.id);
         emit(buildAssistantEvent({
           sessionId,
           content: [toolUse],
@@ -527,7 +535,15 @@ export class CodexSessionRuntime {
     if (eventType === 'item.completed') {
       if (item.type === 'command_execution'
         || item.type === 'mcp_tool_call'
+        || item.type === 'file_change'
         || item.type === 'web_search') {
+        if (item.type === 'file_change' && toolUse && !this.emittedToolUseIds.has(item.id)) {
+          this.emittedToolUseIds.add(item.id);
+          emit(buildAssistantEvent({
+            sessionId,
+            content: [toolUse],
+          }));
+        }
         const result = buildCodexToolResultContent(item);
         if (result) {
           const isError = isCodexToolResultError(item);
@@ -538,14 +554,18 @@ export class CodexSessionRuntime {
             isError,
           }));
         }
-      } else if (item.type !== 'agent_message' && item.type !== 'reasoning' && item.type !== 'error') {
-        process.stderr.write(`[codex] item.completed with unhandled type: ${item.type} id=${item.id}\n`);
+      } else {
+        const unhandledItem = item as { type: string; id?: string };
+        if (unhandledItem.type !== 'agent_message' && unhandledItem.type !== 'reasoning' && unhandledItem.type !== 'error') {
+          process.stderr.write(`[codex] item.completed with unhandled type: ${unhandledItem.type} id=${unhandledItem.id ?? 'unknown'}\n`);
+        }
       }
     }
   }
 
   private finishTurn(): void {
     this.streamingItemState.clear();
+    this.emittedToolUseIds.clear();
     emit({ type: 'sidecar_query_done' });
   }
 
@@ -554,6 +574,7 @@ export class CodexSessionRuntime {
     this.abortController = null;
     this.streamingItemState.clear();
     this.todoListState.clear();
+    this.emittedToolUseIds.clear();
     this.thread = null;
     this.client = null;
   }

@@ -149,7 +149,7 @@ function ToolFallbackContent({
       )}
       {...props}
     >
-      <div className="mt-1 flex max-h-90 flex-col gap-2 overflow-y-auto pr-1 text-xs scrollbar-gutter-stable">{children}</div>
+      <div className="mt-1 flex max-h-40 flex-col gap-2 overflow-y-auto pr-1 text-xs scrollbar-gutter-stable">{children}</div>
     </CollapsibleContent>
   );
 }
