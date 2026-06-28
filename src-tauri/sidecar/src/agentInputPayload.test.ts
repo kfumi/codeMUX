@@ -38,6 +38,7 @@ describe('agentInputPayload', () => {
   it('recognizes common provider image-unsupported errors', () => {
     expect(isImageUnsupportedError('This model does not support image input')).toBe(true);
     expect(isImageUnsupportedError('Unsupported content type: image_url')).toBe(true);
+    expect(isImageUnsupportedError('unknown feature key in config: view_image_tool\nShell snapshot not supported yet for PowerShell')).toBe(false);
     expect(isImageUnsupportedError('ordinary rate limit error')).toBe(false);
   });
 });

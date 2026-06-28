@@ -1,11 +1,185 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ThreadEvent } from '@openai/codex-sdk';
 
-import { CodexSessionRuntime } from './codexRuntime.js';
+import { buildCodexCliConfig, CodexSessionRuntime } from './codexRuntime.js';
 import { buildCodexToolUseContent } from './runtimeEvents.js';
 import { flushStreamEvents } from './streamEventBatcher.js';
 
 describe('CodexSessionRuntime', () => {
+  it('configures a native Responses model provider for the selected Codex provider', () => {
+    expect(buildCodexCliConfig('https://example.test')).toEqual({
+      model_provider: 'codemux_proxy',
+      model_providers: {
+        codemux_proxy: {
+          name: 'CodeMUX Proxy',
+          base_url: 'https://example.test/v1',
+          env_key: 'OPENAI_API_KEY',
+          wire_api: 'responses',
+          requires_openai_auth: true,
+        },
+      },
+      openai_base_url: 'https://example.test',
+    });
+    expect(buildCodexCliConfig('https://example.test/v1')).toMatchObject({
+      model_providers: {
+        codemux_proxy: {
+          base_url: 'https://example.test/v1',
+        },
+      },
+    });
+  });
+
+  it('drains the Codex SDK stream after turn.completed instead of closing it early', async () => {
+    const writes: string[] = [];
+    let returnedEarly = false;
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        config: {
+          sessionId: string;
+          cwd: string;
+          model: string;
+        };
+        thread: {
+          id: string;
+          runStreamed: () => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).config = {
+        sessionId: 'session-1',
+        cwd: 'D:/repo',
+        model: 'gpt-5',
+      };
+      let nextCount = 0;
+      const events = {
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+        async next() {
+          nextCount += 1;
+          if (nextCount === 1) {
+            return {
+              done: false,
+              value: {
+                type: 'turn.completed',
+                usage: {
+                  input_tokens: 1,
+                  cached_input_tokens: 0,
+                  output_tokens: 1,
+                  reasoning_output_tokens: 0,
+                },
+              } as ThreadEvent,
+            };
+          }
+          return { done: true, value: undefined };
+        },
+        async return() {
+          returnedEarly = true;
+          return { done: true, value: undefined };
+        },
+        async throw(error?: unknown) {
+          throw error;
+        },
+      } as AsyncGenerator<ThreadEvent>;
+
+      (runtime as unknown as {
+        thread: {
+          id: string;
+          runStreamed: () => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).thread = {
+        id: 'codex-thread-1',
+        runStreamed: async () => ({
+          events,
+        }),
+      };
+
+      await (runtime as unknown as {
+        runInput: (prompt: string, inputPayload: undefined, includeImages: boolean) => Promise<void>;
+      }).runInput('hello', undefined, false);
+
+      expect(returnedEarly).toBe(false);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it('treats a missing response.completed stream close as success after an assistant message completed', async () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        config: {
+          sessionId: string;
+          cwd: string;
+          model: string;
+        };
+        thread: {
+          id: string;
+          runStreamed: () => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).config = {
+        sessionId: 'session-1',
+        cwd: 'D:/repo',
+        model: 'gpt-5',
+      };
+      (runtime as unknown as {
+        thread: {
+          id: string;
+          runStreamed: () => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).thread = {
+        id: 'codex-thread-1',
+        runStreamed: async () => ({
+          events: (async function* () {
+            yield {
+              type: 'item.completed',
+              item: {
+                id: 'agent-message-1',
+                type: 'agent_message',
+                text: 'Complete answer',
+              },
+            } as ThreadEvent;
+            throw new Error('stream disconnected before completion: stream closed before response.completed');
+          })(),
+        }),
+      };
+
+      await (runtime as unknown as {
+        runInput: (prompt: string, inputPayload: undefined, includeImages: boolean) => Promise<void>;
+      }).runInput('hello', undefined, false);
+
+      const emittedEvents = writes
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line));
+
+      expect(emittedEvents.some((event) => event.type === 'sidecar_error')).toBe(false);
+      expect(emittedEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'assistant' }),
+          expect.objectContaining({ type: 'result', subtype: 'success', is_error: false }),
+          expect.objectContaining({ type: 'sidecar_query_done' }),
+        ]),
+      );
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
   it('includes reasoning effort in Codex thread options', () => {
     const runtime = new CodexSessionRuntime();
     (runtime as unknown as {

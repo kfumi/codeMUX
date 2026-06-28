@@ -162,19 +162,7 @@ export class CodexSessionRuntime {
       codexEnv.OPENAI_BASE_URL = runtimeBaseUrl;
     }
 
-    // Build Codex CLI config overrides (values must be CodexConfigValue-compatible)
-    const codexConfig: Record<string, string | number | boolean | Record<string, unknown> | Record<string, unknown>[]> = {};
-    if (runtimeBaseUrl) {
-      codexConfig.model_provider = 'codemux_proxy';
-      codexConfig.model_providers = {
-        codemux_proxy: {
-          name: 'CodeMUX Proxy',
-          base_url: runtimeBaseUrl,
-          env_key: 'OPENAI_API_KEY',
-        },
-      };
-      codexConfig.openai_base_url = runtimeBaseUrl;
-    }
+    const codexConfig = buildCodexCliConfig(runtimeBaseUrl);
 
     this.client = new Codex({
       env: codexEnv,
@@ -183,7 +171,7 @@ export class CodexSessionRuntime {
       config: Object.keys(codexConfig).length > 0 ? codexConfig as any : undefined,
     });
     process.stderr.write(
-      `[codex] SDK client configured with baseUrl=${runtimeBaseUrl || 'default'} env.OPENAI_BASE_URL=${codexEnv.OPENAI_BASE_URL || 'unset'} model_provider=codemux_proxy\n`,
+      `[codex] SDK client configured with baseUrl=${runtimeBaseUrl || 'default'} env.OPENAI_BASE_URL=${codexEnv.OPENAI_BASE_URL || 'unset'}\n`,
     );
     this.thread = requestedConfig.agentSessionId
       ? this.client.resumeThread(requestedConfig.agentSessionId, this.threadOptions())
@@ -236,6 +224,7 @@ export class CodexSessionRuntime {
     let failureEmitted = false;
     let pendingStreamError: string | null = null;
     let retryingWithoutImages = false;
+    let completedAssistantMessageSeen = false;
 
     this.abortController = new AbortController();
     activeAbortController = this.abortController;
@@ -302,7 +291,11 @@ export class CodexSessionRuntime {
             usage = event.usage;
             usageSeen = true;
             turnCompleted = true;
-            break;
+            continue;
+          }
+
+          if (event.type === 'item.completed' && event.item.type === 'agent_message') {
+            completedAssistantMessageSeen = true;
           }
 
           if (this.abortController?.signal.aborted || forceBreak) break;
@@ -317,11 +310,17 @@ export class CodexSessionRuntime {
         throw error;
       }
       if (!this.abortController?.signal.aborted) {
+        const rawMessage = error instanceof Error ? error.message : String(error);
         const message = error instanceof Error
           ? `${error.message}${error.stack ? `\n${error.stack}` : ''}`
-          : String(error);
-        process.stderr.write(`[codex] SDK turn failed before completion: ${message}\n`);
-        emitFailure(message);
+          : rawMessage;
+        if (completedAssistantMessageSeen && isMissingResponsesCompletionError(rawMessage)) {
+          process.stderr.write(`[codex] SDK stream closed after completed assistant message; treating as completed: ${rawMessage}\n`);
+          turnCompleted = true;
+        } else {
+          process.stderr.write(`[codex] SDK turn failed before completion: ${message}\n`);
+          emitFailure(message);
+        }
       } else {
         process.stderr.write('[codex] SDK turn aborted\n');
       }
@@ -631,4 +630,36 @@ export class CodexSessionRuntime {
 
 function normalizeCodexReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | undefined {
   return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
+}
+
+export function buildCodexCliConfig(
+  runtimeBaseUrl: string | undefined,
+): Record<string, string | Record<string, unknown>> {
+  if (!runtimeBaseUrl) return {};
+
+  const providerBaseUrl = normalizeCodexResponsesProviderBaseUrl(runtimeBaseUrl);
+  return {
+    model_provider: 'codemux_proxy',
+    model_providers: {
+      codemux_proxy: {
+        name: 'CodeMUX Proxy',
+        base_url: providerBaseUrl,
+        env_key: 'OPENAI_API_KEY',
+        wire_api: 'responses',
+        requires_openai_auth: true,
+      },
+    },
+    openai_base_url: runtimeBaseUrl,
+  };
+}
+
+function normalizeCodexResponsesProviderBaseUrl(baseUrl: string): string {
+  const trimmed = baseUrl.replace(/\/+$/, '');
+  return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`;
+}
+
+function isMissingResponsesCompletionError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes('stream closed before response.completed')
+    || normalized.includes('stream disconnected before completion');
 }

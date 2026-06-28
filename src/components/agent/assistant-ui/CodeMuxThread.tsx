@@ -186,7 +186,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
               }
             </ThreadPrimitive.Messages>
             {stopped ? <InterruptBanner /> : null}
-            <StreamingContent sessionId={sessionId} />
+            <StreamingContent sessionId={sessionId} events={events} />
             <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pt-2 pb-4">
             <ThreadPrimitive.ScrollToBottom
               className="absolute -top-12 left-1/2 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--foreground)/0.35)] transition-all hover:-translate-y-0.5 hover:text-foreground disabled:invisible"
@@ -676,14 +676,25 @@ function CodeMuxReasoningGroup({
   );
 }
 
-function StreamingContent({ sessionId }: { sessionId: string }) {
+function StreamingContent({ sessionId, events }: { sessionId: string; events: AgentMessage[] }) {
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const queryStartTime = useAgentStore((state) => state.queryStartTime[sessionId]);
   const thinking = useAgentStore((state) => state.streamingThinking[sessionId] ?? '');
   const text = useAgentStore((state) => state.streamingText[sessionId] ?? '');
+  const lastAssistantText = useMemo(() => getLastAssistantText(events), [events]);
+  const duplicateLiveText = Boolean(
+    text
+    && lastAssistantText
+    && (
+      text === lastAssistantText
+      || text.startsWith(lastAssistantText)
+      || lastAssistantText.startsWith(text)
+    ),
+  );
+  const visibleText = duplicateLiveText ? '' : text;
 
-  if (stopped || (!isRunning && !thinking && !text)) {
+  if (stopped || (!isRunning && !thinking && !visibleText)) {
     return null;
   }
 
@@ -703,13 +714,13 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
           </ReasoningRoot>
         )}
 
-        {text ? (
+        {visibleText ? (
           <div
             data-streaming-text="markdown"
             className="relative text-sm leading-6 text-foreground"
           >
             <Streamdown mode="streaming" className="aui-md">
-              {text}
+              {visibleText}
             </Streamdown>
             <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse rounded-full bg-foreground/60 align-text-bottom" />
           </div>
@@ -719,7 +730,7 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
           <div
             className={cn(
               'flex items-center gap-2.5 py-1 text-sm text-muted-foreground/60 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
-              !thinking && !text && 'text-muted-foreground',
+              !thinking && !visibleText && 'text-muted-foreground',
             )}
           >
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
@@ -729,6 +740,25 @@ function StreamingContent({ sessionId }: { sessionId: string }) {
       </div>
     </div>
   );
+}
+
+function getLastAssistantText(events: AgentMessage[]): string {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.kind !== 'assistant') {
+      continue;
+    }
+
+    return event.data.message.content
+      .filter((block): block is { type: 'text'; text: string } =>
+        block?.type === 'text' && typeof block.text === 'string',
+      )
+      .map((block) => block.text)
+      .join('')
+      .trim();
+  }
+
+  return '';
 }
 
 function getVisibleStreamingThinking(thinking: string): string {

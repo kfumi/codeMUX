@@ -108,7 +108,13 @@ export async function cleanupTempImageFiles(imagePaths: string[]): Promise<void>
 export function isImageUnsupportedError(error: unknown): boolean {
   const message = String(error).toLowerCase();
   return (
-    message.includes('image') &&
+    (
+      message.includes('image input') ||
+      message.includes('image_url') ||
+      message.includes('image content') ||
+      message.includes('input image') ||
+      message.includes('vision')
+    ) &&
     (
       message.includes('not support') ||
       message.includes('unsupported') ||

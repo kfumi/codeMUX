@@ -100,6 +100,7 @@ const STREAMING_FLUSH_THROTTLE_MS = 100;
 const logger = createLogger('agentStore');
 const pendingStreamingBuffers = new Map<string, StreamingBuffer>();
 const pendingStreamingFlushHandles = new Map<string, ReturnType<typeof setTimeout>>();
+const sessionsWithLiveTextStream = new Set<string>();
 /** Per-session thinking start timestamps (set on content_block_start, cleared on content_block_stop) */
 const pendingThinkingStartTimes = new Map<string, number>();
 const streamingTelemetry = new Map<string, { deltas: number; flushes: number; uiUpdates: number }>();
@@ -183,6 +184,7 @@ function clearPendingStreaming(sessionId: string) {
   }
 
   pendingStreamingBuffers.delete(sessionId);
+  sessionsWithLiveTextStream.delete(sessionId);
   logStreamingTelemetry(sessionId, 'clear');
   streamingTelemetry.delete(sessionId);
 }
@@ -204,6 +206,10 @@ function clearStreamingTextField(
   });
 }
 
+function isReconnectingStreamStatus(event: AgentMessage): boolean {
+  return event.kind === 'stream_status' && event.data.is_reconnecting;
+}
+
 function queueStreamingDelta(
   sessionId: string,
   key: keyof StreamingBuffer,
@@ -215,6 +221,9 @@ function queueStreamingDelta(
   }
 
   recordStreamingTelemetry(sessionId, 'deltas');
+  if (key === 'text') {
+    sessionsWithLiveTextStream.add(sessionId);
+  }
   const buffer = pendingStreamingBuffers.get(sessionId) ?? { thinking: '', text: '' };
   buffer[key] += chunk;
   pendingStreamingBuffers.set(sessionId, buffer);
@@ -245,8 +254,8 @@ function queueStreamingDelta(
 // appearing all at once.
 // ---------------------------------------------------------------------------
 
-const SIM_CHARS_PER_TICK = 320;
-const SIM_TICK_MS = 50;
+const SIM_CHARS_PER_TICK = 24;
+const SIM_TICK_MS = 24;
 
 type SimulatedStreamEntry = {
   event: AgentMessage;
@@ -331,6 +340,7 @@ function simulateStreamingText(
     if (!current.remaining) {
       // All chunks delivered — commit the event and clear streaming state.
       pendingSimulatedStreams.delete(sessionId);
+      clearPendingStreaming(sessionId);
       set((s) => {
         const prev = s.events[sessionId] || [];
         const timestamps = s.eventTimestamps[sessionId] || [];
@@ -1221,6 +1231,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           const hasToolUse = filtered.some((b: any) => b?.type === 'tool_use');
           const currentStreamingText = get().streamingText[sessionId] || '';
           const currentStreamingThinking = get().streamingThinking[sessionId] || '';
+          const hasLiveTextStream = sessionsWithLiveTextStream.has(sessionId);
+          const finalTextReplacesLiveText = Boolean(
+            textBlock
+            && !hasToolUse
+            && hasLiveTextStream
+            && currentStreamingText
+            && (
+              textBlock.text === currentStreamingText
+              || textBlock.text.startsWith(currentStreamingText)
+              || currentStreamingText.startsWith(textBlock.text)
+            ),
+          );
           if (textBlock && !hasToolUse && !currentStreamingText && !currentStreamingThinking) {
             simulateStreamingText(sessionId, event, textBlock.text, set);
             return;
@@ -1248,6 +1270,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             const updates: Partial<AgentState> = {};
             if (s.streamingThinking[sessionId]) updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
             if (s.streamingText[sessionId]) updates.streamingText = { ...s.streamingText, [sessionId]: '' };
+            if (finalTextReplacesLiveText) {
+              sessionsWithLiveTextStream.delete(sessionId);
+            }
             if (s.streamedToolUseIds[sessionId]?.size) {
               updates.streamedToolUseIds = { ...s.streamedToolUseIds, [sessionId]: new Set<string>() };
             }
@@ -1267,7 +1292,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             let replaceIdx = -1;
             for (let i = prev.length - 1; i >= 0; i--) {
               const e = prev[i];
-              if (e.kind === 'stream_status' && e.data.is_reconnecting) {
+              if (isReconnectingStreamStatus(e)) {
                 replaceIdx = i;
                 break;
               }
@@ -1277,6 +1302,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               : [...prev, event];
           } else {
             newEvents = [...prev, event];
+          }
+          if (isTerminalAgentEvent(event.kind, Boolean(event.kind === 'result' && event.data?.is_error))) {
+            newEvents = newEvents.filter((entry) => !isReconnectingStreamStatus(entry));
           }
           const extractedTodos = extractTodosFromEvents(newEvents);
 

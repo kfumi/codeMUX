@@ -226,6 +226,50 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
   });
 
+  it('removes reconnecting stream status after a successful Codex result', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'sidecar_stream_status',
+        message: 'Reconnecting... 5/5 (stream disconnected before completion: stream closed before response.completed)',
+        is_reconnecting: true,
+      }));
+      onEvent(JSON.stringify({
+        type: 'assistant',
+        uuid: 'assistant-1',
+        session_id: sessionId,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Recovered reply' }],
+        },
+      }));
+      onEvent(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        uuid: 'result-1',
+        session_id: sessionId,
+        duration_ms: 5,
+        duration_api_ms: 4,
+        num_turns: 1,
+        result: '',
+        total_cost_usd: 0,
+        usage: {
+          input_tokens: 5,
+          output_tokens: 7,
+        },
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useAgentStore.getState().events[session.id].some((event) => event.kind === 'stream_status')).toBe(false);
+  });
+
   it('keeps the first file snapshot as the diff baseline across repeated edits', async () => {
     startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
       const filePath = 'D:\\project\\ai-code\\codeMUX\\src\\example.ts';
@@ -575,6 +619,7 @@ describe('agent store Codex history loading', () => {
 
   it('throttles simulated streaming text instead of updating visible state for every chunk', async () => {
     vi.useFakeTimers();
+    const simulatedText = 'simulated-stream-text '.repeat(40);
 
     startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
       onEvent(JSON.stringify({
@@ -583,7 +628,7 @@ describe('agent store Codex history loading', () => {
         session_id: sessionId,
         message: {
           role: 'assistant',
-          content: [{ type: 'text', text: 'simulated-stream-text'.repeat(80) }],
+          content: [{ type: 'text', text: simulatedText }],
         },
         parent_tool_use_id: null,
       }));
@@ -602,8 +647,9 @@ describe('agent store Codex history loading', () => {
 
       await vi.advanceTimersByTimeAsync(80);
       expect(useAgentStore.getState().streamingText[session.id] ?? '').toContain('simulated-stream-text');
+      expect((useAgentStore.getState().streamingText[session.id] ?? '').length).toBeLessThan(simulatedText.length);
 
-      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(3_000);
       expect(useAgentStore.getState().streamingText[session.id] ?? '').toBe('');
       expect(useAgentStore.getState().events[session.id]).toContainEqual(
         expect.objectContaining({ kind: 'assistant' }),
@@ -730,6 +776,55 @@ describe('agent store Codex history loading', () => {
       expect(useAgentStore.getState().streamingText[session.id]).toBe('hello world');
       expect(useAgentStore.getState().events[session.id]).toEqual([
         { kind: 'user', data: { content: 'batched stream' } },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('replaces live Codex text streaming with the final assistant event without duplicate visible text', async () => {
+    vi.useFakeTimers();
+
+    let capturedOnEvent: ((event: string) => void) | undefined;
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      capturedOnEvent = onEvent;
+      onEvent(JSON.stringify({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: { type: 'content_block_start', content_block: { type: 'text' } },
+      }));
+      onEvent(JSON.stringify({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'final streamed answer' } },
+      }));
+    });
+
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('codex');
+
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'stream then final', 'D:\\project\\ai-code\\codeMUX');
+
+      await vi.advanceTimersByTimeAsync(120);
+      expect(useAgentStore.getState().streamingText[session.id]).toBe('final streamed answer');
+
+      capturedOnEvent?.(JSON.stringify({
+        type: 'assistant',
+        uuid: 'assistant-final',
+        session_id: session.id,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'final streamed answer' }],
+        },
+      }));
+
+      expect(useAgentStore.getState().streamingText[session.id]).toBe('');
+      expect(useAgentStore.getState().events[session.id]).toEqual([
+        { kind: 'user', data: { content: 'stream then final' } },
+        expect.objectContaining({ kind: 'assistant' }),
       ]);
     } finally {
       vi.useRealTimers();
