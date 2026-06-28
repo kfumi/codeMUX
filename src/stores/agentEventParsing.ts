@@ -66,6 +66,14 @@ export function parseSdkUserMessage(data: Record<string, unknown>): ParsedStoreE
   };
 }
 
+export function isCodexInjectedSystemUserMessage(text: string): boolean {
+  const normalized = text.trimStart();
+  return (
+    normalized.startsWith('# AGENTS.md instructions for ') &&
+    normalized.includes('<INSTRUCTIONS>')
+  );
+}
+
 export function mapPersistedClaudeMessage(raw: Record<string, unknown>, agentKind: AgentKind = 'claude_code'): ParsedStoreEvent | null {
   const msgType = raw.type;
 
@@ -88,6 +96,10 @@ export function mapPersistedClaudeMessage(raw: Record<string, unknown>, agentKin
     const event = parseSdkUserMessage(raw);
     if (event.kind !== 'user' || agentKind !== 'codex') {
       return event;
+    }
+
+    if (isCodexInjectedSystemUserMessage(event.data.content)) {
+      return null;
     }
 
     return {

@@ -61,6 +61,35 @@ describe('parseSdkUserMessage', () => {
 });
 
 describe('mapPersistedClaudeMessage', () => {
+  it('suppresses Codex injected AGENTS instructions from user-visible history', () => {
+    expect(
+      mapPersistedClaudeMessage(
+        {
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: [
+                  '# AGENTS.md instructions for D:\\project\\ai-code\\codeMUX',
+                  '',
+                  '<INSTRUCTIONS>',
+                  '# Repository Guidelines',
+                  '',
+                  'codeMUX is a Tauri 2 desktop app.',
+                  '</INSTRUCTIONS>',
+                ].join('\n'),
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        'codex',
+      ),
+    ).toBeNull();
+  });
+
   it('loads result messages from Claude JSONL history', () => {
     expect(
       mapPersistedClaudeMessage({
