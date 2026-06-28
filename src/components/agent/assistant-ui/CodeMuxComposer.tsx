@@ -273,9 +273,11 @@ export function CodeMuxComposer({
               multiple
               onChange={(event) => void handleFileSelection(event)}
             />
-            <ComposerPrimitive.Attachments>
-              {() => <ComposerAttachmentPreview />}
-            </ComposerPrimitive.Attachments>
+            <div className="mb-1.5 flex flex-wrap gap-2" data-testid="composer-attachment-list">
+              <ComposerPrimitive.Attachments>
+                {() => <ComposerAttachmentPreview />}
+              </ComposerPrimitive.Attachments>
+            </div>
             <LexicalComposerInput
               submitMode="enter"
               placeholder={placeholder}
@@ -400,7 +402,7 @@ function ComposerAttachmentPreview() {
   }, [attachment?.file, attachment?.type]);
 
   return (
-    <AttachmentPrimitive.Root className="mb-1.5 flex flex-wrap gap-2">
+    <AttachmentPrimitive.Root className="flex">
       <div className="group relative flex h-18 w-18">
         {imageSrc ? (
           <ImageAttachmentPreview

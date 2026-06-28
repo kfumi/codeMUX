@@ -57,7 +57,7 @@ function SessionScopedAssistantRuntime({
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
-  const attachmentAdapter = useMemo(() => new SimpleImageAttachmentAdapter(), []);
+  const attachmentAdapter = useMemo(() => new CodeMuxImageAttachmentAdapter(), []);
 
   const messages = useMemo(
     () => convertAgentEventsToAssistantMessages(events),
@@ -183,6 +183,24 @@ export function buildAgentInputPayloadFromAppendMessage(message: AppendMessage):
     });
 
   return images.length > 0 ? { text, images } : { text };
+}
+
+export class CodeMuxImageAttachmentAdapter extends SimpleImageAttachmentAdapter {
+  public override async add(state: { file: File }) {
+    const attachment = await super.add(state);
+    return {
+      ...attachment,
+      id: `${state.file.name}-${createUniqueAttachmentSuffix()}`,
+    };
+  }
+}
+
+function createUniqueAttachmentSuffix(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function mediaTypeFromDataUrl(dataUrl: string): string | undefined {

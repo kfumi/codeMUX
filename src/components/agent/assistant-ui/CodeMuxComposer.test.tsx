@@ -189,6 +189,9 @@ describe('CodeMuxComposer', () => {
   it('renders assistant-ui image attachment previews without a filename label', () => {
     render(<CodeMuxComposer sessionId="session-1" />);
 
+    const list = screen.getByTestId('composer-attachment-list');
+    expect(list.className).toContain('flex-wrap');
+    expect(list.className).toContain('gap-2');
     expect(screen.getByTestId('composer-attachments')).toBeTruthy();
     const image = screen.getByAltText('screenshot.png') as HTMLImageElement;
     expect(image.src).toBe('data:image/png;base64,abc123');

@@ -7,6 +7,7 @@ import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import {
   buildAgentInputPayloadFromAppendMessage,
+  CodeMuxImageAttachmentAdapter,
   CodeMuxAssistantRuntimeProvider,
   resolveSlashCommand,
 } from './CodeMuxAssistantRuntime';
@@ -450,6 +451,62 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         },
       ],
     });
+  });
+
+  it('builds image payloads from multiple assistant-ui attachments', () => {
+    const payload = buildAgentInputPayloadFromAppendMessage({
+      role: 'user',
+      parentId: null,
+      sourceId: null,
+      runConfig: undefined,
+      content: [{ type: 'text', text: 'compare these' }],
+      attachments: [
+        {
+          id: 'image-1',
+          type: 'image',
+          name: 'first.png',
+          contentType: 'image/png',
+          status: { type: 'complete' },
+          content: [{ type: 'image', image: 'data:image/png;base64,first' }],
+        },
+        {
+          id: 'image-2',
+          type: 'image',
+          name: 'second.jpg',
+          contentType: 'image/jpeg',
+          status: { type: 'complete' },
+          content: [{ type: 'image', image: 'data:image/jpeg;base64,second' }],
+        },
+      ],
+      metadata: { custom: {} },
+      createdAt: new Date(),
+    });
+
+    expect(payload).toEqual({
+      text: 'compare these',
+      images: [
+        {
+          name: 'first.png',
+          mediaType: 'image/png',
+          dataUrl: 'data:image/png;base64,first',
+        },
+        {
+          name: 'second.jpg',
+          mediaType: 'image/jpeg',
+          dataUrl: 'data:image/jpeg;base64,second',
+        },
+      ],
+    });
+  });
+
+  it('assigns unique attachment ids for same-name image files', async () => {
+    const adapter = new CodeMuxImageAttachmentAdapter();
+    const first = await adapter.add({ file: new File(['first'], 'pasted.png', { type: 'image/png' }) });
+    const second = await adapter.add({ file: new File(['second'], 'pasted.png', { type: 'image/png' }) });
+
+    expect(first.id).not.toBe(second.id);
+    expect(first.name).toBe('pasted.png');
+    expect(second.name).toBe('pasted.png');
   });
 
   it('renders historical user image attachments without requiring text', () => {
