@@ -37,7 +37,7 @@ describe('AgentPermissionSelector', () => {
     expect(onPlanModeChange).toHaveBeenCalledWith('on');
   });
 
-  it('shows Codex approval options without changing plan mode', () => {
+  it('shows Codex plan mode as read-only without changing plan mode from the selector', () => {
     const onPermissionConfigChange = vi.fn();
     const onPlanModeChange = vi.fn();
 
@@ -46,9 +46,9 @@ describe('AgentPermissionSelector', () => {
         agentKind="codex"
         permissionConfig={{
           kind: 'codex',
-          sandboxMode: 'workspace-write',
-          approvalPolicy: 'on-request',
-          networkAccessEnabled: false,
+          sandboxMode: 'danger-full-access',
+          approvalPolicy: 'never',
+          networkAccessEnabled: true,
         }}
         planMode="on"
         onPermissionConfigChange={onPermissionConfigChange}
@@ -56,19 +56,20 @@ describe('AgentPermissionSelector', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTitle('请求批准'));
+    fireEvent.click(screen.getByTitle('计划只读'));
 
-    expect(screen.getByText('应如何批准 Codex 操作?')).toBeTruthy();
-    expect(screen.getAllByText('请求批准')).toHaveLength(2);
-    expect(screen.getByText('替我审批')).toBeTruthy();
-    expect(screen.getByText('完全访问权限')).toBeTruthy();
+    expect(screen.getByText('Codex 操作审批')).toBeTruthy();
+    expect(screen.getByText('计划只读')).toBeTruthy();
+    expect(screen.getByText('请求批准')).toBeTruthy();
+    expect(screen.getByText('自动编辑')).toBeTruthy();
+    expect(screen.getByText('完全访问')).toBeTruthy();
 
-    fireEvent.click(screen.getByText('替我审批'));
+    fireEvent.click(screen.getByText('自动编辑'));
 
     expect(onPermissionConfigChange).toHaveBeenCalledWith({
       kind: 'codex',
       sandboxMode: 'workspace-write',
-      approvalPolicy: 'never',
+      approvalPolicy: 'on-request',
       networkAccessEnabled: false,
     });
     expect(onPlanModeChange).not.toHaveBeenCalled();

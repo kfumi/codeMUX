@@ -38,16 +38,16 @@ type PermissionOption = {
 };
 
 const claudeOptions: PermissionOption[] = [
-  { mode: 'confirm_before_edit', label: '变更前确认', description: '改文件前先问我。', icon: Hand },
-  { mode: 'auto_edit', label: '自动编辑', description: '自动编辑文件。', icon: ShieldCheck },
-  { mode: 'plan', label: '计划模式', description: '编辑前先出计划。', icon: ClipboardList },
-  { mode: 'full_access', label: '完全访问', description: '减少确认次数。', icon: Shield, tone: 'warning' },
+  { mode: 'confirm_before_edit', label: '变更前确认', description: '修改文件或运行敏感工具前先询问。', icon: Hand },
+  { mode: 'auto_edit', label: '自动编辑', description: '允许 Claude 自动编辑文件。', icon: ShieldCheck },
+  { mode: 'plan', label: '计划模式', description: '先分析和规划，暂不直接修改。', icon: ClipboardList },
+  { mode: 'full_access', label: '完全访问', description: '跳过权限确认，风险更高。', icon: Shield, tone: 'warning' },
 ];
 
 const codexOptions: PermissionOption[] = [
-  { mode: 'confirm_before_edit', label: '请求批准', description: '编辑外部文件和使用互联网时始终询问', icon: Hand },
-  { mode: 'auto_edit', label: '替我审批', description: '仅对检测到的风险操作请求批准', icon: ShieldQuestion },
-  { mode: 'full_access', label: '完全访问权限', description: '可不受限制地访问互联网和您电脑上的任何文件', icon: Shield, tone: 'warning' },
+  { mode: 'confirm_before_edit', label: '请求批准', description: '文件变更和敏感操作前请求确认。', icon: Hand },
+  { mode: 'auto_edit', label: '自动编辑', description: '保持工作区写入，但仍按策略请求批准。', icon: ShieldQuestion },
+  { mode: 'full_access', label: '完全访问', description: '允许不受限访问文件和网络，风险更高。', icon: Shield, tone: 'warning' },
 ];
 
 export function AgentPermissionSelector({
@@ -66,7 +66,11 @@ export function AgentPermissionSelector({
     () => options.find((option) => option.mode === selectedMode) ?? options[0],
     [options, selectedMode],
   );
-  const SelectedIcon = selected.icon;
+  const displaySelected =
+    agentKind === 'codex' && planMode === 'on'
+      ? { ...selected, label: '计划只读', icon: ClipboardList, tone: undefined }
+      : selected;
+  const SelectedIcon = displaySelected.icon;
 
   const selectMode = (mode: AgentExecutionMode) => {
     onPermissionConfigChange(mapExecutionModeToPermissionConfig(agentKind, mode));
@@ -83,15 +87,15 @@ export function AgentPermissionSelector({
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={selected.label}
+        title={displaySelected.label}
         onClick={() => setOpen((value) => !value)}
         className={cn(
           'inline-flex h-7 max-w-40 items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-200 hover:bg-muted/58 hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
-          selected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
+          displaySelected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
         )}
       >
         <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
-        <span className="truncate">{selected.mode === 'full_access' && agentKind === 'codex' ? '完全访问' : selected.label}</span>
+        <span className="truncate">{displaySelected.label}</span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
       </button>
 
@@ -102,8 +106,8 @@ export function AgentPermissionSelector({
         >
           {agentKind === 'codex' && (
             <div className="flex items-center gap-2 px-2.5 pb-1.5 pt-1 text-xs text-muted-foreground">
-              <span>应如何批准 Codex 操作?</span>
-              <span className="underline underline-offset-2">了解更多</span>
+              <span>Codex 操作审批</span>
+              <span className="text-muted-foreground/80">计划模式会强制只读</span>
             </div>
           )}
 
