@@ -23,6 +23,19 @@ const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = [
 const CODEX_SANDBOX_MODES: CodexSandboxMode[] = ['read-only', 'workspace-write', 'danger-full-access'];
 const CODEX_APPROVAL_POLICIES: CodexApprovalPolicy[] = ['untrusted', 'on-request', 'never'];
 
+// Shared default triplets — keep in sync with src/lib/agentPermissions.ts
+const CODEX_DEFAULT_PERMISSIONS = {
+  sandboxMode: 'danger-full-access' as CodexSandboxMode,
+  approvalPolicy: 'never' as CodexApprovalPolicy,
+  networkAccessEnabled: true,
+};
+
+const CODEX_PLAN_MODE_PERMISSIONS = {
+  sandboxMode: 'read-only' as CodexSandboxMode,
+  approvalPolicy: 'never' as CodexApprovalPolicy,
+  networkAccessEnabled: false,
+};
+
 export function buildClaudePermissionOptions(config: unknown, planMode: AgentPlanMode = 'off'): {
   permissionMode: ClaudePermissionMode;
   allowDangerouslySkipPermissions: boolean;
@@ -46,18 +59,14 @@ export function buildCodexThreadPermissionOptions(config: unknown, planMode: Age
   networkAccessEnabled: boolean;
 } {
   if (planMode === 'on') {
-    return {
-      sandboxMode: 'read-only',
-      approvalPolicy: 'never',
-      networkAccessEnabled: false,
-    };
+    return { ...CODEX_PLAN_MODE_PERMISSIONS };
   }
 
   const raw = isRecord(config) ? config : {};
   return {
-    sandboxMode: isCodexSandboxMode(raw.sandboxMode) ? raw.sandboxMode : 'danger-full-access',
-    approvalPolicy: isCodexApprovalPolicy(raw.approvalPolicy) ? raw.approvalPolicy : 'never',
-    networkAccessEnabled: typeof raw.networkAccessEnabled === 'boolean' ? raw.networkAccessEnabled : true,
+    sandboxMode: isCodexSandboxMode(raw.sandboxMode) ? raw.sandboxMode : CODEX_DEFAULT_PERMISSIONS.sandboxMode,
+    approvalPolicy: isCodexApprovalPolicy(raw.approvalPolicy) ? raw.approvalPolicy : CODEX_DEFAULT_PERMISSIONS.approvalPolicy,
+    networkAccessEnabled: typeof raw.networkAccessEnabled === 'boolean' ? raw.networkAccessEnabled : CODEX_DEFAULT_PERMISSIONS.networkAccessEnabled,
   };
 }
 

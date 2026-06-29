@@ -260,6 +260,25 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     });
   }, [sessionId, updateSessionPermissions]);
 
+  // Atomic mode change — updates both config and plan mode in a single DB write
+  // to avoid race conditions from two separate async calls.
+  const handleModeChange = useCallback((nextConfig: AgentPermissionConfig, nextPlanMode: AgentPlanMode) => {
+    updateSessionPermissions(sessionId, nextConfig, nextPlanMode).catch((error) => {
+      useAgentStore.setState((state) => ({
+        error: { ...state.error, [sessionId]: String(error) },
+      }));
+    });
+  }, [sessionId, updateSessionPermissions]);
+
+  // Migrate legacy Codex configs (e.g. workspace-write) to the current default.
+  const handleLegacyConfigMigrate = useCallback((migratedConfig: AgentPermissionConfig) => {
+    updateSessionPermissions(sessionId, migratedConfig).catch((error) => {
+      useAgentStore.setState((state) => ({
+        error: { ...state.error, [sessionId]: String(error) },
+      }));
+    });
+  }, [sessionId, updateSessionPermissions]);
+
   const showInfoDialog = useCallback((title: string, content: string) => {
     setInfoTitle(title);
     setInfoContent(content);
@@ -362,6 +381,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                     disabled={isRunning}
                     onPermissionConfigChange={handlePermissionConfigChange}
                     onPlanModeChange={handlePlanModeChange}
+                    onModeChange={handleModeChange}
+                    onLegacyConfigMigrate={handleLegacyConfigMigrate}
                   />
                 )}
                 onStop={() => interrupt(sessionId)}

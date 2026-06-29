@@ -7,7 +7,7 @@ import {
   ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   buildDefaultPermissionConfig,
@@ -26,6 +26,10 @@ interface AgentPermissionSelectorProps {
   disabled?: boolean;
   onPermissionConfigChange: (permissionConfig: AgentPermissionConfig) => void;
   onPlanModeChange: (planMode: AgentPlanMode) => void;
+  /** Atomic callback — updates both config and plan mode in a single call to avoid race conditions. */
+  onModeChange?: (config: AgentPermissionConfig, planMode: AgentPlanMode) => void;
+  /** Called once when a legacy Codex config (e.g. workspace-write) is detected and needs migration. */
+  onLegacyConfigMigrate?: (migratedConfig: AgentPermissionConfig) => void;
 }
 
 type PermissionOption = {
@@ -55,22 +59,56 @@ export function AgentPermissionSelector({
   disabled,
   onPermissionConfigChange,
   onPlanModeChange,
+  onModeChange,
+  onLegacyConfigMigrate,
 }: AgentPermissionSelectorProps) {
   const [open, setOpen] = useState(false);
   const normalized = permissionConfig ?? buildDefaultPermissionConfig(agentKind);
   const selectedMode = inferExecutionMode(agentKind, normalized, planMode);
+
+  // Auto-migrate legacy Codex configs (e.g. workspace-write) to the current default
+  // so the stored config matches what the UI displays.
+  const migratedRef = useRef(false);
+  useEffect(() => {
+    if (migratedRef.current) return;
+    if (
+      agentKind === 'codex' &&
+      normalized.kind === 'codex' &&
+      normalized.sandboxMode === 'workspace-write' &&
+      planMode !== 'on' &&
+      onLegacyConfigMigrate
+    ) {
+      migratedRef.current = true;
+      onLegacyConfigMigrate({
+        kind: 'codex',
+        sandboxMode: 'danger-full-access',
+        approvalPolicy: 'never',
+        networkAccessEnabled: true,
+      });
+    }
+  }, [agentKind, normalized, planMode, onLegacyConfigMigrate]);
   const options = agentKind === 'codex' ? codexOptions : claudeOptions;
   const selected = useMemo(
     () => options.find((option) => option.mode === selectedMode) ?? options[0],
     [options, selectedMode],
   );
-  const displaySelected = selected;
-  const SelectedIcon = displaySelected.icon;
+  const SelectedIcon = selected.icon;
 
   const selectMode = (mode: AgentExecutionMode) => {
-    onPermissionConfigChange(mapExecutionModeToPermissionConfig(agentKind, mode));
-    if (agentKind === 'claude_code' || agentKind === 'codex') {
-      onPlanModeChange(mode === 'plan' ? 'on' : 'off');
+    const nextConfig = mapExecutionModeToPermissionConfig(agentKind, mode);
+    const nextPlanMode = (agentKind === 'claude_code' || agentKind === 'codex')
+      ? (mode === 'plan' ? 'on' as const : 'off' as const)
+      : planMode;
+
+    // Prefer the atomic callback to avoid race conditions between
+    // separate config and plan-mode state updates.
+    if (onModeChange) {
+      onModeChange(nextConfig, nextPlanMode);
+    } else {
+      onPermissionConfigChange(nextConfig);
+      if (agentKind === 'claude_code' || agentKind === 'codex') {
+        onPlanModeChange(nextPlanMode);
+      }
     }
     setOpen(false);
   };
@@ -82,15 +120,15 @@ export function AgentPermissionSelector({
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={displaySelected.label}
+        title={selected.label}
         onClick={() => setOpen((value) => !value)}
         className={cn(
           'inline-flex h-7 max-w-40 items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-200 hover:bg-muted/58 hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
-          displaySelected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
+          selected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
         )}
       >
         <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
-        <span className="truncate">{displaySelected.label}</span>
+        <span className="truncate">{selected.label}</span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
       </button>
 
@@ -137,7 +175,8 @@ function inferExecutionMode(
 ): AgentExecutionMode {
   if (agentKind === 'codex' && permissionConfig.kind === 'codex') {
     if (planMode === 'on' || permissionConfig.sandboxMode === 'read-only') return 'plan';
-    if (permissionConfig.sandboxMode === 'danger-full-access') return 'full_access';
+    // workspace-write is a legacy mode that maps to full_access in the simplified UI.
+    // The onLegacyConfigMigrate callback handles persisting the upgrade.
     return 'full_access';
   }
 

@@ -32,14 +32,22 @@ const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = [
 const CODEX_SANDBOX_MODES: CodexSandboxMode[] = ['read-only', 'workspace-write', 'danger-full-access'];
 const CODEX_APPROVAL_POLICIES: CodexApprovalPolicy[] = ['untrusted', 'on-request', 'never'];
 
+// Shared default triplets — keep in sync with src-tauri/sidecar/src/agentPermissions.ts
+const CODEX_DEFAULT_PERMISSIONS: Omit<CodexPermissionConfig, 'kind'> = {
+  sandboxMode: 'danger-full-access',
+  approvalPolicy: 'never',
+  networkAccessEnabled: true,
+};
+
+const CODEX_PLAN_MODE_PERMISSIONS: Omit<CodexPermissionConfig, 'kind'> = {
+  sandboxMode: 'read-only',
+  approvalPolicy: 'never',
+  networkAccessEnabled: false,
+};
+
 export function buildDefaultPermissionConfig(agentKind: AgentKind): AgentPermissionConfig {
   if (agentKind === 'codex') {
-    return {
-      kind: 'codex',
-      sandboxMode: 'danger-full-access',
-      approvalPolicy: 'never',
-      networkAccessEnabled: true,
-    };
+    return { kind: 'codex', ...CODEX_DEFAULT_PERMISSIONS };
   }
 
   return {
@@ -55,23 +63,13 @@ export function mapExecutionModeToPermissionConfig(
   if (agentKind === 'codex') {
     switch (executionMode) {
       case 'plan':
-        return {
-          kind: 'codex',
-          sandboxMode: 'read-only',
-          approvalPolicy: 'never',
-          networkAccessEnabled: false,
-        };
+        return { kind: 'codex', ...CODEX_PLAN_MODE_PERMISSIONS };
       case 'full_access':
-        return {
-          kind: 'codex',
-          sandboxMode: 'danger-full-access',
-          approvalPolicy: 'never',
-          networkAccessEnabled: true,
-        };
-      case 'auto_edit':
-      case 'confirm_before_edit':
+        return { kind: 'codex', ...CODEX_DEFAULT_PERMISSIONS };
       default:
-        return buildDefaultPermissionConfig('codex');
+        // auto_edit, confirm_before_edit, and any future modes fall back to defaults.
+        // The Codex UI only exposes 'plan' and 'full_access'.
+        return { kind: 'codex', ...CODEX_DEFAULT_PERMISSIONS };
     }
   }
 
@@ -95,12 +93,7 @@ export function resolveEffectivePermissionConfig(
 ): AgentPermissionConfig {
   const normalized = serializePermissionConfig(agentKind, config);
   if (agentKind === 'codex' && planMode === 'on') {
-    return {
-      kind: 'codex',
-      sandboxMode: 'read-only',
-      approvalPolicy: 'never',
-      networkAccessEnabled: false,
-    };
+    return { kind: 'codex', ...CODEX_PLAN_MODE_PERMISSIONS };
   }
   if (agentKind === 'claude_code' && planMode === 'on') {
     return {
@@ -119,17 +112,11 @@ export function serializePermissionConfig(agentKind: AgentKind, value: unknown):
 
   const raw = value as Record<string, unknown>;
   if (agentKind === 'codex') {
-    const codexFallback: CodexPermissionConfig = {
-      kind: 'codex',
-      sandboxMode: 'danger-full-access',
-      approvalPolicy: 'never',
-      networkAccessEnabled: true,
-    };
     return {
       kind: 'codex',
-      sandboxMode: isCodexSandboxMode(raw.sandboxMode) ? raw.sandboxMode : codexFallback.sandboxMode,
-      approvalPolicy: isCodexApprovalPolicy(raw.approvalPolicy) ? raw.approvalPolicy : codexFallback.approvalPolicy,
-      networkAccessEnabled: typeof raw.networkAccessEnabled === 'boolean' ? raw.networkAccessEnabled : codexFallback.networkAccessEnabled,
+      sandboxMode: isCodexSandboxMode(raw.sandboxMode) ? raw.sandboxMode : CODEX_DEFAULT_PERMISSIONS.sandboxMode,
+      approvalPolicy: isCodexApprovalPolicy(raw.approvalPolicy) ? raw.approvalPolicy : CODEX_DEFAULT_PERMISSIONS.approvalPolicy,
+      networkAccessEnabled: typeof raw.networkAccessEnabled === 'boolean' ? raw.networkAccessEnabled : CODEX_DEFAULT_PERMISSIONS.networkAccessEnabled,
     };
   }
 

@@ -694,13 +694,15 @@ function normalizeCodexPlanMode(value: unknown): AgentPlanMode {
   return value === 'on' ? 'on' : 'off';
 }
 
+const CODEX_PLAN_PREFIX = '$plan';
+
 function applyCodexPlanPrefix(payload: AgentInputPayload, planMode: AgentPlanMode | undefined): AgentInputPayload {
   if (planMode !== 'on') {
     return payload;
   }
 
   const text = payload.text.trimStart();
-  if (text.toLowerCase().startsWith('$plan')) {
+  if (text === CODEX_PLAN_PREFIX || text.toLowerCase().startsWith(`${CODEX_PLAN_PREFIX} `)) {
     return {
       ...payload,
       text,
@@ -709,7 +711,7 @@ function applyCodexPlanPrefix(payload: AgentInputPayload, planMode: AgentPlanMod
 
   return {
     ...payload,
-    text: `$plan ${text}`.trimEnd(),
+    text: `${CODEX_PLAN_PREFIX} ${text}`.trimEnd(),
   };
 }
 

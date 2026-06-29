@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentPermissionSelector } from './AgentPermissionSelector';
@@ -116,5 +116,86 @@ describe('AgentPermissionSelector', () => {
       networkAccessEnabled: false,
     });
     expect(onPlanModeChange).toHaveBeenCalledWith('on');
+  });
+
+  it('prefers onModeChange over separate callbacks when switching Codex modes', () => {
+    const onPermissionConfigChange = vi.fn();
+    const onPlanModeChange = vi.fn();
+    const onModeChange = vi.fn();
+
+    render(
+      <AgentPermissionSelector
+        agentKind="codex"
+        permissionConfig={{
+          kind: 'codex',
+          sandboxMode: 'danger-full-access',
+          approvalPolicy: 'never',
+          networkAccessEnabled: true,
+        }}
+        planMode="off"
+        onPermissionConfigChange={onPermissionConfigChange}
+        onPlanModeChange={onPlanModeChange}
+        onModeChange={onModeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle('完全访问'));
+    fireEvent.click(screen.getByText('计划模式'));
+
+    expect(onModeChange).toHaveBeenCalledWith(
+      { kind: 'codex', sandboxMode: 'read-only', approvalPolicy: 'never', networkAccessEnabled: false },
+      'on',
+    );
+    expect(onPermissionConfigChange).not.toHaveBeenCalled();
+    expect(onPlanModeChange).not.toHaveBeenCalled();
+  });
+
+  it('calls onLegacyConfigMigrate for legacy workspace-write Codex config', () => {
+    const onLegacyConfigMigrate = vi.fn();
+
+    render(
+      <AgentPermissionSelector
+        agentKind="codex"
+        permissionConfig={{
+          kind: 'codex',
+          sandboxMode: 'workspace-write',
+          approvalPolicy: 'on-request',
+          networkAccessEnabled: false,
+        }}
+        planMode="off"
+        onPermissionConfigChange={vi.fn()}
+        onPlanModeChange={vi.fn()}
+        onLegacyConfigMigrate={onLegacyConfigMigrate}
+      />,
+    );
+
+    expect(onLegacyConfigMigrate).toHaveBeenCalledWith({
+      kind: 'codex',
+      sandboxMode: 'danger-full-access',
+      approvalPolicy: 'never',
+      networkAccessEnabled: true,
+    });
+  });
+
+  it('does not call onLegacyConfigMigrate when plan mode is active', () => {
+    const onLegacyConfigMigrate = vi.fn();
+
+    render(
+      <AgentPermissionSelector
+        agentKind="codex"
+        permissionConfig={{
+          kind: 'codex',
+          sandboxMode: 'workspace-write',
+          approvalPolicy: 'on-request',
+          networkAccessEnabled: false,
+        }}
+        planMode="on"
+        onPermissionConfigChange={vi.fn()}
+        onPlanModeChange={vi.fn()}
+        onLegacyConfigMigrate={onLegacyConfigMigrate}
+      />,
+    );
+
+    expect(onLegacyConfigMigrate).not.toHaveBeenCalled();
   });
 });
