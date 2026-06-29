@@ -263,6 +263,43 @@ describe('CodexSessionRuntime', () => {
     });
   });
 
+  it('uses read-only Codex thread options when plan mode is active', () => {
+    const runtime = new CodexSessionRuntime();
+    (runtime as unknown as {
+      config: {
+        sessionId: string;
+        cwd: string;
+        model: string;
+        planMode: 'on';
+        permissionConfig: {
+          kind: 'codex';
+          sandboxMode: 'danger-full-access';
+          approvalPolicy: 'never';
+          networkAccessEnabled: true;
+        };
+      };
+    }).config = {
+      sessionId: 'session-1',
+      cwd: 'D:/repo',
+      model: 'gpt-5',
+      planMode: 'on',
+      permissionConfig: {
+        kind: 'codex',
+        sandboxMode: 'danger-full-access',
+        approvalPolicy: 'never',
+        networkAccessEnabled: true,
+      },
+    };
+
+    const options = (runtime as unknown as { threadOptions: () => Record<string, unknown> }).threadOptions();
+
+    expect(options).toMatchObject({
+      sandboxMode: 'read-only',
+      approvalPolicy: 'on-request',
+      networkAccessEnabled: false,
+    });
+  });
+
   it('emits incremental stream events from item.updated agent messages', () => {
     const writes: string[] = [];
     const stdoutSpy = vi
@@ -583,5 +620,51 @@ describe('CodexSessionRuntime', () => {
       name: 'list_mcp_resources',
       input: { server: 'context7' },
     });
+  });
+
+  it('emits a structured diagnostic for unknown Codex approval-like events', async () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      await (runtime as unknown as {
+        handleSdkEvent: (
+          sessionId: string,
+          event: ThreadEvent,
+          emitFailure: (message: string) => void,
+          noteStreamError: (message: string) => void,
+        ) => Promise<void>;
+      }).handleSdkEvent(
+        'session-1',
+        {
+          type: 'approval.requested',
+          request_id: 'approval-1',
+          item: { id: 'approval-1', type: 'command_execution', command: 'git commit', status: 'pending' },
+        } as unknown as ThreadEvent,
+        () => {},
+        () => {},
+      );
+
+      const emittedEvents = writes
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line));
+
+      expect(emittedEvents).toEqual([
+        {
+          type: 'sidecar_stream_status',
+          message: 'Codex emitted unsupported approval event type: approval.requested',
+          is_reconnecting: false,
+        },
+      ]);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
   });
 });

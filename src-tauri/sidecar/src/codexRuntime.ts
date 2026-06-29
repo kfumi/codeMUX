@@ -434,6 +434,10 @@ export class CodexSessionRuntime {
     emitFailure: (message: string) => void,
     noteStreamError: (message: string) => void,
   ): Promise<void> {
+    // Codex SDK 0.139.0 exposes tool execution items and sandbox/approval policy
+    // options, but this codebase has not observed a stable interactive approval
+    // event shape. Approval-like unknown event types are surfaced as diagnostics
+    // instead of being auto-allowed.
     switch (event.type) {
       case 'thread.started': {
         if (this.config && this.config.agentSessionId !== event.thread_id) {
@@ -477,6 +481,17 @@ export class CodexSessionRuntime {
       case 'turn.started':
       case 'turn.completed':
         return;
+      default: {
+        const unknownEvent = event as { type?: string };
+        if (typeof unknownEvent.type === 'string' && unknownEvent.type.toLowerCase().includes('approval')) {
+          emit({
+            type: 'sidecar_stream_status',
+            message: `Codex emitted unsupported approval event type: ${unknownEvent.type}`,
+            is_reconnecting: false,
+          });
+        }
+        return;
+      }
     }
   }
 
