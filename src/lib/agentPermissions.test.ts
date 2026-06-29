@@ -51,7 +51,7 @@ describe('agentPermissions', () => {
     expect(mapExecutionModeToPermissionConfig('codex', 'auto_edit')).toEqual({
       kind: 'codex',
       sandboxMode: 'workspace-write',
-      approvalPolicy: 'never',
+      approvalPolicy: 'on-request',
       networkAccessEnabled: false,
     });
     expect(mapExecutionModeToPermissionConfig('codex', 'full_access')).toEqual({
@@ -62,15 +62,20 @@ describe('agentPermissions', () => {
     });
   });
 
-  it('keeps Codex plan mode separate from sandbox and approval', () => {
+  it('forces Codex plan mode to read-only approval settings', () => {
     const configured: AgentPermissionConfig = {
       kind: 'codex',
-      sandboxMode: 'workspace-write',
+      sandboxMode: 'danger-full-access',
       approvalPolicy: 'never',
-      networkAccessEnabled: false,
+      networkAccessEnabled: true,
     };
 
-    expect(resolveEffectivePermissionConfig('codex', configured, 'on')).toEqual(configured);
+    expect(resolveEffectivePermissionConfig('codex', configured, 'on')).toEqual({
+      kind: 'codex',
+      sandboxMode: 'read-only',
+      approvalPolicy: 'on-request',
+      networkAccessEnabled: false,
+    });
   });
 
   it('maps Claude plan mode onto the native plan permission mode', () => {

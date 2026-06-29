@@ -58,7 +58,7 @@ export function mapExecutionModeToPermissionConfig(
         return {
           kind: 'codex',
           sandboxMode: 'workspace-write',
-          approvalPolicy: 'never',
+          approvalPolicy: 'on-request',
           networkAccessEnabled: false,
         };
       case 'full_access':
@@ -94,6 +94,14 @@ export function resolveEffectivePermissionConfig(
   planMode: AgentPlanMode,
 ): AgentPermissionConfig {
   const normalized = serializePermissionConfig(agentKind, config);
+  if (agentKind === 'codex' && planMode === 'on') {
+    return {
+      kind: 'codex',
+      sandboxMode: 'read-only',
+      approvalPolicy: 'on-request',
+      networkAccessEnabled: false,
+    };
+  }
   if (agentKind === 'claude_code' && planMode === 'on') {
     return {
       kind: 'claude_code',
