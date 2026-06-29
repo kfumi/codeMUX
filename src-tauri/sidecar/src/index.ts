@@ -20,6 +20,7 @@ import { proxyManager } from './proxyManager.js';
 import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
 import { emit } from './streamEventBatcher.js';
 import { buildClaudePermissionOptions, type AgentPlanMode, type SidecarPermissionConfig } from './agentPermissions.js';
+import { getClaudeApprovalTitle } from './claudeApprovalPrompt.js';
 import {
   buildClaudeUserMessageContent,
   isImageUnsupportedError,
@@ -758,31 +759,6 @@ function normalizeReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | u
 
 function normalizePlanMode(value: unknown): AgentPlanMode {
   return value === 'on' ? 'on' : 'off';
-}
-
-function getClaudeApprovalTitle(
-  toolName: string,
-  input: Record<string, unknown>,
-  opts: { toolUseID?: string; title?: string; displayName?: string; description?: string },
-): string {
-  if (typeof opts.title === 'string' && opts.title.trim()) {
-    return opts.title;
-  }
-
-  const filePath = typeof input.file_path === 'string' ? input.file_path : undefined;
-  if (filePath && (toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit' || toolName === 'NotebookEdit')) {
-    return `允许 Claude ${toolName === 'Write' ? '写入' : '编辑'} ${filePath} 吗？`;
-  }
-
-  const command = typeof input.command === 'string' ? input.command : undefined;
-  if (toolName === 'Bash' && command) {
-    return `允许 Claude 运行命令：${command}`;
-  }
-
-  const displayName = typeof opts.displayName === 'string' && opts.displayName.trim()
-    ? opts.displayName
-    : toolName;
-  return `允许 Claude 使用 ${displayName} 吗？`;
 }
 
 const runtime = new SessionRuntime();
