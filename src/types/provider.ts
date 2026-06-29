@@ -1,4 +1,5 @@
 import type { AgentKind } from './session';
+import type { ClaudePermissionConfig, CodexPermissionConfig } from '../lib/agentPermissions';
 
 export type Theme = 'Light' | 'Dark' | 'System';
 
@@ -10,9 +11,11 @@ export interface AgentConfigMap {
   claude_code: {
     executable_mode?: 'auto' | 'bundled' | 'path';
     resume_sessions?: boolean;
+    permission_config?: ClaudePermissionConfig;
   };
   codex: {
     sdk_mode?: 'responses' | 'agent';
+    permission_config?: CodexPermissionConfig;
   };
   gemini_cli: Record<string, never>;
   opencode: Record<string, never>;

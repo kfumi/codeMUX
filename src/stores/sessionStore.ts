@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { AgentKind, Session, SessionMode } from '../types/session';
+import type { AgentPermissionConfig, AgentPlanMode } from '../lib/agentPermissions';
 import { sessionApi, agentApi } from '../lib/tauri';
 import { useAgentStore } from './agentStore';
 import { useSettingsStore } from './settingsStore';
@@ -22,14 +23,21 @@ interface SessionState {
   unarchiveSession: (sessionId: string) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
+  updateSessionPermissions: (sessionId: string, permissionConfig?: AgentPermissionConfig, planMode?: AgentPlanMode) => Promise<void>;
   touchSession: (sessionId: string) => void;
   markSessionRead: (sessionId: string) => void;
   markSessionUnread: (sessionId: string) => void;
 }
 
 type CreateSessionAction = {
-  (title: string, mode?: SessionMode, projectId?: string): Promise<Session>;
-  (title: string, agentKind: AgentKind, mode?: SessionMode, projectId?: string): Promise<Session>;
+  (
+    title: string,
+    agentKindOrMode?: AgentKind | SessionMode,
+    modeOrProjectId?: SessionMode | string,
+    projectIdOrPermissionConfig?: string | AgentPermissionConfig,
+    permissionConfigOrPlanMode?: AgentPermissionConfig | AgentPlanMode,
+    planMode?: AgentPlanMode,
+  ): Promise<Session>;
 };
 
 function resolveDefaultAgentKind(): AgentKind {
@@ -41,40 +49,55 @@ function normalizeCreateSessionArgs(
   agentKindOrMode?: AgentKind | SessionMode,
   modeOrProjectId?: SessionMode | string,
   projectId?: string,
-): [string, AgentKind, SessionMode | undefined, string | undefined] {
+  permissionConfig?: AgentPermissionConfig,
+  planMode?: AgentPlanMode,
+): [string, AgentKind, SessionMode | undefined, string | undefined, AgentPermissionConfig | undefined, AgentPlanMode | undefined] {
   if (
     agentKindOrMode === 'claude_code' ||
     agentKindOrMode === 'codex' ||
     agentKindOrMode === 'gemini_cli' ||
     agentKindOrMode === 'opencode'
   ) {
-    return [title, agentKindOrMode, modeOrProjectId as SessionMode | undefined, projectId];
+    return [title, agentKindOrMode, modeOrProjectId as SessionMode | undefined, projectId, permissionConfig, planMode];
   }
 
   const legacyMode = agentKindOrMode;
-  return [title, resolveDefaultAgentKind(), legacyMode, modeOrProjectId as string | undefined];
+  return [title, resolveDefaultAgentKind(), legacyMode, modeOrProjectId as string | undefined, permissionConfig, planMode];
 }
 
 function createSessionAction(
   set: (partial: Partial<SessionState> | ((state: SessionState) => Partial<SessionState>)) => void,
 ): CreateSessionAction {
-  function createSession(title: string, mode?: SessionMode, projectId?: string): Promise<Session>;
-  function createSession(title: string, agentKind: AgentKind, mode?: SessionMode, projectId?: string): Promise<Session>;
   async function createSession(
     title: string,
     agentKindOrMode?: AgentKind | SessionMode,
     modeOrProjectId?: SessionMode | string,
-    projectId?: string,
+    projectIdOrPermissionConfig?: string | AgentPermissionConfig,
+    permissionConfigOrPlanMode?: AgentPermissionConfig | AgentPlanMode,
+    planMode?: AgentPlanMode,
   ): Promise<Session> {
     set({ isLoading: true, error: null });
     try {
-      const [, agentKind, mode, resolvedProjectId] = normalizeCreateSessionArgs(
+      const projectId = typeof projectIdOrPermissionConfig === 'string' ? projectIdOrPermissionConfig : undefined;
+      const permissionConfig = typeof projectIdOrPermissionConfig === 'object'
+        ? projectIdOrPermissionConfig
+        : typeof permissionConfigOrPlanMode === 'object'
+          ? permissionConfigOrPlanMode
+          : undefined;
+      const resolvedInputPlanMode = typeof permissionConfigOrPlanMode === 'string'
+        ? permissionConfigOrPlanMode
+        : planMode;
+      const [, agentKind, mode, resolvedProjectId, resolvedPermissionConfig, resolvedPlanMode] = normalizeCreateSessionArgs(
         title,
         agentKindOrMode,
         modeOrProjectId,
         projectId,
+        permissionConfig,
+        resolvedInputPlanMode,
       );
-      const session = await sessionApi.create(title, agentKind, mode, resolvedProjectId);
+      const session = resolvedPermissionConfig || resolvedPlanMode
+        ? await sessionApi.create(title, agentKind, mode, resolvedProjectId, resolvedPermissionConfig, resolvedPlanMode)
+        : await sessionApi.create(title, agentKind, mode, resolvedProjectId);
       set((state) => ({
         sessions: [session, ...state.sessions],
         activeSessionId: session.id,
@@ -202,6 +225,23 @@ export const useSessionStore = create<SessionState>((set) => ({
       }));
     } catch (error) {
       set({ error: String(error) });
+    }
+  },
+  updateSessionPermissions: async (sessionId: string, permissionConfig?: AgentPermissionConfig, planMode?: AgentPlanMode) => {
+    try {
+      await sessionApi.updatePermissions(sessionId, permissionConfig, planMode);
+      set((state) => ({
+        sessions: state.sessions.map((session) => session.id === sessionId
+          ? {
+              ...session,
+              permission_config: permissionConfig ? JSON.stringify(permissionConfig) : session.permission_config,
+              plan_mode: planMode ?? session.plan_mode,
+            }
+          : session),
+      }));
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
     }
   },
   touchSession: (sessionId: string) => {

@@ -7,6 +7,7 @@ const touchMock = vi.fn<(...args: unknown[]) => Promise<void>>();
 const getArchivedMock = vi.fn<(...args: unknown[]) => Promise<Session[]>>();
 const archiveMock = vi.fn<(...args: unknown[]) => Promise<void>>();
 const unarchiveMock = vi.fn<(...args: unknown[]) => Promise<void>>();
+const updatePermissionsMock = vi.fn<(...args: unknown[]) => Promise<void>>();
 
 vi.mock('../lib/tauri', () => ({
   agentApi: {
@@ -33,6 +34,7 @@ vi.mock('../lib/tauri', () => ({
     archive: archiveMock,
     unarchive: unarchiveMock,
     updateTitle: vi.fn(),
+    updatePermissions: updatePermissionsMock,
     touch: touchMock,
   },
 }));
@@ -283,5 +285,38 @@ describe('session store createSession', () => {
       id: 'session-archived',
       is_archived: false,
     });
+  });
+
+  it('updates plan mode without overwriting the permission snapshot', async () => {
+    updatePermissionsMock.mockResolvedValue(undefined);
+    const permissionConfig = '{"kind":"claude_code","permissionMode":"bypassPermissions"}';
+    const session: Session = {
+      id: 'session-permissions',
+      title: 'Permissioned',
+      agent_kind: 'claude_code',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      permission_config: permissionConfig,
+      plan_mode: 'on',
+      project_id: null,
+      created_at: '2026-06-20T00:00:00.000Z',
+      updated_at: '2026-06-20T00:00:00.000Z',
+    };
+
+    const { useSessionStore } = await import('./sessionStore');
+    useSessionStore.setState({
+      sessions: [session],
+      activeSessionId: session.id,
+      isLoading: false,
+      error: null,
+    });
+
+    await useSessionStore.getState().updateSessionPermissions(session.id, undefined, 'off');
+
+    expect(updatePermissionsMock).toHaveBeenCalledWith(session.id, undefined, 'off');
+    expect(useSessionStore.getState().sessions[0].permission_config).toBe(permissionConfig);
+    expect(useSessionStore.getState().sessions[0].plan_mode).toBe('off');
   });
 });

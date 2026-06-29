@@ -30,6 +30,18 @@ fn apply_agent_config_update(
             if let Some(resume_sessions) = update.resume_sessions {
                 app_config.agent_configs.claude_code.resume_sessions = resume_sessions;
             }
+            if let Some(permission_config) = update.permission_config {
+                if !matches!(
+                    permission_config.permission_mode.as_str(),
+                    "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions"
+                ) {
+                    return Err(format!(
+                        "Unsupported Claude Code permissionMode: {}",
+                        permission_config.permission_mode
+                    ));
+                }
+                app_config.agent_configs.claude_code.permission_config = permission_config;
+            }
         }
         AgentKind::Codex => {
             let update: CodexAgentConfigUpdate = serde_json::from_value(config)
@@ -40,6 +52,27 @@ fn apply_agent_config_update(
                     return Err(format!("Unsupported Codex sdk_mode: {}", sdk_mode));
                 }
                 app_config.agent_configs.codex.sdk_mode = sdk_mode;
+            }
+            if let Some(permission_config) = update.permission_config {
+                if !matches!(
+                    permission_config.sandbox_mode.as_str(),
+                    "read-only" | "workspace-write" | "danger-full-access"
+                ) {
+                    return Err(format!(
+                        "Unsupported Codex sandboxMode: {}",
+                        permission_config.sandbox_mode
+                    ));
+                }
+                if !matches!(
+                    permission_config.approval_policy.as_str(),
+                    "untrusted" | "on-request" | "never"
+                ) {
+                    return Err(format!(
+                        "Unsupported Codex approvalPolicy: {}",
+                        permission_config.approval_policy
+                    ));
+                }
+                app_config.agent_configs.codex.permission_config = permission_config;
             }
         }
         AgentKind::GeminiCli => {}

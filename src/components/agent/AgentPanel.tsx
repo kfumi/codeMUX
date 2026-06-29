@@ -5,6 +5,7 @@ import { resolveAgentProviderConfig } from '../../lib/agentProvider';
 import { getProviderModelList } from '../../lib/providerModels';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { findCommand, formatCommandDisplay, renderCommandPrompt } from '../../lib/slashCommands';
+import { serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
 import type { ReasoningEffort } from '../../types/session';
 import type { AgentInputPayload } from '../../types/agentInput';
 import { agentApi, sessionApi } from '../../lib/tauri';
@@ -19,6 +20,7 @@ import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
 import { CodeMuxModelSelector } from './assistant-ui/CodeMuxModelSelector';
 import { CodeMuxThread } from './assistant-ui/CodeMuxThread';
+import { AgentPermissionSelector } from './AgentPermissionSelector';
 import { formatModelDisplayName } from './modelDisplay';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
@@ -29,7 +31,7 @@ interface AgentPanelProps {
 const EMPTY_EVENTS: import('../../stores/agentStore').AgentMessage[] = [];
 
 export function AgentPanel({ sessionId }: AgentPanelProps) {
-  const { sessions, createSession } = useSessionStore();
+  const { sessions, createSession, updateSessionPermissions } = useSessionStore();
   const { projects } = useProjectStore();
   const { startQuery, interrupt, loadSessionMessages, clearEvents } = useAgentStore();
   const { config, getActiveProvider, setProxyRunning } = useSettingsStore();
@@ -55,12 +57,27 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     usesLargeContext: resolvedProvider?.context_1m,
   }), [agentKind, resolvedProvider?.context_1m]);
   const modelNameWithSuffix = useMemo(() => model ? formatSelectedProviderModel(model) : undefined, [model, formatSelectedProviderModel]);
+  const rawPermissionConfig = useMemo(() => {
+    if (!session?.permission_config) return null;
+    try {
+      return JSON.parse(session.permission_config) as unknown;
+    } catch {
+      return null;
+    }
+  }, [session?.permission_config]);
+  const configuredPermissionConfig = agentKind === 'codex'
+    ? config?.agent_configs.codex.permission_config
+    : config?.agent_configs.claude_code.permission_config;
+  const permissionConfig = useMemo(
+    () => serializePermissionConfig(agentKind, rawPermissionConfig ?? configuredPermissionConfig),
+    [agentKind, configuredPermissionConfig, rawPermissionConfig],
+  );
+  const planMode: AgentPlanMode = session?.plan_mode === 'on' ? 'on' : 'off';
 
   const [infoOpen, setInfoOpen] = useState(false);
   const [infoTitle, setInfoTitle] = useState('');
   const [infoContent, setInfoContent] = useState('');
   const [cwd, setCwd] = useState(() => getStoredAgentCwd());
-  const [codexPlanMode, setCodexPlanMode] = useState(false);
   const ensuredSessionsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -86,10 +103,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   }, [sessionId, project?.path]);
 
   useEffect(() => {
-    setCodexPlanMode(false);
-  }, [sessionId, agentKind]);
-
-  useEffect(() => {
     if (isRunning) {
       return;
     }
@@ -104,6 +117,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       hasApiKey: Boolean(apiKey),
       baseUrl: baseUrl || null,
       codexNeedsProxy: codexNeedsProxy ?? null,
+      permissionConfig: session?.permission_config || null,
+      planMode,
     });
 
     if (ensuredSessionsRef.current.has(ensureKey)) {
@@ -124,7 +139,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }).catch(() => {
       ensuredSessionsRef.current.delete(ensureKey);
     });
-  }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, runtimeModel, reasoningEffort, codexNeedsProxy, setProxyRunning, isRunning]);
+  }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, runtimeModel, reasoningEffort, codexNeedsProxy, session?.permission_config, planMode, setProxyRunning, isRunning]);
 
   const handleSend = async (input: AgentInputPayload, displayContent = input.text, options?: { skipCommandMode?: boolean }) => {
     const effectiveCwd = project?.path || cwd;
@@ -138,7 +153,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       sessionProviderId: latestSession?.provider_id ?? session?.provider_id,
       sessionModel: latestSession?.model ?? session?.model ?? model,
     });
-    const runtimeContent = !options?.skipCommandMode && latestAgentKind === 'codex' && codexPlanMode
+    const latestPlanMode = latestSession?.plan_mode === 'on' ? 'on' : 'off';
+    const runtimeContent = !options?.skipCommandMode && latestAgentKind === 'codex' && latestPlanMode === 'on'
       ? renderCommandPrompt(findCommand('plan', 'codex')!, content)
       : content;
 
@@ -231,6 +247,22 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
   }, [config, sessionId]);
 
+  const handlePermissionConfigChange = useCallback((nextPermissionConfig: AgentPermissionConfig) => {
+    updateSessionPermissions(sessionId, nextPermissionConfig, planMode).catch((error) => {
+      useAgentStore.setState((state) => ({
+        error: { ...state.error, [sessionId]: String(error) },
+      }));
+    });
+  }, [planMode, sessionId, updateSessionPermissions]);
+
+  const handlePlanModeChange = useCallback((nextPlanMode: AgentPlanMode) => {
+    updateSessionPermissions(sessionId, undefined, nextPlanMode).catch((error) => {
+      useAgentStore.setState((state) => ({
+        error: { ...state.error, [sessionId]: String(error) },
+      }));
+    });
+  }, [sessionId, updateSessionPermissions]);
+
   const showInfoDialog = useCallback((title: string, content: string) => {
     setInfoTitle(title);
     setInfoContent(content);
@@ -290,7 +322,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     if (command.handler === 'prompt' && command.prompt) {
       const displayContent = formatCommandDisplay(command, args);
       if (agentKind === 'codex' && command.name === 'plan') {
-        setCodexPlanMode(true);
+        await updateSessionPermissions(sessionId, permissionConfig, 'on');
         if (!args) {
           return;
         }
@@ -299,7 +331,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       const prompt = renderCommandPrompt(command, args);
       await handleSend({ text: prompt }, displayContent, { skipCommandMode: true });
     }
-  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, getCostInfo, agentKind, handleSend]);
+  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, getCostInfo, agentKind, handleSend, permissionConfig, updateSessionPermissions]);
 
   return (
     <div className="flex h-full flex-col">
@@ -325,9 +357,19 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                     disabled={isRunning}
                   />
                 )}
+                permissionSelector={(
+                  <AgentPermissionSelector
+                    agentKind={agentKind}
+                    permissionConfig={permissionConfig}
+                    planMode={planMode}
+                    disabled={isRunning}
+                    onPermissionConfigChange={handlePermissionConfigChange}
+                    onPlanModeChange={handlePlanModeChange}
+                  />
+                )}
                 onStop={() => interrupt(sessionId)}
-                activeCommandMode={agentKind === 'codex' && codexPlanMode ? { id: 'plan', label: '计划' } : null}
-                onClearCommandMode={() => setCodexPlanMode(false)}
+                activeCommandMode={agentKind === 'codex' && planMode === 'on' ? { id: 'plan', label: '计划' } : null}
+                onClearCommandMode={() => handlePlanModeChange('off')}
               />
             </div>
           )}

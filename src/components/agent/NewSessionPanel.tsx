@@ -1,8 +1,9 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo } from 'react';
 
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { findCommand, renderCommandPrompt } from '../../lib/slashCommands';
 import { getPrimaryProviderModel, getProviderModelList } from '../../lib/providerModels';
+import { serializePermissionConfig } from '../../lib/agentPermissions';
 import { agentApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
 import { useNewSessionStore } from '../../stores/newSessionStore';
@@ -12,6 +13,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { getAgentDefinition } from '../../types/agentRegistry';
 import type { AgentInputPayload } from '../../types/agentInput';
 import { AgentSelector } from './AgentSelector';
+import { AgentPermissionSelector } from './AgentPermissionSelector';
 import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 import { CodeMuxModelSelector } from './assistant-ui/CodeMuxModelSelector';
@@ -26,9 +28,13 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     selectedAgentKind,
     selectedModel,
     selectedReasoningEffort,
+    selectedPermissionConfig,
+    selectedPlanMode,
     setSelectedAgentKind,
     setSelectedModel,
     setSelectedReasoningEffort,
+    setSelectedPermissionConfig,
+    setSelectedPlanMode,
     draftProjectId,
   } = useNewSessionStore();
   const projects = useProjectStore((state) => state.projects);
@@ -37,7 +43,6 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const getActiveProvider = useSettingsStore((s) => s.getActiveProvider);
   const { loadFileTree, setProjectPath } = usePreviewStore();
   const clearEvents = useAgentStore((state) => state.clearEvents);
-  const [codexPlanMode, setCodexPlanMode] = useState(false);
 
   const selectedAgent = getAgentDefinition(selectedAgentKind);
   const providerModels = useMemo(() => getProviderModelList(activeProvider), [activeProvider]);
@@ -78,12 +83,27 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     }
   }, [draftProject?.path, loadFileTree, setProjectPath]);
 
-  const handleSend = async (input: AgentInputPayload) => {
+  useEffect(() => {
+    const configured = selectedAgentKind === 'codex'
+      ? config?.agent_configs.codex.permission_config
+      : config?.agent_configs.claude_code.permission_config;
+    setSelectedPermissionConfig(serializePermissionConfig(selectedAgentKind, configured));
+    setSelectedPlanMode('off');
+  }, [
+    config?.agent_configs.claude_code.permission_config,
+    config?.agent_configs.codex.permission_config,
+    selectedAgentKind,
+    setSelectedPermissionConfig,
+    setSelectedPlanMode,
+  ]);
+
+  const handleSend = async (input: AgentInputPayload | string) => {
+    const payload = typeof input === 'string' ? { text: input } : input;
     const planCommand = findCommand('plan', 'codex');
-    const text = selectedAgentKind === 'codex' && codexPlanMode && planCommand
-      ? renderCommandPrompt(planCommand, input.text)
-      : input.text;
-    await onSubmit({ ...input, text });
+    const text = selectedAgentKind === 'codex' && selectedPlanMode === 'on' && planCommand
+      ? renderCommandPrompt(planCommand, payload.text)
+      : payload.text;
+    await onSubmit({ ...payload, text });
   };
 
   const handleCommand = async (command: SlashCommand, args: string) => {
@@ -106,7 +126,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
 
     if (command.handler === 'prompt' && command.prompt) {
       if (selectedAgentKind === 'codex' && command.name === 'plan') {
-        setCodexPlanMode(true);
+        setSelectedPlanMode('on');
         if (!args) {
           return;
         }
@@ -148,8 +168,17 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                   getDisplayName={formatSelectedProviderModel}
                 />
               )}
-              activeCommandMode={selectedAgentKind === 'codex' && codexPlanMode ? { id: 'plan', label: '计划' } : null}
-              onClearCommandMode={() => setCodexPlanMode(false)}
+              permissionSelector={(
+                <AgentPermissionSelector
+                  agentKind={selectedAgentKind}
+                  permissionConfig={selectedPermissionConfig}
+                  planMode={selectedPlanMode}
+                  onPermissionConfigChange={setSelectedPermissionConfig}
+                  onPlanModeChange={setSelectedPlanMode}
+                />
+              )}
+              activeCommandMode={selectedAgentKind === 'codex' && selectedPlanMode === 'on' ? { id: 'plan', label: '计划' } : null}
+              onClearCommandMode={() => setSelectedPlanMode('off')}
             />
 
           </div>

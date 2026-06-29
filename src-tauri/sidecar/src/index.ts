@@ -19,6 +19,7 @@ import { getRuntimeFlavor } from './runtimeEvents.js';
 import { proxyManager } from './proxyManager.js';
 import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
 import { emit } from './streamEventBatcher.js';
+import { buildClaudePermissionOptions, type AgentPlanMode, type SidecarPermissionConfig } from './agentPermissions.js';
 import {
   buildClaudeUserMessageContent,
   isImageUnsupportedError,
@@ -54,6 +55,8 @@ type SessionBootstrap = {
   model?: string;
   reasoningEffort?: string;
   skills?: string[];
+  permissionConfig?: SidecarPermissionConfig;
+  planMode?: AgentPlanMode;
 };
 
 type QueryOptions = Record<string, unknown> & {
@@ -242,6 +245,8 @@ export class SessionRuntime {
       model: cmd.model,
       reasoningEffort: normalizeReasoningEffort(cmd.reasoningEffort),
       skills: cmd.skills,
+      permissionConfig: cmd.permissionConfig,
+      planMode: normalizePlanMode(cmd.planMode),
     };
   }
 
@@ -429,16 +434,13 @@ export class SessionRuntime {
       this.abortController = new AbortController();
     }
 
+    const permissionOptions = buildClaudePermissionOptions(config.permissionConfig, config.planMode);
+
     const options: QueryOptions = {
       cwd: config.cwd,
       abortController: this.abortController,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      allowedTools: [
-        'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch', 'AskUserQuestion', 'TodoWrite',
-        'WaitForMcpServers', 'Skill',
-      ],
+      permissionMode: permissionOptions.permissionMode,
+      allowDangerouslySkipPermissions: permissionOptions.allowDangerouslySkipPermissions,
       env: subprocessEnv,
       ...(Object.keys(cleanSettings).length > 0 ? { settings: cleanSettings } : {}),
       includePartialMessages: true,
@@ -510,7 +512,34 @@ export class SessionRuntime {
           });
           return { behavior: 'allow', updatedInput: { ...input, questions, answers: answersRecord } };
         }
-        return { behavior: 'allow', updatedInput: input };
+
+        const toolUseId = opts.toolUseID;
+        const title = getClaudeApprovalTitle(toolName, input, opts);
+        emit({
+          type: 'ask_user_question',
+          tool_use_id: toolUseId,
+          questions: [{
+            header: '审批',
+            question: title,
+            options: [
+              { label: '允许', description: '执行这一次操作。' },
+              { label: '拒绝', description: '阻止这一次操作。' },
+            ],
+          }],
+        });
+        const userAnswers = await new Promise<string[]>((resolve) => {
+          pendingToolResponses.set(toolUseId, { resolve: resolve as (v: unknown) => void });
+        });
+        pendingToolResponses.delete(toolUseId);
+        const answer = String(userAnswers[0] ?? '');
+        if (answer === '允许') {
+          return { behavior: 'allow', updatedInput: input, toolUseID: toolUseId };
+        }
+        return {
+          behavior: 'deny',
+          message: `${toolName} was denied by the user.`,
+          toolUseID: toolUseId,
+        };
       },
     };
 
@@ -725,6 +754,35 @@ export class SessionRuntime {
 
 function normalizeReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | undefined {
   return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
+}
+
+function normalizePlanMode(value: unknown): AgentPlanMode {
+  return value === 'on' ? 'on' : 'off';
+}
+
+function getClaudeApprovalTitle(
+  toolName: string,
+  input: Record<string, unknown>,
+  opts: { toolUseID?: string; title?: string; displayName?: string; description?: string },
+): string {
+  if (typeof opts.title === 'string' && opts.title.trim()) {
+    return opts.title;
+  }
+
+  const filePath = typeof input.file_path === 'string' ? input.file_path : undefined;
+  if (filePath && (toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit' || toolName === 'NotebookEdit')) {
+    return `允许 Claude ${toolName === 'Write' ? '写入' : '编辑'} ${filePath} 吗？`;
+  }
+
+  const command = typeof input.command === 'string' ? input.command : undefined;
+  if (toolName === 'Bash' && command) {
+    return `允许 Claude 运行命令：${command}`;
+  }
+
+  const displayName = typeof opts.displayName === 'string' && opts.displayName.trim()
+    ? opts.displayName
+    : toolName;
+  return `允许 Claude 使用 ${displayName} 吗？`;
 }
 
 const runtime = new SessionRuntime();

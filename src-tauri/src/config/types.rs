@@ -61,6 +61,18 @@ fn default_false() -> bool {
     false
 }
 
+fn default_claude_permission_mode() -> String {
+    "default".to_string()
+}
+
+fn default_codex_sandbox_mode() -> String {
+    "workspace-write".to_string()
+}
+
+fn default_codex_approval_policy() -> String {
+    "on-request".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
     pub id: String,
@@ -102,11 +114,47 @@ impl Default for AgentDefaults {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudePermissionConfig {
+    #[serde(default = "default_claude_permission_mode", rename = "permissionMode")]
+    pub permission_mode: String,
+}
+
+impl Default for ClaudePermissionConfig {
+    fn default() -> Self {
+        Self {
+            permission_mode: default_claude_permission_mode(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodexPermissionConfig {
+    #[serde(default = "default_codex_sandbox_mode", rename = "sandboxMode")]
+    pub sandbox_mode: String,
+    #[serde(default = "default_codex_approval_policy", rename = "approvalPolicy")]
+    pub approval_policy: String,
+    #[serde(default = "default_false", rename = "networkAccessEnabled")]
+    pub network_access_enabled: bool,
+}
+
+impl Default for CodexPermissionConfig {
+    fn default() -> Self {
+        Self {
+            sandbox_mode: default_codex_sandbox_mode(),
+            approval_policy: default_codex_approval_policy(),
+            network_access_enabled: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClaudeCodeAgentConfig {
     #[serde(default = "default_claude_executable_mode")]
     pub executable_mode: String,
     #[serde(default = "default_true")]
     pub resume_sessions: bool,
+    #[serde(default)]
+    pub permission_config: ClaudePermissionConfig,
 }
 
 impl Default for ClaudeCodeAgentConfig {
@@ -114,6 +162,7 @@ impl Default for ClaudeCodeAgentConfig {
         Self {
             executable_mode: default_claude_executable_mode(),
             resume_sessions: true,
+            permission_config: ClaudePermissionConfig::default(),
         }
     }
 }
@@ -122,12 +171,15 @@ impl Default for ClaudeCodeAgentConfig {
 pub struct CodexAgentConfig {
     #[serde(default = "default_codex_sdk_mode")]
     pub sdk_mode: String,
+    #[serde(default)]
+    pub permission_config: CodexPermissionConfig,
 }
 
 impl Default for CodexAgentConfig {
     fn default() -> Self {
         Self {
             sdk_mode: default_codex_sdk_mode(),
+            permission_config: CodexPermissionConfig::default(),
         }
     }
 }
@@ -136,11 +188,13 @@ impl Default for CodexAgentConfig {
 pub struct ClaudeCodeAgentConfigUpdate {
     pub executable_mode: Option<String>,
     pub resume_sessions: Option<bool>,
+    pub permission_config: Option<ClaudePermissionConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CodexAgentConfigUpdate {
     pub sdk_mode: Option<String>,
+    pub permission_config: Option<CodexPermissionConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

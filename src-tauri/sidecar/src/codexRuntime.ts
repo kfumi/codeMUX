@@ -28,6 +28,11 @@ import {
   writePayloadImagesToTempFiles,
   type AgentInputPayload,
 } from './agentInputPayload.js';
+import {
+  buildCodexThreadPermissionOptions,
+  type AgentPlanMode,
+  type SidecarPermissionConfig,
+} from './agentPermissions.js';
 
 export { emit } from './streamEventBatcher.js';
 
@@ -45,6 +50,8 @@ type CodexSessionBootstrap = {
   model?: string;
   reasoningEffort?: string;
   codexNeedsProxy?: boolean;
+  permissionConfig?: SidecarPermissionConfig;
+  planMode?: AgentPlanMode;
 };
 
 /** Current active session ID — shared with the proxy for event routing. */
@@ -104,6 +111,8 @@ export class CodexSessionRuntime {
       model: cmd.model,
       reasoningEffort: normalizeCodexReasoningEffort(cmd.reasoningEffort),
       codexNeedsProxy: cmd.codexNeedsProxy,
+      permissionConfig: cmd.permissionConfig,
+      planMode: normalizeCodexPlanMode(cmd.planMode),
     };
     const nextFingerprint = JSON.stringify(requestedConfig);
 
@@ -233,6 +242,10 @@ export class CodexSessionRuntime {
 
     const payload = normalizeAgentInputPayload(prompt, inputPayload);
     const imagePaths = includeImages ? await writePayloadImagesToTempFiles(payload) : [];
+    const permissionOptions = buildCodexThreadPermissionOptions(
+      this.config.permissionConfig,
+      this.config.planMode,
+    );
 
     process.stderr.write(`[codex] Processing input via SDK: ${payload.text.slice(0, 80)}...\n`);
 
@@ -244,7 +257,7 @@ export class CodexSessionRuntime {
       model,
       cwd: this.config.cwd,
       tools: [],
-      permissionMode: 'bypassPermissions',
+      permissionMode: `${permissionOptions.sandboxMode}/${permissionOptions.approvalPolicy}`,
     });
 
     const emitFailure = (message: string): void => {
@@ -398,13 +411,18 @@ export class CodexSessionRuntime {
       throw new Error('Missing Codex config');
     }
 
+    const permissionOptions = buildCodexThreadPermissionOptions(
+      this.config.permissionConfig,
+      this.config.planMode,
+    );
+
     return {
       model: this.config.model,
       workingDirectory: this.config.cwd,
       skipGitRepoCheck: true,
-      sandboxMode: 'danger-full-access' as const,
-      approvalPolicy: 'never' as const,
-      networkAccessEnabled: true,
+      sandboxMode: permissionOptions.sandboxMode,
+      approvalPolicy: permissionOptions.approvalPolicy,
+      networkAccessEnabled: permissionOptions.networkAccessEnabled,
       ...(this.config.reasoningEffort ? { modelReasoningEffort: this.config.reasoningEffort as any } : {}),
     };
   }
@@ -651,6 +669,10 @@ export class CodexSessionRuntime {
 
 function normalizeCodexReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | undefined {
   return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
+}
+
+function normalizeCodexPlanMode(value: unknown): AgentPlanMode {
+  return value === 'on' ? 'on' : 'off';
 }
 
 export function buildCodexCliConfig(

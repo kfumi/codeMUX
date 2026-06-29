@@ -2,6 +2,7 @@ import { invoke, Channel } from '@tauri-apps/api/core';
 import type { AgentKind, ReasoningEffort, Session, SessionMode } from '../types/session';
 import type { AgentInputPayload } from '../types/agentInput';
 import type { AgentConfigUpdateMap, AppConfig, Provider, Theme } from '../types/provider';
+import type { AgentPermissionConfig, AgentPlanMode } from './agentPermissions';
 import type { Project } from '../types/project';
 import type { McpServer } from '../types/mcp';
 import type { Skill } from '../types/skill';
@@ -94,6 +95,7 @@ function summarizeInvokeArgs(args?: Record<string, unknown>) {
   if (typeof args.reasoningEffort === 'string') summary.reasoningEffort = args.reasoningEffort;
   if (typeof args.theme === 'string') summary.theme = args.theme;
   if (typeof args.mode === 'string') summary.mode = args.mode;
+  if (typeof args.planMode === 'string') summary.planMode = args.planMode;
   if (typeof args.name === 'string') summary.name = args.name;
 
   if (typeof args.prompt === 'string') summary.promptLength = args.prompt.length;
@@ -126,8 +128,22 @@ export const projectApi = {
 };
 
 export const sessionApi = {
-  create: (title: string, agentKind: AgentKind, mode?: SessionMode, projectId?: string): Promise<Session> =>
-    invokeLogged('create_session', { title, agentKind, mode, projectId: projectId ?? null }),
+  create: (
+    title: string,
+    agentKind: AgentKind,
+    mode?: SessionMode,
+    projectId?: string,
+    permissionConfig?: AgentPermissionConfig,
+    planMode?: AgentPlanMode,
+  ): Promise<Session> =>
+    invokeLogged('create_session', {
+      title,
+      agentKind,
+      mode,
+      projectId: projectId ?? null,
+      permissionConfig: permissionConfig ? JSON.stringify(permissionConfig) : null,
+      planMode: planMode ?? null,
+    }),
   getAll: (): Promise<Session[]> => invokeLogged('get_all_sessions'),
   getArchived: (): Promise<Session[]> => invokeLogged('get_archived_sessions'),
   delete: (sessionId: string): Promise<void> => invokeLogged('delete_session', { sessionId }),
@@ -137,6 +153,16 @@ export const sessionApi = {
   touch: (sessionId: string): Promise<void> => invokeLogged('touch_session', { sessionId }),
   updateProvider: (sessionId: string, providerId: string, model: string, reasoningEffort?: ReasoningEffort): Promise<void> =>
     invokeLogged('update_session_provider', { sessionId, providerId, model, reasoningEffort }),
+  updatePermissions: (
+    sessionId: string,
+    permissionConfig?: AgentPermissionConfig,
+    planMode?: AgentPlanMode,
+  ): Promise<void> =>
+    invokeLogged('update_session_permissions', {
+      sessionId,
+      permissionConfig: permissionConfig ? JSON.stringify(permissionConfig) : null,
+      planMode: planMode ?? null,
+    }),
 };
 
 export const agentApi = {

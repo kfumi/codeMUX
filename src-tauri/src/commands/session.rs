@@ -12,6 +12,8 @@ pub fn create_session(
     agent_kind: Option<String>,
     mode: Option<String>,
     project_id: Option<String>,
+    permission_config: Option<String>,
+    plan_mode: Option<String>,
 ) -> Result<operations::Session, String> {
     let agent_kind = AgentKind::from_str(agent_kind.as_deref().unwrap_or("claude_code"))?;
     info!(
@@ -25,10 +27,25 @@ pub fn create_session(
     let db = state.db.lock().unwrap();
     let mode_str = mode.as_deref().unwrap_or("chat");
     match project_id.as_deref() {
-        Some(pid) => operations::create_session_for_project(&db, &title, agent_kind, mode_str, pid)
-            .map_err(|e| e.to_string()),
-        None => operations::create_session_with_mode(&db, &title, agent_kind, mode_str)
-            .map_err(|e| e.to_string()),
+        Some(pid) => operations::create_session_for_project_with_permissions(
+            &db,
+            &title,
+            agent_kind,
+            mode_str,
+            pid,
+            permission_config.as_deref(),
+            plan_mode.as_deref(),
+        )
+        .map_err(|e| e.to_string()),
+        None => operations::create_session_with_mode_and_permissions(
+            &db,
+            &title,
+            agent_kind,
+            mode_str,
+            permission_config.as_deref(),
+            plan_mode.as_deref(),
+        )
+        .map_err(|e| e.to_string()),
     }
 }
 
@@ -107,6 +124,30 @@ pub fn update_session_provider(
         &provider_id,
         &model,
         reasoning_effort.as_deref(),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_session_permissions(
+    state: State<'_, AppState>,
+    session_id: String,
+    permission_config: Option<String>,
+    plan_mode: Option<String>,
+) -> Result<(), String> {
+    info!(
+        target: "session",
+        "Updating session permissions session_id={} has_permission_config={} plan_mode={}",
+        session_id,
+        permission_config.as_ref().map(|value| !value.is_empty()).unwrap_or(false),
+        plan_mode.as_deref().unwrap_or("unchanged")
+    );
+    let db = state.db.lock().unwrap();
+    operations::update_session_permissions(
+        &db,
+        &session_id,
+        permission_config.as_deref(),
+        plan_mode.as_deref(),
     )
     .map_err(|e| e.to_string())
 }

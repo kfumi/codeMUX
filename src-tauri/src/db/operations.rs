@@ -37,6 +37,8 @@ pub struct Session {
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub mode: Option<String>,
+    pub permission_config: Option<String>,
+    pub plan_mode: Option<String>,
     pub project_id: Option<String>,
     pub is_archived: bool,
     pub created_at: String,
@@ -110,18 +112,22 @@ pub fn rename_project(conn: &Connection, project_id: &str, name: &str) -> Result
     Ok(())
 }
 
-pub fn create_session_with_mode(
+pub fn create_session_with_mode_and_permissions(
     conn: &Connection,
     title: &str,
     agent_kind: AgentKind,
     mode: &str,
+    permission_config: Option<&str>,
+    plan_mode: Option<&str>,
 ) -> Result<Session> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
+    let permission_config = permission_config.unwrap_or("");
+    let plan_mode = plan_mode.unwrap_or("off");
 
     conn.execute(
-        "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![id, title, agent_kind.as_str(), mode, now, now],
+        "INSERT INTO sessions (id, title, agent_kind, mode, permission_config, plan_mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![id, title, agent_kind.as_str(), mode, permission_config, plan_mode, now, now],
     )?;
 
     Ok(Session {
@@ -132,6 +138,8 @@ pub fn create_session_with_mode(
         model: None,
         reasoning_effort: Some("medium".to_string()),
         mode: Some(mode.to_string()),
+        permission_config: Some(permission_config.to_string()),
+        plan_mode: Some(plan_mode.to_string()),
         project_id: None,
         is_archived: false,
         created_at: now.clone(),
@@ -139,19 +147,23 @@ pub fn create_session_with_mode(
     })
 }
 
-pub fn create_session_for_project(
+pub fn create_session_for_project_with_permissions(
     conn: &Connection,
     title: &str,
     agent_kind: AgentKind,
     mode: &str,
     project_id: &str,
+    permission_config: Option<&str>,
+    plan_mode: Option<&str>,
 ) -> Result<Session> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
+    let permission_config = permission_config.unwrap_or("");
+    let plan_mode = plan_mode.unwrap_or("off");
 
     conn.execute(
-        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![id, title, agent_kind.as_str(), mode, project_id, now, now],
+        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, permission_config, plan_mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![id, title, agent_kind.as_str(), mode, project_id, permission_config, plan_mode, now, now],
     )?;
 
     Ok(Session {
@@ -162,6 +174,8 @@ pub fn create_session_for_project(
         model: None,
         reasoning_effort: Some("medium".to_string()),
         mode: Some(mode.to_string()),
+        permission_config: Some(permission_config.to_string()),
+        plan_mode: Some(plan_mode.to_string()),
         project_id: Some(project_id.to_string()),
         is_archived: false,
         created_at: now.clone(),
@@ -170,7 +184,7 @@ pub fn create_session_for_project(
 }
 
 pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, project_id, is_archived, created_at, updated_at FROM sessions WHERE is_archived = 0 ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, is_archived, created_at, updated_at FROM sessions WHERE is_archived = 0 ORDER BY updated_at DESC")?;
 
     let sessions = stmt
         .query_map([], |row| {
@@ -182,10 +196,12 @@ pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
                 model: row.get(4)?,
                 reasoning_effort: row.get(5)?,
                 mode: row.get(6)?,
-                project_id: row.get(7)?,
-                is_archived: row.get::<_, i32>(8)? != 0,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
+                permission_config: row.get(7)?,
+                plan_mode: row.get(8)?,
+                project_id: row.get(9)?,
+                is_archived: row.get::<_, i32>(10)? != 0,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
             })
         })?
         .collect::<Result<Vec<_>>>()?;
@@ -194,7 +210,7 @@ pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
 }
 
 pub fn get_all_archived_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, project_id, is_archived, created_at, updated_at FROM sessions WHERE is_archived = 1 ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, is_archived, created_at, updated_at FROM sessions WHERE is_archived = 1 ORDER BY updated_at DESC")?;
 
     let sessions = stmt
         .query_map([], |row| {
@@ -206,10 +222,12 @@ pub fn get_all_archived_sessions(conn: &Connection) -> Result<Vec<Session>> {
                 model: row.get(4)?,
                 reasoning_effort: row.get(5)?,
                 mode: row.get(6)?,
-                project_id: row.get(7)?,
-                is_archived: row.get::<_, i32>(8)? != 0,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
+                permission_config: row.get(7)?,
+                plan_mode: row.get(8)?,
+                project_id: row.get(9)?,
+                is_archived: row.get::<_, i32>(10)? != 0,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
             })
         })?
         .collect::<Result<Vec<_>>>()?;
@@ -322,6 +340,20 @@ pub fn update_session_provider(
     Ok(())
 }
 
+pub fn update_session_permissions(
+    conn: &Connection,
+    session_id: &str,
+    permission_config: Option<&str>,
+    plan_mode: Option<&str>,
+) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE sessions SET permission_config = COALESCE(?1, permission_config, ''), plan_mode = COALESCE(?2, plan_mode, 'off'), updated_at = ?3 WHERE id = ?4",
+        params![permission_config, plan_mode, now, session_id],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -407,6 +439,36 @@ mod tests {
         let sessions = get_all_sessions(&conn).unwrap();
         assert_eq!(sessions[0].model.as_deref(), Some("gpt-5"));
         assert_eq!(sessions[0].reasoning_effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn creates_session_with_permission_snapshot_and_plan_mode() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+
+        let permission_config = r#"{"kind":"codex","sandboxMode":"workspace-write","approvalPolicy":"on-request","networkAccessEnabled":false}"#;
+        let created = super::create_session_with_mode_and_permissions(
+            &conn,
+            "Permissioned",
+            AgentKind::Codex,
+            "agent",
+            Some(permission_config),
+            Some("on"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            created.permission_config.as_deref(),
+            Some(permission_config)
+        );
+        assert_eq!(created.plan_mode.as_deref(), Some("on"));
+
+        let sessions = get_all_sessions(&conn).unwrap();
+        assert_eq!(
+            sessions[0].permission_config.as_deref(),
+            Some(permission_config)
+        );
+        assert_eq!(sessions[0].plan_mode.as_deref(), Some("on"));
     }
 
     #[test]

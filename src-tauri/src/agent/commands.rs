@@ -780,6 +780,39 @@ fn build_ensure_session_command(
     if let Some(needs_proxy) = codex_needs_proxy {
         cmd["codexNeedsProxy"] = serde_json::Value::Bool(needs_proxy);
     }
+    let permission_snapshot = {
+        let db = state.db.lock().unwrap();
+        db.query_row(
+            "SELECT permission_config, plan_mode FROM sessions WHERE id = ?1 LIMIT 1",
+            [session_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )
+        .ok()
+    };
+    if let Some((permission_config, plan_mode)) = permission_snapshot {
+        if let Some(permission_config) = permission_config.filter(|value| !value.trim().is_empty())
+        {
+            match serde_json::from_str::<serde_json::Value>(&permission_config) {
+                Ok(value) => {
+                    cmd["permissionConfig"] = value;
+                }
+                Err(error) => warn!(
+                    target: "agent",
+                    "Ignoring invalid permission_config for session_id={} error={}",
+                    session_id,
+                    error
+                ),
+            }
+        }
+        if let Some(plan_mode) = plan_mode.filter(|value| value == "on" || value == "off") {
+            cmd["planMode"] = serde_json::Value::String(plan_mode);
+        }
+    }
     if let Ok(parsed_agent_kind) = AgentKind::from_str(agent_kind) {
         match get_agent_session_id(state, session_id, parsed_agent_kind) {
             Ok(Some(agent_session_id)) => {

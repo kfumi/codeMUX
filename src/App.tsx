@@ -103,7 +103,14 @@ function App() {
   };
 
   const handleStartNewSession = async (input: AgentInputPayload) => {
-    const { selectedAgentKind, selectedModel, selectedReasoningEffort, draftProjectId } = useNewSessionStore.getState();
+    const {
+      selectedAgentKind,
+      selectedModel,
+      selectedReasoningEffort,
+      selectedPermissionConfig,
+      selectedPlanMode,
+      draftProjectId,
+    } = useNewSessionStore.getState();
     const cwd = resolveSessionCwd(projects, draftProjectId, getStoredAgentCwd());
     const { provider, apiKey, baseUrl, model, runtimeModel, codexNeedsProxy } = resolveAgentProviderConfig({
       agentKind: selectedAgentKind,
@@ -112,7 +119,14 @@ function App() {
     });
 
     try {
-      const session = await createSession('新对话', selectedAgentKind, 'agent', draftProjectId ?? undefined);
+      const session = await createSession(
+        '新对话',
+        selectedAgentKind,
+        'agent',
+        draftProjectId ?? undefined,
+        selectedPermissionConfig,
+        selectedPlanMode,
+      );
 
       if (provider?.id && model) {
         sessionApi.updateProvider(session.id, provider.id, model, selectedReasoningEffort).catch(() => {});

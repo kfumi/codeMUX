@@ -152,6 +152,6 @@ describe('NewSessionPanel', () => {
 
     await composerProps[0]?.onSend?.('Ship the feature');
 
-    expect(onSubmit).toHaveBeenCalledWith('Ship the feature');
+    expect(onSubmit).toHaveBeenCalledWith({ text: 'Ship the feature' });
   });
 });

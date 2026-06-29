@@ -49,6 +49,7 @@ interface CodeMuxComposerProps {
   modelName?: string;
   placeholder?: string;
   modelSelector?: ReactNode;
+  permissionSelector?: ReactNode;
   onStop?: () => void | Promise<void>;
   activeCommandMode?: { id: 'plan'; label: string } | null;
   onClearCommandMode?: () => void;
@@ -116,6 +117,7 @@ export function CodeMuxComposer({
   modelName,
   placeholder = '输入消息... (@ 引用文件, / 命令)',
   modelSelector,
+  permissionSelector,
   onStop,
   activeCommandMode,
   onClearCommandMode,
@@ -314,6 +316,7 @@ export function CodeMuxComposer({
                 >
                   /
                 </button>
+                {permissionSelector}
                 {activeCommandMode && (
                   <span
                     className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[hsl(var(--accent)/0.42)] bg-[hsl(var(--accent)/0.16)] px-2 text-xs font-medium text-[hsl(var(--accent))]"

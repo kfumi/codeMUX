@@ -22,6 +22,8 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             model TEXT,
             reasoning_effort TEXT DEFAULT 'medium',
             mode TEXT NOT NULL DEFAULT 'chat',
+            permission_config TEXT NOT NULL DEFAULT '',
+            plan_mode TEXT NOT NULL DEFAULT 'off',
             project_id TEXT,
             is_archived INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
@@ -106,6 +108,26 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
     if !has_reasoning_effort {
         let _ = conn.execute(
             "ALTER TABLE sessions ADD COLUMN reasoning_effort TEXT DEFAULT 'medium'",
+            [],
+        );
+    }
+
+    let has_permission_config: bool = conn
+        .prepare("SELECT permission_config FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_permission_config {
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN permission_config TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+    }
+
+    let has_plan_mode: bool = conn
+        .prepare("SELECT plan_mode FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_plan_mode {
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN plan_mode TEXT NOT NULL DEFAULT 'off'",
             [],
         );
     }
@@ -272,6 +294,41 @@ mod tests {
             )
             .unwrap();
         assert_eq!(agent_kind, "claude_code");
+    }
+
+    #[test]
+    fn migrates_sessions_permission_snapshot_columns_with_safe_defaults() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                agent_kind TEXT NOT NULL DEFAULT 'claude_code',
+                provider_id TEXT,
+                model TEXT,
+                mode TEXT NOT NULL DEFAULT 'chat',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at)
+            VALUES ('session-1', 'Legacy', 'codex', 'agent', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            ",
+        )
+        .unwrap();
+
+        initialize_database(&conn).unwrap();
+
+        let row = conn
+            .query_row(
+                "SELECT permission_config, plan_mode FROM sessions WHERE id = 'session-1'",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(row.0, "");
+        assert_eq!(row.1, "off");
     }
 
     #[test]

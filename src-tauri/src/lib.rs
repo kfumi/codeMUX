@@ -150,6 +150,7 @@ pub fn run() {
             commands::session::update_session_title,
             commands::session::touch_session,
             commands::session::update_session_provider,
+            commands::session::update_session_permissions,
             commands::project::create_project,
             commands::project::get_all_projects,
             commands::project::delete_project,
