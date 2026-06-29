@@ -56,13 +56,25 @@ describe('AgentPermissionSelector', () => {
       />,
     );
 
+    const triggerLabel = screen.getByText('计划只读');
+    const triggerButton = triggerLabel.closest('button');
+
+    expect(triggerButton).toBeTruthy();
+    expect(triggerButton?.getAttribute('title')).toBe('计划只读');
+
     fireEvent.click(screen.getByTitle('计划只读'));
 
+    expect(triggerButton?.textContent).toContain('计划只读');
     expect(screen.getByText('Codex 操作审批')).toBeTruthy();
     expect(screen.getByText('计划只读')).toBeTruthy();
     expect(screen.getByText('请求批准')).toBeTruthy();
     expect(screen.getByText('自动编辑')).toBeTruthy();
     expect(screen.getByText('完全访问')).toBeTruthy();
+
+    const activeOption = screen.getAllByRole('menuitemradio').find((item) => item.getAttribute('aria-checked') === 'true');
+
+    expect(activeOption).toBeTruthy();
+    expect(activeOption?.textContent).toContain('完全访问');
 
     fireEvent.click(screen.getByText('自动编辑'));
 
