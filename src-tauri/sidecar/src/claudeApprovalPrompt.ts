@@ -1,7 +1,7 @@
 export function getClaudeApprovalTitle(
   toolName: string,
   input: Record<string, unknown>,
-  opts: { title?: string; displayName?: string } = {},
+  opts: { title?: string; displayName?: string; toolUseID?: string; description?: string } = {},
 ): string {
   if (typeof opts.title === 'string' && opts.title.trim()) {
     return opts.title;
