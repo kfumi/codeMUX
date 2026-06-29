@@ -30,6 +30,7 @@ import {
 } from './agentInputPayload.js';
 import {
   buildCodexThreadPermissionOptions,
+  describeCodexPermissionOptions,
   type AgentPlanMode,
   type SidecarPermissionConfig,
 } from './agentPermissions.js';
@@ -257,7 +258,7 @@ export class CodexSessionRuntime {
       model,
       cwd: this.config.cwd,
       tools: [],
-      permissionMode: `${permissionOptions.sandboxMode}/${permissionOptions.approvalPolicy}`,
+      permissionMode: describeCodexPermissionOptions(permissionOptions),
     });
 
     const emitFailure = (message: string): void => {

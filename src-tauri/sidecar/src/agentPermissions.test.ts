@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildClaudePermissionOptions,
   buildCodexThreadPermissionOptions,
+  describeCodexPermissionOptions,
   type SidecarPermissionConfig,
 } from './agentPermissions.js';
 
@@ -46,7 +47,7 @@ describe('sidecar agent permissions', () => {
     });
   });
 
-  it('keeps Codex plan mode from changing sandbox or approval settings', () => {
+  it('forces Codex plan mode to read-only approval settings', () => {
     const config: SidecarPermissionConfig = {
       kind: 'codex',
       sandboxMode: 'danger-full-access',
@@ -55,9 +56,17 @@ describe('sidecar agent permissions', () => {
     };
 
     expect(buildCodexThreadPermissionOptions(config, 'on')).toEqual({
-      sandboxMode: 'danger-full-access',
-      approvalPolicy: 'never',
-      networkAccessEnabled: true,
+      sandboxMode: 'read-only',
+      approvalPolicy: 'on-request',
+      networkAccessEnabled: false,
     });
+  });
+
+  it('describes effective Codex permission options for status logging', () => {
+    expect(describeCodexPermissionOptions({
+      sandboxMode: 'read-only',
+      approvalPolicy: 'on-request',
+      networkAccessEnabled: false,
+    })).toBe('read-only/on-request/network-off');
   });
 });

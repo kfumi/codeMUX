@@ -40,17 +40,33 @@ export function buildClaudePermissionOptions(config: unknown, planMode: AgentPla
   };
 }
 
-export function buildCodexThreadPermissionOptions(config: unknown, _planMode: AgentPlanMode = 'off'): {
+export function buildCodexThreadPermissionOptions(config: unknown, planMode: AgentPlanMode = 'off'): {
   sandboxMode: CodexSandboxMode;
   approvalPolicy: CodexApprovalPolicy;
   networkAccessEnabled: boolean;
 } {
+  if (planMode === 'on') {
+    return {
+      sandboxMode: 'read-only',
+      approvalPolicy: 'on-request',
+      networkAccessEnabled: false,
+    };
+  }
+
   const raw = isRecord(config) ? config : {};
   return {
     sandboxMode: isCodexSandboxMode(raw.sandboxMode) ? raw.sandboxMode : 'workspace-write',
     approvalPolicy: isCodexApprovalPolicy(raw.approvalPolicy) ? raw.approvalPolicy : 'on-request',
     networkAccessEnabled: typeof raw.networkAccessEnabled === 'boolean' ? raw.networkAccessEnabled : false,
   };
+}
+
+export function describeCodexPermissionOptions(options: {
+  sandboxMode: CodexSandboxMode;
+  approvalPolicy: CodexApprovalPolicy;
+  networkAccessEnabled: boolean;
+}): string {
+  return `${options.sandboxMode}/${options.approvalPolicy}/${options.networkAccessEnabled ? 'network-on' : 'network-off'}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
