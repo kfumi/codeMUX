@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useNewSessionStore } from '../../stores/newSessionStore';
@@ -151,6 +151,22 @@ describe('NewSessionPanel', () => {
     render(<NewSessionPanel onSubmit={onSubmit} />);
 
     await composerProps[0]?.onSend?.('Ship the feature');
+
+    expect(onSubmit).toHaveBeenCalledWith({ text: 'Ship the feature' });
+  });
+
+  it('keeps normal Codex plan mode draft sends as the original user text', async () => {
+    const onSubmit = vi.fn();
+    useNewSessionStore.setState({ selectedAgentKind: 'codex' });
+
+    render(<NewSessionPanel onSubmit={onSubmit} />);
+
+    act(() => {
+      useNewSessionStore.setState({ selectedPlanMode: 'on' });
+    });
+
+    const runtimeSend = [...composerProps].reverse().find((props) => props.onSend)?.onSend;
+    await runtimeSend?.('Ship the feature');
 
     expect(onSubmit).toHaveBeenCalledWith({ text: 'Ship the feature' });
   });

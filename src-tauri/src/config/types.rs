@@ -66,11 +66,11 @@ fn default_claude_permission_mode() -> String {
 }
 
 fn default_codex_sandbox_mode() -> String {
-    "workspace-write".to_string()
+    "danger-full-access".to_string()
 }
 
 fn default_codex_approval_policy() -> String {
-    "on-request".to_string()
+    "never".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,7 +133,7 @@ pub struct CodexPermissionConfig {
     pub sandbox_mode: String,
     #[serde(default = "default_codex_approval_policy", rename = "approvalPolicy")]
     pub approval_policy: String,
-    #[serde(default = "default_false", rename = "networkAccessEnabled")]
+    #[serde(default = "default_true", rename = "networkAccessEnabled")]
     pub network_access_enabled: bool,
 }
 
@@ -142,7 +142,7 @@ impl Default for CodexPermissionConfig {
         Self {
             sandbox_mode: default_codex_sandbox_mode(),
             approval_policy: default_codex_approval_policy(),
-            network_access_enabled: false,
+            network_access_enabled: true,
         }
     }
 }

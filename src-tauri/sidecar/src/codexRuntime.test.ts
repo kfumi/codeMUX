@@ -295,9 +295,137 @@ describe('CodexSessionRuntime', () => {
 
     expect(options).toMatchObject({
       sandboxMode: 'read-only',
-      approvalPolicy: 'on-request',
+      approvalPolicy: 'never',
       networkAccessEnabled: false,
     });
+  });
+
+  it('prefixes Codex plan-mode input with $plan before streaming', async () => {
+    const writes: string[] = [];
+    let streamedInput: unknown;
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        config: {
+          sessionId: string;
+          cwd: string;
+          model: string;
+          planMode: 'on';
+        };
+        thread: {
+          id: string;
+          runStreamed: (input: unknown) => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).config = {
+        sessionId: 'session-1',
+        cwd: 'D:/repo',
+        model: 'gpt-5',
+        planMode: 'on',
+      };
+      (runtime as unknown as {
+        thread: {
+          id: string;
+          runStreamed: (input: unknown) => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).thread = {
+        id: 'codex-thread-1',
+        runStreamed: async (input) => {
+          streamedInput = input;
+          return {
+            events: (async function* () {
+              yield {
+                type: 'turn.completed',
+                usage: {
+                  input_tokens: 1,
+                  cached_input_tokens: 0,
+                  output_tokens: 1,
+                  reasoning_output_tokens: 0,
+                },
+              } as ThreadEvent;
+            })(),
+          };
+        },
+      };
+
+      await (runtime as unknown as {
+        runInput: (prompt: string, inputPayload: undefined, includeImages: boolean) => Promise<void>;
+      }).runInput('build a login form', undefined, false);
+
+      expect(streamedInput).toEqual([{ type: 'text', text: '$plan build a login form' }]);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it('does not duplicate an existing Codex $plan prefix', async () => {
+    const writes: string[] = [];
+    let streamedInput: unknown;
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        config: {
+          sessionId: string;
+          cwd: string;
+          model: string;
+          planMode: 'on';
+        };
+        thread: {
+          id: string;
+          runStreamed: (input: unknown) => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).config = {
+        sessionId: 'session-1',
+        cwd: 'D:/repo',
+        model: 'gpt-5',
+        planMode: 'on',
+      };
+      (runtime as unknown as {
+        thread: {
+          id: string;
+          runStreamed: (input: unknown) => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).thread = {
+        id: 'codex-thread-1',
+        runStreamed: async (input) => {
+          streamedInput = input;
+          return {
+            events: (async function* () {
+              yield {
+                type: 'turn.completed',
+                usage: {
+                  input_tokens: 1,
+                  cached_input_tokens: 0,
+                  output_tokens: 1,
+                  reasoning_output_tokens: 0,
+                },
+              } as ThreadEvent;
+            })(),
+          };
+        },
+      };
+
+      await (runtime as unknown as {
+        runInput: (prompt: string, inputPayload: undefined, includeImages: boolean) => Promise<void>;
+      }).runInput('$plan build a login form', undefined, false);
+
+      expect(streamedInput).toEqual([{ type: 'text', text: '$plan build a login form' }]);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
   });
 
   it('emits incremental stream events from item.updated agent messages', () => {

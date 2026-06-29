@@ -39,11 +39,11 @@ describe('sidecar agent permissions', () => {
     });
   });
 
-  it('uses safe Codex defaults when no config is provided', () => {
+  it('uses full-access Codex defaults when no config is provided', () => {
     expect(buildCodexThreadPermissionOptions(undefined)).toEqual({
-      sandboxMode: 'workspace-write',
-      approvalPolicy: 'on-request',
-      networkAccessEnabled: false,
+      sandboxMode: 'danger-full-access',
+      approvalPolicy: 'never',
+      networkAccessEnabled: true,
     });
   });
 
@@ -57,7 +57,7 @@ describe('sidecar agent permissions', () => {
 
     expect(buildCodexThreadPermissionOptions(config, 'on')).toEqual({
       sandboxMode: 'read-only',
-      approvalPolicy: 'on-request',
+      approvalPolicy: 'never',
       networkAccessEnabled: false,
     });
   });
@@ -65,8 +65,8 @@ describe('sidecar agent permissions', () => {
   it('describes effective Codex permission options for status logging', () => {
     expect(describeCodexPermissionOptions({
       sandboxMode: 'read-only',
-      approvalPolicy: 'on-request',
+      approvalPolicy: 'never',
       networkAccessEnabled: false,
-    })).toBe('read-only/on-request/network-off');
+    })).toBe('read-only/never/network-off');
   });
 });

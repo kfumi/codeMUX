@@ -39,7 +39,7 @@ describe('slash commands by agent kind', () => {
     expect(plan?.prompt).not.toBe('/plan');
     expect(renderCommandPrompt(init!, '')).toContain('AGENTS.md');
     expect(renderCommandPrompt(review!, 'focus tests')).toContain('focus tests');
-    expect(renderCommandPrompt(plan!, 'add login')).toContain('add login');
+    expect(renderCommandPrompt(plan!, 'add login')).toBe('$plan add login');
   });
 
   it('maps Codex prompt templates back to slash command display text', () => {
@@ -50,6 +50,10 @@ describe('slash commands by agent kind', () => {
     expect(formatPromptAsCommandDisplay(renderCommandPrompt(init, ''), 'codex')).toBe('/init');
     expect(formatPromptAsCommandDisplay(renderCommandPrompt(review, 'focus tests'), 'codex')).toBe('/review focus tests');
     expect(formatPromptAsCommandDisplay(renderCommandPrompt(plan, 'add login'), 'codex')).toBe('/plan add login');
+  });
+
+  it('maps raw Codex $plan prompts back to slash command display text', () => {
+    expect(formatPromptAsCommandDisplay('$plan add login', 'codex')).toBe('/plan add login');
   });
 
   it('maps legacy Codex review prompt templates back to slash command display text', () => {

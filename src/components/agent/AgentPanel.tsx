@@ -4,7 +4,7 @@ import { getStoredAgentCwd } from '../../lib/sessionCwd';
 import { resolveAgentProviderConfig } from '../../lib/agentProvider';
 import { getProviderModelList } from '../../lib/providerModels';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
-import { findCommand, formatCommandDisplay, renderCommandPrompt } from '../../lib/slashCommands';
+import { formatCommandDisplay, renderCommandPrompt } from '../../lib/slashCommands';
 import { serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
 import type { ReasoningEffort } from '../../types/session';
 import type { AgentInputPayload } from '../../types/agentInput';
@@ -141,7 +141,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     });
   }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, runtimeModel, reasoningEffort, codexNeedsProxy, session?.permission_config, planMode, setProxyRunning, isRunning]);
 
-  const handleSend = async (input: AgentInputPayload, displayContent = input.text, options?: { skipCommandMode?: boolean }) => {
+  const handleSend = async (input: AgentInputPayload, displayContent = input.text) => {
     const effectiveCwd = project?.path || cwd;
     const latestSession = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId) ?? session;
     const latestReasoningEffort = latestSession?.reasoning_effort ?? reasoningEffort;
@@ -153,10 +153,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       sessionProviderId: latestSession?.provider_id ?? session?.provider_id,
       sessionModel: latestSession?.model ?? session?.model ?? model,
     });
-    const latestPlanMode = latestSession?.plan_mode === 'on' ? 'on' : 'off';
-    const runtimeContent = !options?.skipCommandMode && latestAgentKind === 'codex' && latestPlanMode === 'on'
-      ? renderCommandPrompt(findCommand('plan', 'codex')!, content)
-      : content;
+    const runtimeContent = content;
 
     if (latestSession && latestProviderConfig.provider?.id && latestProviderConfig.model) {
       sessionApi.updateProvider(sessionId, latestProviderConfig.provider.id, latestProviderConfig.model, latestReasoningEffort).catch(() => {});
@@ -329,7 +326,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       }
 
       const prompt = renderCommandPrompt(command, args);
-      await handleSend({ text: prompt }, displayContent, { skipCommandMode: true });
+      await handleSend({ text: prompt }, displayContent);
     }
   }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, getCostInfo, agentKind, handleSend, permissionConfig, updateSessionPermissions]);
 

@@ -16,9 +16,9 @@ describe('agentPermissions', () => {
     });
     expect(buildDefaultPermissionConfig('codex')).toEqual({
       kind: 'codex',
-      sandboxMode: 'workspace-write',
-      approvalPolicy: 'on-request',
-      networkAccessEnabled: false,
+      sandboxMode: 'danger-full-access',
+      approvalPolicy: 'never',
+      networkAccessEnabled: true,
     });
   });
 
@@ -42,17 +42,17 @@ describe('agentPermissions', () => {
   });
 
   it('maps unified execution presets to native Codex sandbox and approval settings', () => {
-    expect(mapExecutionModeToPermissionConfig('codex', 'confirm_before_edit')).toEqual({
+    expect(mapExecutionModeToPermissionConfig('codex', 'plan')).toEqual({
       kind: 'codex',
-      sandboxMode: 'workspace-write',
-      approvalPolicy: 'on-request',
+      sandboxMode: 'read-only',
+      approvalPolicy: 'never',
       networkAccessEnabled: false,
     });
-    expect(mapExecutionModeToPermissionConfig('codex', 'auto_edit')).toEqual({
+    expect(mapExecutionModeToPermissionConfig('codex', 'confirm_before_edit')).toEqual({
       kind: 'codex',
-      sandboxMode: 'workspace-write',
-      approvalPolicy: 'on-request',
-      networkAccessEnabled: false,
+      sandboxMode: 'danger-full-access',
+      approvalPolicy: 'never',
+      networkAccessEnabled: true,
     });
     expect(mapExecutionModeToPermissionConfig('codex', 'full_access')).toEqual({
       kind: 'codex',
@@ -73,7 +73,7 @@ describe('agentPermissions', () => {
     expect(resolveEffectivePermissionConfig('codex', configured, 'on')).toEqual({
       kind: 'codex',
       sandboxMode: 'read-only',
-      approvalPolicy: 'on-request',
+      approvalPolicy: 'never',
       networkAccessEnabled: false,
     });
   });
@@ -94,9 +94,9 @@ describe('agentPermissions', () => {
   it('serializes malformed or missing values to safe defaults', () => {
     expect(serializePermissionConfig('codex', { kind: 'codex', sandboxMode: 'bad' })).toEqual({
       kind: 'codex',
-      sandboxMode: 'workspace-write',
-      approvalPolicy: 'on-request',
-      networkAccessEnabled: false,
+      sandboxMode: 'danger-full-access',
+      approvalPolicy: 'never',
+      networkAccessEnabled: true,
     });
     expect(serializePermissionConfig('claude_code', null)).toEqual({
       kind: 'claude_code',

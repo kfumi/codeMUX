@@ -241,7 +241,10 @@ export class CodexSessionRuntime {
     this.abortController = new AbortController();
     activeAbortController = this.abortController;
 
-    const payload = normalizeAgentInputPayload(prompt, inputPayload);
+    const payload = applyCodexPlanPrefix(
+      normalizeAgentInputPayload(prompt, inputPayload),
+      this.config.planMode,
+    );
     const imagePaths = includeImages ? await writePayloadImagesToTempFiles(payload) : [];
     const permissionOptions = buildCodexThreadPermissionOptions(
       this.config.permissionConfig,
@@ -689,6 +692,25 @@ function normalizeCodexReasoningEffort(value: unknown): 'low' | 'medium' | 'high
 
 function normalizeCodexPlanMode(value: unknown): AgentPlanMode {
   return value === 'on' ? 'on' : 'off';
+}
+
+function applyCodexPlanPrefix(payload: AgentInputPayload, planMode: AgentPlanMode | undefined): AgentInputPayload {
+  if (planMode !== 'on') {
+    return payload;
+  }
+
+  const text = payload.text.trimStart();
+  if (text.toLowerCase().startsWith('$plan')) {
+    return {
+      ...payload,
+      text,
+    };
+  }
+
+  return {
+    ...payload,
+    text: `$plan ${text}`.trimEnd(),
+  };
 }
 
 export function buildCodexCliConfig(

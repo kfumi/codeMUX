@@ -78,7 +78,7 @@ export function formatPromptAsCommandDisplay(prompt: string, agentKind: AgentKin
 }
 
 const codexPromptTemplates = {
-  plan: 'Plan the following request before making changes. Keep the plan concise and actionable.\n\nRequest:\n{args}',
+  plan: '$plan {args}',
   init: `Generate a file named AGENTS.md that serves as a contributor guide for this repository.
 Your goal is to produce a clear, concise, and well-structured document with descriptive headings and actionable explanations for each section.
 Follow the outline below, but adapt as needed — add sections if relevant, and omit those that do not apply to this project.

@@ -37,7 +37,7 @@ describe('AgentPermissionSelector', () => {
     expect(onPlanModeChange).toHaveBeenCalledWith('on');
   });
 
-  it('shows Codex plan mode as read-only without changing plan mode from the selector', () => {
+  it('shows only Codex plan and full-access modes', () => {
     const onPermissionConfigChange = vi.fn();
     const onPlanModeChange = vi.fn();
 
@@ -56,34 +56,65 @@ describe('AgentPermissionSelector', () => {
       />,
     );
 
-    const triggerLabel = screen.getByText('计划只读');
+    const triggerLabel = screen.getByText('计划模式');
     const triggerButton = triggerLabel.closest('button');
 
     expect(triggerButton).toBeTruthy();
-    expect(triggerButton?.getAttribute('title')).toBe('计划只读');
+    expect(triggerButton?.getAttribute('title')).toBe('计划模式');
 
-    fireEvent.click(screen.getByTitle('计划只读'));
+    fireEvent.click(screen.getByTitle('计划模式'));
 
-    expect(triggerButton?.textContent).toContain('计划只读');
-    expect(screen.getByText('Codex 操作审批')).toBeTruthy();
-    expect(screen.getByText('计划只读')).toBeTruthy();
-    expect(screen.getByText('请求批准')).toBeTruthy();
-    expect(screen.getByText('自动编辑')).toBeTruthy();
+    expect(triggerButton?.textContent).toContain('计划模式');
+    expect(screen.getAllByText('计划模式')).toHaveLength(2);
     expect(screen.getByText('完全访问')).toBeTruthy();
+    expect(screen.queryByText('Codex 操作审批')).toBeNull();
+    expect(screen.queryByText('请求批准')).toBeNull();
+    expect(screen.queryByText('自动编辑')).toBeNull();
 
     const activeOption = screen.getAllByRole('menuitemradio').find((item) => item.getAttribute('aria-checked') === 'true');
 
     expect(activeOption).toBeTruthy();
-    expect(activeOption?.textContent).toContain('完全访问');
+    expect(activeOption?.textContent).toContain('计划模式');
 
-    fireEvent.click(screen.getByText('自动编辑'));
+    fireEvent.click(screen.getByText('完全访问'));
 
     expect(onPermissionConfigChange).toHaveBeenCalledWith({
       kind: 'codex',
-      sandboxMode: 'workspace-write',
-      approvalPolicy: 'on-request',
+      sandboxMode: 'danger-full-access',
+      approvalPolicy: 'never',
+      networkAccessEnabled: true,
+    });
+    expect(onPlanModeChange).toHaveBeenCalledWith('off');
+  });
+
+  it('switches Codex to plan mode from full access', () => {
+    const onPermissionConfigChange = vi.fn();
+    const onPlanModeChange = vi.fn();
+
+    render(
+      <AgentPermissionSelector
+        agentKind="codex"
+        permissionConfig={{
+          kind: 'codex',
+          sandboxMode: 'danger-full-access',
+          approvalPolicy: 'never',
+          networkAccessEnabled: true,
+        }}
+        planMode="off"
+        onPermissionConfigChange={onPermissionConfigChange}
+        onPlanModeChange={onPlanModeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle('完全访问'));
+    fireEvent.click(screen.getByText('计划模式'));
+
+    expect(onPermissionConfigChange).toHaveBeenCalledWith({
+      kind: 'codex',
+      sandboxMode: 'read-only',
+      approvalPolicy: 'never',
       networkAccessEnabled: false,
     });
-    expect(onPlanModeChange).not.toHaveBeenCalled();
+    expect(onPlanModeChange).toHaveBeenCalledWith('on');
   });
 });

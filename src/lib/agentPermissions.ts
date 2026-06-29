@@ -36,9 +36,9 @@ export function buildDefaultPermissionConfig(agentKind: AgentKind): AgentPermiss
   if (agentKind === 'codex') {
     return {
       kind: 'codex',
-      sandboxMode: 'workspace-write',
-      approvalPolicy: 'on-request',
-      networkAccessEnabled: false,
+      sandboxMode: 'danger-full-access',
+      approvalPolicy: 'never',
+      networkAccessEnabled: true,
     };
   }
 
@@ -54,11 +54,11 @@ export function mapExecutionModeToPermissionConfig(
 ): AgentPermissionConfig {
   if (agentKind === 'codex') {
     switch (executionMode) {
-      case 'auto_edit':
+      case 'plan':
         return {
           kind: 'codex',
-          sandboxMode: 'workspace-write',
-          approvalPolicy: 'on-request',
+          sandboxMode: 'read-only',
+          approvalPolicy: 'never',
           networkAccessEnabled: false,
         };
       case 'full_access':
@@ -68,7 +68,7 @@ export function mapExecutionModeToPermissionConfig(
           approvalPolicy: 'never',
           networkAccessEnabled: true,
         };
-      case 'plan':
+      case 'auto_edit':
       case 'confirm_before_edit':
       default:
         return buildDefaultPermissionConfig('codex');
@@ -98,7 +98,7 @@ export function resolveEffectivePermissionConfig(
     return {
       kind: 'codex',
       sandboxMode: 'read-only',
-      approvalPolicy: 'on-request',
+      approvalPolicy: 'never',
       networkAccessEnabled: false,
     };
   }
@@ -119,11 +119,17 @@ export function serializePermissionConfig(agentKind: AgentKind, value: unknown):
 
   const raw = value as Record<string, unknown>;
   if (agentKind === 'codex') {
+    const codexFallback: CodexPermissionConfig = {
+      kind: 'codex',
+      sandboxMode: 'danger-full-access',
+      approvalPolicy: 'never',
+      networkAccessEnabled: true,
+    };
     return {
       kind: 'codex',
-      sandboxMode: isCodexSandboxMode(raw.sandboxMode) ? raw.sandboxMode : 'workspace-write',
-      approvalPolicy: isCodexApprovalPolicy(raw.approvalPolicy) ? raw.approvalPolicy : 'on-request',
-      networkAccessEnabled: typeof raw.networkAccessEnabled === 'boolean' ? raw.networkAccessEnabled : false,
+      sandboxMode: isCodexSandboxMode(raw.sandboxMode) ? raw.sandboxMode : codexFallback.sandboxMode,
+      approvalPolicy: isCodexApprovalPolicy(raw.approvalPolicy) ? raw.approvalPolicy : codexFallback.approvalPolicy,
+      networkAccessEnabled: typeof raw.networkAccessEnabled === 'boolean' ? raw.networkAccessEnabled : codexFallback.networkAccessEnabled,
     };
   }
 

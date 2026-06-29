@@ -48,16 +48,16 @@ export function buildCodexThreadPermissionOptions(config: unknown, planMode: Age
   if (planMode === 'on') {
     return {
       sandboxMode: 'read-only',
-      approvalPolicy: 'on-request',
+      approvalPolicy: 'never',
       networkAccessEnabled: false,
     };
   }
 
   const raw = isRecord(config) ? config : {};
   return {
-    sandboxMode: isCodexSandboxMode(raw.sandboxMode) ? raw.sandboxMode : 'workspace-write',
-    approvalPolicy: isCodexApprovalPolicy(raw.approvalPolicy) ? raw.approvalPolicy : 'on-request',
-    networkAccessEnabled: typeof raw.networkAccessEnabled === 'boolean' ? raw.networkAccessEnabled : false,
+    sandboxMode: isCodexSandboxMode(raw.sandboxMode) ? raw.sandboxMode : 'danger-full-access',
+    approvalPolicy: isCodexApprovalPolicy(raw.approvalPolicy) ? raw.approvalPolicy : 'never',
+    networkAccessEnabled: typeof raw.networkAccessEnabled === 'boolean' ? raw.networkAccessEnabled : true,
   };
 }
 

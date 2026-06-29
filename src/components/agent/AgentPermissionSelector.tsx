@@ -5,7 +5,6 @@ import {
   Hand,
   Shield,
   ShieldCheck,
-  ShieldQuestion,
   type LucideIcon,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -45,8 +44,7 @@ const claudeOptions: PermissionOption[] = [
 ];
 
 const codexOptions: PermissionOption[] = [
-  { mode: 'confirm_before_edit', label: '请求批准', description: '文件变更和敏感操作前请求确认。', icon: Hand },
-  { mode: 'auto_edit', label: '自动编辑', description: '保持工作区写入，但仍按策略请求批准。', icon: ShieldQuestion },
+  { mode: 'plan', label: '计划模式', description: '先分析和规划，不直接写入文件。', icon: ClipboardList },
   { mode: 'full_access', label: '完全访问', description: '允许不受限访问文件和网络，风险更高。', icon: Shield, tone: 'warning' },
 ];
 
@@ -66,15 +64,12 @@ export function AgentPermissionSelector({
     () => options.find((option) => option.mode === selectedMode) ?? options[0],
     [options, selectedMode],
   );
-  const displaySelected =
-    agentKind === 'codex' && planMode === 'on'
-      ? { ...selected, label: '计划只读', icon: ClipboardList, tone: undefined }
-      : selected;
+  const displaySelected = selected;
   const SelectedIcon = displaySelected.icon;
 
   const selectMode = (mode: AgentExecutionMode) => {
     onPermissionConfigChange(mapExecutionModeToPermissionConfig(agentKind, mode));
-    if (agentKind === 'claude_code') {
+    if (agentKind === 'claude_code' || agentKind === 'codex') {
       onPlanModeChange(mode === 'plan' ? 'on' : 'off');
     }
     setOpen(false);
@@ -104,13 +99,6 @@ export function AgentPermissionSelector({
           role="menu"
           className="absolute bottom-full left-0 z-50 mb-2 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 p-1.5 shadow-[0_22px_54px_-28px_hsl(var(--foreground)/0.55)] backdrop-blur-lg"
         >
-          {agentKind === 'codex' && (
-            <div className="flex items-center gap-2 px-2.5 pb-1.5 pt-1 text-xs text-muted-foreground">
-              <span>Codex 操作审批</span>
-              <span className="text-muted-foreground/80">计划模式会强制只读</span>
-            </div>
-          )}
-
           {options.map((option) => {
             const active = selectedMode === option.mode;
             const Icon = option.icon;
@@ -148,9 +136,9 @@ function inferExecutionMode(
   planMode: AgentPlanMode,
 ): AgentExecutionMode {
   if (agentKind === 'codex' && permissionConfig.kind === 'codex') {
+    if (planMode === 'on' || permissionConfig.sandboxMode === 'read-only') return 'plan';
     if (permissionConfig.sandboxMode === 'danger-full-access') return 'full_access';
-    if (permissionConfig.approvalPolicy === 'never') return 'auto_edit';
-    return 'confirm_before_edit';
+    return 'full_access';
   }
 
   if (agentKind === 'claude_code' && permissionConfig.kind === 'claude_code') {

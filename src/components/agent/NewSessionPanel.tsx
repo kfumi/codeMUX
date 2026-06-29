@@ -1,7 +1,7 @@
 ﻿import { useEffect, useMemo } from 'react';
 
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
-import { findCommand, renderCommandPrompt } from '../../lib/slashCommands';
+import { renderCommandPrompt } from '../../lib/slashCommands';
 import { getPrimaryProviderModel, getProviderModelList } from '../../lib/providerModels';
 import { serializePermissionConfig } from '../../lib/agentPermissions';
 import { agentApi } from '../../lib/tauri';
@@ -99,11 +99,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
 
   const handleSend = async (input: AgentInputPayload | string) => {
     const payload = typeof input === 'string' ? { text: input } : input;
-    const planCommand = findCommand('plan', 'codex');
-    const text = selectedAgentKind === 'codex' && selectedPlanMode === 'on' && planCommand
-      ? renderCommandPrompt(planCommand, payload.text)
-      : payload.text;
-    await onSubmit({ ...payload, text });
+    await onSubmit(payload);
   };
 
   const handleCommand = async (command: SlashCommand, args: string) => {
