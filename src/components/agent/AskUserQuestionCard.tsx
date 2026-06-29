@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Check } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Check, ChevronDown, ChevronRight } from 'lucide-react';
 import { agentApi } from '../../lib/tauri';
 import { createLogger, serializeError } from '../../lib/logger';
 import { useAgentStore } from '../../stores/agentStore';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 
 const logger = createLogger('AskUserQuestionCard');
 
@@ -26,31 +26,40 @@ const OTHER_IDX = -1;
 
 /** Try to extract answers from tool_result content */
 function parseResultAnswers(resultContent: string, questions: Question[]): string[] {
-  // Try JSON parse first
   try {
     const parsed = JSON.parse(resultContent);
     if (Array.isArray(parsed)) return parsed.map(String);
     if (parsed?.answers) return Object.values(parsed.answers).map(String);
-  } catch { /* not JSON */ }
-  // Try to extract from "question"="answer" pattern
+  } catch {
+    // not JSON
+  }
+
   const answers: string[] = [];
   for (const q of questions) {
     const re = new RegExp(`"${q.question.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"\\s*=\\s*"([^"]*)"`, 'i');
     const match = resultContent.match(re);
     answers.push(match?.[1] || '');
   }
-  return answers.some(a => a) ? answers : [];
+
+  return answers.some((answer) => answer) ? answers : [];
 }
 
-export function AskUserQuestionCard({ sessionId, toolUseId, questions, submitted: propSubmitted, resultContent }: AskUserQuestionCardProps) {
-  // Parse answers from result content if available
+export function AskUserQuestionCard({
+  sessionId,
+  toolUseId,
+  questions,
+  submitted: propSubmitted,
+  resultContent,
+}: AskUserQuestionCardProps) {
   const parsedAnswers = propSubmitted && resultContent ? parseResultAnswers(resultContent, questions) : [];
 
   const [isExpanded, setIsExpanded] = useState(!propSubmitted);
   const [activeTab, setActiveTab] = useState('0');
   const [selections, setSelections] = useState<Record<number, Set<number>>>(() => {
     const init: Record<number, Set<number>> = {};
-    questions.forEach((_, i) => { init[i] = new Set(); });
+    questions.forEach((_, i) => {
+      init[i] = new Set();
+    });
     return init;
   });
   const [otherTexts, setOtherTexts] = useState<Record<number, string>>({});
@@ -58,22 +67,21 @@ export function AskUserQuestionCard({ sessionId, toolUseId, questions, submitted
   const [submitting, setSubmitting] = useState(false);
   const [submittedAnswers, setSubmittedAnswers] = useState<string[]>(parsedAnswers);
 
-  // Subscribe to forceStopped — when the user interrupts the conversation,
-  // auto-cancel this question card so it becomes non-interactive.
+  // Subscribe to forceStopped so interrupted sessions render as non-interactive cancelled cards.
   const forceStopped = useAgentStore((s) => s.forceStopped[sessionId] ?? false);
   useEffect(() => {
     if (forceStopped && !submitted && !propSubmitted) {
       setSubmittedAnswers(questions.map(() => '已取消'));
       setSubmitted(true);
     }
-  }, [forceStopped, submitted, propSubmitted, questions]);
+  }, [forceStopped, propSubmitted, questions, submitted]);
 
   const hasMultipleQuestions = questions.length > 1;
 
   const isQuestionAnswered = (i: number) => {
-    const sel = selections[i];
-    if (sel.size === 0) return false;
-    if (sel.has(OTHER_IDX) && !otherTexts[i]?.trim()) return false;
+    const selection = selections[i];
+    if (selection.size === 0) return false;
+    if (selection.has(OTHER_IDX) && !otherTexts[i]?.trim()) return false;
     return true;
   };
 
@@ -82,19 +90,26 @@ export function AskUserQuestionCard({ sessionId, toolUseId, questions, submitted
 
   const toggleOption = (qIdx: number, oIdx: number) => {
     if (submitted) return;
+
     setSelections((prev) => {
       const next = { ...prev };
       const question = questions[qIdx];
+
       if (question.multiSelect) {
         const set = new Set(prev[qIdx]);
-        if (set.has(oIdx)) set.delete(oIdx); else set.add(oIdx);
+        if (set.has(oIdx)) {
+          set.delete(oIdx);
+        } else {
+          set.add(oIdx);
+        }
         next[qIdx] = set;
       } else {
         next[qIdx] = new Set([oIdx]);
       }
+
       return next;
     });
-    // Auto-advance for single-select when there are multiple questions
+
     if (!questions[qIdx].multiSelect && hasMultipleQuestions && qIdx < questions.length - 1) {
       setTimeout(() => setActiveTab(String(qIdx + 1)), 200);
     }
@@ -104,17 +119,21 @@ export function AskUserQuestionCard({ sessionId, toolUseId, questions, submitted
 
   const handleSubmit = async () => {
     if (!allAnswered || submitting) return;
+
     setSubmitting(true);
+
     const answers = questions.map((q, i) => {
       const selected = Array.from(selections[i]).map((idx) => {
         if (idx === OTHER_IDX) return otherTexts[i]?.trim() || '其他';
         return q.options[idx].label;
       });
+
       return q.multiSelect ? selected : selected[0];
     });
+
     try {
       await agentApi.sendToolResponse(sessionId, toolUseId, answers);
-      setSubmittedAnswers(answers.map((a) => Array.isArray(a) ? a.join(', ') : a));
+      setSubmittedAnswers(answers.map((answer) => Array.isArray(answer) ? answer.join(', ') : answer));
       setSubmitted(true);
     } catch (err) {
       logger.error('Failed to send tool response', { sessionId, toolUseId }, serializeError(err));
@@ -125,7 +144,9 @@ export function AskUserQuestionCard({ sessionId, toolUseId, questions, submitted
 
   const handleCancel = async () => {
     if (submitting) return;
+
     setSubmitting(true);
+
     try {
       await agentApi.sendToolResponse(sessionId, toolUseId, questions.map(() => '__cancelled__'));
       setSubmittedAnswers(questions.map(() => '已取消'));
@@ -139,53 +160,62 @@ export function AskUserQuestionCard({ sessionId, toolUseId, questions, submitted
 
   const renderQuestion = (q: Question, qIdx: number) => (
     <div>
-      <p className="text-sm mb-2">{q.question}</p>
+      <p className="mb-2 text-sm">{q.question}</p>
       <div className="space-y-1.5">
         {q.options.map((opt, oIdx) => {
           const selected = selections[qIdx]?.has(oIdx);
+
           return (
             <button
               key={oIdx}
               onClick={() => toggleOption(qIdx, oIdx)}
-              className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors border ${
+              className={`w-full cursor-pointer rounded-md border px-3 py-2 text-left text-sm transition-colors ${
                 selected
-                  ? 'bg-primary/10 border-primary/40 text-foreground'
-                  : 'bg-muted/30 border-transparent text-muted-foreground hover:bg-muted/50'
-              } cursor-pointer`}
+                  ? 'border-primary/40 bg-primary/10 text-foreground'
+                  : 'border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/50'
+              }`}
             >
               <div className="flex items-center gap-2">
-                <span className={`h-4 w-4 rounded-${q.multiSelect ? 'sm' : 'full'} border flex items-center justify-center shrink-0 ${
-                  selected ? 'bg-primary border-primary' : 'border-muted-foreground/30'
-                }`}>
+                <span
+                  className={`flex h-4 w-4 shrink-0 items-center justify-center border ${
+                    q.multiSelect ? 'rounded-sm' : 'rounded-full'
+                  } ${
+                    selected ? 'border-primary bg-primary' : 'border-muted-foreground/30'
+                  }`}
+                >
                   {selected && <Check className="h-3 w-3 text-primary-foreground" />}
                 </span>
                 <span className="font-medium">{opt.label}</span>
               </div>
               {opt.description && (
-                <p className="text-xs text-muted-foreground mt-0.5 ml-6">{opt.description}</p>
+                <p className="ml-6 mt-0.5 text-xs text-muted-foreground">{opt.description}</p>
               )}
             </button>
           );
         })}
-        {/* "Other" option */}
+
         <button
           onClick={() => toggleOption(qIdx, OTHER_IDX)}
-          className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors border ${
+          className={`w-full cursor-pointer rounded-md border px-3 py-2 text-left text-sm transition-colors ${
             isOtherSelected(qIdx)
-              ? 'bg-primary/10 border-primary/40 text-foreground'
-              : 'bg-muted/30 border-transparent text-muted-foreground hover:bg-muted/50'
-          } cursor-pointer`}
+              ? 'border-primary/40 bg-primary/10 text-foreground'
+              : 'border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/50'
+          }`}
         >
           <div className="flex items-center gap-2">
-            <span className={`h-4 w-4 rounded-${q.multiSelect ? 'sm' : 'full'} border flex items-center justify-center shrink-0 ${
-              isOtherSelected(qIdx) ? 'bg-primary border-primary' : 'border-muted-foreground/30'
-            }`}>
+            <span
+              className={`flex h-4 w-4 shrink-0 items-center justify-center border ${
+                q.multiSelect ? 'rounded-sm' : 'rounded-full'
+              } ${
+                isOtherSelected(qIdx) ? 'border-primary bg-primary' : 'border-muted-foreground/30'
+              }`}
+            >
               {isOtherSelected(qIdx) && <Check className="h-3 w-3 text-primary-foreground" />}
             </span>
             <span className="font-medium">其他</span>
           </div>
         </button>
-        {/* Text input for "Other" */}
+
         {isOtherSelected(qIdx) && (
           <div className="pl-3">
             <input
@@ -194,7 +224,7 @@ export function AskUserQuestionCard({ sessionId, toolUseId, questions, submitted
               onChange={(e) => setOtherTexts((prev) => ({ ...prev, [qIdx]: e.target.value }))}
               placeholder="请输入..."
               autoFocus
-              className="w-full px-3 py-1.5 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
         )}
@@ -206,62 +236,64 @@ export function AskUserQuestionCard({ sessionId, toolUseId, questions, submitted
   const progressText = hasMultipleQuestions && !submitted ? ` (${answeredCount}/${questions.length})` : '';
 
   return (
-    <div className="border rounded-md my-2 bg-primary/5 border-primary/20">
+    <div className="my-2 rounded-md border border-primary/20 bg-primary/5">
       <div
         role="button"
         tabIndex={0}
-        className="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-muted/40 transition-colors"
+        className="flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-muted/40"
         onClick={() => setIsExpanded(!isExpanded)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsExpanded(!isExpanded); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') setIsExpanded(!isExpanded);
+        }}
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         <span className="font-medium">{headerText}{progressText}</span>
-        {submitted && <Check className="h-4 w-4 text-[hsl(var(--success))] ml-auto" />}
+        {submitted && <Check className="ml-auto h-4 w-4 text-[hsl(var(--success))]" />}
       </div>
+
       {isExpanded && (
-        <div className="border-t px-3 py-3 space-y-3">
-          {/* After submit: show summary only */}
+        <div className="space-y-3 border-t px-3 py-3">
           {submitted ? (
             questions.map((q, qIdx) => (
               <div key={qIdx}>
-                <p className="text-xs text-muted-foreground mb-0.5">{q.question}</p>
+                <p className="mb-0.5 text-xs text-muted-foreground">{q.question}</p>
                 <p className="text-sm font-medium">{submittedAnswers[qIdx] || '已回答'}</p>
               </div>
             ))
           ) : hasMultipleQuestions ? (
-            /* Multiple questions: tab layout */
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <TabsList className="w-full justify-start overflow-x-auto">
                 {questions.map((q, i) => (
                   <TabsTrigger key={i} value={String(i)} className="relative">
                     {q.header || `问题 ${i + 1}`}
                     {isQuestionAnswered(i) && (
-                      <Check className="h-3 w-3 text-[hsl(var(--success))] ml-1 inline" />
+                      <Check className="ml-1 inline h-3 w-3 text-[hsl(var(--success))]" />
                     )}
                   </TabsTrigger>
                 ))}
               </TabsList>
+
               {questions.map((q, qIdx) => (
                 <TabsContent key={qIdx} value={String(qIdx)}>
                   {renderQuestion(q, qIdx)}
                 </TabsContent>
               ))}
-              {/* Submit / Cancel buttons after last question content */}
-              <div className="flex gap-2 mt-3">
+
+              <div className="mt-3 flex gap-2">
                 <button
                   onClick={handleCancel}
                   disabled={submitting}
-                  className="flex-1 py-2 rounded-md text-sm font-medium transition-colors bg-muted/40 text-muted-foreground hover:bg-muted/60 cursor-pointer"
+                  className="flex-1 cursor-pointer rounded-md bg-muted/40 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60"
                 >
                   取消
                 </button>
                 <button
                   onClick={handleSubmit}
                   disabled={!allAnswered || submitting}
-                  className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
+                  className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
                     allAnswered && !submitting
                       ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                      : 'bg-muted/40 text-muted-foreground cursor-not-allowed'
+                      : 'cursor-not-allowed bg-muted/40 text-muted-foreground'
                   }`}
                 >
                   {submitting ? '提交中...' : '提交'}
@@ -269,24 +301,23 @@ export function AskUserQuestionCard({ sessionId, toolUseId, questions, submitted
               </div>
             </Tabs>
           ) : (
-            /* Single question: original layout */
             <>
               {questions.map((q, qIdx) => renderQuestion(q, qIdx))}
               <div className="flex gap-2">
                 <button
                   onClick={handleCancel}
                   disabled={submitting}
-                  className="flex-1 py-2 rounded-md text-sm font-medium transition-colors bg-muted/40 text-muted-foreground hover:bg-muted/60 cursor-pointer"
+                  className="flex-1 cursor-pointer rounded-md bg-muted/40 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60"
                 >
                   取消
                 </button>
                 <button
                   onClick={handleSubmit}
                   disabled={!allAnswered || submitting}
-                  className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
+                  className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
                     allAnswered && !submitting
                       ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                      : 'bg-muted/40 text-muted-foreground cursor-not-allowed'
+                      : 'cursor-not-allowed bg-muted/40 text-muted-foreground'
                   }`}
                 >
                   {submitting ? '提交中...' : '提交'}
