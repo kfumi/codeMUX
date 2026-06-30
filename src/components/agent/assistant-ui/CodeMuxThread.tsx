@@ -47,6 +47,12 @@ type AssistantCollapseInfo = {
   durationMs?: number;
 };
 
+type UserNavItem = {
+  eventIndex: number;
+  title: string;
+  summary: string;
+};
+
 const EMPTY_EVENTS: AgentMessage[] = [];
 const EMPTY_TIMESTAMPS: number[] = [];
 const INTERRUPT_LABEL = '用户中断请求';
@@ -119,39 +125,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
     return newResult;
   }, [events, provider]);
 
-  // Incremental user nav items calculation
-  const userNavCacheRef = useRef<{ events: AgentMessage[]; result: Array<{ eventIndex: number; preview: string }> }>({ events: [], result: [] });
-  const userNavItems = useMemo(() => {
-    const cache = userNavCacheRef.current;
-    if (cache.events === events) {
-      return cache.result;
-    }
-    const prevLen = cache.events.length;
-    if (prevLen > 0 && prevLen < events.length && cache.events[0] === events[0]) {
-      const newItems = [...cache.result];
-      for (let eventIndex = prevLen; eventIndex < events.length; eventIndex++) {
-        const event = events[eventIndex];
-        if (event.kind !== 'user') continue;
-        const text = event.data.content.trim();
-        if (text.length === 0 || isInterruptMarker(text)) continue;
-        newItems.push({
-          eventIndex,
-          preview: text.length > 20 ? `${text.slice(0, 20)}...` : text,
-        });
-      }
-      userNavCacheRef.current = { events, result: newItems };
-      return newItems;
-    }
-    const newResult = events.reduce<Array<{ eventIndex: number; preview: string }>>((items, event, eventIndex) => {
-      if (event.kind !== 'user') return items;
-      const text = event.data.content.trim();
-      if (text.length === 0 || isInterruptMarker(text)) return items;
-      items.push({ eventIndex, preview: text.length > 20 ? `${text.slice(0, 20)}...` : text });
-      return items;
-    }, []);
-    userNavCacheRef.current = { events, result: newResult };
-    return newResult;
-  }, [events]);
+  const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
 
   const collapseInfoByEventIndex = useMemo(
     () => buildAssistantCollapseInfoMap(events, eventTimestamps),
@@ -305,17 +279,130 @@ function isLongUserMessage(text: string): boolean {
   return text.length > 900 || text.split(/\r?\n/).length > 12;
 }
 
+export function buildUserNavItems(events: AgentMessage[]): UserNavItem[] {
+  const userIndexes: number[] = [];
+
+  for (let eventIndex = 0; eventIndex < events.length; eventIndex++) {
+    const event = events[eventIndex];
+    if (event.kind !== 'user') continue;
+
+    const text = typeof event.data.content === 'string' ? event.data.content.trim() : '';
+    if (text.length === 0 || isInterruptMarker(text)) continue;
+
+    userIndexes.push(eventIndex);
+  }
+
+  return userIndexes.map((eventIndex, index) => {
+    const event = events[eventIndex];
+    const text = event.kind === 'user' ? event.data.content : '';
+    return {
+      eventIndex,
+      title: extractUserNavTitle(text),
+      summary: extractAssistantNavSummary(events, eventIndex, userIndexes[index + 1]),
+    };
+  });
+}
+
+export function extractUserNavTitle(text: string): string {
+  const firstLine = text
+    .split(/\r?\n/)
+    .map((line) => cleanNavText(line))
+    .find((line) => line.length > 0) ?? '用户消息';
+
+  return truncateNavText(firstLine, 16);
+}
+
+export function extractAssistantNavSummary(
+  events: AgentMessage[],
+  userIndex: number,
+  nextUserIndex?: number,
+): string {
+  const endIndex = nextUserIndex ?? events.length;
+  let lastAssistantText = '';
+
+  for (let index = userIndex + 1; index < endIndex; index++) {
+    const event = events[index];
+    if (event.kind !== 'assistant') continue;
+
+    const text = extractAssistantText(event);
+    if (text) {
+      lastAssistantText = text;
+    }
+  }
+
+  return truncateNavText(cleanNavText(lastAssistantText), 90);
+}
+
+export function cleanNavText(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/<command-message>[\s\S]*?<\/command-message>/g, ' ')
+    .replace(/<command-name>[\s\S]*?<\/command-name>/g, ' ')
+    .replace(/<usage>[\s\S]*?<\/usage>/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
+    .replace(/[*_~>#-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractAssistantText(event: Extract<AgentMessage, { kind: 'assistant' }>): string {
+  const content: unknown = event.data.message?.content;
+
+  if (typeof content === 'string') {
+    return content.trim() === 'No response requested.' ? '' : content;
+  }
+
+  if (!Array.isArray(content)) {
+    return '';
+  }
+
+  return content
+    .filter((block): block is { type: 'text'; text: string } =>
+      block?.type === 'text' && typeof block.text === 'string' && block.text.trim() !== 'No response requested.',
+    )
+    .map((block) => block.text)
+    .join('\n\n')
+    .trim();
+}
+
+function truncateNavText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function getMessageNavMarkerWidth(
+  itemIndex: number,
+  previewItemIndex: number | null,
+  isActive: boolean,
+): number {
+  if (previewItemIndex == null || previewItemIndex < 0) {
+    return isActive ? 8 : 6;
+  }
+
+  const distance = Math.abs(itemIndex - previewItemIndex);
+  if (distance === 0) return 34;
+  if (distance === 1) return 22;
+  if (distance === 2) return 14;
+  return 7;
+}
+
 function MessageNav({
   items,
   scrollContainer,
   disabled,
 }: {
-  items: Array<{ eventIndex: number; preview: string }>;
+  items: UserNavItem[];
   scrollContainer: RefObject<HTMLDivElement | null>;
   disabled?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
-  const [hoveredBar, setHoveredBar] = useState<number | null>(null);
+  const [previewEventIndex, setPreviewEventIndex] = useState<number | null>(null);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const [navHeight, setNavHeight] = useState(0);
 
@@ -402,32 +489,28 @@ function MessageNav({
   const navMetrics = useMemo(() => {
     const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
     const count = items.length;
-    const nodeSize = 10;
-    const minSpacing = nodeSize + 2;
+    const markerHeight = 2;
+    const markerGap = 8;
     const availableHeight = Math.max(navHeight, 48);
-    const usableHeight = Math.max(availableHeight - nodeSize, 0);
+    const stackHeight = Math.min(144, Math.max(48, availableHeight * 0.36));
     const maxVisibleCount =
       availableHeight > 0
-        ? Math.max(1, Math.floor(usableHeight / minSpacing) + 1)
+        ? Math.max(1, Math.floor((stackHeight - markerHeight) / markerGap) + 1)
         : count;
     const visibleCount = Math.min(count, maxVisibleCount);
-    const hiddenCount = Math.max(count - visibleCount, 0);
-    const spacing =
-      visibleCount <= 1
-        ? 0
-        : Math.min(usableHeight / Math.max(visibleCount - 1, 1), availableHeight * 0.6 / Math.max(visibleCount - 1, 1));
 
     return {
-      hiddenCount,
-      nodeSize: clamp(nodeSize, 10, 10),
-      spacing,
+      markerHeight: clamp(markerHeight, 2, 2),
+      spacing: markerGap,
       center: availableHeight / 2,
-      usableHeight,
       visibleCount,
     };
   }, [items.length, navHeight]);
 
   const visibleItems = navMetrics.visibleCount >= items.length ? items : items.slice(-navMetrics.visibleCount);
+  const previewItemIndex = previewEventIndex == null
+    ? null
+    : visibleItems.findIndex((item) => item.eventIndex === previewEventIndex);
   const positionedItems = useMemo(
     () =>
       visibleItems.map((item, index) => ({
@@ -436,7 +519,7 @@ function MessageNav({
           visibleItems.length <= 1
             ? navMetrics.center
             : navMetrics.center + (index - (visibleItems.length - 1) / 2) * navMetrics.spacing,
-      })),
+    })),
     [navMetrics.spacing, navMetrics.center, visibleItems],
   );
 
@@ -462,55 +545,62 @@ function MessageNav({
   return (
     <div
       data-testid="message-nav"
-      className="pointer-events-none absolute right-1.5 top-0 bottom-0 z-10 flex w-12 items-stretch justify-center"
+      className="pointer-events-none absolute left-3 top-0 bottom-0 z-10 flex w-18 items-stretch justify-start"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => {
         setHovered(false);
-        setHoveredBar(null);
+        setPreviewEventIndex(null);
       }}
     >
       <div
         className={cn(
           'pointer-events-auto relative h-full w-full transition-opacity duration-200',
-          hovered ? 'opacity-100' : 'opacity-55',
+          hovered ? 'opacity-100' : 'opacity-70',
         )}
       >
-        <div
-          className="absolute left-1/2 top-0 bottom-0 w-px -translate-x-1/2 rounded-full"
-          style={{ background: 'linear-gradient(to bottom, transparent 0%, hsl(var(--border)) 20%, hsl(var(--border)) 80%, transparent 100%)' }}
-        />
-        {navMetrics.hiddenCount > 0 ? (
-          <div className="absolute left-1/2 top-1.5 -translate-x-1/2 rounded-full border border-border/40 bg-background/90 px-1.5 py-0.5 text-[9px] font-medium leading-none text-muted-foreground shadow-sm backdrop-blur">
-            +{navMetrics.hiddenCount}
-          </div>
-        ) : null}
-        {positionedItems.map((item) => (
+        {positionedItems.map((item, itemIndex) => (
           <div
             key={item.eventIndex}
-            className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2"
+            className="absolute left-0 -translate-y-1/2"
             style={{ top: `${item.top}px` }}
           >
             <button
               type="button"
-              aria-label={`跳转到消息 ${item.preview}`}
-              onMouseEnter={() => setHoveredBar(item.eventIndex)}
-              onMouseLeave={() => setHoveredBar(null)}
+              aria-label={`跳转到消息 ${item.title}`}
+              onFocus={() => setPreviewEventIndex(item.eventIndex)}
+              onBlur={() => setPreviewEventIndex(null)}
+              onMouseEnter={() => setPreviewEventIndex(item.eventIndex)}
+              onMouseLeave={() => setPreviewEventIndex(null)}
               onClick={() => scrollToMessage(item.eventIndex)}
               className={cn(
-                'rounded-full border transition-all duration-150 hover:scale-105',
-                item.eventIndex === activeIdx
-                  ? 'border-[hsl(var(--background))] bg-[hsl(var(--primary)/0.82)] shadow-[0_0_0_3px_hsl(var(--background)),0_0_0_4px_hsl(var(--primary)/0.18),0_10px_18px_-12px_hsl(var(--primary)/0.38)]'
-                  : 'border-border/70 bg-[hsl(var(--muted-foreground)/0.28)] shadow-[0_0_0_2px_hsl(var(--background)/0.94)] hover:border-[hsl(var(--primary)/0.24)] hover:bg-[hsl(var(--muted-foreground)/0.36)] dark:bg-[hsl(var(--muted-foreground)/0.42)]',
+                'flex h-4 w-12 items-center justify-start rounded-md border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
               )}
-              style={{
-                width: `${navMetrics.nodeSize}px`,
-                height: `${navMetrics.nodeSize}px`,
-                transform: item.eventIndex === activeIdx ? 'scale(1.08)' : 'scale(1)',
-              }}
-            />
-            {hoveredBar === item.eventIndex ? (
-              <div className="pointer-events-none absolute right-full top-1/2 mr-3 max-w-55 -translate-y-1/2 overflow-hidden text-ellipsis whitespace-nowrap rounded-xl border border-border/35 bg-[hsl(var(--popover))]/95 px-3 py-1.5 text-xs text-popover-foreground shadow-[0_12px_32px_-18px_hsl(var(--foreground)/0.45)] backdrop-blur animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
-                {item.preview}
+            >
+              <span
+                className={cn(
+                  'block origin-left rounded-full transition-[width,background-color,opacity] duration-[180ms] ease-out',
+                  previewEventIndex === item.eventIndex
+                    ? 'bg-foreground/90'
+                    : item.eventIndex === activeIdx
+                      ? 'bg-foreground/72'
+                      : 'bg-muted-foreground/52',
+                )}
+                style={{
+                  width: getMessageNavMarkerWidth(itemIndex, previewItemIndex, item.eventIndex === activeIdx),
+                  height: `${navMetrics.markerHeight}px`,
+                }}
+              />
+            </button>
+            {previewEventIndex === item.eventIndex ? (
+              <div className="pointer-events-none absolute left-full top-1/2 ml-3 w-[min(20rem,calc(100vw-6rem))] -translate-y-1/2 overflow-hidden rounded-[10px] border border-border/45 bg-[hsl(var(--popover))]/94 px-3 py-2.5 text-popover-foreground shadow-[0_18px_46px_-26px_hsl(var(--foreground)/0.58),0_0_0_1px_hsl(var(--background)/0.45)] backdrop-blur-md animate-in fade-in fill-mode-forwards animation-duration-[220ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+                <div className="truncate text-xs font-semibold leading-5 text-foreground">
+                  {item.title}
+                </div>
+                {item.summary ? (
+                  <div className="mt-0.5 line-clamp-3 text-xs leading-5 text-muted-foreground/86">
+                    {item.summary}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>

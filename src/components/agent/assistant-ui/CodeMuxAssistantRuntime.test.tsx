@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
@@ -250,6 +250,98 @@ const completedTurnEvents: AgentMessage[] = [
   },
 ];
 
+const navigationTurnEvents: AgentMessage[] = [
+  { kind: 'user', data: { content: '修复子智能体展示\n需要保持 Codex 风格' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-nav-1-process',
+      session_id: 'session-nav',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '我先检查现有实现。' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-nav-1-final',
+      session_id: 'session-nav',
+      message: {
+        role: 'assistant',
+        content: [{
+          type: 'text',
+          text: '已按计划完成这次修复，核心路径都接上了：后端新增索引加载，从 Claude 的 subagents/agent-* metadata 建立映射。',
+        }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  { kind: 'user', data: { content: '调整权限审批功能' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-nav-2-final',
+      session_id: 'session-nav',
+      message: {
+        role: 'assistant',
+        content: [{
+          type: 'text',
+          text: '权限审批入口已经调整完成，按钮状态、禁用态和审核动作都按新的交互逻辑联动。',
+        }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  { kind: 'user', data: { content: '检查未提交变更' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-nav-3-final',
+      session_id: 'session-nav',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '未提交变更已经检查完成，当前只包含导航相关文件。' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  { kind: 'user', data: { content: '整理展示提示' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-nav-4-final',
+      session_id: 'session-nav',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '展示提示已整理为更短的标题和更稳定的摘要。' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  { kind: 'user', data: { content: '补充测试覆盖' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-nav-5-final',
+      session_id: 'session-nav',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '测试覆盖已经补充，包含悬停、聚焦和点击滚动行为。' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+];
+
 const originalScrollTo = HTMLElement.prototype.scrollTo;
 
 function Harness({ sessionId }: { sessionId: string }) {
@@ -291,6 +383,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-image-only': imageOnlyUserEvents,
         'session-image-text': imageAndTextUserEvents,
         'session-completed-turn': completedTurnEvents,
+        'session-nav': navigationTurnEvents,
       },
       eventTimestamps: {
         'session-1': [1, 2],
@@ -656,6 +749,66 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     expect(screen.getByText('I am checking files first.')).toBeTruthy();
     expect(screen.getByRole('button', { name: /鏀惰捣AI杩囩▼|收起AI过程/ })).toBeTruthy();
+  });
+
+  it('renders Codex-style message navigation with user title and latest assistant summary', () => {
+    render(<Harness sessionId="session-nav" />);
+
+    const nav = screen.getByTestId('message-nav');
+    expect(nav.className).toContain('left-');
+
+    const firstNavButton = screen.getByRole('button', { name: /跳转到消息 修复子智能体展示/ });
+    fireEvent.mouseEnter(firstNavButton);
+
+    expect(within(nav).getByText('修复子智能体展示')).toBeTruthy();
+    expect(within(nav).getByText(/已按计划完成这次修复，核心路径都接上了/)).toBeTruthy();
+    expect(within(nav).queryByText('我先检查现有实现。')).toBeNull();
+  });
+
+  it('shows the message navigation popover on keyboard focus and scrolls to the selected turn', () => {
+    render(<Harness sessionId="session-nav" />);
+
+    const nav = screen.getByTestId('message-nav');
+    const secondNavButton = screen.getByRole('button', { name: /跳转到消息 调整权限审批功能/ });
+    fireEvent.focus(secondNavButton);
+
+    expect(within(nav).getByText('调整权限审批功能')).toBeTruthy();
+    expect(within(nav).getByText(/权限审批入口已经调整完成/)).toBeTruthy();
+
+    fireEvent.click(secondNavButton);
+
+    expect(HTMLElement.prototype.scrollTo).toHaveBeenCalled();
+  });
+
+  it('keeps message navigation compact and animates marker widths as a mountain around hover', () => {
+    render(<Harness sessionId="session-nav" />);
+
+    const navButtons = screen.getAllByRole('button', { name: /跳转到消息/ });
+    expect(navButtons).toHaveLength(5);
+
+    const markerTops = navButtons.map((button) =>
+      Number.parseFloat((button.parentElement as HTMLElement).style.top),
+    );
+    const markerGaps = markerTops.slice(1).map((top, index) => top - markerTops[index]);
+    expect(Math.max(...markerGaps)).toBeLessThanOrEqual(8);
+
+    fireEvent.mouseEnter(navButtons[2]);
+
+    const widths = navButtons.map((button) =>
+      Number.parseFloat(((button as HTMLElement).firstElementChild as HTMLElement).style.width),
+    );
+    expect(widths).toEqual([14, 22, 34, 22, 14]);
+  });
+
+  it('uses a larger hit target than the visible message navigation marker', () => {
+    render(<Harness sessionId="session-nav" />);
+
+    const firstNavButton = screen.getAllByRole('button', { name: /跳转到消息/ })[0] as HTMLElement;
+    const marker = firstNavButton.firstElementChild as HTMLElement;
+
+    expect(firstNavButton.className).toContain('h-4');
+    expect(firstNavButton.className).toContain('w-12');
+    expect(marker.style.height).toBe('2px');
   });
 
   it('returns tool durations from event-reported data only', () => {
