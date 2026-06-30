@@ -51,8 +51,7 @@ interface CodeMuxComposerProps {
   modelSelector?: ReactNode;
   permissionSelector?: ReactNode;
   onStop?: () => void | Promise<void>;
-  activeCommandMode?: { id: 'plan'; label: string } | null;
-  onClearCommandMode?: () => void;
+  onActivatePlanMode?: () => void;
 }
 
 type TriggerCategory = { id: string; label: string };
@@ -119,8 +118,7 @@ export function CodeMuxComposer({
   modelSelector,
   permissionSelector,
   onStop,
-  activeCommandMode,
-  onClearCommandMode,
+  onActivatePlanMode,
 }: CodeMuxComposerProps) {
   const aui = useAui();
   const composerRootRef = useRef<HTMLDivElement>(null);
@@ -172,11 +170,6 @@ export function CodeMuxComposer({
 
   const hasInput = composerText.trim().length > 0 || attachmentCount > 0;
 
-  const insertSlash = () => {
-    setManualTrigger('/');
-    setAddMenuOpen(false);
-    aui.composer().setText('/');
-  };
 
   const openFilePicker = () => {
     setAddMenuOpen(false);
@@ -303,37 +296,12 @@ export function CodeMuxComposer({
                   {addMenuOpen ? (
                     <AddMenu
                       onSelectFile={openFilePicker}
+                      onActivatePlanMode={onActivatePlanMode}
                       onClose={() => setAddMenuOpen(false)}
                     />
                   ) : null}
                 </div>
-                <button
-                  type="button"
-                  onClick={insertSlash}
-                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-[12px] font-medium leading-none text-muted-foreground/76 transition-all duration-200 hover:bg-muted/58 hover:text-foreground"
-                  style={{ fontFamily: "'JetBrains Mono', monospace" }}
-                  title="插入斜杠命令"
-                >
-                  /
-                </button>
                 {permissionSelector}
-                {activeCommandMode && (
-                  <span
-                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[hsl(var(--accent)/0.42)] bg-[hsl(var(--accent)/0.16)] px-2 text-xs font-medium text-[hsl(var(--accent))]"
-                    data-active-command-mode={activeCommandMode.id}
-                  >
-                    <ListTodo className="h-3.5 w-3.5" />
-                    <span>{activeCommandMode.label}</span>
-                    <button
-                      type="button"
-                      onClick={onClearCommandMode}
-                      className="-mr-0.5 inline-flex h-4 w-4 items-center justify-center rounded-sm text-[hsl(var(--accent)/0.82)] transition-colors hover:bg-[hsl(var(--accent)/0.16)] hover:text-[hsl(var(--accent))]"
-                      title={`关闭${activeCommandMode.label}模式`}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                )}
               </div>
               <div className="flex items-center gap-2">
                 {contextUsage.usedTokens > 0 && (
@@ -431,9 +399,11 @@ function ComposerAttachmentPreview() {
 
 function AddMenu({
   onSelectFile,
+  onActivatePlanMode,
   onClose,
 }: {
   onSelectFile: () => void;
+  onActivatePlanMode?: () => void;
   onClose: () => void;
 }) {
   return (
@@ -441,7 +411,7 @@ function AddMenu({
       <button
         type="button"
         onMouseDown={(event) => event.preventDefault()}
-        onClick={onSelectFile}
+        onClick={() => { onSelectFile(); onClose(); }}
         className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted/56"
       >
         <FilePlus2 className="h-4 w-4 text-muted-foreground" />
@@ -450,7 +420,7 @@ function AddMenu({
       <button
         type="button"
         onMouseDown={(event) => event.preventDefault()}
-        onClick={onClose}
+        onClick={() => { onActivatePlanMode?.(); onClose(); }}
         className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground"
       >
         <ListTodo className="h-4 w-4" />

@@ -14,6 +14,7 @@ import { AlertTriangle, XCircle } from 'lucide-react';
 import { getCodeChangeFilePath, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
 import { getDisplayableArgs, getToolHeaderSummary } from '../toolHeaderSummary';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { SubAgentPanel } from './SubAgentPanel';
 
 type CodeMuxToolCallPartProps = {
   toolName: string;
@@ -23,6 +24,12 @@ type CodeMuxToolCallPartProps = {
   isError?: boolean;
   durationMs?: number;
   status?: ToolCallMessagePartStatus;
+  /** For Agent tool calls: the sub-agent ID. */
+  agentId?: string;
+  /** Live sub-agent panel cache key, usually the Agent tool_use id. */
+  subAgentKey?: string;
+  /** Current session ID (for sub-agent event loading). */
+  sessionId?: string;
 };
 
 type CodeMuxDataPartProps = {
@@ -69,6 +76,9 @@ export function CodeMuxToolCallMessagePart({
   isError,
   durationMs,
   status,
+  agentId,
+  subAgentKey,
+  sessionId,
 }: CodeMuxToolCallPartProps) {
   const resolvedStatus = resolveToolStatus(status, result, isError);
   const headerSummary = getToolHeaderSummary(toolName, args);
@@ -78,6 +88,8 @@ export function CodeMuxToolCallMessagePart({
   const resolvedArgsText = argsText && displayableArgs ? JSON.stringify(displayableArgs, null, 2) : displayableArgs ? JSON.stringify(displayableArgs, null, 2) : undefined;
 
   const tooltipPath = headerSummary.fullPath;
+  const isAgentTool = toolName === 'Agent' || toolName === 'Task' || toolName === 'subagent';
+  const resolvedSubAgentKey = subAgentKey || agentId;
 
   return (
     <ToolFallbackRoot defaultOpen={resolvedStatus?.type === 'requires-action'}>
@@ -111,6 +123,14 @@ export function CodeMuxToolCallMessagePart({
         <ToolCodeDiff toolName={toolName} input={args} />
         {!codeFilePath && <ToolFallbackResult result={stringifyResult(result)} />}
       </ToolFallbackContent>
+      {isAgentTool && resolvedSubAgentKey && sessionId && (
+        <SubAgentPanel
+          subAgentKey={resolvedSubAgentKey}
+          historyAgentId={agentId}
+          sessionId={sessionId}
+          prompt={typeof args.prompt === 'string' ? args.prompt : undefined}
+        />
+      )}
     </ToolFallbackRoot>
   );
 }

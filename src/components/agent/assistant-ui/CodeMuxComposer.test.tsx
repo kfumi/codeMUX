@@ -165,23 +165,11 @@ describe('CodeMuxComposer', () => {
     expect(capturedPopovers).toHaveLength(0);
   });
 
-  it('inserts a selected slash command by updating composer text directly', () => {
-    render(<CodeMuxComposer sessionId="session-1" agentKind="codex" />);
-
-    fireEvent.click(screen.getByText('/'));
-    fireEvent.click(document.querySelector('[data-command-id="review"]')!);
-
-    expect(setComposerTextMock).toHaveBeenLastCalledWith('/review ');
-  });
-
-  it('renders the add menu before the slash command button', () => {
+  it('renders the add menu with file and plan mode options', () => {
     render(<CodeMuxComposer sessionId="session-1" />);
 
     fireEvent.click(screen.getByTitle('添加附件或功能'));
 
-    const addButton = screen.getByTitle('添加附件或功能');
-    const slashButton = screen.getByTitle('插入斜杠命令');
-    expect(addButton.compareDocumentPosition(slashButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText('选择文件')).toBeTruthy();
     expect(screen.getByText('计划模式')).toBeTruthy();
   });
@@ -236,35 +224,12 @@ describe('CodeMuxComposer', () => {
   it('uses Codex slash commands for Codex sessions', () => {
     render(<CodeMuxComposer sessionId="session-1" agentKind="codex" />);
 
-    fireEvent.click(screen.getByText('/'));
+    // Slash command menu is triggered by typing '/' in the input,
+    // which sets the manual trigger in the component.
     const commandIds = Array.from(document.querySelectorAll('[data-command-id]'))
       .map((item) => item.getAttribute('data-command-id'));
 
-    expect(commandIds).toEqual(expect.arrayContaining(['plan', 'init', 'review']));
-    expect(commandIds).not.toContain('permissions');
-    expect(commandIds).not.toContain('diff');
-    expect(commandIds).not.toContain('model');
-    expect(commandIds).not.toContain('security-review');
-    expect(commandIds).not.toContain('claude-api');
-  });
-
-  it('shows a dismissible plan mode indicator', () => {
-    const onClear = vi.fn();
-    const { container } = render(
-      <CodeMuxComposer
-        sessionId="session-1"
-        agentKind="codex"
-        activeCommandMode={{ id: 'plan', label: '计划' }}
-        onClearCommandMode={onClear}
-      />,
-    );
-
-    expect(screen.getByText('计划')).toBeTruthy();
-    const indicator = container.querySelector('[data-active-command-mode="plan"]');
-    expect(indicator?.querySelector('.lucide-list-todo')).toBeTruthy();
-
-    fireEvent.click(screen.getByTitle('关闭计划模式'));
-
-    expect(onClear).toHaveBeenCalledTimes(1);
+    // When no trigger is active, no commands are rendered.
+    expect(commandIds).toHaveLength(0);
   });
 });

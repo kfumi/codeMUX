@@ -3,7 +3,7 @@
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { renderCommandPrompt } from '../../lib/slashCommands';
 import { getPrimaryProviderModel, getProviderModelList } from '../../lib/providerModels';
-import { serializePermissionConfig } from '../../lib/agentPermissions';
+import { mapExecutionModeToPermissionConfig, serializePermissionConfig } from '../../lib/agentPermissions';
 import { agentApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
 import { useNewSessionStore } from '../../stores/newSessionStore';
@@ -173,8 +173,10 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                   onPlanModeChange={setSelectedPlanMode}
                 />
               )}
-              activeCommandMode={selectedAgentKind === 'codex' && selectedPlanMode === 'on' ? { id: 'plan', label: '计划' } : null}
-              onClearCommandMode={() => setSelectedPlanMode('off')}
+              onActivatePlanMode={() => {
+                setSelectedPermissionConfig(mapExecutionModeToPermissionConfig(selectedAgentKind, 'plan'));
+                setSelectedPlanMode('on');
+              }}
             />
 
           </div>

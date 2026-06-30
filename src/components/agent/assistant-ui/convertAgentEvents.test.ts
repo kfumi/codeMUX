@@ -407,4 +407,299 @@ describe('convertAgentEventsToAssistantMessages', () => {
     expect(messages[0]?.metadata.isFinalAssistantMessage).toBeUndefined();
     expect(messages[1]?.metadata.isFinalAssistantMessage).toBe(true);
   });
+
+  it('preserves agentId from Agent tool_use blocks patched from the subagent index', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-agent-indexed',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'call-agent-indexed',
+                name: 'Agent',
+                input: { description: 'Read package.json', prompt: 'Read the file' },
+                agentId: 'a6cae6d569918e2d3',
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages[0]?.content[0]).toMatchObject({
+      type: 'tool-call',
+      toolCallId: 'call-agent-indexed',
+      toolName: 'Agent',
+      agentId: 'a6cae6d569918e2d3',
+      subAgentKey: 'call-agent-indexed',
+    });
+  });
+
+  it('uses the Agent tool_use id as the live subagent panel key before agentId is known', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-agent-live-key',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'call-agent-live-key',
+                name: 'Agent',
+                input: { description: 'Read package.json', prompt: 'Read the file' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages[0]?.content[0]).toMatchObject({
+      type: 'tool-call',
+      toolCallId: 'call-agent-live-key',
+      toolName: 'Agent',
+      subAgentKey: 'call-agent-live-key',
+    });
+  });
+
+  it('extracts agentId from Agent tool result with array content and hides metadata from the main tool result', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-agent-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'call-agent-1',
+                name: 'Agent',
+                input: { description: 'Read package.json', prompt: 'Read the file' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-agent-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'call-agent-1',
+                content: [
+                  { type: 'text', text: '项目名称：**codemux**，版本号：**1.0.0**' },
+                  { type: 'text', text: "agentId: ae25c43324d205377 (use SendMessage with to: 'ae25c43324d205377' to continue this agent)\n<usage>subagent_tokens: 21236\ntool_uses: 1\nduration_ms: 4615</usage>" },
+                ],
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content).toEqual([
+      {
+        type: 'tool-call',
+        toolCallId: 'call-agent-1',
+        toolName: 'Agent',
+        args: { description: 'Read package.json', prompt: 'Read the file' },
+        result: '项目名称：**codemux**，版本号：**1.0.0**',
+        isError: false,
+        agentId: 'ae25c43324d205377',
+        subAgentKey: 'call-agent-1',
+      },
+    ]);
+  });
+
+  it('extracts agentId from Agent tool result with string content', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-agent-2',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'call-agent-2',
+                name: 'Agent',
+                input: { prompt: 'do something' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-agent-2',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'call-agent-2',
+                content: "result text\nagentId: abc123def (use SendMessage with to: 'abc123def' to continue this agent)",
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content[0]).toMatchObject({
+      type: 'tool-call',
+      toolCallId: 'call-agent-2',
+      toolName: 'Agent',
+      result: 'result text',
+      agentId: 'abc123def',
+    });
+  });
+
+  it('keeps metadata-like content in non-Agent tool results unchanged', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-bash',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'call-bash',
+                name: 'Bash',
+                input: { command: 'printf metadata' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-bash',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'call-bash',
+                content: "result text\nagentId: abc123def\n<usage>tool output</usage>",
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages[0]?.content[0]).toMatchObject({
+      type: 'tool-call',
+      toolCallId: 'call-bash',
+      toolName: 'Bash',
+      result: "result text\nagentId: abc123def\n<usage>tool output</usage>",
+    });
+  });
+
+  it('attaches agentId when tool result arrives before tool call', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-agent-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'call-agent-late',
+                content: 'result text\nagentId: abc123def (use SendMessage with to: \'abc123def\' to continue this agent)',
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-agent-late',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'call-agent-late',
+                name: 'Agent',
+                input: { prompt: 'do something' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content[0]).toMatchObject({
+      type: 'tool-call',
+      toolCallId: 'call-agent-late',
+      toolName: 'Agent',
+      agentId: 'abc123def',
+    });
+  });
 });

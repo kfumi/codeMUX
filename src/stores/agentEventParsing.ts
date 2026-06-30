@@ -132,10 +132,12 @@ function extensionForMediaType(mediaType: string): string {
 export function isAgentInjectedUserMessage(text: string): boolean {
   const normalized = text.trimStart();
   return (
+    // AGENTS.md injection
     (
       normalized.startsWith('# AGENTS.md instructions for ') &&
       normalized.includes('<INSTRUCTIONS>')
     ) ||
+    // Skill base directory injection
     (
       normalized.startsWith('Base directory for this skill: ') &&
       normalized.includes('<SUBAGENT-STOP>')
@@ -143,7 +145,56 @@ export function isAgentInjectedUserMessage(text: string): boolean {
   );
 }
 
-export function mapPersistedClaudeMessage(raw: Record<string, unknown>, agentKind: AgentKind = 'claude_code'): ParsedStoreEvent | null {
+/**
+ * Check if a raw persisted event is a meta message (e.g. slash command auto-generated prompts).
+ * Claude Code marks these with `isMeta: true` in the JSONL.
+ */
+export function isMetaPersistedEvent(raw: Record<string, unknown>): boolean {
+  return raw.isMeta === true;
+}
+
+export function isClaudeSubagentEvent(raw: Record<string, unknown>): boolean {
+  return raw.isSidechain === true
+    || (typeof raw.parent_tool_use_id === 'string' && raw.parent_tool_use_id.length > 0);
+}
+
+// Matches Claude CLI's internal XML command tags, e.g.:
+// <command-message>code-review</command-message><command-name>/code-review</command-name>
+const CLAUDE_COMMAND_TAG_RE = /<command-message>[\s\S]*?<\/command-message>\s*<command-name>([\s\S]*?)<\/command-name>/;
+
+/**
+ * Strip Claude CLI's internal XML command tags from persisted user messages.
+ * When the content is purely command tags, returns the command name (e.g. "/code-review").
+ * When there is additional text alongside the tags, strips the tags and returns the rest.
+ */
+function stripClaudeCommandTags(content: string): string {
+  const match = content.match(CLAUDE_COMMAND_TAG_RE);
+  if (!match) return content;
+
+  const commandName = match[1]?.trim();
+  const withoutTags = content.replace(CLAUDE_COMMAND_TAG_RE, '').trim();
+
+  // Content is purely command tags — use the command name as display text
+  if (!withoutTags && commandName) return commandName;
+
+  // Mixed content — strip tags, keep the rest
+  return withoutTags || content;
+}
+
+export function mapPersistedClaudeMessage(
+  raw: Record<string, unknown>,
+  agentKind: AgentKind = 'claude_code',
+  options: { includeSidechain?: boolean } = {},
+): ParsedStoreEvent | null {
+  if (!options.includeSidechain && isClaudeSubagentEvent(raw)) {
+    return null;
+  }
+
+  // Skip meta messages (slash command auto-generated prompts like /code-review)
+  if (isMetaPersistedEvent(raw)) {
+    return null;
+  }
+
   const msgType = raw.type;
 
   if (msgType === 'assistant') {
@@ -167,17 +218,23 @@ export function mapPersistedClaudeMessage(raw: Record<string, unknown>, agentKin
       return null;
     }
 
-    if (event.kind !== 'user' || agentKind !== 'codex') {
+    if (event.kind !== 'user') {
       return event;
     }
 
-    return {
-      ...event,
-      data: {
-        ...event.data,
-        content: formatPromptAsCommandDisplay(event.data.content, agentKind) ?? event.data.content,
-      },
-    };
+    // Strip Claude CLI's internal XML command tags from persisted messages
+    let content = event.data.content;
+    if (agentKind === 'claude_code') {
+      content = stripClaudeCommandTags(content);
+    }
+
+    // Try to reverse-map prompt templates back to slash command display form
+    const displayContent = formatPromptAsCommandDisplay(content, agentKind);
+    if (displayContent && displayContent !== content) {
+      return { ...event, data: { ...event.data, content: displayContent } };
+    }
+
+    return { ...event, data: { ...event.data, content } };
   }
 
   return null;

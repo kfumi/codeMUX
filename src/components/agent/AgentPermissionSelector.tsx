@@ -149,16 +149,16 @@ export function AgentPermissionSelector({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => selectMode(option.mode)}
                 className={cn(
-                  'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted/56',
+                  'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/56',
                   active && 'bg-muted/64',
                 )}
               >
-                <Icon className={cn('h-5 w-5 shrink-0 text-muted-foreground', option.tone === 'warning' && 'text-orange-500')} />
+                <Icon className={cn('h-4 w-4 shrink-0 text-muted-foreground', option.tone === 'warning' && 'text-orange-500')} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-foreground">{option.label}</span>
-                  <span className="block truncate text-xs leading-5 text-muted-foreground">{option.description}</span>
+                  <span className="block truncate text-xs font-medium text-foreground">{option.label}</span>
+                  <span className="block truncate text-[11px] leading-4 text-muted-foreground">{option.description}</span>
                 </span>
-                {active && <Check className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                {active && <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
               </button>
             );
           })}

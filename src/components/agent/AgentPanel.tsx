@@ -5,7 +5,7 @@ import { resolveAgentProviderConfig } from '../../lib/agentProvider';
 import { getProviderModelList } from '../../lib/providerModels';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { formatCommandDisplay, renderCommandPrompt } from '../../lib/slashCommands';
-import { serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
+import { mapExecutionModeToPermissionConfig, serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
 import type { ReasoningEffort } from '../../types/session';
 import type { AgentInputPayload } from '../../types/agentInput';
 import { agentApi, sessionApi } from '../../lib/tauri';
@@ -386,8 +386,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                   />
                 )}
                 onStop={() => interrupt(sessionId)}
-                activeCommandMode={agentKind === 'codex' && planMode === 'on' ? { id: 'plan', label: '计划' } : null}
-                onClearCommandMode={() => handlePlanModeChange('off')}
+                onActivatePlanMode={() => handleModeChange(mapExecutionModeToPermissionConfig(agentKind, 'plan'), 'on')}
               />
             </div>
           )}

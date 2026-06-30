@@ -182,6 +182,71 @@ describe('mapPersistedClaudeMessage', () => {
     ).toBeNull();
   });
 
+  it('suppresses slash command meta messages (isMeta: true) from user-visible history', () => {
+    expect(
+      mapPersistedClaudeMessage(
+        {
+          type: 'user',
+          isMeta: true,
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: [
+                  '`medium effort → 3+4 angles × 6 candidates → 1-vote verify → ≤8 findings`',
+                  '',
+                  'You are reviewing for **precision** at medium effort: every finding you surface',
+                  'should be one a maintainer would act on.',
+                ].join('\n'),
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        'claude_code',
+      ),
+    ).toBeNull();
+  });
+
+  it('suppresses Claude sidechain messages from main persisted history by default', () => {
+    expect(
+      mapPersistedClaudeMessage({
+        type: 'assistant',
+        isSidechain: true,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'subagent-only text' }],
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it('keeps Claude sidechain messages when loading a subagent transcript', () => {
+    const event = mapPersistedClaudeMessage(
+      {
+        type: 'assistant',
+        isSidechain: true,
+        parent_tool_use_id: 'call_agent',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'subagent-only text' }],
+        },
+      },
+      'claude_code',
+      { includeSidechain: true },
+    );
+
+    expect(event).toEqual({
+      kind: 'assistant',
+      data: expect.objectContaining({
+        message: expect.objectContaining({
+          content: [{ type: 'text', text: 'subagent-only text' }],
+        }),
+      }),
+    });
+  });
+
   it('loads result messages from Claude JSONL history', () => {
     expect(
       mapPersistedClaudeMessage({
@@ -220,6 +285,78 @@ describe('mapPersistedClaudeMessage', () => {
         },
         terminal_reason: 'completed',
       },
+    });
+  });
+
+  it('strips Claude CLI command XML tags and extracts the command name', () => {
+    const event = mapPersistedClaudeMessage(
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: '<command-message>code-review</command-message>\n<command-name>/code-review</command-name>',
+            },
+          ],
+        },
+        parent_tool_use_id: null,
+      },
+      'claude_code',
+    );
+
+    expect(event).toEqual({
+      kind: 'user',
+      data: { content: '/code-review' },
+    });
+  });
+
+  it('strips Claude CLI command XML tags but keeps surrounding text', () => {
+    const event = mapPersistedClaudeMessage(
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: 'Please review this\n<command-message>code-review</command-message>\n<command-name>/code-review</command-name>',
+            },
+          ],
+        },
+        parent_tool_use_id: null,
+      },
+      'claude_code',
+    );
+
+    expect(event).toEqual({
+      kind: 'user',
+      data: { content: 'Please review this' },
+    });
+  });
+
+  it('leaves normal Claude Code user messages unchanged', () => {
+    const event = mapPersistedClaudeMessage(
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: 'fix the bug in auth.ts',
+            },
+          ],
+        },
+        parent_tool_use_id: null,
+      },
+      'claude_code',
+    );
+
+    expect(event).toEqual({
+      kind: 'user',
+      data: { content: 'fix the bug in auth.ts' },
     });
   });
 
