@@ -24,12 +24,14 @@ interface CodeMuxModelSelectorProps {
   getDisplayName?: (model: string) => string;
   disabled?: boolean;
   className?: string;
+  /** 紧凑模式：隐藏推理强度标签，缩短模型名显示 */
+  compact?: boolean;
 }
 
 const EFFORT_OPTIONS: Array<{ id: ReasoningEffort; name: string }> = [
-  { id: 'low', name: 'Low' },
-  { id: 'medium', name: 'Medium' },
-  { id: 'high', name: 'High' },
+  { id: 'low', name: '低' },
+  { id: 'medium', name: '中' },
+  { id: 'high', name: '高' },
 ];
 const PANEL_OFFSET = 6;
 const VIEWPORT_PADDING = 24;
@@ -45,6 +47,7 @@ export function CodeMuxModelSelector({
   getDisplayName = (model) => model,
   disabled,
   className,
+  compact,
 }: CodeMuxModelSelectorProps) {
   const api = useAui();
   const [open, setOpen] = useState(false);
@@ -169,7 +172,7 @@ export function CodeMuxModelSelector({
             style={{ maxHeight: Math.max(120, position.maxHeight - 45) }}
           >
             {normalizedModels.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-muted-foreground">No models found.</div>
+              <div className="px-3 py-2 text-sm text-muted-foreground">未找到模型</div>
             ) : (
               normalizedModels.map((model) => {
                 const displayName = getDisplayName(model);
@@ -200,7 +203,7 @@ export function CodeMuxModelSelector({
             )}
           </div>
           <div data-slot="model-selector-effort" className="flex items-center justify-between gap-3 border-t border-border/62 px-3 py-2">
-            <span className="text-xs text-muted-foreground">Thinking</span>
+            <span className="text-xs text-muted-foreground">推理强度</span>
             <div role="group" aria-label="Thinking" className="flex items-center gap-0.5">
               {EFFORT_OPTIONS.map((option) => {
                 const active = option.id === reasoningEffort;
@@ -239,13 +242,14 @@ export function CodeMuxModelSelector({
         disabled={disabled || !selectedModel}
         onClick={() => setOpen((next) => !next)}
         className={cn(
-          'inline-flex h-8 min-w-40 max-w-72 items-center justify-between gap-2 overflow-hidden rounded-md border-border/45 bg-[hsl(var(--surface-2))]/64 px-2.5 py-1 text-xs text-foreground/88 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50',
+          'inline-flex h-8 max-w-72 items-center justify-between gap-2 overflow-hidden rounded-md border-border/45 bg-[hsl(var(--surface-2))]/64 px-2.5 py-1 text-xs text-foreground/88 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50',
+          compact ? 'min-w-0' : 'min-w-40',
           className,
         )}
       >
         <span data-slot="model-selector-value" className="flex min-w-0 items-center gap-2">
-          <span className="truncate font-medium">{selectedModelDisplayName || 'Select model'}</span>
-          {selectedEffortName ? (
+          <span className="truncate font-medium">{selectedModelDisplayName || '选择模型'}</span>
+          {!compact && selectedEffortName ? (
             <span className="truncate text-muted-foreground">{selectedEffortName}</span>
           ) : null}
         </span>

@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useSidePanelStore } from './sidePanelStore';
 
 describe('side panel store', () => {
   beforeEach(() => {
     useSidePanelStore.getState().reset();
+    vi.stubGlobal('window', { innerWidth: 1024 });
   });
 
   it('opens review and terminal tabs and activates the requested tab', () => {
@@ -95,5 +96,21 @@ describe('side panel store', () => {
       isOpen: false,
       tabs: [{ kind: 'review', projectPath: 'D:/project/a' }],
     });
+  });
+
+  it('lets the side panel grow until the conversation area reaches its minimum width', () => {
+    vi.stubGlobal('window', { innerWidth: 1920 });
+
+    useSidePanelStore.getState().setPanelWidth(1800);
+
+    expect(useSidePanelStore.getState().panelWidth).toBe(1480);
+  });
+
+  it('uses the split container width when clamping side panel growth', () => {
+    vi.stubGlobal('window', { innerWidth: 1920 });
+
+    useSidePanelStore.getState().setPanelWidth(1800, 1620);
+
+    expect(useSidePanelStore.getState().panelWidth).toBe(1180);
   });
 });

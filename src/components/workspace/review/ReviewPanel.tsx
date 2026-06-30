@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, FileText, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileText, RefreshCw, Undo2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { gitApi, type GitStatusArea, type GitStatusChange } from '../../../lib/tauri';
@@ -51,6 +51,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
   const [fileDetails, setFileDetails] = useState<Record<string, FileDetailState>>({});
   const [expandedPath, setExpandedPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [mutatingKey, setMutatingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -103,6 +104,25 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       });
   }, [area, fileDetails, projectPath]);
 
+  const runStageAction = useCallback(async (filePath?: string) => {
+    if (!projectPath) return;
+    const key = `${area}:${filePath ?? 'all'}`;
+    setMutatingKey(key);
+    setError(null);
+    try {
+      if (area === 'unstaged') {
+        await gitApi.stageStatusChanges(projectPath, filePath);
+      } else {
+        await gitApi.unstageStatusChanges(projectPath, filePath);
+      }
+      await load();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setMutatingKey(null);
+    }
+  }, [area, load, projectPath]);
+
   const totals = useMemo(() => files.reduce(
     (acc, file) => ({
       additions: acc.additions + file.additions,
@@ -113,25 +133,38 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-15 shrink-0 items-center justify-between px-4">
-        <Select
-          value={area}
-          onValueChange={(value) => {
-            setExpandedPath(null);
-            setArea(value as GitStatusArea);
-          }}
-        >
-          <SelectTrigger
-            className="h-9 w-34 rounded-lg border-border/45 bg-background/92 px-3 text-sm shadow-sm"
-            aria-label="选择审查范围"
+      <div className="flex h-15 shrink-0 items-center justify-between gap-2 px-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <Select
+            value={area}
+            onValueChange={(value) => {
+              setExpandedPath(null);
+              setArea(value as GitStatusArea);
+            }}
           >
-            <SelectValue placeholder="审查范围" />
-          </SelectTrigger>
-          <SelectContent align="start" className="z-260">
-            <SelectItem value="unstaged">未暂存</SelectItem>
-            <SelectItem value="staged">已暂存</SelectItem>
-          </SelectContent>
-        </Select>
+            <SelectTrigger
+              className="h-9 w-34 rounded-lg border-border/45 bg-background/92 px-3 text-sm shadow-sm"
+              aria-label="选择审查范围"
+            >
+              <SelectValue placeholder="审查范围" />
+            </SelectTrigger>
+            <SelectContent align="start" className="z-260">
+              <SelectItem value="unstaged">未暂存</SelectItem>
+              <SelectItem value="staged">已暂存</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <button
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-border/42 bg-background/80 px-2.5 text-xs text-foreground/82 transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-45"
+            onClick={() => void runStageAction()}
+            disabled={loading || files.length === 0 || mutatingKey != null}
+            aria-label={area === 'unstaged' ? '全部暂存' : '全部取消暂存'}
+            title={area === 'unstaged' ? '全部暂存' : '全部取消暂存'}
+          >
+            {area === 'unstaged' ? <Upload className="h-3.5 w-3.5" /> : <Undo2 className="h-3.5 w-3.5" />}
+            <span className="hidden xl:inline">{area === 'unstaged' ? '全部暂存' : '全部取消暂存'}</span>
+          </button>
+        </div>
 
         <button
           className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/45 hover:text-foreground"
@@ -158,36 +191,52 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
 
             return (
               <div key={file.path} className="border-b border-border/18 last:border-b-0">
-                <button
-                  onClick={() => toggleFile(file)}
+                <div
                   className={cn(
                     'flex w-full items-center gap-2 px-4 py-2 text-left transition-colors',
                     expanded ? 'bg-muted/52' : 'hover:bg-muted/28',
                   )}
                 >
-                  <span className={cn(
-                    'flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-[10px] font-semibold',
-                    file.status === 'added'
-                      ? 'bg-[hsl(var(--success)/0.12)] text-[hsl(var(--success))]'
-                      : file.status === 'deleted'
-                        ? 'bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))]'
-                        : 'bg-primary/10 text-primary',
-                  )}>
-                    {statusLabel(file.status)}
-                  </span>
-                  <FileText className="h-4 w-4 shrink-0 text-muted-foreground/55" />
-                  <span className="min-w-0 flex-1 truncate text-sm text-foreground/88">
-                    {name}
-                    {directory && <span className="ml-2 text-sm text-muted-foreground/55">{directory}</span>}
-                  </span>
-                  <span className="shrink-0 font-mono text-sm text-[hsl(var(--success))]">+{file.additions}</span>
-                  <span className="shrink-0 font-mono text-sm text-[hsl(var(--destructive))]">-{file.deletions}</span>
-                  {expanded ? (
-                    <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-                  )}
-                </button>
+                  <button
+                    onClick={() => toggleFile(file)}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <span className={cn(
+                      'flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-[10px] font-semibold',
+                      file.status === 'added'
+                        ? 'bg-[hsl(var(--success)/0.12)] text-[hsl(var(--success))]'
+                        : file.status === 'deleted'
+                          ? 'bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))]'
+                          : 'bg-primary/10 text-primary',
+                    )}>
+                      {statusLabel(file.status)}
+                    </span>
+                    <FileText className="h-4 w-4 shrink-0 text-muted-foreground/55" />
+                    <span className="min-w-0 flex-1 truncate text-sm text-foreground/88">
+                      {name}
+                      {directory && <span className="ml-2 text-sm text-muted-foreground/55">{directory}</span>}
+                    </span>
+                    <span className="shrink-0 font-mono text-sm text-[hsl(var(--success))]">+{file.additions}</span>
+                    <span className="shrink-0 font-mono text-sm text-[hsl(var(--destructive))]">-{file.deletions}</span>
+                    {expanded ? (
+                      <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`${area === 'unstaged' ? '暂存' : '取消暂存'} ${name}`}
+                    title={area === 'unstaged' ? '暂存此文件' : '取消暂存此文件'}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/72 transition-colors hover:bg-background/72 hover:text-foreground"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void runStageAction(file.path);
+                    }}
+                  >
+                    {area === 'unstaged' ? <Upload className="h-3.5 w-3.5" /> : <Undo2 className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
                 {expanded && (
                   <div className="border-l-4 border-[hsl(var(--success))] bg-background">
                     {detail?.loading ? (

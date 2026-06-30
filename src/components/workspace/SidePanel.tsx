@@ -27,6 +27,7 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
   const openTerminalTab = useSidePanelStore((state) => state.openTerminalTab);
   const setScope = useSidePanelStore((state) => state.setScope);
   const draggingRef = useRef(false);
+  const panelRef = useRef<HTMLElement | null>(null);
 
   useLayoutEffect(() => {
     setScope(scopeId);
@@ -51,10 +52,11 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
 
     const startX = event.clientX;
     const startWidth = panelWidth;
+    const splitContainerWidth = panelRef.current?.parentElement?.getBoundingClientRect().width;
 
     const onMove = (moveEvent: MouseEvent) => {
       if (!draggingRef.current) return;
-      setPanelWidth(startWidth + startX - moveEvent.clientX);
+      setPanelWidth(startWidth + startX - moveEvent.clientX, splitContainerWidth);
     };
 
     const onUp = () => {
@@ -72,6 +74,7 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
 
   return (
     <aside
+      ref={panelRef}
       className={cn(
         'relative h-full shrink-0 overflow-hidden border-l border-border/35 bg-background',
         isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',

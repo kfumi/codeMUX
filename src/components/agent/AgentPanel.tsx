@@ -38,6 +38,21 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { loadFileTree, setProjectPath } = usePreviewStore();
 
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
+
+  // 检测容器宽度，窄屏时启用紧凑模式
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setCompact(entry.contentRect.width < 560);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
 
   const session = sessions.find((entry) => entry.id === sessionId);
@@ -350,7 +365,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, getCostInfo, agentKind, handleSend, permissionConfig, updateSessionPermissions]);
 
   return (
-    <div className="flex h-full flex-col">
+    <div ref={containerRef} className="flex h-full flex-col">
       <CodeMuxAssistantRuntimeProvider sessionId={sessionId} agentKind={agentKind} onSend={handleSend} onCommand={handleCommand}>
         <CodeMuxThread
           sessionId={sessionId}
@@ -371,6 +386,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                     onReasoningEffortChange={handleReasoningEffortChange}
                     getDisplayName={formatSelectedProviderModel}
                     disabled={isRunning}
+                    compact={compact}
                   />
                 )}
                 permissionSelector={(
@@ -383,6 +399,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                     onPlanModeChange={handlePlanModeChange}
                     onModeChange={handleModeChange}
                     onLegacyConfigMigrate={handleLegacyConfigMigrate}
+                    compact={compact}
                   />
                 )}
                 onStop={() => interrupt(sessionId)}

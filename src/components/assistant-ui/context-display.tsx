@@ -45,12 +45,6 @@ export function ContextDisplay({
           aria-label="查看上下文使用情况"
         >
           <UsageRing percentage={percentage} />
-          <span
-            className="text-[12px] font-medium leading-none text-muted-foreground/78"
-            style={{ fontFamily: "'JetBrains Mono', monospace" }}
-          >
-            {percentageLabel}
-          </span>
         </button>
       </TooltipTrigger>
 

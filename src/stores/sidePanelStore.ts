@@ -32,7 +32,7 @@ interface SidePanelState {
   closePanel: () => void;
   setActiveTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
-  setPanelWidth: (width: number, sidebarWidth?: number) => void;
+  setPanelWidth: (width: number, splitContainerWidth?: number) => void;
   setResizing: (isResizing: boolean) => void;
   setTerminalId: (tabId: string, terminalId: string) => void;
   reset: () => void;
@@ -41,6 +41,7 @@ interface SidePanelState {
 const PANEL_WIDTH_MIN = 320;
 const PANEL_WIDTH_MAX = 820;
 const PANEL_WIDTH_DEFAULT = 520;
+const MAIN_CONTENT_WIDTH_MIN = 440;
 const DEFAULT_SCOPE_ID = 'global';
 
 function defaultSnapshot(): SidePanelSnapshot {
@@ -151,9 +152,9 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     });
   },
 
-  setPanelWidth: (width: number, sidebarWidth = 0) => {
-    const availableWidth = typeof window === 'undefined' ? PANEL_WIDTH_MAX : window.innerWidth - sidebarWidth;
-    const dynamicMax = Math.min(PANEL_WIDTH_MAX, Math.floor(availableWidth * 0.62));
+  setPanelWidth: (width: number, splitContainerWidth?: number) => {
+    const availableWidth = splitContainerWidth ?? (typeof window === 'undefined' ? PANEL_WIDTH_MAX : window.innerWidth);
+    const dynamicMax = Math.max(PANEL_WIDTH_MIN, availableWidth - MAIN_CONTENT_WIDTH_MIN);
     set({ panelWidth: Math.min(dynamicMax, Math.max(PANEL_WIDTH_MIN, width)) });
   },
 

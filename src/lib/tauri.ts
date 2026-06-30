@@ -270,6 +270,10 @@ export const gitApi = {
     invokeLogged('get_git_status_changes', { projectPath, area }),
   getStatusChangeDetail: (projectPath: string, area: GitStatusArea, filePath: string): Promise<GitStatusChange> =>
     invokeLogged('get_git_status_change_detail', { projectPath, area, filePath }),
+  stageStatusChanges: (projectPath: string, filePath?: string): Promise<void> =>
+    invokeLogged('stage_git_status_changes', { projectPath, filePath: filePath ?? null }),
+  unstageStatusChanges: (projectPath: string, filePath?: string): Promise<void> =>
+    invokeLogged('unstage_git_status_changes', { projectPath, filePath: filePath ?? null }),
 };
 
 export const terminalApi = {

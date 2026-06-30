@@ -30,6 +30,8 @@ interface AgentPermissionSelectorProps {
   onModeChange?: (config: AgentPermissionConfig, planMode: AgentPlanMode) => void;
   /** Called once when a legacy Codex config (e.g. workspace-write) is detected and needs migration. */
   onLegacyConfigMigrate?: (migratedConfig: AgentPermissionConfig) => void;
+  /** 紧凑模式：只显示图标，隐藏文字标签 */
+  compact?: boolean;
 }
 
 type PermissionOption = {
@@ -61,6 +63,7 @@ export function AgentPermissionSelector({
   onPlanModeChange,
   onModeChange,
   onLegacyConfigMigrate,
+  compact,
 }: AgentPermissionSelectorProps) {
   const [open, setOpen] = useState(false);
   const normalized = permissionConfig ?? buildDefaultPermissionConfig(agentKind);
@@ -123,13 +126,14 @@ export function AgentPermissionSelector({
         title={selected.label}
         onClick={() => setOpen((value) => !value)}
         className={cn(
-          'inline-flex h-7 max-w-40 items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-200 hover:bg-muted/58 hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
+          'inline-flex h-7 items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-200 hover:bg-muted/58 hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
+          compact ? 'max-w-9' : 'max-w-40',
           selected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
         )}
       >
         <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
-        <span className="truncate">{selected.label}</span>
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
+        {!compact && <span className="truncate">{selected.label}</span>}
+        {!compact && <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />}
       </button>
 
       {open && (

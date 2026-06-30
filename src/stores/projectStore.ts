@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Project } from '../types/project';
-import { projectApi, agentApi } from '../lib/tauri';
+import { projectApi } from '../lib/tauri';
 import { useSessionStore } from './sessionStore';
 import { useAgentStore } from './agentStore';
 
@@ -105,23 +105,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
   deleteProject: async (projectId: string) => {
     set({ isLoading: true, error: null });
     try {
-      // Clean up agent session files for all sessions in this project (including archived)
+      // 只清理内存中的事件数据，保留 agent 底层文件（原生 CLI 仍可访问历史）
       const sessionState = useSessionStore.getState();
       const allSessions = [
         ...sessionState.sessions,
         ...sessionState.archivedSessions,
       ].filter((s) => s.project_id === projectId);
       for (const session of allSessions) {
-        try {
-          await agentApi.deleteClaudeSessionFiles(session.id);
-          await agentApi.deleteCodexSessionFiles(session.id);
-          await agentApi.resetSession(session.id);
-        } catch {
-          // Ignore cleanup errors
-        }
         useAgentStore.getState().clearEvents(session.id);
       }
 
+      // 删除 SQLite 中的项目及其下所有会话记录
       await projectApi.delete(projectId);
 
       // 从本地状态中移除该项目下的已归档 session

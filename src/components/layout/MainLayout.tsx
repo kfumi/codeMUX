@@ -125,7 +125,7 @@ export function MainLayout({
         />
 
         <main className="relative z-10 flex min-h-0 flex-1 overflow-hidden bg-[hsl(var(--sidebar-bg))]">
-          <div className="flex min-w-0 flex-1 flex-col bg-[hsl(var(--background))]">{children}</div>
+          <div className="flex min-w-[440px] flex-1 flex-col bg-[hsl(var(--background))]">{children}</div>
           {sidePanelAvailable && <SidePanel projectPath={sidePanelProjectPath} scopeId={sidePanelScopeId} />}
         </main>
       </section>

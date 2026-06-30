@@ -164,6 +164,8 @@ pub fn run() {
             commands::git::get_git_changed_files_since_head,
             commands::git::get_git_status_change_detail,
             commands::git::get_git_status_changes,
+            commands::git::stage_git_status_changes,
+            commands::git::unstage_git_status_changes,
             commands::terminal::start_terminal_session,
             commands::terminal::write_terminal_session,
             commands::terminal::resize_terminal_session,

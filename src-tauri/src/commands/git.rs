@@ -356,6 +356,43 @@ pub fn read_git_status_change_detail(
     })
 }
 
+pub fn stage_git_status_changes_for_paths(
+    project_path: &Path,
+    file_path: Option<&str>,
+) -> Result<(), String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+
+    match file_path {
+        Some(file_path) => {
+            let relative_path = path_to_repo_relative(&root, file_path);
+            run_git(&root, &["add", "-A", "--", &relative_path]).map(|_| ())
+        }
+        None => run_git(&root, &["add", "-A", "--", "."]).map(|_| ()),
+    }
+}
+
+pub fn unstage_git_status_changes_for_paths(
+    project_path: &Path,
+    file_path: Option<&str>,
+) -> Result<(), String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+
+    let head_tree = git_head_tree(&root)?;
+    match file_path {
+        Some(file_path) => {
+            let relative_path = path_to_repo_relative(&root, file_path);
+            run_git(&root, &["reset", "-q", &head_tree, "--", &relative_path]).map(|_| ())
+        }
+        None => run_git(&root, &["reset", "-q", &head_tree, "--", "."]).map(|_| ()),
+    }
+}
+
 pub fn read_git_changed_files_for_tree(
     project_path: &Path,
     baseline_tree: &str,
@@ -486,11 +523,22 @@ pub fn get_git_status_change_detail(
     read_git_status_change_detail(Path::new(&project_path), area, &file_path)
 }
 
+#[tauri::command]
+pub fn stage_git_status_changes(project_path: String, file_path: Option<String>) -> Result<(), String> {
+    stage_git_status_changes_for_paths(Path::new(&project_path), file_path.as_deref())
+}
+
+#[tauri::command]
+pub fn unstage_git_status_changes(project_path: String, file_path: Option<String>) -> Result<(), String> {
+    unstage_git_status_changes_for_paths(Path::new(&project_path), file_path.as_deref())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         decode_text_bytes, read_git_changed_files_for_tree, read_git_status_change_detail,
-        read_git_status_changes, GitStatusArea,
+        read_git_status_changes, stage_git_status_changes_for_paths,
+        unstage_git_status_changes_for_paths, GitStatusArea,
     };
     use std::fs;
     use std::process::Command;
@@ -688,6 +736,83 @@ mod tests {
             .unwrap();
         assert_eq!(untracked.additions, 1);
         assert_eq!(untracked.deletions, 0);
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_status_staging_actions_move_files_between_areas() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .arg("init")
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["config", "user.email", "codemux@example.test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["config", "user.name", "codeMUX"])
+            .output()
+            .unwrap();
+
+        fs::write(project.join("a.txt"), "one\n").unwrap();
+        fs::write(project.join("b.txt"), "two\n").unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["commit", "-m", "initial"])
+            .output()
+            .unwrap();
+
+        fs::write(project.join("a.txt"), "ONE\n").unwrap();
+        fs::write(project.join("b.txt"), "TWO\n").unwrap();
+
+        let file_a = project.join("a.txt").to_string_lossy().to_string();
+        stage_git_status_changes_for_paths(&project, Some(&file_a)).unwrap();
+
+        let staged = read_git_status_changes(&project, GitStatusArea::Staged).unwrap();
+        let unstaged = read_git_status_changes(&project, GitStatusArea::Unstaged).unwrap();
+        assert_eq!(staged.len(), 1);
+        assert!(staged[0].path.ends_with("a.txt"));
+        assert_eq!(unstaged.len(), 1);
+        assert!(unstaged[0].path.ends_with("b.txt"));
+
+        unstage_git_status_changes_for_paths(&project, Some(&file_a)).unwrap();
+
+        let staged = read_git_status_changes(&project, GitStatusArea::Staged).unwrap();
+        let unstaged = read_git_status_changes(&project, GitStatusArea::Unstaged).unwrap();
+        assert!(staged.is_empty());
+        assert_eq!(unstaged.len(), 2);
+
+        stage_git_status_changes_for_paths(&project, None).unwrap();
+        assert_eq!(
+            read_git_status_changes(&project, GitStatusArea::Staged)
+                .unwrap()
+                .len(),
+            2
+        );
+
+        unstage_git_status_changes_for_paths(&project, None).unwrap();
+        assert!(read_git_status_changes(&project, GitStatusArea::Staged)
+            .unwrap()
+            .is_empty());
 
         let _ = fs::remove_dir_all(project);
     }

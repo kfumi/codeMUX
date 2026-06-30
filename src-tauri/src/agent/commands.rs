@@ -1411,6 +1411,12 @@ pub async fn delete_claude_session_files(
                     let _ = fs::remove_file(&jsonl);
                     deleted.push(jsonl.to_string_lossy().to_string());
                 }
+                // 删除会话子目录（含 subagents 等子智能体记录）
+                let session_subdir = entry.path().join(&claude_session_id);
+                if session_subdir.exists() {
+                    let _ = fs::remove_dir_all(&session_subdir);
+                    deleted.push(session_subdir.to_string_lossy().to_string());
+                }
             }
         }
     }
