@@ -29,6 +29,7 @@ vi.mock('../../lib/tauri', () => ({
     delete: vi.fn(),
     getAll: vi.fn().mockResolvedValue([]),
     getArchived: vi.fn().mockResolvedValue([]),
+    setPinned: vi.fn(),
     touch: vi.fn(),
     unarchive: vi.fn(),
     updateTitle: vi.fn(),
@@ -46,6 +47,7 @@ function makeSession(overrides: Partial<Session>): Session {
     mode: 'agent',
     project_id: null,
     is_archived: false,
+    is_pinned: false,
     created_at: '2026-06-20T00:00:00.000Z',
     updated_at: '2026-06-20T00:00:00.000Z',
     ...overrides,
@@ -112,6 +114,68 @@ describe('SessionList', () => {
 
     expect(screen.getByText('Active Session')).toBeTruthy();
     expect(screen.queryByText('Archived Session')).toBeNull();
+  });
+
+  it('moves pinned sessions into the pinned section without duplicating them', () => {
+    useProjectStore.setState({
+      projects: [makeProject({ id: 'project-1', name: 'codeMUX' })],
+      activeProjectId: null,
+      isLoading: false,
+      error: null,
+      collapsedProjects: new Set<string>(),
+    });
+    useSessionStore.setState({
+      sessions: [
+        makeSession({ id: 'pinned-project', title: 'Pinned Project Session', project_id: 'project-1', is_pinned: true }),
+        makeSession({ id: 'regular-project', title: 'Regular Project Session', project_id: 'project-1' }),
+        makeSession({ id: 'pinned-chat', title: 'Pinned Chat', is_pinned: true }),
+        makeSession({ id: 'regular-chat', title: 'Regular Chat' }),
+      ],
+      archivedSessions: [],
+      activeSessionId: null,
+      isLoading: false,
+      isArchivedLoading: false,
+      error: null,
+      unreadSessions: new Set<string>(),
+    });
+
+    renderSessionList();
+
+    expect(screen.getByText('置顶')).toBeTruthy();
+    expect(screen.getAllByText('Pinned Project Session')).toHaveLength(1);
+    expect(screen.getAllByText('Pinned Chat')).toHaveLength(1);
+    expect(screen.getByText('Regular Project Session')).toBeTruthy();
+    expect(screen.getByText('Regular Chat')).toBeTruthy();
+  });
+
+  it('collapses and expands the pinned section from its header', () => {
+    useSessionStore.setState({
+      sessions: [
+        makeSession({ id: 'pinned-project', title: 'Pinned Project Session', is_pinned: true }),
+        makeSession({ id: 'pinned-chat', title: 'Pinned Chat', is_pinned: true }),
+      ],
+      archivedSessions: [],
+      activeSessionId: null,
+      isLoading: false,
+      isArchivedLoading: false,
+      error: null,
+      unreadSessions: new Set<string>(),
+    });
+
+    renderSessionList();
+
+    expect(screen.getByText('Pinned Project Session')).toBeTruthy();
+    expect(screen.getByText('Pinned Chat')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'toggle-pinned-section' }));
+
+    expect(screen.queryByText('Pinned Project Session')).toBeNull();
+    expect(screen.queryByText('Pinned Chat')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'toggle-pinned-section' }));
+
+    expect(screen.getByText('Pinned Project Session')).toBeTruthy();
+    expect(screen.getByText('Pinned Chat')).toBeTruthy();
   });
 
   it('collapses and expands the entire projects section from its header', () => {

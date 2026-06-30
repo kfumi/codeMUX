@@ -742,7 +742,7 @@ function AssistantCollapseToggle({
       aria-expanded={expanded}
       aria-label={expanded ? '收起AI过程' : '展开AI过程'}
       onClick={onClick}
-      className="mb-2 h-8 gap-1.5 rounded-md pl-0 text-xs font-medium text-muted-foreground/80"
+      className="mb-2 h-8 gap-1.5 rounded-md pl-2 text-xs font-medium text-muted-foreground/80"
     >
       <span>已处理</span>
       {durationMs != null ? <span className="tabular-nums">{formatCompactDuration(durationMs)}</span> : null}

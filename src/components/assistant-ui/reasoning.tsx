@@ -195,7 +195,7 @@ function ReasoningText({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="reasoning-text"
       className={cn(
-        'aui-reasoning-text relative z-0 space-y-3 overflow-y-auto ps-6 pe-2 pt-1.5 pb-1 leading-relaxed scrollbar-gutter-stable',
+        'aui-reasoning-text relative z-0 max-h-40 overflow-y-auto ps-6 pt-2 pe-2 pb-2 leading-relaxed scrollbar-gutter-stable',
         'transform-gpu transition-[transform,opacity]',
         'group-data-[state=open]/collapsible-content:animate-in',
         'group-data-[state=closed]/collapsible-content:animate-out',

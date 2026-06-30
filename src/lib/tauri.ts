@@ -149,6 +149,7 @@ export const sessionApi = {
   delete: (sessionId: string): Promise<void> => invokeLogged('delete_session', { sessionId }),
   archive: (sessionId: string): Promise<void> => invokeLogged('archive_session', { sessionId }),
   unarchive: (sessionId: string): Promise<void> => invokeLogged('unarchive_session', { sessionId }),
+  setPinned: (sessionId: string, pinned: boolean): Promise<void> => invokeLogged('set_session_pinned', { sessionId, pinned }),
   updateTitle: (sessionId: string, title: string): Promise<void> => invokeLogged('update_session_title', { sessionId, title }),
   touch: (sessionId: string): Promise<void> => invokeLogged('touch_session', { sessionId }),
   updateProvider: (sessionId: string, providerId: string, model: string, reasoningEffort?: ReasoningEffort): Promise<void> =>
@@ -225,6 +226,8 @@ export const agentApi = {
   /** Load session events from Codex's JSONL session file. */
   loadCodexSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_codex_session_events', { appSessionId }),
+  getSessionInfo: (appSessionId: string, agentKind: AgentKind): Promise<{ agentSessionId: string | null; messagePath: string | null }> =>
+    invokeLogged('get_agent_session_info', { appSessionId, agentKind }),
   startProxy: (apiKey: string, baseUrl: string, providerName: string, codexNeedsProxy?: boolean): Promise<number> =>
     invokeLogged('start_codex_proxy', { apiKey, baseUrl, providerName, codexNeedsProxy }),
   stopProxy: (): Promise<void> => invokeLogged('stop_codex_proxy'),

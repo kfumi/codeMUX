@@ -85,6 +85,17 @@ pub fn unarchive_session(state: State<'_, AppState>, session_id: String) -> Resu
 }
 
 #[tauri::command]
+pub fn set_session_pinned(
+    state: State<'_, AppState>,
+    session_id: String,
+    pinned: bool,
+) -> Result<(), String> {
+    info!(target: "session", "Setting session pinned session_id={} pinned={}", session_id, pinned);
+    let db = state.db.lock().unwrap();
+    operations::set_session_pinned(&db, &session_id, pinned).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn update_session_title(
     state: State<'_, AppState>,
     session_id: String,

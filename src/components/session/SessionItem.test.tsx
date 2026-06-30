@@ -4,6 +4,27 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SessionItem } from './SessionItem';
+import type { Session } from '../../types/session';
+
+function makeSession(overrides: Partial<Session>): Session {
+  return {
+    id: 'session-1',
+    title: 'Codex Session',
+    agent_kind: 'codex',
+    provider_id: null,
+    model: null,
+    reasoning_effort: null,
+    mode: 'agent',
+    permission_config: null,
+    plan_mode: null,
+    project_id: null,
+    is_archived: false,
+    is_pinned: false,
+    created_at: '',
+    updated_at: '',
+    ...overrides,
+  };
+}
 
 describe('SessionItem', () => {
   afterEach(() => {
@@ -13,19 +34,10 @@ describe('SessionItem', () => {
   it('keeps the session title visible for Codex sessions', () => {
     render(
       <SessionItem
-        session={{
-          id: 'session-1',
-          title: 'Codex Session',
-          agent_kind: 'codex',
-          provider_id: null,
-          model: null,
-          mode: 'agent',
-          project_id: null,
-          created_at: '',
-          updated_at: '',
-        }}
+        session={makeSession({ id: 'session-1', title: 'Codex Session', agent_kind: 'codex' })}
         isActive={false}
         onClick={vi.fn()}
+        onTogglePinned={vi.fn()}
         onArchive={vi.fn()}
         onDelete={vi.fn()}
         onRename={vi.fn()}
@@ -42,19 +54,10 @@ describe('SessionItem', () => {
   it('keeps the session title visible for Claude Code sessions', () => {
     render(
       <SessionItem
-        session={{
-          id: 'session-2',
-          title: 'Claude Session',
-          agent_kind: 'claude_code',
-          provider_id: null,
-          model: null,
-          mode: 'agent',
-          project_id: null,
-          created_at: '',
-          updated_at: '',
-        }}
+        session={makeSession({ id: 'session-2', title: 'Claude Session', agent_kind: 'claude_code' })}
         isActive={false}
         onClick={vi.fn()}
+        onTogglePinned={vi.fn()}
         onArchive={vi.fn()}
         onDelete={vi.fn()}
         onRename={vi.fn()}
@@ -73,19 +76,10 @@ describe('SessionItem', () => {
 
     render(
       <SessionItem
-        session={{
-          id: 'session-3',
-          title: 'Deletable Session',
-          agent_kind: 'codex',
-          provider_id: null,
-          model: null,
-          mode: 'agent',
-          project_id: null,
-          created_at: '',
-          updated_at: '',
-        }}
+        session={makeSession({ id: 'session-3', title: 'Deletable Session', agent_kind: 'codex' })}
         isActive={false}
         onClick={vi.fn()}
+        onTogglePinned={vi.fn()}
         onArchive={vi.fn()}
         onDelete={onDelete}
         onRename={vi.fn()}
@@ -103,5 +97,35 @@ describe('SessionItem', () => {
     fireEvent.click(screen.getByRole('button', { name: '删除' }));
 
     expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it('places the pin action before the archive action and toggles pinned state', () => {
+    const onTogglePinned = vi.fn();
+    const onArchive = vi.fn();
+
+    render(
+      <SessionItem
+        session={makeSession({ id: 'session-4', title: 'Pinnable Session' })}
+        isActive={false}
+        onClick={vi.fn()}
+        onTogglePinned={onTogglePinned}
+        onArchive={onArchive}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        isMenuOpen={false}
+        onOpenMenu={vi.fn()}
+        onCloseMenu={vi.fn()}
+      />,
+    );
+
+    const pin = screen.getByRole('button', { name: '置顶对话' });
+    const archive = screen.getByRole('button', { name: '归档' });
+
+    expect(pin.compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(pin);
+
+    expect(onTogglePinned).toHaveBeenCalledWith(true);
+    expect(onArchive).not.toHaveBeenCalled();
   });
 });

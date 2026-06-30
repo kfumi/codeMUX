@@ -524,12 +524,18 @@ pub fn get_git_status_change_detail(
 }
 
 #[tauri::command]
-pub fn stage_git_status_changes(project_path: String, file_path: Option<String>) -> Result<(), String> {
+pub fn stage_git_status_changes(
+    project_path: String,
+    file_path: Option<String>,
+) -> Result<(), String> {
     stage_git_status_changes_for_paths(Path::new(&project_path), file_path.as_deref())
 }
 
 #[tauri::command]
-pub fn unstage_git_status_changes(project_path: String, file_path: Option<String>) -> Result<(), String> {
+pub fn unstage_git_status_changes(
+    project_path: String,
+    file_path: Option<String>,
+) -> Result<(), String> {
     unstage_git_status_changes_for_paths(Path::new(&project_path), file_path.as_deref())
 }
 

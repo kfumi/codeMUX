@@ -66,9 +66,9 @@ describe('tool header summaries', () => {
 
     fireEvent.click(within(container).getByRole('button'));
 
-    expect(container.textContent).not.toContain('"command"');
-    expect(container.textContent).not.toContain('"timeout_ms"');
-    expect(container.textContent).not.toContain('"workdir"');
+    expect(container.textContent).toContain('"command"');
+    expect(container.textContent).toContain('"timeout_ms"');
+    expect(container.textContent).toContain('"workdir"');
   });
 
   it('shows Grep pattern and Agent description in the header', () => {

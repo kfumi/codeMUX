@@ -1,6 +1,8 @@
-import { FolderOpen, MoreHorizontal, Pencil } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { Archive, Copy, FolderOpen, Mail, MoreHorizontal, Pencil, Pin, PinOff } from 'lucide-react';
 import { useState } from 'react';
 
+import { agentApi } from '../../lib/tauri';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -13,7 +15,13 @@ interface SessionHeaderProps {
 }
 
 export function SessionHeader({ sessionId }: SessionHeaderProps) {
-  const { sessions, updateSessionTitle } = useSessionStore();
+  const {
+    sessions,
+    updateSessionTitle,
+    setSessionPinned,
+    archiveSession,
+    markSessionUnread,
+  } = useSessionStore();
   const { projects } = useProjectStore();
 
   const session = sessions.find((entry) => entry.id === sessionId);
@@ -21,6 +29,7 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const handleRenameOpen = () => {
     setRenameValue(session?.title || '');
@@ -33,6 +42,25 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
       await updateSessionTitle(sessionId, trimmed);
     }
     setRenameOpen(false);
+  };
+
+  const copyText = async (value: string | null | undefined, missingMessage = '没有可复制的内容') => {
+    if (!value) {
+      setActionMessage(missingMessage);
+      return;
+    }
+    await navigator.clipboard.writeText(value);
+    setActionMessage('已复制');
+  };
+
+  const copyAgentSessionValue = async (field: 'agentSessionId' | 'messagePath') => {
+    if (!session) return;
+    const info = await agentApi.getSessionInfo(session.id, session.agent_kind);
+    await copyText(info[field], field === 'messagePath' ? '未找到任务路径' : '未找到会话ID');
+  };
+
+  const handleArchive = async () => {
+    await archiveSession(sessionId);
   };
 
   return (
@@ -48,13 +76,47 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
       )}
       <DropdownMenu
         trigger={(
-          <button className="rounded-lg p-1 text-muted-foreground/66 transition-colors hover:bg-muted/55 hover:text-foreground">
+          <button
+            aria-label="任务菜单"
+            className="rounded-lg p-1 text-muted-foreground/66 transition-colors hover:bg-muted/55 hover:text-foreground"
+          >
             <MoreHorizontal className="h-4 w-4" />
           </button>
         )}
       >
+        <DropdownMenuItem
+          icon={session?.is_pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+          onClick={() => session && void setSessionPinned(session.id, !session.is_pinned)}
+        >
+          {session?.is_pinned ? '取消置顶任务' : '置顶任务'}
+        </DropdownMenuItem>
         <DropdownMenuItem icon={<Pencil className="h-3.5 w-3.5" />} onClick={handleRenameOpen}>
-          重命名
+          重命名任务
+        </DropdownMenuItem>
+        <DropdownMenuItem icon={<Archive className="h-3.5 w-3.5" />} onClick={() => void handleArchive()}>
+          归档任务
+        </DropdownMenuItem>
+        <DropdownMenuItem icon={<Mail className="h-3.5 w-3.5" />} onClick={() => markSessionUnread(sessionId)}>
+          标记为未读
+        </DropdownMenuItem>
+        {project && (
+          <>
+            <DropdownMenuItem
+              icon={<FolderOpen className="h-3.5 w-3.5" />}
+              onClick={() => void invoke('open_in_explorer', { path: project.path })}
+            >
+              在资源管理器中打开
+            </DropdownMenuItem>
+            <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyText(project.path)}>
+              复制路径
+            </DropdownMenuItem>
+          </>
+        )}
+        <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyAgentSessionValue('messagePath')}>
+          复制任务路径
+        </DropdownMenuItem>
+        <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyAgentSessionValue('agentSessionId')}>
+          复制会话ID
         </DropdownMenuItem>
       </DropdownMenu>
 
@@ -77,6 +139,11 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {actionMessage && (
+        <span className="text-[12px] text-muted-foreground/70" data-tauri-drag-region>
+          {actionMessage}
+        </span>
+      )}
     </>
   );
 }

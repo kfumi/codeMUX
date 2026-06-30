@@ -21,6 +21,7 @@ interface SessionState {
   deleteSession: (sessionId: string) => Promise<void>;
   archiveSession: (sessionId: string) => Promise<void>;
   unarchiveSession: (sessionId: string) => Promise<void>;
+  setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   updateSessionPermissions: (sessionId: string, permissionConfig?: AgentPermissionConfig, planMode?: AgentPlanMode) => Promise<void>;
@@ -209,6 +210,17 @@ export const useSessionStore = create<SessionState>((set) => ({
       set({ error: String(error) });
     }
   },
+  setSessionPinned: async (sessionId: string, pinned: boolean) => {
+    try {
+      await sessionApi.setPinned(sessionId, pinned);
+      set((state) => ({
+        sessions: state.sessions.map((session) => session.id === sessionId ? { ...session, is_pinned: pinned } : session),
+        archivedSessions: state.archivedSessions.map((session) => session.id === sessionId ? { ...session, is_pinned: pinned } : session),
+      }));
+    } catch (error) {
+      set({ error: String(error) });
+    }
+  },
   setActiveSession: (sessionId: string | null) => {
     set((state) => {
       if (!sessionId) return { activeSessionId: null };
@@ -264,8 +276,6 @@ export const useSessionStore = create<SessionState>((set) => ({
   markSessionUnread: (sessionId: string) => {
     set((state) => {
       if (state.unreadSessions.has(sessionId)) return state;
-      // Don't mark active session as unread
-      if (state.activeSessionId === sessionId) return state;
       const next = new Set(state.unreadSessions);
       next.add(sessionId);
       return { unreadSessions: next };

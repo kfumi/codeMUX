@@ -17,6 +17,7 @@ interface SessionListProps {
 
 const PROJECTS_SECTION_KEY = 'codemux-projects-section-expanded';
 const CONVERSATIONS_SECTION_KEY = 'codemux-conversations-section-expanded';
+const PINNED_SECTION_KEY = 'codemux-pinned-section-expanded';
 
 function loadSectionExpanded(storageKey: string): boolean {
   try {
@@ -81,11 +82,13 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
     fetchArchivedSessions,
     setActiveSession,
     archiveSession,
+    setSessionPinned,
     deleteSession,
     updateSessionTitle,
   } = useSessionStore();
   const { projects, activeProjectId, fetchProjects, deleteProject, renameProject, setActiveProject } = useProjectStore();
   const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
+  const [pinnedExpanded, setPinnedExpanded] = useState(() => loadSectionExpanded(PINNED_SECTION_KEY));
   const [projectsExpanded, setProjectsExpanded] = useState(() => loadSectionExpanded(PROJECTS_SECTION_KEY));
   const [conversationsExpanded, setConversationsExpanded] = useState(() => loadSectionExpanded(CONVERSATIONS_SECTION_KEY));
 
@@ -111,7 +114,7 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
   const projectSessions = useMemo(() => {
     const map = new Map<string, typeof sessions>();
     for (const session of sessions) {
-      if (!session.project_id) continue;
+      if (!session.project_id || session.is_pinned) continue;
       const list = map.get(session.project_id) || [];
       list.push(session);
       map.set(session.project_id, list);
@@ -119,12 +122,21 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
     return map;
   }, [sessions]);
 
-  const ungroupedSessions = useMemo(() => sessions.filter((session) => !session.project_id), [sessions]);
+  const pinnedSessions = useMemo(() => sessions.filter((session) => session.is_pinned), [sessions]);
+  const ungroupedSessions = useMemo(() => sessions.filter((session) => !session.project_id && !session.is_pinned), [sessions]);
 
   const toggleProjectsExpanded = useCallback(() => {
     setProjectsExpanded((current) => {
       const next = !current;
       saveSectionExpanded(PROJECTS_SECTION_KEY, next);
+      return next;
+    });
+  }, []);
+
+  const togglePinnedExpanded = useCallback(() => {
+    setPinnedExpanded((current) => {
+      const next = !current;
+      saveSectionExpanded(PINNED_SECTION_KEY, next);
       return next;
     });
   }, []);
@@ -139,6 +151,36 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
 
   return (
     <div className="space-y-2 stagger-children">
+      {pinnedSessions.length > 0 && (
+        <div>
+          <SectionHeader
+            title="置顶"
+            expanded={pinnedExpanded}
+            toggleLabel="toggle-pinned-section"
+            onToggle={togglePinnedExpanded}
+          />
+          {pinnedExpanded && pinnedSessions.map((session) => (
+            <SessionItem
+              key={session.id}
+              session={session}
+              isActive={session.id === activeSessionId}
+              onClick={() => {
+                onNavigateHome();
+                setActiveProject(session.project_id ?? null);
+                setActiveSession(session.id);
+              }}
+              onTogglePinned={(pinned) => void setSessionPinned(session.id, pinned)}
+              onArchive={() => archiveSession(session.id)}
+              onDelete={() => deleteSession(session.id)}
+              onRename={(title) => updateSessionTitle(session.id, title)}
+              isMenuOpen={menuSessionId === session.id}
+              onOpenMenu={() => setMenuSessionId(session.id)}
+              onCloseMenu={closeMenu}
+            />
+          ))}
+        </div>
+      )}
+
       {projects.length > 0 && (
         <div>
           <SectionHeader
@@ -175,6 +217,7 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
                 setActiveSession(id);
               }}
               onArchiveSession={archiveSession}
+              onToggleSessionPinned={(sessionId, pinned) => void setSessionPinned(sessionId, pinned)}
               onDeleteSession={deleteSession}
               onRenameSession={updateSessionTitle}
               onNewSessionInProject={onNewSessionInProject}
@@ -206,6 +249,7 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
                 setActiveProject(null);
                 setActiveSession(session.id);
               }}
+              onTogglePinned={(pinned) => void setSessionPinned(session.id, pinned)}
               onArchive={() => archiveSession(session.id)}
               onDelete={() => deleteSession(session.id)}
               onRename={(title) => updateSessionTitle(session.id, title)}

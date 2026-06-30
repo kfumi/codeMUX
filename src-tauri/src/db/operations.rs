@@ -41,6 +41,7 @@ pub struct Session {
     pub plan_mode: Option<String>,
     pub project_id: Option<String>,
     pub is_archived: bool,
+    pub is_pinned: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -142,6 +143,7 @@ pub fn create_session_with_mode_and_permissions(
         plan_mode: Some(plan_mode.to_string()),
         project_id: None,
         is_archived: false,
+        is_pinned: false,
         created_at: now.clone(),
         updated_at: now,
     })
@@ -178,13 +180,14 @@ pub fn create_session_for_project_with_permissions(
         plan_mode: Some(plan_mode.to_string()),
         project_id: Some(project_id.to_string()),
         is_archived: false,
+        is_pinned: false,
         created_at: now.clone(),
         updated_at: now,
     })
 }
 
 pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, is_archived, created_at, updated_at FROM sessions WHERE is_archived = 0 ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, is_archived, is_pinned, created_at, updated_at FROM sessions WHERE is_archived = 0 ORDER BY updated_at DESC")?;
 
     let sessions = stmt
         .query_map([], |row| {
@@ -200,8 +203,9 @@ pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
                 plan_mode: row.get(8)?,
                 project_id: row.get(9)?,
                 is_archived: row.get::<_, i32>(10)? != 0,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
+                is_pinned: row.get::<_, i32>(11)? != 0,
+                created_at: row.get(12)?,
+                updated_at: row.get(13)?,
             })
         })?
         .collect::<Result<Vec<_>>>()?;
@@ -210,7 +214,7 @@ pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
 }
 
 pub fn get_all_archived_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, is_archived, created_at, updated_at FROM sessions WHERE is_archived = 1 ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, is_archived, is_pinned, created_at, updated_at FROM sessions WHERE is_archived = 1 ORDER BY updated_at DESC")?;
 
     let sessions = stmt
         .query_map([], |row| {
@@ -226,8 +230,9 @@ pub fn get_all_archived_sessions(conn: &Connection) -> Result<Vec<Session>> {
                 plan_mode: row.get(8)?,
                 project_id: row.get(9)?,
                 is_archived: row.get::<_, i32>(10)? != 0,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
+                is_pinned: row.get::<_, i32>(11)? != 0,
+                created_at: row.get(12)?,
+                updated_at: row.get(13)?,
             })
         })?
         .collect::<Result<Vec<_>>>()?;
@@ -249,6 +254,15 @@ pub fn unarchive_session(conn: &Connection, session_id: &str) -> Result<()> {
     conn.execute(
         "UPDATE sessions SET is_archived = 0, updated_at = ?1 WHERE id = ?2",
         params![now, session_id],
+    )?;
+    Ok(())
+}
+
+pub fn set_session_pinned(conn: &Connection, session_id: &str, pinned: bool) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE sessions SET is_pinned = ?1, updated_at = ?2 WHERE id = ?3",
+        params![if pinned { 1 } else { 0 }, now, session_id],
     )?;
     Ok(())
 }
@@ -358,7 +372,8 @@ pub fn update_session_permissions(
 mod tests {
     use super::{
         archive_session, get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
-        unarchive_session, update_session_provider, upsert_agent_session_mapping,
+        set_session_pinned, unarchive_session, update_session_provider,
+        upsert_agent_session_mapping,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -512,6 +527,31 @@ mod tests {
         assert_eq!(archived.len(), 1);
         assert_eq!(archived[0].id, "session-archived");
         assert!(archived[0].is_archived);
+    }
+
+    #[test]
+    fn set_session_pinned_marks_session_and_active_listing_returns_it() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                "session-pinned",
+                "Pinned",
+                "codex",
+                "agent",
+                "2026-06-20T00:00:00Z",
+                "2026-06-20T00:00:00Z"
+            ],
+        )
+        .unwrap();
+
+        set_session_pinned(&conn, "session-pinned", true).unwrap();
+
+        let sessions = get_all_sessions(&conn).unwrap();
+        assert_eq!(sessions[0].id, "session-pinned");
+        assert!(sessions[0].is_pinned);
     }
 
     #[test]

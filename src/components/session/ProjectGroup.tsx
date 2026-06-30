@@ -19,6 +19,7 @@ interface ProjectGroupProps {
   isActiveProject: boolean;
   onSelectSession: (sessionId: string) => void;
   onArchiveSession: (sessionId: string) => void;
+  onToggleSessionPinned: (sessionId: string, pinned: boolean) => void;
   onDeleteSession: (sessionId: string) => void;
   onRenameSession: (sessionId: string, title: string) => void;
   onNewSessionInProject: (projectId: string) => void;
@@ -36,6 +37,7 @@ export function ProjectGroup({
   isActiveProject,
   onSelectSession,
   onArchiveSession,
+  onToggleSessionPinned,
   onDeleteSession,
   onRenameSession,
   onNewSessionInProject,
@@ -149,6 +151,7 @@ export function ProjectGroup({
               session={session}
               isActive={session.id === activeSessionId}
               onClick={() => onSelectSession(session.id)}
+              onTogglePinned={(pinned) => onToggleSessionPinned(session.id, pinned)}
               onArchive={() => onArchiveSession(session.id)}
               onDelete={() => onDeleteSession(session.id)}
               onRename={(title) => onRenameSession(session.id, title)}

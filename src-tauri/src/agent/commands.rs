@@ -305,6 +305,53 @@ fn find_codex_session_jsonl(sessions_dir: &Path, codex_session_id: &str) -> Opti
         })
 }
 
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionInfo {
+    pub agent_session_id: Option<String>,
+    pub message_path: Option<String>,
+}
+
+fn resolve_agent_session_info(
+    home: &Path,
+    agent_kind: AgentKind,
+    agent_session_id: Option<String>,
+) -> Result<AgentSessionInfo, String> {
+    let Some(agent_session_id) = agent_session_id else {
+        return Ok(AgentSessionInfo {
+            agent_session_id: None,
+            message_path: None,
+        });
+    };
+
+    let message_path = match agent_kind {
+        AgentKind::ClaudeCode => {
+            find_claude_session_jsonl(&home.join(".claude"), &agent_session_id)
+        }
+        AgentKind::Codex => {
+            find_codex_session_jsonl(&home.join(".codex").join("sessions"), &agent_session_id)
+        }
+        AgentKind::GeminiCli | AgentKind::Opencode => None,
+    }
+    .map(|path| path.to_string_lossy().to_string());
+
+    Ok(AgentSessionInfo {
+        agent_session_id: Some(agent_session_id),
+        message_path,
+    })
+}
+
+#[tauri::command]
+pub async fn get_agent_session_info(
+    state: State<'_, crate::AppState>,
+    app_session_id: String,
+    agent_kind: String,
+) -> Result<AgentSessionInfo, String> {
+    let agent_kind = AgentKind::from_str(&agent_kind)?;
+    let agent_session_id = get_agent_session_id(state.inner(), &app_session_id, agent_kind)?;
+    resolve_agent_session_info(&home_dir()?, agent_kind, agent_session_id)
+}
+
 #[tauri::command]
 pub async fn load_claude_session_events(
     state: State<'_, crate::AppState>,
@@ -1595,7 +1642,9 @@ mod tests {
     use super::{
         collect_subagent_index_from_dir, convert_codex_item_to_claude_format,
         find_codex_session_jsonl, parse_proxy_port_from_stderr, read_json_stream_values,
+        resolve_agent_session_info,
     };
+    use crate::config::types::AgentKind;
 
     #[test]
     fn find_codex_session_jsonl_matches_only_session_meta_payload_id() {
@@ -1630,6 +1679,35 @@ mod tests {
         assert!(missing.is_none());
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn resolve_agent_session_info_returns_codex_id_and_message_path() {
+        let temp =
+            std::env::temp_dir().join(format!("codemux-agent-info-test-{}", uuid::Uuid::new_v4()));
+        let sessions_dir = temp.join(".codex").join("sessions").join("2026").join("06");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+        let jsonl = sessions_dir.join("rollout.jsonl");
+        std::fs::write(
+            &jsonl,
+            r#"{"type":"session_meta","payload":{"id":"codex-session-1"}}"#,
+        )
+        .unwrap();
+
+        let info = resolve_agent_session_info(
+            &temp,
+            AgentKind::Codex,
+            Some("codex-session-1".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(info.agent_session_id.as_deref(), Some("codex-session-1"));
+        assert_eq!(
+            info.message_path.as_deref(),
+            Some(jsonl.to_string_lossy().as_ref())
+        );
+
+        let _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
