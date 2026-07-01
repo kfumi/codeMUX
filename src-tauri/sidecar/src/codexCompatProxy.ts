@@ -266,28 +266,29 @@ async function handleRequest(
   }
 
   // --- Non-streaming path: wait for complete response ---
-  const completion = await fetchChatCompletion(chatRequest, config);
+  let completion = await fetchChatCompletion(chatRequest, config);
 
   // Emit tool_use events for tool calls so the frontend renders them in real-time.
   // The Codex SDK doesn't emit item events for function_call items from the proxy.
-  const toolCalls = completion.choices?.[0]?.message?.tool_calls;
+  let toolCalls = completion.choices?.[0]?.message?.tool_calls;
   if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-    const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
-    proxyLog(`emitting ${toolCalls.length} tool_use events, sessionId=${activeSessionId || '(empty)'}`);
-    for (const tc of toolCalls) {
-      const name = tc.function?.name ?? 'tool';
-      let args: unknown;
-      try { args = JSON.parse(tc.function?.arguments ?? '{}'); } catch { args = {}; }
-      emitEvent({
-        type: 'assistant',
-        uuid: crypto.randomUUID(),
-        session_id: activeSessionId,
-        message: {
-          role: 'assistant',
-          content: [{ type: 'tool_use', id: tc.id, name, input: args }],
-        },
-        parent_tool_use_id: null,
-      });
+    const streamingToolCalls = chatToolCallsToStreamingToolCalls(toolCalls);
+    const interactiveToolCalls = streamingToolCalls.filter(isInteractiveUserInputToolCall);
+    if (interactiveToolCalls.length > 0) {
+      proxyLog(`non-stream intercepted ${interactiveToolCalls.length} interactive user input tool calls`);
+      completion = await continueAfterNonStreamingInteractiveToolCalls(
+        chatRequest,
+        config,
+        collaborationPolicy,
+        interactiveToolCalls,
+      );
+      toolCalls = completion.choices?.[0]?.message?.tool_calls;
+    } else {
+      const { activeSessionId } = await import('./codexRuntime.js');
+      proxyLog(`emitting ${streamingToolCalls.length} tool_use events, sessionId=${activeSessionId || '(empty)'}`);
+      for (const toolCall of streamingToolCalls) {
+        await emitToolUseEvent(toolCall, parseJsonObject(toolCall.arguments));
+      }
     }
   }
 
@@ -533,10 +534,69 @@ async function handleInteractiveUserInputToolCalls({
   await emitToolUseEventsFromStream(continuationToolCalls);
 }
 
+async function continueAfterNonStreamingInteractiveToolCalls(
+  chatRequest: ReturnType<typeof convertResponsesToChatRequest>,
+  config: ProxyConfig,
+  collaborationPolicy: CodexCollaborationPolicy,
+  interactiveToolCalls: StreamingToolCall[],
+): Promise<Parameters<typeof convertChatCompletionToResponses>[0]> {
+  const responses: unknown[] = [];
+  const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
+
+  for (const toolCall of interactiveToolCalls) {
+    let response: unknown;
+    let isError = false;
+    if (collaborationPolicy.requestUserInputPolicy === 'block') {
+      response = {
+        answers: {},
+        blocked: true,
+        reason_code: 'request_user_input_blocked_in_default_mode',
+      };
+      isError = true;
+      emitEvent(buildRequestUserInputBlockedEvent(toolCall.id || null));
+    } else {
+      const input = parseJsonObject(toolCall.arguments);
+      const questions = parseInteractiveQuestions(input.questions);
+      emitEvent({
+        type: 'ask_user_question',
+        tool_use_id: toolCall.id,
+        questions,
+      });
+      response = await waitForInteractiveToolResponse(toolCall.id);
+    }
+
+    responses.push(response);
+    emitEvent(buildToolResultEvent({
+      sessionId: activeSessionId,
+      toolUseId: toolCall.id,
+      content: stringifyInteractiveToolResponse(response),
+      isError,
+    }));
+  }
+
+  return fetchChatCompletion(
+    buildInteractiveContinuationChatRequest(chatRequest, interactiveToolCalls, responses),
+    config,
+  );
+}
+
 function isInteractiveUserInputToolCall(toolCall: StreamingToolCall): boolean {
   return toolCall.name === 'request_user_input'
     || toolCall.name === 'askUserQuestion'
     || toolCall.name === 'AskUserQuestion';
+}
+
+function chatToolCallsToStreamingToolCalls(toolCalls: unknown[]): StreamingToolCall[] {
+  return toolCalls
+    .filter((toolCall): toolCall is {
+      id?: string;
+      function?: { name?: string; arguments?: string };
+    } => Boolean(toolCall) && typeof toolCall === 'object')
+    .map((toolCall) => ({
+      id: toolCall.id ?? '',
+      name: toolCall.function?.name ?? 'tool',
+      arguments: toolCall.function?.arguments ?? '{}',
+    }));
 }
 
 function parseInteractiveQuestions(value: unknown): InteractiveUserInputQuestion[] {

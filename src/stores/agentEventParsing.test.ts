@@ -40,6 +40,34 @@ describe('parseSdkUserMessage', () => {
     });
   });
 
+  it('strips Codex collaboration policy blocks from live user text', () => {
+    expect(
+      parseSdkUserMessage({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: [
+                '<codemux-codex-collaboration-policy>',
+                'policy_version: codemux-codex-collaboration-policy/v1',
+                'effective_mode: plan',
+                '</codemux-codex-collaboration-policy>',
+                '',
+                'Design the feature.',
+              ].join('\n'),
+            },
+          ],
+        },
+        parent_tool_use_id: null,
+      }),
+    ).toEqual({
+      kind: 'user',
+      data: { content: 'Design the feature.' },
+    });
+  });
+
   it('extracts Claude base64 image blocks as user attachments', () => {
     expect(
       parseSdkUserMessage({
@@ -123,6 +151,38 @@ describe('mapPersistedClaudeMessage', () => {
         'codex',
       ),
     ).toBeNull();
+  });
+
+  it('strips Codex collaboration policy blocks from persisted Codex user history', () => {
+    expect(
+      mapPersistedClaudeMessage(
+        {
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: [
+                  '<codemux-codex-collaboration-policy>',
+                  'policy_version: codemux-codex-collaboration-policy/v1',
+                  'profile: strict-local',
+                  'effective_mode: plan',
+                  '</codemux-codex-collaboration-policy>',
+                  '',
+                  'Design the feature.',
+                ].join('\n'),
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        'codex',
+      ),
+    ).toEqual({
+      kind: 'user',
+      data: { content: 'Design the feature.' },
+    });
   });
 
   it('suppresses Codex injected skill instructions from user-visible history', () => {

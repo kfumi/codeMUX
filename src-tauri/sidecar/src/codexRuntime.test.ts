@@ -296,7 +296,7 @@ describe('CodexSessionRuntime', () => {
 
     expect(options).toMatchObject({
       sandboxMode: 'read-only',
-      approvalPolicy: 'never',
+      approvalPolicy: 'on-request',
       networkAccessEnabled: false,
     });
   });

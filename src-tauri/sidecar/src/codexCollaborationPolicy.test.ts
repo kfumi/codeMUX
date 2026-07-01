@@ -94,6 +94,36 @@ describe('codexCollaborationPolicy', () => {
     })).toBeNull();
   });
 
+  it('detects wrapped and option-prefixed git mutations without blocking read-only branch checks', () => {
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-3',
+      command: 'git -C ../repo commit -m "ship"',
+      status: 'in_progress',
+    })).toBe('item/tool/commandExecution:git commit');
+
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-4',
+      command: 'git -c user.name=bot commit -m "ship"',
+      status: 'in_progress',
+    })).toBe('item/tool/commandExecution:git commit');
+
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-5',
+      command: 'cmd /c "git commit -m ship"',
+      status: 'in_progress',
+    })).toBe('item/tool/commandExecution:git commit');
+
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-6',
+      command: 'git branch --show-current',
+      status: 'in_progress',
+    })).toBeNull();
+  });
+
   it('builds a mode-blocked diagnostic event', () => {
     expect(buildCodexModeBlockedEvent({
       blockedMethod: 'item/tool/requestUserInput',

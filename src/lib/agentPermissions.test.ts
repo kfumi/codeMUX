@@ -45,7 +45,7 @@ describe('agentPermissions', () => {
     expect(mapExecutionModeToPermissionConfig('codex', 'plan')).toEqual({
       kind: 'codex',
       sandboxMode: 'read-only',
-      approvalPolicy: 'never',
+      approvalPolicy: 'on-request',
       networkAccessEnabled: false,
     });
     expect(mapExecutionModeToPermissionConfig('codex', 'confirm_before_edit')).toEqual({
@@ -73,7 +73,7 @@ describe('agentPermissions', () => {
     expect(resolveEffectivePermissionConfig('codex', configured, 'on')).toEqual({
       kind: 'codex',
       sandboxMode: 'read-only',
-      approvalPolicy: 'never',
+      approvalPolicy: 'on-request',
       networkAccessEnabled: false,
     });
   });

@@ -112,7 +112,7 @@ describe('AgentPermissionSelector', () => {
     expect(onPermissionConfigChange).toHaveBeenCalledWith({
       kind: 'codex',
       sandboxMode: 'read-only',
-      approvalPolicy: 'never',
+      approvalPolicy: 'on-request',
       networkAccessEnabled: false,
     });
     expect(onPlanModeChange).toHaveBeenCalledWith('on');
@@ -143,7 +143,7 @@ describe('AgentPermissionSelector', () => {
     fireEvent.click(screen.getByText('计划模式'));
 
     expect(onModeChange).toHaveBeenCalledWith(
-      { kind: 'codex', sandboxMode: 'read-only', approvalPolicy: 'never', networkAccessEnabled: false },
+      { kind: 'codex', sandboxMode: 'read-only', approvalPolicy: 'on-request', networkAccessEnabled: false },
       'on',
     );
     expect(onPermissionConfigChange).not.toHaveBeenCalled();

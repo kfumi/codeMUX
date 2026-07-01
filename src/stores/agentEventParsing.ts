@@ -9,6 +9,8 @@ import type { UserAttachmentPreview } from '../types/agentInput';
 
 export const INTERRUPT_MARKER = '[Request interrupted by user]';
 
+const CODEX_COLLABORATION_POLICY_RE = /<codemux-codex-collaboration-policy>[\s\S]*?<\/codemux-codex-collaboration-policy>\s*/g;
+
 export type ParsedStoreEvent =
   | { kind: 'user'; data: { content: string; attachments?: UserAttachmentPreview[] } }
   | { kind: 'assistant'; data: AgentAssistantMessage }
@@ -52,13 +54,13 @@ export function parseSdkUserMessage(data: Record<string, unknown>): ParsedStoreE
   if (typeof message?.content === 'string') {
     return {
       kind: 'user',
-      data: { content: message.content },
+      data: { content: stripCodexCollaborationPolicyBlock(message.content) },
     };
   }
 
   const textParts = content
     ?.filter((block) => isRecord(block) && block.type === 'text')
-    .map((block) => String(block.text || ''))
+    .map((block) => stripCodexCollaborationPolicyBlock(String(block.text || '')))
     .filter((text) => text.length > 0) ?? [];
   const attachments = extractImageAttachments(content ?? []);
 
@@ -143,6 +145,10 @@ export function isAgentInjectedUserMessage(text: string): boolean {
       normalized.includes('<SUBAGENT-STOP>')
     )
   );
+}
+
+export function stripCodexCollaborationPolicyBlock(text: string): string {
+  return text.replace(CODEX_COLLABORATION_POLICY_RE, '').trimStart();
 }
 
 /**

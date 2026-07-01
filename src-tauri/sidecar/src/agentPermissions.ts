@@ -32,7 +32,7 @@ const CODEX_DEFAULT_PERMISSIONS = {
 
 const CODEX_PLAN_MODE_PERMISSIONS = {
   sandboxMode: 'read-only' as CodexSandboxMode,
-  approvalPolicy: 'never' as CodexApprovalPolicy,
+  approvalPolicy: 'on-request' as CodexApprovalPolicy,
   networkAccessEnabled: false,
 };
 

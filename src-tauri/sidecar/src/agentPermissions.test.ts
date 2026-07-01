@@ -57,7 +57,7 @@ describe('sidecar agent permissions', () => {
 
     expect(buildCodexThreadPermissionOptions(config, 'on')).toEqual({
       sandboxMode: 'read-only',
-      approvalPolicy: 'never',
+      approvalPolicy: 'on-request',
       networkAccessEnabled: false,
     });
   });
@@ -65,8 +65,8 @@ describe('sidecar agent permissions', () => {
   it('describes effective Codex permission options for status logging', () => {
     expect(describeCodexPermissionOptions({
       sandboxMode: 'read-only',
-      approvalPolicy: 'never',
+      approvalPolicy: 'on-request',
       networkAccessEnabled: false,
-    })).toBe('read-only/never/network-off');
+    })).toBe('read-only/on-request/network-off');
   });
 });

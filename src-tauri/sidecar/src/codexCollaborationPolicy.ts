@@ -160,9 +160,10 @@ export function detectPlanModeBlockedMethod(item: unknown): string | null {
   }
 
   if (itemType === 'command_execution' || itemToolType === 'commandexecution') {
-    const tokens = normalizeCommandTokens(unwrapWindowsPowerShellCommand(item.command));
-    if (isRepoMutatingCommandTokens(tokens)) {
-      return `item/tool/commandExecution:${tokens.slice(0, 2).join(' ')}`.trim();
+    const tokens = normalizeCommandTokens(unwrapShellCommand(item.command));
+    const mutatingCommand = getRepoMutatingCommandName(tokens);
+    if (mutatingCommand) {
+      return `item/tool/commandExecution:${mutatingCommand}`;
     }
   }
 
@@ -243,36 +244,54 @@ function normalizeCommandTokens(command: unknown): string[] {
   return [];
 }
 
-function unwrapWindowsPowerShellCommand(command: unknown): unknown {
+function unwrapShellCommand(command: unknown): unknown {
   if (typeof command !== 'string') {
     return command;
   }
 
   const shellMatch = command.match(/^(?:"[^"]*powershell(?:\.exe)?"|[^"\s]*powershell(?:\.exe)?)(?:\s+|$)/i);
-  if (!shellMatch) {
-    return command;
+  if (shellMatch) {
+    const afterExecutable = command.slice(shellMatch[0].length).trim();
+    const commandFlagMatch = afterExecutable.match(/(?:^|\s)-(?:Command|c)\s+([\s\S]+)$/i);
+    if (!commandFlagMatch) {
+      return command;
+    }
+
+    return unwrapQuotedCommand(commandFlagMatch[1].trim());
   }
 
-  const afterExecutable = command.slice(shellMatch[0].length).trim();
-  const commandFlagMatch = afterExecutable.match(/(?:^|\s)-(?:Command|c)\s+([\s\S]+)$/i);
-  if (!commandFlagMatch) {
-    return command;
+  const cmdMatch = command.match(/^(?:"[^"]*cmd(?:\.exe)?"|[^"\s]*cmd(?:\.exe)?)(?:\s+|$)/i);
+  if (cmdMatch) {
+    const afterExecutable = command.slice(cmdMatch[0].length).trim();
+    const commandFlagMatch = afterExecutable.match(/(?:^|\s)\/c\s+([\s\S]+)$/i);
+    if (!commandFlagMatch) {
+      return command;
+    }
+
+    return unwrapQuotedCommand(commandFlagMatch[1].trim());
   }
 
-  const rawInnerCommand = commandFlagMatch[1].trim();
-  if (
-    (rawInnerCommand.startsWith('"') && rawInnerCommand.endsWith('"'))
-    || (rawInnerCommand.startsWith("'") && rawInnerCommand.endsWith("'"))
-  ) {
-    return rawInnerCommand.slice(1, -1);
-  }
-
-  return rawInnerCommand;
+  return command;
 }
 
-function isRepoMutatingCommandTokens(tokens: string[]): boolean {
-  if (tokens[0] !== 'git') return false;
-  return new Set([
+function unwrapQuotedCommand(command: string): string {
+  if (
+    (command.startsWith('"') && command.endsWith('"'))
+    || (command.startsWith("'") && command.endsWith("'"))
+  ) {
+    return command.slice(1, -1);
+  }
+
+  return command;
+}
+
+function getRepoMutatingCommandName(tokens: string[]): string | null {
+  const gitIndex = tokens.indexOf('git');
+  if (gitIndex < 0) return null;
+  const subcommand = findGitSubcommand(tokens.slice(gitIndex + 1));
+  if (!subcommand) return null;
+
+  const mutatingCommands = new Set([
     'add',
     'commit',
     'push',
@@ -292,9 +311,33 @@ function isRepoMutatingCommandTokens(tokens: string[]): boolean {
     'restore',
     'clean',
     'tag',
-    'branch',
-    'fetch',
-  ]).has(tokens[1] ?? '');
+  ]);
+  return mutatingCommands.has(subcommand) ? `git ${subcommand}` : null;
+}
+
+function findGitSubcommand(tokens: string[]): string | null {
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (!token.startsWith('-')) {
+      return token;
+    }
+
+    if (token === '-c' || token === '-C' || token === '--git-dir' || token === '--work-tree') {
+      index++;
+      continue;
+    }
+
+    if (
+      token.startsWith('-c=') ||
+      token.startsWith('-C=') ||
+      token.startsWith('--git-dir=') ||
+      token.startsWith('--work-tree=')
+    ) {
+      continue;
+    }
+  }
+
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

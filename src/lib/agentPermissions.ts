@@ -41,7 +41,7 @@ const CODEX_DEFAULT_PERMISSIONS: Omit<CodexPermissionConfig, 'kind'> = {
 
 const CODEX_PLAN_MODE_PERMISSIONS: Omit<CodexPermissionConfig, 'kind'> = {
   sandboxMode: 'read-only',
-  approvalPolicy: 'never',
+  approvalPolicy: 'on-request',
   networkAccessEnabled: false,
 };
 

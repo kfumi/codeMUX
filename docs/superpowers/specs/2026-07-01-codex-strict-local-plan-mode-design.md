@@ -6,7 +6,7 @@ codeMUX currently implements Codex plan mode as a lightweight combination of:
 
 - `planMode: "on" | "off"` stored on the app session.
 - A `$plan` text prefix added in the sidecar before `Thread.runStreamed()`.
-- Codex SDK thread permissions switched to `read-only`, `never`, and `network-off` while plan mode is on.
+- Codex SDK thread permissions switched to `read-only`, `on-request`, and `network-off` while plan mode is on, matching desktop-cc-gui strict-local.
 
 `desktop-cc-gui` uses a stronger collaboration-mode model. It treats plan mode as a runtime policy with normalized `code` and `plan` modes, injected developer instructions, request-user-input rules, thread-scoped state, and strict-local enforcement. This design adapts that behavior to codeMUX's current React + Tauri + TypeScript sidecar architecture without switching away from the OpenAI Codex SDK.
 
@@ -115,7 +115,7 @@ Blocked in `plan` mode:
 
 When blocked, the runtime will emit a diagnostic event and avoid presenting the action as successful. If the SDK sandbox already denies the operation, the sidecar will translate that denial into the same user-facing mode-blocked shape.
 
-The thread options will continue to enforce `read-only`, `never`, and `network-off` in plan mode as a second line of defense.
+The thread options will continue to enforce `read-only`, `on-request`, and `network-off` in plan mode as a second line of defense.
 
 ### 5. Frontend State Mapping
 
