@@ -1,6 +1,6 @@
 [package]
 name = "codemux"
-version = "0.0.4"
+version = "0.0.5"
 description = "codeMUX - AI编码工具聚合平台"
 authors = ["you"]
 edition = "2021"
