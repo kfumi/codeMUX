@@ -124,6 +124,64 @@ describe('codexCollaborationPolicy', () => {
     })).toBeNull();
   });
 
+  it('blocks mutating git branch commands without blocking read-only searches that mention git', () => {
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-7',
+      command: 'git branch new-plan',
+      status: 'in_progress',
+    })).toBe('item/tool/commandExecution:git branch');
+
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-8',
+      command: 'git branch -D old-plan',
+      status: 'in_progress',
+    })).toBe('item/tool/commandExecution:git branch');
+
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-9',
+      command: 'git branch -M old-plan new-plan',
+      status: 'in_progress',
+    })).toBe('item/tool/commandExecution:git branch');
+
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-10',
+      command: 'git status --short && git commit -m ship',
+      status: 'in_progress',
+    })).toBe('item/tool/commandExecution:git commit');
+
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-11',
+      command: 'git status; git commit -m ship',
+      status: 'in_progress',
+    })).toBe('item/tool/commandExecution:git commit');
+
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-12',
+      command: 'git status&& git commit -m ship',
+      status: 'in_progress',
+    })).toBe('item/tool/commandExecution:git commit');
+
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-13',
+      command: 'rg "git commit"',
+      status: 'in_progress',
+    })).toBeNull();
+
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-14',
+      command: 'git branch --list "feature/*"',
+      status: 'in_progress',
+    })).toBeNull();
+  });
+
   it('builds a mode-blocked diagnostic event', () => {
     expect(buildCodexModeBlockedEvent({
       blockedMethod: 'item/tool/requestUserInput',

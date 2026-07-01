@@ -158,6 +158,7 @@ async function handleRequest(
   }
   const reasoningConfig = inferReasoningConfig(requestBody.model, config.baseUrl, config.providerName ?? '');
   const chatRequest = convertResponsesToChatRequest(requestBody, historyStore, reasoningConfig);
+  let effectiveChatRequest = chatRequest;
   // Extract and remove the metadata field so it doesn't get sent to the upstream API
   const previousMessageCount = (chatRequest as Record<string, unknown>)._previousMessageCount as number ?? 0;
   delete (chatRequest as Record<string, unknown>)._previousMessageCount;
@@ -237,6 +238,7 @@ async function handleRequest(
           res,
           chatRequest,
           config,
+          historyStore,
           collaborationPolicy,
           interactiveToolCalls,
           reasoningEnabled: reasoningConfig?.supports_thinking ?? false,
@@ -276,12 +278,14 @@ async function handleRequest(
     const interactiveToolCalls = streamingToolCalls.filter(isInteractiveUserInputToolCall);
     if (interactiveToolCalls.length > 0) {
       proxyLog(`non-stream intercepted ${interactiveToolCalls.length} interactive user input tool calls`);
-      completion = await continueAfterNonStreamingInteractiveToolCalls(
+      const continuation = await continueAfterNonStreamingInteractiveToolCalls(
         chatRequest,
         config,
         collaborationPolicy,
         interactiveToolCalls,
       );
+      completion = continuation.completion;
+      effectiveChatRequest = continuation.chatRequest;
       toolCalls = completion.choices?.[0]?.message?.tool_calls;
     } else {
       const { activeSessionId } = await import('./codexRuntime.js');
@@ -299,21 +303,16 @@ async function handleRequest(
   // already contains previousMessages prepended by convertResponsesToChatRequest,
   // and storing those would cause exponential duplication on the next request.
   const historyMessages: Array<{ role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string }> = [];
-  for (const msg of chatRequest.messages.slice(previousMessageCount)) {
+  for (const msg of effectiveChatRequest.messages.slice(previousMessageCount)) {
     historyMessages.push(msg as { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string });
   }
-  // Build assistant message with original tool_call IDs from the chat request,
-  // not from compatResponse.output which uses generated IDs.
+  // Store the final assistant message from this turn. Synthetic tool-call
+  // assistant messages are already included in effectiveChatRequest.
   const assistantMsg: { role: string; content?: string; tool_calls?: unknown[] } = { role: 'assistant' };
   if (compatResponse.output_text) {
     assistantMsg.content = compatResponse.output_text;
   }
-  // Find the assistant message from chatRequest.messages that has tool_calls
-  // (the last assistant message in the messages array should have them)
-  const lastAssistantMsg = [...chatRequest.messages].reverse().find((m) => m.role === 'assistant' && m.tool_calls);
-  if (lastAssistantMsg?.tool_calls) {
-    assistantMsg.tool_calls = lastAssistantMsg.tool_calls;
-  } else if (Array.isArray(completion.choices?.[0]?.message?.tool_calls) && completion.choices[0].message.tool_calls.length > 0) {
+  if (Array.isArray(completion.choices?.[0]?.message?.tool_calls) && completion.choices[0].message.tool_calls.length > 0) {
     assistantMsg.tool_calls = completion.choices[0].message.tool_calls;
   }
   historyMessages.push(assistantMsg);
@@ -439,6 +438,7 @@ async function handleInteractiveUserInputToolCalls({
   res,
   chatRequest,
   config,
+  historyStore,
   collaborationPolicy,
   interactiveToolCalls,
   reasoningEnabled,
@@ -447,91 +447,79 @@ async function handleInteractiveUserInputToolCalls({
   res: ServerResponse;
   chatRequest: ReturnType<typeof convertResponsesToChatRequest>;
   config: ProxyConfig;
+  historyStore: CodexHistoryStore;
   collaborationPolicy: CodexCollaborationPolicy;
   interactiveToolCalls: StreamingToolCall[];
   reasoningEnabled: boolean;
   toolContext: Map<string, { kind: 'function' | 'custom' | 'tool_search'; name: string }>;
 }): Promise<void> {
-  const responses: unknown[] = [];
-  const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
-
-  for (const toolCall of interactiveToolCalls) {
-    if (collaborationPolicy.requestUserInputPolicy === 'block') {
-      const blockedResponse = {
-        answers: {},
-        blocked: true,
-        reason_code: 'request_user_input_blocked_in_default_mode',
-      };
-      responses.push(blockedResponse);
-      emitEvent(buildRequestUserInputBlockedEvent(toolCall.id || null));
-      emitEvent(buildToolResultEvent({
-        sessionId: activeSessionId,
-        toolUseId: toolCall.id,
-        content: stringifyInteractiveToolResponse(blockedResponse),
-        isError: true,
-      }));
-      continue;
-    }
-
-    const input = parseJsonObject(toolCall.arguments);
-    const questions = parseInteractiveQuestions(input.questions);
-    emitEvent({
-      type: 'ask_user_question',
-      tool_use_id: toolCall.id,
-      questions,
-    });
-
-    const response = await waitForInteractiveToolResponse(toolCall.id);
-    responses.push(response);
-    emitEvent(buildToolResultEvent({
-      sessionId: activeSessionId,
-      toolUseId: toolCall.id,
-      content: stringifyInteractiveToolResponse(response),
-    }));
-  }
-
-  const continuationRequest = buildInteractiveContinuationChatRequest(
+  let continuationRequest = buildInteractiveContinuationChatRequest(
     chatRequest,
     interactiveToolCalls,
-    responses,
+    await resolveInteractiveUserInputToolCalls(interactiveToolCalls, collaborationPolicy),
   );
-  const responseId = `resp_${crypto.randomUUID()}`;
-  const messageId = `msg_${crypto.randomUUID()}`;
-  const reasoningId = `rs_${crypto.randomUUID()}`;
-  const { chunks, response: upstreamRes } = await streamChatCompletion(continuationRequest, config);
-  const responsesEvents = convertChatStreamToResponsesEvents(chunks, {
-    responseId,
-    model: upstreamRes.headers.get('x-model') || continuationRequest.model || 'unknown',
-    reasoningId,
-    messageId,
-    reasoningEnabled,
-    toolContext,
-  });
 
-  const events: Array<Record<string, unknown>> = [];
-  const continuationToolCalls: StreamingToolCall[] = [];
-  let eventCount = 0;
-  for await (const event of responsesEvents) {
-    eventCount++;
-    logStreamingEvent(event, eventCount);
-    events.push(event);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const responseId = `resp_${crypto.randomUUID()}`;
+    const messageId = `msg_${crypto.randomUUID()}`;
+    const reasoningId = `rs_${crypto.randomUUID()}`;
+    const { chunks, response: upstreamRes } = await streamChatCompletion(continuationRequest, config);
+    const responsesEvents = convertChatStreamToResponsesEvents(chunks, {
+      responseId,
+      model: upstreamRes.headers.get('x-model') || continuationRequest.model || 'unknown',
+      reasoningId,
+      messageId,
+      reasoningEnabled,
+      toolContext,
+    });
 
-    if (event.type === 'response.output_item.done') {
-      const item = event.item as Record<string, unknown> | undefined;
-      if (item?.type === 'function_call') {
-        continuationToolCalls.push({
-          id: String(item.call_id ?? item.id ?? ''),
-          name: String(item.name ?? ''),
-          namespace: typeof item.namespace === 'string' ? item.namespace : undefined,
-          arguments: String(item.arguments ?? ''),
-        });
+    const events: Array<Record<string, unknown>> = [];
+    const continuationToolCalls: StreamingToolCall[] = [];
+    let eventCount = 0;
+    for await (const event of responsesEvents) {
+      eventCount++;
+      logStreamingEvent(event, eventCount);
+      events.push(event);
+
+      if (event.type === 'response.output_item.done') {
+        const item = event.item as Record<string, unknown> | undefined;
+        if (item?.type === 'function_call') {
+          const call = {
+            id: String(item.call_id ?? item.id ?? ''),
+            name: String(item.name ?? ''),
+            namespace: typeof item.namespace === 'string' ? item.namespace : undefined,
+            arguments: String(item.arguments ?? ''),
+          };
+          continuationToolCalls.push(call);
+          if (call.id) {
+            historyStore.recordStreamingToolCall(responseId, {
+              callId: call.id,
+              name: call.name,
+              namespace: call.namespace,
+              arguments: call.arguments,
+            });
+          }
+        }
       }
     }
+
+    const nextInteractiveToolCalls = continuationToolCalls.filter(isInteractiveUserInputToolCall);
+    if (nextInteractiveToolCalls.length === 0) {
+      forwardResponsesSseEvents(res, events);
+      proxyLog(`interactive continuation completed: ${eventCount} events forwarded`);
+      await emitToolUseEventsFromStream(continuationToolCalls);
+      return;
+    }
+
+    proxyLog(`stream intercepted ${nextInteractiveToolCalls.length} continuation interactive user input tool calls`);
+    continuationRequest = buildInteractiveContinuationChatRequest(
+      continuationRequest,
+      nextInteractiveToolCalls,
+      await resolveInteractiveUserInputToolCalls(nextInteractiveToolCalls, collaborationPolicy),
+    );
   }
 
-  forwardResponsesSseEvents(res, events);
-  proxyLog(`interactive continuation completed: ${eventCount} events forwarded`);
-  await emitToolUseEventsFromStream(continuationToolCalls);
+  throw new Error('Too many consecutive interactive user input tool calls.');
 }
 
 async function continueAfterNonStreamingInteractiveToolCalls(
@@ -539,7 +527,42 @@ async function continueAfterNonStreamingInteractiveToolCalls(
   config: ProxyConfig,
   collaborationPolicy: CodexCollaborationPolicy,
   interactiveToolCalls: StreamingToolCall[],
-): Promise<Parameters<typeof convertChatCompletionToResponses>[0]> {
+): Promise<{
+  completion: Parameters<typeof convertChatCompletionToResponses>[0];
+  chatRequest: ReturnType<typeof convertResponsesToChatRequest>;
+}> {
+  let continuationRequest = buildInteractiveContinuationChatRequest(
+    chatRequest,
+    interactiveToolCalls,
+    await resolveInteractiveUserInputToolCalls(interactiveToolCalls, collaborationPolicy),
+  );
+
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const completion = await fetchChatCompletion(continuationRequest, config);
+    const toolCalls = completion.choices?.[0]?.message?.tool_calls;
+    const nextInteractiveToolCalls = Array.isArray(toolCalls)
+      ? chatToolCallsToStreamingToolCalls(toolCalls).filter(isInteractiveUserInputToolCall)
+      : [];
+
+    if (nextInteractiveToolCalls.length === 0) {
+      return { completion, chatRequest: continuationRequest };
+    }
+
+    proxyLog(`non-stream intercepted ${nextInteractiveToolCalls.length} continuation interactive user input tool calls`);
+    continuationRequest = buildInteractiveContinuationChatRequest(
+      continuationRequest,
+      nextInteractiveToolCalls,
+      await resolveInteractiveUserInputToolCalls(nextInteractiveToolCalls, collaborationPolicy),
+    );
+  }
+
+  throw new Error('Too many consecutive interactive user input tool calls.');
+}
+
+async function resolveInteractiveUserInputToolCalls(
+  interactiveToolCalls: StreamingToolCall[],
+  collaborationPolicy: CodexCollaborationPolicy,
+): Promise<unknown[]> {
   const responses: unknown[] = [];
   const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
 
@@ -574,10 +597,7 @@ async function continueAfterNonStreamingInteractiveToolCalls(
     }));
   }
 
-  return fetchChatCompletion(
-    buildInteractiveContinuationChatRequest(chatRequest, interactiveToolCalls, responses),
-    config,
-  );
+  return responses;
 }
 
 function isInteractiveUserInputToolCall(toolCall: StreamingToolCall): boolean {

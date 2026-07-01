@@ -232,16 +232,25 @@ function normalizeCommandTokens(command: unknown): string[] {
   if (typeof command === 'string') {
     return command
       .split(/\s+/)
+      .flatMap(splitShellSeparators)
       .map((token) => token.trim().replace(/^["']|["']$/g, '').toLowerCase())
       .filter(Boolean);
   }
   if (Array.isArray(command)) {
     return command
       .filter((token): token is string => typeof token === 'string')
+      .flatMap(splitShellSeparators)
       .map((token) => token.trim().replace(/^["']|["']$/g, '').toLowerCase())
       .filter(Boolean);
   }
   return [];
+}
+
+function splitShellSeparators(token: string): string[] {
+  return token
+    .split(/(&&|\|\||[;|])/)
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 
 function unwrapShellCommand(command: unknown): unknown {
@@ -286,11 +295,52 @@ function unwrapQuotedCommand(command: string): string {
 }
 
 function getRepoMutatingCommandName(tokens: string[]): string | null {
-  const gitIndex = tokens.indexOf('git');
-  if (gitIndex < 0) return null;
-  const subcommand = findGitSubcommand(tokens.slice(gitIndex + 1));
-  if (!subcommand) return null;
+  for (const segment of splitShellCommandSegments(tokens)) {
+    const gitIndex = findGitExecutableIndex(segment);
+    if (gitIndex < 0) continue;
 
+    const subcommand = findGitSubcommand(segment.slice(gitIndex + 1));
+    if (!subcommand) continue;
+
+    const mutatingCommand = classifyGitSubcommandMutation(subcommand, segment.slice(gitIndex + 1));
+    if (mutatingCommand) return mutatingCommand;
+  }
+
+  return null;
+}
+
+function splitShellCommandSegments(tokens: string[]): string[][] {
+  const segments: string[][] = [];
+  let current: string[] = [];
+
+  for (const token of tokens) {
+    if (token === '&&' || token === '||' || token === ';' || token === '|') {
+      if (current.length > 0) {
+        segments.push(current);
+        current = [];
+      }
+      continue;
+    }
+    current.push(token);
+  }
+
+  if (current.length > 0) {
+    segments.push(current);
+  }
+
+  return segments;
+}
+
+function findGitExecutableIndex(tokens: string[]): number {
+  const firstCommandTokenIndex = tokens.findIndex((token) => !isShellAssignment(token));
+  return tokens[firstCommandTokenIndex] === 'git' ? firstCommandTokenIndex : -1;
+}
+
+function isShellAssignment(token: string): boolean {
+  return /^[a-z_][a-z0-9_]*=.*$/i.test(token);
+}
+
+function classifyGitSubcommandMutation(subcommand: string, gitArgs: string[]): string | null {
   const mutatingCommands = new Set([
     'add',
     'commit',
@@ -312,14 +362,89 @@ function getRepoMutatingCommandName(tokens: string[]): string | null {
     'clean',
     'tag',
   ]);
-  return mutatingCommands.has(subcommand) ? `git ${subcommand}` : null;
+  if (mutatingCommands.has(subcommand)) return `git ${subcommand}`;
+  if (subcommand === 'branch' && isMutatingGitBranchCommand(gitArgs)) return 'git branch';
+  return null;
+}
+
+function isMutatingGitBranchCommand(gitArgs: string[]): boolean {
+  const branchIndex = findGitSubcommandIndex(gitArgs);
+  if (branchIndex < 0) return false;
+  const branchArgs = gitArgs.slice(branchIndex + 1);
+  if (branchArgs.length === 0) return false;
+
+  const readOnlyLongOptions = new Set([
+    '--all',
+    '--contains',
+    '--format',
+    '--list',
+    '--merged',
+    '--no-contains',
+    '--no-merged',
+    '--points-at',
+    '--remotes',
+    '--show-current',
+    '--sort',
+    '--verbose',
+  ]);
+  const mutatingLongOptions = new Set([
+    '--copy',
+    '--create-reflog',
+    '--delete',
+    '--edit-description',
+    '--force',
+    '--move',
+    '--set-upstream-to',
+    '--track',
+    '--unset-upstream',
+  ]);
+  const listModeOptions = new Set([
+    '--all',
+    '--contains',
+    '--list',
+    '--merged',
+    '--no-contains',
+    '--no-merged',
+    '--points-at',
+    '--remotes',
+  ]);
+  let readOnlyListMode = false;
+
+  for (let index = 0; index < branchArgs.length; index++) {
+    const token = branchArgs[index];
+    if (mutatingLongOptions.has(token) || [...mutatingLongOptions].some((option) => token.startsWith(`${option}=`))) {
+      return true;
+    }
+    if (readOnlyLongOptions.has(token) || [...readOnlyLongOptions].some((option) => token.startsWith(`${option}=`))) {
+      if (listModeOptions.has(token) || [...listModeOptions].some((option) => token.startsWith(`${option}=`))) {
+        readOnlyListMode = true;
+      }
+      if (token === '--format' || token === '--sort' || token === '--points-at') {
+        index++;
+      }
+      continue;
+    }
+    if (token.startsWith('-')) {
+      if (/[dDmMcCfFu]/.test(token.slice(1))) return true;
+      continue;
+    }
+
+    return !readOnlyListMode;
+  }
+
+  return false;
 }
 
 function findGitSubcommand(tokens: string[]): string | null {
+  const index = findGitSubcommandIndex(tokens);
+  return index < 0 ? null : tokens[index];
+}
+
+function findGitSubcommandIndex(tokens: string[]): number {
   for (let index = 0; index < tokens.length; index++) {
     const token = tokens[index];
     if (!token.startsWith('-')) {
-      return token;
+      return index;
     }
 
     if (token === '-c' || token === '-C' || token === '--git-dir' || token === '--work-tree') {
@@ -337,7 +462,7 @@ function findGitSubcommand(tokens: string[]): string | null {
     }
   }
 
-  return null;
+  return -1;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

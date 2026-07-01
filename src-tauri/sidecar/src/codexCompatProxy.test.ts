@@ -710,6 +710,172 @@ describe('createCodexCompatProxyServer', () => {
     );
   });
 
+  it('records streaming continuation tool calls after bridged request_user_input', async () => {
+    setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({ planMode: 'on' }));
+    const upstreamBodies: any[] = [];
+    const upstream = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      upstreamBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+
+      res.setHeader('content-type', 'text/event-stream');
+      res.setHeader('cache-control', 'no-cache');
+      const send = (data: Record<string, unknown>) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+      if (upstreamBodies.length === 1) {
+        send({
+          id: 'chunk-question',
+          model: 'mimo-v2-pro',
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: 'call_question',
+                type: 'function',
+                function: {
+                  name: 'request_user_input',
+                  arguments: JSON.stringify({
+                    questions: [{
+                      header: 'Scope',
+                      id: 'scope',
+                      question: 'Which scope?',
+                      options: [{ label: 'A', description: 'Use A' }],
+                    }],
+                  }),
+                },
+              }],
+            },
+            finish_reason: 'tool_calls',
+          }],
+        });
+        res.end('data: [DONE]\n\n');
+        return;
+      }
+
+      if (upstreamBodies.length === 2) {
+        send({
+          id: 'chunk-tool',
+          model: 'mimo-v2-pro',
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: 'call_shell_after_question',
+                type: 'function',
+                function: {
+                  name: 'shell_command',
+                  arguments: '{"command":"pwd"}',
+                },
+              }],
+            },
+            finish_reason: 'tool_calls',
+          }],
+        });
+        res.end('data: [DONE]\n\n');
+        return;
+      }
+
+      send({
+        id: 'chunk-final',
+        model: 'mimo-v2-pro',
+        choices: [{ delta: { role: 'assistant', content: 'Tool result preserved.' }, finish_reason: null }],
+      });
+      send({
+        id: 'chunk-done',
+        model: 'mimo-v2-pro',
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      });
+      res.end('data: [DONE]\n\n');
+    });
+
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const proxy = await createCodexCompatProxyServer({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+    }, 0);
+    cleanups.push(() => proxy.close());
+
+    const responsePromise = fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'mimo-v2-pro',
+        stream: true,
+        input: [{ role: 'user', content: 'Ask then run a command' }],
+        tools: [
+          {
+            type: 'function',
+            name: 'request_user_input',
+            description: 'Ask the user',
+            parameters: { type: 'object', properties: {} },
+          },
+          {
+            type: 'function',
+            name: 'shell_command',
+            description: 'Run a command',
+            parameters: { type: 'object', properties: {} },
+          },
+        ],
+      }),
+    });
+
+    await waitUntil(() => stdoutWrites.some((line) => line.includes('"type":"ask_user_question"')));
+    expect(resolveInteractiveToolResponse('call_question', ['A'])).toBe(true);
+
+    const firstResponse = await responsePromise;
+    const firstBody = await firstResponse.text();
+    const completedEvents = firstBody
+      .split('\n')
+      .filter((line) => line.startsWith('data: {'))
+      .map((line) => JSON.parse(line.slice('data: '.length)))
+      .filter((event) => event.type === 'response.completed');
+    const previousResponseId = completedEvents.at(-1)?.response?.id;
+
+    expect(firstBody).toContain('call_shell_after_question');
+    expect(typeof previousResponseId).toBe('string');
+
+    await fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'mimo-v2-pro',
+        stream: true,
+        previous_response_id: previousResponseId,
+        input: [{
+          type: 'function_call_output',
+          call_id: 'call_shell_after_question',
+          output: 'D:/project/ai-code/codeMUX',
+        }],
+      }),
+    });
+
+    expect(upstreamBodies).toHaveLength(3);
+    expect(upstreamBodies[2].messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          tool_calls: [
+            expect.objectContaining({
+              id: 'call_shell_after_question',
+              function: expect.objectContaining({
+                name: 'shell_command',
+                arguments: '{"command":"pwd"}',
+              }),
+            }),
+          ],
+        }),
+        expect.objectContaining({
+          role: 'tool',
+          tool_call_id: 'call_shell_after_question',
+          content: 'D:/project/ai-code/codeMUX',
+        }),
+      ]),
+    );
+  });
+
   it('blocks request_user_input tool calls when strict-local code mode is active', async () => {
     const upstreamBodies: any[] = [];
     const upstream = createServer(async (req, res) => {
@@ -952,6 +1118,121 @@ describe('createCodexCompatProxyServer', () => {
     );
   });
 
+  it('re-applies code-mode request_user_input blocking to streaming continuations', async () => {
+    const upstreamBodies: any[] = [];
+    const upstream = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      upstreamBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+
+      res.setHeader('content-type', 'text/event-stream');
+      res.setHeader('cache-control', 'no-cache');
+      const send = (data: Record<string, unknown>) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+      if (upstreamBodies.length <= 2) {
+        const callId = upstreamBodies.length === 1 ? 'call_first_question' : 'call_second_question';
+        send({
+          id: `chunk-${callId}`,
+          model: 'mimo-v2-pro',
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: callId,
+                type: 'function',
+                function: {
+                  name: 'request_user_input',
+                  arguments: JSON.stringify({
+                    questions: [{
+                      header: 'Scope',
+                      id: 'scope',
+                      question: 'Which scope?',
+                      options: [{ label: 'A', description: 'Use A' }],
+                    }],
+                  }),
+                },
+              }],
+            },
+            finish_reason: 'tool_calls',
+          }],
+        });
+        res.end('data: [DONE]\n\n');
+        return;
+      }
+
+      send({
+        id: 'chunk-answer',
+        model: 'mimo-v2-pro',
+        choices: [{ delta: { role: 'assistant', content: 'Finished after blocked questions.' }, finish_reason: null }],
+      });
+      send({
+        id: 'chunk-done',
+        model: 'mimo-v2-pro',
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      });
+      res.end('data: [DONE]\n\n');
+    });
+
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const proxy = await createCodexCompatProxyServer({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+    }, 0);
+    cleanups.push(() => proxy.close());
+
+    const response = await fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'mimo-v2-pro',
+        stream: true,
+        input: [{ role: 'user', content: 'Ask me twice' }],
+        tools: [{
+          type: 'function',
+          name: 'request_user_input',
+          description: 'Ask the user',
+          parameters: { type: 'object', properties: {} },
+        }],
+      }),
+    });
+
+    const body = await response.text();
+    const blockedEvents = stdoutWrites
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line))
+      .filter((event) => event.type === 'sidecar_stream_status');
+
+    expect(body).toContain('Finished after blocked questions.');
+    expect(body).not.toContain('request_user_input');
+    expect(blockedEvents).toEqual([
+      expect.objectContaining({
+        mode_blocked: expect.objectContaining({ request_id: 'call_first_question' }),
+      }),
+      expect.objectContaining({
+        mode_blocked: expect.objectContaining({ request_id: 'call_second_question' }),
+      }),
+    ]);
+    expect(upstreamBodies).toHaveLength(3);
+    expect(upstreamBodies[2].messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'tool',
+          tool_call_id: 'call_first_question',
+          content: expect.stringContaining('request_user_input_blocked_in_default_mode'),
+        }),
+        expect.objectContaining({
+          role: 'tool',
+          tool_call_id: 'call_second_question',
+          content: expect.stringContaining('request_user_input_blocked_in_default_mode'),
+        }),
+      ]),
+    );
+  });
+
   it('bridges non-streaming request_user_input tool calls in strict-local plan mode', async () => {
     setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({ planMode: 'on' }));
     const upstreamBodies: any[] = [];
@@ -1066,6 +1347,126 @@ describe('createCodexCompatProxyServer', () => {
         }),
       ]),
     );
+  });
+
+  it('re-applies plan-mode request_user_input bridging to non-streaming continuations and stores the synthetic history', async () => {
+    setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({ planMode: 'on' }));
+    const upstreamBodies: any[] = [];
+    const upstream = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      upstreamBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+
+      res.setHeader('content-type', 'application/json');
+      if (upstreamBodies.length <= 2) {
+        const callId = upstreamBodies.length === 1 ? 'call_first_question' : 'call_second_question';
+        res.end(JSON.stringify({
+          model: 'mimo-v2-pro',
+          choices: [{
+            message: {
+              role: 'assistant',
+              content: '',
+              tool_calls: [{
+                id: callId,
+                type: 'function',
+                function: {
+                  name: 'request_user_input',
+                  arguments: JSON.stringify({
+                    questions: [{
+                      header: 'Scope',
+                      id: 'scope',
+                      question: `Question ${upstreamBodies.length}?`,
+                      options: [{ label: `Answer ${upstreamBodies.length}`, description: 'Use it' }],
+                    }],
+                  }),
+                },
+              }],
+            },
+            finish_reason: 'tool_calls',
+          }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        }));
+        return;
+      }
+
+      res.end(JSON.stringify({
+        model: 'mimo-v2-pro',
+        choices: [{
+          message: {
+            role: 'assistant',
+            content: upstreamBodies.length === 3 ? 'Thanks for both answers.' : 'History preserved.',
+          },
+          finish_reason: 'stop',
+        }],
+        usage: { prompt_tokens: 11, completion_tokens: 4, total_tokens: 15 },
+      }));
+    });
+
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const proxy = await createCodexCompatProxyServer({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+    }, 0);
+    cleanups.push(() => proxy.close());
+
+    const responsePromise = fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'mimo-v2-pro',
+        stream: false,
+        input: [{ role: 'user', content: 'Ask twice' }],
+        tools: [{
+          type: 'function',
+          name: 'request_user_input',
+          description: 'Ask the user',
+          parameters: { type: 'object', properties: {} },
+        }],
+      }),
+    });
+
+    await waitUntil(() => stdoutWrites.some((line) => line.includes('call_first_question')));
+    expect(resolveInteractiveToolResponse('call_first_question', ['Answer 1'])).toBe(true);
+    await waitUntil(() => stdoutWrites.some((line) => line.includes('call_second_question')));
+    expect(resolveInteractiveToolResponse('call_second_question', ['Answer 2'])).toBe(true);
+
+    const firstResponse = await responsePromise;
+    const firstJson = await firstResponse.json();
+
+    expect(firstJson.output_text).toBe('Thanks for both answers.');
+    expect(upstreamBodies).toHaveLength(3);
+    expect(upstreamBodies[2].messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'tool', tool_call_id: 'call_first_question', content: JSON.stringify(['Answer 1']) }),
+        expect.objectContaining({ role: 'tool', tool_call_id: 'call_second_question', content: JSON.stringify(['Answer 2']) }),
+      ]),
+    );
+
+    await fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'mimo-v2-pro',
+        stream: false,
+        previous_response_id: firstJson.id,
+        input: [{ role: 'user', content: 'Continue' }],
+      }),
+    });
+
+    expect(upstreamBodies).toHaveLength(4);
+    expect(upstreamBodies[3].messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'tool', tool_call_id: 'call_first_question', content: JSON.stringify(['Answer 1']) }),
+        expect.objectContaining({ role: 'tool', tool_call_id: 'call_second_question', content: JSON.stringify(['Answer 2']) }),
+        expect.objectContaining({ role: 'assistant', content: 'Thanks for both answers.' }),
+        expect.objectContaining({ role: 'user', content: 'Continue' }),
+      ]),
+    );
+    const finalAssistantMessages = upstreamBodies[3].messages.filter((message: any) => message.role === 'assistant' && message.content === 'Thanks for both answers.');
+    expect(finalAssistantMessages).toHaveLength(1);
+    expect(finalAssistantMessages[0]).not.toHaveProperty('tool_calls');
   });
 
   it('uses the request-start policy snapshot for delayed request_user_input handling', async () => {
