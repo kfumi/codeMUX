@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ThreadEvent } from '@openai/codex-sdk';
 
 import { buildCodexCliConfig, CodexSessionRuntime } from './codexRuntime.js';
+import { resolveCodexCollaborationPolicy } from './codexCollaborationPolicy.js';
 import { buildCodexToolUseContent } from './runtimeEvents.js';
 import { flushStreamEvents } from './streamEventBatcher.js';
 
@@ -685,6 +686,158 @@ describe('CodexSessionRuntime', () => {
           },
           parent_tool_use_id: null,
         },
+      ]);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it('blocks Codex file_change items while plan mode is active', () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        config: {
+          sessionId: string;
+          cwd: string;
+          model: string;
+          planMode: 'on';
+          collaborationPolicy: ReturnType<typeof resolveCodexCollaborationPolicy>;
+        };
+      }).config = {
+        sessionId: 'session-1',
+        cwd: 'D:/repo',
+        model: 'gpt-5',
+        planMode: 'on',
+        collaborationPolicy: resolveCodexCollaborationPolicy({ planMode: 'on' }),
+      };
+
+      const emitItemEvent = (
+        runtime as unknown as {
+          emitItemEvent: (
+            sessionId: string,
+            eventType: 'item.started' | 'item.updated' | 'item.completed',
+            item: ThreadEvent extends { item: infer T } ? T : never,
+            emitFailure: (message: string) => void,
+          ) => void;
+        }
+      ).emitItemEvent.bind(runtime);
+
+      emitItemEvent(
+        'session-1',
+        'item.completed',
+        {
+          id: 'patch-1',
+          type: 'file_change',
+          changes: [{ path: 'src/app.ts', kind: 'update' }],
+          status: 'completed',
+        },
+        () => {},
+      );
+
+      const emittedEvents = writes
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line));
+
+      expect(emittedEvents).toEqual([
+        expect.objectContaining({
+          type: 'sidecar_stream_status',
+          mode_blocked: expect.objectContaining({
+            effective_mode: 'plan',
+            reason_code: 'plan_readonly_violation',
+            request_id: 'patch-1',
+          }),
+        }),
+      ]);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it('blocks repo-mutating Codex commands while plan mode is active', () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        config: {
+          sessionId: string;
+          cwd: string;
+          model: string;
+          planMode: 'on';
+          collaborationPolicy: ReturnType<typeof resolveCodexCollaborationPolicy>;
+        };
+      }).config = {
+        sessionId: 'session-1',
+        cwd: 'D:/repo',
+        model: 'gpt-5',
+        planMode: 'on',
+        collaborationPolicy: resolveCodexCollaborationPolicy({ planMode: 'on' }),
+      };
+
+      const emitItemEvent = (
+        runtime as unknown as {
+          emitItemEvent: (
+            sessionId: string,
+            eventType: 'item.started' | 'item.updated' | 'item.completed',
+            item: ThreadEvent extends { item: infer T } ? T : never,
+            emitFailure: (message: string) => void,
+          ) => void;
+        }
+      ).emitItemEvent.bind(runtime);
+
+      emitItemEvent(
+        'session-1',
+        'item.started',
+        {
+          id: 'cmd-1',
+          type: 'command_execution',
+          command: 'git commit -m "ship"',
+          aggregated_output: '',
+          status: 'in_progress',
+        },
+        () => {},
+      );
+      emitItemEvent(
+        'session-1',
+        'item.completed',
+        {
+          id: 'cmd-1',
+          type: 'command_execution',
+          command: 'git commit -m "ship"',
+          aggregated_output: 'blocked',
+          status: 'failed',
+        },
+        () => {},
+      );
+
+      const emittedEvents = writes
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line));
+
+      expect(emittedEvents).toEqual([
+        expect.objectContaining({
+          type: 'sidecar_stream_status',
+          mode_blocked: expect.objectContaining({
+            blocked_method: 'item/tool/commandExecution:git commit',
+            effective_mode: 'plan',
+          }),
+        }),
       ]);
     } finally {
       stdoutSpy.mockRestore();

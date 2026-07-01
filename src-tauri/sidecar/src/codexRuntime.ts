@@ -36,8 +36,10 @@ import {
 } from './agentPermissions.js';
 import {
   applyCodexCollaborationPolicyToInput,
+  buildPlanMutationBlockedEvent,
   resolveCodexCollaborationPolicy,
   setActiveCodexCollaborationPolicy,
+  shouldBlockPlanModeItem,
   type CodexCollaborationPolicy,
 } from './codexCollaborationPolicy.js';
 
@@ -104,6 +106,7 @@ export class CodexSessionRuntime {
   private streamingItemState = new Map<string, { kind: 'text' | 'thinking'; text: string }>();
   private todoListState = new Map<string, string>();
   private emittedToolUseIds = new Set<string>();
+  private blockedPlanMutationItemIds = new Set<string>();
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     if (cmd.sessionId) setActiveSessionId(cmd.sessionId);
@@ -410,6 +413,7 @@ export class CodexSessionRuntime {
     this.streamingItemState.clear();
     this.todoListState.clear();
     this.emittedToolUseIds.clear();
+    this.blockedPlanMutationItemIds.clear();
     await this.teardownClient();
     this.config = null;
     this.configFingerprint = null;
@@ -422,6 +426,7 @@ export class CodexSessionRuntime {
     this.streamingItemState.clear();
     this.todoListState.clear();
     this.emittedToolUseIds.clear();
+    this.blockedPlanMutationItemIds.clear();
     await this.teardownClient();
     this.config = null;
     this.configFingerprint = null;
@@ -529,6 +534,17 @@ export class CodexSessionRuntime {
       return;
     }
 
+    const collaborationPolicy = this.config?.collaborationPolicy
+      ?? resolveCodexCollaborationPolicy({ planMode: this.config?.planMode });
+    const blockedMethod = shouldBlockPlanModeItem(item, collaborationPolicy);
+    if (blockedMethod) {
+      if (!this.blockedPlanMutationItemIds.has(item.id)) {
+        this.blockedPlanMutationItemIds.add(item.id);
+        emit(buildPlanMutationBlockedEvent(blockedMethod, item.id ?? null));
+      }
+      return;
+    }
+
     if (item.type === 'agent_message' && eventType === 'item.completed') {
       process.stderr.write(`[codex] agent_message completed: text_length=${item.text?.length ?? 0} preview=${JSON.stringify((item.text ?? '').slice(0, 100))}\n`);
       this.completeStreamingText(sessionId, item.id);
@@ -622,6 +638,7 @@ export class CodexSessionRuntime {
   private finishTurn(): void {
     this.streamingItemState.clear();
     this.emittedToolUseIds.clear();
+    this.blockedPlanMutationItemIds.clear();
     emit({ type: 'sidecar_query_done' });
   }
 
@@ -631,6 +648,7 @@ export class CodexSessionRuntime {
     this.streamingItemState.clear();
     this.todoListState.clear();
     this.emittedToolUseIds.clear();
+    this.blockedPlanMutationItemIds.clear();
     this.thread = null;
     this.client = null;
   }
