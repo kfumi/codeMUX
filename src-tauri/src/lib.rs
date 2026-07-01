@@ -79,6 +79,8 @@ pub fn run() {
         )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_tray_icon_event(|app, event| {
             if let TrayIconEvent::DoubleClick { .. } = event {
                 show_main_window(app);
