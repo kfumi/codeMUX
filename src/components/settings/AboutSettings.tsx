@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { ExternalLink, Github } from 'lucide-react';
 import { getName, getVersion, getTauriVersion } from '@tauri-apps/api/app';
 
+import { useUpdaterContext } from '@/features/update/UpdaterProvider';
+
 import { Button } from '../ui/button';
 
 interface AppInfo {
@@ -21,6 +23,12 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 export function AboutSettings() {
   const [info, setInfo] = useState<AppInfo | null>(null);
+  const { stage, checkForUpdates } = useUpdaterContext();
+  const isCheckingForUpdates = stage === 'checking';
+  const isUpdateActive = stage === 'checking'
+    || stage === 'downloading'
+    || stage === 'installing'
+    || stage === 'restarting';
 
   useEffect(() => {
     Promise.all([getName(), getVersion(), getTauriVersion()])
@@ -68,6 +76,19 @@ export function AboutSettings() {
       <div className="space-y-3">
         <label className="text-sm text-foreground/74">链接</label>
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={isUpdateActive}
+            onClick={() => {
+              void checkForUpdates({
+                interactive: true,
+                announceNoUpdate: true,
+              });
+            }}
+          >
+            {isCheckingForUpdates ? '检查中...' : '检查更新'}
+          </Button>
           <Button
             variant="outline"
             size="sm"

@@ -1,0 +1,27 @@
+import { createContext, type ReactNode, useContext } from 'react';
+
+import { useUpdater } from './hooks/useUpdater';
+
+type UpdaterContextValue = ReturnType<typeof useUpdater>;
+
+const UpdaterContext = createContext<UpdaterContextValue | null>(null);
+
+export function UpdaterProvider({ children }: { children: ReactNode }) {
+  const updater = useUpdater();
+
+  return (
+    <UpdaterContext.Provider value={updater}>
+      {children}
+    </UpdaterContext.Provider>
+  );
+}
+
+export function useUpdaterContext() {
+  const context = useContext(UpdaterContext);
+
+  if (!context) {
+    throw new Error('useUpdaterContext 必须在 UpdaterProvider 内使用');
+  }
+
+  return context;
+}
