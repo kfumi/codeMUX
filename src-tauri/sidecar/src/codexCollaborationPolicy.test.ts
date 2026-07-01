@@ -1,0 +1,119 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  applyCodexCollaborationPolicyToInput,
+  buildCodexModeBlockedEvent,
+  detectPlanModeBlockedMethod,
+  resolveCodexCollaborationPolicy,
+} from './codexCollaborationPolicy.js';
+
+describe('codexCollaborationPolicy', () => {
+  it('resolves planMode on to strict-local plan mode', () => {
+    expect(resolveCodexCollaborationPolicy({ planMode: 'on' })).toMatchObject({
+      selectedMode: 'plan',
+      effectiveMode: 'plan',
+      profile: 'strict-local',
+      requestUserInputPolicy: 'allow',
+      fallbackReason: null,
+    });
+  });
+
+  it('resolves missing or off planMode to code mode that blocks user input tools', () => {
+    expect(resolveCodexCollaborationPolicy({ planMode: 'off' })).toMatchObject({
+      selectedMode: 'code',
+      effectiveMode: 'code',
+      requestUserInputPolicy: 'block',
+    });
+    expect(resolveCodexCollaborationPolicy({})).toMatchObject({
+      effectiveMode: 'code',
+      fallbackReason: 'missing_mode_in_request_default_code',
+    });
+  });
+
+  it('keeps selectedMode null when mode is inherited from previous state', () => {
+    expect(resolveCodexCollaborationPolicy({ previousMode: 'plan' })).toMatchObject({
+      selectedMode: null,
+      effectiveMode: 'plan',
+      fallbackReason: 'missing_mode_in_request_using_thread_state',
+    });
+  });
+
+  it('injects plan directives into the first text input entry', () => {
+    const policy = resolveCodexCollaborationPolicy({ planMode: 'on' });
+    expect(applyCodexCollaborationPolicyToInput(
+      [{ type: 'text', text: 'Design the feature.' }],
+      policy,
+    )).toEqual([
+      {
+        type: 'text',
+        text: expect.stringContaining('Execution policy (plan mode): work in planning-only style.'),
+      },
+    ]);
+  });
+
+  it('does not duplicate directives when applied twice', () => {
+    const policy = resolveCodexCollaborationPolicy({ planMode: 'on' });
+    const once = applyCodexCollaborationPolicyToInput([{ type: 'text', text: 'Plan it.' }], policy);
+    const twice = applyCodexCollaborationPolicyToInput(once, policy);
+    expect(twice).toEqual(once);
+  });
+
+  it('detects plan-mode file and repo mutation attempts', () => {
+    expect(detectPlanModeBlockedMethod({
+      type: 'file_change',
+      id: 'patch-1',
+      changes: [{ path: 'src/app.ts', kind: 'update' }],
+    })).toBe('item/tool/apply_patch');
+
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-1',
+      command: 'git commit -m "ship"',
+      status: 'in_progress',
+    })).toBe('item/tool/commandExecution:git commit');
+
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-1',
+      command: '"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git commit -m ship"',
+      status: 'in_progress',
+    })).toBe('item/tool/commandExecution:git commit');
+
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-1',
+      command: 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "git commit -m ship"',
+      status: 'in_progress',
+    })).toBe('item/tool/commandExecution:git commit');
+
+    expect(detectPlanModeBlockedMethod({
+      type: 'command_execution',
+      id: 'cmd-2',
+      command: 'git status --short',
+      status: 'in_progress',
+    })).toBeNull();
+  });
+
+  it('builds a mode-blocked diagnostic event', () => {
+    expect(buildCodexModeBlockedEvent({
+      blockedMethod: 'item/tool/requestUserInput',
+      effectiveMode: 'code',
+      reasonCode: 'request_user_input_blocked_in_default_mode',
+      reason: 'requestUserInput is blocked while effective_mode=code',
+      suggestion: 'Switch to Plan mode and resend the prompt when user input is needed.',
+      requestId: 'tool-1',
+    })).toEqual({
+      type: 'sidecar_stream_status',
+      message: expect.stringContaining('request_user_input_blocked_in_default_mode'),
+      is_reconnecting: false,
+      mode_blocked: {
+        blocked_method: 'item/tool/requestUserInput',
+        effective_mode: 'code',
+        reason_code: 'request_user_input_blocked_in_default_mode',
+        reason: 'requestUserInput is blocked while effective_mode=code',
+        suggestion: 'Switch to Plan mode and resend the prompt when user input is needed.',
+        request_id: 'tool-1',
+      },
+    });
+  });
+});
