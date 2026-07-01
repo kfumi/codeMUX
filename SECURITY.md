@@ -7,7 +7,7 @@
 请通过以下方式联系我们：
 
 - **邮箱**：949104778@qq.com
-- **GitHub Security Advisories**：使用 [GitHub 私密报告](https://github.com/vzi777/codeMUX/security/advisories/new)
+- **GitHub Security Advisories**：使用 [GitHub 私密报告](https://github.com/kfumi/codeMUX/security/advisories/new)
 
 ### 报告内容
 

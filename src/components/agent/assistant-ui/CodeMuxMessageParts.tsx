@@ -107,13 +107,13 @@ export function CodeMuxToolCallMessagePart({
               </TooltipContent>
             </Tooltip>
           ) : (
-            <span className="ml-2 inline-block max-w-[min(33rem,56vw)] truncate align-middle text-xs font-normal text-muted-foreground/72">
+            <span className="ml-2 inline-block max-w-[min(33rem,56vw)] truncate align-middle text-xs font-normal text-muted-foreground/68">
               {headerText}
             </span>
           )
         )}
         {durationMs != null && (
-          <span className="inline-flex rounded-md bg-muted/60 px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground/60">
+          <span className="inline-flex rounded-md border border-border/16 bg-[hsl(var(--surface-3))]/20 px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground/56">
             {formatDuration(durationMs)}
           </span>
         )}

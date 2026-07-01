@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ThreadEvent } from '@openai/codex-sdk';
 
-import { buildCodexCliConfig, CodexSessionRuntime } from './codexRuntime.js';
+import {
+  applyCodexWindowsSandboxPathCompatibility,
+  buildCodexCliConfig,
+  CodexSessionRuntime,
+  shouldRouteCodexThroughCompatProxy,
+} from './codexRuntime.js';
 import { resolveCodexCollaborationPolicy } from './codexCollaborationPolicy.js';
 import { buildCodexToolUseContent } from './runtimeEvents.js';
 import { flushStreamEvents } from './streamEventBatcher.js';
@@ -299,6 +304,34 @@ describe('CodexSessionRuntime', () => {
       approvalPolicy: 'on-request',
       networkAccessEnabled: false,
     });
+  });
+
+  it('routes Codex plan mode through the compat proxy even for OpenAI-native providers', () => {
+    expect(shouldRouteCodexThroughCompatProxy(
+      'https://api.openai.com/v1',
+      false,
+      resolveCodexCollaborationPolicy({ planMode: 'on' }),
+    )).toBe(true);
+
+    expect(shouldRouteCodexThroughCompatProxy(
+      'https://api.openai.com/v1',
+      false,
+      resolveCodexCollaborationPolicy({ planMode: 'off' }),
+    )).toBe(false);
+  });
+
+  it('removes WindowsApps from Codex PATH to keep read-only sandbox shell launch compatible', () => {
+    const env = {
+      Path: [
+        'C:\\Windows\\System32',
+        'C:\\Users\\user\\AppData\\Local\\Microsoft\\WindowsApps',
+        'C:\\Tools\\bin',
+      ].join(';'),
+    };
+
+    applyCodexWindowsSandboxPathCompatibility(env);
+
+    expect(env.Path).toBe('C:\\Windows\\System32;C:\\Tools\\bin');
   });
 
   it('injects strict-local plan directives before streaming Codex input', async () => {

@@ -275,6 +275,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   },
   markSessionUnread: (sessionId: string) => {
     set((state) => {
+      if (state.activeSessionId === sessionId) return state;
       if (state.unreadSessions.has(sessionId)) return state;
       const next = new Set(state.unreadSessions);
       next.add(sessionId);

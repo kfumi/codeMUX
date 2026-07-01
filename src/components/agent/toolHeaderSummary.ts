@@ -64,6 +64,9 @@ export function getToolHeaderSummary(toolName: string, input: Record<string, unk
     case 'TaskUpdate':
       return taskUpdateSummary(input);
 
+    case 'update_plan':
+      return fromFirstKey(input, ['explanation']);
+
     case 'AskUserQuestion':
       return fromFirstKey(input, ['question', 'header']);
 

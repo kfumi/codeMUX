@@ -91,7 +91,7 @@ function ToolFallbackTrigger({
     <CollapsibleTrigger
       data-slot="tool-fallback-trigger"
       className={cn(
-        'aui-tool-fallback-trigger group/trigger flex w-full items-center gap-2 text-sm text-foreground/76 transition-colors hover:text-foreground',
+        'aui-tool-fallback-trigger group/trigger flex w-full items-center gap-2 text-sm text-muted-foreground/76 transition-colors hover:text-foreground/88',
         className,
       )}
       {...props}
@@ -99,10 +99,10 @@ function ToolFallbackTrigger({
       <Icon
         className={cn(
           'size-3.5 shrink-0',
-          isCancelled && 'text-muted-foreground',
-          isRunning && 'animate-spin text-primary',
-          statusType === 'complete' && 'text-[hsl(var(--success))]',
-          statusType === 'incomplete' && !isCancelled && 'text-[hsl(var(--destructive))]',
+          isCancelled && 'text-muted-foreground/72',
+          isRunning && 'animate-spin text-muted-foreground/72',
+          statusType === 'complete' && 'text-muted-foreground/68',
+          statusType === 'incomplete' && !isCancelled && 'text-[hsl(var(--destructive)/0.72)]',
         )}
       />
       <span
@@ -119,7 +119,7 @@ function ToolFallbackTrigger({
       </span>
       <ChevronDownIcon
         className={cn(
-          'size-3.5 shrink-0 transition-transform duration-(--animation-duration) ease-out',
+          'size-3.5 shrink-0 text-muted-foreground/52 transition-transform duration-(--animation-duration) ease-out',
           'group-data-[state=closed]/trigger:-rotate-90',
           'group-data-[state=open]/trigger:rotate-0',
         )}
@@ -161,7 +161,7 @@ function ToolFallbackArgs({
 }: React.ComponentProps<'div'> & { argsText?: string }) {
   if (!argsText) return null;
   return (
-    <div className={cn('aui-tool-fallback-args-value bg-muted/50 text-foreground/90 rounded-md p-2.5 text-xs whitespace-pre-wrap', className)} {...props}>
+    <div className={cn('aui-tool-fallback-args-value rounded-md bg-[hsl(var(--surface-2))]/26 p-2.5 text-xs whitespace-pre-wrap text-foreground/72', className)} {...props}>
       <pre className="whitespace-pre-wrap">{argsText}</pre>
     </div>
   );
@@ -179,8 +179,8 @@ function ToolFallbackResult({
         className={cn('aui-tool-fallback-result max-h-35', className)}
         {...props}
     >
-      <p className="aui-tool-fallback-result-header text-muted-foreground text-xs font-medium">结果：</p>
-      <pre className="aui-tool-fallback-result-content bg-muted/50 text-foreground/90 mt-1 rounded-md p-2.5 text-xs whitespace-pre-wrap">
+      <p className="aui-tool-fallback-result-header text-xs font-medium text-muted-foreground/72">结果：</p>
+      <pre className="aui-tool-fallback-result-content mt-1 rounded-md bg-[hsl(var(--surface-2))]/26 p-2.5 text-xs whitespace-pre-wrap text-foreground/72">
         {typeof result === 'string' ? result : JSON.stringify(result, null, 2)}
       </pre>
     </div>

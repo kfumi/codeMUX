@@ -145,19 +145,20 @@ async function handleRequest(
 
   const requestBody = await readJsonBody(req) as Parameters<typeof convertResponsesToChatRequest>[0];
   const collaborationPolicy = getActiveCodexCollaborationPolicy();
-  await emitToolResultEventsFromRequest(requestBody, emittedToolResultIds);
-  proxyLog(`responses request ${summarizeResponsesRequest(requestBody)}`);
-  if (Array.isArray(requestBody.tools) && requestBody.tools.length > 0) {
-    proxyLog(`responses tool names ${requestBody.tools.map((tool) => summarizeToolName(tool)).join(', ')}`);
-    const missingResponseTools = requestBody.tools.filter((tool) => summarizeToolName(tool) === '<missing>');
+  const effectiveRequestBody = ensureInteractiveUserInputTool(requestBody, collaborationPolicy);
+  await emitToolResultEventsFromRequest(effectiveRequestBody, emittedToolResultIds);
+  proxyLog(`responses request ${summarizeResponsesRequest(effectiveRequestBody)}`);
+  if (Array.isArray(effectiveRequestBody.tools) && effectiveRequestBody.tools.length > 0) {
+    proxyLog(`responses tool names ${effectiveRequestBody.tools.map((tool) => summarizeToolName(tool)).join(', ')}`);
+    const missingResponseTools = effectiveRequestBody.tools.filter((tool) => summarizeToolName(tool) === '<missing>');
     if (missingResponseTools.length > 0) {
       proxyLog(`responses missing-name tools ${truncateForLog(JSON.stringify(missingResponseTools))}`);
     }
-    proxyLog(`responses tools raw ${truncateForLog(JSON.stringify(requestBody.tools.slice(0, 3)))}`);
-    persistDebugJson('last-codex-responses-request.json', requestBody);
+    proxyLog(`responses tools raw ${truncateForLog(JSON.stringify(effectiveRequestBody.tools.slice(0, 3)))}`);
+    persistDebugJson('last-codex-responses-request.json', effectiveRequestBody);
   }
-  const reasoningConfig = inferReasoningConfig(requestBody.model, config.baseUrl, config.providerName ?? '');
-  const chatRequest = convertResponsesToChatRequest(requestBody, historyStore, reasoningConfig);
+  const reasoningConfig = inferReasoningConfig(effectiveRequestBody.model, config.baseUrl, config.providerName ?? '');
+  const chatRequest = convertResponsesToChatRequest(effectiveRequestBody, historyStore, reasoningConfig);
   let effectiveChatRequest = chatRequest;
   // Extract and remove the metadata field so it doesn't get sent to the upstream API
   const previousMessageCount = (chatRequest as Record<string, unknown>)._previousMessageCount as number ?? 0;
@@ -296,7 +297,7 @@ async function handleRequest(
     }
   }
 
-  const compatResponse = convertChatCompletionToResponses(completion, requestBody as Parameters<typeof convertChatCompletionToResponses>[1], legacyHistory);
+  const compatResponse = convertChatCompletionToResponses(completion, effectiveRequestBody as Parameters<typeof convertChatCompletionToResponses>[1], legacyHistory);
 
   // Store messages in legacy history so the next request can reconstruct the full
   // conversation chain. Only store NEW messages from this turn — chatRequest.messages
@@ -362,6 +363,87 @@ function isFunctionCallOutputItem(
     (value as Record<string, unknown>).type === 'function_call_output' &&
     typeof (value as Record<string, unknown>).call_id === 'string'
   );
+}
+
+function ensureInteractiveUserInputTool(
+  requestBody: Parameters<typeof convertResponsesToChatRequest>[0],
+  collaborationPolicy: CodexCollaborationPolicy,
+): Parameters<typeof convertResponsesToChatRequest>[0] {
+  if (collaborationPolicy.requestUserInputPolicy !== 'allow') {
+    return requestBody;
+  }
+
+  const tools = Array.isArray(requestBody.tools) ? requestBody.tools : [];
+  if (tools.some((tool) => summarizeToolName(tool) === 'request_user_input')) {
+    return requestBody;
+  }
+
+  return {
+    ...requestBody,
+    tools: [
+      ...tools,
+      buildRequestUserInputToolDefinition(),
+    ],
+  };
+}
+
+function buildRequestUserInputToolDefinition(): NonNullable<Parameters<typeof convertResponsesToChatRequest>[0]['tools']>[number] {
+  return {
+    type: 'function',
+    name: 'request_user_input',
+    description: 'Ask the user one to three short blocking questions and wait for their answers before continuing.',
+    parameters: {
+      type: 'object',
+      properties: {
+        questions: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 3,
+          items: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+                description: 'Stable snake_case identifier for mapping the answer.',
+              },
+              header: {
+                type: 'string',
+                description: 'Short label, 12 characters or fewer.',
+              },
+              question: {
+                type: 'string',
+                description: 'Single-sentence question shown to the user.',
+              },
+              options: {
+                type: 'array',
+                minItems: 2,
+                maxItems: 3,
+                items: {
+                  type: 'object',
+                  properties: {
+                    label: {
+                      type: 'string',
+                      description: 'Short user-facing option label.',
+                    },
+                    description: {
+                      type: 'string',
+                      description: 'One short sentence explaining the impact of this choice.',
+                    },
+                  },
+                  required: ['label', 'description'],
+                  additionalProperties: false,
+                },
+              },
+            },
+            required: ['id', 'header', 'question', 'options'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['questions'],
+      additionalProperties: false,
+    },
+  };
 }
 
 function stringifyFunctionCallOutput(output: unknown): string {

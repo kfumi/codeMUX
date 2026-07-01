@@ -6,7 +6,7 @@
 
 ### 报告问题
 
-使用 [GitHub Issues](https://github.com/vzi777/codeMUX/issues) 报告 Bug 或提出功能建议。
+使用 [GitHub Issues](https://github.com/kfumi/codeMUX/issues) 报告 Bug 或提出功能建议。
 
 **Bug 报告**请包含：
 
@@ -28,7 +28,7 @@
 1. **Fork** 本仓库到你的 GitHub 账号
 2. **克隆** 你的 Fork：
    ```bash
-   git clone https://github.com/vzi777/codeMUX.git
+   git clone https://github.com/kfumi/codeMUX.git
    cd codeMUX
    ```
 3. **创建分支**：
@@ -162,7 +162,7 @@ src-tauri/              # Rust 后端
 
 ## 有问题？
 
-如有任何疑问，欢迎在 [GitHub Discussions](https://github.com/vzi777/codeMUX/discussions) 中提问。
+如有任何疑问，欢迎在 [GitHub Discussions](https://github.com/kfumi/codeMUX/discussions) 中提问。
 
 ---
 

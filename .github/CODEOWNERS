@@ -2,20 +2,20 @@
 # 文档：https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 
 # 默认所有文件
-* @vzi777
+* @kfumi
 
 # Rust 后端
-src-tauri/src/ @vzi777
+src-tauri/src/ @kfumi
 
 # Sidecar
-src-tauri/sidecar/ @vzi777
+src-tauri/sidecar/ @kfumi
 
 # 前端组件
-src/components/ @vzi777
+src/components/ @kfumi
 
 # 文档
-docs/ @vzi777
-*.md @vzi777
+docs/ @kfumi
+*.md @kfumi
 
 # CI/CD
-.github/ @vzi777
+.github/ @kfumi

@@ -710,6 +710,62 @@ describe('createCodexCompatProxyServer', () => {
     );
   });
 
+  it('advertises request_user_input to upstream chat completions while plan mode allows user input', async () => {
+    setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({ planMode: 'on' }));
+    let receivedBody: any = null;
+    const upstream = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      receivedBody = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+
+      res.setHeader('content-type', 'text/event-stream');
+      res.setHeader('cache-control', 'no-cache');
+      res.write(`data: ${JSON.stringify({
+        id: 'chunk-answer',
+        model: 'mimo-v2-pro',
+        choices: [{ delta: { role: 'assistant', content: 'ok' }, finish_reason: null }],
+      })}\n\n`);
+      res.write(`data: ${JSON.stringify({
+        id: 'chunk-done',
+        model: 'mimo-v2-pro',
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+      })}\n\n`);
+      res.end('data: [DONE]\n\n');
+    });
+
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const proxy = await createCodexCompatProxyServer({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+    }, 0);
+    cleanups.push(() => proxy.close());
+
+    const response = await fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'mimo-v2-pro',
+        stream: true,
+        input: [{ role: 'user', content: 'Plan only' }],
+      }),
+    });
+
+    await response.text();
+
+    expect(receivedBody.tools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'function',
+          function: expect.objectContaining({
+            name: 'request_user_input',
+          }),
+        }),
+      ]),
+    );
+  });
+
   it('records streaming continuation tool calls after bridged request_user_input', async () => {
     setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({ planMode: 'on' }));
     const upstreamBodies: any[] = [];

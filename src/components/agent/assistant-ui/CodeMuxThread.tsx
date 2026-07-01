@@ -59,6 +59,7 @@ const INTERRUPT_LABEL = '用户中断请求';
 const COLLAPSED_USER_MESSAGE_CLASS = 'max-h-80 overflow-hidden';
 const STREAMING_THINKING_PROTECTION_THRESHOLD = 20_000;
 const STREAMING_THINKING_VISIBLE_CHARS = 8_000;
+const MESSAGE_NAV_HIDE_BREAKPOINT = 860;
 const GROUP_BY_PART = groupPartByType({
   reasoning: ['group-thinking'],
   'tool-call': ['group-tool-call'],
@@ -72,10 +73,37 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
   const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
+  const [showMessageNav, setShowMessageNav] = useState(true);
 
   useEffect(() => {
     setExpandedTurnKeys(new Set());
   }, [sessionId, compactAiOutput]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    const updateMessageNavVisibility = (width: number) => {
+      setShowMessageNav(width === 0 || width >= MESSAGE_NAV_HIDE_BREAKPOINT);
+    };
+
+    updateMessageNavVisibility(viewport.clientWidth);
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        updateMessageNavVisibility(entry.contentRect.width);
+      }
+    });
+
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
 
   const toggleExpandedTurn = (turnKey: string) => {
     setExpandedTurnKeys((current) => {
@@ -137,10 +165,17 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <ThreadPrimitive.Viewport
           ref={viewportRef}
+          data-testid="thread-viewport"
           className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scrollbar-gutter-stable"
           autoScroll
         >
-          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col pl-4 pr-14 pt-5">
+          <div
+            data-testid="thread-content-shell"
+            className={cn(
+              'mx-auto flex w-full max-w-3xl flex-1 flex-col pt-5',
+              showMessageNav ? 'pl-14 pr-4' : 'px-4',
+            )}
+          >
             <ThreadPrimitive.Messages>
               {({ message }) =>
                 message.role === 'user' ? (
@@ -173,8 +208,8 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
             {footer}
           </ThreadPrimitive.ViewportFooter>
         </div>
-      </ThreadPrimitive.Viewport>
-      <MessageNav items={userNavItems} scrollContainer={viewportRef} disabled={isRunning} />
+          </ThreadPrimitive.Viewport>
+      {showMessageNav ? <MessageNav items={userNavItems} scrollContainer={viewportRef} disabled={isRunning} /> : null}
       </div>
     </ThreadPrimitive.Root>
   );

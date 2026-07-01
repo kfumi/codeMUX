@@ -74,7 +74,7 @@ export function AboutSettings() {
             className="gap-1.5"
             onClick={() => {
               import('@tauri-apps/plugin-shell').then(({ open }) => {
-                open('https://github.com/vzi777/codeMUX');
+                open('https://github.com/kfumi/codeMUX');
               }).catch(() => {});
             }}
           >

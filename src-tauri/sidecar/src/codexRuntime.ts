@@ -154,13 +154,17 @@ export class CodexSessionRuntime {
     if (
       requestedConfig.apiKey &&
       requestedConfig.upstreamBaseUrl &&
-      shouldUseCodexChatCompatProxy(requestedConfig.upstreamBaseUrl, requestedConfig.codexNeedsProxy)
+      shouldRouteCodexThroughCompatProxy(
+        requestedConfig.upstreamBaseUrl,
+        requestedConfig.codexNeedsProxy,
+        collaborationPolicy,
+      )
     ) {
       const result = await proxyManager.start(
         requestedConfig.apiKey,
         requestedConfig.upstreamBaseUrl,
         undefined,
-        requestedConfig.codexNeedsProxy,
+        resolveCompatProxyOverride(requestedConfig.codexNeedsProxy, collaborationPolicy),
       );
       if (result) {
         runtimeBaseUrl = proxyManager.getBaseUrl() ?? runtimeBaseUrl;
@@ -190,6 +194,7 @@ export class CodexSessionRuntime {
     if (runtimeBaseUrl) {
       codexEnv.OPENAI_BASE_URL = runtimeBaseUrl;
     }
+    applyCodexWindowsSandboxPathCompatibility(codexEnv);
 
     const codexConfig = buildCodexCliConfig(runtimeBaseUrl);
 
@@ -762,6 +767,49 @@ export function buildCodexCliConfig(
 function normalizeCodexResponsesProviderBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.replace(/\/+$/, '');
   return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`;
+}
+
+export function shouldRouteCodexThroughCompatProxy(
+  baseUrl: string | undefined,
+  explicitNeedsProxy: boolean | undefined,
+  collaborationPolicy: CodexCollaborationPolicy,
+): boolean {
+  return shouldUseCodexChatCompatProxy(
+    baseUrl,
+    resolveCompatProxyOverride(explicitNeedsProxy, collaborationPolicy),
+  );
+}
+
+function resolveCompatProxyOverride(
+  explicitNeedsProxy: boolean | undefined,
+  collaborationPolicy: CodexCollaborationPolicy,
+): boolean | undefined {
+  if (collaborationPolicy.effectiveMode === 'plan') {
+    return true;
+  }
+  return explicitNeedsProxy;
+}
+
+export function applyCodexWindowsSandboxPathCompatibility(env: Record<string, string>): void {
+  if (process.platform !== 'win32') {
+    return;
+  }
+
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'Path';
+  const pathValue = env[pathKey];
+  if (!pathValue) {
+    return;
+  }
+
+  const filtered = pathValue
+    .split(';')
+    .filter((entry) => entry.trim().length > 0)
+    .filter((entry) => !entry.toLowerCase().includes('\\windowsapps'))
+    .join(';');
+
+  if (filtered) {
+    env[pathKey] = filtered;
+  }
 }
 
 function isMissingResponsesCompletionError(message: string): boolean {

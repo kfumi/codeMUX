@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
@@ -343,6 +343,32 @@ const navigationTurnEvents: AgentMessage[] = [
 ];
 
 const originalScrollTo = HTMLElement.prototype.scrollTo;
+const resizeObservers: Array<{ callback: ResizeObserverCallback; target: Element | null }> = [];
+
+function triggerResize(target: Element, width: number, height = 720) {
+  for (const observer of resizeObservers) {
+    if (observer.target !== target) {
+      continue;
+    }
+
+    observer.callback([
+      {
+        target,
+        contentRect: {
+          width,
+          height,
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          bottom: height,
+          right: width,
+          toJSON: () => ({}),
+        },
+      } as ResizeObserverEntry,
+    ], {} as ResizeObserver);
+  }
+}
 
 function Harness({ sessionId }: { sessionId: string }) {
   return (
@@ -359,7 +385,16 @@ function Harness({ sessionId }: { sessionId: string }) {
 describe('CodeMuxAssistantRuntimeProvider', () => {
   beforeEach(() => {
     class MockResizeObserver {
-      observe() {}
+      private callback: ResizeObserverCallback;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(target: Element) {
+        resizeObservers.push({ callback: this.callback, target });
+      }
+
       unobserve() {}
       disconnect() {}
     }
@@ -439,6 +474,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
   });
 
   afterEach(() => {
+    resizeObservers.length = 0;
     vi.unstubAllGlobals();
     Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
       configurable: true,
@@ -763,6 +799,28 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(within(nav).getByText('修复子智能体展示')).toBeTruthy();
     expect(within(nav).getByText(/已按计划完成这次修复，核心路径都接上了/)).toBeTruthy();
     expect(within(nav).queryByText('我先检查现有实现。')).toBeNull();
+  });
+
+  it('hides the message navigation when the thread viewport becomes narrow', async () => {
+    const { container } = render(<Harness sessionId="session-nav" />);
+    const viewport = container.querySelector('[data-testid="thread-viewport"]') as HTMLElement | null;
+
+    expect(viewport).toBeTruthy();
+    expect(screen.getByTestId('message-nav')).toBeTruthy();
+
+    triggerResize(viewport!, 720);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('message-nav')).toBeNull();
+    });
+  });
+
+  it('keeps the thread content shell padded for left navigation without shifting the composer off center', () => {
+    render(<Harness sessionId="session-nav" />);
+
+    const shell = screen.getByTestId('thread-content-shell');
+    expect(shell.className).toContain('pl-14');
+    expect(shell.className).toContain('pr-4');
   });
 
   it('shows the message navigation popover on keyboard focus and scrolls to the selected turn', () => {

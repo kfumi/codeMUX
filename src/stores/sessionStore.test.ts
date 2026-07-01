@@ -319,4 +319,76 @@ describe('session store createSession', () => {
     expect(useSessionStore.getState().sessions[0].permission_config).toBe(permissionConfig);
     expect(useSessionStore.getState().sessions[0].plan_mode).toBe('off');
   });
+
+  it('does not mark the active session as unread', async () => {
+    const activeSession: Session = {
+      id: 'session-active',
+      title: 'Active',
+      agent_kind: 'codex',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      project_id: null,
+      created_at: '2026-06-20T00:00:00.000Z',
+      updated_at: '2026-06-20T00:00:00.000Z',
+    };
+
+    const { useSessionStore } = await import('./sessionStore');
+    useSessionStore.setState({
+      sessions: [activeSession],
+      archivedSessions: [],
+      activeSessionId: activeSession.id,
+      unreadSessions: new Set<string>(),
+      isLoading: false,
+      isArchivedLoading: false,
+      error: null,
+    });
+
+    useSessionStore.getState().markSessionUnread(activeSession.id);
+
+    expect(useSessionStore.getState().unreadSessions.has(activeSession.id)).toBe(false);
+  });
+
+  it('still marks an inactive session as unread', async () => {
+    const activeSession: Session = {
+      id: 'session-active',
+      title: 'Active',
+      agent_kind: 'codex',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      project_id: null,
+      created_at: '2026-06-20T00:00:00.000Z',
+      updated_at: '2026-06-20T00:00:00.000Z',
+    };
+    const inactiveSession: Session = {
+      id: 'session-inactive',
+      title: 'Inactive',
+      agent_kind: 'claude_code',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      project_id: null,
+      created_at: '2026-06-19T00:00:00.000Z',
+      updated_at: '2026-06-19T00:00:00.000Z',
+    };
+
+    const { useSessionStore } = await import('./sessionStore');
+    useSessionStore.setState({
+      sessions: [activeSession, inactiveSession],
+      archivedSessions: [],
+      activeSessionId: activeSession.id,
+      unreadSessions: new Set<string>(),
+      isLoading: false,
+      isArchivedLoading: false,
+      error: null,
+    });
+
+    useSessionStore.getState().markSessionUnread(inactiveSession.id);
+
+    expect(useSessionStore.getState().unreadSessions.has(inactiveSession.id)).toBe(true);
+  });
 });
