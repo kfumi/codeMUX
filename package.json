@@ -1,13 +1,14 @@
 {
   "name": "codemux",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "release:prepare": "node scripts/prepare-release.mjs"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.14.24",
