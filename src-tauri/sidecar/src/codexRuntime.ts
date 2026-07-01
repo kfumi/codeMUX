@@ -34,6 +34,12 @@ import {
   type AgentPlanMode,
   type SidecarPermissionConfig,
 } from './agentPermissions.js';
+import {
+  applyCodexCollaborationPolicyToInput,
+  resolveCodexCollaborationPolicy,
+  setActiveCodexCollaborationPolicy,
+  type CodexCollaborationPolicy,
+} from './codexCollaborationPolicy.js';
 
 export { emit } from './streamEventBatcher.js';
 
@@ -53,6 +59,7 @@ type CodexSessionBootstrap = {
   codexNeedsProxy?: boolean;
   permissionConfig?: SidecarPermissionConfig;
   planMode?: AgentPlanMode;
+  collaborationPolicy?: CodexCollaborationPolicy;
 };
 
 /** Current active session ID — shared with the proxy for event routing. */
@@ -115,9 +122,14 @@ export class CodexSessionRuntime {
       permissionConfig: cmd.permissionConfig,
       planMode: normalizeCodexPlanMode(cmd.planMode),
     };
+    const collaborationPolicy = resolveCodexCollaborationPolicy({
+      planMode: requestedConfig.planMode,
+      previousMode: this.config?.collaborationPolicy?.effectiveMode ?? null,
+    });
     const nextFingerprint = JSON.stringify(requestedConfig);
 
     if (this.configFingerprint === nextFingerprint && this.config && this.thread) {
+      setActiveCodexCollaborationPolicy(this.config.collaborationPolicy ?? collaborationPolicy);
       process.stderr.write(
         `[codex] Session ensured via SDK: session_id=${cmd.sessionId || 'none'} cwd=${cwd} thread=${requestedConfig.agentSessionId || 'new'}\n`,
       );
@@ -158,7 +170,9 @@ export class CodexSessionRuntime {
     this.config = {
       ...requestedConfig,
       runtimeBaseUrl,
+      collaborationPolicy,
     };
+    setActiveCodexCollaborationPolicy(collaborationPolicy);
 
     const codexEnv: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
@@ -241,14 +255,13 @@ export class CodexSessionRuntime {
     this.abortController = new AbortController();
     activeAbortController = this.abortController;
 
-    const payload = applyCodexPlanPrefix(
-      normalizeAgentInputPayload(prompt, inputPayload),
-      this.config.planMode,
-    );
+    const collaborationPolicy = this.config.collaborationPolicy
+      ?? resolveCodexCollaborationPolicy({ planMode: this.config.planMode });
+    const payload = normalizeAgentInputPayload(prompt, inputPayload);
     const imagePaths = includeImages ? await writePayloadImagesToTempFiles(payload) : [];
     const permissionOptions = buildCodexThreadPermissionOptions(
       this.config.permissionConfig,
-      this.config.planMode,
+      agentPlanModeFromCollaborationPolicy(collaborationPolicy),
     );
 
     process.stderr.write(`[codex] Processing input via SDK: ${payload.text.slice(0, 80)}...\n`);
@@ -279,7 +292,11 @@ export class CodexSessionRuntime {
     };
 
     try {
-      const { events } = await this.thread.runStreamed(buildCodexInputEntries(payload, imagePaths, includeImages) as any, {
+      const codexInput = applyCodexCollaborationPolicyToInput(
+        buildCodexInputEntries(payload, imagePaths, includeImages) as unknown[],
+        collaborationPolicy,
+      );
+      const { events } = await this.thread.runStreamed(codexInput as any, {
         signal: this.abortController.signal,
       });
 
@@ -417,7 +434,9 @@ export class CodexSessionRuntime {
 
     const permissionOptions = buildCodexThreadPermissionOptions(
       this.config.permissionConfig,
-      this.config.planMode,
+      agentPlanModeFromCollaborationPolicy(
+        this.config.collaborationPolicy ?? resolveCodexCollaborationPolicy({ planMode: this.config.planMode }),
+      ),
     );
 
     return {
@@ -690,29 +709,15 @@ function normalizeCodexReasoningEffort(value: unknown): 'low' | 'medium' | 'high
   return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
 }
 
-function normalizeCodexPlanMode(value: unknown): AgentPlanMode {
-  return value === 'on' ? 'on' : 'off';
+function normalizeCodexPlanMode(value: unknown): AgentPlanMode | undefined {
+  if (value === 'on' || value === 'off') {
+    return value;
+  }
+  return undefined;
 }
 
-const CODEX_PLAN_PREFIX = '$plan';
-
-function applyCodexPlanPrefix(payload: AgentInputPayload, planMode: AgentPlanMode | undefined): AgentInputPayload {
-  if (planMode !== 'on') {
-    return payload;
-  }
-
-  const text = payload.text.trimStart();
-  if (text === CODEX_PLAN_PREFIX || text.toLowerCase().startsWith(`${CODEX_PLAN_PREFIX} `)) {
-    return {
-      ...payload,
-      text,
-    };
-  }
-
-  return {
-    ...payload,
-    text: `${CODEX_PLAN_PREFIX} ${text}`.trimEnd(),
-  };
+function agentPlanModeFromCollaborationPolicy(policy: CodexCollaborationPolicy): AgentPlanMode {
+  return policy.effectiveMode === 'plan' ? 'on' : 'off';
 }
 
 export function buildCodexCliConfig(
