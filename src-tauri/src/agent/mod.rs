@@ -112,6 +112,13 @@ fn missing_node_prerequisite_error(node_command: &str, script_path: &str) -> Str
     )
 }
 
+fn configure_sidecar_command(command: &mut Command) -> &mut Command {
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    command
+}
+
 /// Spawn the sidecar process and return a handle + event receiver.
 ///
 /// Events are raw JSON strings (one per line) from the sidecar's stdout.
@@ -130,49 +137,29 @@ pub async fn spawn_sidecar(
     info!(target: "agent", "Spawning sidecar from {}", script_path.display());
     info!(target: "agent", "Using node runtime {}", node_path.display());
 
-    let mut child = if cfg!(target_os = "windows") {
-        let mut cmd = Command::new(&node_path);
-        cmd.arg(script_path.to_str().unwrap())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .creation_flags(0x08000000); // CREATE_NO_WINDOW
-        cmd.spawn().map_err(|e| {
-            if e.kind() == io::ErrorKind::NotFound {
-                return missing_node_prerequisite_error(
-                    &node_path.display().to_string(),
-                    &script_path.display().to_string(),
-                );
-            }
-            format!(
-                "Failed to spawn sidecar with node={} script={}: {}",
-                node_path.display(),
-                script_path.display(),
-                e
-            )
-        })?
-    } else {
-        Command::new(&node_path)
+    let mut command = Command::new(&node_path);
+    configure_sidecar_command(
+        command
             .arg(&script_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                if e.kind() == io::ErrorKind::NotFound {
-                    return missing_node_prerequisite_error(
-                        &node_path.display().to_string(),
-                        &script_path.display().to_string(),
-                    );
-                }
-                format!(
-                    "Failed to spawn sidecar with node={} script={}: {}",
-                    node_path.display(),
-                    script_path.display(),
-                    e
-                )
-            })?
-    };
+            .stderr(Stdio::piped()),
+    );
+
+    let mut child = command.spawn().map_err(|e| {
+        if e.kind() == io::ErrorKind::NotFound {
+            return missing_node_prerequisite_error(
+                &node_path.display().to_string(),
+                &script_path.display().to_string(),
+            );
+        }
+        format!(
+            "Failed to spawn sidecar with node={} script={}: {}",
+            node_path.display(),
+            script_path.display(),
+            e
+        )
+    })?;
 
     // Set up stdin writer
     let stdin = child.stdin.take().ok_or("Failed to open sidecar stdin")?;
