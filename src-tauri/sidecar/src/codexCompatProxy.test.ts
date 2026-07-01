@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from 'node:http';
 
 import { createCodexCompatProxyServer } from './codexCompatProxy.js';
+import {
+  resolveCodexCollaborationPolicy,
+  setActiveCodexCollaborationPolicy,
+} from './codexCollaborationPolicy.js';
 import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
 
 function listen(server: ReturnType<typeof createServer>): Promise<number> {
@@ -45,6 +49,7 @@ let stdoutSpy: ReturnType<typeof vi.spyOn> | null = null;
 let stdoutWrites: string[] = [];
 
 beforeEach(() => {
+  setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({ planMode: 'off' }));
   stdoutWrites = [];
   stdoutSpy = vi
     .spyOn(process.stdout, 'write')
@@ -579,6 +584,7 @@ describe('createCodexCompatProxyServer', () => {
   });
 
   it('bridges request_user_input tool calls through the frontend question flow', async () => {
+    setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({ planMode: 'on' }));
     const upstreamBodies: any[] = [];
     const upstream = createServer(async (req, res) => {
       const chunks: Buffer[] = [];
@@ -700,6 +706,236 @@ describe('createCodexCompatProxyServer', () => {
           tool_call_id: 'call_question',
           content: JSON.stringify(['TypeScript']),
         }),
+      ]),
+    );
+  });
+
+  it('blocks request_user_input tool calls when strict-local code mode is active', async () => {
+    const upstreamBodies: any[] = [];
+    const upstream = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      upstreamBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+
+      res.setHeader('content-type', 'text/event-stream');
+      res.setHeader('cache-control', 'no-cache');
+      const send = (data: Record<string, unknown>) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+      if (upstreamBodies.length === 1) {
+        send({
+          id: 'chunk-question',
+          model: 'mimo-v2-pro',
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: 'call_question',
+                type: 'function',
+                function: {
+                  name: 'request_user_input',
+                  arguments: JSON.stringify({
+                    questions: [{
+                      header: 'Scope',
+                      id: 'scope',
+                      question: 'Which scope?',
+                      options: [{ label: 'A', description: 'Use A' }],
+                    }],
+                  }),
+                },
+              }],
+            },
+            finish_reason: 'tool_calls',
+          }],
+        });
+        res.end('data: [DONE]\n\n');
+        return;
+      }
+
+      send({
+        id: 'chunk-answer',
+        model: 'mimo-v2-pro',
+        choices: [{ delta: { role: 'assistant', content: 'Continuing without user input.' }, finish_reason: null }],
+      });
+      send({
+        id: 'chunk-done',
+        model: 'mimo-v2-pro',
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      });
+      res.end('data: [DONE]\n\n');
+    });
+
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const proxy = await createCodexCompatProxyServer({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+    }, 0);
+    cleanups.push(() => proxy.close());
+
+    const response = await fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'mimo-v2-pro',
+        stream: true,
+        input: [{ role: 'user', content: 'Ask me a question' }],
+        tools: [{
+          type: 'function',
+          name: 'request_user_input',
+          description: 'Ask the user',
+          parameters: { type: 'object', properties: {} },
+        }],
+      }),
+    });
+
+    const body = await response.text();
+    const events = stdoutWrites
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line));
+
+    expect(body).toContain('Continuing without user input.');
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'sidecar_stream_status',
+          mode_blocked: expect.objectContaining({
+            effective_mode: 'code',
+            reason_code: 'request_user_input_blocked_in_default_mode',
+            request_id: 'call_question',
+          }),
+        }),
+      ]),
+    );
+    expect(events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'ask_user_question' }),
+      ]),
+    );
+    expect(upstreamBodies).toHaveLength(2);
+    expect(upstreamBodies[1].messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'tool',
+          tool_call_id: 'call_question',
+          content: expect.stringContaining('request_user_input_blocked_in_default_mode'),
+        }),
+      ]),
+    );
+  });
+
+  it('uses the request-start policy snapshot for delayed request_user_input handling', async () => {
+    const upstreamBodies: any[] = [];
+    let releaseFirstResponse: (() => void) | null = null;
+    const upstream = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      upstreamBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+
+      res.setHeader('content-type', 'text/event-stream');
+      res.setHeader('cache-control', 'no-cache');
+      const send = (data: Record<string, unknown>) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+      if (upstreamBodies.length === 1) {
+        await new Promise<void>((resolve) => {
+          releaseFirstResponse = resolve;
+        });
+        send({
+          id: 'chunk-question',
+          model: 'mimo-v2-pro',
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: 'call_question',
+                type: 'function',
+                function: {
+                  name: 'request_user_input',
+                  arguments: JSON.stringify({
+                    questions: [{
+                      header: 'Scope',
+                      id: 'scope',
+                      question: 'Which scope?',
+                      options: [{ label: 'A', description: 'Use A' }],
+                    }],
+                  }),
+                },
+              }],
+            },
+            finish_reason: 'tool_calls',
+          }],
+        });
+        res.end('data: [DONE]\n\n');
+        return;
+      }
+
+      send({
+        id: 'chunk-answer',
+        model: 'mimo-v2-pro',
+        choices: [{ delta: { role: 'assistant', content: 'Snapshot respected.' }, finish_reason: null }],
+      });
+      send({
+        id: 'chunk-done',
+        model: 'mimo-v2-pro',
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      });
+      res.end('data: [DONE]\n\n');
+    });
+
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const proxy = await createCodexCompatProxyServer({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+    }, 0);
+    cleanups.push(() => proxy.close());
+
+    const responsePromise = fetch(`${proxy.baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'mimo-v2-pro',
+        stream: true,
+        input: [{ role: 'user', content: 'Ask me a question' }],
+        tools: [{
+          type: 'function',
+          name: 'request_user_input',
+          description: 'Ask the user',
+          parameters: { type: 'object', properties: {} },
+        }],
+      }),
+    });
+
+    await waitUntil(() => upstreamBodies.length === 1);
+    setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({ planMode: 'on' }));
+    releaseFirstResponse?.();
+
+    const response = await responsePromise;
+    const body = await response.text();
+    const events = stdoutWrites
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line));
+
+    expect(body).toContain('Snapshot respected.');
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'sidecar_stream_status',
+          mode_blocked: expect.objectContaining({
+            effective_mode: 'code',
+            reason_code: 'request_user_input_blocked_in_default_mode',
+          }),
+        }),
+      ]),
+    );
+    expect(events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'ask_user_question' }),
       ]),
     );
   });

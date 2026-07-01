@@ -12,6 +12,11 @@ import { CodexChatHistory, convertChatCompletionToResponses } from './codexChatC
 import { buildToolResultEvent } from './runtimeEvents.js';
 import crypto from 'node:crypto';
 import { waitForInteractiveToolResponse } from './interactiveToolResponses.js';
+import {
+  buildRequestUserInputBlockedEvent,
+  getActiveCodexCollaborationPolicy,
+  type CodexCollaborationPolicy,
+} from './codexCollaborationPolicy.js';
 
 export type ProxyConfig = {
   apiKey: string;
@@ -139,6 +144,7 @@ async function handleRequest(
   }
 
   const requestBody = await readJsonBody(req) as Parameters<typeof convertResponsesToChatRequest>[0];
+  const collaborationPolicy = getActiveCodexCollaborationPolicy();
   await emitToolResultEventsFromRequest(requestBody, emittedToolResultIds);
   proxyLog(`responses request ${summarizeResponsesRequest(requestBody)}`);
   if (Array.isArray(requestBody.tools) && requestBody.tools.length > 0) {
@@ -231,6 +237,7 @@ async function handleRequest(
           res,
           chatRequest,
           config,
+          collaborationPolicy,
           interactiveToolCalls,
           reasoningEnabled: reasoningConfig?.supports_thinking ?? false,
           toolContext,
@@ -431,6 +438,7 @@ async function handleInteractiveUserInputToolCalls({
   res,
   chatRequest,
   config,
+  collaborationPolicy,
   interactiveToolCalls,
   reasoningEnabled,
   toolContext,
@@ -438,6 +446,7 @@ async function handleInteractiveUserInputToolCalls({
   res: ServerResponse;
   chatRequest: ReturnType<typeof convertResponsesToChatRequest>;
   config: ProxyConfig;
+  collaborationPolicy: CodexCollaborationPolicy;
   interactiveToolCalls: StreamingToolCall[];
   reasoningEnabled: boolean;
   toolContext: Map<string, { kind: 'function' | 'custom' | 'tool_search'; name: string }>;
@@ -446,6 +455,23 @@ async function handleInteractiveUserInputToolCalls({
   const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
 
   for (const toolCall of interactiveToolCalls) {
+    if (collaborationPolicy.requestUserInputPolicy === 'block') {
+      const blockedResponse = {
+        answers: {},
+        blocked: true,
+        reason_code: 'request_user_input_blocked_in_default_mode',
+      };
+      responses.push(blockedResponse);
+      emitEvent(buildRequestUserInputBlockedEvent(toolCall.id || null));
+      emitEvent(buildToolResultEvent({
+        sessionId: activeSessionId,
+        toolUseId: toolCall.id,
+        content: stringifyInteractiveToolResponse(blockedResponse),
+        isError: true,
+      }));
+      continue;
+    }
+
     const input = parseJsonObject(toolCall.arguments);
     const questions = parseInteractiveQuestions(input.questions);
     emitEvent({
