@@ -36,7 +36,7 @@ export type AgentMessage =
   | { kind: 'result'; data: AgentResultMessage }
   | { kind: 'ready'; data: SidecarReadyEvent }
   | { kind: 'error'; data: SidecarErrorEvent }
-  | { kind: 'stream_status'; data: { message: string; is_reconnecting: boolean } }
+  | { kind: 'stream_status'; data: { message: string; is_reconnecting: boolean; mode_blocked?: ModeBlockedDiagnostic | null } }
   | { kind: 'api_retry'; data: { attempt: number; max_retries: number; retry_delay_ms: number; error_status: number; error: string } }
   | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string }>; multiSelect?: boolean }> } }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
@@ -48,6 +48,15 @@ export type AgentMessage =
   | { kind: 'file_snapshot'; data: { file_path: string; original_content: string; is_new: boolean; tool_use_id: string } }
   | { kind: 'done' }
   | { kind: 'raw'; data: Record<string, unknown> };
+
+type ModeBlockedDiagnostic = {
+  blocked_method?: string;
+  effective_mode?: string;
+  reason_code?: string;
+  reason?: string;
+  suggestion?: string;
+  request_id?: string | null;
+};
 
 interface AgentState {
   /** Events for each session */
@@ -734,7 +743,14 @@ function parseAgentEvent(raw: string): AgentMessage {
       case 'sidecar_debug':
         return { kind: 'raw', data };
       case 'sidecar_stream_status':
-        return { kind: 'stream_status', data: { message: data.message, is_reconnecting: data.is_reconnecting } };
+        return {
+          kind: 'stream_status',
+          data: {
+            message: data.message,
+            is_reconnecting: data.is_reconnecting,
+            mode_blocked: isModeBlockedDiagnostic(data.mode_blocked) ? data.mode_blocked : null,
+          },
+        };
       case 'vision_unsupported':
         return { kind: 'raw', data };
       default:
@@ -749,6 +765,10 @@ function getParentToolUseId(data: Record<string, unknown>): string | undefined {
   return typeof data.parent_tool_use_id === 'string' && data.parent_tool_use_id.length > 0
     ? data.parent_tool_use_id
     : undefined;
+}
+
+function isModeBlockedDiagnostic(value: unknown): value is ModeBlockedDiagnostic {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function getEventUuid(data: Record<string, unknown>): string | undefined {

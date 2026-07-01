@@ -284,6 +284,44 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().events[session.id].some((event) => event.kind === 'stream_status')).toBe(false);
   });
 
+  it('preserves Codex mode-blocked stream diagnostics', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'sidecar_stream_status',
+        message: 'Codex collaboration mode blocked item/tool/requestUserInput: request_user_input_blocked_in_default_mode.',
+        is_reconnecting: false,
+        mode_blocked: {
+          blocked_method: 'item/tool/requestUserInput',
+          effective_mode: 'code',
+          reason_code: 'request_user_input_blocked_in_default_mode',
+          reason: 'requestUserInput is blocked while effective_mode=code',
+          suggestion: 'Switch to Plan mode and resend the prompt when user input is needed.',
+          request_id: 'tool-1',
+        },
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useAgentStore.getState().events[session.id]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'stream_status',
+          data: expect.objectContaining({
+            mode_blocked: expect.objectContaining({
+              reason_code: 'request_user_input_blocked_in_default_mode',
+            }),
+          }),
+        }),
+      ]),
+    );
+  });
+
   it('keeps the first file snapshot as the diff baseline across repeated edits', async () => {
     startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
       const filePath = 'D:\\project\\ai-code\\codeMUX\\src\\example.ts';
