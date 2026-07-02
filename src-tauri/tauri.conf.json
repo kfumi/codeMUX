@@ -42,7 +42,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc5RDA4OEE0QkQyRjBDNDMKUldSRERDKzlwSWpRZVRPWXZiNU1JQlV3enBzaW1VY0FJbTI3c3JGTGlMSmxZVy93a3lDOWhmZ1UK",
       "endpoints": [
         "https://github.com/kfumi/codeMUX-desktop/releases/latest/download/latest.json"
       ]
