@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { relaunch as relaunchApp } from '@tauri-apps/plugin-process';
+import { check as checkForTauriUpdate } from '@tauri-apps/plugin-updater';
 
 import { createLogger, serializeError } from '../../../lib/logger';
 
@@ -71,15 +73,9 @@ const loadUpdaterAdapters = async (): Promise<UpdaterAdapters> => {
     return testAdapters;
   }
 
-  const dynamicImport = (specifier: string) => (0, eval)(`import("${specifier}")`) as Promise<Record<string, unknown>>;
-  const [{ check }, { relaunch }] = await Promise.all([
-    dynamicImport('@tauri-apps/plugin-updater'),
-    dynamicImport('@tauri-apps/plugin-process'),
-  ]);
-
   return {
-    check: check as UpdaterAdapters['check'],
-    relaunch: relaunch as UpdaterAdapters['relaunch'],
+    check: checkForTauriUpdate as UpdaterAdapters['check'],
+    relaunch: relaunchApp,
   };
 };
 
