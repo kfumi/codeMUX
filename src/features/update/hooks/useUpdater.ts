@@ -47,6 +47,7 @@ export interface UpdateHandle {
 export interface CheckForUpdatesOptions {
   interactive?: boolean;
   announceNoUpdate?: boolean;
+  throwOnError?: boolean;
 }
 
 export interface UseUpdaterOptions {
@@ -148,6 +149,7 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
   const checkForUpdates = useCallback(async (checkOptions: CheckForUpdatesOptions = {}) => {
     const interactive = checkOptions.interactive ?? false;
     const announceNoUpdate = checkOptions.announceNoUpdate ?? interactive;
+    const throwOnError = checkOptions.throwOnError ?? false;
 
     if (!enabled || import.meta.env.DEV || !isTauriRuntime()) {
       if (interactive) {
@@ -212,6 +214,10 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
         });
       } else {
         setState({ stage: 'idle' });
+      }
+
+      if (throwOnError) {
+        throw error;
       }
 
       return null;

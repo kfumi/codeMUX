@@ -5,6 +5,15 @@ import { getName, getVersion, getTauriVersion } from '@tauri-apps/api/app';
 import { useUpdaterContext } from '@/features/update/UpdaterProvider';
 
 import { Button } from '../ui/button';
+import { ConfirmDialog } from '../ui/confirm-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog';
 
 interface AppInfo {
   name: string;
@@ -23,7 +32,9 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 export function AboutSettings() {
   const [info, setInfo] = useState<AppInfo | null>(null);
-  const { stage, checkForUpdates } = useUpdaterContext();
+  const [updateConfirmOpen, setUpdateConfirmOpen] = useState(false);
+  const [latestDialogOpen, setLatestDialogOpen] = useState(false);
+  const { stage, version, checkForUpdates, startUpdate } = useUpdaterContext();
   const isCheckingForUpdates = stage === 'checking';
   const isUpdateActive = stage === 'checking'
     || stage === 'downloading'
@@ -80,11 +91,23 @@ export function AboutSettings() {
             variant="outline"
             size="sm"
             disabled={isUpdateActive}
-            onClick={() => {
-              void checkForUpdates({
-                interactive: true,
-                announceNoUpdate: true,
-              });
+            onClick={async () => {
+              try {
+                const update = await checkForUpdates({
+                  interactive: true,
+                  announceNoUpdate: true,
+                  throwOnError: true,
+                });
+
+                if (update) {
+                  setUpdateConfirmOpen(true);
+                  return;
+                }
+
+                setLatestDialogOpen(true);
+              } catch {
+                // useUpdater 已经把错误写入全局更新状态，这里只避免误报“已是最新版本”。
+              }
             }}
           >
             {isCheckingForUpdates ? '检查中...' : '检查更新'}
@@ -105,6 +128,34 @@ export function AboutSettings() {
           </Button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={updateConfirmOpen}
+        onOpenChange={setUpdateConfirmOpen}
+        title={`安装更新 ${version ?? ''}？`}
+        description="应用将下载新版本并在安装完成后重启。请先保存正在编辑的重要内容。"
+        confirmLabel="下载并安装"
+        cancelLabel="稍后"
+        onConfirm={() => {
+          void startUpdate();
+        }}
+      />
+
+      <Dialog open={latestDialogOpen} onOpenChange={setLatestDialogOpen}>
+        <DialogContent className="sm:max-w-95">
+          <DialogHeader>
+            <DialogTitle>已经是最新版本</DialogTitle>
+            <DialogDescription>
+              当前安装的 codeMUX 已经是最新版本。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button size="sm" onClick={() => setLatestDialogOpen(false)}>
+              知道了
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
