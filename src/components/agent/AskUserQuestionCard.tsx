@@ -3,11 +3,12 @@ import { Check, ChevronDown, ChevronRight } from 'lucide-react';
 import { agentApi } from '../../lib/tauri';
 import { createLogger, serializeError } from '../../lib/logger';
 import { useAgentStore } from '../../stores/agentStore';
+import { cn } from '../../lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 
 const logger = createLogger('AskUserQuestionCard');
 
-interface Question {
+export interface AskUserQuestion {
   question: string;
   header?: string;
   options: Array<{ label: string; description?: string }>;
@@ -17,15 +18,17 @@ interface Question {
 interface AskUserQuestionCardProps {
   sessionId: string;
   toolUseId: string;
-  questions: Question[];
+  questions: AskUserQuestion[];
   submitted?: boolean;
   resultContent?: string;
+  variant?: 'message' | 'composer';
+  onSubmitted?: () => void;
 }
 
 const OTHER_IDX = -1;
 
 /** Try to extract answers from tool_result content */
-function parseResultAnswers(resultContent: string, questions: Question[]): string[] {
+function parseResultAnswers(resultContent: string, questions: AskUserQuestion[]): string[] {
   try {
     const parsed = JSON.parse(resultContent);
     if (Array.isArray(parsed)) return parsed.map(String);
@@ -50,6 +53,8 @@ export function AskUserQuestionCard({
   questions,
   submitted: propSubmitted,
   resultContent,
+  variant = 'message',
+  onSubmitted,
 }: AskUserQuestionCardProps) {
   const parsedAnswers = propSubmitted && resultContent ? parseResultAnswers(resultContent, questions) : [];
 
@@ -110,7 +115,7 @@ export function AskUserQuestionCard({
       return next;
     });
 
-    if (!questions[qIdx].multiSelect && hasMultipleQuestions && qIdx < questions.length - 1) {
+    if (!questions[qIdx].multiSelect && hasMultipleQuestions && qIdx < questions.length - 1 && oIdx !== OTHER_IDX) {
       setTimeout(() => setActiveTab(String(qIdx + 1)), 200);
     }
   };
@@ -135,6 +140,7 @@ export function AskUserQuestionCard({
       await agentApi.sendToolResponse(sessionId, toolUseId, answers);
       setSubmittedAnswers(answers.map((answer) => Array.isArray(answer) ? answer.join(', ') : answer));
       setSubmitted(true);
+      onSubmitted?.();
     } catch (err) {
       logger.error('Failed to send tool response', { sessionId, toolUseId }, serializeError(err));
     } finally {
@@ -151,6 +157,7 @@ export function AskUserQuestionCard({
       await agentApi.sendToolResponse(sessionId, toolUseId, questions.map(() => '__cancelled__'));
       setSubmittedAnswers(questions.map(() => '已取消'));
       setSubmitted(true);
+      onSubmitted?.();
     } catch (err) {
       logger.error('Failed to cancel question', { sessionId, toolUseId }, serializeError(err));
     } finally {
@@ -158,10 +165,14 @@ export function AskUserQuestionCard({
     }
   };
 
-  const renderQuestion = (q: Question, qIdx: number) => (
+  const isComposer = variant === 'composer';
+
+  const renderQuestion = (q: AskUserQuestion, qIdx: number) => (
     <div>
-      <p className="mb-2 text-sm">{q.question}</p>
-      <div className="space-y-1.5">
+      <p className={cn('mb-2 text-sm', isComposer && 'px-1 text-[13px] font-semibold text-foreground')}>
+        {q.question}
+      </p>
+      <div className={cn('space-y-1.5', isComposer && 'space-y-0 overflow-hidden rounded-lg border border-border/18 bg-[hsl(var(--surface-3))]/22')}>
         {q.options.map((opt, oIdx) => {
           const selected = selections[qIdx]?.has(oIdx);
 
@@ -169,21 +180,29 @@ export function AskUserQuestionCard({
             <button
               key={oIdx}
               onClick={() => toggleOption(qIdx, oIdx)}
-              className={`w-full cursor-pointer rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+              className={cn(
+                'w-full cursor-pointer border px-3 py-2 text-left text-sm transition-colors',
+                isComposer ? 'rounded-none border-x-0 border-b-0 border-t border-border/12 first:border-t-0' : 'rounded-md',
                 selected
-                  ? 'border-primary/40 bg-primary/10 text-foreground'
-                  : 'border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/50'
-              }`}
+                  ? isComposer
+                    ? 'bg-muted/62 text-foreground'
+                    : 'border-primary/40 bg-primary/10 text-foreground'
+                  : isComposer
+                    ? 'border-transparent text-muted-foreground hover:bg-muted/42 hover:text-foreground'
+                    : 'border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/50',
+              )}
             >
               <div className="flex items-center gap-2">
                 <span
-                  className={`flex h-4 w-4 shrink-0 items-center justify-center border ${
-                    q.multiSelect ? 'rounded-sm' : 'rounded-full'
-                  } ${
-                    selected ? 'border-primary bg-primary' : 'border-muted-foreground/30'
-                  }`}
+                  className={cn(
+                    'flex shrink-0 items-center justify-center border text-[11px] font-semibold',
+                    isComposer ? 'h-5 w-5 rounded-full' : q.multiSelect ? 'h-4 w-4 rounded-sm' : 'h-4 w-4 rounded-full',
+                    selected
+                      ? isComposer ? 'border-foreground bg-foreground text-background' : 'border-primary bg-primary'
+                      : 'border-muted-foreground/30 text-muted-foreground',
+                  )}
                 >
-                  {selected && <Check className="h-3 w-3 text-primary-foreground" />}
+                  {isComposer ? oIdx + 1 : selected && <Check className="h-3 w-3 text-primary-foreground" />}
                 </span>
                 <span className="font-medium">{opt.label}</span>
               </div>
@@ -196,11 +215,13 @@ export function AskUserQuestionCard({
 
         <button
           onClick={() => toggleOption(qIdx, OTHER_IDX)}
-          className={`w-full cursor-pointer rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+          className={cn(
+            'w-full cursor-pointer border px-3 py-2 text-left text-sm transition-colors',
+            isComposer ? 'rounded-none border-x-0 border-b-0 border-t border-border/12' : 'rounded-md',
             isOtherSelected(qIdx)
-              ? 'border-primary/40 bg-primary/10 text-foreground'
-              : 'border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/50'
-          }`}
+              ? isComposer ? 'bg-muted/62 text-foreground' : 'border-primary/40 bg-primary/10 text-foreground'
+              : isComposer ? 'border-transparent text-muted-foreground hover:bg-muted/42 hover:text-foreground' : 'border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/50',
+          )}
         >
           <div className="flex items-center gap-2">
             <span
@@ -234,6 +255,57 @@ export function AskUserQuestionCard({
 
   const headerText = questions[0]?.header || '需要你的输入';
   const progressText = hasMultipleQuestions && !submitted ? ` (${answeredCount}/${questions.length})` : '';
+
+  if (isComposer && !submitted) {
+    return (
+      <div className="space-y-3">
+        <div className="rounded-lg bg-[hsl(var(--surface-2))]/66 p-2">
+          {hasMultipleQuestions ? (
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <TabsList className="mb-2 w-full justify-start overflow-x-auto">
+                {questions.map((q, i) => (
+                  <TabsTrigger key={i} value={String(i)} className="relative">
+                    {q.header || `问题 ${i + 1}`}
+                    {isQuestionAnswered(i) && (
+                      <Check className="ml-1 inline h-3 w-3 text-[hsl(var(--success))]" />
+                    )}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              {questions.map((q, qIdx) => (
+                <TabsContent key={qIdx} value={String(qIdx)}>
+                  {renderQuestion(q, qIdx)}
+                </TabsContent>
+              ))}
+            </Tabs>
+          ) : (
+            questions.map((q, qIdx) => <div key={qIdx}>{renderQuestion(q, qIdx)}</div>)
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 px-1">
+          <button
+            onClick={handleCancel}
+            disabled={submitting}
+            className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground disabled:opacity-60"
+          >
+            跳过
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={!allAnswered || submitting}
+            className={cn(
+              'rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors',
+              allAnswered && !submitting
+                ? 'bg-foreground text-background hover:bg-foreground/90'
+                : 'cursor-not-allowed bg-muted/40 text-muted-foreground',
+            )}
+          >
+            {submitting ? '提交中...' : '提交'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="my-2 rounded-md border border-primary/20 bg-primary/5">

@@ -39,6 +39,7 @@ import { usePreviewStore, type FileTreeNodeData } from '../../../stores/previewS
 import type { AgentKind } from '../../../types/session';
 import { ContextDisplay } from '../../assistant-ui/context-display';
 import { computeContextUsageFromEvents } from '../contextUsage';
+import { AskUserQuestionCard, type AskUserQuestion } from '../AskUserQuestionCard';
 import { CodeMuxDirectiveChip, type CodeMuxDirectiveKind } from './CodeMuxDirectiveText';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 
@@ -73,10 +74,14 @@ const CODEMUX_FORMATTER: Unstable_DirectiveFormatter = {
 
 const MAX_FILE_RESULTS = 50;
 const EMPTY_EVENTS: AgentMessage[] = [];
-const TRIGGER_RE = /(^|\s)([/@])([^\s]*)$/;
+const TRIGGER_RE = /(^|\s)([/@])([^\s]*)(?=\s|$)/g;
 const PARSE_DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w-]*)(?=\s|$)|(@[^\s]+)/g;
 
 type FileEntry = { name: string; relativePath: string; isDir: boolean };
+type PendingUserQuestion = {
+  toolUseId: string;
+  questions: AskUserQuestion[];
+};
 
 function flattenFileTree(nodes: FileTreeNodeData[], prefix = ''): FileEntry[] {
   const result: FileEntry[] = [];
@@ -129,6 +134,7 @@ export function CodeMuxComposer({
   const attachmentCount = useAuiState((state) => state.composer.attachments.length);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
+  const [dismissedQuestionIds, setDismissedQuestionIds] = useState<Set<string>>(() => new Set());
   const contextUsage = useMemo(() => computeContextUsageFromEvents(events, {
     model: modelName,
     sessionProviderUsesLargeContext: false,
@@ -151,6 +157,10 @@ export function CodeMuxComposer({
   const activeQuery = activeTrigger?.query ?? '';
   const slashItemsByCategory = useMemo(() => groupCommands(commands, activeQuery), [commands, activeQuery]);
   const slashItems = useMemo(() => slashItemsByCategory.flatMap((group) => group.items), [slashItemsByCategory]);
+  const pendingQuestion = useMemo(
+    () => findLatestPendingUserQuestion(events, dismissedQuestionIds),
+    [dismissedQuestionIds, events],
+  );
   const fileItems = useMemo(() => {
     if (activeChar !== '@') return [];
     const items = fileItemsRef.current;
@@ -162,13 +172,33 @@ export function CodeMuxComposer({
       .map(toFileTriggerItem);
   }, [activeChar, activeQuery, treeRoot]);
   const menuItems = activeChar === '/' ? slashItems : fileItems;
-  const menuVisible = activeChar !== null && menuItems.length > 0;
+  const menuVisible = activeChar !== null && !pendingQuestion;
 
   useEffect(() => {
     setHighlightedIndex(0);
   }, [activeChar, activeQuery, menuItems.length]);
 
   const hasInput = composerText.trim().length > 0 || attachmentCount > 0;
+
+  useEffect(() => {
+    setDismissedQuestionIds(new Set());
+  }, [sessionId]);
+
+  useEffect(() => {
+    setDismissedQuestionIds((current) => {
+      const answeredIds = collectAnsweredToolUseIds(events);
+      if (answeredIds.size === 0) return current;
+      const next = new Set(current);
+      let changed = false;
+      for (const id of answeredIds) {
+        if (!next.has(id)) {
+          next.add(id);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [events]);
 
 
   const openFilePicker = () => {
@@ -208,6 +238,13 @@ export function CodeMuxComposer({
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!menuVisible) return;
+    if (menuItems.length === 0) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setManualTrigger(null);
+      }
+      return;
+    }
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       setHighlightedIndex((index) => (index + 1) % menuItems.length);
@@ -273,16 +310,28 @@ export function CodeMuxComposer({
                 {() => <ComposerAttachmentPreview />}
               </ComposerPrimitive.Attachments>
             </div>
-            <LexicalComposerInput
-              submitMode="enter"
-              placeholder={placeholder}
-              directiveChip={DIRECTIVE_CHIP}
-              formatter={CODEMUX_FORMATTER}
-              onPaste={handleComposerPaste}
-              className="relative min-h-10 max-h-50 w-full overflow-y-auto text-sm leading-6 text-foreground outline-none [&_.aui-lexical-input]:min-h-10 [&_.aui-lexical-input]:max-h-50 [&_.aui-lexical-input]:overflow-y-auto [&_.aui-lexical-input]:border-0 [&_.aui-lexical-input]:bg-transparent [&_.aui-lexical-input]:px-2 [&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:text-sm [&_.aui-lexical-input]:leading-6 [&_.aui-lexical-input]:text-foreground [&_.aui-lexical-input]:shadow-none [&_.aui-lexical-input]:outline-none [&_.aui-lexical-input]:ring-0 [&_.aui-lexical-input]:focus-visible:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:left-2 [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-sm [&_.aui-lexical-placeholder]:leading-6 [&_.aui-lexical-placeholder]:text-muted-foreground/70"
-            />
+            {pendingQuestion ? (
+              <AskUserQuestionCard
+                sessionId={sessionId}
+                toolUseId={pendingQuestion.toolUseId}
+                questions={pendingQuestion.questions}
+                variant="composer"
+                onSubmitted={() => {
+                  setDismissedQuestionIds((current) => new Set(current).add(pendingQuestion.toolUseId));
+                }}
+              />
+            ) : (
+              <LexicalComposerInput
+                submitMode="enter"
+                placeholder={placeholder}
+                directiveChip={DIRECTIVE_CHIP}
+                formatter={CODEMUX_FORMATTER}
+                onPaste={handleComposerPaste}
+                className="relative min-h-10 max-h-50 w-full overflow-y-auto text-sm leading-6 text-foreground outline-none [&_.aui-lexical-input]:min-h-10 [&_.aui-lexical-input]:max-h-50 [&_.aui-lexical-input]:overflow-y-auto [&_.aui-lexical-input]:border-0 [&_.aui-lexical-input]:bg-transparent [&_.aui-lexical-input]:px-2 [&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:text-sm [&_.aui-lexical-input]:leading-6 [&_.aui-lexical-input]:text-foreground [&_.aui-lexical-input]:shadow-none [&_.aui-lexical-input]:outline-none [&_.aui-lexical-input]:ring-0 [&_.aui-lexical-input]:focus-visible:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:left-2 [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-sm [&_.aui-lexical-placeholder]:leading-6 [&_.aui-lexical-placeholder]:text-muted-foreground/70"
+              />
+            )}
 
-            <div className="relative flex items-center justify-between pl-1">
+            {!pendingQuestion && <div className="relative flex items-center justify-between pl-1">
               <div className="flex items-center gap-2">
                 <div className="relative">
                   <button
@@ -342,11 +391,62 @@ export function CodeMuxComposer({
                   </ComposerPrimitive.Send>
                 )}
               </div>
-            </div>
+            </div>}
           </div>
         </ComposerPrimitive.AttachmentDropzone>
         </ComposerPrimitive.Root>
     </div>
+  );
+}
+
+function findLatestPendingUserQuestion(events: AgentMessage[], dismissedIds: Set<string>): PendingUserQuestion | null {
+  const answeredIds = collectAnsweredToolUseIds(events);
+
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.kind !== 'ask_user_question') {
+      continue;
+    }
+
+    const toolUseId = event.data.tool_use_id;
+    if (answeredIds.has(toolUseId) || dismissedIds.has(toolUseId)) {
+      continue;
+    }
+
+    return {
+      toolUseId,
+      questions: event.data.questions,
+    };
+  }
+
+  return null;
+}
+
+function collectAnsweredToolUseIds(events: AgentMessage[]): Set<string> {
+  const ids = new Set<string>();
+
+  for (const event of events) {
+    if (event.kind !== 'tool_result') {
+      continue;
+    }
+
+    const message = (event.data as unknown as { message?: { content?: unknown[] } }).message;
+    for (const part of message?.content ?? []) {
+      if (isToolResultPart(part)) {
+        ids.add(part.tool_use_id);
+      }
+    }
+  }
+
+  return ids;
+}
+
+function isToolResultPart(value: unknown): value is { type: 'tool_result'; tool_use_id: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { type?: unknown }).type === 'tool_result' &&
+    typeof (value as { tool_use_id?: unknown }).tool_use_id === 'string'
   );
 }
 
@@ -532,12 +632,17 @@ function TriggerMenu({
   onHighlight: (index: number) => void;
   onSelect: (item: Unstable_TriggerItem) => void;
 }) {
+  const totalItems = char === '/' ? slashGroups.reduce((sum, g) => sum + g.items.length, 0) : fileItems.length;
   let index = 0;
 
   return (
     <div className="absolute bottom-full left-0 right-0 z-50 mb-3 max-h-[min(28rem,calc(100vh-6rem))] overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 shadow-[0_20px_54px_-30px_hsl(var(--foreground)/0.5)] backdrop-blur-lg">
       <div className="max-h-[inherit] overflow-y-auto py-2">
-        {char === '/' ? (
+        {totalItems === 0 ? (
+          <div className="px-3 py-4 text-center text-xs text-muted-foreground/60">
+            {char === '/' ? '没有匹配的命令' : '没有匹配的文件'}
+          </div>
+        ) : char === '/' ? (
           slashGroups.map((group) => (
             <div key={group.category.id}>
               <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-normal text-muted-foreground/60">
@@ -637,19 +742,23 @@ function groupCommands(commands: SlashCommand[], query: string) {
 type ActiveTrigger = { char: '/' | '@'; start: number; query: string };
 
 function detectTrailingTrigger(text: string): ActiveTrigger | null {
-  const match = text.match(TRIGGER_RE);
-  if (!match || (match[2] !== '/' && match[2] !== '@')) return null;
+  let lastMatch: RegExpExecArray | null = null;
+  for (const m of text.matchAll(TRIGGER_RE)) {
+    lastMatch = m;
+  }
+  if (!lastMatch || (lastMatch[2] !== '/' && lastMatch[2] !== '@')) return null;
   return {
-    char: match[2],
-    start: (match.index ?? 0) + (match[1]?.length ?? 0),
-    query: match[3] ?? '',
+    char: lastMatch[2],
+    start: (lastMatch.index ?? 0) + (lastMatch[1]?.length ?? 0),
+    query: lastMatch[3] ?? '',
   };
 }
 
 function replaceActiveTrigger(text: string, active: ActiveTrigger | null, item: Unstable_TriggerItem) {
   const directive = CODEMUX_FORMATTER.serialize(item);
   if (!active) return directive;
-  return `${text.slice(0, active.start)}${directive}`;
+  const end = active.start + active.char.length + active.query.length;
+  return `${text.slice(0, active.start)}${directive}${text.slice(end)}`;
 }
 
 function parseComposerDirectives(text: string): Unstable_DirectiveSegment[] {

@@ -102,9 +102,9 @@ export function ToolCallCard({
             </div>
           )}
 
-          <ToolCodeDiff toolName={toolName} input={input} />
+          {status !== 'error' && <ToolCodeDiff toolName={toolName} input={input} />}
 
-          {!codeFilePath && result && (
+          {(!codeFilePath || status === 'error') && result && (
             <div>
               <div className="mb-1.5 text-[11px] font-medium uppercase tracking-normal text-muted-foreground/60">
                 结果

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from 'node:http';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import { createCodexCompatProxyServer } from './codexCompatProxy.js';
 import {
@@ -7,6 +10,7 @@ import {
   setActiveCodexCollaborationPolicy,
 } from './codexCollaborationPolicy.js';
 import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
+import { setActiveSessionId } from './codexRuntime.js';
 
 function listen(server: ReturnType<typeof createServer>): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -50,6 +54,8 @@ let stdoutWrites: string[] = [];
 
 beforeEach(() => {
   setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({ planMode: 'off' }));
+  setActiveSessionId('');
+  delete process.env.CODEMUX_CODEX_INTERACTIVE_EVENTS_DIR;
   stdoutWrites = [];
   stdoutSpy = vi
     .spyOn(process.stdout, 'write')
@@ -60,6 +66,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  delete process.env.CODEMUX_CODEX_INTERACTIVE_EVENTS_DIR;
   stdoutSpy?.mockRestore();
   stdoutSpy = null;
   while (cleanups.length > 0) {
@@ -585,6 +592,10 @@ describe('createCodexCompatProxyServer', () => {
 
   it('bridges request_user_input tool calls through the frontend question flow', async () => {
     setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({ planMode: 'on' }));
+    setActiveSessionId('app-session-question');
+    const interactiveEventsDir = await mkdtemp(path.join(os.tmpdir(), 'codemux-interactive-events-'));
+    cleanups.push(() => rm(interactiveEventsDir, { recursive: true, force: true }));
+    process.env.CODEMUX_CODEX_INTERACTIVE_EVENTS_DIR = interactiveEventsDir;
     const upstreamBodies: any[] = [];
     const upstream = createServer(async (req, res) => {
       const chunks: Buffer[] = [];
@@ -708,6 +719,29 @@ describe('createCodexCompatProxyServer', () => {
         }),
       ]),
     );
+
+    const persisted = (await readFile(path.join(interactiveEventsDir, 'app-session-question.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(persisted).toEqual([
+      expect.objectContaining({
+        type: 'response_item',
+        payload: expect.objectContaining({
+          type: 'function_call',
+          call_id: 'call_question',
+          name: 'AskUserQuestion',
+        }),
+      }),
+      expect.objectContaining({
+        type: 'response_item',
+        payload: expect.objectContaining({
+          type: 'function_call_output',
+          call_id: 'call_question',
+          output: JSON.stringify(['TypeScript']),
+        }),
+      }),
+    ]);
   });
 
   it('advertises request_user_input to upstream chat completions while plan mode allows user input', async () => {

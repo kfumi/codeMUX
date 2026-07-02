@@ -30,6 +30,23 @@ describe('codexCollaborationPolicy', () => {
     });
   });
 
+  it('allows user input tools in full-access Codex code mode', () => {
+    expect(resolveCodexCollaborationPolicy({
+      planMode: 'off',
+      permissionConfig: {
+        kind: 'codex',
+        sandboxMode: 'danger-full-access',
+        approvalPolicy: 'never',
+        networkAccessEnabled: true,
+      },
+    })).toMatchObject({
+      selectedMode: 'code',
+      effectiveMode: 'code',
+      profile: 'official-compatible',
+      requestUserInputPolicy: 'allow',
+    });
+  });
+
   it('keeps selectedMode null when mode is inherited from previous state', () => {
     expect(resolveCodexCollaborationPolicy({ previousMode: 'plan' })).toMatchObject({
       selectedMode: null,

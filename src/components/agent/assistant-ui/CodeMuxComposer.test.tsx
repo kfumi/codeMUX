@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { CodeMuxComposer } from './CodeMuxComposer';
 
 const lexicalProps: Array<{
@@ -17,9 +18,10 @@ const lexicalProps: Array<{
   }>;
 }> = [];
 
-const { setComposerTextMock, addAttachmentMock } = vi.hoisted(() => ({
+const { setComposerTextMock, addAttachmentMock, sendToolResponseMock } = vi.hoisted(() => ({
   setComposerTextMock: vi.fn(),
   addAttachmentMock: vi.fn(),
+  sendToolResponseMock: vi.fn(),
 }));
 
 const capturedPopovers: Array<{
@@ -114,12 +116,54 @@ vi.mock('@assistant-ui/react-lexical', () => ({
   },
 }));
 
+vi.mock('../../../lib/tauri', () => ({
+  agentApi: {
+    sendToolResponse: sendToolResponseMock,
+  },
+}));
+
+const pendingQuestionEvents: AgentMessage[] = [
+  {
+    kind: 'ask_user_question',
+    data: {
+      tool_use_id: 'question-1',
+      questions: [{
+        header: '审批',
+        question: '允许读取 Codex 官方手册吗？',
+        options: [
+          { label: '是', description: '继续读取文档。' },
+          { label: '否', description: '跳过这一步。' },
+        ],
+      }],
+    },
+  },
+];
+
+const answeredQuestionEvents: AgentMessage[] = [
+  ...pendingQuestionEvents,
+  {
+    kind: 'tool_result',
+    data: {
+      type: 'user',
+      uuid: 'tool-result-1',
+      session_id: 'session-1',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'question-1', content: '是' }],
+      },
+      parent_tool_use_id: null,
+    } as any,
+  },
+];
+
 describe('CodeMuxComposer', () => {
   afterEach(() => {
     lexicalProps.length = 0;
     capturedPopovers.length = 0;
     setComposerTextMock.mockClear();
     addAttachmentMock.mockClear();
+    sendToolResponseMock.mockReset();
+    useAgentStore.setState({ events: {}, forceStopped: {} });
     cleanup();
   });
 
@@ -231,5 +275,29 @@ describe('CodeMuxComposer', () => {
 
     // When no trigger is active, no commands are rendered.
     expect(commandIds).toHaveLength(0);
+  });
+
+  it('renders a pending user question inside the composer and submits the selected option', () => {
+    sendToolResponseMock.mockResolvedValue(undefined);
+    useAgentStore.setState({ events: { 'session-1': pendingQuestionEvents } });
+
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    expect(screen.getByText('允许读取 Codex 官方手册吗？')).toBeTruthy();
+    expect(screen.getByText('继续读取文档。')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('是'));
+    fireEvent.click(screen.getByText('提交'));
+
+    expect(sendToolResponseMock).toHaveBeenCalledWith('session-1', 'question-1', ['是']);
+  });
+
+  it('restores the normal composer after a user question receives a tool result', () => {
+    useAgentStore.setState({ events: { 'session-1': answeredQuestionEvents } });
+
+    render(<CodeMuxComposer sessionId="session-1" placeholder="输入消息..." />);
+
+    expect(screen.queryByText('允许读取 Codex 官方手册吗？')).toBeNull();
+    expect(screen.getByText('输入消息...')).toBeTruthy();
   });
 });

@@ -475,6 +475,83 @@ describe('CodexSessionRuntime', () => {
     }
   });
 
+  it('injects full-access code-mode directives that allow request_user_input', async () => {
+    const writes: string[] = [];
+    let streamedInput: unknown;
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        config: {
+          sessionId: string;
+          cwd: string;
+          model: string;
+          planMode: 'off';
+          permissionConfig: {
+            kind: 'codex';
+            sandboxMode: 'danger-full-access';
+            approvalPolicy: 'never';
+            networkAccessEnabled: true;
+          };
+        };
+        thread: {
+          id: string;
+          runStreamed: (input: unknown) => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).config = {
+        sessionId: 'session-1',
+        cwd: 'D:/repo',
+        model: 'gpt-5',
+        planMode: 'off',
+        permissionConfig: {
+          kind: 'codex',
+          sandboxMode: 'danger-full-access',
+          approvalPolicy: 'never',
+          networkAccessEnabled: true,
+        },
+      };
+      (runtime as unknown as {
+        thread: {
+          id: string;
+          runStreamed: (input: unknown) => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).thread = {
+        id: 'codex-thread-1',
+        runStreamed: async (input) => {
+          streamedInput = input;
+          return {
+            events: (async function* () {
+              yield {
+                type: 'turn.completed',
+                usage: {
+                  input_tokens: 1,
+                  cached_input_tokens: 0,
+                  output_tokens: 1,
+                  reasoning_output_tokens: 0,
+                },
+              } as ThreadEvent;
+            })(),
+          };
+        },
+      };
+
+      await (runtime as unknown as {
+        runInput: (prompt: string, inputPayload: undefined, includeImages: boolean) => Promise<void>;
+      }).runInput('ask when blocked', undefined, false);
+
+      expect(JSON.stringify(streamedInput)).toContain('request_user_input_policy: allow');
+      expect(JSON.stringify(streamedInput)).toContain('You may use requestUserInput');
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
   it('emits incremental stream events from item.updated agent messages', () => {
     const writes: string[] = [];
     const stdoutSpy = vi

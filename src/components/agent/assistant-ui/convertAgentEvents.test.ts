@@ -239,6 +239,150 @@ describe('convertAgentEventsToAssistantMessages', () => {
     ]);
   });
 
+  it('attaches ask-user-question results back to the original tool call when the tool event arrives later', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'ask_user_question',
+        data: {
+          tool_use_id: 'question-1',
+          questions: [{
+            question: '继续吗？',
+            options: [{ label: '继续' }, { label: '取消' }],
+          }],
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-question-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'question-1', content: '继续' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-question-tool',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'question-1',
+                name: 'AskUserQuestion',
+                input: {
+                  questions: [{
+                    question: '继续吗？',
+                    options: [{ label: '继续' }, { label: '取消' }],
+                  }],
+                },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content).toEqual([
+      {
+        type: 'tool-call',
+        toolCallId: 'question-1',
+        toolName: 'AskUserQuestion',
+        args: {
+          questions: [{
+            question: '继续吗？',
+            options: [{ label: '继续' }, { label: '取消' }],
+          }],
+        },
+        result: '继续',
+        isError: false,
+      },
+    ]);
+  });
+
+  it('renders ask-user-question events as visible AskUserQuestion tool calls with submitted answers', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'user',
+        data: { content: '帮我继续处理' },
+      },
+      {
+        kind: 'ask_user_question',
+        data: {
+          tool_use_id: 'question-history-1',
+          questions: [{
+            question: '是否继续？',
+            options: [{ label: '继续' }, { label: '取消' }],
+          }],
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-question-history-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'question-history-1', content: '继续' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-final-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '好的，我继续。' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(3);
+    expect(messages[1]).toMatchObject({
+      id: 'ask_user_question-1',
+      role: 'assistant',
+      metadata: {
+        sourceEventIndex: 1,
+        sourceKind: 'ask_user_question',
+      },
+    });
+    expect(messages[1]?.content).toEqual([
+      {
+        type: 'tool-call',
+        toolCallId: 'question-history-1',
+        toolName: 'AskUserQuestion',
+        args: {
+          questions: [{
+            question: '是否继续？',
+            options: [{ label: '继续' }, { label: '取消' }],
+          }],
+        },
+        result: '继续',
+        isError: false,
+      },
+    ]);
+  });
+
   it('coalesces consecutive tool-only assistant events into one message for tool grouping', () => {
     const events: AgentMessage[] = [
       {

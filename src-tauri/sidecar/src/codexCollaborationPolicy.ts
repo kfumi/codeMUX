@@ -1,12 +1,12 @@
 import type { ThreadItem } from '@openai/codex-sdk';
 
-import type { AgentPlanMode } from './agentPermissions.js';
+import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
 import type { AgentInputPayload } from './agentInputPayload.js';
 
 export const CODEX_COLLABORATION_POLICY_VERSION = 'codemux-codex-collaboration-policy/v1';
 
 export type CodexCollaborationMode = 'code' | 'plan';
-export type CodexCollaborationProfile = 'strict-local';
+export type CodexCollaborationProfile = 'strict-local' | 'official-compatible';
 export type CodexRequestUserInputPolicy = 'allow' | 'block';
 
 export type CodexCollaborationPolicy = {
@@ -57,6 +57,7 @@ export function normalizeCodexCollaborationMode(value: unknown): CodexCollaborat
 export function resolveCodexCollaborationPolicy(input: {
   planMode?: AgentPlanMode;
   collaborationMode?: unknown;
+  permissionConfig?: SidecarPermissionConfig;
   previousMode?: CodexCollaborationMode | null;
 }): CodexCollaborationPolicy {
   const explicitMode = normalizeCodexCollaborationMode(input.collaborationMode);
@@ -68,21 +69,35 @@ export function resolveCodexCollaborationPolicy(input: {
       ? 'missing_mode_in_request_using_thread_state'
       : 'missing_mode_in_request_default_code';
   const effectiveMode = selectedMode ?? input.previousMode ?? 'code';
-  const requestUserInputPolicy: CodexRequestUserInputPolicy = effectiveMode === 'code' ? 'block' : 'allow';
+  const profile = effectiveMode === 'code' && isFullAccessCodexPermission(input.permissionConfig)
+    ? 'official-compatible'
+    : 'strict-local';
+  const requestUserInputPolicy: CodexRequestUserInputPolicy = effectiveMode === 'plan' || profile === 'official-compatible'
+    ? 'allow'
+    : 'block';
 
   return {
     selectedMode,
     effectiveMode,
-    profile: 'strict-local',
+    profile,
     fallbackReason,
     policyVersion: CODEX_COLLABORATION_POLICY_VERSION,
     requestUserInputPolicy,
-    directives: buildCodexCollaborationDirectives(effectiveMode),
+    directives: buildCodexCollaborationDirectives(effectiveMode, profile),
   };
 }
 
-export function buildCodexCollaborationDirectives(mode: CodexCollaborationMode): string[] {
+export function buildCodexCollaborationDirectives(
+  mode: CodexCollaborationMode,
+  profile: CodexCollaborationProfile = 'strict-local',
+): string[] {
   if (mode === 'code') {
+    if (profile === 'official-compatible') {
+      return [
+        'Execution policy (default mode, full access): proceed autonomously when possible. You may use requestUserInput / askuserquestion when the user explicitly asks for an interactive question or when a blocking decision truly requires user input.',
+      ];
+    }
+
     return [
       'Execution policy (default mode): keep execution autonomous. Do not ask the user follow-up questions and avoid requestUserInput / askuserquestion interactions. If details are missing, make minimal reasonable assumptions, proceed, and report assumptions briefly.',
     ];
@@ -93,6 +108,12 @@ export function buildCodexCollaborationDirectives(mode: CodexCollaborationMode):
     'Execution policy (plan mode): if a blocker appears (missing path/context, ambiguous scope, permission gap, or any prerequisite failure), you MUST immediately stop further work, call requestUserInput / askuserquestion with concrete options, and WAIT for user input before continuing. Do not silently continue with assumptions.',
     'Execution policy (plan mode): when you need extra user information (for example path, credentials, env value, target scope, preference, or any missing input), you MUST ask via requestUserInput / askuserquestion. Plain-text follow-up questions are NOT allowed.',
   ];
+}
+
+function isFullAccessCodexPermission(config: SidecarPermissionConfig | undefined): boolean {
+  return config?.kind === 'codex'
+    && config.sandboxMode === 'danger-full-access'
+    && config.approvalPolicy === 'never';
 }
 
 export function applyCodexCollaborationPolicyToPayload(

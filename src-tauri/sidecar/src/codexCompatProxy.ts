@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server as HttpServer } from 'node:http';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -668,6 +668,7 @@ async function resolveInteractiveUserInputToolCalls(
         questions,
       });
       response = await waitForInteractiveToolResponse(toolCall.id);
+      persistInteractiveUserInputHistory(activeSessionId, toolCall, questions, response);
     }
 
     responses.push(response);
@@ -680,6 +681,56 @@ async function resolveInteractiveUserInputToolCalls(
   }
 
   return responses;
+}
+
+function persistInteractiveUserInputHistory(
+  appSessionId: string,
+  toolCall: StreamingToolCall,
+  questions: InteractiveUserInputQuestion[],
+  response: unknown,
+): void {
+  if (!appSessionId || !toolCall.id) {
+    return;
+  }
+
+  try {
+    const dir = getInteractiveEventsDir();
+    mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `${sanitizeFileSegment(appSessionId)}.jsonl`);
+    const now = new Date().toISOString();
+    const functionCall = {
+      timestamp: now,
+      type: 'response_item',
+      payload: {
+        type: 'function_call',
+        call_id: toolCall.id,
+        name: 'AskUserQuestion',
+        arguments: JSON.stringify({ questions }),
+      },
+    };
+    const functionCallOutput = {
+      timestamp: new Date(Date.now() + 1).toISOString(),
+      type: 'response_item',
+      payload: {
+        type: 'function_call_output',
+        call_id: toolCall.id,
+        output: stringifyInteractiveToolResponse(response),
+      },
+    };
+
+    appendFileSync(filePath, `${JSON.stringify(functionCall)}\n${JSON.stringify(functionCallOutput)}\n`, 'utf8');
+  } catch (error) {
+    proxyLog(`failed to persist interactive user input history: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function getInteractiveEventsDir(): string {
+  return process.env.CODEMUX_CODEX_INTERACTIVE_EVENTS_DIR
+    || path.join(os.homedir(), '.codemux', 'codex-interactive-events');
+}
+
+function sanitizeFileSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
 function isInteractiveUserInputToolCall(toolCall: StreamingToolCall): boolean {

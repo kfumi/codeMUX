@@ -127,6 +127,7 @@ export class CodexSessionRuntime {
     };
     const collaborationPolicy = resolveCodexCollaborationPolicy({
       planMode: requestedConfig.planMode,
+      permissionConfig: requestedConfig.permissionConfig,
       previousMode: this.config?.collaborationPolicy?.effectiveMode ?? null,
     });
     const nextFingerprint = JSON.stringify(requestedConfig);
@@ -264,7 +265,10 @@ export class CodexSessionRuntime {
     activeAbortController = this.abortController;
 
     const collaborationPolicy = this.config.collaborationPolicy
-      ?? resolveCodexCollaborationPolicy({ planMode: this.config.planMode });
+      ?? resolveCodexCollaborationPolicy({
+        planMode: this.config.planMode,
+        permissionConfig: this.config.permissionConfig,
+      });
     const payload = normalizeAgentInputPayload(prompt, inputPayload);
     const imagePaths = includeImages ? await writePayloadImagesToTempFiles(payload) : [];
     const permissionOptions = buildCodexThreadPermissionOptions(
@@ -445,7 +449,10 @@ export class CodexSessionRuntime {
     const permissionOptions = buildCodexThreadPermissionOptions(
       this.config.permissionConfig,
       agentPlanModeFromCollaborationPolicy(
-        this.config.collaborationPolicy ?? resolveCodexCollaborationPolicy({ planMode: this.config.planMode }),
+        this.config.collaborationPolicy ?? resolveCodexCollaborationPolicy({
+          planMode: this.config.planMode,
+          permissionConfig: this.config.permissionConfig,
+        }),
       ),
     );
 
@@ -540,7 +547,10 @@ export class CodexSessionRuntime {
     }
 
     const collaborationPolicy = this.config?.collaborationPolicy
-      ?? resolveCodexCollaborationPolicy({ planMode: this.config?.planMode });
+      ?? resolveCodexCollaborationPolicy({
+        planMode: this.config?.planMode,
+        permissionConfig: this.config?.permissionConfig,
+      });
     const blockedMethod = shouldBlockPlanModeItem(item, collaborationPolicy);
     if (blockedMethod) {
       if (!this.blockedPlanMutationItemIds.has(item.id)) {

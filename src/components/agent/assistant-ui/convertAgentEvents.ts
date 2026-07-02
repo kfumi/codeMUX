@@ -5,7 +5,7 @@ import { buildAssistantResultTargetSet } from './assistantResultTargets';
 
 type CodeMuxAssistantRole = 'user' | 'assistant' | 'system';
 
-type CodeMuxVisibleEventKind = Extract<AgentMessage['kind'], 'ask_user_question' | 'api_retry' | 'compact' | 'error' | 'stream_status'>;
+type CodeMuxVisibleEventKind = Extract<AgentMessage['kind'], 'api_retry' | 'compact' | 'error' | 'stream_status'>;
 
 type PersistedContentBlock = ContentBlock | Record<string, unknown> | null | undefined;
 
@@ -45,14 +45,14 @@ export type CodeMuxAssistantMessage = {
   };
 };
 
-const visibleEventKinds = ['ask_user_question', 'api_retry', 'compact', 'error', 'stream_status'] as const satisfies readonly CodeMuxVisibleEventKind[];
+const visibleEventKinds = ['api_retry', 'compact', 'error', 'stream_status'] as const satisfies readonly CodeMuxVisibleEventKind[];
 
 export function convertAgentEventsToAssistantMessages(
   events: AgentMessage[],
 ): CodeMuxAssistantMessage[] {
   const messages: CodeMuxAssistantMessage[] = [];
   const toolCallLocationById = new Map<string, { messageIndex: number; partIndex: number }>();
-  const askQuestionLocationByToolUseId = new Map<string, { messageIndex: number; partIndex: number }>();
+  const askQuestionToolUseIds = new Set<string>();
   const pendingToolResultsById = new Map<string, { content: string; isError: boolean }>();
   const pendingAgentIdsById = new Map<string, string>();
 
@@ -69,9 +69,9 @@ export function convertAgentEventsToAssistantMessages(
     }
 
     if (event.kind === 'assistant') {
-      const parts = event.data.message.content.flatMap((block, blockIndex) =>
-        convertContentBlockToParts(block, index, blockIndex),
-      );
+      const parts = event.data.message.content
+        .flatMap((block, blockIndex) => convertContentBlockToParts(block, index, blockIndex))
+        .filter((part) => !isDuplicateAskUserQuestionToolCall(part, toolCallLocationById, askQuestionToolUseIds));
 
       if (parts.length > 0) {
         const message = createMessage(
@@ -122,7 +122,6 @@ export function convertAgentEventsToAssistantMessages(
         if (messageIndex < messages.length) {
           messages.splice(messageIndex, 0, message);
           shiftLocationIndexes(toolCallLocationById, messageIndex);
-          shiftLocationIndexes(askQuestionLocationByToolUseId, messageIndex);
         } else {
           messages.push(message);
         }
@@ -157,6 +156,23 @@ export function convertAgentEventsToAssistantMessages(
       // Extract agentId from Agent tool results before processing content results
       const agentId = extractAgentIdFromToolResult(event);
       for (const result of getToolResults(event)) {
+        if (askQuestionToolUseIds.has(result.toolUseId)) {
+          const attachedToolResult = attachToolResult(
+            messages,
+            toolCallLocationById,
+            result.toolUseId,
+            result.content,
+            result.isError,
+          );
+          if (!attachedToolResult) {
+            pendingToolResultsById.set(result.toolUseId, {
+              content: result.content,
+              isError: result.isError,
+            });
+          }
+          continue;
+        }
+
         const attachedToolResult = attachToolResult(
           messages,
           toolCallLocationById,
@@ -177,12 +193,6 @@ export function convertAgentEventsToAssistantMessages(
             pendingAgentIdsById.set(result.toolUseId, agentId);
           }
         }
-        attachAskQuestionResult(
-          messages,
-          askQuestionLocationByToolUseId,
-          result.toolUseId,
-          result.content,
-        );
       }
 
       return;
@@ -204,8 +214,42 @@ export function convertAgentEventsToAssistantMessages(
       return;
     }
 
+    if (event.kind === 'ask_user_question') {
+      askQuestionToolUseIds.add(event.data.tool_use_id);
+
+      if (!toolCallLocationById.has(event.data.tool_use_id)) {
+        const part = createAskUserQuestionToolCallPart(event);
+        const message = createMessage(
+          `${event.kind}-${index}`,
+          'assistant',
+          [part],
+          event,
+          index,
+        );
+
+        messages.push(message);
+        toolCallLocationById.set(event.data.tool_use_id, {
+          messageIndex: messages.length - 1,
+          partIndex: 0,
+        });
+      }
+
+      const pendingResult = pendingToolResultsById.get(event.data.tool_use_id);
+      if (pendingResult) {
+        attachToolResult(
+          messages,
+          toolCallLocationById,
+          event.data.tool_use_id,
+          pendingResult.content,
+          pendingResult.isError,
+        );
+        pendingToolResultsById.delete(event.data.tool_use_id);
+      }
+
+      return;
+    }
+
     if (isVisibleEventKind(event.kind)) {
-      const messageIndex = messages.length;
       const part = createEventPart(event.kind, event);
       messages.push(
         createMessage(
@@ -217,9 +261,6 @@ export function convertAgentEventsToAssistantMessages(
         ),
       );
 
-      if (event.kind === 'ask_user_question') {
-        askQuestionLocationByToolUseId.set(event.data.tool_use_id, { messageIndex, partIndex: 0 });
-      }
     }
   });
 
@@ -346,6 +387,36 @@ function convertContentBlockToParts(
   return [];
 }
 
+function createAskUserQuestionToolCallPart(
+  event: Extract<AgentMessage, { kind: 'ask_user_question' }>,
+): CodeMuxToolCallPart {
+  return {
+    type: 'tool-call',
+    toolCallId: event.data.tool_use_id,
+    toolName: 'AskUserQuestion',
+    args: { questions: cloneJsonValue(event.data.questions) },
+    result: undefined,
+    isError: undefined,
+  };
+}
+
+function isDuplicateAskUserQuestionToolCall(
+  part: CodeMuxAssistantPart,
+  toolCallLocationById: Map<string, { messageIndex: number; partIndex: number }>,
+  askQuestionToolUseIds: Set<string>,
+): boolean {
+  return (
+    part.type === 'tool-call' &&
+    isAskUserQuestionToolName(part.toolName) &&
+    askQuestionToolUseIds.has(part.toolCallId) &&
+    toolCallLocationById.has(part.toolCallId)
+  );
+}
+
+function isAskUserQuestionToolName(toolName: string): boolean {
+  return toolName === 'AskUserQuestion' || toolName === 'askUserQuestion' || toolName === 'request_user_input';
+}
+
 function attachToolResult(
   messages: CodeMuxAssistantMessage[],
   toolCallLocationById: Map<string, { messageIndex: number; partIndex: number }>,
@@ -465,41 +536,6 @@ function shiftLocationIndexes(
   }
 }
 
-
-function attachAskQuestionResult(
-  messages: CodeMuxAssistantMessage[],
-  askQuestionLocationByToolUseId: Map<string, { messageIndex: number; partIndex: number }>,
-  toolCallId: string,
-  result: string,
-): boolean {
-  const location = askQuestionLocationByToolUseId.get(toolCallId);
-
-  if (!location) {
-    return false;
-  }
-
-  const message = messages[location.messageIndex];
-  const part = message?.content[location.partIndex];
-
-  if (!message || part?.type !== 'data-codemux-event' || part.event.kind !== 'ask_user_question') {
-    return false;
-  }
-
-  const content = [...message.content];
-  content[location.partIndex] = {
-    ...part,
-    event: {
-      ...part.event,
-      data: {
-        ...(part.event.data as Record<string, unknown>),
-        submitted: true,
-        resultContent: result,
-      } as unknown as Extract<AgentMessage, { kind: 'ask_user_question' }>['data'],
-    },
-  };
-  messages[location.messageIndex] = { ...message, content };
-  return true;
-}
 
 function getToolResults(
   event: Extract<AgentMessage, { kind: 'tool_result' }>,

@@ -266,6 +266,19 @@ fn read_codex_session_meta_id(path: &Path) -> Option<String> {
         .map(|id| id.to_string())
 }
 
+fn sanitize_file_segment(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 fn collect_codex_jsonl_files(root: &Path, output: &mut Vec<PathBuf>) {
     use std::fs;
 
@@ -303,6 +316,10 @@ fn find_codex_session_jsonl(sessions_dir: &Path, codex_session_id: &str) -> Opti
                 .map(|duration| duration.as_millis() as i64)
                 .unwrap_or(0)
         })
+}
+
+fn codex_interactive_events_dir(home: &Path) -> PathBuf {
+    home.join(".codemux").join("codex-interactive-events")
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -790,6 +807,32 @@ fn read_json_stream_values(path: &Path) -> Result<Vec<serde_json::Value>, String
     Ok(values)
 }
 
+fn read_codex_interactive_events_from_dir(
+    dir: &Path,
+    app_session_id: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    let path = dir.join(format!("{}.jsonl", sanitize_file_segment(app_session_id)));
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    read_json_stream_values(&path)
+}
+
+fn event_timestamp_millis(value: &serde_json::Value) -> Option<i64> {
+    let timestamp = value.get("timestamp").and_then(|entry| entry.as_str())?;
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .ok()
+        .map(|entry| entry.timestamp_millis())
+}
+
+fn sort_events_by_timestamp_stable(events: &mut Vec<serde_json::Value>) {
+    let mut indexed: Vec<(usize, serde_json::Value)> = events.drain(..).enumerate().collect();
+    indexed
+        .sort_by_key(|(index, value)| (event_timestamp_millis(value).unwrap_or(i64::MAX), *index));
+    events.extend(indexed.into_iter().map(|(_, value)| value));
+}
+
 #[tauri::command]
 pub async fn load_codex_session_events(
     state: State<'_, crate::AppState>,
@@ -819,7 +862,15 @@ pub async fn load_codex_session_events(
 
     debug!(target: "agent", "Reading Codex JSONL from {}", jsonl_path.display());
     // Collect all raw events for two-pass processing
-    let raw_events = read_json_stream_values(&jsonl_path)?;
+    let mut raw_events = read_json_stream_values(&jsonl_path)?;
+    let mut interactive_events = read_codex_interactive_events_from_dir(
+        &codex_interactive_events_dir(&home_dir()?),
+        &app_session_id,
+    )?;
+    if !interactive_events.is_empty() {
+        raw_events.append(&mut interactive_events);
+        sort_events_by_timestamp_stable(&mut raw_events);
+    }
 
     // --- Pass 1: Identify turns and collect per-turn stats ---
     // Each turn starts with a turn_context and has its own task_complete + token_counts.
@@ -1562,6 +1613,13 @@ pub async fn delete_codex_session_files(
         }
     }
 
+    let interactive_events_path = codex_interactive_events_dir(&home_dir()?)
+        .join(format!("{}.jsonl", sanitize_file_segment(&app_session_id)));
+    if interactive_events_path.exists() {
+        let _ = fs::remove_file(&interactive_events_path);
+        deleted.push(interactive_events_path.to_string_lossy().to_string());
+    }
+
     info!(
         target: "agent",
         "Deleted {} Codex session file entries for app_session_id={}",
@@ -1641,8 +1699,9 @@ async fn get_live_proxy_port(agent_state: &State<'_, AgentState>) -> Option<u16>
 mod tests {
     use super::{
         collect_subagent_index_from_dir, convert_codex_item_to_claude_format,
-        find_codex_session_jsonl, parse_proxy_port_from_stderr, read_json_stream_values,
-        resolve_agent_session_info,
+        find_codex_session_jsonl, parse_proxy_port_from_stderr,
+        read_codex_interactive_events_from_dir, read_json_stream_values,
+        resolve_agent_session_info, sort_events_by_timestamp_stable,
     };
     use crate::config::types::AgentKind;
 
@@ -1876,6 +1935,85 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn reads_codex_interactive_events_from_codemux_jsonl() {
+        use std::fs;
+
+        let base = std::env::temp_dir().join(format!(
+            "codemux-interactive-events-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        fs::write(
+            base.join("app-session-1.jsonl"),
+            concat!(
+                "{\"timestamp\":\"2026-07-02T10:00:00.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"call_id\":\"call_question\",\"name\":\"AskUserQuestion\",\"arguments\":\"{\\\"questions\\\":[{\\\"question\\\":\\\"继续吗？\\\",\\\"options\\\":[{\\\"label\\\":\\\"继续\\\"}]}]}\"}}\n",
+                "{\"timestamp\":\"2026-07-02T10:00:00.001Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"call_question\",\"output\":\"[\\\"继续\\\"]\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        let values = read_codex_interactive_events_from_dir(&base, "app-session-1")
+            .expect("interactive events should be readable");
+
+        let mut raw_events = vec![serde_json::json!({
+            "timestamp": "2026-07-02T09:59:59.000Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{ "type": "output_text", "text": "先确认一个问题。" }]
+            }
+        })];
+        raw_events.extend(values);
+        sort_events_by_timestamp_stable(&mut raw_events);
+
+        let converted: Vec<serde_json::Value> = raw_events
+            .iter()
+            .filter_map(convert_codex_item_to_claude_format)
+            .collect();
+
+        assert_eq!(converted.len(), 3);
+        assert_eq!(
+            converted[1],
+            serde_json::json!({
+                "type": "assistant",
+                "timestamp": "2026-07-02T10:00:00.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "call_question",
+                        "name": "AskUserQuestion",
+                        "input": {
+                            "questions": [{
+                                "question": "继续吗？",
+                                "options": [{ "label": "继续" }]
+                            }]
+                        }
+                    }]
+                }
+            })
+        );
+        assert_eq!(
+            converted[2],
+            serde_json::json!({
+                "type": "user",
+                "timestamp": "2026-07-02T10:00:00.001Z",
+                "message": {
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": "call_question",
+                        "content": "[\"继续\"]"
+                    }]
+                }
+            })
+        );
+
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]

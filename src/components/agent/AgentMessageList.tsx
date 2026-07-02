@@ -349,13 +349,14 @@ function renderEvent(sessionId: string, msg: AgentMessage, _prevMsg: AgentMessag
 
     case 'ask_user_question': {
       const resultEntry = resultMap[msg.data.tool_use_id];
+      if (resultEntry) {
+        return null;
+      }
       return (
         <AskUserQuestionCard
           sessionId={sessionId}
           toolUseId={msg.data.tool_use_id}
           questions={msg.data.questions}
-          submitted={!!resultEntry}
-          resultContent={resultEntry?.content}
         />
       );
     }
