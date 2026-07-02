@@ -20,6 +20,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      target_branch: ${{ steps.ensure.outputs.target_branch }}
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +38,7 @@ jobs:
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Ensure public release exists
+        id: ensure
         uses: actions/github-script@v7
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
@@ -48,6 +50,12 @@ jobs:
             const repo = "codeMUX-desktop";
             const tag = process.env.RELEASE_TAG;
             const version = process.env.RELEASE_VERSION;
+            const repository = await github.rest.repos.get({ owner, repo });
+            const targetBranch = repository.data.default_branch;
+            core.info(`目标仓库默认分支: ${targetBranch}`);
+            core.setOutput("target_branch", targetBranch);
+
+            let releaseExists = false;
 
             try {
               const existing = await github.rest.repos.getReleaseByTag({
@@ -55,11 +63,44 @@ jobs:
                 repo,
                 tag,
               });
+              releaseExists = true;
               core.info(`Release ${tag} 已存在，跳过创建。`);
               core.info(`Release id: ${existing.data.id}`);
             } catch (error) {
               if (error.status !== 404) {
                 throw error;
+              }
+
+              let tagExists = true;
+              try {
+                await github.rest.git.getRef({
+                  owner,
+                  repo,
+                  ref: `tags/${tag}`,
+                });
+                core.info(`Tag ${tag} 已存在，继续创建 Release。`);
+              } catch (tagError) {
+                if (tagError.status !== 404) {
+                  throw tagError;
+                }
+                tagExists = false;
+              }
+
+              if (!tagExists) {
+                const branchRef = await github.rest.git.getRef({
+                  owner,
+                  repo,
+                  ref: `heads/${targetBranch}`,
+                });
+
+                await github.rest.git.createRef({
+                  owner,
+                  repo,
+                  ref: `refs/tags/${tag}`,
+                  sha: branchRef.data.object.sha,
+                });
+
+                core.info(`已创建 Tag ${tag} -> ${branchRef.data.object.sha}`);
               }
 
               const created = await github.rest.repos.createRelease({
@@ -70,7 +111,7 @@ jobs:
                 body: "桌面端安装包下载见下方 Assets。",
                 draft: false,
                 prerelease: false,
-                target_commitish: "master",
+                target_commitish: targetBranch,
               });
 
               core.info(`已创建 Release ${tag}，id: ${created.data.id}`);
@@ -134,4 +175,4 @@ jobs:
           releaseBody: "桌面端安装包下载见下方 Assets。"
           releaseDraft: false
           prerelease: false
-          releaseCommitish: master
+          releaseCommitish: ${{ needs.ensure-release.outputs.target_branch }}
