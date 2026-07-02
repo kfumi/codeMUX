@@ -91,7 +91,7 @@ describe('AboutSettings', () => {
     expect(screen.getByText('当前安装的 codeMUX 已经是最新版本。')).toBeTruthy();
   });
 
-  it('手动检查失败时不误弹最新版本提示', async () => {
+  it('手动检查失败时弹出失败提示且不展示底层错误原因', async () => {
     mockUpdaterContext.checkForUpdates.mockRejectedValueOnce(new Error('network down'));
     const { AboutSettings } = await import('./AboutSettings');
 
@@ -105,6 +105,9 @@ describe('AboutSettings', () => {
       expect(mockUpdaterContext.checkForUpdates).toHaveBeenCalled();
     });
 
+    expect(await screen.findByText('检查更新失败')).toBeTruthy();
+    expect(screen.getByText('暂时无法检查更新，请稍后再试。')).toBeTruthy();
+    expect(screen.queryByText('network down')).toBeNull();
     expect(screen.queryByText('已经是最新版本')).toBeNull();
     expect(screen.queryByText('安装更新')).toBeNull();
   });

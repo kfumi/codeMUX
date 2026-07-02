@@ -34,6 +34,7 @@ export function AboutSettings() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [updateConfirmOpen, setUpdateConfirmOpen] = useState(false);
   const [latestDialogOpen, setLatestDialogOpen] = useState(false);
+  const [updateErrorDialogOpen, setUpdateErrorDialogOpen] = useState(false);
   const { stage, version, checkForUpdates, startUpdate } = useUpdaterContext();
   const isCheckingForUpdates = stage === 'checking';
   const isUpdateActive = stage === 'checking'
@@ -106,7 +107,7 @@ export function AboutSettings() {
 
                 setLatestDialogOpen(true);
               } catch {
-                // useUpdater 已经把错误写入全局更新状态，这里只避免误报“已是最新版本”。
+                setUpdateErrorDialogOpen(true);
               }
             }}
           >
@@ -151,6 +152,22 @@ export function AboutSettings() {
           </DialogHeader>
           <DialogFooter>
             <Button size="sm" onClick={() => setLatestDialogOpen(false)}>
+              知道了
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={updateErrorDialogOpen} onOpenChange={setUpdateErrorDialogOpen}>
+        <DialogContent className="sm:max-w-95">
+          <DialogHeader>
+            <DialogTitle>检查更新失败</DialogTitle>
+            <DialogDescription>
+              暂时无法检查更新，请稍后再试。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button size="sm" onClick={() => setUpdateErrorDialogOpen(false)}>
               知道了
             </Button>
           </DialogFooter>
