@@ -1,4 +1,4 @@
-import { Download, Loader2, RefreshCw } from 'lucide-react';
+import { Download, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -62,16 +62,6 @@ const getEntryState = (stage: UpdateStage, progress?: UpdateProgress) => {
     };
   }
 
-  if (stage === 'error') {
-    return {
-      label: '更新失败',
-      tooltip: '更新检查失败，点击重试',
-      disabled: false,
-      tone: 'error' as const,
-      Icon: RefreshCw,
-    };
-  }
-
   return null;
 };
 
@@ -90,13 +80,6 @@ export function UpdateEntry() {
       setConfirmOpen(true);
       return;
     }
-
-    if (updater.stage === 'error') {
-      void updater.checkForUpdates({
-        interactive: true,
-        announceNoUpdate: true,
-      });
-    }
   };
 
   return (
@@ -114,7 +97,6 @@ export function UpdateEntry() {
               'border border-transparent',
               entry.tone === 'available' && 'bg-[hsl(var(--sidebar-accent)/0.16)] text-[hsl(var(--sidebar-accent))] hover:bg-[hsl(var(--sidebar-accent)/0.24)] hover:text-[hsl(var(--sidebar-accent))]',
               entry.tone === 'busy' && 'text-foreground/58',
-              entry.tone === 'error' && 'bg-[hsl(var(--destructive)/0.1)] text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive)/0.16)] hover:text-[hsl(var(--destructive))]',
             )}
           >
             <Icon className={cn('h-3.5 w-3.5', entry.tone === 'busy' && 'animate-spin')} />

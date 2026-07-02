@@ -93,18 +93,14 @@ describe('UpdateEntry', () => {
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '重启中' }).disabled).toBe(true);
   });
 
-  it('更新失败时展示重试入口，点击后重新检查更新', async () => {
+  it('更新检查失败时不展示左上角入口按钮', async () => {
     mockUpdaterState.stage = 'error';
     mockUpdaterState.error = 'network down';
     const { UpdateEntry } = await import('./UpdateEntry');
 
     render(<UpdateEntry />);
 
-    fireEvent.click(screen.getByRole('button', { name: '更新失败' }));
-
-    expect(mockUpdaterState.checkForUpdates).toHaveBeenCalledWith({
-      interactive: true,
-      announceNoUpdate: true,
-    });
+    expect(screen.queryByRole('button', { name: /更新失败|更新/ })).toBeNull();
+    expect(mockUpdaterState.checkForUpdates).not.toHaveBeenCalled();
   });
 });
