@@ -14,13 +14,76 @@ permissions:
   contents: read
 
 jobs:
+  ensure-release:
+    name: Ensure Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure public release exists
+        uses: actions/github-script@v7
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        with:
+          github-token: ${{ secrets.DESKTOP_RELEASE_TOKEN }}
+          script: |
+            const owner = "kfumi";
+            const repo = "codeMUX-desktop";
+            const tag = process.env.RELEASE_TAG;
+            const version = process.env.RELEASE_VERSION;
+
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag,
+              });
+              core.info(`Release ${tag} 已存在，跳过创建。`);
+              core.info(`Release id: ${existing.data.id}`);
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+
+              const created = await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                name: `codeMUX v${version}`,
+                body: "桌面端安装包下载见下方 Assets。",
+                draft: false,
+                prerelease: false,
+                target_commitish: "master",
+              });
+
+              core.info(`已创建 Release ${tag}，id: ${created.data.id}`);
+            }
+
   publish-tauri:
+    needs: ensure-release
     name: Publish (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [windows-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -66,8 +129,8 @@ jobs:
         with:
           owner: kfumi
           repo: codeMUX-desktop
-          tagName: v__VERSION__
-          releaseName: "codeMUX v__VERSION__"
+          tagName: ${{ needs.ensure-release.outputs.tag }}
+          releaseName: "codeMUX v${{ needs.ensure-release.outputs.version }}"
           releaseBody: "桌面端安装包下载见下方 Assets。"
           releaseDraft: false
           prerelease: false

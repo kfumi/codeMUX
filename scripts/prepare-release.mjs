@@ -25,6 +25,7 @@ if (!/^\d+\.\d+\.\d+$/.test(normalizedVersion)) {
 const packageJsonPath = path.join(rootDir, "package.json");
 const tauriConfigPath = path.join(rootDir, "src-tauri", "tauri.conf.json");
 const cargoTomlPath = path.join(rootDir, "src-tauri", "Cargo.toml");
+const cargoLockPath = path.join(rootDir, "src-tauri", "Cargo.lock");
 
 const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
 packageJson.version = normalizedVersion;
@@ -41,6 +42,13 @@ const updatedCargoToml = cargoToml.replace(
 );
 writeFileSync(cargoTomlPath, updatedCargoToml, "utf8");
 
+const cargoLock = readFileSync(cargoLockPath, "utf8");
+const updatedCargoLock = cargoLock.replace(
+  /(\[\[package\]\]\r?\nname = "codemux"\r?\nversion = )".*"$/m,
+  `$1"${normalizedVersion}"`
+);
+writeFileSync(cargoLockPath, updatedCargoLock, "utf8");
+
 if (createTag) {
   const tagName = `v${normalizedVersion}`;
   execFileSync("git", ["tag", tagName], {
@@ -55,6 +63,7 @@ console.log("已更新文件:");
 console.log("- package.json");
 console.log("- src-tauri/tauri.conf.json");
 console.log("- src-tauri/Cargo.toml");
+console.log("- src-tauri/Cargo.lock");
 console.log("后续步骤:");
 console.log("1. 提交版本变更");
-console.log(`2. 推送代码与标签: git push origin main && git push origin v${normalizedVersion}`);
+console.log(`2. 推送代码与标签: git push origin master && git push origin v${normalizedVersion}`);
