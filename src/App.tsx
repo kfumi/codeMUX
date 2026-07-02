@@ -8,6 +8,7 @@ import { Sidebar } from './components/layout/Sidebar';
 import { TodoList } from './components/agent/TodoList';
 import { TooltipProvider } from './components/ui/tooltip';
 import { resolveAgentProviderConfig } from './lib/agentProvider';
+import { useAgentNotifications } from './hooks/useAgentNotifications';
 import { useTheme } from './hooks/useTheme';
 import { createLogger, serializeError } from './lib/logger';
 import type { AgentInputPayload } from './types/agentInput';
@@ -60,6 +61,7 @@ function App() {
   const sidePanelScopeId = activeSessionId ?? (isDraftOpen ? `draft:${draftProjectId ?? 'none'}` : 'home');
 
   useTheme();
+  useAgentNotifications();
 
   useEffect(() => {
     fetchConfig().catch((error) => {

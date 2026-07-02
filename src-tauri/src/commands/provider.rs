@@ -1,6 +1,7 @@
 use crate::config;
 use crate::config::types::{
-    AgentKind, AppConfig, ClaudeCodeAgentConfigUpdate, CodexAgentConfigUpdate, Provider, Theme,
+    AgentKind, AppConfig, ClaudeCodeAgentConfigUpdate, CodexAgentConfigUpdate,
+    NotificationSettings, Provider, Theme,
 };
 use crate::AppState;
 use futures::StreamExt;
@@ -238,6 +239,32 @@ pub fn set_compact_ai_output(
     info!(target: "provider", "Setting compact AI output enabled={}", enabled);
     let mut config = state.config.lock().unwrap();
     config.compact_ai_output = enabled;
+    config::save_config(&app, &config)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_notification_settings(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    settings: NotificationSettings,
+) -> Result<(), String> {
+    if !matches!(settings.sound.as_str(), "soft" | "clear" | "alert") {
+        return Err(format!(
+            "Unsupported notification sound: {}",
+            settings.sound
+        ));
+    }
+
+    info!(
+        target: "provider",
+        "Setting notification settings system_enabled={} sound_enabled={} sound={}",
+        settings.system_enabled,
+        settings.sound_enabled,
+        settings.sound
+    );
+    let mut config = state.config.lock().unwrap();
+    config.notifications = settings;
     config::save_config(&app, &config)?;
     Ok(())
 }

@@ -1,7 +1,7 @@
 import { invoke, Channel } from '@tauri-apps/api/core';
 import type { AgentKind, ReasoningEffort, Session, SessionMode } from '../types/session';
 import type { AgentInputPayload } from '../types/agentInput';
-import type { AgentConfigUpdateMap, AppConfig, Provider, Theme } from '../types/provider';
+import type { AgentConfigUpdateMap, AppConfig, NotificationSettings, Provider, Theme } from '../types/provider';
 import type { AgentPermissionConfig, AgentPlanMode } from './agentPermissions';
 import type { Project } from '../types/project';
 import type { McpServer } from '../types/mcp';
@@ -248,6 +248,8 @@ export const configApi = {
   setTheme: (theme: Theme): Promise<void> => invokeLogged('set_theme', { theme: theme.toLowerCase() }),
   setCompactAiOutput: (enabled: boolean): Promise<void> =>
     invokeLogged('set_compact_ai_output', { enabled }),
+  setNotificationSettings: (settings: NotificationSettings): Promise<void> =>
+    invokeLogged('set_notification_settings', { settings }),
   fetchModels: (apiKey: string, baseUrl: string): Promise<ModelInfo[]> =>
     invokeLogged('fetch_provider_models', { apiKey, baseUrl }),
   testProvider: (providerId: string): Promise<string> =>
@@ -358,4 +360,5 @@ export const appApi = {
     invokeLogged('check_development_environment'),
   getLogFiles: (): Promise<LogFileInfo[]> => invokeLogged('get_log_files'),
   readLogFile: (fileName: string): Promise<string> => invokeLogged('read_log_file', { fileName }),
+  showMainWindow: (): Promise<void> => invokeLogged('show_main_window_command'),
 };

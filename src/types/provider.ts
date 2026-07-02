@@ -3,6 +3,14 @@ import type { ClaudePermissionConfig, CodexPermissionConfig } from '../lib/agent
 
 export type Theme = 'Light' | 'Dark' | 'System';
 
+export type NotificationSound = 'soft' | 'clear' | 'alert';
+
+export interface NotificationSettings {
+  system_enabled: boolean;
+  sound_enabled: boolean;
+  sound: NotificationSound;
+}
+
 export interface AgentDefaults {
   default_agent_kind: AgentKind;
 }
@@ -55,5 +63,6 @@ export interface AppConfig {
   agent_defaults: AgentDefaults;
   agent_configs: AgentConfigMap;
   compact_ai_output: boolean;
+  notifications: NotificationSettings;
   theme: Theme;
 }

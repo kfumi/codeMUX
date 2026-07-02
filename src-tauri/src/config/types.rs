@@ -73,6 +73,30 @@ fn default_codex_approval_policy() -> String {
     "never".to_string()
 }
 
+fn default_notification_sound() -> String {
+    "soft".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationSettings {
+    #[serde(default = "default_true")]
+    pub system_enabled: bool,
+    #[serde(default = "default_false")]
+    pub sound_enabled: bool,
+    #[serde(default = "default_notification_sound")]
+    pub sound: String,
+}
+
+impl Default for NotificationSettings {
+    fn default() -> Self {
+        Self {
+            system_enabled: true,
+            sound_enabled: false,
+            sound: default_notification_sound(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
     pub id: String,
@@ -221,6 +245,8 @@ pub struct AppConfig {
     pub agent_configs: AgentConfigs,
     #[serde(default = "default_false")]
     pub compact_ai_output: bool,
+    #[serde(default)]
+    pub notifications: NotificationSettings,
     pub theme: Theme,
 }
 
@@ -253,6 +279,7 @@ impl Default for AppConfig {
             agent_defaults: AgentDefaults::default(),
             agent_configs: AgentConfigs::default(),
             compact_ai_output: false,
+            notifications: NotificationSettings::default(),
             theme: Theme::System,
         }
     }
@@ -280,6 +307,21 @@ mod tests {
         assert!(config.agent_configs.claude_code.resume_sessions);
         assert_eq!(config.agent_configs.codex.sdk_mode, "responses");
         assert!(!config.compact_ai_output);
+    }
+
+    #[test]
+    fn old_config_json_deserializes_with_notification_defaults() {
+        let raw = serde_json::json!({
+            "providers": [],
+            "active_provider_id": null,
+            "theme": "System"
+        });
+
+        let config: AppConfig = serde_json::from_value(raw).unwrap();
+
+        assert!(config.notifications.system_enabled);
+        assert!(!config.notifications.sound_enabled);
+        assert_eq!(config.notifications.sound, "soft");
     }
 
     #[test]

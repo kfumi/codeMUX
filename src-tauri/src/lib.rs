@@ -39,6 +39,11 @@ fn hide_window_to_tray<R: tauri::Runtime>(window: &Window<R>) {
     let _ = window.hide();
 }
 
+#[tauri::command]
+fn show_main_window_command(app: tauri::AppHandle) {
+    show_main_window(&app);
+}
+
 fn handle_tray_menu_event<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event_id: &str) {
     match event_id {
         TRAY_OPEN_ID => show_main_window(app),
@@ -80,6 +85,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .on_tray_icon_event(|app, event| {
             if let TrayIconEvent::DoubleClick { .. } = event {
@@ -136,6 +142,7 @@ pub fn run() {
             commands::provider::update_agent_config,
             commands::provider::set_theme,
             commands::provider::set_compact_ai_output,
+            commands::provider::set_notification_settings,
             commands::provider::fetch_provider_models,
             commands::provider::test_provider,
             commands::app::get_log_directory,
@@ -143,6 +150,7 @@ pub fn run() {
             commands::app::check_development_environment,
             commands::app::get_log_files,
             commands::app::read_log_file,
+            show_main_window_command,
             commands::session::create_session,
             commands::session::get_all_sessions,
             commands::session::get_archived_sessions,
