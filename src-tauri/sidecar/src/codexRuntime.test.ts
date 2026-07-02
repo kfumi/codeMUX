@@ -475,7 +475,7 @@ describe('CodexSessionRuntime', () => {
     }
   });
 
-  it('injects full-access code-mode directives that allow request_user_input', async () => {
+  it('injects full-access code-mode directives that block request_user_input', async () => {
     const writes: string[] = [];
     let streamedInput: unknown;
     const stdoutSpy = vi
@@ -545,8 +545,9 @@ describe('CodexSessionRuntime', () => {
         runInput: (prompt: string, inputPayload: undefined, includeImages: boolean) => Promise<void>;
       }).runInput('ask when blocked', undefined, false);
 
-      expect(JSON.stringify(streamedInput)).toContain('request_user_input_policy: allow');
-      expect(JSON.stringify(streamedInput)).toContain('You may use requestUserInput');
+      expect(JSON.stringify(streamedInput)).toContain('request_user_input_policy: block');
+      expect(JSON.stringify(streamedInput)).toContain('Execution policy (default mode): keep execution autonomous.');
+      expect(JSON.stringify(streamedInput)).not.toContain('You may use requestUserInput');
     } finally {
       stdoutSpy.mockRestore();
     }

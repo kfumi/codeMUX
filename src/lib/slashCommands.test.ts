@@ -14,6 +14,19 @@ describe('slash commands by agent kind', () => {
     expect(names).not.toContain('claude-api');
   });
 
+  it('does not include info or custom helper commands', () => {
+    const removedNames = ['cost', 'status', 'explain', 'test', 'fix', 'refactor'];
+
+    for (const agentKind of ['codex', 'claude_code'] as const) {
+      const names = getAllCommands(agentKind).map((command) => command.name);
+
+      for (const name of removedNames) {
+        expect(names).not.toContain(name);
+        expect(findCommand(name, agentKind)).toBeUndefined();
+      }
+    }
+  });
+
   it('keeps Claude Code built-ins scoped to Claude Code sessions', () => {
     const names = getAllCommands('claude_code').map((command) => command.name);
 

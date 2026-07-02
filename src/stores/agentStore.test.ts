@@ -930,6 +930,61 @@ describe('agent store Codex history loading', () => {
     ]);
   });
 
+  it('drops live Claude compact summary user events while keeping the compact marker', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            'This session is being continued from a previous conversation that ran out of context.',
+            'The summary below covers the earlier portion of the conversation.',
+            '',
+            'Summary:',
+          ].join('\n'),
+        },
+        parent_tool_use_id: null,
+      }));
+      onEvent(JSON.stringify({
+        type: 'system',
+        subtype: 'compact_boundary',
+        compactMetadata: {
+          trigger: 'manual',
+          preTokens: 34000,
+        },
+      }));
+      onEvent(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        uuid: 'result-compact-live',
+        session_id: sessionId,
+        duration_ms: 1,
+        duration_api_ms: 1,
+        num_turns: 1,
+        result: '',
+        total_cost_usd: 0,
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+        },
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, '/compact', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useAgentStore.getState().events[session.id]).toEqual([
+      expect.objectContaining({ kind: 'user', data: expect.objectContaining({ content: '/compact' }) }),
+      expect.objectContaining({ kind: 'compact' }),
+      expect.objectContaining({ kind: 'result' }),
+    ]);
+  });
+
   it('processes batched stream events without appending the batch to the conversation event list', async () => {
     vi.useFakeTimers();
 

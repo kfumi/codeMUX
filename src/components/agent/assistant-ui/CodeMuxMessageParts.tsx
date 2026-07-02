@@ -38,6 +38,15 @@ type CodeMuxDataPartProps = {
   sessionId?: string;
 };
 
+type StreamStatusDisplayInput = Extract<AgentMessage, { kind: 'stream_status' }>['data'];
+
+export type StreamStatusDisplay = {
+  tone: 'warning' | 'error';
+  text: string;
+  icon: 'warning' | 'error';
+  pulse?: boolean;
+};
+
 type AskUserQuestionData = {
   eventKind: string;
   event: Extract<AgentMessage, { kind: 'ask_user_question' }>;
@@ -66,6 +75,44 @@ export function CodeMuxTextMessagePart() {
 
 export function CodeMuxReasoningMessagePart() {
   return <MarkdownText />;
+}
+
+export function getStreamStatusDisplay(data: StreamStatusDisplayInput): StreamStatusDisplay {
+  if (data.mode_blocked) {
+    const reasonCode = data.mode_blocked.reason_code || 'mode_blocked';
+    const suggestion = data.mode_blocked.suggestion ? ` · ${data.mode_blocked.suggestion}` : '';
+    return {
+      tone: 'warning',
+      icon: 'warning',
+      text: `协作模式已阻止: ${reasonCode}${suggestion}`,
+    };
+  }
+
+  const reconnectMatch = data.message.match(/Reconnecting\.\.\.\s*(\d+)\/(\d+)(?:\s*\((.+)\))?/);
+  if (reconnectMatch) {
+    const [, current, total, reason] = reconnectMatch;
+    return {
+      tone: 'warning',
+      icon: 'warning',
+      pulse: true,
+      text: `正在重新连接 ${current}/${total}${reason ? ` · ${reason}` : ''}`,
+    };
+  }
+
+  if (!data.is_reconnecting) {
+    return {
+      tone: 'error',
+      icon: 'error',
+      text: `连接断开: ${data.message}`,
+    };
+  }
+
+  return {
+    tone: 'warning',
+    icon: 'warning',
+    pulse: true,
+    text: data.message,
+  };
 }
 
 export function CodeMuxToolCallMessagePart({
@@ -120,8 +167,8 @@ export function CodeMuxToolCallMessagePart({
       </ToolFallbackTrigger>
       <ToolFallbackContent>
         {displayableArgs && <ToolFallbackArgs argsText={resolvedArgsText} />}
-        <ToolCodeDiff toolName={toolName} input={args} />
-        {!codeFilePath && <ToolFallbackResult result={stringifyResult(result)} />}
+        {resolvedStatus?.type !== 'incomplete' && <ToolCodeDiff toolName={toolName} input={args} />}
+        {(!codeFilePath || resolvedStatus?.type === 'incomplete') && <ToolFallbackResult result={stringifyResult(result)} />}
       </ToolFallbackContent>
       {isAgentTool && resolvedSubAgentKey && sessionId && (
         <SubAgentPanel
@@ -165,37 +212,17 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
   }
 
   if (isStreamStatusData(data)) {
-    const { message, is_reconnecting } = data.event.data;
-    // Parse "Reconnecting... N/M (reason)" from codex SDK
-    const reconnectMatch = message.match(/Reconnecting\.\.\.\s*(\d+)\/(\d+)(?:\s*\((.+)\))?/);
-    if (reconnectMatch) {
-      const [, current, total, reason] = reconnectMatch;
-      return (
-        <div className="text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0 animate-pulse" />
-            <span>正在重新连接 {current}/{total}{reason ? ` · ${reason}` : ''}</span>
-          </div>
-        </div>
-      );
-    }
-    // Non-reconnecting stream error (final failure)
-    if (!is_reconnecting) {
-      return (
-        <div className="text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]">
-          <div className="flex items-start gap-2">
-            <XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-            <span className="break-all whitespace-pre-wrap">连接断开: {message}</span>
-          </div>
-        </div>
-      );
-    }
-    // Generic reconnecting message
+    const display = getStreamStatusDisplay(data.event.data);
+    const toneClass = display.tone === 'error'
+      ? 'text-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.12)]'
+      : 'text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]';
+    const Icon = display.icon === 'error' ? XCircle : AlertTriangle;
+
     return (
-      <div className="text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.12)]">
-        <div className="flex items-center gap-2">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0 animate-pulse" />
-          <span>{message}</span>
+      <div className={`text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] ${toneClass}`}>
+        <div className="flex items-start gap-2">
+          <Icon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${display.pulse ? 'animate-pulse' : ''}`} />
+          <span className="break-all whitespace-pre-wrap">{display.text}</span>
         </div>
       </div>
     );

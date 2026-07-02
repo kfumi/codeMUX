@@ -5,6 +5,7 @@ import {
   isTerminalAgentEvent,
   isInterruptMarker,
   mapPersistedClaudeMessage,
+  normalizeClaudeUserEvent,
   parseSdkUserMessage,
   shouldProcessTerminalEvent,
   shouldSuppressLiveEventWhileStopped,
@@ -369,6 +370,116 @@ describe('mapPersistedClaudeMessage', () => {
     expect(event).toEqual({
       kind: 'user',
       data: { content: '/code-review' },
+    });
+  });
+
+  it('extracts command names from Claude command XML regardless of tag order', () => {
+    const event = mapPersistedClaudeMessage(
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: [
+                '<command-name>/compact</command-name>',
+                '<command-message>compact</command-message>',
+                '<command-args></command-args>',
+              ].join('\n'),
+            },
+          ],
+        },
+        parent_tool_use_id: null,
+      },
+      'claude_code',
+    );
+
+    expect(event).toEqual({
+      kind: 'user',
+      data: { content: '/compact' },
+    });
+  });
+
+  it('normalizes live Claude command XML user events to command display text', () => {
+    const event = normalizeClaudeUserEvent({
+      kind: 'user',
+      data: {
+        content: [
+          '<command-name>/compact</command-name>',
+          '<command-message>compact</command-message>',
+          '<command-args></command-args>',
+        ].join('\n'),
+      },
+    });
+
+    expect(event).toEqual({
+      kind: 'user',
+      data: { content: '/compact' },
+    });
+  });
+
+  it('skips persisted Claude compact summary transcript-only messages', () => {
+    const event = mapPersistedClaudeMessage(
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: 'This session is being continued from a previous conversation that ran out of context.',
+        },
+        isVisibleInTranscriptOnly: true,
+        isCompactSummary: true,
+        parent_tool_use_id: null,
+      },
+      'claude_code',
+    );
+
+    expect(event).toBeNull();
+  });
+
+  it('skips persisted Claude local compact stdout messages', () => {
+    const event = mapPersistedClaudeMessage(
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: '<local-command-stdout>Compacted</local-command-stdout>',
+        },
+        parent_tool_use_id: null,
+      },
+      'claude_code',
+    );
+
+    expect(event).toBeNull();
+  });
+
+  it('loads persisted Claude compact boundary events as compact markers', () => {
+    const event = mapPersistedClaudeMessage(
+      {
+        type: 'system',
+        subtype: 'compact_boundary',
+        content: 'Conversation compacted',
+        compactMetadata: {
+          trigger: 'manual',
+          preTokens: 40956,
+          postTokens: 2876,
+        },
+        uuid: 'compact-1',
+        sessionId: 'session-1',
+      },
+      'claude_code',
+    );
+
+    expect(event).toEqual({
+      kind: 'compact',
+      data: expect.objectContaining({
+        type: 'system',
+        subtype: 'compact_boundary',
+        compact_metadata: expect.objectContaining({
+          trigger: 'manual',
+          pre_tokens: 40956,
+        }),
+      }),
     });
   });
 

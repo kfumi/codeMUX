@@ -12,7 +12,7 @@ type DirectiveSegment =
 // Match commands only at line start (not in paths like root/root/dist)
 // Commands: /command must be at start of line or after whitespace
 // File mentions: @path anywhere
-const DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w-]*)(?=\s|$)|(@[^\s]+)/g;
+const DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w:-]*)(?=\s|$)|(@[^\s]+)/g;
 type DirectiveTone = 'default' | 'inverted';
 
 export function CodeMuxDirectiveChip({

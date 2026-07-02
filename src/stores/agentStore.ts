@@ -3,9 +3,12 @@ import { agentApi, fileApi } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 import {
   isClaudeSubagentEvent,
+  isClaudeCompactSummaryRawEvent,
+  isClaudeCompactSummaryText,
   isAgentInjectedUserMessage,
   isTerminalAgentEvent,
   mapPersistedClaudeMessage,
+  normalizeClaudeUserEvent,
   parseSdkUserMessage,
   shouldProcessTerminalEvent,
   shouldSuppressLiveEventWhileStopped,
@@ -716,6 +719,17 @@ function parseAgentEvent(raw: string): AgentMessage {
           const event = parseSdkUserMessage(data);
           if (event.kind === 'user' && isAgentInjectedUserMessage(event.data.content)) {
             return { kind: 'raw', data };
+          }
+          if (event.kind === 'user') {
+            if (
+              data.isCompactSummary === true ||
+              data.isVisibleInTranscriptOnly === true ||
+              isClaudeCompactSummaryText(event.data.content)
+            ) {
+              return { kind: 'raw', data };
+            }
+            const normalized = normalizeClaudeUserEvent(event);
+            return normalized ?? { kind: 'raw', data };
           }
           return event;
         }
@@ -1462,6 +1476,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
 
         if (event.kind === 'raw' && event.data?.type === 'sidecar_debug') {
+          return;
+        }
+
+        if (event.kind === 'raw' && isClaudeCompactSummaryRawEvent(event.data)) {
           return;
         }
 

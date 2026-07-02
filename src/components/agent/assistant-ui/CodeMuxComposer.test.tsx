@@ -4,7 +4,11 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
+import { registerSkillCommands } from '../../../lib/slashCommands';
+import { usePreviewStore } from '../../../stores/previewStore';
 import { CodeMuxComposer } from './CodeMuxComposer';
+
+let composerText = '';
 
 const lexicalProps: Array<{
   className?: string;
@@ -72,7 +76,10 @@ vi.mock('@assistant-ui/react', () => {
     },
     useAui: () => ({
       composer: () => ({
-        setText: setComposerTextMock,
+        setText: (text: string) => {
+          composerText = text;
+          setComposerTextMock(text);
+        },
         addAttachment: addAttachmentMock,
       }),
     }),
@@ -84,7 +91,7 @@ vi.mock('@assistant-ui/react', () => {
     },
     useAuiState: (selector: (state: any) => unknown) =>
       selector({
-        composer: { text: '', attachments: [] },
+        composer: { text: composerText, attachments: [] },
         attachment: {
           id: 'image-1',
           type: 'image',
@@ -160,10 +167,13 @@ describe('CodeMuxComposer', () => {
   afterEach(() => {
     lexicalProps.length = 0;
     capturedPopovers.length = 0;
+    composerText = '';
     setComposerTextMock.mockClear();
     addAttachmentMock.mockClear();
     sendToolResponseMock.mockReset();
     useAgentStore.setState({ events: {}, forceStopped: {} });
+    usePreviewStore.setState({ treeRoot: null });
+    registerSkillCommands([]);
     cleanup();
   });
 
@@ -263,6 +273,66 @@ describe('CodeMuxComposer', () => {
       { kind: 'mention', type: 'file', label: 'App.tsx', id: 'src/App.tsx' },
       { kind: 'text', text: ' plain' },
     ]);
+  });
+
+  it('parses colon skill commands as command directive chips', () => {
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    const segments = lexicalProps[0]?.formatter?.parse('/superpowers:brainstorming 测试') ?? [];
+
+    expect(segments).toEqual([
+      { kind: 'mention', type: 'command', label: '/superpowers:brainstorming', id: 'superpowers:brainstorming' },
+      { kind: 'text', text: ' 测试' },
+    ]);
+  });
+
+  it('opens slash suggestions for a trigger before existing text', () => {
+    composerText = '/rev 已有文本';
+
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    expect(document.querySelector('[data-command-id="review"]')).toBeTruthy();
+  });
+
+  it('closes slash suggestions after selecting a command before existing text', () => {
+    composerText = '/rev 已有文本';
+
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    fireEvent.click(document.querySelector('[data-command-id="review"]') as Element);
+
+    expect(setComposerTextMock).toHaveBeenCalledWith('/review 已有文本');
+    expect(document.querySelector('[data-command-id="review"]')).toBeNull();
+  });
+
+  it('closes file suggestions after selecting a file reference', () => {
+    composerText = '@Ap 已有文本';
+    usePreviewStore.setState({
+      treeRoot: [{ name: 'App.tsx', path: 'D:/project/codeMUX/src/App.tsx', isDir: false }],
+    });
+
+    render(<CodeMuxComposer sessionId="session-1" projectPath="D:/project/codeMUX" />);
+
+    fireEvent.click(document.querySelector('[data-file-id="App.tsx"]') as Element);
+
+    expect(setComposerTextMock).toHaveBeenCalledWith('@App.tsx 已有文本');
+    expect(document.querySelector('[data-file-id="App.tsx"]')).toBeNull();
+  });
+
+  it('selects a suggestion with Enter without bubbling the key event to submit handlers', () => {
+    composerText = '/rev 已有文本';
+    const bubbleSpy = vi.fn();
+
+    render(
+      <div onKeyDown={bubbleSpy}>
+        <CodeMuxComposer sessionId="session-1" />
+      </div>,
+    );
+
+    fireEvent.keyDown(screen.getByTestId('lexical-composer-input'), { key: 'Enter' });
+
+    expect(setComposerTextMock).toHaveBeenCalledWith('/review 已有文本');
+    expect(bubbleSpy).not.toHaveBeenCalled();
   });
 
   it('uses Codex slash commands for Codex sessions', () => {

@@ -184,44 +184,6 @@ const sharedCommands: SlashCommand[] = [
     handler: 'prompt',
     prompt: '/compact',
   },
-  {
-    name: 'cost',
-    description: 'Token 用量和费用',
-    alias: ['费用', 'token'],
-    category: 'info',
-    handler: 'local',
-    action: (ctx) => {
-      const info = ctx.getCostInfo();
-      ctx.showInfoDialog('会话费用', info);
-    },
-  },
-  {
-    name: 'status',
-    description: '会话状态',
-    alias: ['状态'],
-    category: 'info',
-    handler: 'local',
-    action: (ctx) => {
-      const provider = ctx.getActiveProvider();
-      const lines = [
-        `**Session ID**`,
-        `\`${ctx.sessionId}\``,
-        '',
-        `**工作目录**`,
-        `\`${ctx.cwd}\``,
-        '',
-        `**模型**`,
-        `\`${provider?.default_model || '未配置'}\``,
-        '',
-        `**Provider**`,
-        `\`${provider?.name || '未配置'}\``,
-        '',
-        `**主题**`,
-        `\`${ctx.getTheme()}\``,
-      ];
-      ctx.showInfoDialog('会话状态', lines.join('\n'));
-    },
-  },
 ];
 
 const claudeBuiltInCommands: SlashCommand[] = [
@@ -258,43 +220,7 @@ const codexBuiltInCommands: SlashCommand[] = [
 //   { name: 'new', description: '开始新的 Codex 对话', alias: ['新建'], category: 'builtin', handler: 'prompt', prompt: '/new' },
 ];
 
-const customCommands: SlashCommand[] = [
-  {
-    name: 'explain',
-    description: '解释指定文件或代码',
-    alias: ['解释'],
-    argsHint: '<文件路径>',
-    category: 'custom',
-    handler: 'prompt',
-    prompt: 'Explain the code in {args}. Describe its purpose, key functions, and how it fits into the larger project.',
-  },
-  {
-    name: 'test',
-    description: '为当前项目生成或运行测试',
-    alias: ['测试'],
-    category: 'custom',
-    handler: 'prompt',
-    prompt: 'Generate unit tests for the current project. Focus on critical paths and edge cases. Run existing tests if available.',
-  },
-  {
-    name: 'fix',
-    description: '修复当前项目中的问题',
-    alias: ['修复'],
-    argsHint: '[问题描述]',
-    category: 'custom',
-    handler: 'prompt',
-    prompt: 'Find and fix issues in this project. {args}',
-  },
-  {
-    name: 'refactor',
-    description: '重构指定代码',
-    alias: ['重构'],
-    argsHint: '<目标文件或描述>',
-    category: 'custom',
-    handler: 'prompt',
-    prompt: 'Refactor {args}. Focus on readability, maintainability, and following best practices.',
-  },
-];
+const customCommands: SlashCommand[] = [];
 
 function getBuiltInCommands(agentKind: AgentKind = 'claude_code'): SlashCommand[] {
   return agentKind === 'codex' ? codexBuiltInCommands : claudeBuiltInCommands;

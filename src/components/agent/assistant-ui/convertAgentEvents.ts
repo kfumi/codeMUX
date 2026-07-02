@@ -61,6 +61,10 @@ export function convertAgentEventsToAssistantMessages(
       const text = event.data.content.trim();
       const hasAttachments = (event.data.attachments?.length ?? 0) > 0;
 
+      if (isHiddenClaudeCompactUserEvent(event, text)) {
+        return;
+      }
+
       if (text.length > 0 || hasAttachments) {
         messages.push(createMessage(`user-${index}`, 'user', [{ type: 'text', text }], event, index));
       }
@@ -267,6 +271,19 @@ export function convertAgentEventsToAssistantMessages(
   markFinalAssistantMessages(messages, events);
 
   return messages;
+}
+
+function isHiddenClaudeCompactUserEvent(
+  event: Extract<AgentMessage, { kind: 'user' }>,
+  text: string,
+): boolean {
+  const data = event.data as Record<string, unknown>;
+  return (
+    data.isCompactSummary === true ||
+    data.isVisibleInTranscriptOnly === true ||
+    text === '/compact' ||
+    /^<local-command-stdout>\s*Compacted\s*<\/local-command-stdout>$/i.test(text)
+  );
 }
 
 function markFinalAssistantMessages(

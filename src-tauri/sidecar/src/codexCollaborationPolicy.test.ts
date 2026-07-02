@@ -30,7 +30,7 @@ describe('codexCollaborationPolicy', () => {
     });
   });
 
-  it('allows user input tools in full-access Codex code mode', () => {
+  it('blocks user input tools in full-access Codex code mode', () => {
     expect(resolveCodexCollaborationPolicy({
       planMode: 'off',
       permissionConfig: {
@@ -42,8 +42,8 @@ describe('codexCollaborationPolicy', () => {
     })).toMatchObject({
       selectedMode: 'code',
       effectiveMode: 'code',
-      profile: 'official-compatible',
-      requestUserInputPolicy: 'allow',
+      profile: 'strict-local',
+      requestUserInputPolicy: 'block',
     });
   });
 

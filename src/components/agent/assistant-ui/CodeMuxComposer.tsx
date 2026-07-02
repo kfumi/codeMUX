@@ -75,7 +75,7 @@ const CODEMUX_FORMATTER: Unstable_DirectiveFormatter = {
 const MAX_FILE_RESULTS = 50;
 const EMPTY_EVENTS: AgentMessage[] = [];
 const TRIGGER_RE = /(^|\s)([/@])([^\s]*)(?=\s|$)/g;
-const PARSE_DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w-]*)(?=\s|$)|(@[^\s]+)/g;
+const PARSE_DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w:-]*)(?=\s|$)|(@[^\s]+)/g;
 
 type FileEntry = { name: string; relativePath: string; isDir: boolean };
 type PendingUserQuestion = {
@@ -151,8 +151,12 @@ export function CodeMuxComposer({
   }
 
   const [manualTrigger, setManualTrigger] = useState<'/' | '@' | null>(null);
+  const [suppressedTrigger, setSuppressedTrigger] = useState<ActiveTrigger | null>(null);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const activeTrigger = useMemo(() => detectTrailingTrigger(composerText), [composerText]);
+  const activeTrigger = useMemo(() => {
+    const trigger = detectActiveTrigger(composerText);
+    return trigger && isSameTrigger(trigger, suppressedTrigger) ? null : trigger;
+  }, [composerText, suppressedTrigger]);
   const activeChar = activeTrigger?.char ?? manualTrigger;
   const activeQuery = activeTrigger?.query ?? '';
   const slashItemsByCategory = useMemo(() => groupCommands(commands, activeQuery), [commands, activeQuery]);
@@ -232,8 +236,10 @@ export function CodeMuxComposer({
   };
 
   const selectTriggerItem = (item: Unstable_TriggerItem) => {
+    const nextText = replaceActiveTrigger(composerText, activeTrigger, item);
     setManualTrigger(null);
-    aui.composer().setText(replaceActiveTrigger(composerText, activeTrigger, item));
+    setSuppressedTrigger(getSelectedTrigger(activeTrigger, item));
+    aui.composer().setText(nextText);
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -241,28 +247,33 @@ export function CodeMuxComposer({
     if (menuItems.length === 0) {
       if (event.key === 'Escape') {
         event.preventDefault();
+        event.stopPropagation();
         setManualTrigger(null);
       }
       return;
     }
     if (event.key === 'ArrowDown') {
       event.preventDefault();
+      event.stopPropagation();
       setHighlightedIndex((index) => (index + 1) % menuItems.length);
       return;
     }
     if (event.key === 'ArrowUp') {
       event.preventDefault();
+      event.stopPropagation();
       setHighlightedIndex((index) => (index - 1 + menuItems.length) % menuItems.length);
       return;
     }
     if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
       event.preventDefault();
+      event.stopPropagation();
       const selected = menuItems[highlightedIndex] ?? menuItems[0];
       if (selected) selectTriggerItem(selected);
       return;
     }
     if (event.key === 'Escape') {
       event.preventDefault();
+      event.stopPropagation();
       setManualTrigger(null);
     }
   };
@@ -741,7 +752,7 @@ function groupCommands(commands: SlashCommand[], query: string) {
 
 type ActiveTrigger = { char: '/' | '@'; start: number; query: string };
 
-function detectTrailingTrigger(text: string): ActiveTrigger | null {
+function detectActiveTrigger(text: string): ActiveTrigger | null {
   let lastMatch: RegExpExecArray | null = null;
   for (const m of text.matchAll(TRIGGER_RE)) {
     lastMatch = m;
@@ -754,11 +765,25 @@ function detectTrailingTrigger(text: string): ActiveTrigger | null {
   };
 }
 
+function isSameTrigger(a: ActiveTrigger, b: ActiveTrigger | null) {
+  return b !== null && a.char === b.char && a.start === b.start && a.query === b.query;
+}
+
+function getSelectedTrigger(active: ActiveTrigger | null, item: Unstable_TriggerItem): ActiveTrigger {
+  const isFile = item.type === 'file' || item.type === 'directory';
+  return {
+    char: isFile ? '@' : '/',
+    start: active?.start ?? 0,
+    query: item.id,
+  };
+}
+
 function replaceActiveTrigger(text: string, active: ActiveTrigger | null, item: Unstable_TriggerItem) {
   const directive = CODEMUX_FORMATTER.serialize(item);
   if (!active) return directive;
   const end = active.start + active.char.length + active.query.length;
-  return `${text.slice(0, active.start)}${directive}${text.slice(end)}`;
+  const suffix = text.slice(end).replace(/^[ \t]+/, '');
+  return `${text.slice(0, active.start)}${directive}${suffix}`;
 }
 
 function parseComposerDirectives(text: string): Unstable_DirectiveSegment[] {

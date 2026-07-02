@@ -193,6 +193,27 @@ fn collect_agent_tool_use_ids_from_main_jsonl(jsonl_path: &Path) -> Vec<String> 
     tool_use_ids
 }
 
+fn should_include_claude_history_event(val: &serde_json::Value) -> bool {
+    if val
+        .get("isSidechain")
+        .and_then(|entry| entry.as_bool())
+        .unwrap_or(false)
+    {
+        return false;
+    }
+
+    let msg_type = val
+        .get("type")
+        .and_then(|entry| entry.as_str())
+        .unwrap_or("");
+    if msg_type == "user" || msg_type == "assistant" || msg_type == "result" {
+        return true;
+    }
+
+    msg_type == "system"
+        && val.get("subtype").and_then(|entry| entry.as_str()) == Some("compact_boundary")
+}
+
 /// Find a sub-agent JSONL file. The file lives at:
 /// `~/.claude/projects/{project_dir}/{claude_session_id}/subagents/agent-{agent_id}.jsonl`
 fn find_subagent_session_jsonl(
@@ -419,16 +440,7 @@ pub async fn load_claude_session_events(
             Err(_) => continue,
         };
 
-        if val
-            .get("isSidechain")
-            .and_then(|entry| entry.as_bool())
-            .unwrap_or(false)
-        {
-            continue;
-        }
-
-        let msg_type = val.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        if msg_type == "user" || msg_type == "assistant" || msg_type == "result" {
+        if should_include_claude_history_event(&val) {
             messages.push(val);
         }
     }
@@ -1701,7 +1713,8 @@ mod tests {
         collect_subagent_index_from_dir, convert_codex_item_to_claude_format,
         find_codex_session_jsonl, parse_proxy_port_from_stderr,
         read_codex_interactive_events_from_dir, read_json_stream_values,
-        resolve_agent_session_info, sort_events_by_timestamp_stable,
+        resolve_agent_session_info, should_include_claude_history_event,
+        sort_events_by_timestamp_stable,
     };
     use crate::config::types::AgentKind;
 
@@ -1826,6 +1839,39 @@ mod tests {
         assert_eq!(index.len(), 1);
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn claude_history_includes_compact_boundary_events() {
+        let compact = serde_json::json!({
+            "type": "system",
+            "subtype": "compact_boundary",
+            "content": "Conversation compacted",
+            "compactMetadata": {
+                "trigger": "manual",
+                "preTokens": 40956,
+                "postTokens": 2876
+            }
+        });
+
+        assert!(should_include_claude_history_event(&compact));
+    }
+
+    #[test]
+    fn claude_history_excludes_non_visible_system_and_sidechain_events() {
+        let status = serde_json::json!({
+            "type": "system",
+            "subtype": "status",
+            "status": "compacting"
+        });
+        let sidechain_user = serde_json::json!({
+            "type": "user",
+            "isSidechain": true,
+            "message": { "role": "user", "content": "subagent" }
+        });
+
+        assert!(!should_include_claude_history_event(&status));
+        assert!(!should_include_claude_history_event(&sidechain_user));
     }
 
     #[test]

@@ -16,6 +16,7 @@ export type ParsedStoreEvent =
   | { kind: 'assistant'; data: AgentAssistantMessage }
   | { kind: 'tool_result'; data: AgentToolResult }
   | { kind: 'result'; data: AgentResultMessage }
+  | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
   | { kind: 'file_snapshot'; data: { type: 'file_snapshot'; file_path: string; original_content: string; is_new: boolean; tool_use_id: string } };
 
 export function isInterruptMarker(text: string): boolean {
@@ -164,9 +165,10 @@ export function isClaudeSubagentEvent(raw: Record<string, unknown>): boolean {
     || (typeof raw.parent_tool_use_id === 'string' && raw.parent_tool_use_id.length > 0);
 }
 
-// Matches Claude CLI's internal XML command tags, e.g.:
-// <command-message>code-review</command-message><command-name>/code-review</command-name>
-const CLAUDE_COMMAND_TAG_RE = /<command-message>[\s\S]*?<\/command-message>\s*<command-name>([\s\S]*?)<\/command-name>/;
+const CLAUDE_COMMAND_NAME_RE = /<command-name>\s*([\s\S]*?)\s*<\/command-name>/;
+const CLAUDE_COMMAND_TAGS_RE = /<command-(?:message|name|args)>[\s\S]*?<\/command-(?:message|name|args)>/g;
+const CLAUDE_LOCAL_COMPACT_STDOUT_RE = /^\s*<local-command-stdout>\s*Compacted\s*<\/local-command-stdout>\s*$/;
+const CLAUDE_COMPACT_SUMMARY_PREFIX = 'This session is being continued from a previous conversation that ran out of context.';
 
 /**
  * Strip Claude CLI's internal XML command tags from persisted user messages.
@@ -174,17 +176,98 @@ const CLAUDE_COMMAND_TAG_RE = /<command-message>[\s\S]*?<\/command-message>\s*<c
  * When there is additional text alongside the tags, strips the tags and returns the rest.
  */
 function stripClaudeCommandTags(content: string): string {
-  const match = content.match(CLAUDE_COMMAND_TAG_RE);
+  const match = content.match(CLAUDE_COMMAND_NAME_RE);
   if (!match) return content;
 
   const commandName = match[1]?.trim();
-  const withoutTags = content.replace(CLAUDE_COMMAND_TAG_RE, '').trim();
+  const withoutTags = content.replace(CLAUDE_COMMAND_TAGS_RE, '').trim();
 
   // Content is purely command tags — use the command name as display text
   if (!withoutTags && commandName) return commandName;
 
   // Mixed content — strip tags, keep the rest
   return withoutTags || content;
+}
+
+export function normalizeClaudeUserEvent(
+  event: Extract<ParsedStoreEvent, { kind: 'user' }>,
+): Extract<ParsedStoreEvent, { kind: 'user' }> | null {
+  const content = stripClaudeCommandTags(event.data.content);
+  if (isClaudeLocalCompactStdout(content)) {
+    return null;
+  }
+
+  return { ...event, data: { ...event.data, content } };
+}
+
+export function isClaudeCompactSummaryText(content: string): boolean {
+  return content.trimStart().startsWith(CLAUDE_COMPACT_SUMMARY_PREFIX);
+}
+
+export function isClaudeCompactSummaryRawEvent(raw: Record<string, unknown>): boolean {
+  return isClaudeCompactSummaryEvent(raw);
+}
+
+function isClaudeLocalCompactStdout(content: string): boolean {
+  return CLAUDE_LOCAL_COMPACT_STDOUT_RE.test(content);
+}
+
+function isClaudeCompactSummaryEvent(raw: Record<string, unknown>): boolean {
+  if (raw.isCompactSummary === true) {
+    return true;
+  }
+
+  if (isClaudeCompactSummaryText(getRawUserText(raw))) {
+    return true;
+  }
+
+  return raw.isVisibleInTranscriptOnly === true;
+}
+
+function getRawUserText(raw: Record<string, unknown>): string {
+  const message = asRecord(raw.message);
+  const content = message?.content;
+
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return '';
+  }
+
+  return content
+    .filter((block) => isRecord(block) && block.type === 'text')
+    .map((block) => String(block.text || ''))
+    .join('\n');
+}
+
+function mapCompactBoundary(raw: Record<string, unknown>): Extract<ParsedStoreEvent, { kind: 'compact' }> | null {
+  if (raw.type !== 'system' || raw.subtype !== 'compact_boundary') {
+    return null;
+  }
+
+  const metadata = asRecord(raw.compact_metadata) ?? asRecord(raw.compactMetadata);
+  const trigger = metadata?.trigger === 'auto' ? 'auto' : 'manual';
+  const preTokens = readNumber(metadata?.pre_tokens) ?? readNumber(metadata?.preTokens) ?? 0;
+
+  return {
+    kind: 'compact',
+    data: {
+      ...(raw as Record<string, unknown>),
+      type: 'system',
+      subtype: 'compact_boundary',
+      compact_metadata: {
+        ...(metadata ?? {}),
+        trigger,
+        pre_tokens: preTokens,
+      },
+    } as Extract<ParsedStoreEvent, { kind: 'compact' }>['data'],
+  };
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 export function mapPersistedClaudeMessage(
@@ -203,6 +286,11 @@ export function mapPersistedClaudeMessage(
 
   const msgType = raw.type;
 
+  const compactEvent = mapCompactBoundary(raw);
+  if (compactEvent) {
+    return compactEvent;
+  }
+
   if (msgType === 'assistant') {
     return { kind: 'assistant', data: raw as unknown as AgentAssistantMessage };
   }
@@ -219,6 +307,10 @@ export function mapPersistedClaudeMessage(
   }
 
   if (msgType === 'user') {
+    if (isClaudeCompactSummaryEvent(raw)) {
+      return null;
+    }
+
     const event = parseSdkUserMessage(raw);
     if (event.kind === 'user' && isAgentInjectedUserMessage(event.data.content)) {
       return null;
@@ -229,18 +321,23 @@ export function mapPersistedClaudeMessage(
     }
 
     // Strip Claude CLI's internal XML command tags from persisted messages
-    let content = event.data.content;
+    let normalizedUserEvent: typeof event | null = event;
     if (agentKind === 'claude_code') {
-      content = stripClaudeCommandTags(content);
+      normalizedUserEvent = normalizeClaudeUserEvent(event);
     }
+    if (!normalizedUserEvent) {
+      return null;
+    }
+
+    const content = normalizedUserEvent.data.content;
 
     // Try to reverse-map prompt templates back to slash command display form
     const displayContent = formatPromptAsCommandDisplay(content, agentKind);
     if (displayContent && displayContent !== content) {
-      return { ...event, data: { ...event.data, content: displayContent } };
+      return { ...normalizedUserEvent, data: { ...normalizedUserEvent.data, content: displayContent } };
     }
 
-    return { ...event, data: { ...event.data, content } };
+    return { ...normalizedUserEvent, data: { ...normalizedUserEvent.data, content } };
   }
 
   return null;

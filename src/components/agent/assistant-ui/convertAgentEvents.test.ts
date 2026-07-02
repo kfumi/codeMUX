@@ -793,6 +793,47 @@ describe('convertAgentEventsToAssistantMessages', () => {
     });
   });
 
+  it('renders only the compact marker for Claude compact turns', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'user',
+        data: {
+          content: 'This session is being continued from a previous conversation that ran out of context.',
+          isCompactSummary: true,
+          isVisibleInTranscriptOnly: true,
+        } as any,
+      },
+      {
+        kind: 'user',
+        data: {
+          content: '<local-command-stdout>Compacted</local-command-stdout>',
+        },
+      },
+      {
+        kind: 'compact',
+        data: {
+          type: 'system',
+          subtype: 'compact_boundary',
+          compact_metadata: { trigger: 'manual', pre_tokens: 40956 },
+        },
+      },
+      {
+        kind: 'user',
+        data: {
+          content: '/compact',
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: 'system',
+      content: [{ type: 'data-codemux-event', eventKind: 'compact' }],
+    });
+  });
+
   it('attaches agentId when tool result arrives before tool call', () => {
     const events: AgentMessage[] = [
       {
