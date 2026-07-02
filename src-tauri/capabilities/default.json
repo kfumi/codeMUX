@@ -17,6 +17,7 @@
     "core:menu:allow-popup",
     "log:default",
     "process:allow-restart",
+    "notification:default",
     "shell:allow-open",
     "updater:default",
     "dialog:allow-open",

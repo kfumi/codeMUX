@@ -6,6 +6,7 @@ import { appApi } from '../../lib/tauri';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { Button } from '../ui/button';
 import { Switch } from '../ui/switch';
+import { NotificationSettingsSection } from './NotificationSettingsSection';
 
 export function GeneralSettings() {
   const [configDir, setConfigDir] = useState<string>('');
@@ -61,6 +62,8 @@ export function GeneralSettings() {
           />
         </div>
       </div>
+
+      <NotificationSettingsSection />
 
       {/* Config file section */}
       <div className="space-y-3">

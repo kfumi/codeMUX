@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AgentConfigMap, AgentConfigUpdateMap, AppConfig, Provider, Theme } from '../types/provider';
+import type { AgentConfigMap, AgentConfigUpdateMap, AppConfig, NotificationSettings, Provider, Theme } from '../types/provider';
 import type { ModelInfo } from '../lib/tauri';
 import { configApi, agentApi } from '../lib/tauri';
 import { useNewSessionStore } from './newSessionStore';
@@ -39,6 +39,7 @@ interface SettingsState {
   fetchConfig: () => Promise<void>;
   setTheme: (theme: Theme) => Promise<void>;
   setCompactAiOutput: (enabled: boolean) => Promise<void>;
+  setNotificationSettings: (settings: NotificationSettings) => Promise<void>;
   setActiveProvider: (providerId: string) => Promise<void>;
   updateProvider: (provider: Provider) => Promise<void>;
   deleteProvider: (providerId: string) => Promise<void>;
@@ -104,6 +105,27 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (error) {
       set((state) => ({
         config: state.config ? { ...state.config, compact_ai_output: previousValue } : state.config,
+        error: String(error),
+      }));
+    }
+  },
+
+  setNotificationSettings: async (settings: NotificationSettings) => {
+    const previousValue = get().config?.notifications ?? {
+      system_enabled: true,
+      sound_enabled: false,
+      sound: 'soft' as const,
+    };
+    set((state) => ({
+      config: state.config ? { ...state.config, notifications: settings } : state.config,
+      error: null,
+    }));
+
+    try {
+      await configApi.setNotificationSettings(settings);
+    } catch (error) {
+      set((state) => ({
+        config: state.config ? { ...state.config, notifications: previousValue } : state.config,
         error: String(error),
       }));
     }

@@ -6,6 +6,7 @@ const setDefaultAgentKindMock = vi.fn<(agentKind: string) => Promise<void>>();
 const updateAgentConfigMock = vi.fn<(agentKind: string, config: Record<string, unknown>) => Promise<void>>();
 const deleteProviderMock = vi.fn<(providerId: string) => Promise<void>>();
 const setCompactAiOutputMock = vi.fn<(enabled: boolean) => Promise<void>>();
+const setNotificationSettingsMock = vi.fn<(settings: Record<string, unknown>) => Promise<void>>();
 
 vi.mock('../lib/tauri', () => ({
   configApi: {
@@ -19,6 +20,7 @@ vi.mock('../lib/tauri', () => ({
     setDefaultAgentKind: setDefaultAgentKindMock,
     updateAgentConfig: updateAgentConfigMock,
     setCompactAiOutput: setCompactAiOutputMock,
+    setNotificationSettings: setNotificationSettingsMock,
   },
 }));
 
@@ -41,6 +43,11 @@ const baseConfig: AppConfig = {
   },
   theme: 'System',
   compact_ai_output: false,
+  notifications: {
+    system_enabled: true,
+    sound_enabled: false,
+    sound: 'soft',
+  },
 };
 
 describe('settings store agent config actions', () => {
@@ -137,5 +144,44 @@ describe('settings store agent config actions', () => {
     }));
 
     expect(useSettingsStore.getState().getNeedsProxy()).toBe(false);
+  });
+
+  it('persists notification settings updates', async () => {
+    const { useSettingsStore } = await import('./settingsStore');
+
+    await useSettingsStore.getState().setNotificationSettings({
+      system_enabled: true,
+      sound_enabled: true,
+      sound: 'clear',
+    });
+
+    expect(setNotificationSettingsMock).toHaveBeenCalledWith({
+      system_enabled: true,
+      sound_enabled: true,
+      sound: 'clear',
+    });
+    expect(useSettingsStore.getState().config?.notifications).toEqual({
+      system_enabled: true,
+      sound_enabled: true,
+      sound: 'clear',
+    });
+  });
+
+  it('rolls notification settings back when persistence fails', async () => {
+    const { useSettingsStore } = await import('./settingsStore');
+    setNotificationSettingsMock.mockRejectedValueOnce(new Error('write failed'));
+
+    await useSettingsStore.getState().setNotificationSettings({
+      system_enabled: false,
+      sound_enabled: true,
+      sound: 'alert',
+    });
+
+    expect(useSettingsStore.getState().config?.notifications).toEqual({
+      system_enabled: true,
+      sound_enabled: false,
+      sound: 'soft',
+    });
+    expect(useSettingsStore.getState().error).toContain('write failed');
   });
 });
