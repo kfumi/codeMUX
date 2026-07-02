@@ -21,7 +21,7 @@ import { useSessionStore } from './stores/sessionStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useSkillStore } from './stores/skillStore';
 import { UpdaterProvider } from './features/update/UpdaterProvider';
-import { UpdateToast } from './features/update/components/UpdateToast';
+import { UpdateEntry } from './features/update/components/UpdateEntry';
 import type { TodoItem } from './types/agent';
 
 const logger = createLogger('App');
@@ -161,6 +161,7 @@ function App() {
               onOpenSettings={() => setActiveView('settings')}
             />
           )}
+          sidebarAccessory={activeView === 'settings' ? undefined : <UpdateEntry />}
           sidePanelAvailable={activeView === 'app'}
           sidePanelProjectPath={activeView === 'app' ? sidePanelProjectPath : null}
           sidePanelScopeId={activeView === 'app' ? sidePanelScopeId : 'settings'}
@@ -205,7 +206,6 @@ function App() {
             )}
           </ErrorBoundary>
         </MainLayout>
-        <UpdateToast />
         <Toaster position="top-center" richColors />
       </TooltipProvider>
     </UpdaterProvider>

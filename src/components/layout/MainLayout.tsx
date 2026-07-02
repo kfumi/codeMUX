@@ -13,6 +13,7 @@ interface MainLayoutProps {
   sidebar?: ReactNode;
   children: ReactNode;
   headerContent?: ReactNode;
+  sidebarAccessory?: ReactNode;
   titleBarControls?: ReactNode;
   sidePanelAvailable?: boolean;
   sidePanelProjectPath?: string | null;
@@ -23,6 +24,7 @@ export function MainLayout({
   sidebar,
   children,
   headerContent,
+  sidebarAccessory,
   titleBarControls,
   sidePanelAvailable = true,
   sidePanelProjectPath,
@@ -88,11 +90,18 @@ export function MainLayout({
     </button>
   ) : null;
 
+  const sidebarControls = sidebarToggleButton ? (
+    <div className="flex items-center gap-1">
+      {sidebarToggleButton}
+      {sidebarAccessory}
+    </div>
+  ) : null;
+
   return (
     <div className={cn('app-shell flex h-screen text-foreground', sidebar != null && !sidebarCollapsed ? 'bg-[hsl(var(--sidebar-bg))]' : 'bg-background')}>
       {sidebar != null && !sidebarCollapsed && (
         <div className="fixed left-2 top-2 z-40">
-          {sidebarToggleButton}
+          {sidebarControls}
         </div>
       )}
 
@@ -118,7 +127,7 @@ export function MainLayout({
 
       <section className={cn('flex min-w-0 flex-1 flex-col bg-[hsl(var(--background))]', sidebar != null && !sidebarCollapsed && 'overflow-hidden rounded-l-xl')}>
         <TitleBar
-          leftContent={sidebarCollapsed ? sidebarToggleButton : undefined}
+          leftContent={sidebarCollapsed ? sidebarControls : undefined}
           rightContent={headerContent}
           controlsContent={titleBarControls}
           sidePanelAvailable={sidePanelAvailable}

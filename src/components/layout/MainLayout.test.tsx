@@ -35,4 +35,19 @@ describe('MainLayout', () => {
     expect(titleBarProps[0]).not.toHaveProperty('sidebarWidth');
     expect(titleBarProps[0]).not.toHaveProperty('sidebarInstant');
   });
+
+  it('renders sidebar accessory next to the expanded sidebar toggle', () => {
+    render(
+      <MainLayout sidebar={<div>sidebar</div>} sidebarAccessory={<button>更新</button>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const toggle = document.querySelector('button[title="收起侧栏"]');
+    const update = document.querySelector('button:not([title])');
+
+    expect(toggle).toBeTruthy();
+    expect(update?.textContent).toBe('更新');
+    expect(toggle?.parentElement).toBe(update?.parentElement);
+  });
 });

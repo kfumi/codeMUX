@@ -13,8 +13,8 @@ vi.mock('./features/update/UpdaterProvider', () => ({
   ),
 }));
 
-vi.mock('./features/update/components/UpdateToast', () => ({
-  UpdateToast: () => <div>更新提示</div>,
+vi.mock('./features/update/components/UpdateEntry', () => ({
+  UpdateEntry: () => <button>更新入口</button>,
 }));
 
 vi.mock('./components/ErrorBoundary', () => ({
@@ -22,9 +22,18 @@ vi.mock('./components/ErrorBoundary', () => ({
 }));
 
 vi.mock('./components/layout/MainLayout', () => ({
-  MainLayout: ({ children, sidebar }: { children: React.ReactNode; sidebar?: React.ReactNode }) => (
+  MainLayout: ({
+    children,
+    sidebar,
+    sidebarAccessory,
+  }: {
+    children: React.ReactNode;
+    sidebar?: React.ReactNode;
+    sidebarAccessory?: React.ReactNode;
+  }) => (
     <div>
       <div>{sidebar}</div>
+      <div>{sidebarAccessory}</div>
       <div>{children}</div>
     </div>
   ),
@@ -154,15 +163,15 @@ vi.mock('./stores/skillStore', () => ({
 }));
 
 describe('App', () => {
-  it('渲染时在 UpdaterProvider 内挂载全局更新提示', async () => {
+  it('渲染时在 UpdaterProvider 内将更新入口传给主布局', async () => {
     const { default: App } = await import('./App');
 
     render(<App />);
 
     const updaterProvider = screen.getByTestId('updater-provider');
-    const updateToast = screen.getByText('更新提示');
+    const updateEntry = screen.getByText('更新入口');
 
-    expect(updateToast).toBeTruthy();
-    expect(updaterProvider.contains(updateToast)).toBe(true);
+    expect(updateEntry).toBeTruthy();
+    expect(updaterProvider.contains(updateEntry)).toBe(true);
   });
 });
