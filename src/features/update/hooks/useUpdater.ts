@@ -97,7 +97,15 @@ const getErrorMessage = (error: unknown, fallback: string) => {
     return error;
   }
 
-  return fallback;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message) {
+      return message;
+    }
+  }
+
+  const serialized = serializeError(error);
+  return serialized || fallback;
 };
 
 export const __setUpdaterTestAdapters = (adapters: UpdaterAdapters | null) => {

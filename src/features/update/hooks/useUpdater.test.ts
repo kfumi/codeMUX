@@ -349,6 +349,27 @@ describe('useUpdater', () => {
     expect(result.current.error).toBe('network down');
   });
 
+  it('手动检查失败时保留非 Error 错误对象的诊断信息', async () => {
+    const checkMock = vi.fn<() => Promise<MockUpdate | null>>().mockRejectedValue({
+      message: 'failed to fetch latest.json',
+      status: 0,
+    });
+    const { __setUpdaterTestAdapters, useUpdater } = await import('./useUpdater');
+    __setUpdaterTestAdapters({
+      check: checkMock,
+      relaunch: vi.fn(async () => {}),
+    });
+
+    const { result } = renderHook(() => useUpdater({ autoCheck: false }));
+
+    await act(async () => {
+      await result.current.checkForUpdates({ interactive: true });
+    });
+
+    expect(result.current.stage).toBe('error');
+    expect(result.current.error).toContain('failed to fetch latest.json');
+  });
+
   it('忽略过期检查结果，保持最新请求状态', async () => {
     let resolveFirst: ((value: MockUpdate | null) => void) | undefined;
     const checkMock = vi

@@ -71,4 +71,4 @@ jobs:
           releaseBody: "桌面端安装包下载见下方 Assets。"
           releaseDraft: false
           prerelease: false
-          releaseCommitish: main
+          releaseCommitish: master
