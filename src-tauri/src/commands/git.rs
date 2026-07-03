@@ -492,6 +492,86 @@ pub fn checkout_git_branch_in_project(
     run_git(&root, &["checkout", &branch_name]).map(|_| ())
 }
 
+fn is_untracked_file(root: &Path, relative_path: &str) -> Result<bool, String> {
+    let output = run_git(
+        root,
+        &[
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "--",
+            relative_path,
+        ],
+    )?;
+    Ok(!String::from_utf8_lossy(&output).trim().is_empty())
+}
+
+fn remove_untracked_path(root: &Path, relative_path: &str) -> Result<(), String> {
+    let target = root.join(relative_path);
+    if target.is_file() {
+        std::fs::remove_file(&target)
+            .map_err(|e| format!("Failed to delete {}: {}", relative_path, e))?;
+    } else if target.is_dir() {
+        std::fs::remove_dir_all(&target)
+            .map_err(|e| format!("Failed to delete {}: {}", relative_path, e))?;
+    }
+    Ok(())
+}
+
+pub fn revert_git_status_changes_in_project(
+    project_path: &Path,
+    area: GitStatusArea,
+    file_path: Option<&str>,
+) -> Result<(), String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+
+    match (area, file_path) {
+        (GitStatusArea::Unstaged, Some(file_path)) => {
+            let relative_path = path_to_repo_relative(&root, file_path);
+            if is_untracked_file(&root, &relative_path)? {
+                remove_untracked_path(&root, &relative_path)
+            } else {
+                run_git(&root, &["restore", "--worktree", "--", &relative_path]).map(|_| ())
+            }
+        }
+        (GitStatusArea::Unstaged, None) => {
+            run_git(&root, &["restore", "--worktree", "--", "."])?;
+            run_git(&root, &["clean", "-fd", "--", "."]).map(|_| ())
+        }
+        (GitStatusArea::Staged, Some(file_path)) => {
+            let relative_path = path_to_repo_relative(&root, file_path);
+            run_git(
+                &root,
+                &["restore", "--staged", "--worktree", "--", &relative_path],
+            )
+            .map(|_| ())
+        }
+        (GitStatusArea::Staged, None) => {
+            run_git(&root, &["restore", "--staged", "--worktree", "--", "."]).map(|_| ())
+        }
+    }
+}
+
+pub fn commit_git_changes_in_project(project_path: &Path, message: &str) -> Result<String, String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+    let message = message.trim();
+    if message.is_empty() {
+        return Err("提交信息不能为空".to_string());
+    }
+    if run_git(&root, &["diff", "--cached", "--quiet"]).is_ok() {
+        return Err("没有已暂存修改可提交".to_string());
+    }
+    run_git(&root, &["commit", "-m", message])?;
+    let output = run_git(&root, &["rev-parse", "--short", "HEAD"])?;
+    Ok(String::from_utf8_lossy(&output).trim().to_string())
+}
+
 pub fn read_git_changed_files_for_tree(
     project_path: &Path,
     baseline_tree: &str,
@@ -657,12 +737,27 @@ pub fn checkout_git_branch(project_path: String, branch_name: String) -> Result<
     checkout_git_branch_in_project(Path::new(&project_path), &branch_name)
 }
 
+#[tauri::command]
+pub fn revert_git_status_changes(
+    project_path: String,
+    area: GitStatusArea,
+    file_path: Option<String>,
+) -> Result<(), String> {
+    revert_git_status_changes_in_project(Path::new(&project_path), area, file_path.as_deref())
+}
+
+#[tauri::command]
+pub fn commit_git_changes(project_path: String, message: String) -> Result<String, String> {
+    commit_git_changes_in_project(Path::new(&project_path), &message)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        checkout_git_branch_in_project, create_git_branch_in_project, decode_text_bytes,
-        read_git_changed_files_for_tree, read_git_repository_state, read_git_status_change_detail,
-        read_git_status_changes, stage_git_status_changes_for_paths,
+        checkout_git_branch_in_project, commit_git_changes_in_project,
+        create_git_branch_in_project, decode_text_bytes, read_git_changed_files_for_tree,
+        read_git_repository_state, read_git_status_change_detail, read_git_status_changes,
+        revert_git_status_changes_in_project, stage_git_status_changes_for_paths,
         unstage_git_status_changes_for_paths, GitStatusArea,
     };
     use std::fs;
@@ -795,6 +890,97 @@ mod tests {
         let err = checkout_git_branch_in_project(&project, "feature/clean").unwrap_err();
 
         assert!(err.contains("请先提交或还原当前修改"));
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_revert_unstaged_changes_restores_tracked_and_removes_untracked() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+        fs::write(project.join("README.md"), "dirty\n").unwrap();
+        fs::write(project.join("fresh.txt"), "new\n").unwrap();
+
+        revert_git_status_changes_in_project(&project, GitStatusArea::Unstaged, None).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(project.join("README.md"))
+                .unwrap()
+                .replace("\r\n", "\n"),
+            "hello\n"
+        );
+        assert!(!project.join("fresh.txt").exists());
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_revert_staged_changes_restores_worktree() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+        fs::write(project.join("README.md"), "dirty\n").unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+
+        revert_git_status_changes_in_project(&project, GitStatusArea::Staged, None).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(project.join("README.md"))
+                .unwrap()
+                .replace("\r\n", "\n"),
+            "hello\n"
+        );
+        assert!(read_git_status_changes(&project, GitStatusArea::Staged)
+            .unwrap()
+            .is_empty());
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_commit_requires_staged_changes_and_returns_hash() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .arg("init")
+            .output()
+            .unwrap();
+        configure_git_user(&project);
+
+        let empty_err = commit_git_changes_in_project(&project, "feat: empty").unwrap_err();
+        assert!(empty_err.contains("没有已暂存修改可提交"));
+
+        fs::write(project.join("new.txt"), "hello\n").unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+
+        let hash = commit_git_changes_in_project(&project, "feat: add new file").unwrap();
+
+        assert!(hash.len() >= 7);
+        assert!(read_git_status_changes(&project, GitStatusArea::Staged)
+            .unwrap()
+            .is_empty());
 
         let _ = fs::remove_dir_all(project);
     }
