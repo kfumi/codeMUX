@@ -1,9 +1,10 @@
-import { ChevronRight, FileSearch, Plus, Terminal, X } from 'lucide-react';
+import { ChevronRight, FileSearch, FileText, Plus, Terminal, X } from 'lucide-react';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 
 import { cn } from '../../lib/utils';
 import { useSidePanelStore, type SidePanelTab } from '../../stores/sidePanelStore';
 import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
+import { PlanPreviewPanel } from './plan/PlanPreviewPanel';
 import { ReviewPanel } from './review/ReviewPanel';
 import { TerminalPanel } from './terminal/TerminalPanel';
 
@@ -145,8 +146,14 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
           {activeTab ? (
             activeTab.kind === 'review' ? (
               <ReviewPanel key={activeTab.id} projectPath={activeTab.projectPath ?? projectPath ?? ''} />
-            ) : (
+            ) : activeTab.kind === 'terminal' ? (
               <TerminalPanel key={activeTab.id} tabId={activeTab.id} projectPath={activeTab.projectPath ?? projectPath ?? ''} />
+            ) : (
+              <PlanPreviewPanel
+                key={activeTab.id}
+                planFilePath={activeTab.planFilePath}
+                planContent={activeTab.planContent}
+              />
             )
           ) : (
             <SidePanelEmpty projectPath={projectPath} onOpenReview={openReview} onOpenTerminal={openTerminal} />
@@ -168,7 +175,7 @@ function TabButton({
   onClick: () => void;
   onClose: () => void;
 }) {
-  const Icon = tab.kind === 'review' ? FileSearch : Terminal;
+  const Icon = tab.kind === 'review' ? FileSearch : tab.kind === 'terminal' ? Terminal : FileText;
 
   return (
     <button

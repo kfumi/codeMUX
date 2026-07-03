@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type SidePanelTabKind = 'review' | 'terminal';
+export type SidePanelTabKind = 'review' | 'terminal' | 'plan';
 
 export interface SidePanelTab {
   id: string;
@@ -8,6 +8,8 @@ export interface SidePanelTab {
   title: string;
   projectPath?: string;
   terminalId?: string;
+  planFilePath?: string;
+  planContent?: string;
 }
 
 interface SidePanelSnapshot {
@@ -29,6 +31,7 @@ interface SidePanelState {
   openPanel: () => void;
   openReviewTab: (projectPath: string) => void;
   openTerminalTab: (projectPath: string) => void;
+  openPlanTab: (planFilePath: string, planContent: string) => void;
   closePanel: () => void;
   setActiveTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
@@ -62,17 +65,33 @@ function snapshotFromState(state: SidePanelState): SidePanelSnapshot {
   };
 }
 
-function tabId(scopeId: string, kind: SidePanelTabKind, projectPath: string) {
-  return `${scopeId}:${kind}:${projectPath}`;
+function tabId(scopeId: string, kind: SidePanelTabKind, targetPath: string) {
+  return `${scopeId}:${kind}:${targetPath}`;
 }
 
 function createTab(scopeId: string, kind: SidePanelTabKind, projectPath: string): SidePanelTab {
   return {
     id: tabId(scopeId, kind, projectPath),
     kind,
-    title: kind === 'review' ? '审查' : '终端',
+    title: kind === 'review' ? '审查' : kind === 'terminal' ? '终端' : '计划',
     projectPath,
   };
+}
+
+function createPlanTab(scopeId: string, planFilePath: string, planContent: string): SidePanelTab {
+  return {
+    id: tabId(scopeId, 'plan', planFilePath),
+    kind: 'plan',
+    title: getFileName(planFilePath) || '计划',
+    planFilePath,
+    planContent,
+  };
+}
+
+function getFileName(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  const parts = normalized.split('/');
+  return parts[parts.length - 1] || path;
 }
 
 export const useSidePanelStore = create<SidePanelState>((set, get) => ({
@@ -120,6 +139,17 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     set((state) => ({
       isOpen: true,
       tabs: state.tabs.some((tab) => tab.id === id) ? state.tabs : [...state.tabs, createTab(state.activeScopeId, 'terminal', projectPath)],
+      activeTabId: id,
+    }));
+  },
+
+  openPlanTab: (planFilePath: string, planContent: string) => {
+    const id = tabId(get().activeScopeId, 'plan', planFilePath);
+    set((state) => ({
+      isOpen: true,
+      tabs: state.tabs.some((tab) => tab.id === id)
+        ? state.tabs.map((tab) => (tab.id === id ? { ...tab, planContent } : tab))
+        : [...state.tabs, createPlanTab(state.activeScopeId, planFilePath, planContent)],
       activeTabId: id,
     }));
   },

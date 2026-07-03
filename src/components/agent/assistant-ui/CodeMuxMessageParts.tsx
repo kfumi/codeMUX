@@ -3,9 +3,11 @@ import { MarkdownText } from '@/components/assistant-ui/markdown-text';
 import {
   ToolFallbackContent,
   ToolFallbackResult,
+  ToolFallbackConversationResult,
   ToolFallbackRoot,
   ToolFallbackTrigger,
   ToolFallbackArgs,
+  ToolFallbackConversationArgs,
 } from '@/components/assistant-ui/tool-fallback';
 import { AskUserQuestionCard } from '../AskUserQuestionCard';
 import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
@@ -14,6 +16,7 @@ import { AlertTriangle, XCircle } from 'lucide-react';
 import { getCodeChangeFilePath, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
 import { getDisplayableArgs, getToolHeaderSummary } from '../toolHeaderSummary';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { useSidePanelStore } from '../../../stores/sidePanelStore';
 
 type CodeMuxToolCallPartProps = {
   toolName: string;
@@ -117,20 +120,48 @@ export function CodeMuxToolCallMessagePart({
   durationMs,
   status,
 }: CodeMuxToolCallPartProps) {
+  const openPlanTab = useSidePanelStore((state) => state.openPlanTab);
   const resolvedStatus = resolveToolStatus(status, result, isError);
   const headerSummary = getToolHeaderSummary(toolName, args);
   const codeFilePath = isCodeChangeTool(toolName, args) ? getCodeChangeFilePath(args) : undefined;
   const headerText = codeFilePath || headerSummary.text;
-  const displayableArgs = codeFilePath ? null : getDisplayableArgs(args, headerSummary.consumedKeys);
+  const displayableArgs = codeFilePath ? null : getToolDisplayableArgs(toolName, args, headerSummary.consumedKeys);
   const subAgentPrompt = getSubAgentPrompt(toolName, args);
+  const isSubAgentToolCall = isSubAgentTool(toolName);
   const resolvedArgsText = subAgentPrompt
     ?? (argsText && displayableArgs ? JSON.stringify(displayableArgs, null, 2) : displayableArgs ? JSON.stringify(displayableArgs, null, 2) : undefined);
 
   const tooltipPath = headerSummary.fullPath;
+  const exitPlanModePlanFilePath = toolName === 'ExitPlanMode' ? getStringArg(args, 'planFilePath') : undefined;
+  const exitPlanModePlanContent = toolName === 'ExitPlanMode' ? getStringArg(args, 'plan') ?? '' : '';
 
   return (
     <ToolFallbackRoot defaultOpen={resolvedStatus?.type === 'requires-action'}>
       <ToolFallbackTrigger toolName={headerSummary.displayName || toolName} status={resolvedStatus}>
+        {exitPlanModePlanFilePath ? (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label={`预览计划 ${exitPlanModePlanFilePath}`}
+            title={exitPlanModePlanFilePath}
+            className="ml-2 inline-block max-w-[min(33rem,54vw)] truncate align-middle text-xs font-normal text-primary underline underline-offset-2 transition-colors hover:text-primary/80"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openPlanTab(exitPlanModePlanFilePath, exitPlanModePlanContent);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') {
+                return;
+              }
+              event.preventDefault();
+              event.stopPropagation();
+              openPlanTab(exitPlanModePlanFilePath, exitPlanModePlanContent);
+            }}
+          >
+            {exitPlanModePlanFilePath}
+          </span>
+        ) : null}
         {headerText && (
           tooltipPath ? (
             <Tooltip>
@@ -155,10 +186,18 @@ export function CodeMuxToolCallMessagePart({
           </span>
         )}
       </ToolFallbackTrigger>
-      <ToolFallbackContent>
-        {resolvedArgsText && <ToolFallbackArgs argsText={resolvedArgsText} />}
+      <ToolFallbackContent scrollable={!codeFilePath}>
+        {resolvedArgsText && (
+          isSubAgentToolCall
+            ? <ToolFallbackConversationArgs argsText={resolvedArgsText} />
+            : <ToolFallbackArgs argsText={resolvedArgsText} />
+        )}
         {resolvedStatus?.type !== 'incomplete' && <ToolCodeDiff toolName={toolName} input={args} />}
-        {(!codeFilePath || resolvedStatus?.type === 'incomplete') && <ToolFallbackResult result={stringifyResult(result)} />}
+        {(!codeFilePath || resolvedStatus?.type === 'incomplete') && (
+          isSubAgentToolCall
+            ? <ToolFallbackConversationResult result={stringifyResult(result)} />
+            : <ToolFallbackResult result={stringifyResult(result)} />
+        )}
       </ToolFallbackContent>
     </ToolFallbackRoot>
   );
@@ -346,12 +385,35 @@ function stringifyResult(result: unknown): string | undefined {
 }
 
 function getSubAgentPrompt(toolName: string, args: Record<string, unknown>): string | undefined {
-  if (toolName !== 'Agent' && toolName !== 'Task' && toolName !== 'subagent') {
+  if (!isSubAgentTool(toolName)) {
     return undefined;
   }
 
   const prompt = args.prompt;
   return typeof prompt === 'string' && prompt.trim().length > 0 ? prompt : undefined;
+}
+
+function isSubAgentTool(toolName: string): boolean {
+  return toolName === 'Agent' || toolName === 'Task' || toolName === 'subagent';
+}
+
+function getToolDisplayableArgs(
+  toolName: string,
+  args: Record<string, unknown>,
+  consumedKeys: string[],
+): Record<string, unknown> | null {
+  const displayableArgs = getDisplayableArgs(args, consumedKeys);
+  if (!displayableArgs || toolName !== 'ExitPlanMode') {
+    return displayableArgs;
+  }
+
+  const { plan: _plan, ...rest } = displayableArgs;
+  return Object.keys(rest).length > 0 ? rest : null;
+}
+
+function getStringArg(args: Record<string, unknown>, key: string): string | undefined {
+  const value = args[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }
 
 function inferStatus(result: unknown, isError?: boolean): ToolCallMessagePartStatus {

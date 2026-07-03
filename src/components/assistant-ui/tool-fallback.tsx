@@ -132,9 +132,11 @@ function ToolFallbackTrigger({
 
 function ToolFallbackContent({
   className,
+  bodyClassName,
+  scrollable = true,
   children,
   ...props
-}: React.ComponentProps<typeof CollapsibleContent>) {
+}: React.ComponentProps<typeof CollapsibleContent> & { bodyClassName?: string; scrollable?: boolean }) {
   return (
     <CollapsibleContent
       data-slot="tool-fallback-content"
@@ -151,12 +153,37 @@ function ToolFallbackContent({
       )}
       {...props}
     >
-      <div className="mt-1 flex max-h-40 flex-col gap-2 overflow-y-auto pr-1 text-xs scrollbar-gutter-stable">{children}</div>
+      <div
+        className={cn(
+          'mt-1 flex flex-col gap-2 text-xs scrollbar-gutter-stable',
+          scrollable ? 'max-h-40 overflow-y-auto pr-1' : 'overflow-visible',
+          bodyClassName,
+        )}
+      >
+        {children}
+      </div>
     </CollapsibleContent>
   );
 }
 
 function ToolFallbackArgs({
+  argsText,
+  className,
+  ...props
+}: React.ComponentProps<'div'> & { argsText?: string }) {
+  if (!argsText) return null;
+  return (
+    <div
+      data-slot="tool-fallback-args"
+      className={cn('aui-tool-fallback-args-value rounded-md bg-muted/50 p-2.5 text-xs text-foreground/90 whitespace-pre-wrap', className)}
+      {...props}
+    >
+      <pre className="whitespace-pre-wrap">{argsText}</pre>
+    </div>
+  );
+}
+
+function ToolFallbackConversationArgs({
   argsText,
   className,
   ...props
@@ -176,6 +203,27 @@ function ToolFallbackArgs({
 }
 
 function ToolFallbackResult({
+  result,
+  className,
+  ...props
+}: React.ComponentProps<'div'> & { result?: unknown }) {
+  if (result === undefined) return null;
+  const resultText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+  return (
+    <div
+      data-slot="tool-fallback-result"
+      className={cn('aui-tool-fallback-result max-h-35', className)}
+      {...props}
+    >
+      <p className="aui-tool-fallback-result-header text-xs font-medium text-muted-foreground">结果：</p>
+      <pre className="aui-tool-fallback-result-content mt-1 rounded-md bg-muted/50 p-2.5 text-xs text-foreground/90 whitespace-pre-wrap">
+        {resultText}
+      </pre>
+    </div>
+  );
+}
+
+function ToolFallbackConversationResult({
   result,
   className,
   ...props
@@ -309,7 +357,9 @@ const ToolFallback = memo(ToolFallbackImpl) as unknown as ToolCallMessagePartCom
   Trigger: typeof ToolFallbackTrigger;
   Content: typeof ToolFallbackContent;
   Args: typeof ToolFallbackArgs;
+  ConversationArgs: typeof ToolFallbackConversationArgs;
   Result: typeof ToolFallbackResult;
+  ConversationResult: typeof ToolFallbackConversationResult;
   Error: typeof ToolFallbackError;
   Approval: typeof ToolFallbackApproval;
 };
@@ -319,7 +369,9 @@ ToolFallback.Root = ToolFallbackRoot;
 ToolFallback.Trigger = ToolFallbackTrigger;
 ToolFallback.Content = ToolFallbackContent;
 ToolFallback.Args = ToolFallbackArgs;
+ToolFallback.ConversationArgs = ToolFallbackConversationArgs;
 ToolFallback.Result = ToolFallbackResult;
+ToolFallback.ConversationResult = ToolFallbackConversationResult;
 ToolFallback.Error = ToolFallbackError;
 ToolFallback.Approval = ToolFallbackApproval;
 
@@ -329,7 +381,9 @@ export {
   ToolFallbackTrigger,
   ToolFallbackContent,
   ToolFallbackArgs,
+  ToolFallbackConversationArgs,
   ToolFallbackResult,
+  ToolFallbackConversationResult,
   ToolFallbackError,
   ToolFallbackApproval,
 };

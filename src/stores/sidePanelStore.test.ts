@@ -25,6 +25,24 @@ describe('side panel store', () => {
     });
   });
 
+  it('opens and reuses a plan preview tab by plan file path', () => {
+    const store = useSidePanelStore.getState();
+
+    store.openPlanTab('docs/superpowers/plans/exit-plan.md', '# 初版计划');
+    store.openPlanTab('docs/superpowers/plans/exit-plan.md', '# 更新后的计划');
+
+    const state = useSidePanelStore.getState();
+    expect(state.isOpen).toBe(true);
+    expect(state.tabs).toHaveLength(1);
+    expect(state.activeTabId).toBe(state.tabs[0].id);
+    expect(state.tabs[0]).toMatchObject({
+      kind: 'plan',
+      title: 'exit-plan.md',
+      planFilePath: 'docs/superpowers/plans/exit-plan.md',
+      planContent: '# 更新后的计划',
+    });
+  });
+
   it('reuses an existing tab of the same kind for a project', () => {
     const store = useSidePanelStore.getState();
 
@@ -96,6 +114,17 @@ describe('side panel store', () => {
       isOpen: false,
       tabs: [{ kind: 'review', projectPath: 'D:/project/a' }],
     });
+
+    useSidePanelStore.getState().openPlanTab('docs/plan.md', '# A');
+    expect(useSidePanelStore.getState().tabs).toEqual([
+      expect.objectContaining({ kind: 'review', projectPath: 'D:/project/a' }),
+      expect.objectContaining({ kind: 'plan', planFilePath: 'docs/plan.md', planContent: '# A' }),
+    ]);
+
+    useSidePanelStore.getState().setScope('session-b');
+    expect(useSidePanelStore.getState().tabs).toEqual([
+      expect.objectContaining({ kind: 'terminal', projectPath: 'D:/project/b' }),
+    ]);
   });
 
   it('lets the side panel grow until the conversation area reaches its minimum width', () => {
