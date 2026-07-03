@@ -19,8 +19,6 @@ const saveEventsMock = vi.fn<(sessionId: string, eventsJson: string) => Promise<
 const getEventsMock = vi.fn<(sessionId: string) => Promise<string>>();
 const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
-const loadClaudeSubagentIndexMock = vi.fn<(appSessionId: string) => Promise<Record<string, string>>>();
-const loadSubagentSessionEventsMock = vi.fn<(appSessionId: string, agentId: string) => Promise<Record<string, unknown>[]>>();
 
 vi.mock('../lib/tauri', () => ({
   agentApi: {
@@ -35,8 +33,6 @@ vi.mock('../lib/tauri', () => ({
     saveEvents: saveEventsMock,
     getEvents: getEventsMock,
     loadClaudeSessionEvents: loadClaudeSessionEventsMock,
-    loadClaudeSubagentIndex: loadClaudeSubagentIndexMock,
-    loadSubagentSessionEvents: loadSubagentSessionEventsMock,
     loadCodexSessionEvents: loadCodexSessionEventsMock,
     startProxy: vi.fn(),
     stopProxy: vi.fn(),
@@ -131,10 +127,6 @@ describe('agent store Codex history loading', () => {
       changedFiles: {},
       fileOriginals: {},
       acknowledgedFiles: {},
-      subAgentEvents: {},
-      subAgentLoading: {},
-      subAgentIndex: {},
-      subAgentIndexLoading: {},
     });
 
     return session;
@@ -181,8 +173,6 @@ describe('agent store Codex history loading', () => {
     }));
     loadClaudeSessionEventsMock.mockResolvedValue([]);
     loadCodexSessionEventsMock.mockResolvedValue([]);
-    loadClaudeSubagentIndexMock.mockResolvedValue({});
-    loadSubagentSessionEventsMock.mockResolvedValue([]);
     localStorage.clear();
   });
 
@@ -1082,7 +1072,7 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().events[session.id]).toBeUndefined();
   });
 
-  it('patches historical Claude Agent tool calls from the subagent index and filters sidechain history', async () => {
+  it('loads historical Claude Agent tool calls without subagent linkage and filters sidechain history', async () => {
     const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
@@ -1118,13 +1108,9 @@ describe('agent store Codex history loading', () => {
         parent_tool_use_id: null,
       },
     ]);
-    loadClaudeSubagentIndexMock.mockResolvedValueOnce({
-      call_22bf1cc2e7484a108461feb0: 'a6cae6d569918e2d3',
-    });
 
     await useAgentStore.getState().loadSessionMessages(session.id);
 
-    expect(loadClaudeSubagentIndexMock).toHaveBeenCalledWith(session.id);
     const events = useAgentStore.getState().events[session.id] ?? [];
     expect(events).toHaveLength(1);
     const block = events[0]?.kind === 'assistant' ? events[0].data.message.content[0] : undefined;
@@ -1132,109 +1118,12 @@ describe('agent store Codex history loading', () => {
       type: 'tool_use',
       id: 'call_22bf1cc2e7484a108461feb0',
       name: 'Agent',
-      agentId: 'a6cae6d569918e2d3',
     });
-  });
-
-  it('patches live Claude Agent tool calls from the subagent index', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const session = await primeSession('claude_code');
-
-    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
-      onEvent(JSON.stringify({
-        type: 'assistant',
-        uuid: 'assistant-agent-live',
-        session_id: sessionId,
-        message: {
-          role: 'assistant',
-          content: [
-            {
-              type: 'tool_use',
-              id: 'call_live_agent',
-              name: 'Agent',
-              input: { description: 'Explore', prompt: 'inspect' },
-            },
-          ],
-        },
-        parent_tool_use_id: null,
-      }));
-    });
-    loadClaudeSubagentIndexMock.mockResolvedValueOnce({
-      call_live_agent: 'alive123',
-    });
-
-    await useAgentStore.getState().startQuery(session.id, 'run agent', 'D:\\project\\ai-code\\codeMUX');
-    await Promise.resolve();
-
-    const events = useAgentStore.getState().events[session.id] ?? [];
-    const block = events.find((event) => event.kind === 'assistant')?.kind === 'assistant'
-      ? (events.find((event) => event.kind === 'assistant') as Extract<(typeof events)[number], { kind: 'assistant' }>).data.message.content[0]
-      : undefined;
-
-    expect(block).toMatchObject({
-      type: 'tool_use',
-      id: 'call_live_agent',
-      name: 'Agent',
-      agentId: 'alive123',
-    });
-  });
-
-  it('retries live Claude subagent index loading when meta is written after the Agent tool call', async () => {
-    vi.useFakeTimers();
-    const { useAgentStore } = await import('./agentStore');
-    const session = await primeSession('claude_code');
-
-    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
-      onEvent(JSON.stringify({
-        type: 'assistant',
-        uuid: 'assistant-agent-live',
-        session_id: sessionId,
-        message: {
-          role: 'assistant',
-          content: [
-            {
-              type: 'tool_use',
-              id: 'call_live_agent_late_meta',
-              name: 'Agent',
-              input: { description: 'Explore', prompt: 'inspect' },
-            },
-          ],
-        },
-        parent_tool_use_id: null,
-      }));
-    });
-    loadClaudeSubagentIndexMock
-      .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({
-        call_live_agent_late_meta: 'late123',
-      });
-
-    await useAgentStore.getState().startQuery(session.id, 'run agent', 'D:\\project\\ai-code\\codeMUX');
-    await Promise.resolve();
-
-    let events = useAgentStore.getState().events[session.id] ?? [];
-    let block = events.find((event) => event.kind === 'assistant')?.kind === 'assistant'
-      ? (events.find((event) => event.kind === 'assistant') as Extract<(typeof events)[number], { kind: 'assistant' }>).data.message.content[0]
-      : undefined;
     expect(block).not.toHaveProperty('agentId');
-
-    await vi.advanceTimersByTimeAsync(500);
-    await Promise.resolve();
-
-    events = useAgentStore.getState().events[session.id] ?? [];
-    block = events.find((event) => event.kind === 'assistant')?.kind === 'assistant'
-      ? (events.find((event) => event.kind === 'assistant') as Extract<(typeof events)[number], { kind: 'assistant' }>).data.message.content[0]
-      : undefined;
-    expect(loadClaudeSubagentIndexMock).toHaveBeenCalledTimes(2);
-    expect(block).toMatchObject({
-      type: 'tool_use',
-      id: 'call_live_agent_late_meta',
-      name: 'Agent',
-      agentId: 'late123',
-    });
+    expect(block).not.toHaveProperty('subAgentKey');
   });
 
-  it('routes live Claude subagent stream events to the subagent panel cache by parent tool use id', async () => {
+  it('filters live Claude subagent stream events from the main event list', async () => {
     const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
 
@@ -1288,9 +1177,6 @@ describe('agent store Codex history loading', () => {
         },
       }));
     });
-    loadClaudeSubagentIndexMock.mockResolvedValueOnce({
-      call_live_agent: 'alive123',
-    });
 
     await useAgentStore.getState().startQuery(session.id, 'run agent', 'D:\\project\\ai-code\\codeMUX');
     await Promise.resolve();
@@ -1299,103 +1185,11 @@ describe('agent store Codex history loading', () => {
     expect(events).toHaveLength(2);
     expect(events.some((event) => event.kind === 'assistant' && event.data.uuid === 'assistant-subagent-live')).toBe(false);
     expect(events.some((event) => event.kind === 'tool_result' && event.data.uuid === 'tool-result-subagent-live')).toBe(false);
-    expect(useAgentStore.getState().subAgentEvents[`${session.id}:alive123`]).toEqual([
-      expect.objectContaining({ kind: 'assistant' }),
-      expect.objectContaining({ kind: 'tool_result' }),
-      expect.objectContaining({ kind: 'assistant' }),
-    ]);
-  });
-
-  it('adds the live Agent tool result summary to the subagent panel cache', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const session = await primeSession('claude_code');
-
-    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
-      onEvent(JSON.stringify({
-        type: 'assistant',
-        uuid: 'assistant-agent-live',
-        session_id: sessionId,
-        message: {
-          role: 'assistant',
-          content: [
-            {
-              type: 'tool_use',
-              id: 'call_live_agent',
-              name: 'Agent',
-              input: { description: 'Explore', prompt: 'inspect' },
-            },
-          ],
-        },
-        parent_tool_use_id: null,
-      }));
-      onEvent(JSON.stringify({
-        type: 'user',
-        uuid: 'tool-result-agent-live',
-        session_id: sessionId,
-        message: {
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: 'call_live_agent',
-              content: 'Here are the extracted values:\n\n- **Project name:** codemux\n- **Version:** 1.0.0',
-            },
-          ],
-        },
-        parent_tool_use_id: null,
-      }));
-    });
-
-    await useAgentStore.getState().startQuery(session.id, 'run agent', 'D:\\project\\ai-code\\codeMUX');
-    await Promise.resolve();
-
-    const panelEvents = useAgentStore.getState().subAgentEvents[`${session.id}:call_live_agent`] ?? [];
-    expect(panelEvents).toContainEqual(expect.objectContaining({
-      kind: 'assistant',
-      data: expect.objectContaining({
-        message: expect.objectContaining({
-          content: [{ type: 'text', text: 'Here are the extracted values:\n\n- **Project name:** codemux\n- **Version:** 1.0.0' }],
-        }),
-      }),
-    }));
-  });
-
-  it('loads sidechain Claude messages into the subagent panel cache', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const session = await primeSession('claude_code');
-
-    loadSubagentSessionEventsMock.mockResolvedValueOnce([
-      {
-        type: 'assistant',
-        uuid: 'assistant-subagent-history',
-        session_id: session.id,
-        isSidechain: true,
-        parent_tool_use_id: 'call_agent',
-        message: {
-          role: 'assistant',
-          content: [{ type: 'tool_use', id: 'call_read', name: 'Read', input: { file_path: 'package.json' } }],
-        },
-      },
-      {
-        type: 'user',
-        uuid: 'tool-result-subagent-history',
-        session_id: session.id,
-        isSidechain: true,
-        parent_tool_use_id: 'call_agent',
-        message: {
-          role: 'user',
-          content: [{ type: 'tool_result', tool_use_id: 'call_read', content: 'package contents' }],
-        },
-      },
-    ]);
-
-    await useAgentStore.getState().loadSubagentEvents(session.id, 'alive123');
-
-    expect(loadSubagentSessionEventsMock).toHaveBeenCalledWith(session.id, 'alive123');
-    expect(useAgentStore.getState().subAgentEvents[`${session.id}:alive123`]).toEqual([
-      expect.objectContaining({ kind: 'assistant' }),
-      expect.objectContaining({ kind: 'tool_result' }),
-    ]);
+    const block = events.find((event) => event.kind === 'assistant')?.kind === 'assistant'
+      ? (events.find((event) => event.kind === 'assistant') as Extract<(typeof events)[number], { kind: 'assistant' }>).data.message.content[0]
+      : undefined;
+    expect(block).not.toHaveProperty('agentId');
+    expect(block).not.toHaveProperty('subAgentKey');
   });
 
   it('sends image payloads for unknown models by default', async () => {

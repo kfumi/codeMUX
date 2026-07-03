@@ -283,31 +283,6 @@ describe('mapPersistedClaudeMessage', () => {
     ).toBeNull();
   });
 
-  it('keeps Claude sidechain messages when loading a subagent transcript', () => {
-    const event = mapPersistedClaudeMessage(
-      {
-        type: 'assistant',
-        isSidechain: true,
-        parent_tool_use_id: 'call_agent',
-        message: {
-          role: 'assistant',
-          content: [{ type: 'text', text: 'subagent-only text' }],
-        },
-      },
-      'claude_code',
-      { includeSidechain: true },
-    );
-
-    expect(event).toEqual({
-      kind: 'assistant',
-      data: expect.objectContaining({
-        message: expect.objectContaining({
-          content: [{ type: 'text', text: 'subagent-only text' }],
-        }),
-      }),
-    });
-  });
-
   it('loads result messages from Claude JSONL history', () => {
     expect(
       mapPersistedClaudeMessage({
@@ -398,6 +373,37 @@ describe('mapPersistedClaudeMessage', () => {
     expect(event).toEqual({
       kind: 'user',
       data: { content: '/compact' },
+    });
+  });
+
+  it('keeps Claude command arguments visible with the command name', () => {
+    const event = mapPersistedClaudeMessage(
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: [
+                '<command-message>superpowers:executing-plans</command-message>',
+                '<command-name>/superpowers:executing-plans</command-name>',
+                '<command-args>我已经使用superpowers生成设计文档和实现计划文档，现在请你基于superpowers的TDD按照文档帮我实现需求并完成好测试。</command-args>',
+              ].join('\n'),
+            },
+          ],
+        },
+        parent_tool_use_id: null,
+      },
+      'claude_code',
+    );
+
+    expect(event).toEqual({
+      kind: 'user',
+      data: {
+        content:
+          '/superpowers:executing-plans 我已经使用superpowers生成设计文档和实现计划文档，现在请你基于superpowers的TDD按照文档帮我实现需求并完成好测试。',
+      },
     });
   });
 

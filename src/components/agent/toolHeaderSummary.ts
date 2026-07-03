@@ -6,79 +6,127 @@ export interface ToolHeaderSummary {
   consumedKeys: string[];
 }
 
-export function getToolHeaderSummary(toolName: string, input: Record<string, unknown>): ToolHeaderSummary {
+const BUILT_IN_TOOL_DISPLAY_NAMES: Record<string, string> = {
+  Read: '读取文件',
+  Write: '写入文件',
+  Edit: '编辑文件',
+  MultiEdit: '批量编辑文件',
+  NotebookRead: '读取 Notebook',
+  NotebookEdit: '编辑 Notebook',
+  LS: '列目录',
+  Glob: '匹配文件',
+  Grep: '搜索文本',
+  Bash: '运行命令',
+  shell_command: '运行命令',
+  apply_patch: '应用补丁',
+  Agent: '子智能体',
+  Task: '子智能体',
+  subagent: '子智能体',
+  WebSearch: '网页搜索',
+  WebFetch: '读取网页',
+  Skill: '技能',
+  TodoWrite: '更新待办',
+  TaskGet: '查看任务',
+  TaskCreate: '创建任务',
+  TaskUpdate: '更新任务',
+  TaskList: '任务列表',
+  update_plan: '更新计划',
+  AskUserQuestion: '询问用户',
+  request_user_input: '询问用户',
+  EnterPlanMode: '进入计划模式',
+  ExitPlanMode: '退出计划模式',
+  EnterWorktree: '进入工作树',
+  ExitWorktree: '退出工作树',
+  WaitForMcpServers: '等待 MCP 服务',
+  tool_search: '搜索工具',
+};
+
+export function getToolDisplayName(toolName: string): string {
   if (toolName.startsWith('mcp__')) {
     const parts = toolName.split('__');
-    const server = parts[1] || toolName;
-    const method = parts[2] || '';
+    return parts[1] || toolName;
+  }
+
+  return BUILT_IN_TOOL_DISPLAY_NAMES[toolName] ?? toolName;
+}
+
+export function getToolHeaderSummary(toolName: string, input: Record<string, unknown>): ToolHeaderSummary {
+  if (toolName.startsWith('mcp__')) {
     const queryKey = firstPresentKey(input, ['query', 'libraryName', 'libraryId', 'url', 'path']);
     const query = queryKey ? asDisplayText(input[queryKey]) : '';
 
     return {
-      displayName: server,
-      text: query ? `[${method}] ${query}` : `[${method}]`,
+      displayName: getToolDisplayName(toolName),
+      text: query || undefined,
       consumedKeys: queryKey ? [queryKey] : [],
     };
   }
 
-  switch (toolName) {
-    case 'Read':
-    case 'Write':
-    case 'Edit':
-    case 'MultiEdit':
-    case 'NotebookRead':
-    case 'NotebookEdit':
-      return fromFirstKey(input, ['file_path', 'notebook_path', 'path']);
+  const summary = (() => {
+    switch (toolName) {
+      case 'Read':
+      case 'Write':
+      case 'Edit':
+      case 'MultiEdit':
+      case 'NotebookRead':
+      case 'NotebookEdit':
+        return fromFirstKey(input, ['file_path', 'notebook_path', 'path']);
 
-    case 'LS':
-      return fromFirstKey(input, ['path']);
+      case 'LS':
+        return fromFirstKey(input, ['path']);
 
-    case 'Glob':
-    case 'Grep':
-      return fromFirstKey(input, ['pattern', 'query']);
+      case 'Glob':
+      case 'Grep':
+        return fromFirstKey(input, ['pattern', 'query']);
 
-    case 'Bash':
-    case 'shell_command':
-      return shellCommandSummary(toolName, input);
+      case 'Bash':
+      case 'shell_command':
+        return shellCommandSummary(toolName, input);
 
-    case 'Agent':
-    case 'Task':
-    case 'subagent':
-      return fromFirstKey(input, ['description', 'prompt']);
+      case 'Agent':
+      case 'Task':
+      case 'subagent':
+        return fromFirstKey(input, ['description', 'prompt']);
 
-    case 'WebSearch':
-      return fromFirstKey(input, ['query']);
+      case 'WebSearch':
+        return fromFirstKey(input, ['query']);
 
-    case 'WebFetch':
-      return fromFirstKey(input, ['url']);
+      case 'WebFetch':
+        return fromFirstKey(input, ['url']);
 
-    case 'Skill':
-      return fromFirstKey(input, ['skill', 'name']);
+      case 'Skill':
+        return fromFirstKey(input, ['skill', 'name']);
 
-    case 'TaskGet':
-      return fromFirstKey(input, ['taskId', 'id']);
+      case 'TaskGet':
+        return fromFirstKey(input, ['taskId', 'id']);
 
-    case 'TaskCreate':
-      return fromFirstKey(input, ['subject', 'description']);
+      case 'TaskCreate':
+        return fromFirstKey(input, ['subject', 'description']);
 
-    case 'TaskUpdate':
-      return taskUpdateSummary(input);
+      case 'TaskUpdate':
+        return taskUpdateSummary(input);
 
-    case 'update_plan':
-      return fromFirstKey(input, ['explanation']);
+      case 'update_plan':
+        return fromFirstKey(input, ['explanation']);
 
-    case 'AskUserQuestion':
-      return fromFirstKey(input, ['question', 'header']);
+      case 'AskUserQuestion':
+        return fromFirstKey(input, ['question', 'header']);
 
-    case 'TaskList':
-    case 'EnterPlanMode':
-    case 'ExitPlanMode':
-    case 'WaitForMcpServers':
-      return { consumedKeys: [] };
+      case 'TaskList':
+      case 'EnterPlanMode':
+      case 'ExitPlanMode':
+      case 'WaitForMcpServers':
+        return { consumedKeys: [] };
 
-    default:
-      return fromFirstKey(input, ['description', 'pattern', 'query', 'url', 'file_path', 'path', 'prompt', 'command']);
-  }
+      default:
+        return fromFirstKey(input, ['description', 'pattern', 'query', 'url', 'file_path', 'path', 'prompt', 'command']);
+    }
+  })();
+
+  return {
+    ...summary,
+    displayName: getToolDisplayName(toolName),
+  };
 }
 
 export function getDisplayableArgs(input: Record<string, unknown>, consumedKeys: string[]): Record<string, unknown> | null {

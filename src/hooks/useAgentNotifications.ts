@@ -138,7 +138,7 @@ export function useAgentNotifications() {
   const sessions = useSessionStore((state) => state.sessions);
   const notificationSettings = useSettingsStore((state) => state.config?.notifications);
   const isAppInactive = useAppInactive();
-  const dispatchedKeysRef = useRef<Set<string>>(new Set());
+  const seenNotificationKeysRef = useRef<Set<string>>(new Set());
 
   const sessionTitles = useMemo(
     () => new Map(sessions.map((session) => [session.id, session.title])),
@@ -152,9 +152,7 @@ export function useAgentNotifications() {
       sound: 'ding' as const,
     };
 
-    if (!isAppInactive || !settings.system_enabled) {
-      return;
-    }
+    const shouldSendNotification = isAppInactive && settings.system_enabled;
 
     for (const [sessionId, sessionEvents] of Object.entries(events)) {
       // Scan all events, find the latest one that should trigger a notification
@@ -174,16 +172,18 @@ export function useAgentNotifications() {
 
         const dispatchKey = buildDispatchKey(sessionId, candidate, sessionEvents, i);
 
-        if (dispatchedKeysRef.current.has(dispatchKey)) {
+        if (seenNotificationKeysRef.current.has(dispatchKey)) {
           break;
         }
 
-        dispatchedKeysRef.current.add(dispatchKey);
+        seenNotificationKeysRef.current.add(dispatchKey);
 
-        void sendClickableNotification(candidate);
+        if (shouldSendNotification) {
+          void sendClickableNotification(candidate);
 
-        if (settings.sound_enabled) {
-          playNotificationSound(settings.sound);
+          if (settings.sound_enabled) {
+            playNotificationSound(settings.sound);
+          }
         }
 
         break; // Only notify once per session

@@ -286,6 +286,16 @@ describe('CodeMuxComposer', () => {
     ]);
   });
 
+  it('does not parse inline URL separators in logs as file directive chips', () => {
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    const text =
+      '[2026-07-03][10:24:15][INFO][webview:emit@http://localhost:1420/src/lib/logger.ts:53:17] [agentNotifications] Notification candidate';
+    const segments = lexicalProps[0]?.formatter?.parse(text) ?? [];
+
+    expect(segments).toEqual([{ kind: 'text', text }]);
+  });
+
   it('opens slash suggestions for a trigger before existing text', () => {
     composerText = '/rev 已有文本';
 
@@ -316,6 +326,57 @@ describe('CodeMuxComposer', () => {
     fireEvent.click(document.querySelector('[data-file-id="App.tsx"]') as Element);
 
     expect(setComposerTextMock).toHaveBeenCalledWith('@App.tsx 已有文本');
+    expect(document.querySelector('[data-file-id="App.tsx"]')).toBeNull();
+  });
+
+  it('does not reopen file suggestions for completed file references while typing after them', () => {
+    composerText = '@docs 这是什么目录 @src/App.tsx 这是什么文件';
+    usePreviewStore.setState({
+      treeRoot: [
+        { name: 'docs', path: 'D:/project/codeMUX/docs', isDir: true },
+        { name: 'src', path: 'D:/project/codeMUX/src', isDir: true, children: [
+          { name: 'App.tsx', path: 'D:/project/codeMUX/src/App.tsx', isDir: false },
+        ] },
+      ],
+    });
+
+    render(<CodeMuxComposer sessionId="session-1" projectPath="D:/project/codeMUX" />);
+
+    expect(document.querySelector('[data-file-id]')).toBeNull();
+  });
+
+  it('closes file suggestions with Escape', () => {
+    composerText = '@Ap';
+    usePreviewStore.setState({
+      treeRoot: [{ name: 'App.tsx', path: 'D:/project/codeMUX/src/App.tsx', isDir: false }],
+    });
+
+    render(<CodeMuxComposer sessionId="session-1" projectPath="D:/project/codeMUX" />);
+
+    expect(document.querySelector('[data-file-id="App.tsx"]')).toBeTruthy();
+
+    fireEvent.keyDown(screen.getByTestId('lexical-composer-input'), { key: 'Escape' });
+
+    expect(document.querySelector('[data-file-id="App.tsx"]')).toBeNull();
+  });
+
+  it('closes file suggestions when clicking outside the composer', () => {
+    composerText = '@Ap';
+    usePreviewStore.setState({
+      treeRoot: [{ name: 'App.tsx', path: 'D:/project/codeMUX/src/App.tsx', isDir: false }],
+    });
+
+    render(
+      <div>
+        <button type="button" data-testid="outside-button">外部区域</button>
+        <CodeMuxComposer sessionId="session-1" projectPath="D:/project/codeMUX" />
+      </div>,
+    );
+
+    expect(document.querySelector('[data-file-id="App.tsx"]')).toBeTruthy();
+
+    fireEvent.pointerDown(screen.getByTestId('outside-button'));
+
     expect(document.querySelector('[data-file-id="App.tsx"]')).toBeNull();
   });
 

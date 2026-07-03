@@ -17,6 +17,8 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const ANIMATION_DURATION = 200;
 
@@ -161,8 +163,14 @@ function ToolFallbackArgs({
 }: React.ComponentProps<'div'> & { argsText?: string }) {
   if (!argsText) return null;
   return (
-    <div className={cn('aui-tool-fallback-args-value rounded-md bg-[hsl(var(--surface-2))]/26 p-2.5 text-xs whitespace-pre-wrap text-foreground/72', className)} {...props}>
-      <pre className="whitespace-pre-wrap">{argsText}</pre>
+    <div
+      data-slot="tool-fallback-args"
+      className={cn('aui-tool-fallback-args flex w-full justify-end', className)}
+      {...props}
+    >
+      <pre className="aui-tool-fallback-args-value max-w-10/12 whitespace-pre-wrap wrap-break-word rounded-xl rounded-tr-md border border-border/50 bg-muted px-3 py-2 text-xs leading-relaxed text-foreground">
+        {argsText}
+      </pre>
     </div>
   );
 }
@@ -173,16 +181,18 @@ function ToolFallbackResult({
   ...props
 }: React.ComponentProps<'div'> & { result?: unknown }) {
   if (result === undefined) return null;
+  const resultText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
   return (
     <div
         data-slot="tool-fallback-result"
-        className={cn('aui-tool-fallback-result max-h-35', className)}
+        className={cn('aui-tool-fallback-result flex w-full justify-start', className)}
         {...props}
     >
-      <p className="aui-tool-fallback-result-header text-xs font-medium text-muted-foreground/72">结果：</p>
-      <pre className="aui-tool-fallback-result-content mt-1 rounded-md bg-[hsl(var(--surface-2))]/26 p-2.5 text-xs whitespace-pre-wrap text-foreground/72">
-        {typeof result === 'string' ? result : JSON.stringify(result, null, 2)}
-      </pre>
+      <div className="aui-tool-fallback-result-content aui-md min-w-0 max-w-full rounded-xl rounded-tl-md px-1 py-1 text-sm leading-6 text-foreground/84">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {resultText}
+        </ReactMarkdown>
+      </div>
     </div>
   );
 }

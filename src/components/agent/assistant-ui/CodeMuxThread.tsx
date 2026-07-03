@@ -737,9 +737,6 @@ function AssistantLikeMessage({
                       isError={part.isError}
                       status={part.status}
                       durationMs={typeof part.toolCallId === 'string' ? toolDurations[part.toolCallId] : undefined}
-                      agentId={(part as Record<string, unknown>).agentId as string | undefined}
-                      subAgentKey={(part as Record<string, unknown>).subAgentKey as string | undefined}
-                      sessionId={sessionId}
                     />
                   );
 

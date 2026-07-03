@@ -19,6 +19,7 @@ import { getRuntimeFlavor } from './runtimeEvents.js';
 import { proxyManager } from './proxyManager.js';
 import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
 import { emit } from './streamEventBatcher.js';
+import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
 import { buildClaudePermissionOptions, type AgentPlanMode, type SidecarPermissionConfig } from './agentPermissions.js';
 import { getClaudeApprovalTitle } from './claudeApprovalPrompt.js';
 import {
@@ -282,7 +283,7 @@ export class SessionRuntime {
   }
 
   private normalizeConfig(cmd: EnsureSessionCommand): SessionBootstrap {
-    const cwd = cmd.cwd === '.' ? os.homedir() : cmd.cwd;
+    const cwd = ensureWorkingDirectory(cmd.cwd);
     return {
       sessionId: cmd.sessionId,
       agentSessionId: cmd.agentSessionId,

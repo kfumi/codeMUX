@@ -26,4 +26,15 @@ describe('CodeMuxDirectiveText', () => {
     expect(chip).toBeTruthy();
     expect(chip?.className).toContain('codemux-directive-command');
   });
+
+  it('does not parse inline URL separators in logs as file directives', () => {
+    const text =
+      '[2026-07-03][10:24:15][INFO][webview:emit@http://localhost:1420/src/lib/logger.ts:53:17] [agentNotifications] Notification candidate';
+
+    expect(parseDirectiveText(text)).toEqual([{ kind: 'text', text }]);
+
+    const { container } = render(<CodeMuxDirectiveText text={text} />);
+
+    expect(container.querySelector('[data-directive-type="file"]')).toBeNull();
+  });
 });

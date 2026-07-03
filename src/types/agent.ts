@@ -16,10 +16,6 @@ export interface ContentBlock {
   id?: string;
   name?: string;
   input?: Record<string, unknown>;
-  /** For Agent tool_use blocks: the sub-agent ID extracted from the tool_result. */
-  agentId?: string;
-  /** Live sub-agent panel cache key, usually the Agent tool_use id. */
-  subAgentKey?: string;
 }
 
 /** Parsed assistant message */

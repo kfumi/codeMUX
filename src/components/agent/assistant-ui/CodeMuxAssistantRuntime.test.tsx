@@ -498,7 +498,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
   it('renders failed tool calls as errors instead of leaving them running', () => {
     const { container } = render(<Harness sessionId="session-tool" />);
 
-    expect(screen.getByText('Bash')).toBeTruthy();
+    expect(screen.getByText('运行命令')).toBeTruthy();
     expect(screen.queryByText(/Error: Command failed with exit code 1/)).toBeNull();
 
     const trigger = container.querySelector('[data-slot="tool-group-trigger"]');

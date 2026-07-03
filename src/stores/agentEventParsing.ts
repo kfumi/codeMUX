@@ -166,6 +166,7 @@ export function isClaudeSubagentEvent(raw: Record<string, unknown>): boolean {
 }
 
 const CLAUDE_COMMAND_NAME_RE = /<command-name>\s*([\s\S]*?)\s*<\/command-name>/;
+const CLAUDE_COMMAND_ARGS_RE = /<command-args>\s*([\s\S]*?)\s*<\/command-args>/;
 const CLAUDE_COMMAND_TAGS_RE = /<command-(?:message|name|args)>[\s\S]*?<\/command-(?:message|name|args)>/g;
 const CLAUDE_LOCAL_COMPACT_STDOUT_RE = /^\s*<local-command-stdout>\s*Compacted\s*<\/local-command-stdout>\s*$/;
 const CLAUDE_COMPACT_SUMMARY_PREFIX = 'This session is being continued from a previous conversation that ran out of context.';
@@ -180,7 +181,12 @@ function stripClaudeCommandTags(content: string): string {
   if (!match) return content;
 
   const commandName = match[1]?.trim();
+  const commandArgs = content.match(CLAUDE_COMMAND_ARGS_RE)?.[1]?.trim();
   const withoutTags = content.replace(CLAUDE_COMMAND_TAGS_RE, '').trim();
+
+  if (!withoutTags && commandName && commandArgs) {
+    return `${commandName} ${commandArgs}`;
+  }
 
   // Content is purely command tags — use the command name as display text
   if (!withoutTags && commandName) return commandName;
@@ -273,9 +279,8 @@ function readNumber(value: unknown): number | undefined {
 export function mapPersistedClaudeMessage(
   raw: Record<string, unknown>,
   agentKind: AgentKind = 'claude_code',
-  options: { includeSidechain?: boolean } = {},
 ): ParsedStoreEvent | null {
-  if (!options.includeSidechain && isClaudeSubagentEvent(raw)) {
+  if (isClaudeSubagentEvent(raw)) {
     return null;
   }
 

@@ -5,6 +5,7 @@ import { ChevronDownIcon, LoaderIcon } from 'lucide-react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
+import { getToolDisplayName } from '@/components/agent/toolHeaderSummary';
 
 const ANIMATION_DURATION = 200;
 
@@ -86,7 +87,8 @@ function ToolGroupTrigger({
     // Count by tool name
     const counts = new Map<string, number>();
     for (const name of toolNames) {
-      counts.set(name, (counts.get(name) || 0) + 1);
+      const displayName = getToolDisplayName(name);
+      counts.set(displayName, (counts.get(displayName) || 0) + 1);
     }
 
     // Build summary

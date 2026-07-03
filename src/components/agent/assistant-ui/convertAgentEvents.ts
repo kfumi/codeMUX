@@ -16,10 +16,6 @@ type CodeMuxToolCallPart = {
   args: Record<string, unknown>;
   result?: string;
   isError?: boolean;
-  /** For Agent tool calls: the sub-agent ID from the tool_result. */
-  agentId?: string;
-  /** Stable live cache key for sub-agent events, usually the parent tool_use id. */
-  subAgentKey?: string;
 };
 
 export type CodeMuxAssistantPart =
@@ -54,7 +50,6 @@ export function convertAgentEventsToAssistantMessages(
   const toolCallLocationById = new Map<string, { messageIndex: number; partIndex: number }>();
   const askQuestionToolUseIds = new Set<string>();
   const pendingToolResultsById = new Map<string, { content: string; isError: boolean }>();
-  const pendingAgentIdsById = new Map<string, string>();
 
   events.forEach((event, index) => {
     if (event.kind === 'user') {
@@ -112,11 +107,6 @@ export function convertAgentEventsToAssistantMessages(
                 );
                 pendingToolResultsById.delete(part.toolCallId);
               }
-              const pendingAgentId = pendingAgentIdsById.get(part.toolCallId);
-              if (pendingAgentId) {
-                attachAgentId(messages, toolCallLocationById, part.toolCallId, pendingAgentId);
-                pendingAgentIdsById.delete(part.toolCallId);
-              }
             }
           });
 
@@ -144,11 +134,6 @@ export function convertAgentEventsToAssistantMessages(
               );
               pendingToolResultsById.delete(part.toolCallId);
             }
-            const pendingAgentId = pendingAgentIdsById.get(part.toolCallId);
-            if (pendingAgentId) {
-              attachAgentId(messages, toolCallLocationById, part.toolCallId, pendingAgentId);
-              pendingAgentIdsById.delete(part.toolCallId);
-            }
           }
         });
       }
@@ -157,8 +142,6 @@ export function convertAgentEventsToAssistantMessages(
     }
 
     if (event.kind === 'tool_result') {
-      // Extract agentId from Agent tool results before processing content results
-      const agentId = extractAgentIdFromToolResult(event);
       for (const result of getToolResults(event)) {
         if (askQuestionToolUseIds.has(result.toolUseId)) {
           const attachedToolResult = attachToolResult(
@@ -189,13 +172,6 @@ export function convertAgentEventsToAssistantMessages(
             content: result.content,
             isError: result.isError,
           });
-        }
-        // Attach agentId to the Agent tool call if found
-        if (agentId) {
-          const attached = attachAgentId(messages, toolCallLocationById, result.toolUseId, agentId);
-          if (!attached) {
-            pendingAgentIdsById.set(result.toolUseId, agentId);
-          }
         }
       }
 
@@ -387,16 +363,6 @@ function convertContentBlockToParts(
         args: cloneRecord(isRecord(block.input) ? block.input : {}),
         result: undefined,
         isError: undefined,
-        ...(isAgentToolName(toolName)
-          ? {
-              subAgentKey: typeof block.subAgentKey === 'string' && block.subAgentKey.length > 0
-                ? block.subAgentKey
-                : toolCallId,
-            }
-          : {}),
-        ...(typeof block.agentId === 'string' && block.agentId.length > 0
-          ? { agentId: block.agentId }
-          : {}),
       },
     ];
   }
@@ -753,72 +719,5 @@ function cloneJsonValue<T>(value: T): T {
   }
 
   return JSON.parse(JSON.stringify(value)) as T;
-}
-
-/**
- * Extract the agentId from a tool_result event for Agent tool calls.
- * The agentId is embedded in the tool_result content as a text block
- * containing "agentId: <id>" (followed by usage info).
- *
- * The content can be either a string or an array of text blocks.
- */
-function extractAgentIdFromToolResult(
-  event: Extract<AgentMessage, { kind: 'tool_result' }>,
-): string | undefined {
-  const data = event.data as unknown;
-  if (!isRecord(data)) return undefined;
-
-  const message = data.message;
-  if (!isRecord(message) || !Array.isArray(message.content)) return undefined;
-
-  for (const block of message.content) {
-    if (!isRecord(block) || block.type !== 'tool_result') continue;
-
-    const content = block.content;
-
-    // Handle string content
-    if (typeof content === 'string') {
-      const agentIdMatch = content.match(/agentId:\s*([a-zA-Z0-9_-]+)/);
-      if (agentIdMatch?.[1]) {
-        return agentIdMatch[1];
-      }
-      continue;
-    }
-
-    // Handle array content (array of text blocks)
-    if (Array.isArray(content)) {
-      for (const textBlock of content) {
-        if (!isRecord(textBlock) || typeof textBlock.text !== 'string') continue;
-        const agentIdMatch = textBlock.text.match(/agentId:\s*([a-zA-Z0-9_-]+)/);
-        if (agentIdMatch?.[1]) {
-          return agentIdMatch[1];
-        }
-      }
-    }
-  }
-
-  return undefined;
-}
-
-/**
- * Attach an agentId to a tool-call part identified by toolCallId.
- */
-function attachAgentId(
-  messages: CodeMuxAssistantMessage[],
-  toolCallLocationById: Map<string, { messageIndex: number; partIndex: number }>,
-  toolCallId: string,
-  agentId: string,
-): boolean {
-  const location = toolCallLocationById.get(toolCallId);
-  if (!location) return false;
-
-  const message = messages[location.messageIndex];
-  const part = message?.content[location.partIndex];
-  if (!message || part?.type !== 'tool-call') return false;
-
-  const content = [...message.content];
-  content[location.partIndex] = { ...part, agentId };
-  messages[location.messageIndex] = { ...message, content };
-  return true;
 }
 

@@ -92,15 +92,6 @@ interface AgentState {
   fileOriginals: Record<string, Record<string, FileOriginalSnapshot>>;
   acknowledgedFiles: Record<string, Set<string>>;
 
-  /** Sub-agent events keyed by "sessionId:agentId" */
-  subAgentEvents: Record<string, AgentMessage[]>;
-  /** Sub-agent loading state keyed by "sessionId:agentId" */
-  subAgentLoading: Record<string, boolean>;
-  /** Claude Agent tool call ID -> sub-agent ID index, keyed by sessionId */
-  subAgentIndex: Record<string, Record<string, string>>;
-  /** Claude sub-agent index loading state keyed by sessionId */
-  subAgentIndexLoading: Record<string, boolean>;
-
   /** Start a new agent query */
   startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string, inputPayload?: AgentInputPayload) => Promise<void>;
   /** Interrupt the current query for a specific session */
@@ -109,8 +100,6 @@ interface AgentState {
   clearEvents: (sessionId: string) => void;
   /** Load historical messages for a session */
   loadSessionMessages: (sessionId: string) => Promise<void>;
-  /** Load sub-agent events for a specific agent */
-  loadSubagentEvents: (sessionId: string, agentId: string) => Promise<void>;
   /** Clear changed files for a session */
   clearChangedFiles: (sessionId: string) => void;
 }
@@ -125,11 +114,6 @@ const logger = createLogger('agentStore');
 const pendingStreamingBuffers = new Map<string, StreamingBuffer>();
 const pendingStreamingFlushHandles = new Map<string, ReturnType<typeof setTimeout>>();
 const sessionsWithLiveTextStream = new Set<string>();
-const pendingSubagentIndexRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const pendingSubagentIndexRetryAttempts = new Map<string, number>();
-const liveSubagentParentKeys = new Map<string, string>();
-const SUBAGENT_INDEX_RETRY_DELAY_MS = 500;
-const SUBAGENT_INDEX_MAX_RETRIES = 12;
 /** Per-session thinking start timestamps (set on content_block_start, cleared on content_block_stop) */
 const pendingThinkingStartTimes = new Map<string, number>();
 const streamingTelemetry = new Map<string, { deltas: number; flushes: number; uiUpdates: number }>();
@@ -363,238 +347,6 @@ function replaceToolUseBlocksInEvents(
   return { events: nextEvents, changed };
 }
 
-function isAgentToolName(toolName: unknown): boolean {
-  return toolName === 'Agent' || toolName === 'Task' || toolName === 'subagent';
-}
-
-function applySubagentIndexToEvents(
-  events: AgentMessage[],
-  index: Record<string, string>,
-): { events: AgentMessage[]; changed: boolean } {
-  if (Object.keys(index).length === 0) {
-    return { events, changed: false };
-  }
-
-  let changed = false;
-  const nextEvents = events.map((event) => {
-    if (event.kind !== 'assistant') {
-      return event;
-    }
-
-    let contentChanged = false;
-    const nextContent = event.data.message.content.map((block) => {
-      if (
-        block?.type === 'tool_use'
-        && isAgentToolName(block.name)
-        && typeof block.id === 'string'
-        && index[block.id]
-        && (block.agentId !== index[block.id] || block.subAgentKey !== block.id)
-      ) {
-        changed = true;
-        contentChanged = true;
-        return { ...block, agentId: index[block.id], subAgentKey: block.id };
-      }
-
-      return block;
-    });
-
-    if (!contentChanged) {
-      return event;
-    }
-
-    return {
-      ...event,
-      data: {
-        ...event.data,
-        message: {
-          ...event.data.message,
-          content: nextContent,
-        },
-      },
-    };
-  });
-
-  return { events: nextEvents, changed };
-}
-
-function migrateSubagentLiveCaches(
-  subAgentEvents: Record<string, AgentMessage[]>,
-  sessionId: string,
-  index: Record<string, string>,
-): { subAgentEvents: Record<string, AgentMessage[]>; changed: boolean } {
-  let nextEvents = subAgentEvents;
-  let changed = false;
-
-  for (const [toolUseId, agentId] of Object.entries(index)) {
-    const liveKey = `${sessionId}:${toolUseId}`;
-    const historyKey = `${sessionId}:${agentId}`;
-    const liveEvents = nextEvents[liveKey];
-    if (!liveEvents || liveKey === historyKey) {
-      continue;
-    }
-
-    const historyEvents = nextEvents[historyKey] ?? [];
-    const knownIds = new Set(historyEvents.map((event) => getEventStableId(event)).filter(Boolean));
-    const merged = [
-      ...historyEvents,
-      ...liveEvents.filter((event) => {
-        const id = getEventStableId(event);
-        return !id || !knownIds.has(id);
-      }),
-    ];
-
-    const { [liveKey]: _removed, ...rest } = nextEvents;
-    nextEvents = { ...rest, [historyKey]: merged };
-    changed = true;
-  }
-
-  return { subAgentEvents: nextEvents, changed };
-}
-
-function getEventStableId(event: AgentMessage): string | undefined {
-  const data = 'data' in event ? event.data as Record<string, unknown> : undefined;
-  return typeof data?.uuid === 'string' ? data.uuid : undefined;
-}
-
-function hasAgentToolCall(event: AgentMessage): boolean {
-  if (event.kind !== 'assistant') {
-    return false;
-  }
-
-  return event.data.message.content.some((block) =>
-    block?.type === 'tool_use'
-    && isAgentToolName(block.name)
-    && typeof block.id === 'string',
-  );
-}
-
-function hasAgentToolUseId(events: AgentMessage[], toolUseId: string): boolean {
-  return events.some((event) =>
-    event.kind === 'assistant'
-    && event.data.message.content.some((block) =>
-      block?.type === 'tool_use'
-      && block.id === toolUseId
-      && isAgentToolName(block.name),
-    ),
-  );
-}
-
-function hasUnpatchedAgentToolCall(events: AgentMessage[]): boolean {
-  return events.some((event) =>
-    event.kind === 'assistant'
-    && event.data.message.content.some((block) =>
-      block?.type === 'tool_use'
-      && isAgentToolName(block.name)
-      && typeof block.id === 'string'
-      && typeof block.agentId !== 'string',
-    ),
-  );
-}
-
-function clearSubagentIndexRetry(sessionId: string) {
-  const timer = pendingSubagentIndexRetryTimers.get(sessionId);
-  if (timer) {
-    clearTimeout(timer);
-    pendingSubagentIndexRetryTimers.delete(sessionId);
-  }
-  pendingSubagentIndexRetryAttempts.delete(sessionId);
-}
-
-function clearLiveSubagentParentKeys(sessionId: string) {
-  const prefix = `${sessionId}:`;
-  for (const key of liveSubagentParentKeys.keys()) {
-    if (key.startsWith(prefix)) {
-      liveSubagentParentKeys.delete(key);
-    }
-  }
-}
-
-function scheduleSubagentIndexRetry(
-  sessionId: string,
-  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
-  get: () => AgentState,
-) {
-  if (pendingSubagentIndexRetryTimers.has(sessionId)) {
-    return;
-  }
-
-  const attempts = pendingSubagentIndexRetryAttempts.get(sessionId) ?? 0;
-  if (attempts >= SUBAGENT_INDEX_MAX_RETRIES) {
-    return;
-  }
-
-  const timer = setTimeout(() => {
-    pendingSubagentIndexRetryTimers.delete(sessionId);
-    pendingSubagentIndexRetryAttempts.set(sessionId, attempts + 1);
-    void loadAndPatchClaudeSubagentIndex(sessionId, set, get, { retryIfEmpty: true });
-  }, SUBAGENT_INDEX_RETRY_DELAY_MS);
-
-  pendingSubagentIndexRetryTimers.set(sessionId, timer);
-}
-
-async function loadAndPatchClaudeSubagentIndex(
-  sessionId: string,
-  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
-  get: () => AgentState,
-  options: { retryIfEmpty?: boolean } = {},
-): Promise<void> {
-  const state = get();
-  if (state.subAgentIndexLoading[sessionId]) {
-    return;
-  }
-
-  const cached = state.subAgentIndex[sessionId];
-  if (cached) {
-    if (Object.keys(cached).length > 0) {
-      set((current) => {
-        const existingEvents = current.events[sessionId] || [];
-        const patched = applySubagentIndexToEvents(existingEvents, cached);
-        return patched.changed
-          ? { events: { ...current.events, [sessionId]: patched.events } }
-          : {};
-      });
-      return;
-    }
-  }
-
-  set((current) => ({
-    subAgentIndexLoading: { ...current.subAgentIndexLoading, [sessionId]: true },
-  }));
-
-  try {
-    const index = await agentApi.loadClaudeSubagentIndex(sessionId);
-    set((current) => {
-      const existingEvents = current.events[sessionId] || [];
-      const patched = applySubagentIndexToEvents(existingEvents, index);
-      const migrated = migrateSubagentLiveCaches(current.subAgentEvents, sessionId, index);
-      return {
-        subAgentIndex: { ...current.subAgentIndex, [sessionId]: index },
-        subAgentIndexLoading: { ...current.subAgentIndexLoading, [sessionId]: false },
-        ...(patched.changed ? { events: { ...current.events, [sessionId]: patched.events } } : {}),
-        ...(migrated.changed ? { subAgentEvents: migrated.subAgentEvents } : {}),
-      };
-    });
-    if (Object.keys(index).length > 0) {
-      clearSubagentIndexRetry(sessionId);
-      return;
-    }
-
-    const shouldRetry = Boolean(
-      options.retryIfEmpty
-      && hasUnpatchedAgentToolCall(get().events[sessionId] || []),
-    );
-    if (shouldRetry) {
-      scheduleSubagentIndexRetry(sessionId, set, get);
-    }
-  } catch (err) {
-    logger.error('Failed to load Claude sub-agent index', { sessionId }, serializeError(err));
-    set((current) => ({
-      subAgentIndex: { ...current.subAgentIndex, [sessionId]: {} },
-      subAgentIndexLoading: { ...current.subAgentIndexLoading, [sessionId]: false },
-    }));
-  }
-}
-
 function clearSimulatedStream(sessionId: string) {
   const entry = pendingSimulatedStreams.get(sessionId);
   if (!entry) return;
@@ -680,8 +432,6 @@ function parseAgentEvent(raw: string): AgentMessage {
     const data = JSON.parse(raw);
 
     // Filter out sub-agent (sidechain) messages from the main event stream.
-    // These are loaded on demand via loadSubagentEvents when the user expands
-    // the Agent tool call's sub-agent panel.
     if (isClaudeSubagentEvent(data)) {
       return { kind: 'raw', data };
     }
@@ -775,184 +525,8 @@ function parseAgentEvent(raw: string): AgentMessage {
   }
 }
 
-function getParentToolUseId(data: Record<string, unknown>): string | undefined {
-  return typeof data.parent_tool_use_id === 'string' && data.parent_tool_use_id.length > 0
-    ? data.parent_tool_use_id
-    : undefined;
-}
-
 function isModeBlockedDiagnostic(value: unknown): value is ModeBlockedDiagnostic {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function getEventUuid(data: Record<string, unknown>): string | undefined {
-  return typeof data.uuid === 'string' && data.uuid.length > 0 ? data.uuid : undefined;
-}
-
-function getParentUuid(data: Record<string, unknown>): string | undefined {
-  return typeof data.parentUuid === 'string' && data.parentUuid.length > 0 ? data.parentUuid : undefined;
-}
-
-function resolveLiveSubagentKey(sessionId: string, rawEvent: Record<string, unknown>): string | undefined {
-  const parentToolUseId = getParentToolUseId(rawEvent);
-  if (parentToolUseId) {
-    return parentToolUseId;
-  }
-
-  const parentUuid = getParentUuid(rawEvent);
-  return parentUuid ? liveSubagentParentKeys.get(`${sessionId}:${parentUuid}`) : undefined;
-}
-
-function rememberLiveSubagentKey(sessionId: string, rawEvent: Record<string, unknown>, subAgentKey: string) {
-  const uuid = getEventUuid(rawEvent);
-  if (uuid) {
-    liveSubagentParentKeys.set(`${sessionId}:${uuid}`, subAgentKey);
-  }
-}
-
-function appendLiveSubagentEvent(
-  sessionId: string,
-  rawEvent: Record<string, unknown>,
-  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
-) {
-  const subAgentKey = resolveLiveSubagentKey(sessionId, rawEvent);
-  if (!subAgentKey) {
-    return;
-  }
-  rememberLiveSubagentKey(sessionId, rawEvent, subAgentKey);
-
-  const parsed = mapPersistedClaudeMessage(rawEvent, 'claude_code', { includeSidechain: true });
-  if (!parsed) {
-    return;
-  }
-
-  const event = parsed as AgentMessage;
-  const cacheKey = `${sessionId}:${subAgentKey}`;
-  set((state) => {
-    const existingEvents = state.subAgentEvents[cacheKey] ?? [];
-    const incomingId = getEventStableId(event);
-    if (incomingId && existingEvents.some((existing) => getEventStableId(existing) === incomingId)) {
-      return {};
-    }
-
-    return {
-      subAgentEvents: {
-        ...state.subAgentEvents,
-        [cacheKey]: [...existingEvents, event],
-      },
-    };
-  });
-}
-
-function appendAgentToolResultSummaryToLiveSubagent(
-  sessionId: string,
-  event: Extract<AgentMessage, { kind: 'tool_result' }>,
-  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
-  get: () => AgentState,
-) {
-  const mainEvents = get().events[sessionId] || [];
-  const resultBlocks = getToolResultBlocks(event);
-
-  for (const result of resultBlocks) {
-    if (!hasAgentToolUseId(mainEvents, result.toolUseId)) {
-      continue;
-    }
-
-    const summary = stripAgentToolResultMetadata(result.content);
-    if (!summary) {
-      continue;
-    }
-
-    const summaryEvent: AgentMessage = {
-      kind: 'assistant',
-      data: {
-        type: 'assistant',
-        uuid: `${event.data.uuid || 'tool-result'}:${result.toolUseId}:subagent-summary`,
-        session_id: event.data.session_id,
-        isSidechain: true,
-        message: {
-          role: 'assistant',
-          content: [{ type: 'text', text: summary }],
-        },
-        parent_tool_use_id: result.toolUseId,
-      } as AgentAssistantMessage,
-    };
-
-    const cacheKey = `${sessionId}:${result.toolUseId}`;
-    set((state) => {
-      const existingEvents = state.subAgentEvents[cacheKey] ?? [];
-      if (hasAssistantText(existingEvents, summary)) {
-        return {};
-      }
-
-      const incomingId = getEventStableId(summaryEvent);
-      if (incomingId && existingEvents.some((existing) => getEventStableId(existing) === incomingId)) {
-        return {};
-      }
-
-      return {
-        subAgentEvents: {
-          ...state.subAgentEvents,
-          [cacheKey]: [...existingEvents, summaryEvent],
-        },
-      };
-    });
-  }
-}
-
-function getToolResultBlocks(event: Extract<AgentMessage, { kind: 'tool_result' }>): Array<{ toolUseId: string; content: string }> {
-  const content = event.data.message?.content;
-  if (!Array.isArray(content)) {
-    return [];
-  }
-
-  return content.flatMap((block) => {
-    if (block?.type !== 'tool_result' || typeof block.tool_use_id !== 'string') {
-      return [];
-    }
-
-    const text = stringifyToolResultContent(block.content);
-    return text ? [{ toolUseId: block.tool_use_id, content: text }] : [];
-  });
-}
-
-function stringifyToolResultContent(content: unknown): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((block) => {
-        if (typeof block === 'string') return block;
-        if (block && typeof block === 'object' && 'text' in block) {
-          return typeof block.text === 'string' ? block.text : '';
-        }
-        return '';
-      })
-      .filter((text) => text.length > 0)
-      .join('\n');
-  }
-
-  return '';
-}
-
-function stripAgentToolResultMetadata(result: string): string {
-  return result
-    .replace(/\n?agentId:\s*[a-zA-Z0-9_-]+[^\n]*(?:\n|$)/g, '\n')
-    .replace(/\n?<usage>[\s\S]*?<\/usage>/g, '')
-    .trim();
-}
-
-function hasAssistantText(events: AgentMessage[], text: string): boolean {
-  return events.some((event) =>
-    event.kind === 'assistant'
-    && event.data.message.content.some((block) =>
-      block?.type === 'text'
-      && typeof block.text === 'string'
-      && block.text.trim() === text.trim(),
-    ),
-  );
 }
 
 function truncateTitle(text: string, maxLen = 30): string {
@@ -1363,10 +937,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   changedFiles: {},
   fileOriginals: {},
   acknowledgedFiles: {},
-  subAgentEvents: {},
-  subAgentLoading: {},
-  subAgentIndex: {},
-  subAgentIndexLoading: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string, inputPayload?: AgentInputPayload) => {
     clearPendingStreaming(sessionId);
@@ -1450,10 +1020,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         let event = parseAgentEvent(raw);
         const now = Date.now();
 
-        // Skip sub-agent (sidechain) messages — they are loaded on demand
-        // via loadSubagentEvents when the user expands the Agent tool call.
+        // Skip sub-agent (sidechain) messages from the main thread.
         if (event.kind === 'raw' && isClaudeSubagentEvent(event.data)) {
-          appendLiveSubagentEvent(sessionId, event.data, set);
           return;
         }
 
@@ -1688,9 +1256,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
                 };
               });
-              if (getSessionAgentKind(sessionId) === 'claude_code' && isAgentToolName(toolMeta.name)) {
-                void loadAndPatchClaudeSubagentIndex(sessionId, set, get, { retryIfEmpty: true });
-              }
             } else {
               flushPendingStreaming(sessionId, set);
             }
@@ -1898,15 +1463,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
           };
         });
-        if (event.kind === 'tool_result') {
-          appendAgentToolResultSummaryToLiveSubagent(sessionId, event, set, get);
-        }
-        if (
-          getSessionAgentKind(sessionId) === 'claude_code'
-          && (hasAgentToolCall(event) || event.kind === 'tool_result')
-        ) {
-          void loadAndPatchClaudeSubagentIndex(sessionId, set, get, { retryIfEmpty: true });
-        }
         // Update MCP runtime status from polling results (local to agentStore)
         if (event.kind === 'mcp_status') {
           if (event.data.status) {
@@ -1987,8 +1543,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
 
     logger.info('Interrupting agent query', { sessionId });
-    clearSubagentIndexRetry(sessionId);
-    clearLiveSubagentParentKeys(sessionId);
     // 1. Immediately update UI — BEFORE sending command to sidecar
     set((s) => {
       const { [sessionId]: _removed, ...rest } = s.queryStartTime;
@@ -2012,8 +1566,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   clearEvents: (sessionId: string) => {
     clearPendingStreaming(sessionId);
     clearSimulatedStream(sessionId);
-    clearSubagentIndexRetry(sessionId);
-    clearLiveSubagentParentKeys(sessionId);
     pendingThinkingStartTimes.delete(sessionId);
     set((state) => {
       const newEvents = { ...state.events };
@@ -2036,24 +1588,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       delete newStreamingDurations[sessionId];
       const newForceStopped = { ...state.forceStopped };
       delete newForceStopped[sessionId];
-      // Clean up sub-agent events for this session
-      const newSubAgentEvents = { ...state.subAgentEvents };
-      const newSubAgentLoading = { ...state.subAgentLoading };
-      const newSubAgentIndex = { ...state.subAgentIndex };
-      const newSubAgentIndexLoading = { ...state.subAgentIndexLoading };
-      for (const key of Object.keys(newSubAgentEvents)) {
-        if (key.startsWith(`${sessionId}:`)) {
-          delete newSubAgentEvents[key];
-        }
-      }
-      for (const key of Object.keys(newSubAgentLoading)) {
-        if (key.startsWith(`${sessionId}:`)) {
-          delete newSubAgentLoading[key];
-        }
-      }
-      delete newSubAgentIndex[sessionId];
-      delete newSubAgentIndexLoading[sessionId];
-      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, mcpRuntimeStatus: newMcpRuntimeStatus, todos: newTodos, streamingThinking: newStreaming, streamingText: newStreamingText, streamingThinkingDurations: newStreamingDurations, forceStopped: newForceStopped, subAgentEvents: newSubAgentEvents, subAgentLoading: newSubAgentLoading, subAgentIndex: newSubAgentIndex, subAgentIndexLoading: newSubAgentIndexLoading };
+      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, mcpRuntimeStatus: newMcpRuntimeStatus, todos: newTodos, streamingThinking: newStreaming, streamingText: newStreamingText, streamingThinkingDurations: newStreamingDurations, forceStopped: newForceStopped };
     });
   },
 
@@ -2079,13 +1614,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         return;
       }
 
-      const subagentIndex = agentKind === 'claude_code'
-        ? await agentApi.loadClaudeSubagentIndex(sessionId).catch((err) => {
-          logger.error('Failed to load Claude sub-agent index while loading history', { sessionId }, serializeError(err));
-          return {};
-        })
-        : {};
-
       const events: AgentMessage[] = [];
       const timestamps: number[] = [];
 
@@ -2100,11 +1628,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           events.push(event as AgentMessage);
           timestamps.push(ts);
         }
-      }
-
-      const indexedEvents = applySubagentIndexToEvents(events, subagentIndex);
-      if (indexedEvents.changed) {
-        events.splice(0, events.length, ...indexedEvents.events);
       }
 
       const hasResult = events.some((e) => e.kind === 'result');
@@ -2175,9 +1698,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         events: { ...state.events, [sessionId]: events },
         eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
         todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
-        ...(agentKind === 'claude_code'
-          ? { subAgentIndex: { ...state.subAgentIndex, [sessionId]: subagentIndex } }
-          : {}),
       }));
       logger.info('Loaded session events from agent JSONL', {
         sessionId,
@@ -2189,55 +1709,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         sessionId,
         agentKind: agentKind ?? 'claude_code',
       }, serializeError(err));
-    }
-  },
-
-  loadSubagentEvents: async (sessionId: string, agentId: string) => {
-    const cacheKey = `${sessionId}:${agentId}`;
-    // Don't reload if already loaded or loading
-    if (get().subAgentEvents[cacheKey] !== undefined || get().subAgentLoading[cacheKey]) {
-      return;
-    }
-
-    set((state) => ({
-      subAgentLoading: { ...state.subAgentLoading, [cacheKey]: true },
-    }));
-
-    try {
-      const jsonlMessages = await agentApi.loadSubagentSessionEvents(sessionId, agentId);
-
-      if (!jsonlMessages || jsonlMessages.length === 0) {
-        logger.info('No sub-agent JSONL history found', { sessionId, agentId });
-        // Store empty array to prevent re-fetching
-        set((state) => ({
-          subAgentEvents: { ...state.subAgentEvents, [cacheKey]: [] },
-          subAgentLoading: { ...state.subAgentLoading, [cacheKey]: false },
-        }));
-        return;
-      }
-
-      const events: AgentMessage[] = [];
-
-      for (const raw of jsonlMessages) {
-        const rawMsg = raw as Record<string, unknown>;
-        const event = mapPersistedClaudeMessage(rawMsg, 'claude_code', { includeSidechain: true });
-        if (event) {
-          events.push(event as AgentMessage);
-        }
-      }
-
-      set((state) => ({
-        subAgentEvents: { ...state.subAgentEvents, [cacheKey]: events },
-        subAgentLoading: { ...state.subAgentLoading, [cacheKey]: false },
-      }));
-      logger.info('Loaded sub-agent events', { sessionId, agentId, eventCount: events.length });
-    } catch (err) {
-      logger.error('Failed to load sub-agent events', { sessionId, agentId }, serializeError(err));
-      // Store empty array on error to prevent infinite retries
-      set((state) => ({
-        subAgentEvents: { ...state.subAgentEvents, [cacheKey]: [] },
-        subAgentLoading: { ...state.subAgentLoading, [cacheKey]: false },
-      }));
     }
   },
 

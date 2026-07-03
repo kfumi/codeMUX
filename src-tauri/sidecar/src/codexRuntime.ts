@@ -20,6 +20,7 @@ import {
 import { shouldUseCodexChatCompatProxy } from './sessionRuntimeHelpers.js';
 import { proxyManager } from './proxyManager.js';
 import { emit } from './streamEventBatcher.js';
+import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
 import {
   buildCodexInputEntries,
   cleanupTempImageFiles,
@@ -115,9 +116,7 @@ export class CodexSessionRuntime {
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     if (cmd.sessionId) setActiveSessionId(cmd.sessionId);
-    const cwd = cmd.cwd === '.'
-      ? (process.env.USERPROFILE || process.env.HOME || cmd.cwd)
-      : cmd.cwd;
+    const cwd = ensureWorkingDirectory(cmd.cwd);
     const requestedConfig = {
       sessionId: cmd.sessionId,
       agentSessionId: cmd.agentSessionId,

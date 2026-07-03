@@ -75,7 +75,7 @@ const CODEMUX_FORMATTER: Unstable_DirectiveFormatter = {
 const MAX_FILE_RESULTS = 50;
 const EMPTY_EVENTS: AgentMessage[] = [];
 const TRIGGER_RE = /(^|\s)([/@])([^\s]*)(?=\s|$)/g;
-const PARSE_DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w:-]*)(?=\s|$)|(@[^\s]+)/g;
+const PARSE_DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w:-]*)(?=\s|$)|(^|\s)(@(?![A-Za-z][A-Za-z0-9+.-]*:\/\/)[^\s]+)/g;
 
 type FileEntry = { name: string; relativePath: string; isDir: boolean };
 type PendingUserQuestion = {
@@ -155,8 +155,11 @@ export function CodeMuxComposer({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const activeTrigger = useMemo(() => {
     const trigger = detectActiveTrigger(composerText);
-    return trigger && isSameTrigger(trigger, suppressedTrigger) ? null : trigger;
-  }, [composerText, suppressedTrigger]);
+    if (!trigger || isSameTrigger(trigger, suppressedTrigger)) {
+      return null;
+    }
+    return isCompletedTrigger(trigger, commands, fileItemsRef.current) ? null : trigger;
+  }, [commands, composerText, projectPath, suppressedTrigger, treeRoot]);
   const activeChar = activeTrigger?.char ?? manualTrigger;
   const activeQuery = activeTrigger?.query ?? '';
   const slashItemsByCategory = useMemo(() => groupCommands(commands, activeQuery), [commands, activeQuery]);
@@ -181,6 +184,25 @@ export function CodeMuxComposer({
   useEffect(() => {
     setHighlightedIndex(0);
   }, [activeChar, activeQuery, menuItems.length]);
+
+  useEffect(() => {
+    if (!menuVisible) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && composerRootRef.current?.contains(target)) {
+        return;
+      }
+
+      setManualTrigger(null);
+      setSuppressedTrigger((current) => activeTrigger ?? current);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [activeTrigger, menuVisible]);
 
   const hasInput = composerText.trim().length > 0 || attachmentCount > 0;
 
@@ -249,6 +271,7 @@ export function CodeMuxComposer({
         event.preventDefault();
         event.stopPropagation();
         setManualTrigger(null);
+        setSuppressedTrigger((current) => activeTrigger ?? current);
       }
       return;
     }
@@ -275,11 +298,12 @@ export function CodeMuxComposer({
       event.preventDefault();
       event.stopPropagation();
       setManualTrigger(null);
+      setSuppressedTrigger((current) => activeTrigger ?? current);
     }
   };
 
   return (
-    <div className="relative mx-auto flex w-full max-w-3xl flex-col" onKeyDownCapture={handleComposerKeyDown}>
+    <div ref={composerRootRef} className="relative mx-auto flex w-full max-w-3xl flex-col" onKeyDownCapture={handleComposerKeyDown}>
       {menuVisible && (
         <TriggerMenu
           char={activeChar ?? '/'}
@@ -295,7 +319,6 @@ export function CodeMuxComposer({
       <ComposerPrimitive.Root className="relative flex w-full flex-col">
         <ComposerPrimitive.AttachmentDropzone className="relative flex w-full flex-col">
           <div
-            ref={composerRootRef}
             onFocusCapture={() => setIsFocused(true)}
             onBlurCapture={() => {
               requestAnimationFrame(() => {
@@ -778,6 +801,18 @@ function getSelectedTrigger(active: ActiveTrigger | null, item: Unstable_Trigger
   };
 }
 
+function isCompletedTrigger(trigger: ActiveTrigger, commands: SlashCommand[], files: FileEntry[]): boolean {
+  if (!trigger.query) {
+    return false;
+  }
+
+  if (trigger.char === '/') {
+    return commands.some((command) => command.name === trigger.query);
+  }
+
+  return files.some((file) => file.relativePath === trigger.query || file.name === trigger.query);
+}
+
 function replaceActiveTrigger(text: string, active: ActiveTrigger | null, item: Unstable_TriggerItem) {
   const directive = CODEMUX_FORMATTER.serialize(item);
   if (!active) return directive;
@@ -791,8 +826,8 @@ function parseComposerDirectives(text: string): Unstable_DirectiveSegment[] {
   let lastIndex = 0;
 
   for (const match of text.matchAll(PARSE_DIRECTIVE_RE)) {
-    const leading = match[1] ?? '';
-    const raw = match[2] || match[3] || '';
+    const leading = match[1] ?? match[3] ?? '';
+    const raw = match[2] || match[4] || '';
     const start = match.index + leading.length;
     if (start > lastIndex) {
       segments.push({ kind: 'text', text: text.slice(lastIndex, start) });

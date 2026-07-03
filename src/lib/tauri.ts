@@ -217,12 +217,6 @@ export const agentApi = {
   /** Load session events directly from Claude Code's JSONL session file. */
   loadClaudeSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_claude_session_events', { appSessionId }),
-  /** Load Claude Code Agent tool call ID to sub-agent ID mappings. */
-  loadClaudeSubagentIndex: (appSessionId: string): Promise<Record<string, string>> =>
-    invokeLogged('load_claude_subagent_index', { appSessionId }),
-  /** Load sub-agent session events from subagents/agent-{agentId}.jsonl. */
-  loadSubagentSessionEvents: (appSessionId: string, agentId: string): Promise<Record<string, unknown>[]> =>
-    invokeLogged('load_subagent_session_events', { appSessionId, agentId }),
   /** Load session events from Codex's JSONL session file. */
   loadCodexSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_codex_session_events', { appSessionId }),

@@ -221,8 +221,6 @@ pub fn run() {
             agent::commands::delete_claude_session_files,
             agent::commands::delete_codex_session_files,
             agent::commands::load_claude_session_events,
-            agent::commands::load_claude_subagent_index,
-            agent::commands::load_subagent_session_events,
             agent::commands::load_codex_session_events,
             agent::commands::get_agent_session_info,
             agent::commands::start_codex_proxy,

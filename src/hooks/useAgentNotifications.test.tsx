@@ -207,6 +207,29 @@ describe('useAgentNotifications', () => {
     expect(notificationInstances).toHaveLength(countAfterFirst);
   });
 
+  it('does not notify for historical events loaded while the app is focused after losing focus later', async () => {
+    let focused = true;
+    Object.defineProperty(document, 'hasFocus', {
+      configurable: true,
+      value: () => focused,
+    });
+    render(<Harness />);
+
+    useAgentStore.setState({
+      events: { 'session-1': [{ kind: 'done' }] },
+      eventTimestamps: { 'session-1': [1] },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(notificationInstances).toHaveLength(0);
+
+    focused = false;
+    window.dispatchEvent(new Event('blur'));
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(notificationInstances).toHaveLength(0);
+  });
+
   it('allows a later task completion in the same session to notify again', async () => {
     render(<Harness />);
 

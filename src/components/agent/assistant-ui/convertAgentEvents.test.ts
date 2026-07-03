@@ -552,7 +552,7 @@ describe('convertAgentEventsToAssistantMessages', () => {
     expect(messages[1]?.metadata.isFinalAssistantMessage).toBe(true);
   });
 
-  it('preserves agentId from Agent tool_use blocks patched from the subagent index', () => {
+  it('ignores legacy subagent linkage fields on Agent tool_use blocks', () => {
     const events: AgentMessage[] = [
       {
         kind: 'assistant',
@@ -569,6 +569,7 @@ describe('convertAgentEventsToAssistantMessages', () => {
                 name: 'Agent',
                 input: { description: 'Read package.json', prompt: 'Read the file' },
                 agentId: 'a6cae6d569918e2d3',
+                subAgentKey: 'call-agent-indexed',
               },
             ],
           },
@@ -583,46 +584,15 @@ describe('convertAgentEventsToAssistantMessages', () => {
       type: 'tool-call',
       toolCallId: 'call-agent-indexed',
       toolName: 'Agent',
-      agentId: 'a6cae6d569918e2d3',
-      subAgentKey: 'call-agent-indexed',
+      args: { description: 'Read package.json', prompt: 'Read the file' },
+      result: undefined,
+      isError: undefined,
     });
+    expect(messages[0]?.content[0]).not.toHaveProperty('agentId');
+    expect(messages[0]?.content[0]).not.toHaveProperty('subAgentKey');
   });
 
-  it('uses the Agent tool_use id as the live subagent panel key before agentId is known', () => {
-    const events: AgentMessage[] = [
-      {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid: 'assistant-agent-live-key',
-          session_id: 'session-1',
-          message: {
-            role: 'assistant',
-            content: [
-              {
-                type: 'tool_use',
-                id: 'call-agent-live-key',
-                name: 'Agent',
-                input: { description: 'Read package.json', prompt: 'Read the file' },
-              },
-            ],
-          },
-          parent_tool_use_id: null,
-        },
-      },
-    ];
-
-    const messages = convertAgentEventsToAssistantMessages(events);
-
-    expect(messages[0]?.content[0]).toMatchObject({
-      type: 'tool-call',
-      toolCallId: 'call-agent-live-key',
-      toolName: 'Agent',
-      subAgentKey: 'call-agent-live-key',
-    });
-  });
-
-  it('extracts agentId from Agent tool result with array content and hides metadata from the main tool result', () => {
+  it('hides Agent tool result metadata from the main tool result', () => {
     const events: AgentMessage[] = [
       {
         kind: 'assistant',
@@ -679,13 +649,11 @@ describe('convertAgentEventsToAssistantMessages', () => {
         args: { description: 'Read package.json', prompt: 'Read the file' },
         result: '项目名称：**codemux**，版本号：**1.0.0**',
         isError: false,
-        agentId: 'ae25c43324d205377',
-        subAgentKey: 'call-agent-1',
       },
     ]);
   });
 
-  it('extracts agentId from Agent tool result with string content', () => {
+  it('hides Agent tool result metadata from string content', () => {
     const events: AgentMessage[] = [
       {
         kind: 'assistant',
@@ -736,8 +704,8 @@ describe('convertAgentEventsToAssistantMessages', () => {
       toolCallId: 'call-agent-2',
       toolName: 'Agent',
       result: 'result text',
-      agentId: 'abc123def',
     });
+    expect(messages[0]?.content[0]).not.toHaveProperty('agentId');
   });
 
   it('keeps metadata-like content in non-Agent tool results unchanged', () => {
@@ -834,57 +802,4 @@ describe('convertAgentEventsToAssistantMessages', () => {
     });
   });
 
-  it('attaches agentId when tool result arrives before tool call', () => {
-    const events: AgentMessage[] = [
-      {
-        kind: 'tool_result',
-        data: {
-          type: 'user',
-          uuid: 'tool-result-agent-1',
-          session_id: 'session-1',
-          message: {
-            role: 'user',
-            content: [
-              {
-                type: 'tool_result',
-                tool_use_id: 'call-agent-late',
-                content: 'result text\nagentId: abc123def (use SendMessage with to: \'abc123def\' to continue this agent)',
-              },
-            ],
-          },
-          parent_tool_use_id: null,
-        },
-      },
-      {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid: 'assistant-agent-late',
-          session_id: 'session-1',
-          message: {
-            role: 'assistant',
-            content: [
-              {
-                type: 'tool_use',
-                id: 'call-agent-late',
-                name: 'Agent',
-                input: { prompt: 'do something' },
-              },
-            ],
-          },
-          parent_tool_use_id: null,
-        },
-      },
-    ];
-
-    const messages = convertAgentEventsToAssistantMessages(events);
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0]?.content[0]).toMatchObject({
-      type: 'tool-call',
-      toolCallId: 'call-agent-late',
-      toolName: 'Agent',
-      agentId: 'abc123def',
-    });
-  });
 });
