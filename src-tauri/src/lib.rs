@@ -27,11 +27,25 @@ fn should_hide_to_tray(window_label: &str) -> bool {
     window_label == MAIN_WINDOW_LABEL
 }
 
-fn show_main_window<R: tauri::Runtime, M: Manager<R>>(manager: &M) {
-    if let Some(window) = manager.get_webview_window(MAIN_WINDOW_LABEL) {
+fn should_activate_main_window_for_second_instance(window_label: &str) -> bool {
+    window_label == MAIN_WINDOW_LABEL
+}
+
+fn show_window<R: tauri::Runtime, M: Manager<R>>(manager: &M, window_label: &str) {
+    if let Some(window) = manager.get_webview_window(window_label) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+    }
+}
+
+fn show_main_window<R: tauri::Runtime, M: Manager<R>>(manager: &M) {
+    show_window(manager, MAIN_WINDOW_LABEL);
+}
+
+fn activate_main_window_for_second_instance<R: tauri::Runtime, M: Manager<R>>(manager: &M) {
+    if should_activate_main_window_for_second_instance(MAIN_WINDOW_LABEL) {
+        show_main_window(manager);
     }
 }
 
@@ -63,7 +77,16 @@ fn handle_global_window_event<R: tauri::Runtime>(window: &Window<R>, event: &Win
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            activate_main_window_for_second_instance(app);
+        }));
+    }
+
+    builder
         .on_window_event(handle_global_window_event)
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -219,11 +242,17 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::should_hide_to_tray;
+    use super::{should_activate_main_window_for_second_instance, should_hide_to_tray};
 
     #[test]
     fn hides_only_the_main_window_to_tray() {
         assert!(should_hide_to_tray("main"));
         assert!(!should_hide_to_tray("settings"));
+    }
+
+    #[test]
+    fn activates_only_the_main_window_for_second_instance() {
+        assert!(should_activate_main_window_for_second_instance("main"));
+        assert!(!should_activate_main_window_for_second_instance("settings"));
     }
 }
