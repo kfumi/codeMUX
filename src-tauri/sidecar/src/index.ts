@@ -23,6 +23,8 @@ import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
 import { buildClaudePermissionOptions, type AgentPlanMode, type SidecarPermissionConfig } from './agentPermissions.js';
 import { getClaudeApprovalTitle } from './claudeApprovalPrompt.js';
 import {
+  applyPermissionElevation,
+  buildPermissionElevationResponse,
   buildClaudeModeBlockedEvent,
   resolveClaudeToolRuntimeDecision,
   setActivePermissionState,
@@ -571,7 +573,8 @@ export class SessionRuntime {
         }
 
         const toolUseId = opts.toolUseID;
-        const runtimeDecision = resolveClaudeToolRuntimeDecision(toolName, config.sessionId);
+        const filePath = typeof input.file_path === 'string' ? input.file_path : null;
+        const runtimeDecision = resolveClaudeToolRuntimeDecision(toolName, config.sessionId, filePath);
         if (runtimeDecision.behavior === 'allow') {
           return { behavior: 'allow', updatedInput: input, toolUseID: toolUseId };
         }
@@ -597,17 +600,27 @@ export class SessionRuntime {
             header: '审批',
             question: title,
             options: [
-              { label: '允许', description: '执行这一次操作。' },
+              { label: '接受', description: '执行这一次操作。' },
+              {
+                label: '接受并允许编辑',
+                description: '放行本次操作，并将当前会话提升到允许编辑。',
+                value: buildPermissionElevationResponse('claude_code'),
+              },
               { label: '拒绝', description: '阻止这一次操作。' },
             ],
+            allowOther: false,
           }],
         });
-        const userAnswers = await new Promise<string[]>((resolve) => {
+        const userAnswers = await new Promise<unknown[]>((resolve) => {
           pendingToolResponses.set(toolUseId, { resolve: resolve as (v: unknown) => void });
         });
         pendingToolResponses.delete(toolUseId);
-        const answer = String(userAnswers[0] ?? '');
-        if (answer === '允许') {
+        const answerValue = userAnswers[0];
+        if (applyPermissionElevation(answerValue, { sessionId: config.sessionId, agentKind: 'claude_code' })) {
+          return { behavior: 'allow', updatedInput: input, toolUseID: toolUseId };
+        }
+        const answer = String(answerValue ?? '');
+        if (answer === '接受' || answer === '允许') {
           return { behavior: 'allow', updatedInput: input, toolUseID: toolUseId };
         }
         return {

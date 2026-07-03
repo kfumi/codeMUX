@@ -41,7 +41,7 @@ export type AgentMessage =
   | { kind: 'error'; data: SidecarErrorEvent }
   | { kind: 'stream_status'; data: { message: string; is_reconnecting: boolean; mode_blocked?: ModeBlockedDiagnostic | null } }
   | { kind: 'api_retry'; data: { attempt: number; max_retries: number; retry_delay_ms: number; error_status: number; error: string } }
-  | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string }>; multiSelect?: boolean }> } }
+  | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; allowOther?: boolean }> } }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
   | { kind: 'mcp_status'; data: { servers: Record<string, string>; status?: string } }
   | { kind: 'proxy_status'; data: { running: boolean; port: number | null; upstreamBaseUrl: string | null } }
@@ -91,6 +91,8 @@ interface AgentState {
   changedFiles: Record<string, ChangedFile[]>;
   fileOriginals: Record<string, Record<string, FileOriginalSnapshot>>;
   acknowledgedFiles: Record<string, Set<string>>;
+  /** Draft text for each session's composer input (preserved across session switches) */
+  composerDrafts: Record<string, string>;
 
   /** Start a new agent query */
   startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string, inputPayload?: AgentInputPayload) => Promise<void>;
@@ -102,6 +104,12 @@ interface AgentState {
   loadSessionMessages: (sessionId: string) => Promise<void>;
   /** Clear changed files for a session */
   clearChangedFiles: (sessionId: string) => void;
+  /** Save composer draft text for a session */
+  saveComposerDraft: (sessionId: string, text: string) => void;
+  /** Get and clear composer draft text for a session */
+  consumeComposerDraft: (sessionId: string) => string;
+  /** Get composer draft text without clearing it */
+  getComposerDraft: (sessionId: string) => string;
 }
 
 type StreamingBuffer = {
@@ -937,6 +945,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   changedFiles: {},
   fileOriginals: {},
   acknowledgedFiles: {},
+  composerDrafts: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string, inputPayload?: AgentInputPayload) => {
     clearPendingStreaming(sessionId);
@@ -1730,5 +1739,26 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         acknowledgedFiles: { ...state.acknowledgedFiles, [sessionId]: newAcknowledged },
       };
     });
+  },
+
+  saveComposerDraft: (sessionId: string, text: string) => {
+    set((s) => ({
+      composerDrafts: { ...s.composerDrafts, [sessionId]: text },
+    }));
+  },
+
+  consumeComposerDraft: (sessionId: string) => {
+    const draft = get().composerDrafts[sessionId] ?? '';
+    if (draft) {
+      set((s) => {
+        const { [sessionId]: _, ...rest } = s.composerDrafts;
+        return { composerDrafts: rest };
+      });
+    }
+    return draft;
+  },
+
+  getComposerDraft: (sessionId: string) => {
+    return get().composerDrafts[sessionId] ?? '';
   },
 }));

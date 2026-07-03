@@ -7,6 +7,12 @@ export type RuntimeToolDecision = {
   reasonCode: string | null;
 };
 
+export type PermissionElevationResponse = {
+  action: 'allow_and_elevate_permissions';
+  permissionConfig: SidecarPermissionConfig;
+  planMode: AgentPlanMode;
+};
+
 export type ActivePermissionState = {
   sessionId?: string;
   agentKind?: string;
@@ -80,9 +86,57 @@ export function resolveActiveCodexPlanMode(sessionId?: string | null): AgentPlan
   return state.effectiveMode === 'plan' ? 'on' : 'off';
 }
 
+export function buildPermissionElevationResponse(agentKind?: string | null): PermissionElevationResponse | null {
+  if (agentKind === 'codex') {
+    return {
+      action: 'allow_and_elevate_permissions',
+      permissionConfig: {
+        kind: 'codex',
+        sandboxMode: 'danger-full-access',
+        approvalPolicy: 'never',
+        networkAccessEnabled: true,
+      },
+      planMode: 'off',
+    };
+  }
+
+  if (agentKind === 'claude_code') {
+    return {
+      action: 'allow_and_elevate_permissions',
+      permissionConfig: { kind: 'claude_code', permissionMode: 'acceptEdits' },
+      planMode: 'off',
+    };
+  }
+
+  return null;
+}
+
+export function isPermissionElevationResponse(value: unknown): value is PermissionElevationResponse {
+  if (!value || typeof value !== 'object') return false;
+  const raw = value as Record<string, unknown>;
+  return raw.action === 'allow_and_elevate_permissions'
+    && (raw.planMode === 'off' || raw.planMode === 'on')
+    && isSidecarPermissionConfig(raw.permissionConfig);
+}
+
+export function applyPermissionElevation(
+  value: unknown,
+  input: { sessionId?: string; agentKind?: string },
+): boolean {
+  if (!isPermissionElevationResponse(value)) return false;
+  setActivePermissionState({
+    sessionId: input.sessionId,
+    agentKind: input.agentKind ?? value.permissionConfig.kind,
+    permissionConfig: value.permissionConfig,
+    planMode: value.planMode,
+  });
+  return true;
+}
+
 export function resolveClaudeToolRuntimeDecision(
   toolName: string,
   sessionId?: string | null,
+  filePath?: string | null,
 ): RuntimeToolDecision {
   const state = getActivePermissionState({ sessionId, agentKind: 'claude_code' });
   if (!state) {
@@ -90,6 +144,15 @@ export function resolveClaudeToolRuntimeDecision(
   }
 
   if (state.effectiveMode === 'plan' && isClaudeMutatingTool(toolName)) {
+    // Allow plan files to be written in plan mode - Claude Code manages its own plan files
+    if (filePath && isClaudePlanFile(filePath)) {
+      return {
+        behavior: 'allow',
+        effectiveMode: 'plan',
+        reasonCode: null,
+      };
+    }
+
     return {
       behavior: 'deny',
       effectiveMode: 'plan',
@@ -98,6 +161,10 @@ export function resolveClaudeToolRuntimeDecision(
   }
 
   if (isClaudeFullAccess(state) && toolName !== 'AskUserQuestion') {
+    return { behavior: 'allow', effectiveMode: 'code', reasonCode: null };
+  }
+
+  if (isClaudeAutoEditAccess(state) && isClaudeEditTool(toolName)) {
     return { behavior: 'allow', effectiveMode: 'code', reasonCode: null };
   }
 
@@ -150,6 +217,28 @@ function isClaudeFullAccess(state: ActivePermissionState): boolean {
     && state.permissionConfig.permissionMode === 'bypassPermissions';
 }
 
+function isClaudeAutoEditAccess(state: ActivePermissionState): boolean {
+  return state.planMode !== 'on'
+    && state.permissionConfig?.kind === 'claude_code'
+    && (state.permissionConfig.permissionMode === 'acceptEdits'
+      || state.permissionConfig.permissionMode === 'auto');
+}
+
+function isClaudeEditTool(toolName: string): boolean {
+  const normalized = toolName.trim().toLowerCase().replace(/[-_\s]/g, '');
+  return normalized === 'write'
+    || normalized === 'edit'
+    || normalized === 'multiedit'
+    || normalized === 'notebookedit'
+    || normalized === 'createfile'
+    || normalized === 'createdirectory'
+    || normalized === 'delete'
+    || normalized === 'deletefile'
+    || normalized === 'remove'
+    || normalized === 'removefile'
+    || normalized === 'rewrite';
+}
+
 function isClaudeMutatingTool(toolName: string): boolean {
   const normalized = toolName.trim().toLowerCase().replace(/[-_\s]/g, '');
   return normalized === 'write'
@@ -169,4 +258,18 @@ function isClaudeMutatingTool(toolName: string): boolean {
     || normalized.includes('shell')
     || normalized.includes('terminal')
     || normalized === 'run';
+}
+
+function isClaudePlanFile(filePath: string): boolean {
+  // Normalize path separators for cross-platform compatibility
+  const normalizedPath = filePath.replace(/\\/g, '/');
+  // Check if the file is in .claude/plans/ directory
+  // This allows Claude Code to create/modify its own plan files in plan mode
+  return normalizedPath.includes('/.claude/plans/') || normalizedPath.startsWith('.claude/plans/');
+}
+
+function isSidecarPermissionConfig(value: unknown): value is SidecarPermissionConfig {
+  if (!value || typeof value !== 'object') return false;
+  const raw = value as Record<string, unknown>;
+  return raw.kind === 'claude_code' || raw.kind === 'codex';
 }

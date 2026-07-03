@@ -206,6 +206,40 @@ export function CodeMuxComposer({
 
   const hasInput = composerText.trim().length > 0 || attachmentCount > 0;
 
+  // Save composer draft on text change (debounced)
+  const saveComposerDraft = useAgentStore((s) => s.saveComposerDraft);
+  const draftTextRef = useRef(composerText);
+  draftTextRef.current = composerText;
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveComposerDraft(sessionId, composerText.trim());
+    }, 500);
+    return () => {
+      clearTimeout(timer);
+      // Save immediately on unmount
+      saveComposerDraft(sessionId, draftTextRef.current.trim());
+    };
+  }, [composerText, sessionId, saveComposerDraft]);
+
+  // Restore draft on mount
+  const getComposerDraft = useAgentStore((s) => s.getComposerDraft);
+  const consumeComposerDraft = useAgentStore((s) => s.consumeComposerDraft);
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const draft = getComposerDraft(sessionId);
+    if (draft) {
+      // Delay to ensure Lexical editor is ready
+      setTimeout(() => {
+        aui.composer().setText(draft);
+        // Clear draft after successful restore
+        consumeComposerDraft(sessionId);
+      }, 150);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     setDismissedQuestionIds(new Set());
   }, [sessionId]);

@@ -5,8 +5,8 @@ import {
 } from "@assistant-ui/react-streamdown";
 import { code } from "@streamdown/code";
 import { memo } from "react";
-import { open } from "@tauri-apps/plugin-shell";
 import { cn } from "@/lib/utils";
+import { CODEMUX_MARKDOWN_REHYPE_PLUGINS, CodeMuxMarkdownLink } from "./markdown-link";
 
 const MarkdownTextImpl = () => {
   return (
@@ -15,6 +15,7 @@ const MarkdownTextImpl = () => {
       shikiTheme={["github-light", "github-dark"]}
       className="aui-md"
       components={defaultComponents as never}
+      rehypePlugins={CODEMUX_MARKDOWN_REHYPE_PLUGINS}
       controls={{ code: { copy: true, download: false }, table: false } as never}
       linkSafety={{ enabled: false }}
     />
@@ -78,20 +79,17 @@ const defaultComponents = {
       {...props}
     />
   ),
-  a: ({ className, href, children }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a
+  a: ({ className, href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <CodeMuxMarkdownLink
+      {...props}
+      href={href}
       className={cn(
         "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2 cursor-pointer",
         className,
       )}
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (href) open(href);
-      }}
     >
       {children}
-    </a>
+    </CodeMuxMarkdownLink>
   ),
   table: ({ className, ...props }: React.TableHTMLAttributes<HTMLTableElement>) => (
     <div className="my-4 overflow-x-auto rounded-md border border-border bg-background">

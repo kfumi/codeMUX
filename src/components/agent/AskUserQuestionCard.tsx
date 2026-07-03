@@ -3,16 +3,19 @@ import { Check, ChevronDown, ChevronRight } from 'lucide-react';
 import { agentApi } from '../../lib/tauri';
 import { createLogger, serializeError } from '../../lib/logger';
 import { useAgentStore } from '../../stores/agentStore';
+import { useSessionStore } from '../../stores/sessionStore';
 import { cn } from '../../lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import type { AgentPermissionConfig, AgentPlanMode } from '../../lib/agentPermissions';
 
 const logger = createLogger('AskUserQuestionCard');
 
 export interface AskUserQuestion {
   question: string;
   header?: string;
-  options: Array<{ label: string; description?: string }>;
+  options: Array<{ label: string; description?: string; value?: unknown }>;
   multiSelect?: boolean;
+  allowOther?: boolean;
 }
 
 interface AskUserQuestionCardProps {
@@ -47,6 +50,34 @@ function parseResultAnswers(resultContent: string, questions: AskUserQuestion[])
   return answers.some((answer) => answer) ? answers : [];
 }
 
+function getSelectedOptionValue(question: AskUserQuestion, optionIndex: number): unknown {
+  const option = question.options[optionIndex];
+  return option.value ?? option.label;
+}
+
+function getSelectedOptionLabel(question: AskUserQuestion, optionIndex: number): string {
+  return question.options[optionIndex].label;
+}
+
+function findPermissionElevationAnswer(answers: unknown[]): {
+  permissionConfig: AgentPermissionConfig;
+  planMode: AgentPlanMode;
+} | null {
+  for (const answer of answers) {
+    if (!answer || typeof answer !== 'object') continue;
+    const raw = answer as Record<string, unknown>;
+    if (raw.action !== 'allow_and_elevate_permissions') continue;
+    if (!raw.permissionConfig || typeof raw.permissionConfig !== 'object') continue;
+    const planMode = raw.planMode === 'on' ? 'on' : 'off';
+    return {
+      permissionConfig: raw.permissionConfig as AgentPermissionConfig,
+      planMode,
+    };
+  }
+
+  return null;
+}
+
 export function AskUserQuestionCard({
   sessionId,
   toolUseId,
@@ -74,6 +105,7 @@ export function AskUserQuestionCard({
 
   // Subscribe to forceStopped so interrupted sessions render as non-interactive cancelled cards.
   const forceStopped = useAgentStore((s) => s.forceStopped[sessionId] ?? false);
+  const updateSessionPermissions = useSessionStore((s) => s.updateSessionPermissions);
   useEffect(() => {
     if (forceStopped && !submitted && !propSubmitted) {
       setSubmittedAnswers(questions.map(() => '已取消'));
@@ -130,15 +162,36 @@ export function AskUserQuestionCard({
     const answers = questions.map((q, i) => {
       const selected = Array.from(selections[i]).map((idx) => {
         if (idx === OTHER_IDX) return otherTexts[i]?.trim() || '其他';
-        return q.options[idx].label;
+        return getSelectedOptionValue(q, idx);
       });
 
       return q.multiSelect ? selected : selected[0];
     });
 
+    const displayAnswers = questions.map((q, i) => {
+      const selected = Array.from(selections[i]).map((idx) => {
+        if (idx === OTHER_IDX) return otherTexts[i]?.trim() || '其他';
+        return getSelectedOptionLabel(q, idx);
+      });
+
+      return q.multiSelect ? selected.join(', ') : selected[0];
+    });
+
     try {
+      const permissionElevation = findPermissionElevationAnswer(answers);
+      if (permissionElevation) {
+        await Promise.resolve(
+          updateSessionPermissions(
+            sessionId,
+            permissionElevation.permissionConfig,
+            permissionElevation.planMode,
+          ),
+        ).catch((err) => {
+          logger.warn('Failed to persist elevated permissions before tool response', { sessionId }, serializeError(err));
+        });
+      }
       await agentApi.sendToolResponse(sessionId, toolUseId, answers);
-      setSubmittedAnswers(answers.map((answer) => Array.isArray(answer) ? answer.join(', ') : answer));
+      setSubmittedAnswers(displayAnswers);
       setSubmitted(true);
       onSubmitted?.();
     } catch (err) {
@@ -213,29 +266,31 @@ export function AskUserQuestionCard({
           );
         })}
 
-        <button
-          onClick={() => toggleOption(qIdx, OTHER_IDX)}
-          className={cn(
-            'w-full cursor-pointer border px-3 py-2 text-left text-sm transition-colors',
-            isComposer ? 'rounded-none border-x-0 border-b-0 border-t border-border/12' : 'rounded-md',
-            isOtherSelected(qIdx)
-              ? isComposer ? 'bg-muted/62 text-foreground' : 'border-primary/40 bg-primary/10 text-foreground'
-              : isComposer ? 'border-transparent text-muted-foreground hover:bg-muted/42 hover:text-foreground' : 'border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/50',
-          )}
-        >
-          <div className="flex items-center gap-2">
-            <span
-              className={`flex h-4 w-4 shrink-0 items-center justify-center border ${
-                q.multiSelect ? 'rounded-sm' : 'rounded-full'
-              } ${
-                isOtherSelected(qIdx) ? 'border-primary bg-primary' : 'border-muted-foreground/30'
-              }`}
-            >
-              {isOtherSelected(qIdx) && <Check className="h-3 w-3 text-primary-foreground" />}
-            </span>
-            <span className="font-medium">其他</span>
-          </div>
-        </button>
+        {q.allowOther !== false && (
+          <button
+            onClick={() => toggleOption(qIdx, OTHER_IDX)}
+            className={cn(
+              'w-full cursor-pointer border px-3 py-2 text-left text-sm transition-colors',
+              isComposer ? 'rounded-none border-x-0 border-b-0 border-t border-border/12' : 'rounded-md',
+              isOtherSelected(qIdx)
+                ? isComposer ? 'bg-muted/62 text-foreground' : 'border-primary/40 bg-primary/10 text-foreground'
+                : isComposer ? 'border-transparent text-muted-foreground hover:bg-muted/42 hover:text-foreground' : 'border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/50',
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className={`flex h-4 w-4 shrink-0 items-center justify-center border ${
+                  q.multiSelect ? 'rounded-sm' : 'rounded-full'
+                } ${
+                  isOtherSelected(qIdx) ? 'border-primary bg-primary' : 'border-muted-foreground/30'
+                }`}
+              >
+                {isOtherSelected(qIdx) && <Check className="h-3 w-3 text-primary-foreground" />}
+              </span>
+              <span className="font-medium">其他</span>
+            </div>
+          </button>
+        )}
 
         {isOtherSelected(qIdx) && (
           <div className="pl-3">

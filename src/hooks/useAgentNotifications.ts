@@ -133,12 +133,18 @@ function buildDispatchKey(
   return candidate.key;
 }
 
+function isTerminalNotification(candidate: { kind: string }): boolean {
+  return candidate.kind === 'task_completed' || candidate.kind === 'task_failed';
+}
+
 export function useAgentNotifications() {
   const events = useAgentStore((state) => state.events);
+  const eventTimestamps = useAgentStore((state) => state.eventTimestamps);
   const sessions = useSessionStore((state) => state.sessions);
   const notificationSettings = useSettingsStore((state) => state.config?.notifications);
   const isAppInactive = useAppInactive();
   const seenNotificationKeysRef = useRef<Set<string>>(new Set());
+  const hookStartedAtRef = useRef(Date.now());
 
   const sessionTitles = useMemo(
     () => new Map(sessions.map((session) => [session.id, session.title])),
@@ -178,16 +184,24 @@ export function useAgentNotifications() {
 
         seenNotificationKeysRef.current.add(dispatchKey);
 
+        const isTerminal = isTerminalNotification(candidate);
+        const eventTimestamp = eventTimestamps[sessionId]?.[i] ?? 0;
+        const isLiveEvent = eventTimestamp >= hookStartedAtRef.current;
+
         if (shouldSendNotification) {
           void sendClickableNotification(candidate);
 
-          if (settings.sound_enabled) {
+          if (settings.sound_enabled && !isTerminal) {
             playNotificationSound(settings.sound);
           }
+        }
+
+        if (settings.sound_enabled && isTerminal && isLiveEvent) {
+          playNotificationSound(settings.sound);
         }
 
         break; // Only notify once per session
       }
     }
-  }, [events, isAppInactive, notificationSettings, sessionTitles]);
+  }, [eventTimestamps, events, isAppInactive, notificationSettings, sessionTitles]);
 }

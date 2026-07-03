@@ -8,11 +8,12 @@ import { useSettingsStore } from '../stores/settingsStore';
 import type { AppConfig } from '../types/provider';
 import { useAgentNotifications } from './useAgentNotifications';
 
-const { sendNotificationMock, requestPermissionMock, isPermissionGrantedMock, showMainWindowMock } = vi.hoisted(() => ({
+const { sendNotificationMock, requestPermissionMock, isPermissionGrantedMock, showMainWindowMock, audioPlayMock } = vi.hoisted(() => ({
   sendNotificationMock: vi.fn(),
   requestPermissionMock: vi.fn(async () => 'granted'),
   isPermissionGrantedMock: vi.fn(async () => true),
   showMainWindowMock: vi.fn(async () => {}),
+  audioPlayMock: vi.fn(async () => {}),
 }));
 
 const notificationInstances: Array<{ title: string; options?: NotificationOptions; onclick: (() => void) | null }> = [];
@@ -78,6 +79,10 @@ describe('useAgentNotifications', () => {
       constructor(public title: string, public options?: NotificationOptions) {
         notificationInstances.push(this);
       }
+    });
+    vi.stubGlobal('Audio', class {
+      volume = 0;
+      play = audioPlayMock;
     });
     useSettingsStore.setState({ config: structuredClone(baseConfig), isLoading: false, error: null });
     useSessionStore.setState({
@@ -213,6 +218,18 @@ describe('useAgentNotifications', () => {
       configurable: true,
       value: () => focused,
     });
+    useSettingsStore.setState({
+      config: {
+        ...structuredClone(baseConfig),
+        notifications: {
+          system_enabled: true,
+          sound_enabled: true,
+          sound: 'ding',
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
     render(<Harness />);
 
     useAgentStore.setState({
@@ -222,11 +239,48 @@ describe('useAgentNotifications', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(notificationInstances).toHaveLength(0);
+    expect(audioPlayMock).not.toHaveBeenCalled();
 
     focused = false;
     window.dispatchEvent(new Event('blur'));
 
     await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(notificationInstances).toHaveLength(0);
+    expect(audioPlayMock).not.toHaveBeenCalled();
+  });
+
+  it('plays the completion sound for a live task completion while focused', async () => {
+    Object.defineProperty(document, 'hasFocus', {
+      configurable: true,
+      value: () => true,
+    });
+    useSettingsStore.setState({
+      config: {
+        ...structuredClone(baseConfig),
+        notifications: {
+          system_enabled: false,
+          sound_enabled: true,
+          sound: 'ding',
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<Harness />);
+
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          { kind: 'user', data: { content: '开始任务' } },
+          { kind: 'done' },
+        ],
+      },
+      eventTimestamps: { 'session-1': [Date.now(), Date.now()] },
+    });
+
+    await waitFor(() => {
+      expect(audioPlayMock).toHaveBeenCalledTimes(1);
+    });
     expect(notificationInstances).toHaveLength(0);
   });
 

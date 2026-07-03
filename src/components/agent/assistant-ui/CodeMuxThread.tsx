@@ -11,6 +11,7 @@ import { Streamdown } from 'streamdown';
 
 import { MessageFooter, type MessageFooterStats } from '@/components/assistant-ui/message-footer';
 import { ToolGroup } from '@/components/assistant-ui/tool-group';
+import { CODEMUX_MARKDOWN_REHYPE_PLUGINS, CodeMuxMarkdownLink } from '@/components/assistant-ui/markdown-link';
 import { Button } from '@/components/ui/button';
 import {
   ReasoningContent,
@@ -64,6 +65,9 @@ const GROUP_BY_PART = groupPartByType({
   reasoning: ['group-thinking'],
   'tool-call': ['group-tool-call'],
 });
+const STREAMING_MARKDOWN_COMPONENTS = {
+  a: CodeMuxMarkdownLink,
+};
 
 export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProps) {
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
@@ -844,7 +848,13 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
             data-streaming-text="markdown"
             className="relative text-sm leading-6 text-foreground"
           >
-            <Streamdown mode="streaming" className="aui-md">
+            <Streamdown
+              mode="streaming"
+              className="aui-md"
+              components={STREAMING_MARKDOWN_COMPONENTS}
+              rehypePlugins={CODEMUX_MARKDOWN_REHYPE_PLUGINS}
+              linkSafety={{ enabled: false }}
+            >
               {visibleText}
             </Streamdown>
             <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse rounded-full bg-foreground/60 align-text-bottom" />
