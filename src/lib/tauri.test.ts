@@ -78,6 +78,43 @@ describe('gitApi', () => {
       filePath: 'D:/project/app/src/main.ts',
     });
   });
+
+  it('maps branch and commit git commands with command argument casing', async () => {
+    invokeMock.mockResolvedValue(undefined);
+    const { gitApi } = await import('./tauri');
+
+    await gitApi.getRepositoryState('D:/project/app');
+    await gitApi.createBranch('D:/project/app', 'feature/git-panel', true);
+    await gitApi.checkoutBranch('D:/project/app', 'feature/git-panel');
+    await gitApi.revertStatusChanges('D:/project/app', 'unstaged', 'D:/project/app/src/App.tsx');
+    await gitApi.commitChanges('D:/project/app', 'feat: add git panel');
+    await gitApi.generateCommitMessage('D:/project/app');
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'get_git_repository_state', {
+      projectPath: 'D:/project/app',
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'create_git_branch', {
+      projectPath: 'D:/project/app',
+      branchName: 'feature/git-panel',
+      checkout: true,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, 'checkout_git_branch', {
+      projectPath: 'D:/project/app',
+      branchName: 'feature/git-panel',
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(4, 'revert_git_status_changes', {
+      projectPath: 'D:/project/app',
+      area: 'unstaged',
+      filePath: 'D:/project/app/src/App.tsx',
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(5, 'commit_git_changes', {
+      projectPath: 'D:/project/app',
+      message: 'feat: add git panel',
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(6, 'generate_git_commit_message', {
+      projectPath: 'D:/project/app',
+    });
+  });
 });
 
 describe('terminalApi', () => {
