@@ -36,6 +36,22 @@ pub struct GitStatusChange {
     pub deletions: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranch {
+    pub name: String,
+    pub current: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRepositoryState {
+    pub current_branch: Option<String>,
+    pub branches: Vec<GitBranch>,
+    pub detached: bool,
+    pub has_uncommitted_changes: bool,
+}
+
 fn run_git(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     run_git_with_env(root, args, None)
 }
@@ -178,6 +194,20 @@ fn git_head_tree(root: &Path) -> Result<String, String> {
         Ok(output) => Ok(String::from_utf8_lossy(&output).trim().to_string()),
         Err(_) => Ok(EMPTY_TREE_HASH.to_string()),
     }
+}
+
+fn has_uncommitted_changes(root: &Path) -> Result<bool, String> {
+    let output = run_git(root, &["status", "--porcelain=v1"])?;
+    Ok(!output.is_empty())
+}
+
+fn validate_branch_name(root: &Path, branch_name: &str) -> Result<String, String> {
+    let trimmed = branch_name.trim();
+    if trimmed.is_empty() {
+        return Err("分支名不能为空".to_string());
+    }
+    run_git(root, &["check-ref-format", "--branch", trimmed])?;
+    Ok(trimmed.to_string())
 }
 
 fn status_from_name_status(status_char: &str) -> Option<&'static str> {
@@ -393,6 +423,75 @@ pub fn unstage_git_status_changes_for_paths(
     }
 }
 
+pub fn read_git_repository_state(project_path: &Path) -> Result<GitRepositoryState, String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+
+    let current_output = run_git(&root, &["branch", "--show-current"])?;
+    let current_branch_text = String::from_utf8_lossy(&current_output).trim().to_string();
+    let current_branch = if current_branch_text.is_empty() {
+        None
+    } else {
+        Some(current_branch_text)
+    };
+
+    let branch_output = run_git(&root, &["branch", "--format=%(refname:short)"])?;
+    let branch_text = String::from_utf8_lossy(&branch_output);
+    let branches = branch_text
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| GitBranch {
+            name: name.to_string(),
+            current: current_branch.as_deref() == Some(name),
+        })
+        .collect();
+
+    let detached =
+        current_branch.is_none() && run_git(&root, &["rev-parse", "--short", "HEAD"]).is_ok();
+
+    Ok(GitRepositoryState {
+        current_branch,
+        branches,
+        detached,
+        has_uncommitted_changes: has_uncommitted_changes(&root)?,
+    })
+}
+
+pub fn create_git_branch_in_project(
+    project_path: &Path,
+    branch_name: &str,
+    checkout: bool,
+) -> Result<(), String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+    let branch_name = validate_branch_name(&root, branch_name)?;
+    run_git(&root, &["branch", &branch_name])?;
+    if checkout {
+        run_git(&root, &["checkout", &branch_name])?;
+    }
+    Ok(())
+}
+
+pub fn checkout_git_branch_in_project(
+    project_path: &Path,
+    branch_name: &str,
+) -> Result<(), String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+    let branch_name = validate_branch_name(&root, branch_name)?;
+    if has_uncommitted_changes(&root)? {
+        return Err("请先提交或还原当前修改，再切换分支".to_string());
+    }
+    run_git(&root, &["checkout", &branch_name]).map(|_| ())
+}
+
 pub fn read_git_changed_files_for_tree(
     project_path: &Path,
     baseline_tree: &str,
@@ -539,10 +638,30 @@ pub fn unstage_git_status_changes(
     unstage_git_status_changes_for_paths(Path::new(&project_path), file_path.as_deref())
 }
 
+#[tauri::command]
+pub fn get_git_repository_state(project_path: String) -> Result<GitRepositoryState, String> {
+    read_git_repository_state(Path::new(&project_path))
+}
+
+#[tauri::command]
+pub fn create_git_branch(
+    project_path: String,
+    branch_name: String,
+    checkout: bool,
+) -> Result<(), String> {
+    create_git_branch_in_project(Path::new(&project_path), &branch_name, checkout)
+}
+
+#[tauri::command]
+pub fn checkout_git_branch(project_path: String, branch_name: String) -> Result<(), String> {
+    checkout_git_branch_in_project(Path::new(&project_path), &branch_name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_text_bytes, read_git_changed_files_for_tree, read_git_status_change_detail,
+        checkout_git_branch_in_project, create_git_branch_in_project, decode_text_bytes,
+        read_git_changed_files_for_tree, read_git_repository_state, read_git_status_change_detail,
         read_git_status_changes, stage_git_status_changes_for_paths,
         unstage_git_status_changes_for_paths, GitStatusArea,
     };
@@ -564,11 +683,120 @@ mod tests {
         dir
     }
 
+    fn configure_git_user(project: &std::path::Path) {
+        Command::new("git")
+            .arg("-C")
+            .arg(project)
+            .args(["config", "user.email", "codemux@example.test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(project)
+            .args(["config", "user.name", "codeMUX"])
+            .output()
+            .unwrap();
+    }
+
+    fn init_project_with_commit(project: &std::path::Path) {
+        Command::new("git")
+            .arg("-C")
+            .arg(project)
+            .arg("init")
+            .output()
+            .unwrap();
+        configure_git_user(project);
+        fs::write(project.join("README.md"), "hello\n").unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(project)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(project)
+            .args(["commit", "-m", "initial"])
+            .output()
+            .unwrap();
+    }
+
     #[test]
     fn git_text_decoder_falls_back_to_gbk() {
         let gbk_bytes = [0xd6, 0xd0, 0xce, 0xc4, b'\r', b'\n'];
 
         assert_eq!(decode_text_bytes(&gbk_bytes).as_deref(), Some("中文\n"));
+    }
+
+    #[test]
+    fn git_repository_state_tracks_current_branch_and_local_branches() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["branch", "feature/test"])
+            .output()
+            .unwrap();
+
+        let state = read_git_repository_state(&project).unwrap();
+
+        assert!(
+            state.current_branch.as_deref() == Some("master")
+                || state.current_branch.as_deref() == Some("main")
+        );
+        assert!(state
+            .branches
+            .iter()
+            .any(|branch| branch.name == "feature/test"));
+        assert!(!state.detached);
+        assert!(!state.has_uncommitted_changes);
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_branch_create_and_checkout_changes_current_branch() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+
+        create_git_branch_in_project(&project, "feature/git-panel", true).unwrap();
+
+        let state = read_git_repository_state(&project).unwrap();
+        assert_eq!(state.current_branch.as_deref(), Some("feature/git-panel"));
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_checkout_branch_rejects_dirty_worktree() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["branch", "feature/clean"])
+            .output()
+            .unwrap();
+        fs::write(project.join("README.md"), "dirty\n").unwrap();
+
+        let err = checkout_git_branch_in_project(&project, "feature/clean").unwrap_err();
+
+        assert!(err.contains("请先提交或还原当前修改"));
+
+        let _ = fs::remove_dir_all(project);
     }
 
     #[test]
