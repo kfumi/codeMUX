@@ -1,3 +1,5 @@
+use crate::config::types::{AppConfig, Provider};
+use crate::AppState;
 use encoding_rs::GBK;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -5,6 +7,7 @@ use std::collections::HashMap;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tauri::State;
 
 /// Empty tree hash — the tree object git uses for a repo with zero commits.
 const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf899d69f3612f4bf";
@@ -592,6 +595,7 @@ pub fn build_commit_message_prompt(stat: &str, diff: &str, truncated: bool) -> S
     )
 }
 
+#[allow(dead_code)]
 fn suggest_commit_message_from_prompt(prompt: &str) -> String {
     let lower = prompt.to_lowercase();
     if lower.contains(".md") || lower.contains("docs/") {
@@ -605,9 +609,7 @@ fn suggest_commit_message_from_prompt(prompt: &str) -> String {
     }
 }
 
-pub fn generate_git_commit_message_in_project(
-    project_path: &Path,
-) -> Result<GitCommitMessageSuggestion, String> {
+pub fn build_commit_message_prompt_in_project(project_path: &Path) -> Result<String, String> {
     let root = project_path
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
@@ -632,11 +634,219 @@ pub fn generate_git_commit_message_in_project(
     } else {
         raw_diff
     };
-    let prompt = build_commit_message_prompt(&stat, &diff, truncated);
+    Ok(build_commit_message_prompt(&stat, &diff, truncated))
+}
 
-    Ok(GitCommitMessageSuggestion {
-        message: suggest_commit_message_from_prompt(&prompt),
-    })
+fn select_commit_message_provider(config: &AppConfig) -> Result<Provider, String> {
+    let provider = config
+        .active_provider_id
+        .as_deref()
+        .and_then(|id| config.providers.iter().find(|provider| provider.id == id))
+        .or_else(|| config.providers.first())
+        .cloned()
+        .ok_or_else(|| "请先配置 AI 供应商".to_string())?;
+
+    if provider.api_key.trim().is_empty() {
+        return Err("请先配置 AI 供应商 API Key".to_string());
+    }
+    if provider.default_model.trim().is_empty() {
+        return Err("请先配置 AI 供应商默认模型".to_string());
+    }
+    if provider.anthropic_base_url.trim().is_empty() && provider.openai_base_url.trim().is_empty() {
+        return Err("请先配置 AI 供应商 Base URL".to_string());
+    }
+
+    Ok(provider)
+}
+
+fn clean_commit_message(raw: &str) -> Result<String, String> {
+    let without_fence = raw
+        .trim()
+        .trim_start_matches("```")
+        .trim_start_matches("git")
+        .trim_start_matches("text")
+        .trim_end_matches("```")
+        .trim();
+    let first_line = without_fence
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("")
+        .trim_start_matches("- ")
+        .trim_matches(|ch| matches!(ch, '"' | '\'' | '`'))
+        .trim()
+        .to_string();
+
+    if first_line.is_empty() {
+        Err("AI 未返回可用的提交信息".to_string())
+    } else {
+        Ok(first_line.chars().take(120).collect())
+    }
+}
+
+fn parse_anthropic_commit_message_response(body: &serde_json::Value) -> Result<String, String> {
+    let text = body
+        .get("content")
+        .and_then(|content| content.as_array())
+        .and_then(|content| {
+            content
+                .iter()
+                .filter_map(|item| item.get("text").and_then(|text| text.as_str()))
+                .find(|text| !text.trim().is_empty())
+        })
+        .ok_or_else(|| "AI 响应缺少提交信息".to_string())?;
+
+    clean_commit_message(text)
+}
+
+fn parse_openai_commit_message_response(body: &serde_json::Value) -> Result<String, String> {
+    let text = body
+        .get("choices")
+        .and_then(|choices| choices.as_array())
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(|content| content.as_str())
+        .ok_or_else(|| "AI 响应缺少提交信息".to_string())?;
+
+    clean_commit_message(text)
+}
+
+fn http_status_error(status: reqwest::StatusCode, body: &str) -> String {
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        "认证失败，请检查 API Key".to_string()
+    } else if body.trim().is_empty() {
+        format!("AI 请求失败: HTTP {}", status.as_u16())
+    } else {
+        format!("AI 请求失败: HTTP {} {}", status.as_u16(), body.trim())
+    }
+}
+
+async fn generate_with_anthropic(
+    client: &reqwest::Client,
+    provider: &Provider,
+    prompt: &str,
+) -> Result<String, String> {
+    let url = format!(
+        "{}/v1/messages",
+        provider.anthropic_base_url.trim_end_matches('/')
+    );
+    let body = serde_json::json!({
+        "model": provider.default_model,
+        "max_tokens": 80,
+        "messages": [{"role": "user", "content": prompt}]
+    });
+
+    let resp = client
+        .post(url)
+        .header("x-api-key", provider.api_key.trim())
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "AI 请求超时".to_string()
+            } else {
+                format!("AI 连接失败: {}", e)
+            }
+        })?;
+
+    let status = resp.status();
+    let body_text = resp
+        .text()
+        .await
+        .map_err(|e| format!("AI 响应读取失败: {}", e))?;
+    if !status.is_success() {
+        return Err(http_status_error(status, &body_text));
+    }
+
+    let body: serde_json::Value =
+        serde_json::from_str(&body_text).map_err(|_| "AI 响应不是有效 JSON".to_string())?;
+    parse_anthropic_commit_message_response(&body)
+}
+
+async fn generate_with_openai(
+    client: &reqwest::Client,
+    provider: &Provider,
+    prompt: &str,
+) -> Result<String, String> {
+    let url = format!(
+        "{}/v1/chat/completions",
+        provider.openai_base_url.trim_end_matches('/')
+    );
+    let body = serde_json::json!({
+        "model": provider.default_model,
+        "max_tokens": 80,
+        "messages": [{"role": "user", "content": prompt}]
+    });
+
+    let resp = client
+        .post(url)
+        .header(
+            "Authorization",
+            format!("Bearer {}", provider.api_key.trim()),
+        )
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "AI 请求超时".to_string()
+            } else {
+                format!("AI 连接失败: {}", e)
+            }
+        })?;
+
+    let status = resp.status();
+    let body_text = resp
+        .text()
+        .await
+        .map_err(|e| format!("AI 响应读取失败: {}", e))?;
+    if !status.is_success() {
+        return Err(http_status_error(status, &body_text));
+    }
+
+    let body: serde_json::Value =
+        serde_json::from_str(&body_text).map_err(|_| "AI 响应不是有效 JSON".to_string())?;
+    parse_openai_commit_message_response(&body)
+}
+
+async fn request_commit_message(provider: &Provider, prompt: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    if !provider.anthropic_base_url.trim().is_empty() {
+        match generate_with_anthropic(&client, provider, prompt).await {
+            Ok(message) => return Ok(message),
+            Err(err) => {
+                if err.contains("认证失败") || provider.openai_base_url.trim().is_empty() {
+                    return Err(err);
+                }
+            }
+        }
+    }
+
+    if !provider.openai_base_url.trim().is_empty() {
+        return generate_with_openai(&client, provider, prompt).await;
+    }
+
+    Err("请先配置 AI 供应商 Base URL".to_string())
+}
+
+pub async fn generate_git_commit_message_in_project(
+    project_path: &Path,
+    config: &AppConfig,
+) -> Result<GitCommitMessageSuggestion, String> {
+    let prompt = build_commit_message_prompt_in_project(project_path)?;
+    let provider = select_commit_message_provider(config)?;
+    let message = request_commit_message(&provider, &prompt).await?;
+
+    Ok(GitCommitMessageSuggestion { message })
 }
 
 pub fn read_git_changed_files_for_tree(
@@ -819,21 +1029,26 @@ pub fn commit_git_changes(project_path: String, message: String) -> Result<Strin
 }
 
 #[tauri::command]
-pub fn generate_git_commit_message(
+pub async fn generate_git_commit_message(
+    state: State<'_, AppState>,
     project_path: String,
 ) -> Result<GitCommitMessageSuggestion, String> {
-    generate_git_commit_message_in_project(Path::new(&project_path))
+    let config = state.config.lock().unwrap().clone();
+    generate_git_commit_message_in_project(Path::new(&project_path), &config).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_commit_message_prompt, checkout_git_branch_in_project, commit_git_changes_in_project,
-        create_git_branch_in_project, decode_text_bytes, generate_git_commit_message_in_project,
-        read_git_changed_files_for_tree, read_git_repository_state, read_git_status_change_detail,
-        read_git_status_changes, revert_git_status_changes_in_project,
+        build_commit_message_prompt, build_commit_message_prompt_in_project,
+        checkout_git_branch_in_project, clean_commit_message, commit_git_changes_in_project,
+        create_git_branch_in_project, decode_text_bytes, parse_anthropic_commit_message_response,
+        parse_openai_commit_message_response, read_git_changed_files_for_tree,
+        read_git_repository_state, read_git_status_change_detail, read_git_status_changes,
+        revert_git_status_changes_in_project, select_commit_message_provider,
         stage_git_status_changes_for_paths, unstage_git_status_changes_for_paths, GitStatusArea,
     };
+    use crate::config::types::{AppConfig, Provider};
     use std::fs;
     use std::process::Command;
 
@@ -1087,11 +1302,90 @@ mod tests {
             .output()
             .unwrap();
 
-        let err = generate_git_commit_message_in_project(&project).unwrap_err();
+        let err = build_commit_message_prompt_in_project(&project).unwrap_err();
 
         assert!(err.contains("没有已暂存修改可生成提交信息"));
 
         let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_commit_message_parser_reads_anthropic_response() {
+        let body = serde_json::json!({
+            "content": [{ "type": "text", "text": "\"feat: add branch controls\"\n\nextra" }]
+        });
+
+        let message = parse_anthropic_commit_message_response(&body).unwrap();
+
+        assert_eq!(message, "feat: add branch controls");
+    }
+
+    #[test]
+    fn git_commit_message_parser_reads_openai_response() {
+        let body = serde_json::json!({
+            "choices": [{ "message": { "content": "```text\nfix: handle dirty branch checkout\n```" } }]
+        });
+
+        let message = parse_openai_commit_message_response(&body).unwrap();
+
+        assert_eq!(message, "fix: handle dirty branch checkout");
+    }
+
+    #[test]
+    fn git_commit_message_cleaner_keeps_single_line() {
+        let message = clean_commit_message("- docs: update git plan\n\nbody").unwrap();
+
+        assert_eq!(message, "docs: update git plan");
+    }
+
+    #[test]
+    fn git_commit_message_provider_uses_active_provider() {
+        let active = Provider {
+            id: "active".to_string(),
+            name: "Active".to_string(),
+            api_key: "key".to_string(),
+            anthropic_base_url: String::new(),
+            openai_base_url: "https://api.openai.com".to_string(),
+            default_model: "gpt-test".to_string(),
+            models: Vec::new(),
+            input_price: None,
+            cache_read_price: None,
+            output_price: None,
+            context_1m: None,
+            codex_needs_proxy: None,
+        };
+        let fallback = Provider {
+            id: "fallback".to_string(),
+            name: "Fallback".to_string(),
+            api_key: "key".to_string(),
+            anthropic_base_url: "https://api.anthropic.com".to_string(),
+            openai_base_url: String::new(),
+            default_model: "claude-test".to_string(),
+            models: Vec::new(),
+            input_price: None,
+            cache_read_price: None,
+            output_price: None,
+            context_1m: None,
+            codex_needs_proxy: None,
+        };
+        let config = AppConfig {
+            providers: vec![fallback, active],
+            active_provider_id: Some("active".to_string()),
+            ..AppConfig::default()
+        };
+
+        let provider = select_commit_message_provider(&config).unwrap();
+
+        assert_eq!(provider.id, "active");
+    }
+
+    #[test]
+    fn git_commit_message_provider_requires_credentials() {
+        let config = AppConfig::default();
+
+        let err = select_commit_message_provider(&config).unwrap_err();
+
+        assert!(err.contains("API Key"));
     }
 
     #[test]
