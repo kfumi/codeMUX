@@ -34,6 +34,7 @@ export function GitBranchBar({
             <button
               type="button"
               aria-label="切换分支"
+              data-testid="git-branch-trigger"
               className="flex max-w-52 items-center gap-2 truncate rounded-lg border border-border/42 bg-background/80 px-2.5 py-1.5 text-sm text-foreground/86 transition-colors hover:bg-muted/45 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={loading || mutating || !state}
             >
@@ -65,6 +66,7 @@ export function GitBranchBar({
           type="button"
           aria-label="新建分支"
           title="新建分支"
+          data-testid="git-branch-create"
           onClick={onCreateBranch}
           className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
         >

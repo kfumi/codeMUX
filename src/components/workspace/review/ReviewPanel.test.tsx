@@ -30,7 +30,7 @@ vi.mock('../../preview/DiffView', () => ({
   DiffView: () => <div data-testid="diff-view" />,
 }));
 
-describe('ReviewPanel staging actions', () => {
+describe('ReviewPanel git actions', () => {
   afterEach(() => {
     cleanup();
   });
@@ -60,13 +60,14 @@ describe('ReviewPanel staging actions', () => {
     gitApiMock.checkoutBranch.mockResolvedValue(undefined);
     gitApiMock.stageStatusChanges.mockResolvedValue(undefined);
     gitApiMock.unstageStatusChanges.mockResolvedValue(undefined);
+    gitApiMock.revertStatusChanges.mockResolvedValue(undefined);
   });
 
   it('loads repository state and switches branches', async () => {
     render(<ReviewPanel projectPath="D:/project/app" />);
 
     await screen.findByText('master');
-    fireEvent.click(screen.getByRole('button', { name: '切换分支' }));
+    fireEvent.click(screen.getByTestId('git-branch-trigger'));
     fireEvent.click(screen.getByRole('button', { name: 'feature/git-panel' }));
 
     await waitFor(() => expect(gitApiMock.checkoutBranch).toHaveBeenCalledWith('D:/project/app', 'feature/git-panel'));
@@ -77,9 +78,9 @@ describe('ReviewPanel staging actions', () => {
     render(<ReviewPanel projectPath="D:/project/app" />);
 
     await screen.findByText('master');
-    fireEvent.click(screen.getByRole('button', { name: '新建分支' }));
-    fireEvent.change(screen.getByLabelText('分支名'), { target: { value: 'feature/new-work' } });
-    fireEvent.click(screen.getByRole('button', { name: '创建分支' }));
+    fireEvent.click(screen.getByTestId('git-branch-create'));
+    fireEvent.change(screen.getByTestId('git-branch-name'), { target: { value: 'feature/new-work' } });
+    fireEvent.click(screen.getByTestId('git-branch-submit'));
 
     await waitFor(() => expect(gitApiMock.createBranch).toHaveBeenCalledWith('D:/project/app', 'feature/new-work', true));
   });
@@ -101,5 +102,33 @@ describe('ReviewPanel staging actions', () => {
     fireEvent.click(screen.getByRole('button', { name: '暂存 App.tsx' }));
 
     await waitFor(() => expect(gitApiMock.stageStatusChanges).toHaveBeenCalledWith('D:/project/app', 'D:/project/app/src/App.tsx'));
+  });
+
+  it('reverts a single file after confirmation', async () => {
+    render(<ReviewPanel projectPath="D:/project/app" />);
+
+    await screen.findByText('App.tsx');
+    fireEvent.click(screen.getByTestId('git-revert-App.tsx'));
+    fireEvent.click(screen.getByRole('button', { name: '确认还原' }));
+
+    await waitFor(() => expect(gitApiMock.revertStatusChanges).toHaveBeenCalledWith(
+      'D:/project/app',
+      'unstaged',
+      'D:/project/app/src/App.tsx',
+    ));
+  });
+
+  it('reverts all files in the current area after confirmation', async () => {
+    render(<ReviewPanel projectPath="D:/project/app" />);
+
+    await screen.findByText('App.tsx');
+    fireEvent.click(screen.getByTestId('git-revert-all'));
+    fireEvent.click(screen.getByRole('button', { name: '确认还原' }));
+
+    await waitFor(() => expect(gitApiMock.revertStatusChanges).toHaveBeenCalledWith(
+      'D:/project/app',
+      'unstaged',
+      undefined,
+    ));
   });
 });

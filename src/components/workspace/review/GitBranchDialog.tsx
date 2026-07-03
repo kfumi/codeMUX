@@ -40,6 +40,7 @@ export function GitBranchDialog({
             <span className="text-muted-foreground">分支名</span>
             <Input
               aria-label="分支名"
+              data-testid="git-branch-name"
               value={branchName}
               onChange={(event) => setBranchName(event.target.value)}
               placeholder="feature/git-panel"
@@ -59,7 +60,11 @@ export function GitBranchDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={loading}>
             取消
           </Button>
-          <Button onClick={() => onCreate(branchName, checkout)} disabled={loading || !branchName.trim()}>
+          <Button
+            data-testid="git-branch-submit"
+            onClick={() => onCreate(branchName, checkout)}
+            disabled={loading || !branchName.trim()}
+          >
             创建分支
           </Button>
         </DialogFooter>
