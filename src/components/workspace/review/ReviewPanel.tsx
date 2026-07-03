@@ -1,10 +1,12 @@
 import { ChevronDown, ChevronUp, FileText, RefreshCw, Undo2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { gitApi, type GitStatusArea, type GitStatusChange } from '../../../lib/tauri';
+import { gitApi, type GitRepositoryState, type GitStatusArea, type GitStatusChange } from '../../../lib/tauri';
 import { cn } from '../../../lib/utils';
 import { DiffView } from '../../preview/DiffView';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
+import { GitBranchBar } from './GitBranchBar';
+import { GitBranchDialog } from './GitBranchDialog';
 
 function displayPath(filePath: string, projectPath: string): string {
   const normalize = (path: string) => path
@@ -47,24 +49,32 @@ function detailKey(area: GitStatusArea, filePath: string) {
 
 export function ReviewPanel({ projectPath }: { projectPath: string }) {
   const [area, setArea] = useState<GitStatusArea>('unstaged');
+  const [repositoryState, setRepositoryState] = useState<GitRepositoryState | null>(null);
   const [files, setFiles] = useState<GitStatusChange[]>([]);
   const [fileDetails, setFileDetails] = useState<Record<string, FileDetailState>>({});
   const [expandedPath, setExpandedPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [mutatingKey, setMutatingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [branchDialogOpen, setBranchDialogOpen] = useState(false);
+  const [branchError, setBranchError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!projectPath) return;
     setLoading(true);
     setError(null);
     try {
-      const nextFiles = await gitApi.getStatusChanges(projectPath, area);
+      const [nextState, nextFiles] = await Promise.all([
+        gitApi.getRepositoryState(projectPath),
+        gitApi.getStatusChanges(projectPath, area),
+      ]);
+      setRepositoryState(nextState);
       setFiles(nextFiles);
       setFileDetails({});
       setExpandedPath((current) => (current && nextFiles.some((file) => file.path === current) ? current : null));
     } catch (err) {
       setError(String(err));
+      setRepositoryState(null);
       setFiles([]);
       setFileDetails({});
       setExpandedPath(null);
@@ -123,6 +133,35 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     }
   }, [area, load, projectPath]);
 
+  const checkoutBranch = useCallback(async (branchName: string) => {
+    if (!projectPath) return;
+    setMutatingKey(`branch:${branchName}`);
+    setError(null);
+    try {
+      await gitApi.checkoutBranch(projectPath, branchName);
+      await load();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setMutatingKey(null);
+    }
+  }, [load, projectPath]);
+
+  const createBranch = useCallback(async (branchName: string, checkout: boolean) => {
+    if (!projectPath) return;
+    setMutatingKey('branch:create');
+    setBranchError(null);
+    try {
+      await gitApi.createBranch(projectPath, branchName, checkout);
+      setBranchDialogOpen(false);
+      await load();
+    } catch (err) {
+      setBranchError(String(err));
+    } finally {
+      setMutatingKey(null);
+    }
+  }, [load, projectPath]);
+
   const totals = useMemo(() => files.reduce(
     (acc, file) => ({
       additions: acc.additions + file.additions,
@@ -133,6 +172,21 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
 
   return (
     <div className="flex h-full flex-col">
+      <GitBranchBar
+        state={repositoryState}
+        loading={loading}
+        mutating={mutatingKey != null}
+        onRefresh={() => void load()}
+        onCheckout={(branchName) => void checkoutBranch(branchName)}
+        onCreateBranch={() => setBranchDialogOpen(true)}
+      />
+      <GitBranchDialog
+        open={branchDialogOpen}
+        loading={mutatingKey === 'branch:create'}
+        error={branchError}
+        onOpenChange={setBranchDialogOpen}
+        onCreate={(branchName, checkout) => void createBranch(branchName, checkout)}
+      />
       <div className="flex h-15 shrink-0 items-center justify-between gap-2 px-4">
         <div className="flex min-w-0 items-center gap-2">
           <Select
