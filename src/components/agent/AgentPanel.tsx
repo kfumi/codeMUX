@@ -394,7 +394,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                     agentKind={agentKind}
                     permissionConfig={permissionConfig}
                     planMode={planMode}
-                    disabled={isRunning}
                     onPermissionConfigChange={handlePermissionConfigChange}
                     onPlanModeChange={handlePlanModeChange}
                     onModeChange={handleModeChange}

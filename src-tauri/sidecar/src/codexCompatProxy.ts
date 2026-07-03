@@ -15,8 +15,10 @@ import { waitForInteractiveToolResponse } from './interactiveToolResponses.js';
 import {
   buildRequestUserInputBlockedEvent,
   getActiveCodexCollaborationPolicy,
+  resolveCodexCollaborationPolicy,
   type CodexCollaborationPolicy,
 } from './codexCollaborationPolicy.js';
+import { getActivePermissionState } from './activePermissionState.js';
 
 export type ProxyConfig = {
   apiKey: string;
@@ -144,7 +146,7 @@ async function handleRequest(
   }
 
   const requestBody = await readJsonBody(req) as Parameters<typeof convertResponsesToChatRequest>[0];
-  const collaborationPolicy = getActiveCodexCollaborationPolicy();
+  const collaborationPolicy = getCurrentCodexCollaborationPolicy();
   const effectiveRequestBody = ensureInteractiveUserInputTool(requestBody, collaborationPolicy);
   await emitToolResultEventsFromRequest(effectiveRequestBody, emittedToolResultIds);
   proxyLog(`responses request ${summarizeResponsesRequest(effectiveRequestBody)}`);
@@ -649,9 +651,10 @@ async function resolveInteractiveUserInputToolCalls(
   const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
 
   for (const toolCall of interactiveToolCalls) {
+    const currentPolicy = getCurrentCodexCollaborationPolicy(activeSessionId) ?? collaborationPolicy;
     let response: unknown;
     let isError = false;
-    if (collaborationPolicy.requestUserInputPolicy === 'block') {
+    if (currentPolicy.requestUserInputPolicy === 'block') {
       response = {
         answers: {},
         blocked: true,
@@ -681,6 +684,17 @@ async function resolveInteractiveUserInputToolCalls(
   }
 
   return responses;
+}
+
+function getCurrentCodexCollaborationPolicy(sessionId?: string | null): CodexCollaborationPolicy {
+  const activeState = getActivePermissionState({ sessionId, agentKind: 'codex' });
+  if (activeState) {
+    return resolveCodexCollaborationPolicy({
+      planMode: activeState.planMode,
+      permissionConfig: activeState.permissionConfig,
+    });
+  }
+  return getActiveCodexCollaborationPolicy();
 }
 
 function persistInteractiveUserInputHistory(

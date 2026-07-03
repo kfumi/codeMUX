@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore } from '../../stores/agentStore';
@@ -51,7 +51,9 @@ vi.mock('./assistant-ui/CodeMuxThread', () => ({
 }));
 
 vi.mock('./assistant-ui/CodeMuxComposer', () => ({
-  CodeMuxComposer: () => <div data-testid="composer" />,
+  CodeMuxComposer: ({ permissionSelector }: { permissionSelector?: React.ReactNode }) => (
+    <div data-testid="composer">{permissionSelector}</div>
+  ),
 }));
 
 vi.mock('./assistant-ui/CodeMuxModelSelector', () => ({
@@ -60,6 +62,10 @@ vi.mock('./assistant-ui/CodeMuxModelSelector', () => ({
 
 describe('AgentPanel session bootstrapping', () => {
   beforeEach(() => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+    });
     ensureSessionMock.mockClear();
 
     useSessionStore.setState({
@@ -133,6 +139,7 @@ describe('AgentPanel session bootstrapping', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     cleanup();
   });
 
@@ -142,5 +149,11 @@ describe('AgentPanel session bootstrapping', () => {
     await waitFor(() => {
       expect(ensureSessionMock).not.toHaveBeenCalled();
     });
+  });
+
+  it('keeps the permission selector enabled while the session is running', () => {
+    render(<AgentPanel sessionId="session-running" />);
+
+    expect(screen.getByTitle('变更前确认')).toHaveProperty('disabled', false);
   });
 });

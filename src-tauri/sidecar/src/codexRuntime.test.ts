@@ -7,6 +7,10 @@ import {
   CodexSessionRuntime,
   shouldRouteCodexThroughCompatProxy,
 } from './codexRuntime.js';
+import {
+  clearActivePermissionState,
+  setActivePermissionState,
+} from './activePermissionState.js';
 import { resolveCodexCollaborationPolicy } from './codexCollaborationPolicy.js';
 import { buildCodexToolUseContent } from './runtimeEvents.js';
 import { flushStreamEvents } from './streamEventBatcher.js';
@@ -951,6 +955,102 @@ describe('CodexSessionRuntime', () => {
         }),
       ]);
     } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it('uses the latest active Codex permissions when deciding whether to block plan mutations', () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        config: {
+          sessionId: string;
+          cwd: string;
+          model: string;
+          planMode: 'on';
+          collaborationPolicy: ReturnType<typeof resolveCodexCollaborationPolicy>;
+        };
+      }).config = {
+        sessionId: 'session-1',
+        cwd: 'D:/repo',
+        model: 'gpt-5',
+        planMode: 'on',
+        collaborationPolicy: resolveCodexCollaborationPolicy({ planMode: 'on' }),
+      };
+      setActivePermissionState({
+        sessionId: 'session-1',
+        agentKind: 'codex',
+        permissionConfig: {
+          kind: 'codex',
+          sandboxMode: 'danger-full-access',
+          approvalPolicy: 'never',
+          networkAccessEnabled: true,
+        },
+        planMode: 'off',
+      });
+
+      const emitItemEvent = (
+        runtime as unknown as {
+          emitItemEvent: (
+            sessionId: string,
+            eventType: 'item.started' | 'item.updated' | 'item.completed',
+            item: ThreadEvent extends { item: infer T } ? T : never,
+            emitFailure: (message: string) => void,
+          ) => void;
+        }
+      ).emitItemEvent.bind(runtime);
+
+      emitItemEvent(
+        'session-1',
+        'item.completed',
+        {
+          id: 'patch-1',
+          type: 'file_change',
+          changes: [{ path: 'src/app.ts', kind: 'update' }],
+          status: 'completed',
+        },
+        () => {},
+      );
+
+      const emittedEvents = writes
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line));
+
+      expect(emittedEvents).toEqual([
+        expect.objectContaining({
+          type: 'assistant',
+          message: expect.objectContaining({
+            content: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'tool_use',
+                name: 'apply_patch',
+              }),
+            ]),
+          }),
+        }),
+        expect.objectContaining({
+          type: 'user',
+          message: expect.objectContaining({
+            content: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'tool_result',
+                tool_use_id: 'patch-1',
+              }),
+            ]),
+          }),
+        }),
+      ]);
+    } finally {
+      clearActivePermissionState();
       stdoutSpy.mockRestore();
     }
   });

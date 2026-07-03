@@ -1559,7 +1559,7 @@ describe('createCodexCompatProxyServer', () => {
     expect(finalAssistantMessages[0]).not.toHaveProperty('tool_calls');
   });
 
-  it('uses the request-start policy snapshot for delayed request_user_input handling', async () => {
+  it('uses the latest policy for delayed request_user_input handling', async () => {
     const upstreamBodies: any[] = [];
     let releaseFirstResponse: (() => void) | null = null;
     const upstream = createServer(async (req, res) => {
@@ -1646,6 +1646,8 @@ describe('createCodexCompatProxyServer', () => {
     await waitUntil(() => upstreamBodies.length === 1);
     setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({ planMode: 'on' }));
     releaseFirstResponse?.();
+    await waitUntil(() => stdoutWrites.some((line) => line.includes('"type":"ask_user_question"')));
+    expect(resolveInteractiveToolResponse('call_question', ['A'])).toBe(true);
 
     const response = await responsePromise;
     const body = await response.text();
@@ -1658,17 +1660,26 @@ describe('createCodexCompatProxyServer', () => {
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          type: 'sidecar_stream_status',
-          mode_blocked: expect.objectContaining({
-            effective_mode: 'code',
-            reason_code: 'request_user_input_blocked_in_default_mode',
-          }),
+          type: 'ask_user_question',
+          tool_use_id: 'call_question',
         }),
       ]),
     );
     expect(events).not.toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: 'ask_user_question' }),
+        expect.objectContaining({
+          type: 'sidecar_stream_status',
+          mode_blocked: expect.anything(),
+        }),
+      ]),
+    );
+    expect(upstreamBodies[1].messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'tool',
+          tool_call_id: 'call_question',
+          content: JSON.stringify(['A']),
+        }),
       ]),
     );
   });

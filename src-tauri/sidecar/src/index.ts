@@ -22,6 +22,11 @@ import { emit } from './streamEventBatcher.js';
 import { buildClaudePermissionOptions, type AgentPlanMode, type SidecarPermissionConfig } from './agentPermissions.js';
 import { getClaudeApprovalTitle } from './claudeApprovalPrompt.js';
 import {
+  buildClaudeModeBlockedEvent,
+  resolveClaudeToolRuntimeDecision,
+  setActivePermissionState,
+} from './activePermissionState.js';
+import {
   buildClaudeUserMessageContent,
   isImageUnsupportedError,
   normalizeAgentInputPayload,
@@ -46,6 +51,7 @@ const MESSAGE_TIMEOUT_MS = 300_000;
 const COMPACT_TIMEOUT_MS = 60_000;
 
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
+type UpdatePermissionsCommand = Extract<SidecarCommand, { type: 'update_permissions' }>;
 
 type SessionBootstrap = {
   sessionId?: string;
@@ -148,6 +154,7 @@ export class SessionRuntime {
     const normalized = this.normalizeConfig(cmd);
     const nextFingerprint = JSON.stringify(normalized);
     if (this.configFingerprint === nextFingerprint && this.config) {
+      this.applyActivePermissionState(normalized);
       return;
     }
 
@@ -155,6 +162,7 @@ export class SessionRuntime {
     this.configFingerprint = nextFingerprint;
     this.providerMode = getProviderMode(normalized.baseUrl);
     this.activeConfigGeneration += 1;
+    this.applyActivePermissionState(normalized);
 
     await this.resetForReconfigure();
 
@@ -165,6 +173,44 @@ export class SessionRuntime {
     });
 
     this.startWarmup(this.activeConfigGeneration);
+  }
+
+  updatePermissions(cmd: UpdatePermissionsCommand): void {
+    if (!this.config) {
+      setActivePermissionState({
+        sessionId: cmd.sessionId,
+        agentKind: 'claude_code',
+        permissionConfig: cmd.permissionConfig,
+        planMode: normalizePlanMode(cmd.planMode),
+      });
+      return;
+    }
+
+    const nextConfig: SessionBootstrap = {
+      ...this.config,
+      sessionId: cmd.sessionId ?? this.config.sessionId,
+      permissionConfig: cmd.permissionConfig,
+      planMode: normalizePlanMode(cmd.planMode ?? this.config.planMode),
+    };
+
+    this.config = nextConfig;
+    this.configFingerprint = JSON.stringify(nextConfig);
+    this.activeConfigGeneration += 1;
+    this.applyActivePermissionState(nextConfig);
+
+    if (this.warmQuery) {
+      this.warmQuery.close();
+      this.warmQuery = null;
+    }
+    this.warmPromise = null;
+
+    if (!this.turnActive) {
+      this.startWarmup(this.activeConfigGeneration);
+    }
+
+    process.stderr.write(
+      `[sidecar] Runtime permissions updated: session_id=${nextConfig.sessionId || 'none'} plan_mode=${nextConfig.planMode ?? 'off'}\n`,
+    );
   }
 
   async sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void> {
@@ -249,6 +295,15 @@ export class SessionRuntime {
       permissionConfig: cmd.permissionConfig,
       planMode: normalizePlanMode(cmd.planMode),
     };
+  }
+
+  private applyActivePermissionState(config: SessionBootstrap): void {
+    setActivePermissionState({
+      sessionId: config.sessionId,
+      agentKind: 'claude_code',
+      permissionConfig: config.permissionConfig,
+      planMode: config.planMode,
+    });
   }
 
   private async resetForReconfigure(): Promise<void> {
@@ -515,6 +570,24 @@ export class SessionRuntime {
         }
 
         const toolUseId = opts.toolUseID;
+        const runtimeDecision = resolveClaudeToolRuntimeDecision(toolName, config.sessionId);
+        if (runtimeDecision.behavior === 'allow') {
+          return { behavior: 'allow', updatedInput: input, toolUseID: toolUseId };
+        }
+        if (runtimeDecision.behavior === 'deny') {
+          emit(buildClaudeModeBlockedEvent({
+            toolName,
+            toolUseId,
+            effectiveMode: runtimeDecision.effectiveMode,
+            reasonCode: runtimeDecision.reasonCode ?? 'permission_mode_blocked',
+          }));
+          return {
+            behavior: 'deny',
+            message: `${toolName} is blocked by the current permission mode.`,
+            toolUseID: toolUseId,
+          };
+        }
+
         const title = getClaudeApprovalTitle(toolName, input, opts);
         emit({
           type: 'ask_user_question',
@@ -795,6 +868,20 @@ async function main(): Promise<void> {
             await codexRuntime.ensure(cmd);
           } else {
             await runtime.ensure(cmd);
+          }
+        } catch (err) {
+          emit({ type: 'sidecar_error', error: String(err) });
+        }
+        break;
+      }
+      case 'update_permissions': {
+        const flavor = getRuntimeFlavor(cmd.agentKind ?? activeAgentKind);
+        activeAgentKind = cmd.agentKind ?? activeAgentKind;
+        try {
+          if (flavor === 'codex') {
+            codexRuntime.updatePermissions(cmd);
+          } else {
+            runtime.updatePermissions(cmd);
           }
         } catch (err) {
           emit({ type: 'sidecar_error', error: String(err) });

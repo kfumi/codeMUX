@@ -35,6 +35,10 @@ import {
   type SidecarPermissionConfig,
 } from './agentPermissions.js';
 import {
+  resolveActiveCodexPlanMode,
+  setActivePermissionState,
+} from './activePermissionState.js';
+import {
   applyCodexCollaborationPolicyToInput,
   buildPlanMutationBlockedEvent,
   resolveCodexCollaborationPolicy,
@@ -46,6 +50,7 @@ import {
 export { emit } from './streamEventBatcher.js';
 
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
+type UpdatePermissionsCommand = Extract<SidecarCommand, { type: 'update_permissions' }>;
 const DEBUG_STREAM_LOGS = process.env.CODEMUX_STREAM_DEBUG === '1';
 const DEFAULT_SHELL_COMMAND_TIMEOUT_MS = 10000;
 
@@ -133,7 +138,12 @@ export class CodexSessionRuntime {
     const nextFingerprint = JSON.stringify(requestedConfig);
 
     if (this.configFingerprint === nextFingerprint && this.config && this.thread) {
-      setActiveCodexCollaborationPolicy(this.config.collaborationPolicy ?? collaborationPolicy);
+      this.applyActivePermissionState({
+        sessionId: requestedConfig.sessionId,
+        permissionConfig: requestedConfig.permissionConfig,
+        planMode: requestedConfig.planMode,
+        collaborationPolicy: this.config.collaborationPolicy ?? collaborationPolicy,
+      });
       process.stderr.write(
         `[codex] Session ensured via SDK: session_id=${cmd.sessionId || 'none'} cwd=${cwd} thread=${requestedConfig.agentSessionId || 'new'}\n`,
       );
@@ -180,7 +190,12 @@ export class CodexSessionRuntime {
       runtimeBaseUrl,
       collaborationPolicy,
     };
-    setActiveCodexCollaborationPolicy(collaborationPolicy);
+    this.applyActivePermissionState({
+      sessionId: requestedConfig.sessionId,
+      permissionConfig: requestedConfig.permissionConfig,
+      planMode: requestedConfig.planMode,
+      collaborationPolicy,
+    });
 
     const codexEnv: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
@@ -222,6 +237,39 @@ export class CodexSessionRuntime {
       status: 'ready',
     });
     emit({ type: 'proxy_status', ...proxyManager.getStatus() });
+  }
+
+  updatePermissions(cmd: UpdatePermissionsCommand): void {
+    const planMode = normalizeCodexPlanMode(cmd.planMode) ?? this.config?.planMode ?? 'off';
+    const collaborationPolicy = resolveCodexCollaborationPolicy({
+      planMode,
+      permissionConfig: cmd.permissionConfig,
+      previousMode: this.config?.collaborationPolicy?.effectiveMode ?? null,
+    });
+
+    if (cmd.sessionId) {
+      setActiveSessionId(cmd.sessionId);
+    }
+
+    if (this.config) {
+      this.config = {
+        ...this.config,
+        sessionId: cmd.sessionId ?? this.config.sessionId,
+        permissionConfig: cmd.permissionConfig,
+        planMode,
+        collaborationPolicy,
+      };
+    }
+
+    this.applyActivePermissionState({
+      sessionId: cmd.sessionId ?? this.config?.sessionId,
+      permissionConfig: cmd.permissionConfig,
+      planMode,
+      collaborationPolicy,
+    });
+    process.stderr.write(
+      `[codex] Runtime permissions updated: session_id=${cmd.sessionId || this.config?.sessionId || 'none'} plan_mode=${planMode} effective_mode=${collaborationPolicy.effectiveMode}\n`,
+    );
   }
 
   async sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void> {
@@ -467,6 +515,21 @@ export class CodexSessionRuntime {
     };
   }
 
+  private applyActivePermissionState(input: {
+    sessionId?: string;
+    permissionConfig?: SidecarPermissionConfig;
+    planMode?: AgentPlanMode;
+    collaborationPolicy: CodexCollaborationPolicy;
+  }): void {
+    setActivePermissionState({
+      sessionId: input.sessionId,
+      agentKind: 'codex',
+      permissionConfig: input.permissionConfig,
+      planMode: input.planMode,
+    });
+    setActiveCodexCollaborationPolicy(input.collaborationPolicy);
+  }
+
   private async handleSdkEvent(
     sessionId: string,
     event: ThreadEvent,
@@ -551,7 +614,14 @@ export class CodexSessionRuntime {
         planMode: this.config?.planMode,
         permissionConfig: this.config?.permissionConfig,
       });
-    const blockedMethod = shouldBlockPlanModeItem(item, collaborationPolicy);
+    const activePlanMode = resolveActiveCodexPlanMode(sessionId);
+    const effectiveCollaborationPolicy = activePlanMode
+      ? resolveCodexCollaborationPolicy({
+        planMode: activePlanMode,
+        permissionConfig: this.config?.permissionConfig,
+      })
+      : collaborationPolicy;
+    const blockedMethod = shouldBlockPlanModeItem(item, effectiveCollaborationPolicy);
     if (blockedMethod) {
       if (!this.blockedPlanMutationItemIds.has(item.id)) {
         this.blockedPlanMutationItemIds.add(item.id);

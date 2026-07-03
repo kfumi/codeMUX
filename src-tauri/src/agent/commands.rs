@@ -1212,23 +1212,7 @@ fn build_ensure_session_command(
         .ok()
     };
     if let Some((permission_config, plan_mode)) = permission_snapshot {
-        if let Some(permission_config) = permission_config.filter(|value| !value.trim().is_empty())
-        {
-            match serde_json::from_str::<serde_json::Value>(&permission_config) {
-                Ok(value) => {
-                    cmd["permissionConfig"] = value;
-                }
-                Err(error) => warn!(
-                    target: "agent",
-                    "Ignoring invalid permission_config for session_id={} error={}",
-                    session_id,
-                    error
-                ),
-            }
-        }
-        if let Some(plan_mode) = plan_mode.filter(|value| value == "on" || value == "off") {
-            cmd["planMode"] = serde_json::Value::String(plan_mode);
-        }
+        apply_permission_snapshot_to_command(&mut cmd, session_id, permission_config, plan_mode);
     }
     if let Ok(parsed_agent_kind) = AgentKind::from_str(agent_kind) {
         match get_agent_session_id(state, session_id, parsed_agent_kind) {
@@ -1257,6 +1241,73 @@ fn build_ensure_session_command(
     cmd
 }
 
+fn apply_permission_snapshot_to_command(
+    cmd: &mut serde_json::Value,
+    session_id: &str,
+    permission_config: Option<String>,
+    plan_mode: Option<String>,
+) {
+    if let Some(permission_config) = permission_config.filter(|value| !value.trim().is_empty()) {
+        match serde_json::from_str::<serde_json::Value>(&permission_config) {
+            Ok(value) => {
+                cmd["permissionConfig"] = value;
+            }
+            Err(error) => warn!(
+                target: "agent",
+                "Ignoring invalid permission_config for session_id={} error={}",
+                session_id,
+                error
+            ),
+        }
+    }
+    if let Some(plan_mode) = plan_mode.filter(|value| value == "on" || value == "off") {
+        cmd["planMode"] = serde_json::Value::String(plan_mode);
+    }
+}
+
+fn build_update_permissions_command_from_snapshot(
+    session_id: &str,
+    agent_kind: &str,
+    permission_config: Option<String>,
+    plan_mode: Option<String>,
+) -> serde_json::Value {
+    let mut cmd = serde_json::json!({
+        "type": "update_permissions",
+        "sessionId": session_id,
+        "agentKind": agent_kind,
+    });
+    apply_permission_snapshot_to_command(&mut cmd, session_id, permission_config, plan_mode);
+    cmd
+}
+
+fn build_update_permissions_command(
+    state: &crate::AppState,
+    session_id: &str,
+) -> Result<serde_json::Value, String> {
+    let (agent_kind, permission_config, plan_mode) = {
+        let db = state.db.lock().unwrap();
+        db.query_row(
+            "SELECT agent_kind, permission_config, plan_mode FROM sessions WHERE id = ?1 LIMIT 1",
+            [session_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .map_err(|error| error.to_string())?
+    };
+
+    Ok(build_update_permissions_command_from_snapshot(
+        session_id,
+        &agent_kind,
+        permission_config,
+        plan_mode,
+    ))
+}
+
 async fn send_command_to_session(
     agent_state: &State<'_, AgentState>,
     session_id: &str,
@@ -1267,6 +1318,23 @@ async fn send_command_to_session(
         handle.send_command(&cmd.to_string()).await
     } else {
         Err(format!("No sidecar found for session_id={}", session_id))
+    }
+}
+
+pub async fn send_permission_update_to_session(
+    state: &crate::AppState,
+    agent_state: &State<'_, AgentState>,
+    session_id: &str,
+) -> Result<bool, String> {
+    let cmd = build_update_permissions_command(state, session_id)?;
+    let sidecars = agent_state.sidecars.lock().await;
+    if let Some(handle) = sidecars.get(session_id) {
+        handle.send_command(&cmd.to_string()).await?;
+        info!(target: "agent", "Runtime permission update sent for session_id={}", session_id);
+        Ok(true)
+    } else {
+        debug!(target: "agent", "Runtime permission update skipped; no active sidecar for session_id={}", session_id);
+        Ok(false)
     }
 }
 
@@ -1710,10 +1778,10 @@ async fn get_live_proxy_port(agent_state: &State<'_, AgentState>) -> Option<u16>
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_subagent_index_from_dir, convert_codex_item_to_claude_format,
-        find_codex_session_jsonl, parse_proxy_port_from_stderr,
-        read_codex_interactive_events_from_dir, read_json_stream_values,
-        resolve_agent_session_info, should_include_claude_history_event,
+        build_update_permissions_command_from_snapshot, collect_subagent_index_from_dir,
+        convert_codex_item_to_claude_format, find_codex_session_jsonl,
+        parse_proxy_port_from_stderr, read_codex_interactive_events_from_dir,
+        read_json_stream_values, resolve_agent_session_info, should_include_claude_history_event,
         sort_events_by_timestamp_stable,
     };
     use crate::config::types::AgentKind;
@@ -1790,6 +1858,32 @@ mod tests {
         ];
 
         assert_eq!(parse_proxy_port_from_stderr(&lines), Some(15722));
+    }
+
+    #[test]
+    fn builds_runtime_permission_update_command_from_session_snapshot() {
+        let cmd = build_update_permissions_command_from_snapshot(
+            "session-1",
+            "codex",
+            Some(r#"{"kind":"codex","sandboxMode":"read-only","approvalPolicy":"on-request","networkAccessEnabled":false}"#.to_string()),
+            Some("on".to_string()),
+        );
+
+        assert_eq!(
+            cmd,
+            serde_json::json!({
+                "type": "update_permissions",
+                "sessionId": "session-1",
+                "agentKind": "codex",
+                "permissionConfig": {
+                    "kind": "codex",
+                    "sandboxMode": "read-only",
+                    "approvalPolicy": "on-request",
+                    "networkAccessEnabled": false
+                },
+                "planMode": "on"
+            })
+        );
     }
 
     #[test]

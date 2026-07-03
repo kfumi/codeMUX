@@ -1,7 +1,8 @@
+use crate::agent::commands::{send_permission_update_to_session, AgentState};
 use crate::config::types::AgentKind;
 use crate::db::operations;
 use crate::AppState;
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::str::FromStr;
 use tauri::State;
 
@@ -140,8 +141,9 @@ pub fn update_session_provider(
 }
 
 #[tauri::command]
-pub fn update_session_permissions(
+pub async fn update_session_permissions(
     state: State<'_, AppState>,
+    agent_state: State<'_, AgentState>,
     session_id: String,
     permission_config: Option<String>,
     plan_mode: Option<String>,
@@ -153,12 +155,25 @@ pub fn update_session_permissions(
         permission_config.as_ref().map(|value| !value.is_empty()).unwrap_or(false),
         plan_mode.as_deref().unwrap_or("unchanged")
     );
-    let db = state.db.lock().unwrap();
-    operations::update_session_permissions(
-        &db,
-        &session_id,
-        permission_config.as_deref(),
-        plan_mode.as_deref(),
-    )
-    .map_err(|e| e.to_string())
+    {
+        let db = state.db.lock().unwrap();
+        operations::update_session_permissions(
+            &db,
+            &session_id,
+            permission_config.as_deref(),
+            plan_mode.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    if let Err(error) = send_permission_update_to_session(&state, &agent_state, &session_id).await {
+        warn!(
+            target: "session",
+            "Runtime permission update skipped after DB save session_id={} error={}",
+            session_id,
+            error
+        );
+    }
+
+    Ok(())
 }
