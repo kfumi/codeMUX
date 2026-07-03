@@ -8,6 +8,7 @@ import { ConfirmDialog } from '../../ui/confirm-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
 import { GitBranchBar } from './GitBranchBar';
 import { GitBranchDialog } from './GitBranchDialog';
+import { GitCommitBox } from './GitCommitBox';
 
 function displayPath(filePath: string, projectPath: string): string {
   const normalize = (path: string) => path
@@ -52,6 +53,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
   const [area, setArea] = useState<GitStatusArea>('unstaged');
   const [repositoryState, setRepositoryState] = useState<GitRepositoryState | null>(null);
   const [files, setFiles] = useState<GitStatusChange[]>([]);
+  const [stagedFiles, setStagedFiles] = useState<GitStatusChange[]>([]);
   const [fileDetails, setFileDetails] = useState<Record<string, FileDetailState>>({});
   const [expandedPath, setExpandedPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -60,24 +62,29 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
   const [branchDialogOpen, setBranchDialogOpen] = useState(false);
   const [branchError, setBranchError] = useState<string | null>(null);
   const [revertTarget, setRevertTarget] = useState<{ type: 'single' | 'all'; filePath?: string; name?: string } | null>(null);
+  const [commitMessage, setCommitMessage] = useState('');
+  const [commitError, setCommitError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!projectPath) return;
     setLoading(true);
     setError(null);
     try {
-      const [nextState, nextFiles] = await Promise.all([
+      const [nextState, nextFiles, nextStagedFiles] = await Promise.all([
         gitApi.getRepositoryState(projectPath),
         gitApi.getStatusChanges(projectPath, area),
+        gitApi.getStatusChanges(projectPath, 'staged'),
       ]);
       setRepositoryState(nextState);
       setFiles(nextFiles);
+      setStagedFiles(nextStagedFiles);
       setFileDetails({});
       setExpandedPath((current) => (current && nextFiles.some((file) => file.path === current) ? current : null));
     } catch (err) {
       setError(String(err));
       setRepositoryState(null);
       setFiles([]);
+      setStagedFiles([]);
       setFileDetails({});
       setExpandedPath(null);
     } finally {
@@ -181,6 +188,35 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       setRevertTarget(null);
     }
   }, [area, load, projectPath, revertTarget]);
+
+  const generateCommitMessage = useCallback(async () => {
+    if (!projectPath) return;
+    setMutatingKey('commit:generate');
+    setCommitError(null);
+    try {
+      const suggestion = await gitApi.generateCommitMessage(projectPath);
+      setCommitMessage(suggestion.message);
+    } catch (err) {
+      setCommitError(String(err));
+    } finally {
+      setMutatingKey(null);
+    }
+  }, [projectPath]);
+
+  const commitChanges = useCallback(async () => {
+    if (!projectPath || !commitMessage.trim()) return;
+    setMutatingKey('commit');
+    setCommitError(null);
+    try {
+      await gitApi.commitChanges(projectPath, commitMessage);
+      setCommitMessage('');
+      await load();
+    } catch (err) {
+      setCommitError(String(err));
+    } finally {
+      setMutatingKey(null);
+    }
+  }, [commitMessage, load, projectPath]);
 
   const totals = useMemo(() => files.reduce(
     (acc, file) => ({
@@ -362,6 +398,17 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
           <span className="text-[hsl(var(--destructive))]">-{totals.deletions}</span>
         </div>
       </div>
+      <GitCommitBox
+        message={commitMessage}
+        stagedCount={stagedFiles.length}
+        loading={loading}
+        generating={mutatingKey === 'commit:generate'}
+        committing={mutatingKey === 'commit'}
+        error={commitError}
+        onMessageChange={setCommitMessage}
+        onGenerate={() => void generateCommitMessage()}
+        onCommit={() => void commitChanges()}
+      />
       <ConfirmDialog
         open={revertTarget != null}
         onOpenChange={(open) => !open && setRevertTarget(null)}

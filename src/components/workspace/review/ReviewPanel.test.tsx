@@ -92,7 +92,7 @@ describe('ReviewPanel git actions', () => {
     fireEvent.click(screen.getByRole('button', { name: '全部暂存' }));
 
     await waitFor(() => expect(gitApiMock.stageStatusChanges).toHaveBeenCalledWith('D:/project/app', undefined));
-    await waitFor(() => expect(gitApiMock.getStatusChanges).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(gitApiMock.getStatusChanges).toHaveBeenCalledTimes(4));
   });
 
   it('stages a single unstaged file', async () => {
@@ -130,5 +130,31 @@ describe('ReviewPanel git actions', () => {
       'unstaged',
       undefined,
     ));
+  });
+
+  it('generates a commit message into the commit input', async () => {
+    gitApiMock.generateCommitMessage.mockResolvedValue({ message: 'feat: update app' });
+
+    render(<ReviewPanel projectPath="D:/project/app" />);
+
+    await screen.findByTestId('git-commit-message');
+    fireEvent.click(screen.getByTestId('git-commit-generate'));
+
+    await waitFor(() => {
+      expect((screen.getByTestId('git-commit-message') as HTMLInputElement).value).toBe('feat: update app');
+    });
+  });
+
+  it('commits staged changes and clears the commit input', async () => {
+    gitApiMock.commitChanges.mockResolvedValue('abc1234');
+
+    render(<ReviewPanel projectPath="D:/project/app" />);
+
+    const input = await screen.findByTestId('git-commit-message');
+    fireEvent.change(input, { target: { value: 'feat: update app' } });
+    fireEvent.click(screen.getByTestId('git-commit-submit'));
+
+    await waitFor(() => expect(gitApiMock.commitChanges).toHaveBeenCalledWith('D:/project/app', 'feat: update app'));
+    await waitFor(() => expect((input as HTMLInputElement).value).toBe(''));
   });
 });
