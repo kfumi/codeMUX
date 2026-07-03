@@ -37,7 +37,8 @@ function compactBody(text: string, maxLength = 120): string {
 }
 
 function getQuestionSummary(event: Extract<AgentMessage, { kind: 'ask_user_question' }>): string {
-  return compactBody(event.data.questions[0]?.question ?? '等待你的输入');
+  const questions = event.data.questions;
+  return compactBody(questions[questions.length - 1]?.question ?? '等待你的输入');
 }
 
 export function buildAgentNotificationCandidate({

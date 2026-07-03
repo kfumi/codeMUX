@@ -5,9 +5,10 @@ import {
   sendNotification,
 } from '@tauri-apps/plugin-notification';
 
-import { buildAgentNotificationCandidate, shouldDispatchAgentNotification } from '../lib/agentNotifications';
-import { createLogger, serializeError } from '../lib/logger';
+import { buildAgentNotificationCandidate } from '../lib/agentNotifications';
+import { createLogger } from '../lib/logger';
 import { appApi } from '../lib/tauri';
+import type { AgentMessage } from '../stores/agentStore';
 import { useAgentStore } from '../stores/agentStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -45,15 +46,18 @@ function useAppInactive(): boolean {
   return inactive;
 }
 
-async function ensureNotificationPermission(): Promise<boolean> {
+async function sendTauriNotification(title: string, body: string): Promise<void> {
   try {
-    if (await isPermissionGranted()) {
-      return true;
+    let permissionGranted = await isPermissionGranted();
+    if (!permissionGranted) {
+      permissionGranted = await requestPermission() === 'granted';
     }
-    return await requestPermission() === 'granted';
-  } catch (error) {
-    logger.error('Failed to check notification permission', undefined, serializeError(error));
-    return false;
+
+    if (permissionGranted) {
+      sendNotification({ title, body });
+    }
+  } catch {
+    logger.error('Failed to send system notification');
   }
 }
 
@@ -82,30 +86,51 @@ async function showAppSession(sessionId: string) {
 // the originating session. The Tauri plugin remains the fallback sender.
 async function sendClickableNotification(candidate: { title: string; body: string; sessionId: string }) {
   const notificationCtor = typeof window !== 'undefined' ? window.Notification : undefined;
-
   if (notificationCtor) {
-    if (notificationCtor.permission === 'default') {
-      await notificationCtor.requestPermission();
-    }
+    try {
+      let permission = notificationCtor.permission;
+      if (permission !== 'granted') {
+        permission = await notificationCtor.requestPermission();
+      }
 
-    if (notificationCtor.permission === 'granted') {
-      const notification = new notificationCtor(candidate.title, {
-        body: candidate.body,
-        tag: `codemux-${candidate.sessionId}`,
-      });
-      notification.onclick = () => {
-        void showAppSession(candidate.sessionId);
-      };
-      return;
+      if (permission === 'granted') {
+        const notification = new notificationCtor(candidate.title, {
+          body: candidate.body,
+          tag: `codemux-${candidate.sessionId}`,
+        });
+        notification.onclick = () => {
+          void showAppSession(candidate.sessionId);
+        };
+        return;
+      }
+    } catch {
+      logger.debug('Web Notification setup failed');
     }
   }
 
-  if (await ensureNotificationPermission()) {
-    sendNotification({
-      title: candidate.title,
-      body: candidate.body,
-    });
+  await sendTauriNotification(candidate.title, candidate.body);
+}
+
+function findPreviousUserEventIndex(events: AgentMessage[], eventIndex: number): number {
+  for (let index = eventIndex; index >= 0; index -= 1) {
+    if (events[index]?.kind === 'user') {
+      return index;
+    }
   }
+  return -1;
+}
+
+function buildDispatchKey(
+  sessionId: string,
+  candidate: { key: string; kind: string },
+  events: AgentMessage[],
+  eventIndex: number,
+): string {
+  if (candidate.kind === 'task_completed' || candidate.kind === 'task_failed') {
+    return `terminal:${sessionId}:${candidate.kind}:${findPreviousUserEventIndex(events, eventIndex)}`;
+  }
+
+  return candidate.key;
 }
 
 export function useAgentNotifications() {
@@ -124,35 +149,45 @@ export function useAgentNotifications() {
     const settings = notificationSettings ?? {
       system_enabled: true,
       sound_enabled: false,
-      sound: 'soft' as const,
+      sound: 'ding' as const,
     };
 
+    if (!isAppInactive || !settings.system_enabled) {
+      return;
+    }
+
     for (const [sessionId, sessionEvents] of Object.entries(events)) {
-      sessionEvents.forEach((event, eventIndex) => {
+      // Scan all events, find the latest one that should trigger a notification
+      for (let i = sessionEvents.length - 1; i >= 0; i--) {
+        const event = sessionEvents[i];
+
         const candidate = buildAgentNotificationCandidate({
           sessionId,
           event,
-          eventIndex,
+          eventIndex: i,
           sessionTitles,
         });
 
-        if (!shouldDispatchAgentNotification({
-          candidate,
-          isAppInactive,
-          systemEnabled: settings.system_enabled,
-          alreadyDispatched: candidate ? dispatchedKeysRef.current.has(candidate.key) : false,
-        }) || !candidate) {
-          return;
+        if (!candidate) {
+          continue;
         }
 
-        dispatchedKeysRef.current.add(candidate.key);
+        const dispatchKey = buildDispatchKey(sessionId, candidate, sessionEvents, i);
+
+        if (dispatchedKeysRef.current.has(dispatchKey)) {
+          break;
+        }
+
+        dispatchedKeysRef.current.add(dispatchKey);
 
         void sendClickableNotification(candidate);
 
         if (settings.sound_enabled) {
           playNotificationSound(settings.sound);
         }
-      });
+
+        break; // Only notify once per session
+      }
     }
   }, [events, isAppInactive, notificationSettings, sessionTitles]);
 }

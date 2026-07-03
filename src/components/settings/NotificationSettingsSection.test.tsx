@@ -22,7 +22,7 @@ const baseConfig: AppConfig = {
   notifications: {
     system_enabled: true,
     sound_enabled: false,
-    sound: 'soft',
+    sound: 'ding',
   },
   theme: 'System',
 };
@@ -60,7 +60,32 @@ describe('NotificationSettingsSection', () => {
     expect(setNotificationSettingsMock).toHaveBeenCalledWith({
       system_enabled: true,
       sound_enabled: true,
-      sound: 'soft',
+      sound: 'ding',
+    });
+  });
+
+  it('normalizes legacy sound values before toggling sound', () => {
+    useSettingsStore.setState({
+      config: {
+        ...structuredClone(baseConfig),
+        notifications: {
+          system_enabled: true,
+          sound_enabled: false,
+          sound: 'soft' as never,
+        },
+      },
+      setNotificationSettings: setNotificationSettingsMock,
+    } as Partial<ReturnType<typeof useSettingsStore.getState>>);
+
+    render(<NotificationSettingsSection />);
+
+    const soundSwitches = screen.getAllByRole('switch', { name: '提示音' });
+    fireEvent.click(soundSwitches[0]);
+
+    expect(setNotificationSettingsMock).toHaveBeenCalledWith({
+      system_enabled: true,
+      sound_enabled: true,
+      sound: 'ding',
     });
   });
 });

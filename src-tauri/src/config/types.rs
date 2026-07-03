@@ -74,7 +74,7 @@ fn default_codex_approval_policy() -> String {
 }
 
 fn default_notification_sound() -> String {
-    "soft".to_string()
+    "ding".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -321,7 +321,7 @@ mod tests {
 
         assert!(config.notifications.system_enabled);
         assert!(!config.notifications.sound_enabled);
-        assert_eq!(config.notifications.sound, "soft");
+        assert_eq!(config.notifications.sound, "ding");
     }
 
     #[test]

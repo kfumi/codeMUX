@@ -46,7 +46,7 @@ const baseConfig: AppConfig = {
   notifications: {
     system_enabled: true,
     sound_enabled: false,
-    sound: 'soft',
+    sound: 'ding',
   },
 };
 
@@ -152,18 +152,18 @@ describe('settings store agent config actions', () => {
     await useSettingsStore.getState().setNotificationSettings({
       system_enabled: true,
       sound_enabled: true,
-      sound: 'clear',
+      sound: 'chime',
     });
 
     expect(setNotificationSettingsMock).toHaveBeenCalledWith({
       system_enabled: true,
       sound_enabled: true,
-      sound: 'clear',
+      sound: 'chime',
     });
     expect(useSettingsStore.getState().config?.notifications).toEqual({
       system_enabled: true,
       sound_enabled: true,
-      sound: 'clear',
+      sound: 'chime',
     });
   });
 
@@ -180,8 +180,29 @@ describe('settings store agent config actions', () => {
     expect(useSettingsStore.getState().config?.notifications).toEqual({
       system_enabled: true,
       sound_enabled: false,
-      sound: 'soft',
+      sound: 'ding',
     });
     expect(useSettingsStore.getState().error).toContain('write failed');
+  });
+
+  it('normalizes legacy notification sound values before saving', async () => {
+    const { useSettingsStore } = await import('./settingsStore');
+
+    await useSettingsStore.getState().setNotificationSettings({
+      system_enabled: true,
+      sound_enabled: true,
+      sound: 'soft' as never,
+    });
+
+    expect(setNotificationSettingsMock).toHaveBeenCalledWith({
+      system_enabled: true,
+      sound_enabled: true,
+      sound: 'ding',
+    });
+    expect(useSettingsStore.getState().config?.notifications).toEqual({
+      system_enabled: true,
+      sound_enabled: true,
+      sound: 'ding',
+    });
   });
 });

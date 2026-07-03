@@ -249,7 +249,10 @@ pub fn set_notification_settings(
     app: AppHandle,
     settings: NotificationSettings,
 ) -> Result<(), String> {
-    if !matches!(settings.sound.as_str(), "soft" | "clear" | "alert") {
+    if !matches!(
+        settings.sound.as_str(),
+        "ding" | "chime" | "bell" | "success"
+    ) {
         return Err(format!(
             "Unsupported notification sound: {}",
             settings.sound

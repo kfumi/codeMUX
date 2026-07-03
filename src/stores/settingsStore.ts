@@ -5,6 +5,7 @@ import { configApi, agentApi } from '../lib/tauri';
 import { useNewSessionStore } from './newSessionStore';
 import { getDefaultAgentKind } from '../types/agentRegistry';
 import type { AgentKind } from '../types/session';
+import { normalizeNotificationSettings } from '../lib/notificationSettings';
 
 function applyThemeLocally(theme: Theme) {
   if (typeof document === 'undefined') {
@@ -66,7 +67,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   fetchConfig: async () => {
     set({ isLoading: true, error: null });
     try {
-      const config = await configApi.get();
+      const rawConfig = await configApi.get();
+      const config = {
+        ...rawConfig,
+        notifications: normalizeNotificationSettings(rawConfig.notifications),
+      };
       useNewSessionStore.getState().setSelectedAgentKind(config.agent_defaults.default_agent_kind);
       set({ config, isLoading: false });
     } catch (error) {
@@ -111,21 +116,19 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   setNotificationSettings: async (settings: NotificationSettings) => {
-    const previousValue = get().config?.notifications ?? {
-      system_enabled: true,
-      sound_enabled: false,
-      sound: 'soft' as const,
-    };
+    const previousConfig = get().config;
+    const nextSettings = normalizeNotificationSettings(settings);
+    const previousNotifications = normalizeNotificationSettings(previousConfig?.notifications);
     set((state) => ({
-      config: state.config ? { ...state.config, notifications: settings } : state.config,
+      config: state.config ? { ...state.config, notifications: nextSettings } : state.config,
       error: null,
     }));
 
     try {
-      await configApi.setNotificationSettings(settings);
+      await configApi.setNotificationSettings(nextSettings);
     } catch (error) {
       set((state) => ({
-        config: state.config ? { ...state.config, notifications: previousValue } : state.config,
+        config: state.config ? { ...state.config, notifications: previousNotifications } : state.config,
         error: String(error),
       }));
     }

@@ -1,5 +1,6 @@
 import { Bell, Volume2 } from 'lucide-react';
 
+import { normalizeNotificationSettings } from '../../lib/notificationSettings';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { NotificationSound } from '../../types/provider';
 import { Button } from '../ui/button';
@@ -13,9 +14,10 @@ import {
 import { Switch } from '../ui/switch';
 
 const SOUND_OPTIONS: Array<{ value: NotificationSound; label: string }> = [
-  { value: 'soft', label: '轻提示' },
-  { value: 'clear', label: '清脆提示' },
-  { value: 'alert', label: '明显提示' },
+  { value: 'ding', label: '默认（叮咚）' },
+  { value: 'chime', label: '清脆铃声' },
+  { value: 'bell', label: '钟声' },
+  { value: 'success', label: '成功提示' },
 ];
 
 function playPreview(sound: NotificationSound) {
@@ -25,12 +27,12 @@ function playPreview(sound: NotificationSound) {
 }
 
 export function NotificationSettingsSection() {
-  const settings = useSettingsStore((state) => state.config?.notifications ?? {
-    system_enabled: true,
-    sound_enabled: false,
-    sound: 'soft' as const,
-  });
+  const config = useSettingsStore((state) => state.config);
   const setNotificationSettings = useSettingsStore((state) => state.setNotificationSettings);
+
+  if (!config) return null;
+
+  const settings = normalizeNotificationSettings(config.notifications);
 
   return (
     <div className="space-y-3">

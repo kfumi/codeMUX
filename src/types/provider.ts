@@ -3,7 +3,9 @@ import type { ClaudePermissionConfig, CodexPermissionConfig } from '../lib/agent
 
 export type Theme = 'Light' | 'Dark' | 'System';
 
-export type NotificationSound = 'soft' | 'clear' | 'alert';
+export const NOTIFICATION_SOUNDS = ['ding', 'chime', 'bell', 'success'] as const;
+export type NotificationSound = typeof NOTIFICATION_SOUNDS[number];
+export const DEFAULT_NOTIFICATION_SOUND: NotificationSound = 'ding';
 
 export interface NotificationSettings {
   system_enabled: boolean;

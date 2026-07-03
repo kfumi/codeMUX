@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { render, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore } from '../stores/agentStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -48,7 +48,7 @@ const baseConfig: AppConfig = {
   notifications: {
     system_enabled: true,
     sound_enabled: false,
-    sound: 'soft',
+    sound: 'ding',
   },
   theme: 'System',
 };
@@ -59,6 +59,10 @@ function Harness() {
 }
 
 describe('useAgentNotifications', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     Object.defineProperty(document, 'hasFocus', {
@@ -68,6 +72,7 @@ describe('useAgentNotifications', () => {
     notificationInstances.length = 0;
     vi.stubGlobal('Notification', class {
       static permission = 'granted';
+      static requestPermission = vi.fn(async () => 'granted');
       onclick: (() => void) | null = null;
 
       constructor(public title: string, public options?: NotificationOptions) {
@@ -128,6 +133,54 @@ describe('useAgentNotifications', () => {
     });
   });
 
+  it('requests Web Notification permission so the notification can be clicked', async () => {
+    const requestPermission = vi.fn(async () => 'granted');
+    vi.stubGlobal('Notification', class {
+      static permission = 'default';
+      static requestPermission = requestPermission;
+      onclick: (() => void) | null = null;
+
+      constructor(public title: string, public options?: NotificationOptions) {
+        notificationInstances.push(this);
+      }
+    });
+    render(<Harness />);
+
+    useAgentStore.setState({
+      events: { 'session-1': [{ kind: 'done' }] },
+      eventTimestamps: { 'session-1': [1] },
+    });
+
+    await waitFor(() => {
+      expect(requestPermission).toHaveBeenCalled();
+      expect(notificationInstances).toHaveLength(1);
+    });
+  });
+
+  it('requests permission when the injected Notification API is not already granted', async () => {
+    const requestPermission = vi.fn(async () => 'granted');
+    vi.stubGlobal('Notification', class {
+      static permission = 'denied';
+      static requestPermission = requestPermission;
+      onclick: (() => void) | null = null;
+
+      constructor(public title: string, public options?: NotificationOptions) {
+        notificationInstances.push(this);
+      }
+    });
+    render(<Harness />);
+
+    useAgentStore.setState({
+      events: { 'session-1': [{ kind: 'done' }] },
+      eventTimestamps: { 'session-1': [1] },
+    });
+
+    await waitFor(() => {
+      expect(requestPermission).toHaveBeenCalled();
+      expect(notificationInstances).toHaveLength(1);
+    });
+  });
+
   it('does not send duplicate notifications for the same event', async () => {
     render(<Harness />);
 
@@ -152,6 +205,100 @@ describe('useAgentNotifications', () => {
 
     // No new notification for the already-dispatched done event
     expect(notificationInstances).toHaveLength(countAfterFirst);
+  });
+
+  it('allows a later task completion in the same session to notify again', async () => {
+    render(<Harness />);
+
+    useAgentStore.setState({
+      events: { 'session-1': [{ kind: 'done' }] },
+      eventTimestamps: { 'session-1': [1] },
+    });
+
+    await waitFor(() => {
+      expect(notificationInstances).toHaveLength(1);
+    });
+
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          { kind: 'done' },
+          { kind: 'user', data: { content: '下一轮' } },
+          { kind: 'done' },
+        ],
+      },
+      eventTimestamps: { 'session-1': [1, 2, 3] },
+    });
+
+    await waitFor(() => {
+      expect(notificationInstances).toHaveLength(2);
+    });
+  });
+
+  it('coalesces multiple terminal events from the same turn into one notification', async () => {
+    render(<Harness />);
+
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          { kind: 'user', data: { content: '你是什么模型' } },
+          { kind: 'done' },
+        ],
+      },
+      eventTimestamps: { 'session-1': [1, 2] },
+    });
+
+    await waitFor(() => {
+      expect(notificationInstances).toHaveLength(1);
+    });
+
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          { kind: 'user', data: { content: '你是什么模型' } },
+          { kind: 'done' },
+          {
+            kind: 'result',
+            data: {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              uuid: 'result-1',
+              session_id: 'session-1',
+              duration_ms: 1000,
+              duration_api_ms: 800,
+              num_turns: 1,
+              result: '',
+              total_cost_usd: 0,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            },
+          },
+          { kind: 'done' },
+        ],
+      },
+      eventTimestamps: { 'session-1': [1, 2, 3, 4] },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(notificationInstances).toHaveLength(1);
+  });
+
+  it('uses the Tauri notification plugin fallback when Web Notification is unavailable', async () => {
+    vi.stubGlobal('Notification', undefined);
+    render(<Harness />);
+
+    useAgentStore.setState({
+      events: { 'session-1': [{ kind: 'done' }] },
+      eventTimestamps: { 'session-1': [1] },
+    });
+
+    await waitFor(() => {
+      expect(sendNotificationMock).toHaveBeenCalledWith({
+        title: '任务已完成',
+        body: '重构设置页',
+      });
+    });
   });
 
   it('opens the app and switches to the session when the notification is clicked', async () => {
