@@ -8,6 +8,7 @@ use std::process::Command;
 
 /// Empty tree hash — the tree object git uses for a repo with zero commits.
 const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf899d69f3612f4bf";
+const COMMIT_MESSAGE_DIFF_LIMIT: usize = 12_000;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +51,12 @@ pub struct GitRepositoryState {
     pub branches: Vec<GitBranch>,
     pub detached: bool,
     pub has_uncommitted_changes: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitMessageSuggestion {
+    pub message: String,
 }
 
 fn run_git(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
@@ -572,6 +579,66 @@ pub fn commit_git_changes_in_project(project_path: &Path, message: &str) -> Resu
     Ok(String::from_utf8_lossy(&output).trim().to_string())
 }
 
+pub fn build_commit_message_prompt(stat: &str, diff: &str, truncated: bool) -> String {
+    format!(
+        "请根据以下 staged diff 生成一条 Git 提交信息。只输出一条提交信息，不输出解释。优先使用 Conventional Commits，长度不超过 72 个字符。{}\n\n统计:\n{}\n\nDiff:\n{}",
+        if truncated {
+            "Diff 内容已截断，请基于可见内容概括。"
+        } else {
+            ""
+        },
+        stat.trim(),
+        diff.trim()
+    )
+}
+
+fn suggest_commit_message_from_prompt(prompt: &str) -> String {
+    let lower = prompt.to_lowercase();
+    if lower.contains(".md") || lower.contains("docs/") {
+        "docs: 更新项目文档".to_string()
+    } else if lower.contains(".test.") || lower.contains("test(") {
+        "test: 更新测试覆盖".to_string()
+    } else if lower.contains("fix") || lower.contains("error") {
+        "fix: 修复实现问题".to_string()
+    } else {
+        "feat: 更新项目功能".to_string()
+    }
+}
+
+pub fn generate_git_commit_message_in_project(
+    project_path: &Path,
+) -> Result<GitCommitMessageSuggestion, String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+    if run_git(&root, &["diff", "--cached", "--quiet"]).is_ok() {
+        return Err("没有已暂存修改可生成提交信息".to_string());
+    }
+
+    let stat =
+        String::from_utf8_lossy(&run_git(&root, &["diff", "--cached", "--stat"])?).to_string();
+    let raw_diff = String::from_utf8_lossy(&run_git(
+        &root,
+        &["diff", "--cached", "--unified=3", "--no-ext-diff"],
+    )?)
+    .to_string();
+    let truncated = raw_diff.len() > COMMIT_MESSAGE_DIFF_LIMIT;
+    let diff = if truncated {
+        raw_diff
+            .chars()
+            .take(COMMIT_MESSAGE_DIFF_LIMIT)
+            .collect::<String>()
+    } else {
+        raw_diff
+    };
+    let prompt = build_commit_message_prompt(&stat, &diff, truncated);
+
+    Ok(GitCommitMessageSuggestion {
+        message: suggest_commit_message_from_prompt(&prompt),
+    })
+}
+
 pub fn read_git_changed_files_for_tree(
     project_path: &Path,
     baseline_tree: &str,
@@ -751,14 +818,21 @@ pub fn commit_git_changes(project_path: String, message: String) -> Result<Strin
     commit_git_changes_in_project(Path::new(&project_path), &message)
 }
 
+#[tauri::command]
+pub fn generate_git_commit_message(
+    project_path: String,
+) -> Result<GitCommitMessageSuggestion, String> {
+    generate_git_commit_message_in_project(Path::new(&project_path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        checkout_git_branch_in_project, commit_git_changes_in_project,
-        create_git_branch_in_project, decode_text_bytes, read_git_changed_files_for_tree,
-        read_git_repository_state, read_git_status_change_detail, read_git_status_changes,
-        revert_git_status_changes_in_project, stage_git_status_changes_for_paths,
-        unstage_git_status_changes_for_paths, GitStatusArea,
+        build_commit_message_prompt, checkout_git_branch_in_project, commit_git_changes_in_project,
+        create_git_branch_in_project, decode_text_bytes, generate_git_commit_message_in_project,
+        read_git_changed_files_for_tree, read_git_repository_state, read_git_status_change_detail,
+        read_git_status_changes, revert_git_status_changes_in_project,
+        stage_git_status_changes_for_paths, unstage_git_status_changes_for_paths, GitStatusArea,
     };
     use std::fs;
     use std::process::Command;
@@ -981,6 +1055,41 @@ mod tests {
         assert!(read_git_status_changes(&project, GitStatusArea::Staged)
             .unwrap()
             .is_empty());
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_commit_message_prompt_includes_stat_and_diff() {
+        let prompt = build_commit_message_prompt(
+            " src/main.ts | 2 +-\n",
+            "diff --git a/src/main.ts b/src/main.ts\n+new\n-old\n",
+            false,
+        );
+
+        assert!(prompt.contains("只输出一条提交信息"));
+        assert!(prompt.contains("src/main.ts | 2 +-"));
+        assert!(prompt.contains("diff --git"));
+        assert!(prompt.contains("Conventional Commits"));
+    }
+
+    #[test]
+    fn git_commit_message_generation_requires_staged_diff() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .arg("init")
+            .output()
+            .unwrap();
+
+        let err = generate_git_commit_message_in_project(&project).unwrap_err();
+
+        assert!(err.contains("没有已暂存修改可生成提交信息"));
 
         let _ = fs::remove_dir_all(project);
     }
