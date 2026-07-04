@@ -113,8 +113,8 @@ function convertCodeMuxMessageToThreadMessageLike(
     createdAt: sourceTimestamp ? new Date(sourceTimestamp) : undefined,
     content: message.content.map(convertCodeMuxPartToThreadPart),
     attachments: message.role === 'user'
-      ? message.metadata.attachments?.map((attachment) => ({
-        id: `${message.id}-${attachment.name}`,
+      ? message.metadata.attachments?.map((attachment, index) => ({
+        id: `${message.id}-${attachment.name}-${index}`,
         type: 'image',
         name: attachment.name,
         contentType: attachment.mediaType,
