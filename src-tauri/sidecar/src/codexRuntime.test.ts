@@ -1231,7 +1231,7 @@ describe('CodexSessionRuntime', () => {
     }
   });
 
-  it('does not emit a success result for live Codex compaction-only turns', async () => {
+  it('emits a success result even when a live Codex turn had compaction', async () => {
     const writes: string[] = [];
     const stdoutSpy = vi
       .spyOn(process.stdout, 'write')
@@ -1301,7 +1301,7 @@ describe('CodexSessionRuntime', () => {
           expect.objectContaining({ type: 'sidecar_query_done' }),
         ]),
       );
-      expect(emittedEvents.some((event) => event.type === 'result')).toBe(false);
+      expect(emittedEvents.some((event) => event.type === 'result')).toBe(true);
     } finally {
       stdoutSpy.mockRestore();
     }

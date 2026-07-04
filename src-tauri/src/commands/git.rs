@@ -573,8 +573,7 @@ pub fn revert_git_status_changes_in_project(
             }
         }
         (GitStatusArea::Unstaged, None) => {
-            run_git(&root, &["restore", "--worktree", "--", "."])?;
-            run_git(&root, &["clean", "-fd", "--", "."]).map(|_| ())
+            run_git(&root, &["restore", "--worktree", "--", "."]).map(|_| ())
         }
         (GitStatusArea::Staged, Some(file_path)) => {
             let relative_path = path_to_repo_relative(&root, file_path);
@@ -1349,7 +1348,7 @@ mod tests {
     }
 
     #[test]
-    fn git_revert_unstaged_changes_restores_tracked_and_removes_untracked() {
+    fn git_revert_unstaged_changes_restores_tracked_files() {
         if !git_available() {
             return;
         }
@@ -1367,7 +1366,8 @@ mod tests {
                 .replace("\r\n", "\n"),
             "hello\n"
         );
-        assert!(!project.join("fresh.txt").exists());
+        // Untracked files are preserved — only tracked file modifications are reverted.
+        assert!(project.join("fresh.txt").exists());
 
         let _ = fs::remove_dir_all(project);
     }

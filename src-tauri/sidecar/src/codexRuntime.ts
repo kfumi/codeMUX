@@ -114,7 +114,6 @@ export class CodexSessionRuntime {
   private blockedPlanMutationItemIds = new Set<string>();
   private activeCompactItemIds = new Set<string>();
   private emittedCompactItemIds = new Set<string>();
-  private currentTurnHadCompaction = false;
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     if (cmd.sessionId) setActiveSessionId(cmd.sessionId);
@@ -312,7 +311,6 @@ export class CodexSessionRuntime {
 
     this.abortController = new AbortController();
     activeAbortController = this.abortController;
-    this.currentTurnHadCompaction = false;
 
     const collaborationPolicy = this.config.collaborationPolicy
       ?? resolveCodexCollaborationPolicy({
@@ -416,7 +414,7 @@ export class CodexSessionRuntime {
       }
 
       const finalUsage = usageSeen ? usage : emptyUsage();
-      if (!retryingWithoutImages && !this.abortController?.signal.aborted && turnCompleted && !turnFailed && !this.currentTurnHadCompaction) {
+      if (!retryingWithoutImages && !this.abortController?.signal.aborted && turnCompleted && !turnFailed) {
         const lastTokenUsage = await readLatestCodexLastTokenUsage(this.thread.id).catch((error) => {
           process.stderr.write(`[codex] Failed to read session last_token_usage: ${String(error)}\n`);
           return null;
@@ -427,7 +425,7 @@ export class CodexSessionRuntime {
           lastTokenUsage,
           durationMs: Date.now() - startedAt,
         }));
-      } else if (!retryingWithoutImages && !this.abortController?.signal.aborted && !this.currentTurnHadCompaction) {
+      } else if (!retryingWithoutImages && !this.abortController?.signal.aborted) {
         process.stderr.write(
           `[codex] Skipping success result: completed=${turnCompleted} failed=${turnFailed}\n`,
         );
@@ -732,7 +730,6 @@ export class CodexSessionRuntime {
     this.emittedToolUseIds.clear();
     this.blockedPlanMutationItemIds.clear();
     this.activeCompactItemIds.clear();
-    this.currentTurnHadCompaction = false;
     emit({ type: 'sidecar_query_done' });
   }
 
@@ -745,7 +742,6 @@ export class CodexSessionRuntime {
     this.blockedPlanMutationItemIds.clear();
     this.activeCompactItemIds.clear();
     this.emittedCompactItemIds.clear();
-    this.currentTurnHadCompaction = false;
     this.thread = null;
     this.client = null;
   }
@@ -826,7 +822,6 @@ export class CodexSessionRuntime {
       return false;
     }
 
-    this.currentTurnHadCompaction = true;
     process.stderr.write(`[codex][compact-detected] phase=${compactEvent.phase} item_id=${compactEvent.itemId ?? 'none'}\n`);
 
     if (compactEvent.itemId && compactEvent.phase === 'started') {

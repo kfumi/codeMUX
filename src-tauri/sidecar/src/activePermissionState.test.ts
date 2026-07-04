@@ -112,8 +112,9 @@ describe('activePermissionState', () => {
       planMode: 'off',
       effectiveMode: 'code',
     });
+    // acceptEdits mode is handled by the SDK via permissionMode — sidecar returns 'ask' to let the SDK decide
     expect(resolveClaudeToolRuntimeDecision('Write', 'session-1')).toEqual({
-      behavior: 'allow',
+      behavior: 'ask',
       effectiveMode: 'code',
       reasonCode: null,
     });

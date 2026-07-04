@@ -182,9 +182,25 @@ fn rewind_jsonl_before_latest_turn(path: &Path, agent_kind: AgentKind) -> Result
     };
 
     let next_content = lines[..user_line_index].concat();
-    fs::write(path, next_content).map_err(|err| {
+    // Atomic write: write to a temp file first, then rename over the original.
+    // This prevents corruption if the process crashes mid-write or the sidecar
+    // is concurrently appending to the same file.
+    let tmp_path = path.with_extension(format!(
+        "jsonl.tmp.{}",
+        uuid::Uuid::new_v4()
+    ));
+    fs::write(&tmp_path, &next_content).map_err(|err| {
+        let _ = fs::remove_file(&tmp_path);
         format!(
-            "Failed to write rewound session history {}: {}",
+            "Failed to write temp session history {}: {}",
+            tmp_path.display(),
+            err
+        )
+    })?;
+    fs::rename(&tmp_path, path).map_err(|err| {
+        let _ = fs::remove_file(&tmp_path);
+        format!(
+            "Failed to rename temp session history to {}: {}",
             path.display(),
             err
         )
@@ -1475,7 +1491,7 @@ pub async fn rewind_agent_session(
         let interactive_path = codex_interactive_events_dir(&home)
             .join(format!("{}.jsonl", sanitize_file_segment(&app_session_id)));
         if interactive_path.exists() {
-            let _ = rewind_jsonl_before_latest_turn(&interactive_path, AgentKind::ClaudeCode);
+            let _ = rewind_jsonl_before_latest_turn(&interactive_path, agent_kind);
         }
     }
 

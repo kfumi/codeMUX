@@ -164,10 +164,6 @@ export function resolveClaudeToolRuntimeDecision(
     return { behavior: 'allow', effectiveMode: 'code', reasonCode: null };
   }
 
-  if (isClaudeAutoEditAccess(state) && isClaudeEditTool(toolName)) {
-    return { behavior: 'allow', effectiveMode: 'code', reasonCode: null };
-  }
-
   return {
     behavior: 'ask',
     effectiveMode: state.effectiveMode,
@@ -215,28 +211,6 @@ function isClaudeFullAccess(state: ActivePermissionState): boolean {
   return state.planMode !== 'on'
     && state.permissionConfig?.kind === 'claude_code'
     && state.permissionConfig.permissionMode === 'bypassPermissions';
-}
-
-function isClaudeAutoEditAccess(state: ActivePermissionState): boolean {
-  return state.planMode !== 'on'
-    && state.permissionConfig?.kind === 'claude_code'
-    && (state.permissionConfig.permissionMode === 'acceptEdits'
-      || state.permissionConfig.permissionMode === 'auto');
-}
-
-function isClaudeEditTool(toolName: string): boolean {
-  const normalized = toolName.trim().toLowerCase().replace(/[-_\s]/g, '');
-  return normalized === 'write'
-    || normalized === 'edit'
-    || normalized === 'multiedit'
-    || normalized === 'notebookedit'
-    || normalized === 'createfile'
-    || normalized === 'createdirectory'
-    || normalized === 'delete'
-    || normalized === 'deletefile'
-    || normalized === 'remove'
-    || normalized === 'removefile'
-    || normalized === 'rewrite';
 }
 
 function isClaudeMutatingTool(toolName: string): boolean {
