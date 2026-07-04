@@ -1,6 +1,6 @@
 import { AssistantRuntimeProvider, SimpleImageAttachmentAdapter, useExternalStoreRuntime } from '@assistant-ui/react';
 import type { AppendMessage, ThreadMessageLike } from '@assistant-ui/react';
-import { useCallback, useMemo, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, type ReactNode } from 'react';
 
 import type { SlashCommand } from '../../../lib/slashCommands';
 import { findCommand } from '../../../lib/slashCommands';
@@ -59,6 +59,8 @@ function SessionScopedAssistantRuntime({
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const rewindLastTurn = useAgentStore((state) => state.rewindLastTurn);
   const attachmentAdapter = useMemo(() => new CodeMuxImageAttachmentAdapter(), []);
+  const eventTimestampsRef = useRef(eventTimestamps);
+  eventTimestampsRef.current = eventTimestamps;
 
   const messages = useMemo(
     () => convertAgentEventsToAssistantMessages(events),
@@ -101,10 +103,16 @@ function SessionScopedAssistantRuntime({
     [handleMessage, rewindLastTurn, sessionId],
   );
 
+  const convertMessage = useCallback(
+    (message: CodeMuxAssistantMessage) =>
+      convertCodeMuxMessageToThreadMessageLike(message, eventTimestampsRef.current),
+    [],
+  );
+
   const runtime = useExternalStoreRuntime<CodeMuxAssistantMessage>({
     messages,
     isRunning,
-    convertMessage: (message) => convertCodeMuxMessageToThreadMessageLike(message, eventTimestamps),
+    convertMessage,
     onNew: handleNew,
     onEdit: handleEdit,
     adapters: {

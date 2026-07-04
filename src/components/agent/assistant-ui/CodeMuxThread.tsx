@@ -3,13 +3,15 @@
   MessagePrimitive,
   ThreadPrimitive,
   groupPartByType,
+  unstable_useThreadMessageIds,
   useAui,
   useAuiState,
   type MessageState,
 } from '@assistant-ui/react';
 import { LexicalComposerInput } from '@assistant-ui/react-lexical';
 import { ArrowDown, ChevronRight, ChevronDown, Loader2, Undo2 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { flushSync } from 'react-dom';
 import { Streamdown } from 'streamdown';
 
 import { MessageFooter, type MessageFooterStats } from '@/components/assistant-ui/message-footer';
@@ -58,6 +60,18 @@ type UserNavItem = {
   summary: string;
 };
 
+type CodeMuxThreadRenderContextValue = {
+  sessionId: string;
+  compactAiOutput: boolean;
+  isRunning: boolean;
+  latestRewindableUserIndex: number | null;
+  collapseInfoByEventIndex: Map<number, AssistantCollapseInfo>;
+  expandedTurnKeys: Set<string>;
+  onToggleExpandedTurn: (turnKey: string) => void;
+  toolDurations: Record<string, number>;
+  resultStatsByAssistantIndex: Record<number, MessageFooterStats>;
+};
+
 const EMPTY_EVENTS: AgentMessage[] = [];
 const EMPTY_TIMESTAMPS: number[] = [];
 const INTERRUPT_LABEL = '用户中断请求';
@@ -71,6 +85,12 @@ const GROUP_BY_PART = groupPartByType({
 });
 const STREAMING_MARKDOWN_COMPONENTS = {
   a: CodeMuxMarkdownLink,
+};
+const CodeMuxThreadRenderContext = createContext<CodeMuxThreadRenderContextValue | null>(null);
+const MESSAGE_COMPONENTS = {
+  UserMessage: CodeMuxUserMessage,
+  UserEditComposer: CodeMuxUserEditComposer,
+  AssistantMessage: CodeMuxAssistantMessage,
 };
 
 export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProps) {
@@ -113,7 +133,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
     return () => observer.disconnect();
   }, []);
 
-  const toggleExpandedTurn = (turnKey: string) => {
+  const toggleExpandedTurn = useCallback((turnKey: string) => {
     setExpandedTurnKeys((current) => {
       const next = new Set(current);
       if (next.has(turnKey)) {
@@ -123,7 +143,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
       }
       return next;
     });
-  };
+  }, []);
 
   // Incremental tool duration calculation - only use event-reported durations
   const toolDurationCacheRef = useRef<{ events: AgentMessage[]; result: Record<string, number> }>({ events: [], result: {} });
@@ -168,41 +188,21 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
     () => buildAssistantCollapseInfoMap(events, eventTimestamps),
     [events, eventTimestamps],
   );
-  const messageComponents = useMemo(() => ({
-    UserMessage: function CodeMuxUserMessage() {
-      const message = useAuiState((state) => state.message);
-      return (
-        <UserMessage
-          message={message}
-          sourceEventIndex={getSourceEventIndex(message)}
-          canRewind={!isRunning && getSourceEventIndex(message) === latestRewindableUserIndex}
-        />
-      );
-    },
-    UserEditComposer: function CodeMuxUserEditComposer() {
-      const message = useAuiState((state) => state.message);
-      return <UserEditComposer message={message} sourceEventIndex={getSourceEventIndex(message)} />;
-    },
-    AssistantMessage: function CodeMuxAssistantMessage() {
-      const message = useAuiState((state) => state.message);
-      return (
-        <AssistantLikeMessage
-          message={message}
-          sessionId={sessionId}
-          compactAiOutput={compactAiOutput}
-          collapseInfoByEventIndex={collapseInfoByEventIndex}
-          expandedTurnKeys={expandedTurnKeys}
-          onToggleExpandedTurn={toggleExpandedTurn}
-          toolDurations={toolDurations}
-          resultStatsByAssistantIndex={resultStatsByAssistantIndex}
-        />
-      );
-    },
-  }), [
-    isRunning,
-    latestRewindableUserIndex,
+  const threadRenderContextValue = useMemo(() => ({
     sessionId,
     compactAiOutput,
+    isRunning,
+    latestRewindableUserIndex,
+    collapseInfoByEventIndex,
+    expandedTurnKeys,
+    onToggleExpandedTurn: toggleExpandedTurn,
+    toolDurations,
+    resultStatsByAssistantIndex,
+  }), [
+    sessionId,
+    compactAiOutput,
+    isRunning,
+    latestRewindableUserIndex,
     collapseInfoByEventIndex,
     expandedTurnKeys,
     toggleExpandedTurn,
@@ -226,7 +226,9 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
               showMessageNav ? 'pl-14 pr-4' : 'px-4',
             )}
           >
-            <ThreadPrimitive.Messages components={messageComponents} />
+            <CodeMuxThreadRenderContext.Provider value={threadRenderContextValue}>
+              <CodeMuxThreadMessages />
+            </CodeMuxThreadRenderContext.Provider>
             {stopped ? <InterruptBanner /> : null}
             <StreamingContent sessionId={sessionId} events={events} />
             <ThreadPrimitive.ViewportFooter
@@ -248,6 +250,73 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
       {showMessageNav ? <MessageNav items={userNavItems} scrollContainer={viewportRef} disabled={isRunning} /> : null}
       </div>
     </ThreadPrimitive.Root>
+  );
+}
+
+function CodeMuxThreadMessages() {
+  const messageIds = unstable_useThreadMessageIds();
+
+  return (
+    <>
+      {messageIds.map((messageId) => (
+        <ThreadPrimitive.Unstable_MessageById
+          key={messageId}
+          messageId={messageId}
+          components={MESSAGE_COMPONENTS}
+        />
+      ))}
+    </>
+  );
+}
+
+function useCodeMuxThreadRenderContext() {
+  const value = useContext(CodeMuxThreadRenderContext);
+  if (!value) {
+    throw new Error('CodeMux thread message components must be rendered inside CodeMuxThreadRenderContext.');
+  }
+  return value;
+}
+
+function CodeMuxUserMessage() {
+  const message = useAuiState((state) => state.message);
+  const { isRunning, latestRewindableUserIndex } = useCodeMuxThreadRenderContext();
+  const sourceEventIndex = getSourceEventIndex(message);
+  return (
+    <UserMessage
+      message={message}
+      sourceEventIndex={sourceEventIndex}
+      canRewind={!isRunning && sourceEventIndex === latestRewindableUserIndex}
+    />
+  );
+}
+
+function CodeMuxUserEditComposer() {
+  const message = useAuiState((state) => state.message);
+  return <UserEditComposer message={message} sourceEventIndex={getSourceEventIndex(message)} />;
+}
+
+function CodeMuxAssistantMessage() {
+  const message = useAuiState((state) => state.message);
+  const {
+    sessionId,
+    compactAiOutput,
+    collapseInfoByEventIndex,
+    expandedTurnKeys,
+    onToggleExpandedTurn,
+    toolDurations,
+    resultStatsByAssistantIndex,
+  } = useCodeMuxThreadRenderContext();
+  return (
+    <AssistantLikeMessage
+      message={message}
+      sessionId={sessionId}
+      compactAiOutput={compactAiOutput}
+      collapseInfoByEventIndex={collapseInfoByEventIndex}
+      expandedTurnKeys={expandedTurnKeys}
+      onToggleExpandedTurn={onToggleExpandedTurn}
+      toolDurations={toolDurations}
+      resultStatsByAssistantIndex={resultStatsByAssistantIndex}
+    />
   );
 }
 
@@ -368,15 +437,19 @@ function UserEditComposer({ message, sourceEventIndex }: { message: MessageState
       return;
     }
 
-    aui.thread().append({
-      parentId: message.id,
-      sourceId: message.id,
-      role: 'user',
-      content: text ? [{ type: 'text', text }] : [],
-      attachments: [],
-      createdAt: new Date(),
+    flushSync(() => {
+      aui.message().composer().cancel();
     });
-    aui.message().composer().cancel();
+    window.setTimeout(() => {
+      void aui.thread().append({
+        parentId: message.id,
+        sourceId: message.id,
+        role: 'user',
+        content: text ? [{ type: 'text', text }] : [],
+        attachments: [],
+        createdAt: new Date(),
+      });
+    }, 0);
   };
 
   return (
@@ -670,37 +743,31 @@ function MessageNav({
     const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
     const count = items.length;
     const markerHeight = 2;
-    const markerGap = 8;
+    const maxMarkerGap = 8;
     const availableHeight = Math.max(navHeight, 48);
-    const stackHeight = Math.min(144, Math.max(48, availableHeight * 0.36));
-    const maxVisibleCount =
-      availableHeight > 0
-        ? Math.max(1, Math.floor((stackHeight - markerHeight) / markerGap) + 1)
-        : count;
-    const visibleCount = Math.min(count, maxVisibleCount);
+    const stackHeight = clamp(availableHeight - 120, 48, availableHeight);
+    const spacing = count <= 1 ? maxMarkerGap : Math.min(maxMarkerGap, stackHeight / (count - 1));
 
     return {
       markerHeight: clamp(markerHeight, 2, 2),
-      spacing: markerGap,
+      spacing,
       center: availableHeight / 2,
-      visibleCount,
     };
   }, [items.length, navHeight]);
 
-  const visibleItems = navMetrics.visibleCount >= items.length ? items : items.slice(-navMetrics.visibleCount);
   const previewItemIndex = previewEventIndex == null
     ? null
-    : visibleItems.findIndex((item) => item.eventIndex === previewEventIndex);
+    : items.findIndex((item) => item.eventIndex === previewEventIndex);
   const positionedItems = useMemo(
     () =>
-      visibleItems.map((item, index) => ({
+      items.map((item, index) => ({
         ...item,
         top:
-          visibleItems.length <= 1
+          items.length <= 1
             ? navMetrics.center
-            : navMetrics.center + (index - (visibleItems.length - 1) / 2) * navMetrics.spacing,
-    })),
-    [navMetrics.spacing, navMetrics.center, visibleItems],
+            : navMetrics.center + (index - (items.length - 1) / 2) * navMetrics.spacing,
+      })),
+    [navMetrics.spacing, navMetrics.center, items],
   );
 
   if (items.length <= 1) {

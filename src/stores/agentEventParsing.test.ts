@@ -283,6 +283,36 @@ describe('mapPersistedClaudeMessage', () => {
     ).toBeNull();
   });
 
+  it('suppresses Claude task notification user messages from user-visible history', () => {
+    expect(
+      mapPersistedClaudeMessage(
+        {
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: [
+                  '<task-notification>',
+                  '<task-id>a03cceb46f044534</task-id>',
+                  '<status>completed</status>',
+                  '<summary>Agent completed</summary>',
+                  '</task-notification>',
+                ].join('\n'),
+              },
+            ],
+          },
+          origin: {
+            kind: 'task-notification',
+          },
+          parent_tool_use_id: null,
+        },
+        'claude_code',
+      ),
+    ).toBeNull();
+  });
+
   it('loads result messages from Claude JSONL history', () => {
     expect(
       mapPersistedClaudeMessage({

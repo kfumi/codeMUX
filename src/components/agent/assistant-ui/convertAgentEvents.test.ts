@@ -802,6 +802,42 @@ describe('convertAgentEventsToAssistantMessages', () => {
     });
   });
 
+  it('does not render Claude task notification XML if it reaches the UI converter', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-before-meta',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'All finder angles are running in parallel.' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'user',
+        data: {
+          content: [
+            '<task-notification>',
+            '<status>completed</status>',
+            '<summary>Agent completed</summary>',
+            '</task-notification>',
+          ].join('\n'),
+          origin: { kind: 'task-notification' },
+        } as any,
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.role).toBe('assistant');
+    expect(messages[0]?.content).toEqual([{ type: 'text', text: 'All finder angles are running in parallel.' }]);
+  });
+
   it('renders only the compact marker when a Codex compact summary assistant message is present', () => {
     const events: AgentMessage[] = [
       {

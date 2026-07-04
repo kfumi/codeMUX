@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
+import { TooltipProvider } from '../../ui/tooltip';
 import {
   buildAgentInputPayloadFromAppendMessage,
   CodeMuxImageAttachmentAdapter,
@@ -411,6 +413,70 @@ const navigationTurnEvents: AgentMessage[] = [
   },
 ];
 
+function buildLargeToolHistoryEvents(turnCount: number): AgentMessage[] {
+  const events: AgentMessage[] = [];
+
+  for (let index = 0; index < turnCount; index += 1) {
+    const toolUseId = `perf-tool-${index}`;
+    events.push(
+      { kind: 'user', data: { content: `性能测试消息 ${index}` } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: `perf-assistant-tool-${index}`,
+          session_id: 'session-perf-large',
+          message: {
+            role: 'assistant',
+            content: [{
+              type: 'tool_use',
+              id: toolUseId,
+              name: 'Read',
+              input: { file_path: `src/perf/${index}.tsx`, note: 'x'.repeat(80) },
+            }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: `perf-tool-result-${index}`,
+          session_id: 'session-perf-large',
+          message: {
+            role: 'user',
+            content: [{
+              type: 'tool_result',
+              tool_use_id: toolUseId,
+              content: `result ${index}\n${'result-line\n'.repeat(6)}`,
+            }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: `perf-assistant-final-${index}`,
+          session_id: 'session-perf-large',
+          message: {
+            role: 'assistant',
+            content: [{
+              type: 'text',
+              text: `### 结果 ${index}\n\n- 项目 A\n- 项目 B\n\n\`\`\`ts\nconst value${index} = ${index};\n\`\`\``,
+            }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    );
+  }
+
+  return events;
+}
+
 const originalScrollTo = HTMLElement.prototype.scrollTo;
 const resizeObservers: Array<{ callback: ResizeObserverCallback; target: Element | null }> = [];
 
@@ -446,7 +512,7 @@ function Harness({
   sessionId: string;
   onSend?: (content: any) => Promise<void>;
 }) {
-  return (
+  const content = (
     <CodeMuxAssistantRuntimeProvider
       sessionId={sessionId}
       onSend={onSend}
@@ -455,10 +521,14 @@ function Harness({
       <CodeMuxThread sessionId={sessionId} />
     </CodeMuxAssistantRuntimeProvider>
   );
+  const wrapped = <TooltipProvider>{content}</TooltipProvider>;
+  return wrapped;
 }
 
 describe('CodeMuxAssistantRuntimeProvider', () => {
   beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
     class MockResizeObserver {
       private callback: ResizeObserverCallback;
 
@@ -621,6 +691,72 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(toolGroup?.getAttribute('data-variant')).toBe('ghost');
     expect(container.querySelector('[data-slot="tool-group-trigger"]')).toBeTruthy();
   });
+
+  it('keeps expanded tool details open across large-history running updates', async () => {
+    const largeEvents = buildLargeToolHistoryEvents(200);
+    useAgentStore.setState((state) => ({
+      events: {
+        ...state.events,
+        'session-perf-large': largeEvents,
+      },
+      eventTimestamps: {
+        ...state.eventTimestamps,
+        'session-perf-large': largeEvents.map((_, index) => index + 1),
+      },
+      isRunning: {
+        ...state.isRunning,
+        'session-perf-large': false,
+      },
+    }));
+
+    const { container } = render(<Harness sessionId="session-perf-large" />);
+
+    const firstTrigger = container.querySelector('[data-slot="tool-fallback-trigger"]');
+    expect(firstTrigger).toBeTruthy();
+    fireEvent.click(firstTrigger!);
+    expect(firstTrigger?.getAttribute('aria-expanded')).toBe('true');
+
+    await act(async () => {
+      useAgentStore.setState((state) => ({
+        isRunning: {
+          ...state.isRunning,
+          'session-perf-large': true,
+        },
+        streamingThinking: {
+          ...state.streamingThinking,
+          'session-perf-large': '正在分析大量历史消息\n'.repeat(200),
+        },
+      }));
+    });
+
+    const triggerAfterRunning = container.querySelector('[data-slot="tool-fallback-trigger"]');
+    const expandedAfterRunning = triggerAfterRunning?.getAttribute('aria-expanded');
+
+    expect(expandedAfterRunning).toBe('true');
+
+    await act(async () => {
+      useAgentStore.setState((state) => ({
+        events: {
+          ...state.events,
+          'session-perf-large': [
+            ...(state.events['session-perf-large'] ?? []),
+            {
+              kind: 'raw',
+              data: {
+                type: 'tool_progress',
+                tool_use_id: 'perf-tool-0',
+                elapsed_time_seconds: 2,
+              },
+            } as AgentMessage,
+          ],
+        },
+      }));
+    });
+
+    const expandedAfterEvent = container.querySelector('[data-slot="tool-fallback-trigger"]')?.getAttribute('aria-expanded');
+
+    expect(expandedAfterEvent).toBe('true');
+  }, 30_000);
 
   it('does not resolve Claude-only slash commands in Codex sessions', () => {
     expect(resolveSlashCommand('/security-review', 'codex')).toBeNull();
@@ -860,6 +996,54 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     });
   });
 
+  it('does not read stale message indexes when rewind removes the tail of a long thread', async () => {
+    const longSessionId = 'session-long-rewind';
+    const longEvents = buildLargeToolHistoryEvents(120);
+    const latestUserIndex = longEvents.findLastIndex((event) => event.kind === 'user');
+    const onSend = vi.fn(async () => {});
+    const rewindLastTurn = vi.fn(async () => {
+      useAgentStore.setState((state) => ({
+        events: {
+          ...state.events,
+          [longSessionId]: longEvents.slice(0, latestUserIndex),
+        },
+        eventTimestamps: {
+          ...state.eventTimestamps,
+          [longSessionId]: longEvents.slice(0, latestUserIndex).map((_, index) => index + 1),
+        },
+      }));
+      return { text: `性能测试消息 ${latestUserIndex}` };
+    });
+
+    useAgentStore.setState((state) => ({
+      rewindLastTurn,
+      events: {
+        ...state.events,
+        [longSessionId]: longEvents,
+      },
+      eventTimestamps: {
+        ...state.eventTimestamps,
+        [longSessionId]: longEvents.map((_, index) => index + 1),
+      },
+    } as any));
+
+    render(<Harness sessionId={longSessionId} onSend={onSend} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回退并编辑这条消息' }));
+    const sendButton = await screen.findByRole<HTMLButtonElement>('button', { name: '发送' });
+    await waitFor(() => expect(sendButton.disabled).toBe(false));
+
+    await act(async () => {
+      fireEvent.click(sendButton);
+    });
+
+    await waitFor(() => {
+      expect(rewindLastTurn).toHaveBeenCalledWith(longSessionId);
+      expect(onSend).toHaveBeenCalled();
+    });
+    expect(screen.queryByText('结果 119')).toBeNull();
+  }, 30_000);
+
   it('keeps short streaming thinking complete but renders only the latest window for very long thinking', () => {
     const shortThinking = 'short thinking stays fully visible';
     const longThinkingHead = 'long-thinking-head';
@@ -1069,6 +1253,30 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       Number.parseFloat(((button as HTMLElement).firstElementChild as HTMLElement).style.width),
     );
     expect(widths).toEqual([14, 22, 34, 22, 14]);
+  });
+
+  it('keeps every message navigation item accessible for long histories', () => {
+    const manyTurns: AgentMessage[] = Array.from({ length: 30 }, (_, index) => ({
+      kind: 'user',
+      data: { content: `历史消息 ${index + 1}` },
+    }));
+    useAgentStore.setState((state) => ({
+      events: {
+        ...state.events,
+        'session-many-nav': manyTurns,
+      },
+      eventTimestamps: {
+        ...state.eventTimestamps,
+        'session-many-nav': manyTurns.map((_, index) => index + 1),
+      },
+    }));
+
+    render(<Harness sessionId="session-many-nav" />);
+
+    const navButtons = screen.getAllByRole('button', { name: /跳转到消息/ });
+    expect(navButtons).toHaveLength(30);
+    expect(screen.getByRole('button', { name: '跳转到消息 历史消息 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '跳转到消息 历史消息 30' })).toBeTruthy();
   });
 
   it('uses a larger hit target than the visible message navigation marker', () => {

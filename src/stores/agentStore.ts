@@ -5,6 +5,7 @@ import {
   isClaudeSubagentEvent,
   isClaudeCompactSummaryRawEvent,
   isClaudeCompactSummaryText,
+  isClaudeTaskNotificationEvent,
   isCodexCompactSummaryText,
   isAgentInjectedUserMessage,
   isInterruptMarker,
@@ -445,6 +446,10 @@ function parseAgentEvent(raw: string): AgentMessage {
 
     // Filter out sub-agent (sidechain) messages from the main event stream.
     if (isClaudeSubagentEvent(data)) {
+      return { kind: 'raw', data };
+    }
+
+    if (isClaudeTaskNotificationEvent(data)) {
       return { kind: 'raw', data };
     }
 

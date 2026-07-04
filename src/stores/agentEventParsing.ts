@@ -165,6 +165,26 @@ export function isClaudeSubagentEvent(raw: Record<string, unknown>): boolean {
     || (typeof raw.parent_tool_use_id === 'string' && raw.parent_tool_use_id.length > 0);
 }
 
+export function isClaudeTaskNotificationEvent(raw: Record<string, unknown>): boolean {
+  const origin = asRecord(raw.origin);
+  return (
+    origin?.kind === 'task-notification' ||
+    origin?.kind === 'task_notification' ||
+    (raw.type === 'system' && raw.subtype === 'task_notification')
+  );
+}
+
+export function isClaudeTaskNotificationUserEvent(data: Record<string, unknown>): boolean {
+  const origin = asRecord(data.origin);
+  const content = typeof data.content === 'string' ? data.content.trimStart() : '';
+
+  return (
+    origin?.kind === 'task-notification' ||
+    origin?.kind === 'task_notification' ||
+    content.startsWith('<task-notification>')
+  );
+}
+
 const CLAUDE_COMMAND_NAME_RE = /<command-name>\s*([\s\S]*?)\s*<\/command-name>/;
 const CLAUDE_COMMAND_ARGS_RE = /<command-args>\s*([\s\S]*?)\s*<\/command-args>/;
 const CLAUDE_COMMAND_TAGS_RE = /<command-(?:message|name|args)>[\s\S]*?<\/command-(?:message|name|args)>/g;
@@ -316,6 +336,10 @@ export function mapPersistedClaudeMessage(
   agentKind: AgentKind = 'claude_code',
 ): ParsedStoreEvent | null {
   if (isClaudeSubagentEvent(raw)) {
+    return null;
+  }
+
+  if (isClaudeTaskNotificationEvent(raw)) {
     return null;
   }
 

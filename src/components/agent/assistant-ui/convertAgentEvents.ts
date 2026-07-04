@@ -1,5 +1,5 @@
 ﻿import type { AgentMessage } from '../../../stores/agentStore';
-import { isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
+import { isClaudeTaskNotificationUserEvent, isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
 import type { ContentBlock } from '../../../types/agent';
 import type { UserAttachmentPreview } from '../../../types/agentInput';
 import { buildAssistantResultTargetSet } from './assistantResultTargets';
@@ -58,6 +58,10 @@ export function convertAgentEventsToAssistantMessages(
       const hasAttachments = (event.data.attachments?.length ?? 0) > 0;
 
       if (isHiddenClaudeCompactUserEvent(event, text)) {
+        return;
+      }
+
+      if (isClaudeTaskNotificationUserEvent(event.data)) {
         return;
       }
 
