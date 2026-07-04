@@ -6,12 +6,14 @@ import type { AgentInputPayload } from './agentInputPayload.js';
 export const CODEX_COLLABORATION_POLICY_VERSION = 'codemux-codex-collaboration-policy/v1';
 
 export type CodexCollaborationMode = 'code' | 'plan';
+export type CodexInteractionMode = 'autonomous' | 'checkpoint' | 'plan';
 export type CodexCollaborationProfile = 'strict-local';
 export type CodexRequestUserInputPolicy = 'allow' | 'block';
 
 export type CodexCollaborationPolicy = {
   selectedMode: CodexCollaborationMode | null;
   effectiveMode: CodexCollaborationMode;
+  interactionMode: CodexInteractionMode;
   profile: CodexCollaborationProfile;
   fallbackReason: string | null;
   policyVersion: typeof CODEX_COLLABORATION_POLICY_VERSION;
@@ -54,13 +56,27 @@ export function normalizeCodexCollaborationMode(value: unknown): CodexCollaborat
   return null;
 }
 
+export function normalizeCodexInteractionMode(value: unknown): CodexInteractionMode | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'plan') return 'plan';
+  if (normalized === 'checkpoint' || normalized === 'interactive') return 'checkpoint';
+  if (normalized === 'autonomous' || normalized === 'code' || normalized === 'default') return 'autonomous';
+  return null;
+}
+
 export function resolveCodexCollaborationPolicy(input: {
   planMode?: AgentPlanMode;
   collaborationMode?: unknown;
   permissionConfig?: SidecarPermissionConfig;
   previousMode?: CodexCollaborationMode | null;
 }): CodexCollaborationPolicy {
-  const explicitMode = normalizeCodexCollaborationMode(input.collaborationMode);
+  const explicitInteractionMode = normalizeCodexInteractionMode(input.collaborationMode);
+  const explicitMode = explicitInteractionMode === 'plan'
+    ? 'plan'
+    : explicitInteractionMode
+      ? 'code'
+      : normalizeCodexCollaborationMode(input.collaborationMode);
   const selectedMode = explicitMode
     ?? (input.planMode === 'on' ? 'plan' : input.planMode === 'off' ? 'code' : null);
   const fallbackReason = selectedMode
@@ -70,28 +86,54 @@ export function resolveCodexCollaborationPolicy(input: {
       : 'missing_mode_in_request_default_code';
   const effectiveMode = selectedMode ?? input.previousMode ?? 'code';
   const profile: CodexCollaborationProfile = 'strict-local';
-  const requestUserInputPolicy: CodexRequestUserInputPolicy = effectiveMode === 'plan'
-    ? 'allow'
-    : 'block';
+  const interactionMode = resolveCodexInteractionMode({
+    effectiveMode,
+    explicitInteractionMode,
+    planMode: input.planMode,
+  });
+  const requestUserInputPolicy: CodexRequestUserInputPolicy = interactionMode === 'autonomous'
+    ? 'block'
+    : 'allow';
 
   return {
     selectedMode,
     effectiveMode,
+    interactionMode,
     profile,
     fallbackReason,
     policyVersion: CODEX_COLLABORATION_POLICY_VERSION,
     requestUserInputPolicy,
-    directives: buildCodexCollaborationDirectives(effectiveMode, profile),
+    directives: buildCodexCollaborationDirectives(effectiveMode, interactionMode, profile),
   };
+}
+
+function resolveCodexInteractionMode(input: {
+  effectiveMode: CodexCollaborationMode;
+  explicitInteractionMode: CodexInteractionMode | null;
+  planMode?: AgentPlanMode;
+}): CodexInteractionMode {
+  if (input.effectiveMode === 'plan') return 'plan';
+  if (input.explicitInteractionMode && input.explicitInteractionMode !== 'plan') {
+    return input.explicitInteractionMode;
+  }
+  return input.planMode === 'off' ? 'checkpoint' : 'autonomous';
 }
 
 export function buildCodexCollaborationDirectives(
   mode: CodexCollaborationMode,
+  interactionMode: CodexInteractionMode = mode === 'plan' ? 'plan' : 'autonomous',
   _profile: CodexCollaborationProfile = 'strict-local',
 ): string[] {
-  if (mode === 'code') {
+  if (mode === 'code' && interactionMode === 'autonomous') {
     return [
       'Execution policy (default mode): keep execution autonomous. Do not ask the user follow-up questions and avoid requestUserInput / askuserquestion interactions. If details are missing, make minimal reasonable assumptions, proceed, and report assumptions briefly.',
+    ];
+  }
+
+  if (mode === 'code') {
+    return [
+      'Execution policy (checkpoint mode): keep execution autonomous for routine work, but you MAY use requestUserInput / askuserquestion for explicit checkpoints, phase confirmations, blockers, or missing information that materially affects the result.',
+      'Execution policy (checkpoint mode): full access controls filesystem, network, and approval behavior only; it does not disable user confirmation checkpoints.',
     ];
   }
 
@@ -145,12 +187,12 @@ function renderPolicyBlock(policy: CodexCollaborationPolicy): string {
     `policy_version: ${policy.policyVersion}`,
     `profile: ${policy.profile}`,
     `effective_mode: ${policy.effectiveMode}`,
+    `interaction_mode: ${policy.interactionMode}`,
     `request_user_input_policy: ${policy.requestUserInputPolicy}`,
     ...policy.directives,
     POLICY_MARKER_END,
   ].join('\n');
 }
-
 export function detectPlanModeBlockedMethod(item: unknown): string | null {
   if (!isRecord(item)) return null;
   const itemType = String(item.type ?? '').toLowerCase();

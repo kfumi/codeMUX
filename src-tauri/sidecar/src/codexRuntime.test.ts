@@ -409,7 +409,7 @@ describe('CodexSessionRuntime', () => {
     }
   });
 
-  it('injects code-mode autonomous directives when plan mode is off', async () => {
+  it('injects code-mode checkpoint directives when plan mode is off', async () => {
     const writes: string[] = [];
     let streamedInput: unknown;
     const stdoutSpy = vi
@@ -470,16 +470,18 @@ describe('CodexSessionRuntime', () => {
       expect(streamedInput).toEqual([
         {
           type: 'text',
-          text: expect.stringContaining('Execution policy (default mode): keep execution autonomous.'),
+          text: expect.stringContaining('Execution policy (checkpoint mode): keep execution autonomous for routine work'),
         },
       ]);
+      expect(JSON.stringify(streamedInput)).toContain('interaction_mode: checkpoint');
+      expect(JSON.stringify(streamedInput)).toContain('request_user_input_policy: allow');
       expect(JSON.stringify(streamedInput)).toContain('fix the bug');
     } finally {
       stdoutSpy.mockRestore();
     }
   });
 
-  it('injects full-access code-mode directives that block request_user_input', async () => {
+  it('injects full-access checkpoint directives that allow request_user_input', async () => {
     const writes: string[] = [];
     let streamedInput: unknown;
     const stdoutSpy = vi
@@ -549,9 +551,10 @@ describe('CodexSessionRuntime', () => {
         runInput: (prompt: string, inputPayload: undefined, includeImages: boolean) => Promise<void>;
       }).runInput('ask when blocked', undefined, false);
 
-      expect(JSON.stringify(streamedInput)).toContain('request_user_input_policy: block');
-      expect(JSON.stringify(streamedInput)).toContain('Execution policy (default mode): keep execution autonomous.');
-      expect(JSON.stringify(streamedInput)).not.toContain('You may use requestUserInput');
+      expect(JSON.stringify(streamedInput)).toContain('interaction_mode: checkpoint');
+      expect(JSON.stringify(streamedInput)).toContain('request_user_input_policy: allow');
+      expect(JSON.stringify(streamedInput)).toContain('Execution policy (checkpoint mode): keep execution autonomous for routine work');
+      expect(JSON.stringify(streamedInput)).toContain('you MAY use requestUserInput');
     } finally {
       stdoutSpy.mockRestore();
     }

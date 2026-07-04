@@ -62,14 +62,16 @@ export async function createCodexCompatProxyServer(
     }
   });
 
-  const PORT = preferredPort;
+  let port = preferredPort;
   const address = await new Promise<{ port: number }>((resolve, reject) => {
     let retries = 0;
     const tryListen = () => {
       server.once('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE' && retries < 5) {
+          const busyPort = port;
           retries++;
-          proxyLog(`port ${PORT} busy, retrying (${retries}/5)...`);
+          port = preferredPort === 0 ? 0 : preferredPort + retries;
+          proxyLog(`port ${busyPort} busy, retrying on ${port} (${retries}/5)...`);
           setTimeout(() => {
             server.removeAllListeners('error');
             tryListen();
@@ -78,7 +80,7 @@ export async function createCodexCompatProxyServer(
           reject(err);
         }
       });
-      server.listen(PORT, '127.0.0.1', () => {
+      server.listen(port, '127.0.0.1', () => {
         const currentAddress = server.address();
         if (!currentAddress || typeof currentAddress === 'string') {
           reject(new Error('Codex proxy server did not expose a TCP port.'));

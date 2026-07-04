@@ -11,6 +11,7 @@ import {
 } from './codexCollaborationPolicy.js';
 import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
 import { setActiveSessionId } from './codexRuntime.js';
+import { clearActivePermissionState } from './activePermissionState.js';
 
 function listen(server: ReturnType<typeof createServer>): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -53,6 +54,7 @@ let stdoutSpy: ReturnType<typeof vi.spyOn> | null = null;
 let stdoutWrites: string[] = [];
 
 beforeEach(() => {
+  clearActivePermissionState();
   setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({ planMode: 'off' }));
   setActiveSessionId('');
   delete process.env.CODEMUX_CODEX_INTERACTIVE_EVENTS_DIR;
@@ -66,6 +68,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  clearActivePermissionState();
   delete process.env.CODEMUX_CODEX_INTERACTIVE_EVENTS_DIR;
   stdoutSpy?.mockRestore();
   stdoutSpy = null;
@@ -967,6 +970,10 @@ describe('createCodexCompatProxyServer', () => {
   });
 
   it('blocks request_user_input tool calls when strict-local code mode is active', async () => {
+    setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({
+      planMode: 'off',
+      collaborationMode: 'autonomous',
+    }));
     const upstreamBodies: any[] = [];
     const upstream = createServer(async (req, res) => {
       const chunks: Buffer[] = [];
@@ -1083,6 +1090,10 @@ describe('createCodexCompatProxyServer', () => {
   });
 
   it('blocks non-streaming request_user_input tool calls when strict-local code mode is active', async () => {
+    setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({
+      planMode: 'off',
+      collaborationMode: 'autonomous',
+    }));
     const upstreamBodies: any[] = [];
     const upstream = createServer(async (req, res) => {
       const chunks: Buffer[] = [];
@@ -1209,6 +1220,10 @@ describe('createCodexCompatProxyServer', () => {
   });
 
   it('re-applies code-mode request_user_input blocking to streaming continuations', async () => {
+    setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({
+      planMode: 'off',
+      collaborationMode: 'autonomous',
+    }));
     const upstreamBodies: any[] = [];
     const upstream = createServer(async (req, res) => {
       const chunks: Buffer[] = [];
@@ -1685,6 +1700,10 @@ describe('createCodexCompatProxyServer', () => {
   });
 
   it('sends only chat-completions-compatible function tools upstream', async () => {
+    setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({
+      planMode: 'off',
+      collaborationMode: 'autonomous',
+    }));
     let receivedBody: any = null;
     const upstream = createServer(async (req, res) => {
       const chunks: Buffer[] = [];

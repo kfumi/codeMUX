@@ -18,19 +18,25 @@ describe('codexCollaborationPolicy', () => {
     });
   });
 
-  it('resolves missing or off planMode to code mode that blocks user input tools', () => {
-    expect(resolveCodexCollaborationPolicy({ planMode: 'off' })).toMatchObject({
-      selectedMode: 'code',
-      effectiveMode: 'code',
-      requestUserInputPolicy: 'block',
-    });
+  it('resolves missing planMode to autonomous code mode that blocks user input tools', () => {
     expect(resolveCodexCollaborationPolicy({})).toMatchObject({
       effectiveMode: 'code',
+      interactionMode: 'autonomous',
+      requestUserInputPolicy: 'block',
       fallbackReason: 'missing_mode_in_request_default_code',
     });
   });
 
-  it('blocks user input tools in full-access Codex code mode', () => {
+  it('resolves off planMode to checkpoint code mode that allows user input tools', () => {
+    expect(resolveCodexCollaborationPolicy({ planMode: 'off' })).toMatchObject({
+      selectedMode: 'code',
+      effectiveMode: 'code',
+      interactionMode: 'checkpoint',
+      requestUserInputPolicy: 'allow',
+    });
+  });
+
+  it('allows user input tools in full-access Codex checkpoint mode', () => {
     expect(resolveCodexCollaborationPolicy({
       planMode: 'off',
       permissionConfig: {
@@ -43,6 +49,26 @@ describe('codexCollaborationPolicy', () => {
       selectedMode: 'code',
       effectiveMode: 'code',
       profile: 'strict-local',
+      interactionMode: 'checkpoint',
+      requestUserInputPolicy: 'allow',
+    });
+  });
+
+  it('keeps explicit autonomous code mode blocking user input tools', () => {
+    expect(resolveCodexCollaborationPolicy({
+      planMode: 'off',
+      collaborationMode: 'autonomous',
+      permissionConfig: {
+        kind: 'codex',
+        sandboxMode: 'danger-full-access',
+        approvalPolicy: 'never',
+        networkAccessEnabled: true,
+      },
+    })).toMatchObject({
+      selectedMode: 'code',
+      effectiveMode: 'code',
+      profile: 'strict-local',
+      interactionMode: 'autonomous',
       requestUserInputPolicy: 'block',
     });
   });
