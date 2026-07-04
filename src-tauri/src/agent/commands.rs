@@ -566,6 +566,7 @@ fn convert_codex_history_values_to_events(
         model_context_window: Option<u64>,
         duration_ms: Option<u64>,
         last_assistant_msg_idx: Option<usize>,
+        compaction_only: bool,
     }
 
     let has_agent_messages = raw_events
@@ -590,6 +591,8 @@ fn convert_codex_history_values_to_events(
         };
 
         if let Some(converted) = convert_codex_compacted_to_compact_boundary(val) {
+            current_turn.last_assistant_msg_idx = None;
+            current_turn.compaction_only = true;
             messages.push(converted);
             msg_idx += 1;
             continue;
@@ -602,6 +605,7 @@ fn convert_codex_history_values_to_events(
                     Some("agent_message") => {
                         if let Some(converted) = convert_codex_agent_message_to_claude_format(val) {
                             current_turn.last_assistant_msg_idx = Some(msg_idx);
+                            current_turn.compaction_only = false;
                             messages.push(converted);
                             msg_idx += 1;
                         }
@@ -636,6 +640,7 @@ fn convert_codex_history_values_to_events(
         if let Some(converted) = convert_codex_item_to_claude_format(val) {
             if converted.get("type").and_then(|t| t.as_str()) == Some("assistant") {
                 current_turn.last_assistant_msg_idx = Some(msg_idx);
+                current_turn.compaction_only = false;
             }
             messages.push(converted);
             msg_idx += 1;
@@ -653,6 +658,9 @@ fn convert_codex_history_values_to_events(
             Some(u) => u,
             None => continue,
         };
+        if turn.compaction_only {
+            continue;
+        }
 
         let input = usage
             .get("input_tokens")
@@ -1850,6 +1858,105 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn codex_history_does_not_attach_compaction_usage_to_previous_assistant() {
+        let raw_events = vec![
+            serde_json::json!({
+                "timestamp": "2026-07-03T17:59:00.000Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "agent_message",
+                    "message": "压缩前的助手消息"
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-07-03T18:00:00.000Z",
+                "type": "compacted",
+                "payload": {
+                    "message": "Another language model started to solve this problem and produced a summary.",
+                    "pre_tokens": 40956,
+                    "post_tokens": 2876
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-07-03T18:00:01.000Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {
+                            "input_tokens": 237119,
+                            "cached_input_tokens": 1209,
+                            "output_tokens": 0,
+                            "reasoning_output_tokens": 0
+                        },
+                        "model_context_window": 258400
+                    }
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-07-03T18:00:02.000Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "task_complete",
+                    "duration_ms": 1
+                }
+            }),
+        ];
+
+        let converted = convert_codex_history_values_to_events(&raw_events, "app-session-1");
+
+        assert_eq!(converted.len(), 2);
+        assert_eq!(converted[0].get("type").and_then(|v| v.as_str()), Some("assistant"));
+        assert_eq!(converted[1].get("subtype").and_then(|v| v.as_str()), Some("compact_boundary"));
+        assert!(!converted
+            .iter()
+            .any(|event| event.get("type").and_then(|v| v.as_str()) == Some("result")));
+    }
+
+    #[test]
+    fn codex_history_keeps_normal_assistant_usage_result() {
+        let raw_events = vec![
+            serde_json::json!({
+                "timestamp": "2026-07-03T17:59:00.000Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "agent_message",
+                    "message": "普通助手消息"
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-07-03T18:00:01.000Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {
+                            "input_tokens": 10,
+                            "cached_input_tokens": 2,
+                            "output_tokens": 4,
+                            "reasoning_output_tokens": 0
+                        }
+                    }
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-07-03T18:00:02.000Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "task_complete",
+                    "duration_ms": 123
+                }
+            }),
+        ];
+
+        let converted = convert_codex_history_values_to_events(&raw_events, "app-session-1");
+
+        assert_eq!(converted.len(), 2);
+        assert_eq!(converted[0].get("type").and_then(|v| v.as_str()), Some("assistant"));
+        assert_eq!(converted[1].get("type").and_then(|v| v.as_str()), Some("result"));
     }
 
     #[test]

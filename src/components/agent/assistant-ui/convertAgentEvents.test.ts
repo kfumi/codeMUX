@@ -802,4 +802,94 @@ describe('convertAgentEventsToAssistantMessages', () => {
     });
   });
 
+  it('renders only the compact marker when a Codex compact summary assistant message is present', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'summary-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'text',
+                text: 'Another language model started to solve this problem and produced a summary of its thinking process.',
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        } as any,
+      },
+      {
+        kind: 'compact',
+        data: {
+          type: 'system',
+          subtype: 'compact_boundary',
+          compact_metadata: { trigger: 'auto', pre_tokens: 0 },
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: 'system',
+      content: [{ type: 'data-codemux-event', eventKind: 'compact' }],
+    });
+  });
+
+  it('does not mark an assistant before a compact marker as final for a later result', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-before-compact',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '压缩前的助手消息' }],
+          },
+          parent_tool_use_id: null,
+        } as any,
+      },
+      {
+        kind: 'compact',
+        data: {
+          type: 'system',
+          subtype: 'compact_boundary',
+          compact_metadata: { trigger: 'auto', pre_tokens: 237119 },
+        },
+      },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'result-compact',
+          session_id: 'session-1',
+          duration_ms: 1,
+          duration_api_ms: 0,
+          num_turns: 1,
+          result: '',
+          total_cost_usd: 0,
+          usage: { input_tokens: 237119, output_tokens: 0 },
+        } as any,
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.metadata.isFinalAssistantMessage).toBeUndefined();
+    expect(messages[1]).toMatchObject({
+      role: 'system',
+      content: [{ type: 'data-codemux-event', eventKind: 'compact' }],
+    });
+  });
+
 });

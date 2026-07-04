@@ -19,7 +19,7 @@ import {
 } from './runtimeEvents.js';
 import { shouldUseCodexChatCompatProxy } from './sessionRuntimeHelpers.js';
 import { proxyManager } from './proxyManager.js';
-import { emit } from './streamEventBatcher.js';
+import { emit as emitStreamEvent } from './streamEventBatcher.js';
 import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
 import {
   buildCodexInputEntries,
@@ -48,11 +48,38 @@ import {
   type CodexCollaborationPolicy,
 } from './codexCollaborationPolicy.js';
 
-export { emit } from './streamEventBatcher.js';
+export function emit(obj: unknown): void {
+  logCodexRealtimePayload('emit', obj);
+  emitStreamEvent(obj);
+}
+
+function logCodexRealtimePayload(label: 'sdk-event' | 'emit', payload: unknown): void {
+  process.stderr.write(`[codex][${label}] ${safeStringifyForLog(payload)}\n`);
+}
+
+function safeStringifyForLog(payload: unknown): string {
+  const seen = new WeakSet<object>();
+  try {
+    const json = JSON.stringify(payload, (_key, value) => {
+      if (typeof value === 'bigint') {
+        return value.toString();
+      }
+      if (value && typeof value === 'object') {
+        if (seen.has(value)) {
+          return '[Circular]';
+        }
+        seen.add(value);
+      }
+      return value;
+    });
+    return json ?? String(payload);
+  } catch (error) {
+    return `[Unserializable payload: ${error instanceof Error ? error.message : String(error)}]`;
+  }
+}
 
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
 type UpdatePermissionsCommand = Extract<SidecarCommand, { type: 'update_permissions' }>;
-const DEBUG_STREAM_LOGS = process.env.CODEMUX_STREAM_DEBUG === '1';
 const DEFAULT_SHELL_COMMAND_TIMEOUT_MS = 10000;
 
 type CodexSessionBootstrap = {
@@ -113,6 +140,9 @@ export class CodexSessionRuntime {
   private todoListState = new Map<string, string>();
   private emittedToolUseIds = new Set<string>();
   private blockedPlanMutationItemIds = new Set<string>();
+  private activeCompactItemIds = new Set<string>();
+  private emittedCompactItemIds = new Set<string>();
+  private currentTurnHadCompaction = false;
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     if (cmd.sessionId) setActiveSessionId(cmd.sessionId);
@@ -310,6 +340,7 @@ export class CodexSessionRuntime {
 
     this.abortController = new AbortController();
     activeAbortController = this.abortController;
+    this.currentTurnHadCompaction = false;
 
     const collaborationPolicy = this.config.collaborationPolicy
       ?? resolveCodexCollaborationPolicy({
@@ -370,17 +401,7 @@ export class CodexSessionRuntime {
         for await (const event of events) {
           if (this.abortController?.signal.aborted || forceBreak) break;
 
-          if (DEBUG_STREAM_LOGS) {
-            const eventDetail =
-              event.type === 'error'
-                ? ` message=${event.message}`
-                : event.type === 'turn.failed'
-                  ? ` message=${event.error.message}`
-                  : 'item' in event
-                    ? ` item=${event.item.type}`
-                    : '';
-            process.stderr.write(`[codex] SDK event: ${event.type}${eventDetail}\n`);
-          }
+          logCodexRealtimePayload('sdk-event', event);
 
           if (event.type === 'turn.completed') {
             usage = event.usage;
@@ -425,7 +446,7 @@ export class CodexSessionRuntime {
       }
 
       const finalUsage = usageSeen ? usage : emptyUsage();
-      if (!retryingWithoutImages && !this.abortController?.signal.aborted && turnCompleted && !turnFailed) {
+      if (!retryingWithoutImages && !this.abortController?.signal.aborted && turnCompleted && !turnFailed && !this.currentTurnHadCompaction) {
         const lastTokenUsage = await readLatestCodexLastTokenUsage(this.thread.id).catch((error) => {
           process.stderr.write(`[codex] Failed to read session last_token_usage: ${String(error)}\n`);
           return null;
@@ -436,7 +457,7 @@ export class CodexSessionRuntime {
           lastTokenUsage,
           durationMs: Date.now() - startedAt,
         }));
-      } else if (!retryingWithoutImages && !this.abortController?.signal.aborted) {
+      } else if (!retryingWithoutImages && !this.abortController?.signal.aborted && !this.currentTurnHadCompaction) {
         process.stderr.write(
           `[codex] Skipping success result: completed=${turnCompleted} failed=${turnFailed}\n`,
         );
@@ -470,6 +491,8 @@ export class CodexSessionRuntime {
     this.todoListState.clear();
     this.emittedToolUseIds.clear();
     this.blockedPlanMutationItemIds.clear();
+    this.activeCompactItemIds.clear();
+    this.emittedCompactItemIds.clear();
     await this.teardownClient();
     this.config = null;
     this.configFingerprint = null;
@@ -483,6 +506,8 @@ export class CodexSessionRuntime {
     this.todoListState.clear();
     this.emittedToolUseIds.clear();
     this.blockedPlanMutationItemIds.clear();
+    this.activeCompactItemIds.clear();
+    this.emittedCompactItemIds.clear();
     await this.teardownClient();
     this.config = null;
     this.configFingerprint = null;
@@ -535,9 +560,7 @@ export class CodexSessionRuntime {
     emitFailure: (message: string) => void,
     noteStreamError: (message: string) => void,
   ): Promise<void> {
-    const compactBoundaryEvent = buildLiveCodexCompactBoundaryEvent(sessionId, event);
-    if (compactBoundaryEvent) {
-      emit(compactBoundaryEvent);
+    if (this.handleLiveCodexCompactEvent(sessionId, event)) {
       return;
     }
 
@@ -638,6 +661,9 @@ export class CodexSessionRuntime {
     if (item.type === 'agent_message' && eventType === 'item.completed') {
       process.stderr.write(`[codex] agent_message completed: text_length=${item.text?.length ?? 0} preview=${JSON.stringify((item.text ?? '').slice(0, 100))}\n`);
       this.completeStreamingText(sessionId, item.id);
+      if (isCodexCompactSummaryText(item.text)) {
+        return;
+      }
       if (item.text.trim()) {
         emit(buildAssistantEvent({
           sessionId,
@@ -648,6 +674,10 @@ export class CodexSessionRuntime {
     }
 
     if (item.type === 'agent_message' && eventType === 'item.updated') {
+      if (isCodexCompactSummaryText(item.text)) {
+        this.completeStreamingText(sessionId, item.id);
+        return;
+      }
       this.emitStreamingTextDelta(sessionId, item.id, 'text', item.text);
       return;
     }
@@ -729,6 +759,8 @@ export class CodexSessionRuntime {
     this.streamingItemState.clear();
     this.emittedToolUseIds.clear();
     this.blockedPlanMutationItemIds.clear();
+    this.activeCompactItemIds.clear();
+    this.currentTurnHadCompaction = false;
     emit({ type: 'sidecar_query_done' });
   }
 
@@ -739,6 +771,9 @@ export class CodexSessionRuntime {
     this.todoListState.clear();
     this.emittedToolUseIds.clear();
     this.blockedPlanMutationItemIds.clear();
+    this.activeCompactItemIds.clear();
+    this.emittedCompactItemIds.clear();
+    this.currentTurnHadCompaction = false;
     this.thread = null;
     this.client = null;
   }
@@ -811,15 +846,79 @@ export class CodexSessionRuntime {
     });
     this.streamingItemState.delete(itemId);
   }
+
+  private handleLiveCodexCompactEvent(sessionId: string, event: ThreadEvent): boolean {
+    const rawEvent = event as unknown as Record<string, unknown>;
+    const compactEvent = parseLiveCodexCompactEvent(rawEvent);
+    if (!compactEvent) {
+      return false;
+    }
+
+    this.currentTurnHadCompaction = true;
+
+    if (compactEvent.itemId && compactEvent.phase === 'started') {
+      this.activeCompactItemIds.add(compactEvent.itemId);
+      return true;
+    }
+
+    if (compactEvent.itemId) {
+      if (this.emittedCompactItemIds.has(compactEvent.itemId)) {
+        return true;
+      }
+      this.activeCompactItemIds.delete(compactEvent.itemId);
+      this.emittedCompactItemIds.add(compactEvent.itemId);
+    }
+
+    emit(buildLiveCodexCompactBoundaryEvent(sessionId, compactEvent));
+    return true;
+  }
 }
 
-function buildLiveCodexCompactBoundaryEvent(sessionId: string, event: ThreadEvent): Record<string, unknown> | null {
-  const rawEvent = event as unknown as Record<string, unknown>;
-  if (rawEvent.type !== 'compacted') {
-    return null;
+type LiveCodexCompactEvent = {
+  phase: 'started' | 'completed';
+  itemId?: string;
+  timestamp?: unknown;
+  payload: Record<string, unknown>;
+};
+
+function parseLiveCodexCompactEvent(rawEvent: Record<string, unknown>): LiveCodexCompactEvent | null {
+  if (rawEvent.type === 'compacted') {
+    return {
+      phase: 'completed',
+      timestamp: rawEvent.timestamp,
+      payload: isRecord(rawEvent.payload) ? rawEvent.payload : {},
+    };
   }
 
-  const payload = isRecord(rawEvent.payload) ? rawEvent.payload : {};
+  const item = isRecord(rawEvent.item) ? rawEvent.item : undefined;
+  if (
+    (rawEvent.type === 'item.started' || rawEvent.type === 'item.completed')
+    && item
+    && isCodexCompactItemType(item.type)
+  ) {
+    return {
+      phase: rawEvent.type === 'item.started' ? 'started' : 'completed',
+      itemId: typeof item.id === 'string' ? item.id : undefined,
+      timestamp: rawEvent.timestamp,
+      payload: item,
+    };
+  }
+
+  const payload = isRecord(rawEvent.payload) ? rawEvent.payload : undefined;
+  if (rawEvent.type === 'event_msg' && payload && isCodexCompactItemType(payload.type)) {
+    return {
+      phase: 'completed',
+      timestamp: rawEvent.timestamp,
+      itemId: typeof payload.id === 'string' ? payload.id : undefined,
+      payload,
+    };
+  }
+
+  return null;
+}
+
+function buildLiveCodexCompactBoundaryEvent(sessionId: string, compactEvent: LiveCodexCompactEvent): Record<string, unknown> {
+  const payload = compactEvent.payload;
   const trigger = payload.trigger === 'manual' ? 'manual' : 'auto';
   const preTokens = readFiniteNumber(payload.pre_tokens) ?? readFiniteNumber(payload.preTokens) ?? 0;
   const postTokens = readFiniteNumber(payload.post_tokens) ?? readFiniteNumber(payload.postTokens) ?? 0;
@@ -828,7 +927,7 @@ function buildLiveCodexCompactBoundaryEvent(sessionId: string, event: ThreadEven
     type: 'system',
     subtype: 'compact_boundary',
     content: 'Conversation compacted',
-    timestamp: rawEvent.timestamp,
+    ...(compactEvent.timestamp !== undefined ? { timestamp: compactEvent.timestamp } : {}),
     session_id: sessionId,
     compact_metadata: {
       trigger,
@@ -836,6 +935,22 @@ function buildLiveCodexCompactBoundaryEvent(sessionId: string, event: ThreadEven
       post_tokens: postTokens,
     },
   };
+}
+
+function isCodexCompactItemType(value: unknown): boolean {
+  return value === 'contextCompaction'
+    || value === 'context_compaction'
+    || value === 'context_compacted';
+}
+
+function isCodexCompactSummaryText(value: unknown): boolean {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const text = value.trimStart();
+  return text.startsWith('Another language model started to solve this problem and produced a summary')
+    || text.startsWith('This session is being continued from a previous conversation that ran out of context.');
 }
 
 function readFiniteNumber(value: unknown): number | undefined {

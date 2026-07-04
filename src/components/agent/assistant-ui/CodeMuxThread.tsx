@@ -688,7 +688,7 @@ function AssistantLikeMessage({
     isFinal && message.metadata.custom?.sourceRole !== 'system' && (footerStats !== undefined || sourceTimestamp !== undefined);
 
   return (
-    <MessagePrimitive.Root className="mb-5 flex w-full justify-start">
+    <MessagePrimitive.Root className="mb-2 flex w-full justify-start">
       <div
         className={cn(
           'w-full min-w-0 space-y-2 text-sm leading-relaxed',

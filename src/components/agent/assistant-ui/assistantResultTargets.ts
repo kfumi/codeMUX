@@ -23,6 +23,12 @@ export function buildAssistantResultTargetMap(events: AgentMessage[]): Map<numbe
       continue;
     }
 
+    if (event.kind === 'compact') {
+      fallbackAssistantIndex = undefined;
+      preferredAssistantIndex = undefined;
+      continue;
+    }
+
     if (event.kind !== 'result') {
       continue;
     }

@@ -1,4 +1,5 @@
 ﻿import type { AgentMessage } from '../../../stores/agentStore';
+import { isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
 import type { ContentBlock } from '../../../types/agent';
 import type { UserAttachmentPreview } from '../../../types/agentInput';
 import { buildAssistantResultTargetSet } from './assistantResultTargets';
@@ -68,6 +69,10 @@ export function convertAgentEventsToAssistantMessages(
     }
 
     if (event.kind === 'assistant') {
+      if (isCodexCompactSummaryAssistantEvent(event)) {
+        return;
+      }
+
       const parts = event.data.message.content
         .flatMap((block, blockIndex) => convertContentBlockToParts(block, index, blockIndex))
         .filter((part) => !isDuplicateAskUserQuestionToolCall(part, toolCallLocationById, askQuestionToolUseIds));
@@ -257,9 +262,21 @@ function isHiddenClaudeCompactUserEvent(
   return (
     data.isCompactSummary === true ||
     data.isVisibleInTranscriptOnly === true ||
+    isCodexCompactSummaryText(text) ||
     text === '/compact' ||
     /^<local-command-stdout>\s*Compacted\s*<\/local-command-stdout>$/i.test(text)
   );
+}
+
+function isCodexCompactSummaryAssistantEvent(
+  event: Extract<AgentMessage, { kind: 'assistant' }>,
+): boolean {
+  return event.data.message.content.some((block) => (
+    isRecord(block)
+    && block.type === 'text'
+    && typeof block.text === 'string'
+    && isCodexCompactSummaryText(block.text)
+  ));
 }
 
 function markFinalAssistantMessages(

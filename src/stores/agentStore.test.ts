@@ -975,6 +975,57 @@ describe('agent store Codex history loading', () => {
     ]);
   });
 
+  it('maps live raw Codex compacted events to compact markers', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'compacted',
+        timestamp: '2026-07-03T17:22:53.471Z',
+        payload: {
+          trigger: 'auto',
+          pre_tokens: 42000,
+          post_tokens: 3000,
+        },
+      }));
+      onEvent(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        uuid: 'result-compact-live',
+        session_id: sessionId,
+        duration_ms: 1,
+        duration_api_ms: 1,
+        num_turns: 1,
+        result: '',
+        total_cost_usd: 0,
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+        },
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'trigger compact', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useAgentStore.getState().events[session.id]).toEqual([
+      { kind: 'user', data: { content: 'trigger compact' } },
+      expect.objectContaining({
+        kind: 'compact',
+        data: expect.objectContaining({
+          compact_metadata: expect.objectContaining({
+            trigger: 'auto',
+            pre_tokens: 42000,
+          }),
+        }),
+      }),
+      expect.objectContaining({ kind: 'result' }),
+    ]);
+  });
+
   it('processes batched stream events without appending the batch to the conversation event list', async () => {
     vi.useFakeTimers();
 

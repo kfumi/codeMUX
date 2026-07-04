@@ -1230,4 +1230,224 @@ describe('CodexSessionRuntime', () => {
       stdoutSpy.mockRestore();
     }
   });
+
+  it('does not emit a success result for live Codex compaction-only turns', async () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        config: {
+          sessionId: string;
+          cwd: string;
+          model: string;
+        };
+        thread: {
+          id: string;
+          runStreamed: () => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).config = {
+        sessionId: 'session-1',
+        cwd: 'D:/repo',
+        model: 'gpt-5',
+      };
+      (runtime as unknown as {
+        thread: {
+          id: string;
+          runStreamed: () => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).thread = {
+        id: 'codex-thread-1',
+        runStreamed: async () => ({
+          events: (async function* () {
+            yield {
+              type: 'compacted',
+              timestamp: '2026-07-03T17:22:53.471Z',
+              payload: {
+                message: 'Another language model started to solve this problem and produced a summary.',
+              },
+            } as unknown as ThreadEvent;
+            yield {
+              type: 'turn.completed',
+              usage: {
+                input_tokens: 100,
+                cached_input_tokens: 20,
+                output_tokens: 5,
+                reasoning_output_tokens: 0,
+              },
+            } as ThreadEvent;
+          })(),
+        }),
+      };
+
+      await (runtime as unknown as {
+        runInput: (prompt: string, inputPayload: undefined, includeImages: boolean) => Promise<void>;
+      }).runInput('compact', undefined, false);
+
+      const emittedEvents = writes
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line));
+
+      expect(emittedEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'system', subtype: 'compact_boundary' }),
+          expect.objectContaining({ type: 'sidecar_query_done' }),
+        ]),
+      );
+      expect(emittedEvents.some((event) => event.type === 'result')).toBe(false);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it('emits a compact boundary for live Codex contextCompaction completion items', async () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      await (runtime as unknown as {
+        handleSdkEvent: (
+          sessionId: string,
+          event: ThreadEvent,
+          emitFailure: (message: string) => void,
+          noteStreamError: (message: string) => void,
+        ) => Promise<void>;
+      }).handleSdkEvent(
+        'session-1',
+        {
+          type: 'item.started',
+          item: {
+            id: 'compact-1',
+            type: 'contextCompaction',
+          },
+        } as unknown as ThreadEvent,
+        () => {},
+        () => {},
+      );
+      await (runtime as unknown as {
+        handleSdkEvent: (
+          sessionId: string,
+          event: ThreadEvent,
+          emitFailure: (message: string) => void,
+          noteStreamError: (message: string) => void,
+        ) => Promise<void>;
+      }).handleSdkEvent(
+        'session-1',
+        {
+          type: 'item.completed',
+          item: {
+            id: 'compact-1',
+            type: 'contextCompaction',
+          },
+        } as unknown as ThreadEvent,
+        () => {},
+        () => {},
+      );
+
+      const emittedEvents = writes
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line));
+
+      expect(emittedEvents).toEqual([
+        {
+          type: 'system',
+          subtype: 'compact_boundary',
+          content: 'Conversation compacted',
+          session_id: 'session-1',
+          compact_metadata: {
+            trigger: 'auto',
+            pre_tokens: 0,
+            post_tokens: 0,
+          },
+        },
+      ]);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it('does not emit Codex compact summary agent messages as assistant text', () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        emitItemEvent: (
+          sessionId: string,
+          eventType: 'item.started' | 'item.updated' | 'item.completed',
+          item: { id: string; type: 'agent_message'; text: string },
+          emitFailure: (message: string) => void,
+        ) => void;
+      }).emitItemEvent(
+        'session-1',
+        'item.completed',
+        {
+          id: 'summary-1',
+          type: 'agent_message',
+          text: 'Another language model started to solve this problem and produced a summary of its thinking process.',
+        },
+        () => {},
+      );
+
+      expect(writes).toEqual([]);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it('does not stream Codex compact summary agent message updates', () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        emitItemEvent: (
+          sessionId: string,
+          eventType: 'item.started' | 'item.updated' | 'item.completed',
+          item: { id: string; type: 'agent_message'; text: string },
+          emitFailure: (message: string) => void,
+        ) => void;
+      }).emitItemEvent(
+        'session-1',
+        'item.updated',
+        {
+          id: 'summary-1',
+          type: 'agent_message',
+          text: 'Another language model started to solve this problem and produced a summary of its thinking process.',
+        },
+        () => {},
+      );
+      flushStreamEvents();
+
+      expect(writes).toEqual([]);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
 });

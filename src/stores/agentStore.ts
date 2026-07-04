@@ -5,8 +5,10 @@ import {
   isClaudeSubagentEvent,
   isClaudeCompactSummaryRawEvent,
   isClaudeCompactSummaryText,
+  isCodexCompactSummaryText,
   isAgentInjectedUserMessage,
   isTerminalAgentEvent,
+  mapCodexCompactedEvent,
   mapPersistedClaudeMessage,
   normalizeClaudeUserEvent,
   parseSdkUserMessage,
@@ -444,6 +446,11 @@ function parseAgentEvent(raw: string): AgentMessage {
       return { kind: 'raw', data };
     }
 
+    const codexCompactedEvent = mapCodexCompactedEvent(data);
+    if (codexCompactedEvent) {
+      return codexCompactedEvent;
+    }
+
     switch (data.type) {
       case 'sidecar_ready':
         return { kind: 'ready', data };
@@ -471,6 +478,9 @@ function parseAgentEvent(raw: string): AgentMessage {
           },
         };
       case 'assistant':
+        if (isAssistantCompactSummaryEvent(data)) {
+          return { kind: 'raw', data };
+        }
         return { kind: 'assistant', data };
       case 'user':
         {
@@ -535,6 +545,30 @@ function parseAgentEvent(raw: string): AgentMessage {
 
 function isModeBlockedDiagnostic(value: unknown): value is ModeBlockedDiagnostic {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isAssistantCompactSummaryEvent(data: Record<string, unknown>): boolean {
+  const message = data.message;
+  if (!message || typeof message !== 'object' || Array.isArray(message)) {
+    return false;
+  }
+
+  const content = (message as Record<string, unknown>).content;
+  if (typeof content === 'string') {
+    return isCodexCompactSummaryText(content);
+  }
+
+  if (!Array.isArray(content)) {
+    return false;
+  }
+
+  return content.some((block) => {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) {
+      return false;
+    }
+    const text = (block as Record<string, unknown>).text;
+    return typeof text === 'string' && isCodexCompactSummaryText(text);
+  });
 }
 
 function truncateTitle(text: string, maxLen = 30): string {

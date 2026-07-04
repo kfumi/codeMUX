@@ -489,6 +489,33 @@ describe('mapPersistedClaudeMessage', () => {
     });
   });
 
+  it('loads raw Codex compacted events as compact markers', () => {
+    const event = mapPersistedClaudeMessage(
+      {
+        type: 'compacted',
+        timestamp: '2026-07-03T17:22:53.471Z',
+        payload: {
+          trigger: 'auto',
+          pre_tokens: 42000,
+          post_tokens: 3000,
+        },
+      },
+      'codex',
+    );
+
+    expect(event).toEqual({
+      kind: 'compact',
+      data: expect.objectContaining({
+        type: 'system',
+        subtype: 'compact_boundary',
+        compact_metadata: expect.objectContaining({
+          trigger: 'auto',
+          pre_tokens: 42000,
+        }),
+      }),
+    });
+  });
+
   it('strips Claude CLI command XML tags but keeps surrounding text', () => {
     const event = mapPersistedClaudeMessage(
       {

@@ -170,6 +170,7 @@ const CLAUDE_COMMAND_ARGS_RE = /<command-args>\s*([\s\S]*?)\s*<\/command-args>/;
 const CLAUDE_COMMAND_TAGS_RE = /<command-(?:message|name|args)>[\s\S]*?<\/command-(?:message|name|args)>/g;
 const CLAUDE_LOCAL_COMPACT_STDOUT_RE = /^\s*<local-command-stdout>\s*Compacted\s*<\/local-command-stdout>\s*$/;
 const CLAUDE_COMPACT_SUMMARY_PREFIX = 'This session is being continued from a previous conversation that ran out of context.';
+const CODEX_COMPACT_SUMMARY_PREFIX = 'Another language model started to solve this problem and produced a summary';
 
 /**
  * Strip Claude CLI's internal XML command tags from persisted user messages.
@@ -208,6 +209,12 @@ export function normalizeClaudeUserEvent(
 
 export function isClaudeCompactSummaryText(content: string): boolean {
   return content.trimStart().startsWith(CLAUDE_COMPACT_SUMMARY_PREFIX);
+}
+
+export function isCodexCompactSummaryText(content: string): boolean {
+  const text = content.trimStart();
+  return text.startsWith(CODEX_COMPACT_SUMMARY_PREFIX)
+    || text.startsWith(CLAUDE_COMPACT_SUMMARY_PREFIX);
 }
 
 export function isClaudeCompactSummaryRawEvent(raw: Record<string, unknown>): boolean {
@@ -272,6 +279,34 @@ function mapCompactBoundary(raw: Record<string, unknown>): Extract<ParsedStoreEv
   };
 }
 
+export function mapCodexCompactedEvent(raw: Record<string, unknown>): Extract<ParsedStoreEvent, { kind: 'compact' }> | null {
+  if (raw.type !== 'compacted') {
+    return null;
+  }
+
+  const payload = asRecord(raw.payload);
+  const trigger = payload?.trigger === 'manual' ? 'manual' : 'auto';
+  const preTokens = readNumber(payload?.pre_tokens) ?? readNumber(payload?.preTokens) ?? 0;
+  const postTokens = readNumber(payload?.post_tokens) ?? readNumber(payload?.postTokens) ?? 0;
+
+  return {
+    kind: 'compact',
+    data: {
+      type: 'system',
+      subtype: 'compact_boundary',
+      content: 'Conversation compacted',
+      ...(raw.timestamp !== undefined ? { timestamp: raw.timestamp } : {}),
+      ...(raw.session_id !== undefined ? { session_id: raw.session_id } : {}),
+      compact_metadata: {
+        ...(payload ?? {}),
+        trigger,
+        pre_tokens: preTokens,
+        post_tokens: postTokens,
+      },
+    } as Extract<ParsedStoreEvent, { kind: 'compact' }>['data'],
+  };
+}
+
 function readNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
@@ -290,6 +325,11 @@ export function mapPersistedClaudeMessage(
   }
 
   const msgType = raw.type;
+
+  const codexCompactedEvent = mapCodexCompactedEvent(raw);
+  if (codexCompactedEvent) {
+    return codexCompactedEvent;
+  }
 
   const compactEvent = mapCompactBoundary(raw);
   if (compactEvent) {
