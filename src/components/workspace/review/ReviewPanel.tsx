@@ -8,7 +8,6 @@ import { ConfirmDialog } from '../../ui/confirm-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
 import { GitBranchBar } from './GitBranchBar';
 import { GitBranchDialog } from './GitBranchDialog';
-import { GitCommitBox } from './GitCommitBox';
 
 function displayPath(filePath: string, projectPath: string): string {
   const normalize = (path: string) => path
@@ -203,12 +202,22 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     }
   }, [projectPath]);
 
-  const commitChanges = useCallback(async () => {
-    if (!projectPath || !commitMessage.trim()) return;
-    setMutatingKey('commit');
+  const commitChanges = useCallback(async (options: { includeUnstaged: boolean; pushAfter: boolean }) => {
+    if (!projectPath) return;
+    setMutatingKey(options.pushAfter ? 'commit:push' : 'commit');
     setCommitError(null);
     try {
-      await gitApi.commitChanges(projectPath, commitMessage);
+      if (options.includeUnstaged) {
+        await gitApi.stageStatusChanges(projectPath);
+      }
+      const message = commitMessage.trim()
+        ? commitMessage
+        : (await gitApi.generateCommitMessage(projectPath)).message;
+      setCommitMessage(message);
+      await gitApi.commitChanges(projectPath, message);
+      if (options.pushAfter) {
+        await gitApi.pushBranch(projectPath);
+      }
       setCommitMessage('');
       await load();
     } catch (err) {
@@ -217,6 +226,20 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       setMutatingKey(null);
     }
   }, [commitMessage, load, projectPath]);
+
+  const pushBranch = useCallback(async () => {
+    if (!projectPath) return;
+    setMutatingKey('push');
+    setCommitError(null);
+    try {
+      await gitApi.pushBranch(projectPath);
+      await load();
+    } catch (err) {
+      setCommitError(String(err));
+    } finally {
+      setMutatingKey(null);
+    }
+  }, [load, projectPath]);
 
   const totals = useMemo(() => files.reduce(
     (acc, file) => ({
@@ -232,9 +255,19 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
         state={repositoryState}
         loading={loading}
         mutating={mutatingKey != null}
+        stagedCount={stagedFiles.length}
+        commitMessage={commitMessage}
+        commitError={commitError}
+        generatingCommitMessage={mutatingKey === 'commit:generate'}
+        committing={mutatingKey === 'commit' || mutatingKey === 'commit:push'}
+        pushing={mutatingKey === 'push' || mutatingKey === 'commit:push'}
         onRefresh={() => void load()}
         onCheckout={(branchName) => void checkoutBranch(branchName)}
         onCreateBranch={() => setBranchDialogOpen(true)}
+        onCommitMessageChange={setCommitMessage}
+        onGenerateCommitMessage={() => void generateCommitMessage()}
+        onCommit={(options) => void commitChanges(options)}
+        onPush={() => void pushBranch()}
       />
       <GitBranchDialog
         open={branchDialogOpen}
@@ -398,17 +431,6 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
           <span className="text-[hsl(var(--destructive))]">-{totals.deletions}</span>
         </div>
       </div>
-      <GitCommitBox
-        message={commitMessage}
-        stagedCount={stagedFiles.length}
-        loading={loading}
-        generating={mutatingKey === 'commit:generate'}
-        committing={mutatingKey === 'commit'}
-        error={commitError}
-        onMessageChange={setCommitMessage}
-        onGenerate={() => void generateCommitMessage()}
-        onCommit={() => void commitChanges()}
-      />
       <ConfirmDialog
         open={revertTarget != null}
         onOpenChange={(open) => !open && setRevertTarget(null)}

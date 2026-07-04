@@ -480,6 +480,240 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
     None
 }
 
+fn is_codex_assistant_response_message(val: &serde_json::Value) -> bool {
+    val.get("type").and_then(|t| t.as_str()) == Some("response_item")
+        && val
+            .get("payload")
+            .and_then(|payload| payload.get("type"))
+            .and_then(|t| t.as_str())
+            == Some("message")
+        && val
+            .get("payload")
+            .and_then(|payload| payload.get("role"))
+            .and_then(|role| role.as_str())
+            == Some("assistant")
+}
+
+fn convert_codex_agent_message_to_claude_format(
+    val: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    if val.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
+        return None;
+    }
+
+    let payload = val.get("payload")?;
+    if payload.get("type").and_then(|t| t.as_str()) != Some("agent_message") {
+        return None;
+    }
+
+    let text = payload.get("message")?.as_str()?.trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    Some(serde_json::json!({
+        "type": "assistant",
+        "timestamp": val.get("timestamp").cloned(),
+        "message": {
+            "role": "assistant",
+            "content": [{ "type": "text", "text": text }]
+        }
+    }))
+}
+
+fn convert_codex_compacted_to_compact_boundary(
+    val: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    if val.get("type").and_then(|t| t.as_str()) != Some("compacted") {
+        return None;
+    }
+
+    let payload = val.get("payload");
+    let trigger = payload
+        .and_then(|p| p.get("trigger"))
+        .and_then(|v| v.as_str())
+        .filter(|value| *value == "auto" || *value == "manual")
+        .unwrap_or("auto");
+    let pre_tokens = payload
+        .and_then(|p| p.get("pre_tokens").or_else(|| p.get("preTokens")))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let post_tokens = payload
+        .and_then(|p| p.get("post_tokens").or_else(|| p.get("postTokens")))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    Some(serde_json::json!({
+        "type": "system",
+        "subtype": "compact_boundary",
+        "content": "Conversation compacted",
+        "timestamp": val.get("timestamp").cloned(),
+        "compact_metadata": {
+            "trigger": trigger,
+            "pre_tokens": pre_tokens,
+            "post_tokens": post_tokens
+        }
+    }))
+}
+
+fn convert_codex_history_values_to_events(
+    raw_events: &[serde_json::Value],
+    app_session_id: &str,
+) -> Vec<serde_json::Value> {
+    #[derive(Default)]
+    struct TurnInfo {
+        last_token_usage: Option<serde_json::Value>,
+        model_context_window: Option<u64>,
+        duration_ms: Option<u64>,
+        last_assistant_msg_idx: Option<usize>,
+    }
+
+    let has_agent_messages = raw_events
+        .iter()
+        .any(|val| convert_codex_agent_message_to_claude_format(val).is_some());
+    let mut messages = Vec::new();
+    let mut turns: Vec<TurnInfo> = Vec::new();
+    let mut msg_idx: usize = 0;
+
+    for val in raw_events {
+        let item_type = val.get("type").and_then(|t| t.as_str());
+
+        if item_type == Some("turn_context") {
+            turns.push(TurnInfo::default());
+        }
+
+        let current_turn = if turns.is_empty() {
+            turns.push(TurnInfo::default());
+            turns.last_mut().unwrap()
+        } else {
+            turns.last_mut().unwrap()
+        };
+
+        if let Some(converted) = convert_codex_compacted_to_compact_boundary(val) {
+            messages.push(converted);
+            msg_idx += 1;
+            continue;
+        }
+
+        if item_type == Some("event_msg") {
+            if let Some(payload) = val.get("payload") {
+                let payload_type = payload.get("type").and_then(|t| t.as_str());
+                match payload_type {
+                    Some("agent_message") => {
+                        if let Some(converted) = convert_codex_agent_message_to_claude_format(val) {
+                            current_turn.last_assistant_msg_idx = Some(msg_idx);
+                            messages.push(converted);
+                            msg_idx += 1;
+                        }
+                    }
+                    Some("token_count") => {
+                        if let Some(info) = payload.get("info") {
+                            if let Some(usage) = info.get("last_token_usage") {
+                                current_turn.last_token_usage = Some(usage.clone());
+                            }
+                            if let Some(ctx) =
+                                info.get("model_context_window").and_then(|v| v.as_u64())
+                            {
+                                current_turn.model_context_window = Some(ctx);
+                            }
+                        }
+                    }
+                    Some("task_complete") => {
+                        if let Some(dm) = payload.get("duration_ms").and_then(|d| d.as_u64()) {
+                            current_turn.duration_ms = Some(dm);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            continue;
+        }
+
+        if has_agent_messages && is_codex_assistant_response_message(val) {
+            continue;
+        }
+
+        if let Some(converted) = convert_codex_item_to_claude_format(val) {
+            if converted.get("type").and_then(|t| t.as_str()) == Some("assistant") {
+                current_turn.last_assistant_msg_idx = Some(msg_idx);
+            }
+            messages.push(converted);
+            msg_idx += 1;
+        }
+    }
+
+    struct TurnResult {
+        insert_at: usize,
+        result: serde_json::Value,
+    }
+    let mut turn_results: Vec<TurnResult> = Vec::new();
+
+    for (i, turn) in turns.iter().enumerate() {
+        let usage = match &turn.last_token_usage {
+            Some(u) => u,
+            None => continue,
+        };
+
+        let input = usage
+            .get("input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let cached = usage
+            .get("cached_input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let output = usage
+            .get("output_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let reasoning = usage
+            .get("reasoning_output_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let total = input + output + reasoning;
+
+        if input > 0 || output > 0 {
+            if let Some(insert_at) = turn.last_assistant_msg_idx {
+                let mut result = serde_json::json!({
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": false,
+                    "uuid": format!("synthetic-codex-turn-{}-{}", app_session_id, i),
+                    "session_id": app_session_id,
+                    "duration_ms": turn.duration_ms.unwrap_or(0),
+                    "duration_api_ms": 0,
+                    "num_turns": 1,
+                    "result": "",
+                    "total_cost_usd": 0,
+                    "usage": {
+                        "input_tokens": input,
+                        "cache_read_input_tokens": cached,
+                        "cache_creation_input_tokens": 0,
+                        "output_tokens": output
+                    },
+                    "last_token_usage": {
+                        "input_tokens": input,
+                        "output_tokens": output,
+                        "cached_input_tokens": cached,
+                        "total_tokens": total
+                    }
+                });
+                if let Some(ctx) = turn.model_context_window {
+                    result["model_context_window"] = serde_json::json!(ctx);
+                }
+                turn_results.push(TurnResult { insert_at, result });
+            }
+        }
+    }
+
+    for turn_result in turn_results.into_iter().rev() {
+        let pos = (turn_result.insert_at + 1).min(messages.len());
+        messages.insert(pos, turn_result.result);
+    }
+
+    messages
+}
+
 fn is_codex_image_text_marker(text: &str) -> bool {
     let trimmed = text.trim();
     trimmed.starts_with("<image ") || trimmed == "<image>" || trimmed == "</image>"
@@ -585,146 +819,7 @@ pub async fn load_codex_session_events(
         sort_events_by_timestamp_stable(&mut raw_events);
     }
 
-    // --- Pass 1: Identify turns and collect per-turn stats ---
-    // Each turn starts with a turn_context and has its own task_complete + token_counts.
-    // We compute per-turn token deltas so each turn gets its own result event.
-
-    #[derive(Default)]
-    struct TurnInfo {
-        last_token_usage: Option<serde_json::Value>,
-        model_context_window: Option<u64>,
-        duration_ms: Option<u64>,
-        last_assistant_msg_idx: Option<usize>, // index in `messages`
-    }
-
-    let mut turns: Vec<TurnInfo> = Vec::new();
-    let mut msg_idx: usize = 0;
-
-    for val in &raw_events {
-        let item_type = val.get("type").and_then(|t| t.as_str());
-
-        // Turn boundary
-        if item_type == Some("turn_context") {
-            turns.push(TurnInfo::default());
-        }
-
-        let current_turn = if turns.is_empty() {
-            turns.push(TurnInfo::default());
-            turns.last_mut().unwrap()
-        } else {
-            turns.last_mut().unwrap()
-        };
-
-        if item_type == Some("event_msg") {
-            if let Some(payload) = val.get("payload") {
-                let payload_type = payload.get("type").and_then(|t| t.as_str());
-                match payload_type {
-                    Some("token_count") => {
-                        if let Some(info) = payload.get("info") {
-                            if let Some(usage) = info.get("last_token_usage") {
-                                current_turn.last_token_usage = Some(usage.clone());
-                            }
-                            // Also capture model_context_window for the frontend
-                            if let Some(ctx) =
-                                info.get("model_context_window").and_then(|v| v.as_u64())
-                            {
-                                current_turn.model_context_window = Some(ctx);
-                            }
-                        }
-                    }
-                    Some("task_complete") => {
-                        if let Some(dm) = payload.get("duration_ms").and_then(|d| d.as_u64()) {
-                            current_turn.duration_ms = Some(dm);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            continue; // event_msg entries are not converted to messages
-        }
-
-        // Track which message index the last assistant message of this turn lands at
-        if let Some(converted) = convert_codex_item_to_claude_format(val) {
-            if converted.get("type").and_then(|t| t.as_str()) == Some("assistant") {
-                current_turn.last_assistant_msg_idx = Some(msg_idx);
-            }
-            messages.push(converted);
-            msg_idx += 1;
-        }
-    }
-
-    // --- Pass 2: Insert synthetic result events per turn ---
-    // Each turn's last token_count is cumulative; display as-is (total so far).
-    // Insert in reverse order so indices stay valid.
-
-    struct TurnResult {
-        insert_at: usize, // insert AFTER this message index
-        result: serde_json::Value,
-    }
-    let mut turn_results: Vec<TurnResult> = Vec::new();
-
-    for (i, turn) in turns.iter().enumerate() {
-        let usage = match &turn.last_token_usage {
-            Some(u) => u,
-            None => continue,
-        };
-
-        let input = usage
-            .get("input_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let cached = usage
-            .get("cached_input_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let output = usage
-            .get("output_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let reasoning = usage
-            .get("reasoning_output_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let total = input + output + reasoning;
-
-        if input > 0 || output > 0 {
-            if let Some(insert_at) = turn.last_assistant_msg_idx {
-                let mut result = serde_json::json!({
-                    "type": "result",
-                    "subtype": "success",
-                    "is_error": false,
-                    "uuid": format!("synthetic-codex-turn-{}-{}", app_session_id, i),
-                    "session_id": app_session_id,
-                    "duration_ms": turn.duration_ms.unwrap_or(0),
-                    "duration_api_ms": 0,
-                    "num_turns": 1,
-                    "result": "",
-                    "total_cost_usd": 0,
-                    "usage": {
-                        "input_tokens": input,
-                        "output_tokens": output,
-                        "cache_read_input_tokens": cached,
-                        "cache_creation_input_tokens": 0
-                    },
-                    "last_token_usage": {
-                        "input_tokens": input,
-                        "output_tokens": output,
-                        "cached_input_tokens": cached,
-                        "total_tokens": total
-                    }
-                });
-                if let Some(ctx) = turn.model_context_window {
-                    result["model_context_window"] = serde_json::json!(ctx);
-                }
-                turn_results.push(TurnResult { insert_at, result });
-            }
-        }
-    }
-
-    // Insert result events in reverse order to preserve indices
-    for tr in turn_results.into_iter().rev() {
-        messages.insert(tr.insert_at + 1, tr.result);
-    }
+    messages = convert_codex_history_values_to_events(&raw_events, &app_session_id);
 
     info!(target: "agent", "Loaded {} messages from Codex JSONL for app_session_id={}", messages.len(), app_session_id);
     Ok(messages)
@@ -1479,10 +1574,10 @@ async fn get_live_proxy_port(agent_state: &State<'_, AgentState>) -> Option<u16>
 #[cfg(test)]
 mod tests {
     use super::{
-        build_update_permissions_command_from_snapshot, convert_codex_item_to_claude_format,
-        find_codex_session_jsonl, parse_proxy_port_from_stderr,
-        read_codex_interactive_events_from_dir, read_json_stream_values,
-        resolve_agent_session_info, should_include_claude_history_event,
+        build_update_permissions_command_from_snapshot, convert_codex_history_values_to_events,
+        convert_codex_item_to_claude_format, find_codex_session_jsonl,
+        parse_proxy_port_from_stderr, read_codex_interactive_events_from_dir,
+        read_json_stream_values, resolve_agent_session_info, should_include_claude_history_event,
         sort_events_by_timestamp_stable,
     };
     use crate::config::types::AgentKind;
@@ -1652,6 +1747,106 @@ mod tests {
                             "thinking": "**Crafting a concise response**\n\nI can answer directly."
                         }
                     ]
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn codex_history_prefers_event_msg_agent_message_over_response_item_message() {
+        let raw_events = vec![
+            serde_json::json!({
+                "timestamp": "2026-07-03T17:31:58.239Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "agent_message",
+                    "message": "使用 agent_message 展示",
+                    "phase": "commentary"
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-07-03T17:31:58.240Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{ "type": "output_text", "text": "不应该展示 response_item" }],
+                    "phase": "commentary"
+                }
+            }),
+        ];
+
+        let converted = convert_codex_history_values_to_events(&raw_events, "app-session-1");
+
+        assert_eq!(converted.len(), 1);
+        assert_eq!(
+            converted[0],
+            serde_json::json!({
+                "type": "assistant",
+                "timestamp": "2026-07-03T17:31:58.239Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [{ "type": "text", "text": "使用 agent_message 展示" }]
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn codex_history_falls_back_to_response_item_message_without_agent_message() {
+        let raw_events = vec![serde_json::json!({
+            "timestamp": "2026-07-03T17:31:58.240Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{ "type": "output_text", "text": "旧历史消息" }],
+                "phase": "commentary"
+            }
+        })];
+
+        let converted = convert_codex_history_values_to_events(&raw_events, "app-session-1");
+
+        assert_eq!(converted.len(), 1);
+        assert_eq!(
+            converted[0],
+            serde_json::json!({
+                "type": "assistant",
+                "timestamp": "2026-07-03T17:31:58.240Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [{ "type": "text", "text": "旧历史消息" }]
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn codex_history_converts_compacted_record_to_compact_boundary() {
+        let raw_events = vec![serde_json::json!({
+            "timestamp": "2026-07-03T18:00:00.000Z",
+            "type": "compacted",
+            "payload": {
+                "trigger": "auto",
+                "pre_tokens": 40956,
+                "post_tokens": 2876
+            }
+        })];
+
+        let converted = convert_codex_history_values_to_events(&raw_events, "app-session-1");
+
+        assert_eq!(converted.len(), 1);
+        assert_eq!(
+            converted[0],
+            serde_json::json!({
+                "type": "system",
+                "subtype": "compact_boundary",
+                "content": "Conversation compacted",
+                "timestamp": "2026-07-03T18:00:00.000Z",
+                "compact_metadata": {
+                    "trigger": "auto",
+                    "pre_tokens": 40956,
+                    "post_tokens": 2876
                 }
             })
         );

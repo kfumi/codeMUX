@@ -15,6 +15,7 @@ const gitApiMock = vi.hoisted(() => ({
   unstageStatusChanges: vi.fn(),
   revertStatusChanges: vi.fn(),
   commitChanges: vi.fn(),
+  pushBranch: vi.fn(),
   generateCommitMessage: vi.fn(),
 }));
 
@@ -45,6 +46,8 @@ describe('ReviewPanel git actions', () => {
       ],
       detached: false,
       hasUncommittedChanges: false,
+      aheadCount: 0,
+      hasUnpushedCommits: false,
     });
     gitApiMock.getStatusChanges.mockResolvedValue([
       {
@@ -61,6 +64,9 @@ describe('ReviewPanel git actions', () => {
     gitApiMock.stageStatusChanges.mockResolvedValue(undefined);
     gitApiMock.unstageStatusChanges.mockResolvedValue(undefined);
     gitApiMock.revertStatusChanges.mockResolvedValue(undefined);
+    gitApiMock.commitChanges.mockResolvedValue('abc1234');
+    gitApiMock.pushBranch.mockResolvedValue(undefined);
+    gitApiMock.generateCommitMessage.mockResolvedValue({ message: 'feat: 更新应用' });
   });
 
   it('loads repository state and switches branches', async () => {
@@ -133,28 +139,93 @@ describe('ReviewPanel git actions', () => {
   });
 
   it('generates a commit message into the commit input', async () => {
-    gitApiMock.generateCommitMessage.mockResolvedValue({ message: 'feat: update app' });
-
     render(<ReviewPanel projectPath="D:/project/app" />);
 
-    await screen.findByTestId('git-commit-message');
+    await screen.findByText('App.tsx');
+    fireEvent.click(screen.getByTestId('git-action-trigger'));
     fireEvent.click(screen.getByTestId('git-commit-generate'));
 
     await waitFor(() => {
-      expect((screen.getByTestId('git-commit-message') as HTMLInputElement).value).toBe('feat: update app');
+      expect((screen.getByTestId('git-commit-message') as HTMLTextAreaElement).value).toBe('feat: 更新应用');
     });
   });
 
   it('commits staged changes and clears the commit input', async () => {
-    gitApiMock.commitChanges.mockResolvedValue('abc1234');
-
     render(<ReviewPanel projectPath="D:/project/app" />);
 
-    const input = await screen.findByTestId('git-commit-message');
+    await screen.findByText('App.tsx');
+    fireEvent.click(screen.getByTestId('git-action-trigger'));
+    const input = screen.getByTestId('git-commit-message');
     fireEvent.change(input, { target: { value: 'feat: update app' } });
     fireEvent.click(screen.getByTestId('git-commit-submit'));
 
     await waitFor(() => expect(gitApiMock.commitChanges).toHaveBeenCalledWith('D:/project/app', 'feat: update app'));
-    await waitFor(() => expect((input as HTMLInputElement).value).toBe(''));
+    await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe(''));
+  });
+
+  it('commits multiline staged changes without flattening the message', async () => {
+    render(<ReviewPanel projectPath="D:/project/app" />);
+
+    await screen.findByText('App.tsx');
+    fireEvent.click(screen.getByTestId('git-action-trigger'));
+    const input = screen.getByTestId('git-commit-message');
+    const message = 'feat: 更新审查面板\n\n补充多行提交说明';
+    fireEvent.change(input, { target: { value: message } });
+    fireEvent.click(screen.getByTestId('git-commit-submit'));
+
+    await waitFor(() => expect(gitApiMock.commitChanges).toHaveBeenCalledWith('D:/project/app', message));
+  });
+
+  it('pushes when there are no local changes and the branch is ahead', async () => {
+    gitApiMock.getRepositoryState.mockResolvedValue({
+      currentBranch: 'master',
+      branches: [{ name: 'master', current: true }],
+      detached: false,
+      hasUncommittedChanges: false,
+      aheadCount: 1,
+      hasUnpushedCommits: true,
+    });
+    gitApiMock.getStatusChanges.mockResolvedValue([]);
+
+    render(<ReviewPanel projectPath="D:/project/app" />);
+
+    await screen.findByText('推送');
+    fireEvent.click(screen.getByTestId('git-action-trigger'));
+    fireEvent.click(screen.getByTestId('git-push-submit'));
+
+    await waitFor(() => expect(gitApiMock.pushBranch).toHaveBeenCalledWith('D:/project/app'));
+  });
+
+  it('can stage unstaged changes before committing', async () => {
+    gitApiMock.getRepositoryState.mockResolvedValue({
+      currentBranch: 'master',
+      branches: [{ name: 'master', current: true }],
+      detached: false,
+      hasUncommittedChanges: true,
+      aheadCount: 0,
+      hasUnpushedCommits: false,
+    });
+
+    render(<ReviewPanel projectPath="D:/project/app" />);
+
+    await screen.findByText('App.tsx');
+    fireEvent.click(screen.getByTestId('git-action-trigger'));
+    fireEvent.change(screen.getByTestId('git-commit-message'), { target: { value: 'feat: update app' } });
+    fireEvent.click(screen.getByTestId('git-commit-submit'));
+
+    await waitFor(() => expect(gitApiMock.stageStatusChanges).toHaveBeenCalledWith('D:/project/app'));
+    await waitFor(() => expect(gitApiMock.commitChanges).toHaveBeenCalledWith('D:/project/app', 'feat: update app'));
+  });
+
+  it('commits and pushes from the commit popover', async () => {
+    render(<ReviewPanel projectPath="D:/project/app" />);
+
+    await screen.findByText('App.tsx');
+    fireEvent.click(screen.getByTestId('git-action-trigger'));
+    fireEvent.change(screen.getByTestId('git-commit-message'), { target: { value: 'feat: update app' } });
+    fireEvent.click(screen.getByTestId('git-commit-push-submit'));
+
+    await waitFor(() => expect(gitApiMock.commitChanges).toHaveBeenCalledWith('D:/project/app', 'feat: update app'));
+    await waitFor(() => expect(gitApiMock.pushBranch).toHaveBeenCalledWith('D:/project/app'));
   });
 });

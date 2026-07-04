@@ -54,6 +54,8 @@ pub struct GitRepositoryState {
     pub branches: Vec<GitBranch>,
     pub detached: bool,
     pub has_uncommitted_changes: bool,
+    pub ahead_count: usize,
+    pub has_unpushed_commits: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -209,6 +211,25 @@ fn git_head_tree(root: &Path) -> Result<String, String> {
 fn has_uncommitted_changes(root: &Path) -> Result<bool, String> {
     let output = run_git(root, &["status", "--porcelain=v1"])?;
     Ok(!output.is_empty())
+}
+
+fn read_ahead_count(root: &Path, current_branch: Option<&str>) -> Result<usize, String> {
+    if current_branch.is_none() {
+        return Ok(0);
+    }
+    if run_git(
+        root,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    )
+    .is_err()
+    {
+        return Ok(0);
+    }
+    let output = run_git(root, &["rev-list", "--count", "@{u}..HEAD"])?;
+    Ok(String::from_utf8_lossy(&output)
+        .trim()
+        .parse::<usize>()
+        .unwrap_or(0))
 }
 
 fn validate_branch_name(root: &Path, branch_name: &str) -> Result<String, String> {
@@ -462,11 +483,15 @@ pub fn read_git_repository_state(project_path: &Path) -> Result<GitRepositorySta
     let detached =
         current_branch.is_none() && run_git(&root, &["rev-parse", "--short", "HEAD"]).is_ok();
 
+    let ahead_count = read_ahead_count(&root, current_branch.as_deref())?;
+
     Ok(GitRepositoryState {
         current_branch,
         branches,
         detached,
         has_uncommitted_changes: has_uncommitted_changes(&root)?,
+        ahead_count,
+        has_unpushed_commits: ahead_count > 0,
     })
 }
 
@@ -582,9 +607,35 @@ pub fn commit_git_changes_in_project(project_path: &Path, message: &str) -> Resu
     Ok(String::from_utf8_lossy(&output).trim().to_string())
 }
 
+pub fn push_git_branch_in_project(project_path: &Path) -> Result<(), String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+
+    let current_output = run_git(&root, &["branch", "--show-current"])?;
+    let current_branch = String::from_utf8_lossy(&current_output).trim().to_string();
+    if current_branch.is_empty() {
+        return Err("当前处于 detached HEAD，无法推送分支".to_string());
+    }
+
+    if run_git(
+        &root,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    )
+    .is_ok()
+    {
+        run_git(&root, &["push"])?;
+    } else {
+        run_git(&root, &["push", "-u", "origin", &current_branch])?;
+    }
+
+    Ok(())
+}
+
 pub fn build_commit_message_prompt(stat: &str, diff: &str, truncated: bool) -> String {
     format!(
-        "请根据以下 staged diff 生成一条 Git 提交信息。只输出一条提交信息，不输出解释。优先使用 Conventional Commits，长度不超过 72 个字符。{}\n\n统计:\n{}\n\nDiff:\n{}",
+        "请根据以下 staged diff 生成一条 Git 提交信息。只输出提交信息本身，不输出解释、代码块或引号。提交信息必须使用中文描述，并遵循 Conventional Commits 格式。\n\n格式要求：\n<type>(可选 scope): <中文标题，标题不超过 72 个字符>\n\n- <中文要点 1>\n- <中文要点 2>\n\n要求：\n1. 第一行必须是 Conventional Commits 标题，例如：feat: 增加分支切换入口、fix: 修复提交信息生成失败、docs: 更新使用说明。\n2. 标题后必须空一行，再输出 1 到 4 条中文要点，每条以 \"- \" 开头。\n3. 不要输出快捷键、解释说明、Markdown 代码围栏或多余前后缀。{}\n\n统计:\n{}\n\nDiff:\n{}",
         if truncated {
             "Diff 内容已截断，请基于可见内容概括。"
         } else {
@@ -660,27 +711,70 @@ fn select_commit_message_provider(config: &AppConfig) -> Result<Provider, String
 }
 
 fn clean_commit_message(raw: &str) -> Result<String, String> {
-    let without_fence = raw
-        .trim()
-        .trim_start_matches("```")
-        .trim_start_matches("git")
-        .trim_start_matches("text")
-        .trim_end_matches("```")
-        .trim();
-    let first_line = without_fence
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or("")
-        .trim_start_matches("- ")
-        .trim_matches(|ch| matches!(ch, '"' | '\'' | '`'))
-        .trim()
-        .to_string();
+    let text = if raw.trim().starts_with("```") {
+        raw.trim()
+            .lines()
+            .skip(1)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .trim_end_matches("```")
+            .trim()
+            .to_string()
+    } else {
+        raw.trim().to_string()
+    };
 
-    if first_line.is_empty() {
+    let mut lines = text.lines().map(|line| line.trim_end()).collect::<Vec<_>>();
+    while lines.first().is_some_and(|line| line.trim().is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|line| line.trim().is_empty()) {
+        lines.pop();
+    }
+
+    let conventional_prefixes = [
+        "feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore",
+        "revert",
+    ];
+    let start = lines
+        .iter()
+        .position(|line| {
+            let trimmed = line
+                .trim()
+                .trim_start_matches("- ")
+                .trim_matches(|ch| matches!(ch, '"' | '\'' | '`'));
+            conventional_prefixes.iter().any(|prefix| {
+                trimmed.starts_with(&format!("{}: ", prefix))
+                    || (trimmed.starts_with(&format!("{}(", prefix)) && trimmed.contains("): "))
+                    || (trimmed.starts_with(&format!("{}!", prefix)) && trimmed.contains(": "))
+            })
+        })
+        .unwrap_or(0);
+
+    let mut cleaned = lines
+        .into_iter()
+        .skip(start)
+        .map(|line| {
+            line.trim_matches(|ch| matches!(ch, '"' | '\'' | '`'))
+                .trim_end()
+        })
+        .collect::<Vec<_>>();
+    if let Some(first) = cleaned.first_mut() {
+        *first = first.trim_start_matches("- ").trim();
+    }
+    while cleaned.first().is_some_and(|line| line.trim().is_empty()) {
+        cleaned.remove(0);
+    }
+    while cleaned.last().is_some_and(|line| line.trim().is_empty()) {
+        cleaned.pop();
+    }
+
+    let message = cleaned.join("\n").trim().to_string();
+    if message.is_empty() {
         Err("AI 未返回可用的提交信息".to_string())
     } else {
-        Ok(first_line.chars().take(120).collect())
+        Ok(message)
     }
 }
 
@@ -733,7 +827,7 @@ async fn generate_with_anthropic(
     );
     let body = serde_json::json!({
         "model": provider.default_model,
-        "max_tokens": 80,
+        "max_tokens": 220,
         "messages": [{"role": "user", "content": prompt}]
     });
 
@@ -778,7 +872,7 @@ async fn generate_with_openai(
     );
     let body = serde_json::json!({
         "model": provider.default_model,
-        "max_tokens": 80,
+        "max_tokens": 220,
         "messages": [{"role": "user", "content": prompt}]
     });
 
@@ -1029,6 +1123,11 @@ pub fn commit_git_changes(project_path: String, message: String) -> Result<Strin
 }
 
 #[tauri::command]
+pub fn push_git_branch(project_path: String) -> Result<(), String> {
+    push_git_branch_in_project(Path::new(&project_path))
+}
+
+#[tauri::command]
 pub async fn generate_git_commit_message(
     state: State<'_, AppState>,
     project_path: String,
@@ -1043,10 +1142,11 @@ mod tests {
         build_commit_message_prompt, build_commit_message_prompt_in_project,
         checkout_git_branch_in_project, clean_commit_message, commit_git_changes_in_project,
         create_git_branch_in_project, decode_text_bytes, parse_anthropic_commit_message_response,
-        parse_openai_commit_message_response, read_git_changed_files_for_tree,
-        read_git_repository_state, read_git_status_change_detail, read_git_status_changes,
-        revert_git_status_changes_in_project, select_commit_message_provider,
-        stage_git_status_changes_for_paths, unstage_git_status_changes_for_paths, GitStatusArea,
+        parse_openai_commit_message_response, push_git_branch_in_project,
+        read_git_changed_files_for_tree, read_git_repository_state, read_git_status_change_detail,
+        read_git_status_changes, revert_git_status_changes_in_project,
+        select_commit_message_provider, stage_git_status_changes_for_paths,
+        unstage_git_status_changes_for_paths, GitStatusArea,
     };
     use crate::config::types::{AppConfig, Provider};
     use std::fs;
@@ -1158,6 +1258,71 @@ mod tests {
         assert_eq!(state.current_branch.as_deref(), Some("feature/git-panel"));
 
         let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_repository_state_tracks_unpushed_commits_and_pushes_branch() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        let remote = temp_project();
+        Command::new("git")
+            .arg("-C")
+            .arg(&remote)
+            .args(["init", "--bare"])
+            .output()
+            .unwrap();
+        init_project_with_commit(&project);
+        let branch_output = Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["branch", "--show-current"])
+            .output()
+            .unwrap();
+        let branch = String::from_utf8_lossy(&branch_output.stdout)
+            .trim()
+            .to_string();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["remote", "add", "origin"])
+            .arg(&remote)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["push", "-u", "origin", &branch])
+            .output()
+            .unwrap();
+
+        fs::write(project.join("README.md"), "hello\nnext\n").unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["commit", "-m", "feat: local change"])
+            .output()
+            .unwrap();
+
+        let state = read_git_repository_state(&project).unwrap();
+        assert_eq!(state.ahead_count, 1);
+        assert!(state.has_unpushed_commits);
+
+        push_git_branch_in_project(&project).unwrap();
+        let state = read_git_repository_state(&project).unwrap();
+        assert_eq!(state.ahead_count, 0);
+        assert!(!state.has_unpushed_commits);
+
+        let _ = fs::remove_dir_all(project);
+        let _ = fs::remove_dir_all(remote);
     }
 
     #[test]
@@ -1282,7 +1447,10 @@ mod tests {
             false,
         );
 
-        assert!(prompt.contains("只输出一条提交信息"));
+        assert!(prompt.contains("只输出提交信息本身"));
+        assert!(prompt.contains("<type>(可选 scope): <中文标题"));
+        assert!(prompt.contains("- <中文要点 1>"));
+        assert!(prompt.contains("feat: 增加分支切换入口"));
         assert!(prompt.contains("src/main.ts | 2 +-"));
         assert!(prompt.contains("diff --git"));
         assert!(prompt.contains("Conventional Commits"));
@@ -1312,30 +1480,42 @@ mod tests {
     #[test]
     fn git_commit_message_parser_reads_anthropic_response() {
         let body = serde_json::json!({
-            "content": [{ "type": "text", "text": "\"feat: add branch controls\"\n\nextra" }]
+            "content": [{ "type": "text", "text": "\"feat: 增加分支控件\"\n\n- 支持切换本地分支\n- 支持创建后检出" }]
         });
 
         let message = parse_anthropic_commit_message_response(&body).unwrap();
 
-        assert_eq!(message, "feat: add branch controls");
+        assert_eq!(
+            message,
+            "feat: 增加分支控件\n\n- 支持切换本地分支\n- 支持创建后检出"
+        );
     }
 
     #[test]
     fn git_commit_message_parser_reads_openai_response() {
         let body = serde_json::json!({
-            "choices": [{ "message": { "content": "```text\nfix: handle dirty branch checkout\n```" } }]
+            "choices": [{ "message": { "content": "```text\nfix: 处理脏工作区切换分支\n\n- 阻止存在未提交修改时切换\n```" } }]
         });
 
         let message = parse_openai_commit_message_response(&body).unwrap();
 
-        assert_eq!(message, "fix: handle dirty branch checkout");
+        assert_eq!(
+            message,
+            "fix: 处理脏工作区切换分支\n\n- 阻止存在未提交修改时切换"
+        );
     }
 
     #[test]
-    fn git_commit_message_cleaner_keeps_single_line() {
-        let message = clean_commit_message("- docs: update git plan\n\nbody").unwrap();
+    fn git_commit_message_cleaner_keeps_conventional_body() {
+        let message = clean_commit_message(
+            "提交信息如下：\n\n- docs: 更新 Git 计划\n\n- 补充分支管理说明\n- 记录提交弹窗行为",
+        )
+        .unwrap();
 
-        assert_eq!(message, "docs: update git plan");
+        assert_eq!(
+            message,
+            "docs: 更新 Git 计划\n\n- 补充分支管理说明\n- 记录提交弹窗行为"
+        );
     }
 
     #[test]

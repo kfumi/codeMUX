@@ -205,6 +205,7 @@ pub fn run() {
             commands::git::unstage_git_status_changes,
             commands::git::revert_git_status_changes,
             commands::git::commit_git_changes,
+            commands::git::push_git_branch,
             commands::git::generate_git_commit_message,
             commands::terminal::start_terminal_session,
             commands::terminal::write_terminal_session,

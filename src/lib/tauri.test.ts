@@ -88,6 +88,7 @@ describe('gitApi', () => {
     await gitApi.checkoutBranch('D:/project/app', 'feature/git-panel');
     await gitApi.revertStatusChanges('D:/project/app', 'unstaged', 'D:/project/app/src/App.tsx');
     await gitApi.commitChanges('D:/project/app', 'feat: add git panel');
+    await gitApi.pushBranch('D:/project/app');
     await gitApi.generateCommitMessage('D:/project/app');
 
     expect(invokeMock).toHaveBeenNthCalledWith(1, 'get_git_repository_state', {
@@ -111,7 +112,10 @@ describe('gitApi', () => {
       projectPath: 'D:/project/app',
       message: 'feat: add git panel',
     });
-    expect(invokeMock).toHaveBeenNthCalledWith(6, 'generate_git_commit_message', {
+    expect(invokeMock).toHaveBeenNthCalledWith(6, 'push_git_branch', {
+      projectPath: 'D:/project/app',
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(7, 'generate_git_commit_message', {
       projectPath: 'D:/project/app',
     });
   });

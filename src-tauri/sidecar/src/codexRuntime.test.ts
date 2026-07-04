@@ -1175,4 +1175,59 @@ describe('CodexSessionRuntime', () => {
       stdoutSpy.mockRestore();
     }
   });
+
+  it('emits a compact boundary for live Codex compacted events', async () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      await (runtime as unknown as {
+        handleSdkEvent: (
+          sessionId: string,
+          event: ThreadEvent,
+          emitFailure: (message: string) => void,
+          noteStreamError: (message: string) => void,
+        ) => Promise<void>;
+      }).handleSdkEvent(
+        'session-1',
+        {
+          type: 'compacted',
+          timestamp: '2026-07-03T17:22:53.471Z',
+          payload: {
+            message: 'Another language model started to solve this problem and produced a summary.',
+          },
+        } as unknown as ThreadEvent,
+        () => {},
+        () => {},
+      );
+
+      const emittedEvents = writes
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line));
+
+      expect(emittedEvents).toEqual([
+        {
+          type: 'system',
+          subtype: 'compact_boundary',
+          content: 'Conversation compacted',
+          timestamp: '2026-07-03T17:22:53.471Z',
+          session_id: 'session-1',
+          compact_metadata: {
+            trigger: 'auto',
+            pre_tokens: 0,
+            post_tokens: 0,
+          },
+        },
+      ]);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
 });

@@ -1,7 +1,7 @@
+import { useEffect, useRef } from 'react';
 import { Bot, GitCommitHorizontal } from 'lucide-react';
 
 import { Button } from '../../ui/button';
-import { Input } from '../../ui/input';
 
 interface GitCommitBoxProps {
   message: string;
@@ -27,18 +27,28 @@ export function GitCommitBox({
   onCommit,
 }: GitCommitBoxProps) {
   const disabled = loading || stagedCount === 0;
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [message]);
 
   return (
     <div className="shrink-0 border-t border-border/25 px-4 py-3">
-      <div className="flex items-center gap-2">
-        <Input
+      <div className="flex items-end gap-2">
+        <textarea
+          ref={textareaRef}
           aria-label="提交信息"
           data-testid="git-commit-message"
           value={message}
           onChange={(event) => onMessageChange(event.target.value)}
           placeholder={stagedCount > 0 ? 'feat: 描述本次修改' : '暂存修改后可提交'}
           disabled={disabled || committing}
-          className="h-9 rounded-lg"
+          rows={1}
+          className="min-h-9 max-h-[120px] flex-1 resize-none overflow-y-auto rounded-lg border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         />
         <Button
           type="button"

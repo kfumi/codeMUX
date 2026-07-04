@@ -535,6 +535,12 @@ export class CodexSessionRuntime {
     emitFailure: (message: string) => void,
     noteStreamError: (message: string) => void,
   ): Promise<void> {
+    const compactBoundaryEvent = buildLiveCodexCompactBoundaryEvent(sessionId, event);
+    if (compactBoundaryEvent) {
+      emit(compactBoundaryEvent);
+      return;
+    }
+
     // Codex SDK 0.139.0 exposes tool execution items and sandbox/approval policy
     // options, but this codebase has not observed a stable interactive approval
     // event shape. Approval-like unknown event types are surfaced as diagnostics
@@ -805,6 +811,39 @@ export class CodexSessionRuntime {
     });
     this.streamingItemState.delete(itemId);
   }
+}
+
+function buildLiveCodexCompactBoundaryEvent(sessionId: string, event: ThreadEvent): Record<string, unknown> | null {
+  const rawEvent = event as unknown as Record<string, unknown>;
+  if (rawEvent.type !== 'compacted') {
+    return null;
+  }
+
+  const payload = isRecord(rawEvent.payload) ? rawEvent.payload : {};
+  const trigger = payload.trigger === 'manual' ? 'manual' : 'auto';
+  const preTokens = readFiniteNumber(payload.pre_tokens) ?? readFiniteNumber(payload.preTokens) ?? 0;
+  const postTokens = readFiniteNumber(payload.post_tokens) ?? readFiniteNumber(payload.postTokens) ?? 0;
+
+  return {
+    type: 'system',
+    subtype: 'compact_boundary',
+    content: 'Conversation compacted',
+    timestamp: rawEvent.timestamp,
+    session_id: sessionId,
+    compact_metadata: {
+      trigger,
+      pre_tokens: preTokens,
+      post_tokens: postTokens,
+    },
+  };
+}
+
+function readFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function normalizeCodexReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | undefined {

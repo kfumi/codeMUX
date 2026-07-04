@@ -1,13 +1,14 @@
+import { AlertTriangle } from 'lucide-react';
+
+import { Button } from './button';
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from './dialog';
-import { Button } from './button';
-import { AlertTriangle } from 'lucide-react';
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -39,11 +40,11 @@ export function ConfirmDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent overlayClassName={overlayClassName} className="sm:max-w-95 gap-0 p-0 overflow-hidden">
-        <DialogHeader className="px-6 pt-6 pb-4">
+      <DialogContent overlayClassName={overlayClassName} className="sm:max-w-95 gap-0 overflow-hidden p-0">
+        <DialogHeader className="px-6 pb-4 pt-6">
           <div className="flex items-start gap-3">
             {variant === 'destructive' && (
-              <div className="mt-0.5 shrink-0 w-9 h-9 rounded-full bg-[hsl(var(--destructive)/0.1)] flex items-center justify-center">
+              <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--destructive)/0.1)]">
                 <AlertTriangle className="h-4.5 w-4.5 text-[hsl(var(--destructive))]" />
               </div>
             )}
@@ -55,7 +56,7 @@ export function ConfirmDialog({
             </div>
           </div>
         </DialogHeader>
-        <DialogFooter className="px-6 py-4 bg-muted/30 border-t border-border/40 gap-2">
+        <DialogFooter className="gap-2 border-t border-border/40 bg-muted/30 px-6 py-4">
           <Button
             variant="ghost"
             size="sm"

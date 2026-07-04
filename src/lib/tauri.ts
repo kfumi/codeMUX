@@ -52,6 +52,8 @@ export interface GitRepositoryState {
   branches: GitBranch[];
   detached: boolean;
   hasUncommittedChanges: boolean;
+  aheadCount: number;
+  hasUnpushedCommits: boolean;
 }
 
 export interface GitCommitMessageSuggestion {
@@ -299,6 +301,8 @@ export const gitApi = {
     invokeLogged('revert_git_status_changes', { projectPath, area, filePath: filePath ?? null }),
   commitChanges: (projectPath: string, message: string): Promise<string> =>
     invokeLogged('commit_git_changes', { projectPath, message }),
+  pushBranch: (projectPath: string): Promise<void> =>
+    invokeLogged('push_git_branch', { projectPath }),
   generateCommitMessage: (projectPath: string): Promise<GitCommitMessageSuggestion> =>
     invokeLogged('generate_git_commit_message', { projectPath }),
 };
