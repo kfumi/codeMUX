@@ -42,6 +42,22 @@ export interface GitStatusChange {
   deletions: number;
 }
 
+export interface GitBranch {
+  name: string;
+  current: boolean;
+}
+
+export interface GitRepositoryState {
+  currentBranch: string | null;
+  branches: GitBranch[];
+  detached: boolean;
+  hasUncommittedChanges: boolean;
+}
+
+export interface GitCommitMessageSuggestion {
+  message: string;
+}
+
 export type TerminalEvent =
   | { type: 'output'; terminalId: string; data: string }
   | { type: 'exit'; terminalId: string; code: number | null }
@@ -265,6 +281,12 @@ export const gitApi = {
     invokeLogged('get_git_changed_files', { projectPath, baselineTree }),
   getChangedFilesSinceHead: (projectPath: string): Promise<GitChangedFile[]> =>
     invokeLogged('get_git_changed_files_since_head', { projectPath }),
+  getRepositoryState: (projectPath: string): Promise<GitRepositoryState> =>
+    invokeLogged('get_git_repository_state', { projectPath }),
+  createBranch: (projectPath: string, branchName: string, checkout: boolean): Promise<void> =>
+    invokeLogged('create_git_branch', { projectPath, branchName, checkout }),
+  checkoutBranch: (projectPath: string, branchName: string): Promise<void> =>
+    invokeLogged('checkout_git_branch', { projectPath, branchName }),
   getStatusChanges: (projectPath: string, area: GitStatusArea): Promise<GitStatusChange[]> =>
     invokeLogged('get_git_status_changes', { projectPath, area }),
   getStatusChangeDetail: (projectPath: string, area: GitStatusArea, filePath: string): Promise<GitStatusChange> =>
@@ -273,6 +295,12 @@ export const gitApi = {
     invokeLogged('stage_git_status_changes', { projectPath, filePath: filePath ?? null }),
   unstageStatusChanges: (projectPath: string, filePath?: string): Promise<void> =>
     invokeLogged('unstage_git_status_changes', { projectPath, filePath: filePath ?? null }),
+  revertStatusChanges: (projectPath: string, area: GitStatusArea, filePath?: string): Promise<void> =>
+    invokeLogged('revert_git_status_changes', { projectPath, area, filePath: filePath ?? null }),
+  commitChanges: (projectPath: string, message: string): Promise<string> =>
+    invokeLogged('commit_git_changes', { projectPath, message }),
+  generateCommitMessage: (projectPath: string): Promise<GitCommitMessageSuggestion> =>
+    invokeLogged('generate_git_commit_message', { projectPath }),
 };
 
 export const terminalApi = {

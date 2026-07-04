@@ -1,3 +1,5 @@
+use crate::config::types::{AppConfig, Provider};
+use crate::AppState;
 use encoding_rs::GBK;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -5,9 +7,11 @@ use std::collections::HashMap;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tauri::State;
 
 /// Empty tree hash — the tree object git uses for a repo with zero commits.
 const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf899d69f3612f4bf";
+const COMMIT_MESSAGE_DIFF_LIMIT: usize = 12_000;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +38,28 @@ pub struct GitStatusChange {
     pub current_content: String,
     pub additions: usize,
     pub deletions: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranch {
+    pub name: String,
+    pub current: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRepositoryState {
+    pub current_branch: Option<String>,
+    pub branches: Vec<GitBranch>,
+    pub detached: bool,
+    pub has_uncommitted_changes: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitMessageSuggestion {
+    pub message: String,
 }
 
 fn run_git(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
@@ -178,6 +204,20 @@ fn git_head_tree(root: &Path) -> Result<String, String> {
         Ok(output) => Ok(String::from_utf8_lossy(&output).trim().to_string()),
         Err(_) => Ok(EMPTY_TREE_HASH.to_string()),
     }
+}
+
+fn has_uncommitted_changes(root: &Path) -> Result<bool, String> {
+    let output = run_git(root, &["status", "--porcelain=v1"])?;
+    Ok(!output.is_empty())
+}
+
+fn validate_branch_name(root: &Path, branch_name: &str) -> Result<String, String> {
+    let trimmed = branch_name.trim();
+    if trimmed.is_empty() {
+        return Err("分支名不能为空".to_string());
+    }
+    run_git(root, &["check-ref-format", "--branch", trimmed])?;
+    Ok(trimmed.to_string())
 }
 
 fn status_from_name_status(status_char: &str) -> Option<&'static str> {
@@ -393,6 +433,422 @@ pub fn unstage_git_status_changes_for_paths(
     }
 }
 
+pub fn read_git_repository_state(project_path: &Path) -> Result<GitRepositoryState, String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+
+    let current_output = run_git(&root, &["branch", "--show-current"])?;
+    let current_branch_text = String::from_utf8_lossy(&current_output).trim().to_string();
+    let current_branch = if current_branch_text.is_empty() {
+        None
+    } else {
+        Some(current_branch_text)
+    };
+
+    let branch_output = run_git(&root, &["branch", "--format=%(refname:short)"])?;
+    let branch_text = String::from_utf8_lossy(&branch_output);
+    let branches = branch_text
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| GitBranch {
+            name: name.to_string(),
+            current: current_branch.as_deref() == Some(name),
+        })
+        .collect();
+
+    let detached =
+        current_branch.is_none() && run_git(&root, &["rev-parse", "--short", "HEAD"]).is_ok();
+
+    Ok(GitRepositoryState {
+        current_branch,
+        branches,
+        detached,
+        has_uncommitted_changes: has_uncommitted_changes(&root)?,
+    })
+}
+
+pub fn create_git_branch_in_project(
+    project_path: &Path,
+    branch_name: &str,
+    checkout: bool,
+) -> Result<(), String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+    let branch_name = validate_branch_name(&root, branch_name)?;
+    run_git(&root, &["branch", &branch_name])?;
+    if checkout {
+        run_git(&root, &["checkout", &branch_name])?;
+    }
+    Ok(())
+}
+
+pub fn checkout_git_branch_in_project(
+    project_path: &Path,
+    branch_name: &str,
+) -> Result<(), String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+    let branch_name = validate_branch_name(&root, branch_name)?;
+    if has_uncommitted_changes(&root)? {
+        return Err("请先提交或还原当前修改，再切换分支".to_string());
+    }
+    run_git(&root, &["checkout", &branch_name]).map(|_| ())
+}
+
+fn is_untracked_file(root: &Path, relative_path: &str) -> Result<bool, String> {
+    let output = run_git(
+        root,
+        &[
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "--",
+            relative_path,
+        ],
+    )?;
+    Ok(!String::from_utf8_lossy(&output).trim().is_empty())
+}
+
+fn remove_untracked_path(root: &Path, relative_path: &str) -> Result<(), String> {
+    let target = root.join(relative_path);
+    if target.is_file() {
+        std::fs::remove_file(&target)
+            .map_err(|e| format!("Failed to delete {}: {}", relative_path, e))?;
+    } else if target.is_dir() {
+        std::fs::remove_dir_all(&target)
+            .map_err(|e| format!("Failed to delete {}: {}", relative_path, e))?;
+    }
+    Ok(())
+}
+
+pub fn revert_git_status_changes_in_project(
+    project_path: &Path,
+    area: GitStatusArea,
+    file_path: Option<&str>,
+) -> Result<(), String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+
+    match (area, file_path) {
+        (GitStatusArea::Unstaged, Some(file_path)) => {
+            let relative_path = path_to_repo_relative(&root, file_path);
+            if is_untracked_file(&root, &relative_path)? {
+                remove_untracked_path(&root, &relative_path)
+            } else {
+                run_git(&root, &["restore", "--worktree", "--", &relative_path]).map(|_| ())
+            }
+        }
+        (GitStatusArea::Unstaged, None) => {
+            run_git(&root, &["restore", "--worktree", "--", "."])?;
+            run_git(&root, &["clean", "-fd", "--", "."]).map(|_| ())
+        }
+        (GitStatusArea::Staged, Some(file_path)) => {
+            let relative_path = path_to_repo_relative(&root, file_path);
+            run_git(
+                &root,
+                &["restore", "--staged", "--worktree", "--", &relative_path],
+            )
+            .map(|_| ())
+        }
+        (GitStatusArea::Staged, None) => {
+            run_git(&root, &["restore", "--staged", "--worktree", "--", "."]).map(|_| ())
+        }
+    }
+}
+
+pub fn commit_git_changes_in_project(project_path: &Path, message: &str) -> Result<String, String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+    let message = message.trim();
+    if message.is_empty() {
+        return Err("提交信息不能为空".to_string());
+    }
+    if run_git(&root, &["diff", "--cached", "--quiet"]).is_ok() {
+        return Err("没有已暂存修改可提交".to_string());
+    }
+    run_git(&root, &["commit", "-m", message])?;
+    let output = run_git(&root, &["rev-parse", "--short", "HEAD"])?;
+    Ok(String::from_utf8_lossy(&output).trim().to_string())
+}
+
+pub fn build_commit_message_prompt(stat: &str, diff: &str, truncated: bool) -> String {
+    format!(
+        "请根据以下 staged diff 生成一条 Git 提交信息。只输出一条提交信息，不输出解释。优先使用 Conventional Commits，长度不超过 72 个字符。{}\n\n统计:\n{}\n\nDiff:\n{}",
+        if truncated {
+            "Diff 内容已截断，请基于可见内容概括。"
+        } else {
+            ""
+        },
+        stat.trim(),
+        diff.trim()
+    )
+}
+
+#[allow(dead_code)]
+fn suggest_commit_message_from_prompt(prompt: &str) -> String {
+    let lower = prompt.to_lowercase();
+    if lower.contains(".md") || lower.contains("docs/") {
+        "docs: 更新项目文档".to_string()
+    } else if lower.contains(".test.") || lower.contains("test(") {
+        "test: 更新测试覆盖".to_string()
+    } else if lower.contains("fix") || lower.contains("error") {
+        "fix: 修复实现问题".to_string()
+    } else {
+        "feat: 更新项目功能".to_string()
+    }
+}
+
+pub fn build_commit_message_prompt_in_project(project_path: &Path) -> Result<String, String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    ensure_git_repo(&root)?;
+    if run_git(&root, &["diff", "--cached", "--quiet"]).is_ok() {
+        return Err("没有已暂存修改可生成提交信息".to_string());
+    }
+
+    let stat =
+        String::from_utf8_lossy(&run_git(&root, &["diff", "--cached", "--stat"])?).to_string();
+    let raw_diff = String::from_utf8_lossy(&run_git(
+        &root,
+        &["diff", "--cached", "--unified=3", "--no-ext-diff"],
+    )?)
+    .to_string();
+    let truncated = raw_diff.len() > COMMIT_MESSAGE_DIFF_LIMIT;
+    let diff = if truncated {
+        raw_diff
+            .chars()
+            .take(COMMIT_MESSAGE_DIFF_LIMIT)
+            .collect::<String>()
+    } else {
+        raw_diff
+    };
+    Ok(build_commit_message_prompt(&stat, &diff, truncated))
+}
+
+fn select_commit_message_provider(config: &AppConfig) -> Result<Provider, String> {
+    let provider = config
+        .active_provider_id
+        .as_deref()
+        .and_then(|id| config.providers.iter().find(|provider| provider.id == id))
+        .or_else(|| config.providers.first())
+        .cloned()
+        .ok_or_else(|| "请先配置 AI 供应商".to_string())?;
+
+    if provider.api_key.trim().is_empty() {
+        return Err("请先配置 AI 供应商 API Key".to_string());
+    }
+    if provider.default_model.trim().is_empty() {
+        return Err("请先配置 AI 供应商默认模型".to_string());
+    }
+    if provider.anthropic_base_url.trim().is_empty() && provider.openai_base_url.trim().is_empty() {
+        return Err("请先配置 AI 供应商 Base URL".to_string());
+    }
+
+    Ok(provider)
+}
+
+fn clean_commit_message(raw: &str) -> Result<String, String> {
+    let without_fence = raw
+        .trim()
+        .trim_start_matches("```")
+        .trim_start_matches("git")
+        .trim_start_matches("text")
+        .trim_end_matches("```")
+        .trim();
+    let first_line = without_fence
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("")
+        .trim_start_matches("- ")
+        .trim_matches(|ch| matches!(ch, '"' | '\'' | '`'))
+        .trim()
+        .to_string();
+
+    if first_line.is_empty() {
+        Err("AI 未返回可用的提交信息".to_string())
+    } else {
+        Ok(first_line.chars().take(120).collect())
+    }
+}
+
+fn parse_anthropic_commit_message_response(body: &serde_json::Value) -> Result<String, String> {
+    let text = body
+        .get("content")
+        .and_then(|content| content.as_array())
+        .and_then(|content| {
+            content
+                .iter()
+                .filter_map(|item| item.get("text").and_then(|text| text.as_str()))
+                .find(|text| !text.trim().is_empty())
+        })
+        .ok_or_else(|| "AI 响应缺少提交信息".to_string())?;
+
+    clean_commit_message(text)
+}
+
+fn parse_openai_commit_message_response(body: &serde_json::Value) -> Result<String, String> {
+    let text = body
+        .get("choices")
+        .and_then(|choices| choices.as_array())
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(|content| content.as_str())
+        .ok_or_else(|| "AI 响应缺少提交信息".to_string())?;
+
+    clean_commit_message(text)
+}
+
+fn http_status_error(status: reqwest::StatusCode, body: &str) -> String {
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        "认证失败，请检查 API Key".to_string()
+    } else if body.trim().is_empty() {
+        format!("AI 请求失败: HTTP {}", status.as_u16())
+    } else {
+        format!("AI 请求失败: HTTP {} {}", status.as_u16(), body.trim())
+    }
+}
+
+async fn generate_with_anthropic(
+    client: &reqwest::Client,
+    provider: &Provider,
+    prompt: &str,
+) -> Result<String, String> {
+    let url = format!(
+        "{}/v1/messages",
+        provider.anthropic_base_url.trim_end_matches('/')
+    );
+    let body = serde_json::json!({
+        "model": provider.default_model,
+        "max_tokens": 80,
+        "messages": [{"role": "user", "content": prompt}]
+    });
+
+    let resp = client
+        .post(url)
+        .header("x-api-key", provider.api_key.trim())
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "AI 请求超时".to_string()
+            } else {
+                format!("AI 连接失败: {}", e)
+            }
+        })?;
+
+    let status = resp.status();
+    let body_text = resp
+        .text()
+        .await
+        .map_err(|e| format!("AI 响应读取失败: {}", e))?;
+    if !status.is_success() {
+        return Err(http_status_error(status, &body_text));
+    }
+
+    let body: serde_json::Value =
+        serde_json::from_str(&body_text).map_err(|_| "AI 响应不是有效 JSON".to_string())?;
+    parse_anthropic_commit_message_response(&body)
+}
+
+async fn generate_with_openai(
+    client: &reqwest::Client,
+    provider: &Provider,
+    prompt: &str,
+) -> Result<String, String> {
+    let url = format!(
+        "{}/v1/chat/completions",
+        provider.openai_base_url.trim_end_matches('/')
+    );
+    let body = serde_json::json!({
+        "model": provider.default_model,
+        "max_tokens": 80,
+        "messages": [{"role": "user", "content": prompt}]
+    });
+
+    let resp = client
+        .post(url)
+        .header(
+            "Authorization",
+            format!("Bearer {}", provider.api_key.trim()),
+        )
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "AI 请求超时".to_string()
+            } else {
+                format!("AI 连接失败: {}", e)
+            }
+        })?;
+
+    let status = resp.status();
+    let body_text = resp
+        .text()
+        .await
+        .map_err(|e| format!("AI 响应读取失败: {}", e))?;
+    if !status.is_success() {
+        return Err(http_status_error(status, &body_text));
+    }
+
+    let body: serde_json::Value =
+        serde_json::from_str(&body_text).map_err(|_| "AI 响应不是有效 JSON".to_string())?;
+    parse_openai_commit_message_response(&body)
+}
+
+async fn request_commit_message(provider: &Provider, prompt: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    if !provider.anthropic_base_url.trim().is_empty() {
+        match generate_with_anthropic(&client, provider, prompt).await {
+            Ok(message) => return Ok(message),
+            Err(err) => {
+                if err.contains("认证失败") || provider.openai_base_url.trim().is_empty() {
+                    return Err(err);
+                }
+            }
+        }
+    }
+
+    if !provider.openai_base_url.trim().is_empty() {
+        return generate_with_openai(&client, provider, prompt).await;
+    }
+
+    Err("请先配置 AI 供应商 Base URL".to_string())
+}
+
+pub async fn generate_git_commit_message_in_project(
+    project_path: &Path,
+    config: &AppConfig,
+) -> Result<GitCommitMessageSuggestion, String> {
+    let prompt = build_commit_message_prompt_in_project(project_path)?;
+    let provider = select_commit_message_provider(config)?;
+    let message = request_commit_message(&provider, &prompt).await?;
+
+    Ok(GitCommitMessageSuggestion { message })
+}
+
 pub fn read_git_changed_files_for_tree(
     project_path: &Path,
     baseline_tree: &str,
@@ -539,13 +995,60 @@ pub fn unstage_git_status_changes(
     unstage_git_status_changes_for_paths(Path::new(&project_path), file_path.as_deref())
 }
 
+#[tauri::command]
+pub fn get_git_repository_state(project_path: String) -> Result<GitRepositoryState, String> {
+    read_git_repository_state(Path::new(&project_path))
+}
+
+#[tauri::command]
+pub fn create_git_branch(
+    project_path: String,
+    branch_name: String,
+    checkout: bool,
+) -> Result<(), String> {
+    create_git_branch_in_project(Path::new(&project_path), &branch_name, checkout)
+}
+
+#[tauri::command]
+pub fn checkout_git_branch(project_path: String, branch_name: String) -> Result<(), String> {
+    checkout_git_branch_in_project(Path::new(&project_path), &branch_name)
+}
+
+#[tauri::command]
+pub fn revert_git_status_changes(
+    project_path: String,
+    area: GitStatusArea,
+    file_path: Option<String>,
+) -> Result<(), String> {
+    revert_git_status_changes_in_project(Path::new(&project_path), area, file_path.as_deref())
+}
+
+#[tauri::command]
+pub fn commit_git_changes(project_path: String, message: String) -> Result<String, String> {
+    commit_git_changes_in_project(Path::new(&project_path), &message)
+}
+
+#[tauri::command]
+pub async fn generate_git_commit_message(
+    state: State<'_, AppState>,
+    project_path: String,
+) -> Result<GitCommitMessageSuggestion, String> {
+    let config = state.config.lock().unwrap().clone();
+    generate_git_commit_message_in_project(Path::new(&project_path), &config).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_text_bytes, read_git_changed_files_for_tree, read_git_status_change_detail,
-        read_git_status_changes, stage_git_status_changes_for_paths,
-        unstage_git_status_changes_for_paths, GitStatusArea,
+        build_commit_message_prompt, build_commit_message_prompt_in_project,
+        checkout_git_branch_in_project, clean_commit_message, commit_git_changes_in_project,
+        create_git_branch_in_project, decode_text_bytes, parse_anthropic_commit_message_response,
+        parse_openai_commit_message_response, read_git_changed_files_for_tree,
+        read_git_repository_state, read_git_status_change_detail, read_git_status_changes,
+        revert_git_status_changes_in_project, select_commit_message_provider,
+        stage_git_status_changes_for_paths, unstage_git_status_changes_for_paths, GitStatusArea,
     };
+    use crate::config::types::{AppConfig, Provider};
     use std::fs;
     use std::process::Command;
 
@@ -564,11 +1067,325 @@ mod tests {
         dir
     }
 
+    fn configure_git_user(project: &std::path::Path) {
+        Command::new("git")
+            .arg("-C")
+            .arg(project)
+            .args(["config", "user.email", "codemux@example.test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(project)
+            .args(["config", "user.name", "codeMUX"])
+            .output()
+            .unwrap();
+    }
+
+    fn init_project_with_commit(project: &std::path::Path) {
+        Command::new("git")
+            .arg("-C")
+            .arg(project)
+            .arg("init")
+            .output()
+            .unwrap();
+        configure_git_user(project);
+        fs::write(project.join("README.md"), "hello\n").unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(project)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(project)
+            .args(["commit", "-m", "initial"])
+            .output()
+            .unwrap();
+    }
+
     #[test]
     fn git_text_decoder_falls_back_to_gbk() {
         let gbk_bytes = [0xd6, 0xd0, 0xce, 0xc4, b'\r', b'\n'];
 
         assert_eq!(decode_text_bytes(&gbk_bytes).as_deref(), Some("中文\n"));
+    }
+
+    #[test]
+    fn git_repository_state_tracks_current_branch_and_local_branches() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["branch", "feature/test"])
+            .output()
+            .unwrap();
+
+        let state = read_git_repository_state(&project).unwrap();
+
+        assert!(
+            state.current_branch.as_deref() == Some("master")
+                || state.current_branch.as_deref() == Some("main")
+        );
+        assert!(state
+            .branches
+            .iter()
+            .any(|branch| branch.name == "feature/test"));
+        assert!(!state.detached);
+        assert!(!state.has_uncommitted_changes);
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_branch_create_and_checkout_changes_current_branch() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+
+        create_git_branch_in_project(&project, "feature/git-panel", true).unwrap();
+
+        let state = read_git_repository_state(&project).unwrap();
+        assert_eq!(state.current_branch.as_deref(), Some("feature/git-panel"));
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_checkout_branch_rejects_dirty_worktree() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["branch", "feature/clean"])
+            .output()
+            .unwrap();
+        fs::write(project.join("README.md"), "dirty\n").unwrap();
+
+        let err = checkout_git_branch_in_project(&project, "feature/clean").unwrap_err();
+
+        assert!(err.contains("请先提交或还原当前修改"));
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_revert_unstaged_changes_restores_tracked_and_removes_untracked() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+        fs::write(project.join("README.md"), "dirty\n").unwrap();
+        fs::write(project.join("fresh.txt"), "new\n").unwrap();
+
+        revert_git_status_changes_in_project(&project, GitStatusArea::Unstaged, None).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(project.join("README.md"))
+                .unwrap()
+                .replace("\r\n", "\n"),
+            "hello\n"
+        );
+        assert!(!project.join("fresh.txt").exists());
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_revert_staged_changes_restores_worktree() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+        fs::write(project.join("README.md"), "dirty\n").unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+
+        revert_git_status_changes_in_project(&project, GitStatusArea::Staged, None).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(project.join("README.md"))
+                .unwrap()
+                .replace("\r\n", "\n"),
+            "hello\n"
+        );
+        assert!(read_git_status_changes(&project, GitStatusArea::Staged)
+            .unwrap()
+            .is_empty());
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_commit_requires_staged_changes_and_returns_hash() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .arg("init")
+            .output()
+            .unwrap();
+        configure_git_user(&project);
+
+        let empty_err = commit_git_changes_in_project(&project, "feat: empty").unwrap_err();
+        assert!(empty_err.contains("没有已暂存修改可提交"));
+
+        fs::write(project.join("new.txt"), "hello\n").unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+
+        let hash = commit_git_changes_in_project(&project, "feat: add new file").unwrap();
+
+        assert!(hash.len() >= 7);
+        assert!(read_git_status_changes(&project, GitStatusArea::Staged)
+            .unwrap()
+            .is_empty());
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_commit_message_prompt_includes_stat_and_diff() {
+        let prompt = build_commit_message_prompt(
+            " src/main.ts | 2 +-\n",
+            "diff --git a/src/main.ts b/src/main.ts\n+new\n-old\n",
+            false,
+        );
+
+        assert!(prompt.contains("只输出一条提交信息"));
+        assert!(prompt.contains("src/main.ts | 2 +-"));
+        assert!(prompt.contains("diff --git"));
+        assert!(prompt.contains("Conventional Commits"));
+    }
+
+    #[test]
+    fn git_commit_message_generation_requires_staged_diff() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .arg("init")
+            .output()
+            .unwrap();
+
+        let err = build_commit_message_prompt_in_project(&project).unwrap_err();
+
+        assert!(err.contains("没有已暂存修改可生成提交信息"));
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_commit_message_parser_reads_anthropic_response() {
+        let body = serde_json::json!({
+            "content": [{ "type": "text", "text": "\"feat: add branch controls\"\n\nextra" }]
+        });
+
+        let message = parse_anthropic_commit_message_response(&body).unwrap();
+
+        assert_eq!(message, "feat: add branch controls");
+    }
+
+    #[test]
+    fn git_commit_message_parser_reads_openai_response() {
+        let body = serde_json::json!({
+            "choices": [{ "message": { "content": "```text\nfix: handle dirty branch checkout\n```" } }]
+        });
+
+        let message = parse_openai_commit_message_response(&body).unwrap();
+
+        assert_eq!(message, "fix: handle dirty branch checkout");
+    }
+
+    #[test]
+    fn git_commit_message_cleaner_keeps_single_line() {
+        let message = clean_commit_message("- docs: update git plan\n\nbody").unwrap();
+
+        assert_eq!(message, "docs: update git plan");
+    }
+
+    #[test]
+    fn git_commit_message_provider_uses_active_provider() {
+        let active = Provider {
+            id: "active".to_string(),
+            name: "Active".to_string(),
+            api_key: "key".to_string(),
+            anthropic_base_url: String::new(),
+            openai_base_url: "https://api.openai.com".to_string(),
+            default_model: "gpt-test".to_string(),
+            models: Vec::new(),
+            input_price: None,
+            cache_read_price: None,
+            output_price: None,
+            context_1m: None,
+            codex_needs_proxy: None,
+        };
+        let fallback = Provider {
+            id: "fallback".to_string(),
+            name: "Fallback".to_string(),
+            api_key: "key".to_string(),
+            anthropic_base_url: "https://api.anthropic.com".to_string(),
+            openai_base_url: String::new(),
+            default_model: "claude-test".to_string(),
+            models: Vec::new(),
+            input_price: None,
+            cache_read_price: None,
+            output_price: None,
+            context_1m: None,
+            codex_needs_proxy: None,
+        };
+        let config = AppConfig {
+            providers: vec![fallback, active],
+            active_provider_id: Some("active".to_string()),
+            ..AppConfig::default()
+        };
+
+        let provider = select_commit_message_provider(&config).unwrap();
+
+        assert_eq!(provider.id, "active");
+    }
+
+    #[test]
+    fn git_commit_message_provider_requires_credentials() {
+        let config = AppConfig::default();
+
+        let err = select_commit_message_provider(&config).unwrap_err();
+
+        assert!(err.contains("API Key"));
     }
 
     #[test]

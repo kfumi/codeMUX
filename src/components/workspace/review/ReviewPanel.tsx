@@ -1,10 +1,14 @@
-import { ChevronDown, ChevronUp, FileText, RefreshCw, Undo2, Upload } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileText, RefreshCw, Trash2, Undo2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { gitApi, type GitStatusArea, type GitStatusChange } from '../../../lib/tauri';
+import { gitApi, type GitRepositoryState, type GitStatusArea, type GitStatusChange } from '../../../lib/tauri';
 import { cn } from '../../../lib/utils';
 import { DiffView } from '../../preview/DiffView';
+import { ConfirmDialog } from '../../ui/confirm-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
+import { GitBranchBar } from './GitBranchBar';
+import { GitBranchDialog } from './GitBranchDialog';
+import { GitCommitBox } from './GitCommitBox';
 
 function displayPath(filePath: string, projectPath: string): string {
   const normalize = (path: string) => path
@@ -47,25 +51,40 @@ function detailKey(area: GitStatusArea, filePath: string) {
 
 export function ReviewPanel({ projectPath }: { projectPath: string }) {
   const [area, setArea] = useState<GitStatusArea>('unstaged');
+  const [repositoryState, setRepositoryState] = useState<GitRepositoryState | null>(null);
   const [files, setFiles] = useState<GitStatusChange[]>([]);
+  const [stagedFiles, setStagedFiles] = useState<GitStatusChange[]>([]);
   const [fileDetails, setFileDetails] = useState<Record<string, FileDetailState>>({});
   const [expandedPath, setExpandedPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [mutatingKey, setMutatingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [branchDialogOpen, setBranchDialogOpen] = useState(false);
+  const [branchError, setBranchError] = useState<string | null>(null);
+  const [revertTarget, setRevertTarget] = useState<{ type: 'single' | 'all'; filePath?: string; name?: string } | null>(null);
+  const [commitMessage, setCommitMessage] = useState('');
+  const [commitError, setCommitError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!projectPath) return;
     setLoading(true);
     setError(null);
     try {
-      const nextFiles = await gitApi.getStatusChanges(projectPath, area);
+      const [nextState, nextFiles, nextStagedFiles] = await Promise.all([
+        gitApi.getRepositoryState(projectPath),
+        gitApi.getStatusChanges(projectPath, area),
+        gitApi.getStatusChanges(projectPath, 'staged'),
+      ]);
+      setRepositoryState(nextState);
       setFiles(nextFiles);
+      setStagedFiles(nextStagedFiles);
       setFileDetails({});
       setExpandedPath((current) => (current && nextFiles.some((file) => file.path === current) ? current : null));
     } catch (err) {
       setError(String(err));
+      setRepositoryState(null);
       setFiles([]);
+      setStagedFiles([]);
       setFileDetails({});
       setExpandedPath(null);
     } finally {
@@ -123,6 +142,82 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     }
   }, [area, load, projectPath]);
 
+  const checkoutBranch = useCallback(async (branchName: string) => {
+    if (!projectPath) return;
+    setMutatingKey(`branch:${branchName}`);
+    setError(null);
+    try {
+      await gitApi.checkoutBranch(projectPath, branchName);
+      await load();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setMutatingKey(null);
+    }
+  }, [load, projectPath]);
+
+  const createBranch = useCallback(async (branchName: string, checkout: boolean) => {
+    if (!projectPath) return;
+    setMutatingKey('branch:create');
+    setBranchError(null);
+    try {
+      await gitApi.createBranch(projectPath, branchName, checkout);
+      setBranchDialogOpen(false);
+      await load();
+    } catch (err) {
+      setBranchError(String(err));
+    } finally {
+      setMutatingKey(null);
+    }
+  }, [load, projectPath]);
+
+  const runRevertAction = useCallback(async () => {
+    if (!projectPath || !revertTarget) return;
+    const filePath = revertTarget.type === 'single' ? revertTarget.filePath : undefined;
+    const key = `${area}:revert:${filePath ?? 'all'}`;
+    setMutatingKey(key);
+    setError(null);
+    try {
+      await gitApi.revertStatusChanges(projectPath, area, filePath);
+      setExpandedPath(null);
+      await load();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setMutatingKey(null);
+      setRevertTarget(null);
+    }
+  }, [area, load, projectPath, revertTarget]);
+
+  const generateCommitMessage = useCallback(async () => {
+    if (!projectPath) return;
+    setMutatingKey('commit:generate');
+    setCommitError(null);
+    try {
+      const suggestion = await gitApi.generateCommitMessage(projectPath);
+      setCommitMessage(suggestion.message);
+    } catch (err) {
+      setCommitError(String(err));
+    } finally {
+      setMutatingKey(null);
+    }
+  }, [projectPath]);
+
+  const commitChanges = useCallback(async () => {
+    if (!projectPath || !commitMessage.trim()) return;
+    setMutatingKey('commit');
+    setCommitError(null);
+    try {
+      await gitApi.commitChanges(projectPath, commitMessage);
+      setCommitMessage('');
+      await load();
+    } catch (err) {
+      setCommitError(String(err));
+    } finally {
+      setMutatingKey(null);
+    }
+  }, [commitMessage, load, projectPath]);
+
   const totals = useMemo(() => files.reduce(
     (acc, file) => ({
       additions: acc.additions + file.additions,
@@ -133,6 +228,21 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
 
   return (
     <div className="flex h-full flex-col">
+      <GitBranchBar
+        state={repositoryState}
+        loading={loading}
+        mutating={mutatingKey != null}
+        onRefresh={() => void load()}
+        onCheckout={(branchName) => void checkoutBranch(branchName)}
+        onCreateBranch={() => setBranchDialogOpen(true)}
+      />
+      <GitBranchDialog
+        open={branchDialogOpen}
+        loading={mutatingKey === 'branch:create'}
+        error={branchError}
+        onOpenChange={setBranchDialogOpen}
+        onCreate={(branchName, checkout) => void createBranch(branchName, checkout)}
+      />
       <div className="flex h-15 shrink-0 items-center justify-between gap-2 px-4">
         <div className="flex min-w-0 items-center gap-2">
           <Select
@@ -163,6 +273,17 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
           >
             {area === 'unstaged' ? <Upload className="h-3.5 w-3.5" /> : <Undo2 className="h-3.5 w-3.5" />}
             <span className="hidden xl:inline">{area === 'unstaged' ? '全部暂存' : '全部取消暂存'}</span>
+          </button>
+          <button
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-border/42 bg-background/80 px-2.5 text-xs text-destructive transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-45"
+            onClick={() => setRevertTarget({ type: 'all' })}
+            disabled={loading || files.length === 0 || mutatingKey != null}
+            aria-label="全部还原"
+            title="全部还原"
+            data-testid="git-revert-all"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            <span className="hidden xl:inline">全部还原</span>
           </button>
         </div>
 
@@ -236,6 +357,19 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
                   >
                     {area === 'unstaged' ? <Upload className="h-3.5 w-3.5" /> : <Undo2 className="h-3.5 w-3.5" />}
                   </button>
+                  <button
+                    type="button"
+                    aria-label={`还原 ${name}`}
+                    title="还原此文件"
+                    data-testid={`git-revert-${name}`}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/72 transition-colors hover:bg-background/72 hover:text-destructive"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setRevertTarget({ type: 'single', filePath: file.path, name });
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
                 </div>
                 {expanded && (
                   <div className="border-l-4 border-[hsl(var(--success))] bg-background">
@@ -264,6 +398,28 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
           <span className="text-[hsl(var(--destructive))]">-{totals.deletions}</span>
         </div>
       </div>
+      <GitCommitBox
+        message={commitMessage}
+        stagedCount={stagedFiles.length}
+        loading={loading}
+        generating={mutatingKey === 'commit:generate'}
+        committing={mutatingKey === 'commit'}
+        error={commitError}
+        onMessageChange={setCommitMessage}
+        onGenerate={() => void generateCommitMessage()}
+        onCommit={() => void commitChanges()}
+      />
+      <ConfirmDialog
+        open={revertTarget != null}
+        onOpenChange={(open) => !open && setRevertTarget(null)}
+        title={revertTarget?.type === 'all' ? '还原全部修改' : `还原 ${revertTarget?.name ?? '文件'}`}
+        description={area === 'unstaged'
+          ? '此操作会丢弃未暂存修改，并删除未跟踪文件。'
+          : '此操作会丢弃已暂存内容并还原工作区文件。'}
+        confirmLabel="确认还原"
+        variant="destructive"
+        onConfirm={() => void runRevertAction()}
+      />
     </div>
   );
 }
