@@ -112,6 +112,85 @@ fn sanitize_file_segment(value: &str) -> String {
         .collect()
 }
 
+fn split_jsonl_preserving_newlines(content: &str) -> Vec<String> {
+    if content.is_empty() {
+        return Vec::new();
+    }
+
+    content
+        .split_inclusive('\n')
+        .map(|line| line.to_string())
+        .collect()
+}
+
+fn is_claude_visible_user_value(value: &serde_json::Value) -> bool {
+    should_include_claude_history_event(value)
+        && value.get("type").and_then(|entry| entry.as_str()) == Some("user")
+}
+
+fn is_codex_visible_user_value(value: &serde_json::Value) -> bool {
+    let Some(payload) = value.get("payload") else {
+        return false;
+    };
+
+    if value.get("type").and_then(|entry| entry.as_str()) == Some("response_item") {
+        return payload.get("type").and_then(|entry| entry.as_str()) == Some("message")
+            && payload.get("role").and_then(|entry| entry.as_str()) == Some("user");
+    }
+
+    value.get("type").and_then(|entry| entry.as_str()) == Some("event_msg")
+        && payload.get("type").and_then(|entry| entry.as_str()) == Some("user_message")
+}
+
+fn is_rewind_user_value(value: &serde_json::Value, agent_kind: AgentKind) -> bool {
+    match agent_kind {
+        AgentKind::Codex => is_codex_visible_user_value(value),
+        AgentKind::ClaudeCode | AgentKind::GeminiCli | AgentKind::Opencode => {
+            is_claude_visible_user_value(value)
+        }
+    }
+}
+
+fn find_latest_rewind_user_line(lines: &[String], agent_kind: AgentKind) -> Option<usize> {
+    for (index, line) in lines.iter().enumerate().rev() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+        if is_rewind_user_value(&value, agent_kind) {
+            return Some(index);
+        }
+    }
+
+    None
+}
+
+fn rewind_jsonl_before_latest_turn(path: &Path, agent_kind: AgentKind) -> Result<(), String> {
+    use std::fs;
+
+    let content = fs::read_to_string(path)
+        .map_err(|err| format!("Failed to read session history {}: {}", path.display(), err))?;
+    let lines = split_jsonl_preserving_newlines(&content);
+    let Some(user_line_index) = find_latest_rewind_user_line(&lines, agent_kind) else {
+        return Err(format!(
+            "No rewindable user message found in session history {}",
+            path.display()
+        ));
+    };
+
+    let next_content = lines[..user_line_index].concat();
+    fs::write(path, next_content).map_err(|err| {
+        format!(
+            "Failed to write rewound session history {}: {}",
+            path.display(),
+            err
+        )
+    })
+}
+
 fn collect_codex_jsonl_files(root: &Path, output: &mut Vec<PathBuf>) {
     use std::fs;
 
@@ -1358,6 +1437,69 @@ pub async fn reset_agent_session(
 }
 
 #[tauri::command]
+pub async fn rewind_agent_session(
+    state: State<'_, crate::AppState>,
+    agent_state: State<'_, AgentState>,
+    app_session_id: String,
+    agent_kind: String,
+) -> Result<(), String> {
+    let agent_kind = AgentKind::from_str(&agent_kind)?;
+    let Some(agent_session_id) = get_agent_session_id(state.inner(), &app_session_id, agent_kind)?
+    else {
+        return Err(format!(
+            "No agent session mapping found for session_id={}",
+            app_session_id
+        ));
+    };
+
+    let home = home_dir()?;
+    let history_path = match agent_kind {
+        AgentKind::ClaudeCode => {
+            find_claude_session_jsonl(&home.join(".claude"), &agent_session_id)
+        }
+        AgentKind::Codex => {
+            find_codex_session_jsonl(&home.join(".codex").join("sessions"), &agent_session_id)
+        }
+        AgentKind::GeminiCli | AgentKind::Opencode => None,
+    }
+    .ok_or_else(|| {
+        format!(
+            "Session history file not found for session_id={} agent_session_id={}",
+            app_session_id, agent_session_id
+        )
+    })?;
+
+    rewind_jsonl_before_latest_turn(&history_path, agent_kind)?;
+
+    if agent_kind == AgentKind::Codex {
+        let interactive_path = codex_interactive_events_dir(&home)
+            .join(format!("{}.jsonl", sanitize_file_segment(&app_session_id)));
+        if interactive_path.exists() {
+            let _ = rewind_jsonl_before_latest_turn(&interactive_path, AgentKind::ClaudeCode);
+        }
+    }
+
+    let cmd = serde_json::json!({
+        "type": "reset_session",
+        "sessionId": app_session_id,
+    });
+    let sidecars = agent_state.sidecars.lock().await;
+    if let Some(handle) = sidecars.get(&app_session_id) {
+        handle.send_command(&cmd.to_string()).await?;
+    }
+
+    info!(
+        target: "agent",
+        "Rewound agent session app_session_id={} agent_kind={} history_path={}",
+        app_session_id,
+        agent_kind.as_str(),
+        history_path.display()
+    );
+
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn delete_claude_session_files(
     state: State<'_, crate::AppState>,
     app_session_id: String,
@@ -1585,8 +1727,8 @@ mod tests {
         build_update_permissions_command_from_snapshot, convert_codex_history_values_to_events,
         convert_codex_item_to_claude_format, find_codex_session_jsonl,
         parse_proxy_port_from_stderr, read_codex_interactive_events_from_dir,
-        read_json_stream_values, resolve_agent_session_info, should_include_claude_history_event,
-        sort_events_by_timestamp_stable,
+        read_json_stream_values, resolve_agent_session_info, rewind_jsonl_before_latest_turn,
+        should_include_claude_history_event, sort_events_by_timestamp_stable,
     };
     use crate::config::types::AgentKind;
 
@@ -1652,6 +1794,71 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn rewinds_claude_jsonl_before_latest_visible_user_turn() {
+        let path = std::env::temp_dir().join(format!(
+            "codemux-claude-rewind-test-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"second\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"second answer\"}]}}\n",
+                "{\"type\":\"result\",\"subtype\":\"success\"}\n"
+            ),
+        )
+        .unwrap();
+
+        rewind_jsonl_before_latest_turn(&path, AgentKind::ClaudeCode).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            content,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n"
+            )
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rewinds_codex_jsonl_before_latest_user_message_but_keeps_session_meta() {
+        let path = std::env::temp_dir().join(format!(
+            "codemux-codex-rewind-test-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-session-1\"}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"first\"}]}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"first answer\"}]}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"second\"}]}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"second answer\"}]}}\n"
+            ),
+        )
+        .unwrap();
+
+        rewind_jsonl_before_latest_turn(&path, AgentKind::Codex).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            content,
+            concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-session-1\"}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"first\"}]}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"first answer\"}]}}\n"
+            )
+        );
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -1909,8 +2116,14 @@ mod tests {
         let converted = convert_codex_history_values_to_events(&raw_events, "app-session-1");
 
         assert_eq!(converted.len(), 2);
-        assert_eq!(converted[0].get("type").and_then(|v| v.as_str()), Some("assistant"));
-        assert_eq!(converted[1].get("subtype").and_then(|v| v.as_str()), Some("compact_boundary"));
+        assert_eq!(
+            converted[0].get("type").and_then(|v| v.as_str()),
+            Some("assistant")
+        );
+        assert_eq!(
+            converted[1].get("subtype").and_then(|v| v.as_str()),
+            Some("compact_boundary")
+        );
         assert!(!converted
             .iter()
             .any(|event| event.get("type").and_then(|v| v.as_str()) == Some("result")));
@@ -1955,8 +2168,14 @@ mod tests {
         let converted = convert_codex_history_values_to_events(&raw_events, "app-session-1");
 
         assert_eq!(converted.len(), 2);
-        assert_eq!(converted[0].get("type").and_then(|v| v.as_str()), Some("assistant"));
-        assert_eq!(converted[1].get("type").and_then(|v| v.as_str()), Some("result"));
+        assert_eq!(
+            converted[0].get("type").and_then(|v| v.as_str()),
+            Some("assistant")
+        );
+        assert_eq!(
+            converted[1].get("type").and_then(|v| v.as_str()),
+            Some("result")
+        );
     }
 
     #[test]

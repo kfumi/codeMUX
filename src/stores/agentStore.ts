@@ -7,6 +7,7 @@ import {
   isClaudeCompactSummaryText,
   isCodexCompactSummaryText,
   isAgentInjectedUserMessage,
+  isInterruptMarker,
   isTerminalAgentEvent,
   mapCodexCompactedEvent,
   mapPersistedClaudeMessage,
@@ -29,7 +30,7 @@ import type {
   TodoItem,
   ChangedFile,
 } from '../types/agent';
-import type { ReasoningEffort } from '../types/session';
+import type { AgentKind, ReasoningEffort } from '../types/session';
 import type { AgentInputPayload, UserAttachmentPreview } from '../types/agentInput';
 import { inferModelSupportsVision, markModelVisionUnsupported } from '../lib/modelVisionCapabilities';
 
@@ -95,7 +96,6 @@ interface AgentState {
   acknowledgedFiles: Record<string, Set<string>>;
   /** Draft text for each session's composer input (preserved across session switches) */
   composerDrafts: Record<string, string>;
-
   /** Start a new agent query */
   startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string, inputPayload?: AgentInputPayload) => Promise<void>;
   /** Interrupt the current query for a specific session */
@@ -112,6 +112,8 @@ interface AgentState {
   consumeComposerDraft: (sessionId: string) => string;
   /** Get composer draft text without clearing it */
   getComposerDraft: (sessionId: string) => string;
+  /** Rewind the latest user turn and prepare its payload for composer editing */
+  rewindLastTurn: (sessionId: string) => Promise<AgentInputPayload | null>;
 }
 
 type StreamingBuffer = {
@@ -607,6 +609,41 @@ function preserveFirstOriginalSnapshot(
 
 function getSessionAgentKind(sessionId: string) {
   return useSessionStore.getState().sessions.find((session) => session.id === sessionId)?.agent_kind;
+}
+
+function getRewindableUserIndex(events: AgentMessage[]): number {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.kind !== 'user') {
+      continue;
+    }
+    if (isInterruptMarker(event.data.content)) {
+      continue;
+    }
+    if (event.data.content.trim().length === 0 && (event.data.attachments?.length ?? 0) === 0) {
+      continue;
+    }
+    return index;
+  }
+
+  return -1;
+}
+
+function buildInputPayloadFromUserEvent(event: Extract<AgentMessage, { kind: 'user' }>): AgentInputPayload {
+  const images = event.data.attachments?.map((attachment) => ({
+    name: attachment.name,
+    mediaType: attachment.mediaType,
+    dataUrl: attachment.dataUrl,
+  }));
+
+  return images && images.length > 0
+    ? { text: event.data.content, images }
+    : { text: event.data.content };
+}
+
+function removeSessionEntry<T>(record: Record<string, T>, sessionId: string): Record<string, T> {
+  const { [sessionId]: _removed, ...rest } = record;
+  return rest;
 }
 
 /**
@@ -1794,5 +1831,61 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   getComposerDraft: (sessionId: string) => {
     return get().composerDrafts[sessionId] ?? '';
+  },
+
+  rewindLastTurn: async (sessionId: string) => {
+    const state = get();
+    if (state.isRunning[sessionId]) {
+      return null;
+    }
+
+    const events = state.events[sessionId] ?? [];
+    const userIndex = getRewindableUserIndex(events);
+    if (userIndex < 0) {
+      return null;
+    }
+
+    const userEvent = events[userIndex];
+    if (userEvent.kind !== 'user') {
+      return null;
+    }
+
+    const agentKind: AgentKind = getSessionAgentKind(sessionId) ?? 'claude_code';
+    const payload = buildInputPayloadFromUserEvent(userEvent);
+
+    await agentApi.rewindSession(sessionId, agentKind);
+
+    clearPendingStreaming(sessionId);
+    clearPendingStreamingToolInputs(sessionId);
+    clearSimulatedStream(sessionId);
+    pendingThinkingStartTimes.delete(sessionId);
+
+    set((s) => ({
+      events: { ...s.events, [sessionId]: events.slice(0, userIndex) },
+      eventTimestamps: { ...s.eventTimestamps, [sessionId]: (s.eventTimestamps[sessionId] ?? []).slice(0, userIndex) },
+      isRunning: { ...s.isRunning, [sessionId]: false },
+      queryStartTime: removeSessionEntry(s.queryStartTime, sessionId),
+      error: { ...s.error, [sessionId]: null },
+      mcpRuntimeStatus: removeSessionEntry(s.mcpRuntimeStatus, sessionId),
+      todos: removeSessionEntry(s.todos, sessionId),
+      streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+      streamingText: { ...s.streamingText, [sessionId]: '' },
+      streamingThinkingDurations: removeSessionEntry(s.streamingThinkingDurations, sessionId),
+      forceStopped: { ...s.forceStopped, [sessionId]: false },
+      streamingToolInputs: removeSessionEntry(s.streamingToolInputs, sessionId),
+      streamingToolMeta: removeSessionEntry(s.streamingToolMeta, sessionId),
+      streamingToolIndexMap: removeSessionEntry(s.streamingToolIndexMap, sessionId),
+      streamedToolUseIds: removeSessionEntry(s.streamedToolUseIds, sessionId),
+      changedFiles: removeSessionEntry(s.changedFiles, sessionId),
+      fileOriginals: removeSessionEntry(s.fileOriginals, sessionId),
+      acknowledgedFiles: removeSessionEntry(s.acknowledgedFiles, sessionId),
+      composerDrafts: removeSessionEntry(s.composerDrafts, sessionId),
+    }));
+
+    try {
+      localStorage.removeItem(`acknowledged-files-${sessionId}`);
+    } catch {}
+
+    return payload;
   },
 }));

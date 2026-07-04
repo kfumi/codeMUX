@@ -238,6 +238,9 @@ export const agentApi = {
   /** Load session events from Codex's JSONL session file. */
   loadCodexSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_codex_session_events', { appSessionId }),
+  /** Rewind the latest visible turn in the provider session history. */
+  rewindSession: (appSessionId: string, agentKind: AgentKind): Promise<void> =>
+    invokeLogged('rewind_agent_session', { appSessionId, agentKind }),
   getSessionInfo: (appSessionId: string, agentKind: AgentKind): Promise<{ agentSessionId: string | null; messagePath: string | null }> =>
     invokeLogged('get_agent_session_info', { appSessionId, agentKind }),
   startProxy: (apiKey: string, baseUrl: string, providerName: string, codexNeedsProxy?: boolean): Promise<number> =>

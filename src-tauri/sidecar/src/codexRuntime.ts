@@ -19,7 +19,7 @@ import {
 } from './runtimeEvents.js';
 import { shouldUseCodexChatCompatProxy } from './sessionRuntimeHelpers.js';
 import { proxyManager } from './proxyManager.js';
-import { emit as emitStreamEvent } from './streamEventBatcher.js';
+import { emit } from './streamEventBatcher.js';
 import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
 import {
   buildCodexInputEntries,
@@ -48,51 +48,11 @@ import {
   type CodexCollaborationPolicy,
 } from './codexCollaborationPolicy.js';
 
-export function emit(obj: unknown): void {
-  logCodexRealtimePayload('emit', obj);
-  emitStreamEvent(obj);
-}
-
-function logCodexRealtimePayload(label: 'sdk-event' | 'emit', payload: unknown): void {
-  process.stderr.write(`[codex][${label}] ${safeStringifyForLog(payload)}\n`);
-}
-
-function safeStringifyForLog(payload: unknown): string {
-  const seen = new WeakSet<object>();
-  try {
-    const json = JSON.stringify(payload, (_key, value) => {
-      if (typeof value === 'bigint') {
-        return value.toString();
-      }
-      if (typeof value === 'string') {
-        return truncateStringForLog(value);
-      }
-      if (value && typeof value === 'object') {
-        if (seen.has(value)) {
-          return '[Circular]';
-        }
-        seen.add(value);
-      }
-      return value;
-    });
-    return json ?? String(payload);
-  } catch (error) {
-    return `[Unserializable payload: ${error instanceof Error ? error.message : String(error)}]`;
-  }
-}
+export { emit } from './streamEventBatcher.js';
 
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
 type UpdatePermissionsCommand = Extract<SidecarCommand, { type: 'update_permissions' }>;
 const DEFAULT_SHELL_COMMAND_TIMEOUT_MS = 10000;
-const CODEX_REALTIME_LOG_MAX_STRING_LENGTH = 500;
-
-function truncateStringForLog(value: string): string {
-  if (value.length <= CODEX_REALTIME_LOG_MAX_STRING_LENGTH) {
-    return value;
-  }
-
-  return `${value.slice(0, CODEX_REALTIME_LOG_MAX_STRING_LENGTH)}...[truncated ${value.length - CODEX_REALTIME_LOG_MAX_STRING_LENGTH} chars]`;
-}
 
 type CodexSessionBootstrap = {
   sessionId?: string;
@@ -413,8 +373,6 @@ export class CodexSessionRuntime {
         for await (const event of events) {
           if (this.abortController?.signal.aborted || forceBreak) break;
 
-          logCodexRealtimePayload('sdk-event', event);
-
           if (event.type === 'turn.completed') {
             usage = event.usage;
             usageSeen = true;
@@ -674,6 +632,7 @@ export class CodexSessionRuntime {
       process.stderr.write(`[codex] agent_message completed: text_length=${item.text?.length ?? 0} preview=${JSON.stringify((item.text ?? '').slice(0, 100))}\n`);
       this.completeStreamingText(sessionId, item.id);
       if (isCodexCompactSummaryText(item.text)) {
+        process.stderr.write(`[codex][compact-summary-filtered] event=item.completed item_id=${item.id}\n`);
         return;
       }
       if (item.text.trim()) {
@@ -687,6 +646,7 @@ export class CodexSessionRuntime {
 
     if (item.type === 'agent_message' && eventType === 'item.updated') {
       if (isCodexCompactSummaryText(item.text)) {
+        process.stderr.write(`[codex][compact-summary-filtered] event=item.updated item_id=${item.id}\n`);
         this.completeStreamingText(sessionId, item.id);
         return;
       }
@@ -867,6 +827,7 @@ export class CodexSessionRuntime {
     }
 
     this.currentTurnHadCompaction = true;
+    process.stderr.write(`[codex][compact-detected] phase=${compactEvent.phase} item_id=${compactEvent.itemId ?? 'none'}\n`);
 
     if (compactEvent.itemId && compactEvent.phase === 'started') {
       this.activeCompactItemIds.add(compactEvent.itemId);

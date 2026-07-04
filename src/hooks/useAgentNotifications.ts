@@ -125,9 +125,13 @@ function buildDispatchKey(
   candidate: { key: string; kind: string },
   events: AgentMessage[],
   eventIndex: number,
+  timestamps: number[] | undefined,
 ): string {
   if (candidate.kind === 'task_completed' || candidate.kind === 'task_failed') {
-    return `terminal:${sessionId}:${candidate.kind}:${findPreviousUserEventIndex(events, eventIndex)}`;
+    const previousUserIndex = findPreviousUserEventIndex(events, eventIndex);
+    if (previousUserIndex >= 0) {
+      return `terminal:${sessionId}:${candidate.kind}:turn:${timestamps?.[previousUserIndex] ?? previousUserIndex}`;
+    }
   }
 
   return candidate.key;
@@ -176,7 +180,7 @@ export function useAgentNotifications() {
           continue;
         }
 
-        const dispatchKey = buildDispatchKey(sessionId, candidate, sessionEvents, i);
+        const dispatchKey = buildDispatchKey(sessionId, candidate, sessionEvents, i, eventTimestamps[sessionId]);
 
         if (seenNotificationKeysRef.current.has(dispatchKey)) {
           break;

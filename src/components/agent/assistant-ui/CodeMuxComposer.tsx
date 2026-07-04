@@ -72,7 +72,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   skill: '技能',
 };
 
-const CODEMUX_FORMATTER: Unstable_DirectiveFormatter = {
+export const CODEMUX_FORMATTER: Unstable_DirectiveFormatter = {
   serialize: (item) => (item.type === 'file' || item.type === 'directory' ? `@${item.id} ` : `/${item.id} `),
   parse: parseComposerDirectives,
 };
@@ -123,7 +123,7 @@ function DirectiveChip({ directiveType, label }: DirectiveChipProps) {
   return <CodeMuxDirectiveChip kind={getDirectiveKind(directiveType)} value={label} label={label} />;
 }
 
-const DIRECTIVE_CHIP: FC<DirectiveChipProps> = DirectiveChip;
+export const DIRECTIVE_CHIP: FC<DirectiveChipProps> = DirectiveChip;
 
 export function CodeMuxComposer({
   sessionId,
@@ -733,7 +733,7 @@ function isToolResultPart(value: unknown): value is { type: 'tool_result'; tool_
   );
 }
 
-function ComposerAttachmentPreview() {
+export function ComposerAttachmentPreview() {
   const attachment = useAuiState((state) => state.attachment);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const imagePart = attachment?.content?.find((part): part is { type: 'image'; image: string } =>
@@ -1070,7 +1070,7 @@ function replaceActiveTrigger(text: string, active: ActiveTrigger | null, item: 
   return `${text.slice(0, active.start)}${directive}${suffix}`;
 }
 
-function parseComposerDirectives(text: string): Unstable_DirectiveSegment[] {
+export function parseComposerDirectives(text: string): Unstable_DirectiveSegment[] {
   const segments: Unstable_DirectiveSegment[] = [];
   let lastIndex = 0;
 

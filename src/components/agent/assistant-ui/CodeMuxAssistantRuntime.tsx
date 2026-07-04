@@ -57,6 +57,7 @@ function SessionScopedAssistantRuntime({
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
+  const rewindLastTurn = useAgentStore((state) => state.rewindLastTurn);
   const attachmentAdapter = useMemo(() => new CodeMuxImageAttachmentAdapter(), []);
 
   const messages = useMemo(
@@ -64,7 +65,7 @@ function SessionScopedAssistantRuntime({
     [events],
   );
 
-  const handleNew = useCallback(
+  const handleMessage = useCallback(
     async (message: AppendMessage) => {
       const payload = buildAgentInputPayloadFromAppendMessage(message);
 
@@ -85,11 +86,27 @@ function SessionScopedAssistantRuntime({
     [onCommand, onSend],
   );
 
+  const handleNew = useCallback(
+    async (message: AppendMessage) => {
+      await handleMessage(message);
+    },
+    [handleMessage],
+  );
+
+  const handleEdit = useCallback(
+    async (message: AppendMessage) => {
+      await rewindLastTurn(sessionId);
+      await handleMessage(message);
+    },
+    [handleMessage, rewindLastTurn, sessionId],
+  );
+
   const runtime = useExternalStoreRuntime<CodeMuxAssistantMessage>({
     messages,
     isRunning,
     convertMessage: (message) => convertCodeMuxMessageToThreadMessageLike(message, eventTimestamps),
     onNew: handleNew,
+    onEdit: handleEdit,
     adapters: {
       attachments: attachmentAdapter,
     },

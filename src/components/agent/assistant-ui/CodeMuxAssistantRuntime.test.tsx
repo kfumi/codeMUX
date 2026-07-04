@@ -439,11 +439,17 @@ function triggerResize(target: Element, width: number, height = 720) {
   }
 }
 
-function Harness({ sessionId }: { sessionId: string }) {
+function Harness({
+  sessionId,
+  onSend = vi.fn(async () => {}),
+}: {
+  sessionId: string;
+  onSend?: (content: any) => Promise<void>;
+}) {
   return (
     <CodeMuxAssistantRuntimeProvider
       sessionId={sessionId}
-      onSend={vi.fn(async () => {})}
+      onSend={onSend}
       onCommand={vi.fn(async () => {})}
     >
       <CodeMuxThread sessionId={sessionId} />
@@ -773,6 +779,85 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('please check this')).toBeTruthy();
     // Now file chips have a leading icon
     expect(container.querySelector('[data-directive-value="@src/App.tsx"] svg')).toBeTruthy();
+  });
+
+  it('shows rewind only on the latest user message and rewinds only after inline edit send', async () => {
+    const rewindLastTurn = vi.fn().mockResolvedValue({ text: '琛ュ厖娴嬭瘯瑕嗙洊' });
+    const onSend = vi.fn(async () => {});
+    useAgentStore.setState({ rewindLastTurn } as any);
+
+    render(<Harness sessionId="session-nav" onSend={onSend} />);
+
+    const rewindButtons = screen.getAllByRole('button', { name: '回退并编辑这条消息' });
+    expect(rewindButtons).toHaveLength(1);
+
+    fireEvent.click(rewindButtons[0]);
+
+    expect(rewindLastTurn).not.toHaveBeenCalled();
+    expect(await screen.findByRole('button', { name: '取消' })).toBeTruthy();
+    const sendButton = screen.getByRole<HTMLButtonElement>('button', { name: '发送' });
+    await waitFor(() => expect(sendButton.disabled).toBe(false));
+
+    fireEvent.click(sendButton);
+
+    await waitFor(() => {
+      expect(rewindLastTurn).toHaveBeenCalledWith('session-nav');
+      expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ text: expect.any(String) }));
+    });
+  });
+
+  it('rewind inline edit ignores image attachments and resends text only', async () => {
+    const rewindLastTurn = vi.fn().mockResolvedValue({ text: 'describe this image' });
+    const onSend = vi.fn(async () => {});
+    useAgentStore.setState((state) => ({
+      rewindLastTurn,
+      events: {
+        ...state.events,
+        'session-image-rewind': [
+          {
+            kind: 'user',
+            data: {
+              content: 'describe this image',
+              attachments: [{
+                type: 'image',
+                name: 'screen.png',
+                mediaType: 'image/png',
+                dataUrl: 'data:image/png;base64,abc123',
+              }],
+            },
+          },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-image-rewind-final',
+              session_id: 'session-image-rewind',
+              message: {
+                role: 'assistant',
+                content: [{ type: 'text', text: 'image described' }],
+              },
+              parent_tool_use_id: null,
+            },
+          },
+        ],
+      },
+    } as any));
+
+    render(<Harness sessionId="session-image-rewind" onSend={onSend} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回退并编辑这条消息' }));
+
+    expect(await screen.findByRole('button', { name: '取消' })).toBeTruthy();
+    expect(screen.queryByTestId('edit-composer-attachment-list')).toBeNull();
+
+    const sendButton = screen.getByRole<HTMLButtonElement>('button', { name: '发送' });
+    await waitFor(() => expect(sendButton.disabled).toBe(false));
+    fireEvent.click(sendButton);
+
+    await waitFor(() => {
+      expect(rewindLastTurn).toHaveBeenCalledWith('session-image-rewind');
+      expect(onSend).toHaveBeenCalledWith({ text: 'describe this image' });
+    });
   });
 
   it('keeps short streaming thinking complete but renders only the latest window for very long thinking', () => {

@@ -1,11 +1,14 @@
 ﻿import {
+  ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
   groupPartByType,
+  useAui,
   useAuiState,
   type MessageState,
 } from '@assistant-ui/react';
-import { ArrowDown, ChevronRight, ChevronDown, Loader2 } from 'lucide-react';
+import { LexicalComposerInput } from '@assistant-ui/react-lexical';
+import { ArrowDown, ChevronRight, ChevronDown, Loader2, Undo2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Streamdown } from 'streamdown';
 
@@ -35,6 +38,7 @@ import { CodeMuxDirectiveText } from './CodeMuxDirectiveText';
 import { buildAssistantResultTargetMap } from './assistantResultTargets';
 import { RunningElapsedTimer } from './running-elapsed';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
+import { CODEMUX_FORMATTER, DIRECTIVE_CHIP } from './CodeMuxComposer';
 
 type CodeMuxThreadProps = {
   sessionId: string;
@@ -158,11 +162,53 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
   }, [events, provider]);
 
   const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
+  const latestRewindableUserIndex = useMemo(() => findLatestRewindableUserIndex(events), [events]);
 
   const collapseInfoByEventIndex = useMemo(
     () => buildAssistantCollapseInfoMap(events, eventTimestamps),
     [events, eventTimestamps],
   );
+  const messageComponents = useMemo(() => ({
+    UserMessage: function CodeMuxUserMessage() {
+      const message = useAuiState((state) => state.message);
+      return (
+        <UserMessage
+          message={message}
+          sourceEventIndex={getSourceEventIndex(message)}
+          canRewind={!isRunning && getSourceEventIndex(message) === latestRewindableUserIndex}
+        />
+      );
+    },
+    UserEditComposer: function CodeMuxUserEditComposer() {
+      const message = useAuiState((state) => state.message);
+      return <UserEditComposer message={message} sourceEventIndex={getSourceEventIndex(message)} />;
+    },
+    AssistantMessage: function CodeMuxAssistantMessage() {
+      const message = useAuiState((state) => state.message);
+      return (
+        <AssistantLikeMessage
+          message={message}
+          sessionId={sessionId}
+          compactAiOutput={compactAiOutput}
+          collapseInfoByEventIndex={collapseInfoByEventIndex}
+          expandedTurnKeys={expandedTurnKeys}
+          onToggleExpandedTurn={toggleExpandedTurn}
+          toolDurations={toolDurations}
+          resultStatsByAssistantIndex={resultStatsByAssistantIndex}
+        />
+      );
+    },
+  }), [
+    isRunning,
+    latestRewindableUserIndex,
+    sessionId,
+    compactAiOutput,
+    collapseInfoByEventIndex,
+    expandedTurnKeys,
+    toggleExpandedTurn,
+    toolDurations,
+    resultStatsByAssistantIndex,
+  ]);
 
   return (
     <ThreadPrimitive.Root className="flex h-full min-h-0 flex-col text-sm">
@@ -180,24 +226,7 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
               showMessageNav ? 'pl-14 pr-4' : 'px-4',
             )}
           >
-            <ThreadPrimitive.Messages>
-              {({ message }) =>
-                message.role === 'user' ? (
-                  <UserMessage message={message} sourceEventIndex={getSourceEventIndex(message)} />
-                ) : (
-                  <AssistantLikeMessage
-                    message={message}
-                    sessionId={sessionId}
-                    compactAiOutput={compactAiOutput}
-                    collapseInfoByEventIndex={collapseInfoByEventIndex}
-                    expandedTurnKeys={expandedTurnKeys}
-                    onToggleExpandedTurn={toggleExpandedTurn}
-                    toolDurations={toolDurations}
-                    resultStatsByAssistantIndex={resultStatsByAssistantIndex}
-                  />
-                )
-              }
-            </ThreadPrimitive.Messages>
+            <ThreadPrimitive.Messages components={messageComponents} />
             {stopped ? <InterruptBanner /> : null}
             <StreamingContent sessionId={sessionId} events={events} />
             <ThreadPrimitive.ViewportFooter
@@ -232,12 +261,24 @@ function InterruptBanner() {
   );
 }
 
-function UserMessage({ message, sourceEventIndex }: { message: MessageState; sourceEventIndex?: number }) {
+function UserMessage({
+  message,
+  sourceEventIndex,
+  canRewind,
+}: {
+  message: MessageState;
+  sourceEventIndex?: number;
+  canRewind?: boolean;
+}) {
+  const aui = useAui();
   const text = getMessageText(message);
   const timestamp = getSourceTimestamp(message);
   const [expanded, setExpanded] = useState(false);
   const canCollapse = isLongUserMessage(text);
   const imageAttachments = getImageAttachmentItems(message);
+  const beginInlineEdit = () => {
+    aui.message().composer().beginEdit();
+  };
 
   if (!text && imageAttachments.length === 0) {
     return null;
@@ -294,10 +335,107 @@ function UserMessage({ message, sourceEventIndex }: { message: MessageState; sou
             {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           </button>
         ) : null}
-        <MessageFooter timestamp={timestamp} className="justify-end" />
+        <div className="flex items-center justify-end gap-1">
+          <MessageFooter timestamp={timestamp} className="justify-end" />
+          {canRewind ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="回退并编辑这条消息"
+              title="回退并编辑这条消息"
+              onClick={beginInlineEdit}
+              className="mt-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            >
+              <Undo2 className="h-3 w-3" />
+            </Button>
+          ) : null}
+        </div>
       </div>
     </MessagePrimitive.Root>
   );
+}
+
+function UserEditComposer({ message, sourceEventIndex }: { message: MessageState; sourceEventIndex?: number }) {
+  const aui = useAui();
+  const text = useAuiState((state) => state.composer.text);
+  const canSend = text.trim().length > 0;
+  const cancelEdit = () => {
+    aui.message().composer().cancel();
+  };
+  const sendEdit = () => {
+    if (!canSend) {
+      return;
+    }
+
+    aui.thread().append({
+      parentId: message.id,
+      sourceId: message.id,
+      role: 'user',
+      content: text ? [{ type: 'text', text }] : [],
+      attachments: [],
+      createdAt: new Date(),
+    });
+    aui.message().composer().cancel();
+  };
+
+  return (
+    <MessagePrimitive.Root
+      id={sourceEventIndex != null ? `msg-${sourceEventIndex}` : undefined}
+      className="mb-5 flex w-full justify-end"
+    >
+      <ComposerPrimitive.Root
+        onSubmit={(event) => {
+          event.preventDefault();
+          sendEdit();
+        }}
+        className="flex w-full max-w-[min(42rem,100%)] justify-end"
+      >
+        <div className="w-full rounded-xl rounded-tr-md bg-muted p-3 shadow-[0_12px_30px_-24px_hsl(var(--foreground)/0.42)]">
+          <LexicalComposerInput
+            submitMode="enter"
+            autoFocus
+            directiveChip={DIRECTIVE_CHIP}
+            formatter={CODEMUX_FORMATTER}
+            className="relative min-h-18 max-h-52 w-full overflow-y-auto text-sm leading-6 text-foreground outline-none [&_.aui-lexical-input]:min-h-18 [&_.aui-lexical-input]:max-h-52 [&_.aui-lexical-input]:overflow-y-auto [&_.aui-lexical-input]:border-0 [&_.aui-lexical-input]:bg-transparent [&_.aui-lexical-input]:px-0 [&_.aui-lexical-input]:py-0 [&_.aui-lexical-input]:text-sm [&_.aui-lexical-input]:leading-6 [&_.aui-lexical-input]:text-foreground [&_.aui-lexical-input]:shadow-none [&_.aui-lexical-input]:outline-none [&_.aui-lexical-input]:ring-0 [&_.aui-lexical-input]:focus-visible:outline-none"
+          />
+          <div className="mt-3 flex items-center justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" className="h-8 rounded-lg px-3" onClick={cancelEdit}>
+              取消
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={!canSend}
+              className="h-8 rounded-lg px-3"
+              onClick={(event) => {
+                event.preventDefault();
+                sendEdit();
+              }}
+            >
+              发送
+            </Button>
+          </div>
+        </div>
+      </ComposerPrimitive.Root>
+    </MessagePrimitive.Root>
+  );
+}
+
+function findLatestRewindableUserIndex(events: AgentMessage[]): number | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.kind !== 'user') {
+      continue;
+    }
+    const hasText = event.data.content.trim().length > 0;
+    const hasAttachments = (event.data.attachments?.length ?? 0) > 0;
+    if ((hasText || hasAttachments) && !isInterruptMarker(event.data.content)) {
+      return index;
+    }
+  }
+
+  return null;
 }
 
 function getImageAttachmentItems(message: MessageState): Array<{ id: string; name: string; src: string }> {

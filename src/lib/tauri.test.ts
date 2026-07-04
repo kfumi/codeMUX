@@ -141,3 +141,21 @@ describe('terminalApi', () => {
     }));
   });
 });
+
+describe('agentApi', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+  });
+
+  it('rewinds an agent session with app session id and agent kind', async () => {
+    invokeMock.mockResolvedValue(undefined);
+    const { agentApi } = await import('./tauri');
+
+    await agentApi.rewindSession('session-1', 'codex');
+
+    expect(invokeMock).toHaveBeenCalledWith('rewind_agent_session', {
+      appSessionId: 'session-1',
+      agentKind: 'codex',
+    });
+  });
+});

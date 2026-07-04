@@ -205,7 +205,9 @@ pub async fn spawn_sidecar(
                 debug!(target: "sidecar_stderr", "(suppressed abort cleanup) {}", line);
                 continue;
             }
-            if line.to_ascii_lowercase().contains("error") {
+            if line.contains("[codex][compact") {
+                info!(target: "sidecar_stderr", "{}", line);
+            } else if line.to_ascii_lowercase().contains("error") {
                 warn!(target: "sidecar_stderr", "{}", line);
             } else {
                 debug!(target: "sidecar_stderr", "{}", line);

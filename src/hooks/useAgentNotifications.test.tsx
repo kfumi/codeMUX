@@ -398,6 +398,38 @@ describe('useAgentNotifications', () => {
     expect(notificationInstances).toHaveLength(1);
   });
 
+  it('notifies again when a rewound turn completes at the same event index', async () => {
+    render(<Harness />);
+
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          { kind: 'user', data: { content: 'old prompt' } },
+          { kind: 'done' },
+        ],
+      },
+      eventTimestamps: { 'session-1': [1000, 2000] },
+    });
+
+    await waitFor(() => {
+      expect(notificationInstances).toHaveLength(1);
+    });
+
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          { kind: 'user', data: { content: 'edited prompt' } },
+          { kind: 'done' },
+        ],
+      },
+      eventTimestamps: { 'session-1': [3000, 4000] },
+    });
+
+    await waitFor(() => {
+      expect(notificationInstances).toHaveLength(2);
+    });
+  });
+
   it('uses the Tauri notification plugin fallback when Web Notification is unavailable', async () => {
     vi.stubGlobal('Notification', undefined);
     render(<Harness />);

@@ -19,6 +19,7 @@ const saveEventsMock = vi.fn<(sessionId: string, eventsJson: string) => Promise<
 const getEventsMock = vi.fn<(sessionId: string) => Promise<string>>();
 const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
+const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string) => Promise<void>>();
 
 vi.mock('../lib/tauri', () => ({
   agentApi: {
@@ -34,6 +35,7 @@ vi.mock('../lib/tauri', () => ({
     getEvents: getEventsMock,
     loadClaudeSessionEvents: loadClaudeSessionEventsMock,
     loadCodexSessionEvents: loadCodexSessionEventsMock,
+    rewindSession: rewindSessionMock,
     startProxy: vi.fn(),
     stopProxy: vi.fn(),
     getProxyPort: vi.fn(),
@@ -173,6 +175,7 @@ describe('agent store Codex history loading', () => {
     }));
     loadClaudeSessionEventsMock.mockResolvedValue([]);
     loadCodexSessionEventsMock.mockResolvedValue([]);
+    rewindSessionMock.mockResolvedValue();
     localStorage.clear();
   });
 
@@ -1339,6 +1342,131 @@ describe('agent store Codex history loading', () => {
         attachments: [{ type: 'image', name: 'image-1.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
       },
     });
+  });
+
+  it('rewinds the last turn, clears derived state, and returns text plus image payload', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'first turn' } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-1',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+          {
+            kind: 'user',
+            data: {
+              content: 'inspect image',
+              attachments: [{ type: 'image', name: 'screen.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
+            },
+          },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-2',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'second answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+          {
+            kind: 'result',
+            data: {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              uuid: 'result-2',
+              session_id: session.id,
+              duration_ms: 10,
+              duration_api_ms: 10,
+              num_turns: 1,
+              result: '',
+              total_cost_usd: 0,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            },
+          },
+        ],
+      },
+      eventTimestamps: { [session.id]: [1, 2, 3, 4, 5] },
+      todos: { [session.id]: [{ content: 'old todo', status: 'pending' }] },
+      streamingThinking: { [session.id]: 'thinking' },
+      streamingText: { [session.id]: 'streaming' },
+      changedFiles: { [session.id]: [{ path: 'src/app.ts', status: 'modified', originalContent: 'old', currentContent: 'new', additions: 1, deletions: 1 }] },
+    });
+
+    const payload = await useAgentStore.getState().rewindLastTurn(session.id);
+
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'codex');
+    expect(payload).toEqual({
+      text: 'inspect image',
+      images: [{ name: 'screen.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
+    });
+    expect(useAgentStore.getState().events[session.id]).toEqual([
+      { kind: 'user', data: { content: 'first turn' } },
+      expect.objectContaining({ kind: 'assistant' }),
+    ]);
+    expect(useAgentStore.getState().eventTimestamps[session.id]).toEqual([1, 2]);
+    expect(useAgentStore.getState().todos[session.id]).toBeUndefined();
+    expect(useAgentStore.getState().streamingThinking[session.id]).toBe('');
+    expect(useAgentStore.getState().streamingText[session.id]).toBe('');
+    expect(useAgentStore.getState().changedFiles[session.id]).toBeUndefined();
+  });
+
+  it('marks an inactive session unread after a rewound turn completes', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { useSessionStore } = await import('./sessionStore');
+    const session = await primeSession('codex');
+
+    useSessionStore.setState({ activeSessionId: 'other-session', unreadSessions: new Set() });
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'old prompt' } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-old',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'old answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+          {
+            kind: 'result',
+            data: {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              uuid: 'result-old',
+              session_id: session.id,
+              duration_ms: 10,
+              duration_api_ms: 10,
+              num_turns: 1,
+              result: '',
+              total_cost_usd: 0,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            },
+          },
+        ],
+      },
+      eventTimestamps: { [session.id]: [1000, 2000, 3000] },
+    });
+
+    await useAgentStore.getState().rewindLastTurn(session.id);
+    await useAgentStore.getState().startQuery(session.id, 'edited prompt', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useSessionStore.getState().unreadSessions.has(session.id)).toBe(true);
   });
 
   it('does not restore acknowledged changed-file state while loading history', async () => {
