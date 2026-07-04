@@ -190,10 +190,6 @@ export function useAgentNotifications() {
 
         if (shouldSendNotification) {
           void sendClickableNotification(candidate);
-
-          if (settings.sound_enabled && !isTerminal) {
-            playNotificationSound(settings.sound);
-          }
         }
 
         if (settings.sound_enabled && isTerminal && isLiveEvent) {

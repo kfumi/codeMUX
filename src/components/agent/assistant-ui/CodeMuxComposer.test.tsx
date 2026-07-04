@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { registerSkillCommands } from '../../../lib/slashCommands';
 import { usePreviewStore } from '../../../stores/previewStore';
-import { CodeMuxComposer } from './CodeMuxComposer';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { CodeMuxComposer, findLatestPendingProposedPlan } from './CodeMuxComposer';
 
 let composerText = '';
 
@@ -22,10 +23,11 @@ const lexicalProps: Array<{
   }>;
 }> = [];
 
-const { setComposerTextMock, addAttachmentMock, sendToolResponseMock } = vi.hoisted(() => ({
+const { setComposerTextMock, addAttachmentMock, sendToolResponseMock, composerSendMock } = vi.hoisted(() => ({
   setComposerTextMock: vi.fn(),
   addAttachmentMock: vi.fn(),
   sendToolResponseMock: vi.fn(),
+  composerSendMock: vi.fn(),
 }));
 
 const capturedPopovers: Array<{
@@ -80,6 +82,7 @@ vi.mock('@assistant-ui/react', () => {
           composerText = text;
           setComposerTextMock(text);
         },
+        send: composerSendMock,
         addAttachment: addAttachmentMock,
       }),
     }),
@@ -171,6 +174,7 @@ describe('CodeMuxComposer', () => {
     setComposerTextMock.mockClear();
     addAttachmentMock.mockClear();
     sendToolResponseMock.mockReset();
+    composerSendMock.mockClear();
     useAgentStore.setState({ events: {}, forceStopped: {} });
     usePreviewStore.setState({ treeRoot: null });
     registerSkillCommands([]);
@@ -430,5 +434,195 @@ describe('CodeMuxComposer', () => {
 
     expect(screen.queryByText('允许读取 Codex 官方手册吗？')).toBeNull();
     expect(screen.getByText('输入消息...')).toBeTruthy();
+  });
+
+  it('finds the latest final proposed plan after a result event', () => {
+    expect(findLatestPendingProposedPlan([
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-plan',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{
+              type: 'text',
+              text: '<proposed_plan>\n# 计划\n\n## Summary\n摘要\n</proposed_plan>',
+            }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'result-plan',
+          session_id: 'session-1',
+          duration_ms: 1000,
+          duration_api_ms: 1000,
+          num_turns: 1,
+          result: '',
+          total_cost_usd: 0,
+          usage: { input_tokens: 1, output_tokens: 1 },
+        },
+      },
+    ], new Set())).toMatchObject({
+      title: '计划',
+    });
+  });
+
+  it('renders proposed plan approval in the composer and sends the default approval as a user message', () => {
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          { kind: 'user', data: { content: '实现一个贪吃蛇程序' } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-plan',
+              session_id: 'session-1',
+              message: {
+                role: 'assistant',
+                content: [{
+                  type: 'text',
+                  text: '<proposed_plan>\n# 贪吃蛇浏览器小游戏\n\n## Summary\n做一个浏览器小游戏。\n</proposed_plan>',
+                }],
+              },
+              parent_tool_use_id: null,
+            },
+          },
+          {
+            kind: 'result',
+            data: {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              uuid: 'result-plan',
+              session_id: 'session-1',
+              duration_ms: 1000,
+              duration_api_ms: 1000,
+              num_turns: 1,
+              result: '',
+              total_cost_usd: 0,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            },
+          },
+        ],
+      },
+    });
+
+    render(<TooltipProvider><CodeMuxComposer sessionId="session-1" /></TooltipProvider>);
+
+    expect(screen.getByText('实施此计划？')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('是，实施此计划'));
+    fireEvent.click(screen.getByText('提交'));
+
+    expect(setComposerTextMock).toHaveBeenCalledWith('是，实施此计划');
+    expect(composerSendMock).toHaveBeenCalled();
+  });
+
+  it('submits proposed plan adjustment text as a user message', () => {
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-plan',
+              session_id: 'session-1',
+              message: {
+                role: 'assistant',
+                content: [{
+                  type: 'text',
+                  text: '<proposed_plan>\n# 计划\n\n## Summary\n摘要\n</proposed_plan>',
+                }],
+              },
+              parent_tool_use_id: null,
+            },
+          },
+          {
+            kind: 'result',
+            data: {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              uuid: 'result-plan',
+              session_id: 'session-1',
+              duration_ms: 1000,
+              duration_api_ms: 1000,
+              num_turns: 1,
+              result: '',
+              total_cost_usd: 0,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            },
+          },
+        ],
+      },
+    });
+
+    render(<TooltipProvider><CodeMuxComposer sessionId="session-1" /></TooltipProvider>);
+
+    fireEvent.click(screen.getByText('否，请告知 Codex 如何调整'));
+    fireEvent.change(screen.getByPlaceholderText('告诉 Codex 需要怎样调整计划...'), {
+      target: { value: '请加上移动端适配' },
+    });
+    fireEvent.click(screen.getByText('提交'));
+
+    expect(setComposerTextMock).toHaveBeenCalledWith('请加上移动端适配');
+    expect(composerSendMock).toHaveBeenCalled();
+  });
+
+  it('prioritizes pending user questions over proposed plan approval', () => {
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          ...pendingQuestionEvents,
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-plan',
+              session_id: 'session-1',
+              message: {
+                role: 'assistant',
+                content: [{
+                  type: 'text',
+                  text: '<proposed_plan>\n# 计划\n\n## Summary\n摘要\n</proposed_plan>',
+                }],
+              },
+              parent_tool_use_id: null,
+            },
+          },
+          {
+            kind: 'result',
+            data: {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              uuid: 'result-plan',
+              session_id: 'session-1',
+              duration_ms: 1000,
+              duration_api_ms: 1000,
+              num_turns: 1,
+              result: '',
+              total_cost_usd: 0,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            },
+          },
+        ],
+      },
+    });
+
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    expect(screen.getByText('允许读取 Codex 官方手册吗？')).toBeTruthy();
+    expect(screen.queryByText('实施此计划？')).toBeNull();
   });
 });

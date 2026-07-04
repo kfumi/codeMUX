@@ -11,6 +11,7 @@ import { LexicalComposerInput } from '@assistant-ui/react-lexical';
 import type { DirectiveChipProps } from '@assistant-ui/react-lexical';
 import {
   ArrowUp,
+  Check,
   FileCode2,
   FilePlus2,
   Folder,
@@ -42,6 +43,7 @@ import { computeContextUsageFromEvents } from '../contextUsage';
 import { AskUserQuestionCard, type AskUserQuestion } from '../AskUserQuestionCard';
 import { CodeMuxDirectiveChip, type CodeMuxDirectiveKind } from './CodeMuxDirectiveText';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
+import { parseProposedPlan, getProposedPlanTitle } from './proposedPlan';
 
 interface CodeMuxComposerProps {
   sessionId: string;
@@ -81,6 +83,11 @@ type FileEntry = { name: string; relativePath: string; isDir: boolean };
 type PendingUserQuestion = {
   toolUseId: string;
   questions: AskUserQuestion[];
+};
+
+type PendingProposedPlan = {
+  key: string;
+  title: string;
 };
 
 function flattenFileTree(nodes: FileTreeNodeData[], prefix = ''): FileEntry[] {
@@ -135,6 +142,7 @@ export function CodeMuxComposer({
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const [dismissedQuestionIds, setDismissedQuestionIds] = useState<Set<string>>(() => new Set());
+  const [dismissedPlanKeys, setDismissedPlanKeys] = useState<Set<string>>(() => new Set());
   const contextUsage = useMemo(() => computeContextUsageFromEvents(events, {
     model: modelName,
     sessionProviderUsesLargeContext: false,
@@ -168,6 +176,10 @@ export function CodeMuxComposer({
     () => findLatestPendingUserQuestion(events, dismissedQuestionIds),
     [dismissedQuestionIds, events],
   );
+  const pendingPlan = useMemo(
+    () => findLatestPendingProposedPlan(events, dismissedPlanKeys),
+    [dismissedPlanKeys, events],
+  );
   const fileItems = useMemo(() => {
     if (activeChar !== '@') return [];
     const items = fileItemsRef.current;
@@ -179,7 +191,7 @@ export function CodeMuxComposer({
       .map(toFileTriggerItem);
   }, [activeChar, activeQuery, treeRoot]);
   const menuItems = activeChar === '/' ? slashItems : fileItems;
-  const menuVisible = activeChar !== null && !pendingQuestion;
+  const menuVisible = activeChar !== null && !pendingQuestion && !pendingPlan;
 
   useEffect(() => {
     setHighlightedIndex(0);
@@ -242,6 +254,7 @@ export function CodeMuxComposer({
 
   useEffect(() => {
     setDismissedQuestionIds(new Set());
+    setDismissedPlanKeys(new Set());
   }, [sessionId]);
 
   useEffect(() => {
@@ -388,6 +401,18 @@ export function CodeMuxComposer({
                   setDismissedQuestionIds((current) => new Set(current).add(pendingQuestion.toolUseId));
                 }}
               />
+            ) : pendingPlan ? (
+              <ProposedPlanApprovalCard
+                title={pendingPlan.title}
+                onSubmit={(content) => {
+                  setDismissedPlanKeys((current) => new Set(current).add(pendingPlan.key));
+                  aui.composer().setText(content);
+                  aui.composer().send();
+                }}
+                onDismiss={() => {
+                  setDismissedPlanKeys((current) => new Set(current).add(pendingPlan.key));
+                }}
+              />
             ) : (
               <LexicalComposerInput
                 submitMode="enter"
@@ -399,7 +424,7 @@ export function CodeMuxComposer({
               />
             )}
 
-            {!pendingQuestion && <div className="relative flex items-center justify-between pl-1">
+            {!pendingQuestion && !pendingPlan && <div className="relative flex items-center justify-between pl-1">
               <div className="flex items-center gap-2">
                 <div className="relative">
                   <button
@@ -467,6 +492,98 @@ export function CodeMuxComposer({
   );
 }
 
+function ProposedPlanApprovalCard({
+  title,
+  onSubmit,
+  onDismiss,
+}: {
+  title: string;
+  onSubmit: (content: string) => void;
+  onDismiss: () => void;
+}) {
+  const [mode, setMode] = useState<'approve' | 'adjust'>('approve');
+  const [adjustment, setAdjustment] = useState('');
+  const content = mode === 'approve' ? '是，实施此计划' : adjustment.trim();
+  const canSubmit = content.length > 0;
+
+  return (
+    <div className="space-y-3 rounded-2xl bg-[hsl(var(--surface-2))]/66 p-3">
+      <div>
+        <p className="px-1 text-[13px] font-semibold text-foreground">实施此计划？</p>
+        <p className="mt-0.5 line-clamp-1 px-1 text-xs text-muted-foreground/70">{title}</p>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-border/18 bg-[hsl(var(--surface-3))]/22">
+        <button
+          type="button"
+          onClick={() => setMode('approve')}
+          className={cn(
+            'flex w-full items-center gap-2 border-b border-border/12 px-3 py-2 text-left text-sm transition-colors',
+            mode === 'approve' ? 'bg-muted/62 text-foreground' : 'text-muted-foreground hover:bg-muted/42 hover:text-foreground',
+          )}
+        >
+          <span className={cn(
+            'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold',
+            mode === 'approve' ? 'border-foreground bg-foreground text-background' : 'border-muted-foreground/30 text-muted-foreground',
+          )}>
+            1
+          </span>
+          <span className="font-medium">是，实施此计划</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('adjust')}
+          className={cn(
+            'flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors',
+            mode === 'adjust' ? 'bg-muted/62 text-foreground' : 'text-muted-foreground hover:bg-muted/42 hover:text-foreground',
+          )}
+        >
+          <span className={cn(
+            'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold',
+            mode === 'adjust' ? 'border-foreground bg-foreground text-background' : 'border-muted-foreground/30 text-muted-foreground',
+          )}>
+            2
+          </span>
+          <span className="font-medium">否，请告知 Codex 如何调整</span>
+        </button>
+        {mode === 'adjust' ? (
+          <div className="border-t border-border/12 p-2">
+            <input
+              value={adjustment}
+              onChange={(event) => setAdjustment(event.target.value)}
+              placeholder="告诉 Codex 需要怎样调整计划..."
+              autoFocus
+              className="w-full rounded-md border border-border/35 bg-background/80 px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/55 focus:border-primary/45"
+            />
+          </div>
+        ) : null}
+      </div>
+      <div className="flex items-center justify-end gap-2 px-1">
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground"
+        >
+          忽略
+        </button>
+        <button
+          type="button"
+          onClick={() => canSubmit && onSubmit(content)}
+          disabled={!canSubmit}
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors',
+            canSubmit
+              ? 'bg-primary text-primary-foreground hover:bg-primary/92'
+              : 'cursor-not-allowed bg-muted/40 text-muted-foreground',
+          )}
+        >
+          <span>提交</span>
+          <Check className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function findLatestPendingUserQuestion(events: AgentMessage[], dismissedIds: Set<string>): PendingUserQuestion | null {
   const answeredIds = collectAnsweredToolUseIds(events);
 
@@ -488,6 +605,52 @@ function findLatestPendingUserQuestion(events: AgentMessage[], dismissedIds: Set
   }
 
   return null;
+}
+
+export function findLatestPendingProposedPlan(events: AgentMessage[], dismissedKeys: Set<string>): PendingProposedPlan | null {
+  let hasResultAfterAssistant = false;
+
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.kind === 'user') {
+      return null;
+    }
+    if (event.kind === 'result') {
+      hasResultAfterAssistant = true;
+      continue;
+    }
+    if (event.kind !== 'assistant' || !hasResultAfterAssistant) {
+      continue;
+    }
+
+    const text = getAssistantText(event);
+    const parsed = parseProposedPlan(text);
+    if (!parsed) {
+      return null;
+    }
+
+    const key = `${index}:${parsed.planMarkdown}`;
+    if (dismissedKeys.has(key)) {
+      return null;
+    }
+
+    return {
+      key,
+      title: getProposedPlanTitle(parsed.planMarkdown),
+    };
+  }
+
+  return null;
+}
+
+function getAssistantText(event: Extract<AgentMessage, { kind: 'assistant' }>): string {
+  return event.data.message.content
+    .filter((block): block is { type: 'text'; text: string } =>
+      block?.type === 'text' && typeof block.text === 'string',
+    )
+    .map((block) => block.text)
+    .join('\n\n')
+    .trim();
 }
 
 function collectAnsweredToolUseIds(events: AgentMessage[]): Set<string> {

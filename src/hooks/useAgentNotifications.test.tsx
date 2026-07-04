@@ -138,6 +138,43 @@ describe('useAgentNotifications', () => {
     });
   });
 
+  it('does not play a sound for waiting-input notifications', async () => {
+    useSettingsStore.setState({
+      config: {
+        ...structuredClone(baseConfig),
+        notifications: {
+          system_enabled: true,
+          sound_enabled: true,
+          sound: 'ding',
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<Harness />);
+
+    useAgentStore.setState({
+      events: {
+        'session-1': [{
+          kind: 'ask_user_question',
+          data: {
+            tool_use_id: 'question-1',
+            questions: [{
+              question: '是否继续？',
+              options: [{ label: '继续' }, { label: '停止' }],
+            }],
+          },
+        }],
+      },
+      eventTimestamps: { 'session-1': [Date.now()] },
+    });
+
+    await waitFor(() => {
+      expect(notificationInstances).toHaveLength(1);
+    });
+    expect(audioPlayMock).not.toHaveBeenCalled();
+  });
+
   it('requests Web Notification permission so the notification can be clicked', async () => {
     const requestPermission = vi.fn(async () => 'granted');
     vi.stubGlobal('Notification', class {

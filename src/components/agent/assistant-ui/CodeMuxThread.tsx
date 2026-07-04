@@ -200,18 +200,21 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
             </ThreadPrimitive.Messages>
             {stopped ? <InterruptBanner /> : null}
             <StreamingContent sessionId={sessionId} events={events} />
-            <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pt-2 pb-4">
-            <ThreadPrimitive.ScrollToBottom
-              className="absolute -top-12 left-1/2 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--foreground)/0.35)] transition-all hover:-translate-y-0.5 hover:text-foreground disabled:invisible"
-              aria-label="Scroll to bottom"
-              title="Scroll to bottom"
-              behavior="smooth"
+            <ThreadPrimitive.ViewportFooter
+              data-testid="thread-viewport-footer"
+              className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pt-2 pb-4"
             >
-              <ArrowDown className="h-4 w-4" />
-            </ThreadPrimitive.ScrollToBottom>
-            {footer}
-          </ThreadPrimitive.ViewportFooter>
-        </div>
+              <ThreadPrimitive.ScrollToBottom
+                className="absolute -top-12 left-1/2 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--foreground)/0.35)] transition-all hover:-translate-y-0.5 hover:text-foreground disabled:invisible"
+                aria-label="Scroll to bottom"
+                title="Scroll to bottom"
+                behavior="smooth"
+              >
+                <ArrowDown className="h-4 w-4" />
+              </ThreadPrimitive.ScrollToBottom>
+              {footer}
+            </ThreadPrimitive.ViewportFooter>
+          </div>
           </ThreadPrimitive.Viewport>
       {showMessageNav ? <MessageNav items={userNavItems} scrollContainer={viewportRef} disabled={isRunning} /> : null}
       </div>
@@ -688,7 +691,7 @@ function AssistantLikeMessage({
     isFinal && message.metadata.custom?.sourceRole !== 'system' && (footerStats !== undefined || sourceTimestamp !== undefined);
 
   return (
-    <MessagePrimitive.Root className="mb-2 flex w-full justify-start">
+    <MessagePrimitive.Root className="mb-5 flex w-full justify-start">
       <div
         className={cn(
           'w-full min-w-0 space-y-2 text-sm leading-relaxed',
@@ -726,7 +729,12 @@ function AssistantLikeMessage({
                   );
 
                 case 'text':
-                  return <CodeMuxTextMessagePart />;
+                  return (
+                    <CodeMuxTextMessagePart
+                      text={part.text}
+                      parsePlan={isFinal}
+                    />
+                  );
 
                 case 'reasoning':
                   return <CodeMuxReasoningMessagePart />;

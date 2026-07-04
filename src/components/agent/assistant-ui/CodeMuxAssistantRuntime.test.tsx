@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { useSettingsStore } from '../../../stores/settingsStore';
+import { useSidePanelStore } from '../../../stores/sidePanelStore';
 import {
   buildAgentInputPayloadFromAppendMessage,
   CodeMuxImageAttachmentAdapter,
@@ -250,6 +251,74 @@ const completedTurnEvents: AgentMessage[] = [
   },
 ];
 
+const proposedPlanFinalEvents: AgentMessage[] = [
+  { kind: 'user', data: { content: '实现一个贪吃蛇程序' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-plan-final',
+      session_id: 'session-plan-final',
+      message: {
+        role: 'assistant',
+        content: [{
+          type: 'text',
+          text: `计划如下：
+
+<proposed_plan>
+# 贪吃蛇浏览器小游戏
+
+## Summary
+做一个可以直接运行的浏览器小游戏。
+
+## Key Changes
+- 实现游戏循环
+</proposed_plan>`,
+        }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'result',
+    data: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      uuid: 'result-plan-final',
+      session_id: 'session-plan-final',
+      duration_ms: 1000,
+      duration_api_ms: 1000,
+      num_turns: 1,
+      result: '',
+      total_cost_usd: 0,
+      usage: {
+        input_tokens: 10,
+        output_tokens: 20,
+      },
+    },
+  },
+];
+
+const proposedPlanNonFinalEvents: AgentMessage[] = [
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-plan-non-final',
+      session_id: 'session-plan-non-final',
+      message: {
+        role: 'assistant',
+        content: [{
+          type: 'text',
+          text: '<proposed_plan>\n# 不应解析\n\n## Summary\n这是中间消息。\n</proposed_plan>',
+        }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+];
+
 const navigationTurnEvents: AgentMessage[] = [
   { kind: 'user', data: { content: '修复子智能体展示\n需要保持 Codex 风格' } },
   {
@@ -404,6 +473,11 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       configurable: true,
       value: vi.fn(),
     });
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    });
 
     useAgentStore.setState({
       events: {
@@ -418,6 +492,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-image-only': imageOnlyUserEvents,
         'session-image-text': imageAndTextUserEvents,
         'session-completed-turn': completedTurnEvents,
+        'session-plan-final': proposedPlanFinalEvents,
+        'session-plan-non-final': proposedPlanNonFinalEvents,
         'session-nav': navigationTurnEvents,
       },
       eventTimestamps: {
@@ -471,6 +547,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         compact_ai_output: false,
       },
     }));
+    useSidePanelStore.getState().reset();
   });
 
   afterEach(() => {
@@ -785,6 +862,57 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     expect(screen.getByText('I am checking files first.')).toBeTruthy();
     expect(screen.getByRole('button', { name: /鏀惰捣AI杩囩▼|收起AI过程/ })).toBeTruthy();
+  });
+
+  it('renders proposed_plan in final assistant messages as a plan preview card', () => {
+    render(<Harness sessionId="session-plan-final" />);
+
+    expect(screen.getByText('计划如下：')).toBeTruthy();
+    expect(screen.getByText('贪吃蛇浏览器小游戏')).toBeTruthy();
+    expect(screen.getByText('Summary')).toBeTruthy();
+    expect(screen.getByText(/做一个可以直接运行的浏览器小游戏/)).toBeTruthy();
+    expect(screen.getByTestId('proposed-plan-preview').className).toContain('max-h-24');
+    expect(document.body.textContent).not.toContain('<proposed_plan>');
+
+    fireEvent.click(screen.getByRole('button', { name: '展开计划 贪吃蛇浏览器小游戏' }));
+
+    expect(useSidePanelStore.getState()).toMatchObject({
+      isOpen: true,
+      tabs: [
+        expect.objectContaining({
+          kind: 'plan',
+          planFilePath: 'proposed-plan.md',
+          planContent: expect.stringContaining('# 贪吃蛇浏览器小游戏'),
+        }),
+      ],
+    });
+  });
+
+  it('copies proposed_plan markdown from the plan preview card', async () => {
+    render(<Harness sessionId="session-plan-final" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '复制计划 贪吃蛇浏览器小游戏' }));
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('# 贪吃蛇浏览器小游戏'));
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('## Key Changes'));
+    });
+  });
+
+  it('keeps proposed_plan approval on the normal thread footer layout', () => {
+    const { container } = render(<Harness sessionId="session-plan-final" />);
+
+    const footer = container.querySelector('[data-testid="thread-viewport-footer"]');
+
+    expect(footer?.className).toContain('mt-auto');
+    expect(container.querySelector('[data-testid="thread-messages-stack"]')).toBeNull();
+  });
+
+  it('does not parse proposed_plan in non-final assistant messages', () => {
+    render(<Harness sessionId="session-plan-non-final" />);
+
+    expect(document.body.textContent).toContain('<proposed_plan>');
+    expect(screen.queryByRole('button', { name: /展开计划/ })).toBeNull();
   });
 
   it('renders Codex-style message navigation with user title and latest assistant summary', () => {

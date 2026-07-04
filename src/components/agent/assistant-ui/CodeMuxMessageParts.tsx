@@ -1,5 +1,8 @@
 import type { AgentMessage } from '../../../stores/agentStore';
 import { MarkdownText } from '@/components/assistant-ui/markdown-text';
+import { Streamdown } from 'streamdown';
+import { code } from '@streamdown/code';
+import { useState } from 'react';
 import {
   ToolFallbackContent,
   ToolFallbackResult,
@@ -12,11 +15,14 @@ import {
 import { AskUserQuestionCard } from '../AskUserQuestionCard';
 import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
 import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
-import { AlertTriangle, XCircle } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Maximize2, ListTodo, XCircle } from 'lucide-react';
 import { getCodeChangeFilePath, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
 import { getDisplayableArgs, getToolHeaderSummary } from '../toolHeaderSummary';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
+import { CODEMUX_MARKDOWN_REHYPE_PLUGINS, CodeMuxMarkdownLink } from '@/components/assistant-ui/markdown-link';
+import { cn } from '../../../lib/utils';
+import { getProposedPlanPreview, getProposedPlanTitle, parseProposedPlan } from './proposedPlan';
 
 type CodeMuxToolCallPartProps = {
   toolName: string;
@@ -61,16 +67,118 @@ type AskUserQuestionCardData = {
   }>;
 };
 
-export function CodeMuxTextMessagePart() {
+const STATIC_MARKDOWN_COMPONENTS = {
+  a: CodeMuxMarkdownLink,
+};
+
+export function CodeMuxTextMessagePart({
+  text,
+  parsePlan = false,
+}: {
+  text?: string;
+  parsePlan?: boolean;
+}) {
+  const parsedPlan = parsePlan && text ? parseProposedPlan(text) : null;
+
+  if (!parsedPlan) {
+    return (
+      <div className="pl-1">
+        <MarkdownText />
+      </div>
+    );
+  }
+
   return (
-    <div className="pl-1">
-      <MarkdownText />
+    <div className="space-y-2 pl-1">
+      {parsedPlan.beforeText ? <StaticMarkdownText text={parsedPlan.beforeText} /> : null}
+      <ProposedPlanCard planMarkdown={parsedPlan.planMarkdown} />
+      {parsedPlan.afterText ? <StaticMarkdownText text={parsedPlan.afterText} /> : null}
     </div>
   );
 }
 
 export function CodeMuxReasoningMessagePart() {
   return <MarkdownText />;
+}
+
+function StaticMarkdownText({ text }: { text: string }) {
+  return (
+    <Streamdown
+      mode="static"
+      className="aui-md"
+      components={STATIC_MARKDOWN_COMPONENTS as never}
+      plugins={{ code }}
+      shikiTheme={['github-light', 'github-dark']}
+      controls={{ code: { copy: true, download: false }, table: false } as never}
+      rehypePlugins={CODEMUX_MARKDOWN_REHYPE_PLUGINS}
+      linkSafety={{ enabled: false }}
+    >
+      {text}
+    </Streamdown>
+  );
+}
+
+function ProposedPlanCard({ planMarkdown }: { planMarkdown: string }) {
+  const openPlanTab = useSidePanelStore((state) => state.openPlanTab);
+  const title = getProposedPlanTitle(planMarkdown);
+  const preview = getProposedPlanPreview(planMarkdown);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard?.writeText(planMarkdown);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-border/55 bg-[hsl(var(--surface-2))]/42 p-4 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.035)]">
+      <div className="mb-3 flex items-center justify-between gap-3 text-muted-foreground/72">
+        <div className="flex min-w-0 items-center gap-2 text-xs font-medium">
+          <ListTodo className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">计划</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            aria-label={`复制计划 ${title}`}
+            title={copied ? '已复制计划' : '复制计划内容'}
+            onClick={() => void handleCopy()}
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted/45 hover:text-foreground"
+          >
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            type="button"
+            aria-label={`展开计划 ${title}`}
+            title="在右侧面板展开计划"
+            onClick={() => openPlanTab('计划.md', planMarkdown)}
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted/45 hover:text-foreground"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+      <h2 className="mb-3 text-xl font-semibold leading-7 text-foreground">{title}</h2>
+      {preview ? (
+        <div
+          data-testid="proposed-plan-preview"
+          className={cn(
+            'relative max-h-24 overflow-hidden text-sm leading-6 text-foreground/88',
+            '[&_.aui-md>*:last-child]:mb-0',
+            '[&_.aui-md-h2]:mt-0 [&_.aui-md-h2]:mb-1 [&_.aui-md-h2]:text-base [&_.aui-md-h2]:leading-6',
+            '[&_.aui-md-h3]:mt-0 [&_.aui-md-h3]:mb-1 [&_.aui-md-h3]:text-sm [&_.aui-md-h3]:leading-5',
+            'after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-6 after:bg-[linear-gradient(180deg,hsl(var(--surface-2)/0),hsl(var(--surface-2)))]',
+          )}
+        >
+          <StaticMarkdownText text={preview} />
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function getStreamStatusDisplay(data: StreamStatusDisplayInput): StreamStatusDisplay {
