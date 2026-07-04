@@ -23,11 +23,12 @@ const lexicalProps: Array<{
   }>;
 }> = [];
 
-const { setComposerTextMock, addAttachmentMock, sendToolResponseMock, composerSendMock } = vi.hoisted(() => ({
+const { setComposerTextMock, addAttachmentMock, sendToolResponseMock, composerSendMock, updatePermissionsMock } = vi.hoisted(() => ({
   setComposerTextMock: vi.fn(),
   addAttachmentMock: vi.fn(),
   sendToolResponseMock: vi.fn(),
   composerSendMock: vi.fn(),
+  updatePermissionsMock: vi.fn(),
 }));
 
 const capturedPopovers: Array<{
@@ -130,6 +131,9 @@ vi.mock('../../../lib/tauri', () => ({
   agentApi: {
     sendToolResponse: sendToolResponseMock,
   },
+  sessionApi: {
+    updatePermissions: updatePermissionsMock,
+  },
 }));
 
 const pendingQuestionEvents: AgentMessage[] = [
@@ -175,6 +179,7 @@ describe('CodeMuxComposer', () => {
     addAttachmentMock.mockClear();
     sendToolResponseMock.mockReset();
     composerSendMock.mockClear();
+    updatePermissionsMock.mockReset();
     useAgentStore.setState({ events: {}, forceStopped: {} });
     usePreviewStore.setState({ treeRoot: null });
     registerSkillCommands([]);
@@ -475,7 +480,8 @@ describe('CodeMuxComposer', () => {
     });
   });
 
-  it('renders proposed plan approval in the composer and sends the default approval as a user message', () => {
+  it('renders proposed plan approval in the composer, switches to full access, then sends approval', async () => {
+    updatePermissionsMock.mockResolvedValue(undefined);
     useAgentStore.setState({
       events: {
         'session-1': [
@@ -516,18 +522,81 @@ describe('CodeMuxComposer', () => {
       },
     });
 
-    render(<TooltipProvider><CodeMuxComposer sessionId="session-1" /></TooltipProvider>);
+    render(<TooltipProvider><CodeMuxComposer sessionId="session-1" agentKind="codex" /></TooltipProvider>);
 
     expect(screen.getByText('实施此计划？')).toBeTruthy();
 
     fireEvent.click(screen.getByText('是，实施此计划'));
     fireEvent.click(screen.getByText('提交'));
 
-    expect(setComposerTextMock).toHaveBeenCalledWith('是，实施此计划');
-    expect(composerSendMock).toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(updatePermissionsMock).toHaveBeenCalledWith(
+        'session-1',
+        { kind: 'codex', sandboxMode: 'danger-full-access', approvalPolicy: 'never', networkAccessEnabled: true },
+        'off',
+      );
+      expect(setComposerTextMock).toHaveBeenCalledWith('是，实施此计划');
+      expect(composerSendMock).toHaveBeenCalled();
+    });
+
+    expect(updatePermissionsMock.mock.invocationCallOrder[0]).toBeLessThan(setComposerTextMock.mock.invocationCallOrder.at(-1) ?? 0);
   });
 
-  it('submits proposed plan adjustment text as a user message', () => {
+  it('keeps proposed plan approval visible and does not send when full access switch fails', async () => {
+    updatePermissionsMock.mockRejectedValueOnce(new Error('permission failed'));
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-plan',
+              session_id: 'session-1',
+              message: {
+                role: 'assistant',
+                content: [{
+                  type: 'text',
+                  text: '<proposed_plan>\n# 计划\n\n## Summary\n摘要\n</proposed_plan>',
+                }],
+              },
+              parent_tool_use_id: null,
+            },
+          },
+          {
+            kind: 'result',
+            data: {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              uuid: 'result-plan',
+              session_id: 'session-1',
+              duration_ms: 1000,
+              duration_api_ms: 1000,
+              num_turns: 1,
+              result: '',
+              total_cost_usd: 0,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            },
+          },
+        ],
+      },
+    });
+
+    render(<TooltipProvider><CodeMuxComposer sessionId="session-1" agentKind="codex" /></TooltipProvider>);
+
+    fireEvent.click(screen.getByText('提交'));
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('权限切换失败，计划尚未发送。请稍后重试。')).toBeTruthy();
+    });
+
+    expect(screen.getByText('实施此计划？')).toBeTruthy();
+    expect(setComposerTextMock).not.toHaveBeenCalledWith('是，实施此计划');
+    expect(composerSendMock).not.toHaveBeenCalled();
+  });
+
+  it('submits proposed plan adjustment text as a user message without switching permissions', () => {
     useAgentStore.setState({
       events: {
         'session-1': [
@@ -577,6 +646,7 @@ describe('CodeMuxComposer', () => {
 
     expect(setComposerTextMock).toHaveBeenCalledWith('请加上移动端适配');
     expect(composerSendMock).toHaveBeenCalled();
+    expect(updatePermissionsMock).not.toHaveBeenCalled();
   });
 
   it('prioritizes pending user questions over proposed plan approval', () => {

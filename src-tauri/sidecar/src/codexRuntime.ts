@@ -64,6 +64,9 @@ function safeStringifyForLog(payload: unknown): string {
       if (typeof value === 'bigint') {
         return value.toString();
       }
+      if (typeof value === 'string') {
+        return truncateStringForLog(value);
+      }
       if (value && typeof value === 'object') {
         if (seen.has(value)) {
           return '[Circular]';
@@ -81,6 +84,15 @@ function safeStringifyForLog(payload: unknown): string {
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
 type UpdatePermissionsCommand = Extract<SidecarCommand, { type: 'update_permissions' }>;
 const DEFAULT_SHELL_COMMAND_TIMEOUT_MS = 10000;
+const CODEX_REALTIME_LOG_MAX_STRING_LENGTH = 500;
+
+function truncateStringForLog(value: string): string {
+  if (value.length <= CODEX_REALTIME_LOG_MAX_STRING_LENGTH) {
+    return value;
+  }
+
+  return `${value.slice(0, CODEX_REALTIME_LOG_MAX_STRING_LENGTH)}...[truncated ${value.length - CODEX_REALTIME_LOG_MAX_STRING_LENGTH} chars]`;
+}
 
 type CodexSessionBootstrap = {
   sessionId?: string;

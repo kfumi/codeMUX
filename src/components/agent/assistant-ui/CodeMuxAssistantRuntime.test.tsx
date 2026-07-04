@@ -881,7 +881,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       tabs: [
         expect.objectContaining({
           kind: 'plan',
-          planFilePath: 'proposed-plan.md',
+          planFilePath: '计划.md',
           planContent: expect.stringContaining('# 贪吃蛇浏览器小游戏'),
         }),
       ],

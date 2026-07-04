@@ -34,9 +34,12 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FC, typ
 import type { AgentMessage } from '../../../stores/agentStore';
 import type { SlashCommand } from '../../../lib/slashCommands';
 import { getAllCommands } from '../../../lib/slashCommands';
+import { createLogger, serializeError } from '../../../lib/logger';
 import { cn } from '../../../lib/utils';
 import { useAgentStore } from '../../../stores/agentStore';
 import { usePreviewStore, type FileTreeNodeData } from '../../../stores/previewStore';
+import { useSessionStore } from '../../../stores/sessionStore';
+import { mapExecutionModeToPermissionConfig } from '../../../lib/agentPermissions';
 import type { AgentKind } from '../../../types/session';
 import { ContextDisplay } from '../../assistant-ui/context-display';
 import { computeContextUsageFromEvents } from '../contextUsage';
@@ -78,6 +81,7 @@ const MAX_FILE_RESULTS = 50;
 const EMPTY_EVENTS: AgentMessage[] = [];
 const TRIGGER_RE = /(^|\s)([/@])([^\s]*)(?=\s|$)/g;
 const PARSE_DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w:-]*)(?=\s|$)|(^|\s)(@(?![A-Za-z][A-Za-z0-9+.-]*:\/\/)[^\s]+)/g;
+const logger = createLogger('CodeMuxComposer');
 
 type FileEntry = { name: string; relativePath: string; isDir: boolean };
 type PendingUserQuestion = {
@@ -141,6 +145,7 @@ export function CodeMuxComposer({
   const attachmentCount = useAuiState((state) => state.composer.attachments.length);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
+  const updateSessionPermissions = useSessionStore((state) => state.updateSessionPermissions);
   const [dismissedQuestionIds, setDismissedQuestionIds] = useState<Set<string>>(() => new Set());
   const [dismissedPlanKeys, setDismissedPlanKeys] = useState<Set<string>>(() => new Set());
   const contextUsage = useMemo(() => computeContextUsageFromEvents(events, {
@@ -404,10 +409,22 @@ export function CodeMuxComposer({
             ) : pendingPlan ? (
               <ProposedPlanApprovalCard
                 title={pendingPlan.title}
-                onSubmit={(content) => {
-                  setDismissedPlanKeys((current) => new Set(current).add(pendingPlan.key));
-                  aui.composer().setText(content);
-                  aui.composer().send();
+                onSubmit={async (content, approved) => {
+                  try {
+                    if (approved) {
+                      await updateSessionPermissions(
+                        sessionId,
+                        mapExecutionModeToPermissionConfig(agentKind, 'full_access'),
+                        'off',
+                      );
+                    }
+                    setDismissedPlanKeys((current) => new Set(current).add(pendingPlan.key));
+                    aui.composer().setText(content);
+                    aui.composer().send();
+                  } catch (err) {
+                    logger.error('Failed to approve proposed plan', { sessionId, approved }, serializeError(err));
+                    throw err;
+                  }
                 }}
                 onDismiss={() => {
                   setDismissedPlanKeys((current) => new Set(current).add(pendingPlan.key));
@@ -498,13 +515,28 @@ function ProposedPlanApprovalCard({
   onDismiss,
 }: {
   title: string;
-  onSubmit: (content: string) => void;
+  onSubmit: (content: string, approved: boolean) => void | Promise<void>;
   onDismiss: () => void;
 }) {
   const [mode, setMode] = useState<'approve' | 'adjust'>('approve');
   const [adjustment, setAdjustment] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const content = mode === 'approve' ? '是，实施此计划' : adjustment.trim();
-  const canSubmit = content.length > 0;
+  const canSubmit = content.length > 0 && !submitting;
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSubmit(content, mode === 'approve');
+    } catch {
+      setError('权限切换失败，计划尚未发送。请稍后重试。');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="space-y-3 rounded-2xl bg-[hsl(var(--surface-2))]/66 p-3">
@@ -515,10 +547,16 @@ function ProposedPlanApprovalCard({
       <div className="overflow-hidden rounded-lg border border-border/18 bg-[hsl(var(--surface-3))]/22">
         <button
           type="button"
-          onClick={() => setMode('approve')}
+          onClick={() => {
+            if (submitting) return;
+            setMode('approve');
+            setError(null);
+          }}
+          disabled={submitting}
           className={cn(
             'flex w-full items-center gap-2 border-b border-border/12 px-3 py-2 text-left text-sm transition-colors',
             mode === 'approve' ? 'bg-muted/62 text-foreground' : 'text-muted-foreground hover:bg-muted/42 hover:text-foreground',
+            submitting && 'cursor-wait opacity-70',
           )}
         >
           <span className={cn(
@@ -531,10 +569,16 @@ function ProposedPlanApprovalCard({
         </button>
         <button
           type="button"
-          onClick={() => setMode('adjust')}
+          onClick={() => {
+            if (submitting) return;
+            setMode('adjust');
+            setError(null);
+          }}
+          disabled={submitting}
           className={cn(
             'flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors',
             mode === 'adjust' ? 'bg-muted/62 text-foreground' : 'text-muted-foreground hover:bg-muted/42 hover:text-foreground',
+            submitting && 'cursor-wait opacity-70',
           )}
         >
           <span className={cn(
@@ -549,25 +593,33 @@ function ProposedPlanApprovalCard({
           <div className="border-t border-border/12 p-2">
             <input
               value={adjustment}
-              onChange={(event) => setAdjustment(event.target.value)}
+              onChange={(event) => {
+                setAdjustment(event.target.value);
+                setError(null);
+              }}
               placeholder="告诉 Codex 需要怎样调整计划..."
               autoFocus
+              disabled={submitting}
               className="w-full rounded-md border border-border/35 bg-background/80 px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/55 focus:border-primary/45"
             />
           </div>
         ) : null}
       </div>
+      {error ? (
+        <p className="px-1 text-xs text-destructive">{error}</p>
+      ) : null}
       <div className="flex items-center justify-end gap-2 px-1">
         <button
           type="button"
           onClick={onDismiss}
+          disabled={submitting}
           className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground"
         >
           忽略
         </button>
         <button
           type="button"
-          onClick={() => canSubmit && onSubmit(content)}
+          onClick={() => void handleSubmit()}
           disabled={!canSubmit}
           className={cn(
             'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors',
@@ -576,7 +628,7 @@ function ProposedPlanApprovalCard({
               : 'cursor-not-allowed bg-muted/40 text-muted-foreground',
           )}
         >
-          <span>提交</span>
+          <span>{submitting ? '提交中...' : '提交'}</span>
           <Check className="h-3.5 w-3.5" />
         </button>
       </div>
