@@ -20,26 +20,28 @@ interface SettingsViewProps {
 type SettingsTab = 'general' | 'appearance' | 'provider' | 'agents' | 'mcp' | 'skills' | 'archive' | 'environment' | 'logs' | 'about';
 
 const primaryTabs = [
-  { id: 'general' as const, label: '常规', icon: Settings },
-  { id: 'appearance' as const, label: '外观', icon: Palette },
-  { id: 'provider' as const, label: '供应商配置', icon: Plug },
-  { id: 'agents' as const, label: '智能体', icon: Bot },
-  { id: 'mcp' as const, label: 'MCP', icon: Server },
-  { id: 'skills' as const, label: 'Skills', icon: Puzzle },
-  { id: 'archive' as const, label: '已归档对话', icon: Archive },
+  { id: 'general' as const, label: '常规', description: '应用级的通用信息与偏好设置。', icon: Settings },
+  { id: 'appearance' as const, label: '外观', description: '自定义应用主题与视觉风格。', icon: Palette },
+  { id: 'provider' as const, label: '供应商配置', description: '管理 AI 供应商，激活的供应商将用于智能体。', icon: Plug },
+  { id: 'agents' as const, label: '智能体', description: '选择新建对话时默认预选的智能体。', icon: Bot },
+  { id: 'mcp' as const, label: 'MCP', description: '管理 MCP 服务器，为智能体扩展工具与能力。', icon: Server },
+  { id: 'skills' as const, label: 'Skills', description: '查看与卸载已安装的 skills，使用 /find-skills 搜索安装新的。', icon: Puzzle },
+  { id: 'archive' as const, label: '已归档对话', description: '查询、取消归档、删除归档会话。', icon: Archive },
 ];
 
 const secondaryTabs = [
-  { id: 'environment' as const, label: '环境检测', icon: Terminal },
-  { id: 'logs' as const, label: '日志', icon: FileText },
-  { id: 'about' as const, label: '关于', icon: Info },
+  { id: 'environment' as const, label: '环境检测', description: '检查 codeMUX 运行智能体和 Git 功能所需的本机开发环境。', icon: Terminal },
+  { id: 'logs' as const, label: '日志', description: '实时查看应用运行日志（codemux.log），每 3 秒自动刷新。', icon: FileText },
+  { id: 'about' as const, label: '关于', description: '应用信息与系统环境。', icon: Info },
 ];
 
 const allTabs = [...primaryTabs, ...secondaryTabs];
 
 export function SettingsView({ onBack }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
-  const activeLabel = allTabs.find((tab) => tab.id === activeTab)?.label ?? '设置';
+  const activeTabDef = allTabs.find((tab) => tab.id === activeTab);
+  const activeLabel = activeTabDef?.label ?? '设置';
+  const activeDescription = activeTabDef?.description;
 
   const renderNavItem = ({ id, label, icon: Icon }: (typeof allTabs)[number]) => (
     <button
@@ -85,24 +87,25 @@ export function SettingsView({ onBack }: SettingsViewProps) {
       </aside>
 
       <section className="min-w-0 flex-1 overflow-auto">
-        <div className="mx-auto w-full max-w-6xl px-10 py-8">
-          <div className="rounded-lg border border-border/64 bg-card shadow-[0_18px_42px_-38px_hsl(var(--foreground)/0.35)]">
-            <div className="border-b border-border/55 px-6 py-4">
-              <h2 className="text-[15px] font-semibold text-foreground/90">{activeLabel}</h2>
-            </div>
-            <div className="p-6">
-              {activeTab === 'general' && <GeneralSettings />}
-              {activeTab === 'appearance' && <ThemeToggle />}
-              {activeTab === 'provider' && <ProviderConfigPanel />}
-              {activeTab === 'agents' && <AgentSettingsPanel />}
-              {activeTab === 'mcp' && <McpSettingsPanel />}
-              {activeTab === 'skills' && <SkillsSettingsPanel />}
-              {activeTab === 'archive' && <ArchivedSessionsPanel />}
-              {activeTab === 'environment' && <EnvironmentSettings />}
-              {activeTab === 'logs' && <LogSettings />}
-              {activeTab === 'about' && <AboutSettings />}
-            </div>
+        <header className="sticky top-0 z-10 border-b border-border/45 bg-[hsl(var(--background)/0.82)] backdrop-blur-md">
+          <div className="mx-auto w-full max-w-5xl px-12 py-6">
+            <h2 className="text-[22px] font-semibold tracking-tight text-foreground">{activeLabel}</h2>
+            {activeDescription && (
+              <p className="mt-1.5 text-[13px] leading-relaxed text-foreground/55">{activeDescription}</p>
+            )}
           </div>
+        </header>
+        <div className="mx-auto w-full max-w-5xl px-12 py-8">
+          {activeTab === 'general' && <GeneralSettings />}
+          {activeTab === 'appearance' && <ThemeToggle />}
+          {activeTab === 'provider' && <ProviderConfigPanel />}
+          {activeTab === 'agents' && <AgentSettingsPanel />}
+          {activeTab === 'mcp' && <McpSettingsPanel />}
+          {activeTab === 'skills' && <SkillsSettingsPanel />}
+          {activeTab === 'archive' && <ArchivedSessionsPanel />}
+          {activeTab === 'environment' && <EnvironmentSettings />}
+          {activeTab === 'logs' && <LogSettings />}
+          {activeTab === 'about' && <AboutSettings />}
         </div>
       </section>
     </div>

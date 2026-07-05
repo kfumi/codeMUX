@@ -3,7 +3,7 @@ import { useSkillStore } from '../../stores/skillStore';
 import type { Skill } from '../../types/skill';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
-import { Trash2, Loader2, Eye, Puzzle } from 'lucide-react';
+import { Trash2, Loader2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { MarkdownRenderer } from '../agent/MarkdownRenderer';
 
@@ -43,13 +43,6 @@ export function SkillsSettingsPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="font-medium flex items-center gap-2">
-          <Puzzle className="h-4 w-4" />
-          Skills ({installedSkills.length})
-        </h3>
-      </div>
-
       <p className="text-xs text-muted-foreground">
         内置 skills 始终启用。通过对话中使用 <code className="text-xs bg-muted px-1 rounded">/find-skills</code> 搜索和安装新 skills。
       </p>

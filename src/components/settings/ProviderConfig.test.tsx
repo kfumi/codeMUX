@@ -99,7 +99,7 @@ describe('ProviderConfigPanel', () => {
     render(<ProviderConfigPanel />);
 
     fireEvent.click(screen.getByText('OpenRouter'));
-    fireEvent.click(screen.getByRole('checkbox', { name: '需要本地路由映射' }));
+    fireEvent.click(screen.getByRole('switch', { name: '需要本地路由映射' }));
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(updateProvider).toHaveBeenCalled());

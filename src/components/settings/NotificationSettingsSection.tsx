@@ -37,7 +37,7 @@ export function NotificationSettingsSection() {
   return (
     <div className="space-y-3">
       <label className="text-sm text-foreground/74">通知</label>
-      <div className="space-y-3 rounded-xl border border-border/70 bg-card p-4">
+      <div className="space-y-3 rounded-xl bg-muted/40 p-4">
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-medium text-foreground/90">
@@ -64,7 +64,7 @@ export function NotificationSettingsSection() {
               提示音
             </div>
             <p className="mt-1 text-xs leading-relaxed text-foreground/60">
-              可选播放短提示音，默认关闭。
+              任务完成后可选播放短提示音，默认关闭。
             </p>
           </div>
           <Switch

@@ -82,36 +82,30 @@ export function LogSettings() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-foreground/90">系统日志</h3>
-          <p className="text-xs text-foreground/60">实时查看应用运行日志（codemux.log），每 3 秒自动刷新。</p>
-        </div>
-        <div className="flex items-center gap-2 mr-10">
-          {lastRefresh && (
-            <span className="text-xs text-foreground/40">更新于 {lastRefresh}</span>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={handleRefresh}
-            disabled={loading}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-            刷新
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={handleOpenLogDir}
-            disabled={!logDir}
-          >
-            <FolderOpen className="h-3.5 w-3.5" />
-            打开日志目录
-          </Button>
-        </div>
+      <div className="flex items-center justify-end gap-2">
+        {lastRefresh && (
+          <span className="text-xs text-foreground/40">更新于 {lastRefresh}</span>
+        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={handleRefresh}
+          disabled={loading}
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+          刷新
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={handleOpenLogDir}
+          disabled={!logDir}
+        >
+          <FolderOpen className="h-3.5 w-3.5" />
+          打开日志目录
+        </Button>
       </div>
 
       {error && (
@@ -120,7 +114,7 @@ export function LogSettings() {
         </div>
       )}
 
-      <div className="rounded-xl border border-border/70 bg-card">
+      <div className="rounded-xl bg-muted/40">
         <div
           ref={contentRef}
           className="h-[60vh] overflow-auto p-4 font-mono text-xs leading-relaxed"

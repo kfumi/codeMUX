@@ -306,21 +306,18 @@ export function McpSettingsPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="font-medium">MCP Servers</h3>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={handleImport} disabled={importing}>
-            {importing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Download className="h-4 w-4 mr-1" />}
-            从工具导入
-          </Button>
-          <Button size="sm" variant="ghost" onClick={handleRefresh} disabled={isProbing}>
-            <RefreshCw className={`h-4 w-4 ${isProbing ? 'animate-spin' : ''}`} />
-          </Button>
-          <Button size="sm" onClick={openNew}>
-            <Plus className="h-4 w-4 mr-1" />
-            添加
-          </Button>
-        </div>
+      <div className="flex items-center justify-end gap-2">
+        <Button size="sm" variant="outline" onClick={handleImport} disabled={importing}>
+          {importing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Download className="h-4 w-4 mr-1" />}
+          从工具导入
+        </Button>
+        <Button size="sm" variant="ghost" onClick={handleRefresh} disabled={isProbing}>
+          <RefreshCw className={`h-4 w-4 ${isProbing ? 'animate-spin' : ''}`} />
+        </Button>
+        <Button size="sm" onClick={openNew}>
+          <Plus className="h-4 w-4 mr-1" />
+          添加
+        </Button>
       </div>
 
       {isLoading && servers.length === 0 && (

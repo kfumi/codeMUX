@@ -39,14 +39,9 @@ export function GeneralSettings() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-sm font-semibold text-foreground/90">常规设置</h3>
-        <p className="mt-1 text-xs text-foreground/60">应用级的通用信息与偏好设置。</p>
-      </div>
-
       <div className="space-y-3">
         <label className="text-sm text-foreground/74">显示偏好</label>
-        <div className="flex items-center justify-between gap-4 rounded-xl border border-border/70 bg-card p-4">
+        <div className="flex items-center justify-between gap-4 rounded-xl bg-muted/40 p-4">
           <div className="min-w-0">
             <div className="text-sm font-medium text-foreground/90">精简 AI 输出</div>
             <p className="mt-1 text-xs leading-relaxed text-foreground/60">
@@ -68,7 +63,7 @@ export function GeneralSettings() {
       {/* Config file section */}
       <div className="space-y-3">
         <label className="text-sm text-foreground/74">配置文件</label>
-        <div className="rounded-xl border border-border/70 bg-card p-4 space-y-3">
+        <div className="rounded-xl bg-muted/40 p-4 space-y-3">
           <p className="text-xs text-foreground/60">
             配置文件包含提供商、智能体、主题等所有应用设置。高级用户可直接编辑此文件。
           </p>

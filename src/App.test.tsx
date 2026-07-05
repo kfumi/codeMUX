@@ -93,9 +93,13 @@ vi.mock('./stores/agentStore', () => ({
   useAgentStore: (selector: (state: {
     startQuery: ReturnType<typeof vi.fn>;
     todos: Record<string, never[]>;
+    events: Record<string, never[]>;
+    eventTimestamps: Record<string, never[]>;
   }) => unknown) => selector({
     startQuery: vi.fn(),
     todos: {},
+    events: {},
+    eventTimestamps: {},
   }),
 }));
 
@@ -149,6 +153,22 @@ vi.mock('./stores/settingsStore', () => ({
   }) => unknown) => selector({
     config: null,
     fetchConfig: vi.fn(async () => {}),
+  }),
+}));
+
+vi.mock('./stores/appearanceStore', () => ({
+  useAppearanceStore: (selector: (state: {
+    prefs: { accent: string; fontSize: string; radius: string };
+    setAccent: ReturnType<typeof vi.fn>;
+    setFontSize: ReturnType<typeof vi.fn>;
+    setRadius: ReturnType<typeof vi.fn>;
+    reset: ReturnType<typeof vi.fn>;
+  }) => unknown) => selector({
+    prefs: { accent: 'azure', fontSize: 'standard', radius: 'soft' },
+    setAccent: vi.fn(),
+    setFontSize: vi.fn(),
+    setRadius: vi.fn(),
+    reset: vi.fn(),
   }),
 }));
 

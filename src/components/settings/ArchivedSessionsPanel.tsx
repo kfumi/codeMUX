@@ -77,15 +77,11 @@ export function ArchivedSessionsPanel() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-foreground/90">已归档对话</h3>
-          <p className="text-xs text-foreground/60">查询、取消归档、删除归档会话。</p>
-        </div>
+      <div className="flex items-center justify-end">
         <Button
           variant="destructive"
           size="sm"
-          className="gap-2 mr-10"
+          className="gap-2"
           onClick={() => setClearConfirm(true)}
           disabled={filteredSessions.length === 0}
         >
@@ -129,8 +125,8 @@ export function ArchivedSessionsPanel() {
         </Select>
       </div>
 
-      <div className="rounded-xl border border-border/70 bg-card">
-        <div className="flex items-center justify-between border-b border-border/60 px-4 py-3 text-sm text-foreground/70">
+      <div className="rounded-xl bg-muted/40">
+        <div className="flex items-center justify-between border-b border-border/40 px-4 py-3 text-sm text-foreground/70">
           <span>{filteredSessions.length} 个对话</span>
           <span className="flex items-center gap-1.5">
             <FolderOpen className="h-4 w-4" />

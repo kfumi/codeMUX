@@ -52,13 +52,8 @@ export function AboutSettings() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-sm font-semibold text-foreground/90">关于</h3>
-        <p className="mt-1 text-xs text-foreground/60">应用信息与系统环境。</p>
-      </div>
-
       {/* App identity */}
-      <div className="flex flex-col items-center gap-4 rounded-xl border border-border/70 bg-card p-6">
+      <div className="flex flex-col items-center gap-4 rounded-xl bg-muted/40 p-6">
         <img src="/logo.png" alt="codeMUX" className="h-16 w-16 rounded-2xl" />
         <div className="text-center">
           <h2 className="text-lg font-semibold text-foreground/90">
@@ -76,7 +71,7 @@ export function AboutSettings() {
       {/* Environment info */}
       <div className="space-y-3">
         <label className="text-sm text-foreground/74">运行环境</label>
-        <div className="rounded-xl border border-border/70 bg-card px-4 divide-y divide-border/50">
+        <div className="rounded-xl bg-muted/40 px-4 divide-y divide-border/40">
           <InfoRow label="应用版本" value={info?.version ?? '-'} />
           <InfoRow label="Tauri 版本" value={info?.tauriVersion ?? '-'} />
           <InfoRow label="操作系统" value={getOSInfo()} />

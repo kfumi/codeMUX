@@ -16,6 +16,7 @@ import { getStoredAgentCwd, resolveSessionCwd } from './lib/sessionCwd';
 import { registerSkillCommands } from './lib/slashCommands';
 import { sessionApi } from './lib/tauri';
 import { useAgentStore } from './stores/agentStore';
+import './stores/appearanceStore';
 import { useNewSessionStore } from './stores/newSessionStore';
 import { useProjectStore } from './stores/projectStore';
 import { useSessionStore } from './stores/sessionStore';

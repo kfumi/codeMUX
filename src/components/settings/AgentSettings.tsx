@@ -21,13 +21,6 @@ export function AgentSettingsPanel() {
 
   return (
     <div className="space-y-5">
-      <div className="space-y-2">
-        <h3 className="text-sm font-semibold text-foreground">默认智能体</h3>
-        <p className="text-sm leading-6 text-muted-foreground">
-          选择新建对话时默认预选的智能体，侧边栏和空状态输入区都会使用这里的设置。
-        </p>
-      </div>
-
       <div className="grid gap-3">
         {SELECTABLE_AGENTS.map((agent) => {
           const isSelected = agent.kind === selectedKind;
