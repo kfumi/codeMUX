@@ -1,4 +1,4 @@
-﻿/** Mode for a session */
+/** Mode for a session */
 export type SessionMode = 'chat' | 'agent';
 
 /** Minimal representation of an SDKMessage from the sidecar */
@@ -72,7 +72,6 @@ export interface AgentResultMessage {
   duration_api_ms: number;
   num_turns: number;
   result: string;
-  total_cost_usd: number;
   usage: {
     input_tokens: number;
     output_tokens: number;

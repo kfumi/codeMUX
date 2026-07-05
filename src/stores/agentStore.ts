@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import { agentApi, fileApi } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 import {
@@ -700,7 +700,7 @@ function buildTurnSyntheticResult(
         type: 'result', subtype: 'success', is_error: false,
         uuid: `synthetic-turn-${sessionId}-${startIdx}`, session_id: sessionId,
         duration_ms: durationMs, duration_api_ms: 0,
-        num_turns: 1, result: '', total_cost_usd: 0,
+        num_turns: 1, result: '',
         usage: {
           input_tokens: totalInput, output_tokens: totalOutput,
           cache_creation_input_tokens: totalCacheCreate, cache_read_input_tokens: totalCacheRead,
@@ -1770,7 +1770,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 duration_ms: validTs.length >= 2 ? validTs[validTs.length - 1] - validTs[0] : 0,
                 duration_api_ms: 0,
                 num_turns: events.filter((e) => e.kind === 'user').length,
-                result: '', total_cost_usd: 0,
+                result: '',
                 usage: { input_tokens: totalInput, output_tokens: totalOutput, cache_creation_input_tokens: totalCacheCreate, cache_read_input_tokens: totalCacheRead },
               } as AgentResultMessage,
             });

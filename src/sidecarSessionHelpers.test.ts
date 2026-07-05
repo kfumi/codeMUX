@@ -92,7 +92,6 @@ describe('buildCodexResultEvent', () => {
       duration_api_ms: 42,
       num_turns: 1,
       result: 'ok',
-      total_cost_usd: 0,
       usage: {
         input_tokens: 10,
         output_tokens: 5,
@@ -136,7 +135,6 @@ describe('buildCodexResultEvent', () => {
       duration_api_ms: 42,
       num_turns: 1,
       result: 'ok',
-      total_cost_usd: 0,
       usage: {
         input_tokens: 1000,
         output_tokens: 500,

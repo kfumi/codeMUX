@@ -8,7 +8,6 @@ import { cn } from '@/lib/utils';
 export type MessageFooterStats = {
   durationMs?: number;
   numTurns?: number;
-  costUsd?: number | null;
   inputTokens?: number;
   outputTokens?: number;
   cacheReadTokens?: number;
@@ -25,7 +24,6 @@ export function MessageFooter({ timestamp, stats, className }: MessageFooterProp
   const hasStats =
     stats &&
     (stats.durationMs != null ||
-      stats.costUsd != null ||
       stats.inputTokens != null ||
       stats.outputTokens != null);
 
@@ -61,7 +59,6 @@ export function MessageFooter({ timestamp, stats, className }: MessageFooterProp
 
       {timestamp ? <FooterItem>{formatTime(timestamp)}</FooterItem> : null}
       {stats?.durationMs != null ? <FooterItem>耗时 {(stats.durationMs / 1000).toFixed(1)}s</FooterItem> : null}
-      {stats?.costUsd != null ? <FooterItem>${stats.costUsd.toFixed(4)}</FooterItem> : null}
       {stats?.outputTokens != null || totalInputTokens > 0 ? (
         <FooterItem>
           {totalInputTokens}+{stats?.outputTokens || 0} token

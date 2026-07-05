@@ -31,7 +31,6 @@ describe('computeContextUsageFromEvents', () => {
           duration_api_ms: 10,
           num_turns: 1,
           result: '',
-          total_cost_usd: 0,
           usage: {
             input_tokens: 1000,
             output_tokens: 2000,

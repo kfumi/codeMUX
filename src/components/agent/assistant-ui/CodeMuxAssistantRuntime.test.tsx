@@ -244,7 +244,6 @@ const completedTurnEvents: AgentMessage[] = [
       duration_api_ms: 0,
       num_turns: 1,
       result: '',
-      total_cost_usd: 0,
       usage: {
         input_tokens: 10,
         output_tokens: 20,
@@ -293,7 +292,6 @@ const proposedPlanFinalEvents: AgentMessage[] = [
       duration_api_ms: 1000,
       num_turns: 1,
       result: '',
-      total_cost_usd: 0,
       usage: {
         input_tokens: 10,
         output_tokens: 20,

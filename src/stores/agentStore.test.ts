@@ -157,7 +157,6 @@ describe('agent store Codex history loading', () => {
         duration_api_ms: 4,
         num_turns: 1,
         result: '',
-        total_cost_usd: 0,
         usage: {
           input_tokens: 5,
           output_tokens: 7,
@@ -215,7 +214,6 @@ describe('agent store Codex history loading', () => {
         duration_api_ms: 4,
         num_turns: 1,
         result: '',
-        total_cost_usd: 0,
         usage: {
           input_tokens: 5,
           output_tokens: 7,
@@ -259,7 +257,6 @@ describe('agent store Codex history loading', () => {
         duration_api_ms: 4,
         num_turns: 1,
         result: '',
-        total_cost_usd: 0,
         usage: {
           input_tokens: 5,
           output_tokens: 7,
@@ -546,7 +543,6 @@ describe('agent store Codex history loading', () => {
         duration_api_ms: 4,
         num_turns: 1,
         result: '',
-        total_cost_usd: 0,
         usage: {
           input_tokens: 5,
           output_tokens: 7,
@@ -588,7 +584,6 @@ describe('agent store Codex history loading', () => {
         duration_api_ms: 4,
         num_turns: 1,
         result: '',
-        total_cost_usd: 0,
         usage: {
           input_tokens: 5,
           output_tokens: 7,
@@ -902,7 +897,6 @@ describe('agent store Codex history loading', () => {
         duration_api_ms: 1,
         num_turns: 1,
         result: '',
-        total_cost_usd: 0,
         usage: {
           input_tokens: 1,
           output_tokens: 1,
@@ -956,7 +950,6 @@ describe('agent store Codex history loading', () => {
         duration_api_ms: 1,
         num_turns: 1,
         result: '',
-        total_cost_usd: 0,
         usage: {
           input_tokens: 1,
           output_tokens: 1,
@@ -999,7 +992,6 @@ describe('agent store Codex history loading', () => {
         duration_api_ms: 1,
         num_turns: 1,
         result: '',
-        total_cost_usd: 0,
         usage: {
           input_tokens: 1,
           output_tokens: 1,
@@ -1391,7 +1383,6 @@ describe('agent store Codex history loading', () => {
               duration_api_ms: 10,
               num_turns: 1,
               result: '',
-              total_cost_usd: 0,
               usage: { input_tokens: 1, output_tokens: 1 },
             },
           },
@@ -1454,7 +1445,6 @@ describe('agent store Codex history loading', () => {
               duration_api_ms: 10,
               num_turns: 1,
               result: '',
-              total_cost_usd: 0,
               usage: { input_tokens: 1, output_tokens: 1 },
             },
           },

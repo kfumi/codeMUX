@@ -383,7 +383,6 @@ describe('useAgentNotifications', () => {
               duration_api_ms: 800,
               num_turns: 1,
               result: '',
-              total_cost_usd: 0,
               usage: { input_tokens: 1, output_tokens: 1 },
             },
           },

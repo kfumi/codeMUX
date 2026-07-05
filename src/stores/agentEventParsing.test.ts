@@ -325,7 +325,6 @@ describe('mapPersistedClaudeMessage', () => {
         duration_api_ms: 9,
         num_turns: 1,
         result: 'ok',
-        total_cost_usd: 0,
         usage: {
           input_tokens: 1,
           output_tokens: 2,
@@ -344,7 +343,6 @@ describe('mapPersistedClaudeMessage', () => {
         duration_api_ms: 9,
         num_turns: 1,
         result: 'ok',
-        total_cost_usd: 0,
         usage: {
           input_tokens: 1,
           output_tokens: 2,
@@ -680,7 +678,6 @@ describe('Codex runtime event normalization', () => {
       duration_api_ms: 4,
       num_turns: 1,
       result: 'done',
-      total_cost_usd: 0,
       usage: { input_tokens: 10, output_tokens: 20 },
     });
 

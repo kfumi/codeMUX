@@ -1160,7 +1160,7 @@ function getCommandIcon(id: string) {
     case 'new': return <FolderPlus className="h-4 w-4" />;
     case 'clear': return <Layers className="h-4 w-4" />;
     case 'compact': return <Zap className="h-4 w-4" />;
-    case 'cost': case 'status': case 'explain': return <Info className="h-4 w-4" />;
+    case 'status': case 'explain': return <Info className="h-4 w-4" />;
     case 'review': case 'code-review': case 'security-review': case 'deep-research': return <Search className="h-4 w-4" />;
     case 'test': case 'verify': return <TestTube2 className="h-4 w-4" />;
     case 'fix': case 'debug': case 'refactor': return <Wrench className="h-4 w-4" />;

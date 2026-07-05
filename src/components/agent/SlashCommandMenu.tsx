@@ -35,7 +35,6 @@ function getCommandIcon(name: string) {
     case 'new': return <MessageSquare className={iconClass} />;
     case 'clear': return <Layers className={iconClass} />;
     case 'compact': return <Zap className={iconClass} />;
-    case 'cost': return <BarChart3 className={iconClass} />;
     case 'status': return <Info className={iconClass} />;
     case 'init': return <Terminal className={iconClass} />;
     case 'review': case 'code-review': case 'security-review': return <Search className={iconClass} />;

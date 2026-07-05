@@ -340,38 +340,6 @@ export function ProviderConfigPanel() {
           </div>
         </FormSection>
 
-        <FormSection label="计费配置" hint="可选，$/1M tokens">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="输入">
-              <Input
-                type="number"
-                value={editingProvider.input_price ?? ''}
-                onChange={(e) => updateField('input_price', e.target.value ? Number(e.target.value) : undefined)}
-                placeholder="3.00"
-                step="0.01"
-              />
-            </Field>
-            <Field label="缓存命中">
-              <Input
-                type="number"
-                value={editingProvider.cache_read_price ?? ''}
-                onChange={(e) => updateField('cache_read_price', e.target.value ? Number(e.target.value) : undefined)}
-                placeholder="0.30"
-                step="0.01"
-              />
-            </Field>
-            <Field label="输出">
-              <Input
-                type="number"
-                value={editingProvider.output_price ?? ''}
-                onChange={(e) => updateField('output_price', e.target.value ? Number(e.target.value) : undefined)}
-                placeholder="15.00"
-                step="0.01"
-              />
-            </Field>
-          </div>
-        </FormSection>
-
         {saveError && (
           <p className="text-sm text-[hsl(var(--destructive))]">{saveError}</p>
         )}

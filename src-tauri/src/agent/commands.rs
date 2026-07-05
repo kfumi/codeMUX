@@ -787,7 +787,6 @@ fn convert_codex_history_values_to_events(
                     "duration_api_ms": 0,
                     "num_turns": 1,
                     "result": "",
-                    "total_cost_usd": 0,
                     "usage": {
                         "input_tokens": input,
                         "cache_read_input_tokens": cached,

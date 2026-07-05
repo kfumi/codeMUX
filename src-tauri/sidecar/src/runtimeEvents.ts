@@ -109,7 +109,6 @@ export function buildCodexResultEvent({
     duration_api_ms: durationMs,
     num_turns: 1,
     result: 'ok',
-    total_cost_usd: 0,
     usage: {
       input_tokens: usage.input_tokens,
       output_tokens: usage.output_tokens,

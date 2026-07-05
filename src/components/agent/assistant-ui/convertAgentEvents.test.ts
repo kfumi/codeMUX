@@ -156,7 +156,6 @@ describe('convertAgentEventsToAssistantMessages', () => {
           duration_api_ms: 42,
           num_turns: 1,
           result: 'Bash exited with code 1',
-          total_cost_usd: 0,
           usage: {
             input_tokens: 1,
             output_tokens: 1,
@@ -523,7 +522,6 @@ describe('convertAgentEventsToAssistantMessages', () => {
           duration_api_ms: 42,
           num_turns: 1,
           result: '',
-          total_cost_usd: 0,
           usage: {
             input_tokens: 10,
             output_tokens: 20,
@@ -912,7 +910,6 @@ describe('convertAgentEventsToAssistantMessages', () => {
           duration_api_ms: 0,
           num_turns: 1,
           result: '',
-          total_cost_usd: 0,
           usage: { input_tokens: 237119, output_tokens: 0 },
         } as any,
       },

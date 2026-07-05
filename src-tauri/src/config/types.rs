@@ -107,15 +107,6 @@ pub struct Provider {
     pub default_model: String,
     #[serde(default)]
     pub models: Vec<String>,
-    /// 输入 token 单价 ($/1M tokens)
-    #[serde(default)]
-    pub input_price: Option<f64>,
-    /// 缓存命中 token 单价 ($/1M tokens)
-    #[serde(default)]
-    pub cache_read_price: Option<f64>,
-    /// 输出 token 单价 ($/1M tokens)
-    #[serde(default)]
-    pub output_price: Option<f64>,
     /// 1M 上下文窗口（模型名会追加 [1m]）
     #[serde(default)]
     pub context_1m: Option<bool>,
@@ -269,9 +260,6 @@ impl Default for AppConfig {
                 openai_base_url: String::new(),
                 default_model: "claude-sonnet-4-20250514".to_string(),
                 models: vec!["claude-sonnet-4-20250514".to_string()],
-                input_price: None,
-                cache_read_price: None,
-                output_price: None,
                 context_1m: None,
                 codex_needs_proxy: None,
             }],

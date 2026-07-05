@@ -21,8 +21,6 @@ export interface CommandContext {
   getActiveProvider: () => { default_model: string; name: string } | null;
   /** 获取当前主题 */
   getTheme: () => string;
-  /** 获取会话费用信息 */
-  getCostInfo: () => string;
 }
 
 export interface SlashCommand {

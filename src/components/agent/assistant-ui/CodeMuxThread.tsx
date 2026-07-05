@@ -1,4 +1,4 @@
-﻿import {
+import {
   ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
@@ -25,11 +25,9 @@ import {
   ReasoningTrigger,
 } from '@/components/assistant-ui/reasoning';
 import { cn } from '../../../lib/utils';
-import { calculateCost } from '../../../lib/pricing';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { isInterruptMarker } from '../../../stores/agentEventParsing';
 import { useSettingsStore } from '../../../stores/settingsStore';
-import type { Provider } from '../../../types/provider';
 import {
   CodeMuxDataMessagePart,
   CodeMuxReasoningMessagePart,
@@ -44,7 +42,6 @@ import { CODEMUX_FORMATTER, DIRECTIVE_CHIP } from './CodeMuxComposer';
 
 type CodeMuxThreadProps = {
   sessionId: string;
-  provider?: Provider | null;
   footer?: ReactNode;
 };
 
@@ -93,7 +90,7 @@ const MESSAGE_COMPONENTS = {
   AssistantMessage: CodeMuxAssistantMessage,
 };
 
-export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProps) {
+export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
@@ -164,22 +161,22 @@ export function CodeMuxThread({ sessionId, provider, footer }: CodeMuxThreadProp
   }, [events]);
 
   // Incremental result stats calculation
-  const resultStatsCacheRef = useRef<{ events: AgentMessage[]; provider: Provider | null; result: Record<number, MessageFooterStats> }>({ events: [], provider: null, result: {} });
+  const resultStatsCacheRef = useRef<{ events: AgentMessage[]; result: Record<number, MessageFooterStats> }>({ events: [], result: {} });
   const resultStatsByAssistantIndex = useMemo(() => {
     const cache = resultStatsCacheRef.current;
-    if (cache.events === events && cache.provider === (provider ?? null)) {
+    if (cache.events === events) {
       return cache.result;
     }
     const prevLen = cache.events.length;
     if (prevLen > 0 && prevLen < events.length && cache.events[0] === events[0]) {
-      const newResult = incrementAssistantResultStatsMap(cache.result, events, provider ?? null, prevLen);
-      resultStatsCacheRef.current = { events, provider: provider ?? null, result: newResult };
+      const newResult = incrementAssistantResultStatsMap(cache.result, events, prevLen);
+      resultStatsCacheRef.current = { events, result: newResult };
       return newResult;
     }
-    const newResult = buildAssistantResultStatsMap(events, provider ?? null);
-    resultStatsCacheRef.current = { events, provider: provider ?? null, result: newResult };
+    const newResult = buildAssistantResultStatsMap(events);
+    resultStatsCacheRef.current = { events, result: newResult };
     return newResult;
-  }, [events, provider]);
+  }, [events]);
 
   const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
   const latestRewindableUserIndex = useMemo(() => findLatestRewindableUserIndex(events), [events]);
@@ -1346,7 +1343,6 @@ export function buildToolDurationMap(events: AgentMessage[]): Record<string, num
 function incrementAssistantResultStatsMap(
   prevStats: Record<number, MessageFooterStats>,
   events: AgentMessage[],
-  provider: Provider | null,
   fromIndex: number,
 ): Record<number, MessageFooterStats> {
   const statsMap = { ...prevStats };
@@ -1360,13 +1356,9 @@ function incrementAssistantResultStatsMap(
 
     const ltu = (event.data as any).last_token_usage;
     const usage = event.data.usage;
-    const usageForCost = ltu
-      ? { input_tokens: ltu.input_tokens, output_tokens: ltu.output_tokens, cache_read_input_tokens: ltu.cached_input_tokens ?? 0 }
-      : usage;
     statsMap[assistantIndex] = {
       durationMs: event.data.duration_ms,
       numTurns: event.data.num_turns,
-      costUsd: calculateCost(usageForCost, provider),
       inputTokens: ltu ? ltu.input_tokens : (usage?.input_tokens || 0),
       outputTokens: ltu ? ltu.output_tokens : (usage?.output_tokens || 0),
       cacheReadTokens: ltu ? (ltu.cached_input_tokens || 0) : (usage?.cache_read_input_tokens || 0),
@@ -1379,7 +1371,6 @@ function incrementAssistantResultStatsMap(
 
 function buildAssistantResultStatsMap(
   events: AgentMessage[],
-  provider: Provider | null,
 ): Record<number, MessageFooterStats> {
   const statsMap: Record<number, MessageFooterStats> = {};
   const resultIndexByAssistantIndex = buildAssistantResultTargetMap(events);
@@ -1392,13 +1383,9 @@ function buildAssistantResultStatsMap(
 
     const ltu = (event.data as any).last_token_usage;
     const usage = event.data.usage;
-    const usageForCost = ltu
-      ? { input_tokens: ltu.input_tokens, output_tokens: ltu.output_tokens, cache_read_input_tokens: ltu.cached_input_tokens ?? 0 }
-      : usage;
     statsMap[assistantIndex] = {
       durationMs: event.data.duration_ms,
       numTurns: event.data.num_turns,
-      costUsd: calculateCost(usageForCost, provider),
       inputTokens: ltu ? ltu.input_tokens : (usage?.input_tokens || 0),
       outputTokens: ltu ? ltu.output_tokens : (usage?.output_tokens || 0),
       cacheReadTokens: ltu ? (ltu.cached_input_tokens || 0) : (usage?.cache_read_input_tokens || 0),

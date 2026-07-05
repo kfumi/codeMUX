@@ -1528,9 +1528,6 @@ mod tests {
             openai_base_url: "https://api.openai.com".to_string(),
             default_model: "gpt-test".to_string(),
             models: Vec::new(),
-            input_price: None,
-            cache_read_price: None,
-            output_price: None,
             context_1m: None,
             codex_needs_proxy: None,
         };
@@ -1542,9 +1539,6 @@ mod tests {
             openai_base_url: String::new(),
             default_model: "claude-test".to_string(),
             models: Vec::new(),
-            input_price: None,
-            cache_read_price: None,
-            output_price: None,
             context_1m: None,
             codex_needs_proxy: None,
         };

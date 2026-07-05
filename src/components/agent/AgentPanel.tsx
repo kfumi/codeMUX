@@ -28,16 +28,12 @@ interface AgentPanelProps {
   sessionId: string;
 }
 
-const EMPTY_EVENTS: import('../../stores/agentStore').AgentMessage[] = [];
-
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, createSession, updateSessionPermissions } = useSessionStore();
   const { projects } = useProjectStore();
   const { startQuery, interrupt, loadSessionMessages, clearEvents } = useAgentStore();
   const { config, getActiveProvider, setProxyRunning } = useSettingsStore();
   const { loadFileTree, setProjectPath } = usePreviewStore();
-
-  const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
 
   // 检测容器宽度，窄屏时启用紧凑模式
   const containerRef = useRef<HTMLDivElement>(null);
@@ -300,38 +296,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     setInfoOpen(true);
   }, []);
 
-  const getCostInfo = useCallback((): string => {
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      const event = events[index];
-      if (event.kind === 'result' && event.data) {
-        const data = event.data as any;
-        const usage = data.usage;
-        const duration = data.duration_ms;
-        const turns = data.num_turns;
-        const lines: string[] = [];
-
-        if (turns) lines.push(`**对话轮次**　${turns}`);
-        if (duration) lines.push(`**耗时**　${(duration / 1000).toFixed(1)}s`);
-        if (usage) {
-          const input = usage.input_tokens || 0;
-          const output = usage.output_tokens || 0;
-          const cacheRead = usage.cache_read_input_tokens || 0;
-          const cacheCreation = usage.cache_creation_input_tokens || 0;
-          lines.push(`**输入 tokens**　${input.toLocaleString()}`);
-          lines.push(`**输出 tokens**　${output.toLocaleString()}`);
-          if (cacheRead) lines.push(`**缓存命中**　${cacheRead.toLocaleString()}`);
-          if (cacheCreation) lines.push(`**缓存创建**　${cacheCreation.toLocaleString()}`);
-          lines.push(`**总计**　${(input + output).toLocaleString()} tokens`);
-        }
-        if (data.total_cost) lines.push(`**费用**　$${data.total_cost.toFixed(4)}`);
-
-        return lines.join('\n\n');
-      }
-    }
-
-    return '暂无费用信息（当前会话还没有完成过对话）';
-  }, [events]);
-
   const handleCommand = useCallback(async (command: SlashCommand, args: string) => {
     if (command.handler === 'local' && command.action) {
       const context: CommandContext = {
@@ -344,7 +308,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         deleteClaudeSessionFiles: () => agentApi.deleteClaudeSessionFiles(sessionId),
         getActiveProvider: () => getActiveProvider(),
         getTheme: () => config?.theme || 'System',
-        getCostInfo,
       };
       await command.action(context, args);
       return;
@@ -362,14 +325,13 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       const prompt = renderCommandPrompt(command, args);
       await handleSend({ text: prompt }, displayContent);
     }
-  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, getCostInfo, agentKind, handleSend, permissionConfig, updateSessionPermissions]);
+  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, agentKind, handleSend, permissionConfig, updateSessionPermissions]);
 
   return (
     <div ref={containerRef} className="flex h-full flex-col">
       <CodeMuxAssistantRuntimeProvider sessionId={sessionId} agentKind={agentKind} onSend={handleSend} onCommand={handleCommand}>
         <CodeMuxThread
           sessionId={sessionId}
-          provider={resolvedProvider}
           footer={(
             <div className="flex w-full flex-col gap-3">
               <CodeMuxComposer

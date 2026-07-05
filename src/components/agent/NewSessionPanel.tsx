@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { renderCommandPrompt } from '../../lib/slashCommands';
@@ -114,7 +114,6 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
         deleteClaudeSessionFiles: () => agentApi.deleteClaudeSessionFiles('new-session-draft'),
         getActiveProvider: () => getActiveProvider(),
         getTheme: () => config?.theme || 'System',
-        getCostInfo: () => '新建对话还没有费用信息',
       };
       await command.action(context, args);
       return;
