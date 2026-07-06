@@ -5,7 +5,7 @@ import type { AgentConfigUpdateMap, AppConfig, NotificationSettings, Provider, T
 import type { AgentPermissionConfig, AgentPlanMode } from './agentPermissions';
 import type { Project } from '../types/project';
 import type { McpServer } from '../types/mcp';
-import type { Skill } from '../types/skill';
+import type { ImportableSkill, Skill } from '../types/skill';
 import { createLogger, serializeError } from './logger';
 
 const logger = createLogger('tauri');
@@ -349,14 +349,16 @@ export const mcpApi = {
 
 export const skillApi = {
   listInstalled: (): Promise<Skill[]> => invokeLogged('list_installed_skills'),
+  listImportable: (): Promise<ImportableSkill[]> => invokeLogged('list_importable_skills'),
   uninstall: (id: string): Promise<boolean> => invokeLogged('uninstall_skill', { id }),
-  toggle: (id: string, enabled: boolean): Promise<boolean> =>
-    invokeLogged('toggle_skill', { id, enabled }),
+  toggleApp: (skillId: string, app: string, enabled: boolean): Promise<void> =>
+    invokeLogged('toggle_skill_app', { skillId, app, enabled }),
   getContent: (id: string): Promise<string> => invokeLogged('get_skill_content', { id }),
-  syncBuiltins: (): Promise<Skill[]> => invokeLogged('sync_builtin_skills'),
+  syncBuiltins: (): Promise<Skill[]> => invokeLogged('scan_disk_skills'),
   registerFromDisk: (name: string): Promise<Skill> =>
     invokeLogged('register_skill_from_disk', { name }),
-  getEnabledNames: (): Promise<string[]> => invokeLogged('get_enabled_skill_names'),
+  importFromApps: (selected?: string[] | null): Promise<{ total: number }> =>
+    invokeLogged('import_skills_from_apps', { selected: selected ?? null }),
 };
 
 export interface LogFileInfo {

@@ -67,7 +67,13 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             version TEXT,
             installed_at TEXT NOT NULL,
             enabled INTEGER NOT NULL DEFAULT 1,
-            is_builtin INTEGER NOT NULL DEFAULT 0
+            is_builtin INTEGER NOT NULL DEFAULT 0,
+            enabled_claude INTEGER NOT NULL DEFAULT 0,
+            enabled_codex INTEGER NOT NULL DEFAULT 0,
+            enabled_gemini INTEGER NOT NULL DEFAULT 0,
+            enabled_opencode INTEGER NOT NULL DEFAULT 0,
+            disk_path TEXT,
+            directory TEXT NOT NULL DEFAULT ''
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
@@ -179,6 +185,43 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
     let has_disk_path: bool = conn.prepare("SELECT disk_path FROM skills LIMIT 0").is_ok();
     if !has_disk_path {
         let _ = conn.execute("ALTER TABLE skills ADD COLUMN disk_path TEXT", []);
+    }
+
+    // Migration: add directory column to skills if missing
+    let has_directory: bool = conn.prepare("SELECT directory FROM skills LIMIT 0").is_ok();
+    if !has_directory {
+        let _ = conn.execute(
+            "ALTER TABLE skills ADD COLUMN directory TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+    }
+
+    // Migration: migrate skills from legacy `enabled` column to per-app columns
+    let has_enabled_claude: bool = conn
+        .prepare("SELECT enabled_claude FROM skills LIMIT 0")
+        .is_ok();
+    if !has_enabled_claude {
+        let _ = conn.execute(
+            "ALTER TABLE skills ADD COLUMN enabled_claude INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE skills ADD COLUMN enabled_codex INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE skills ADD COLUMN enabled_gemini INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE skills ADD COLUMN enabled_opencode INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        // Migrate data: skills that were previously enabled get claude enabled
+        let _ = conn.execute(
+            "UPDATE skills SET enabled_claude = 1 WHERE enabled = 1 AND enabled_claude = 0",
+            [],
+        );
     }
 
     // 创建索引（在所有迁移之后，确保列存在）
@@ -471,5 +514,78 @@ mod tests {
             .is_ok());
         assert!(conn.prepare("SELECT id FROM messages LIMIT 0").is_err());
         assert!(conn.prepare("SELECT id FROM tool_calls LIMIT 0").is_err());
+    }
+
+    #[test]
+    fn migrates_skills_enabled_to_per_app_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE skills (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                display_name TEXT,
+                description TEXT,
+                source_repo TEXT,
+                source_path TEXT,
+                version TEXT,
+                installed_at TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                is_builtin INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO skills (id, name, display_name, description, installed_at, enabled, is_builtin)
+            VALUES ('skill-1', 'skill-one', NULL, NULL, '2026-01-01T00:00:00Z', 1, 0);
+            INSERT INTO skills (id, name, display_name, description, installed_at, enabled, is_builtin)
+            VALUES ('skill-2', 'skill-two', NULL, NULL, '2026-01-01T00:00:00Z', 0, 0);
+            ",
+        )
+        .unwrap();
+
+        initialize_database(&conn).unwrap();
+
+        // Verify all 4 per-app columns exist
+        assert!(conn
+            .prepare("SELECT enabled_claude FROM skills LIMIT 0")
+            .is_ok());
+        assert!(conn
+            .prepare("SELECT enabled_codex FROM skills LIMIT 0")
+            .is_ok());
+        assert!(conn
+            .prepare("SELECT enabled_gemini FROM skills LIMIT 0")
+            .is_ok());
+        assert!(conn
+            .prepare("SELECT enabled_opencode FROM skills LIMIT 0")
+            .is_ok());
+
+        // Verify enabled_claude inherited the legacy `enabled` value
+        let row1: i64 = conn
+            .query_row(
+                "SELECT enabled_claude FROM skills WHERE id = 'skill-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(row1, 1);
+
+        let row2: i64 = conn
+            .query_row(
+                "SELECT enabled_claude FROM skills WHERE id = 'skill-2'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(row2, 0);
+
+        // Other per-app columns should remain 0 after migration
+        let other_apps: (i64, i64, i64) = conn
+            .query_row(
+                "SELECT enabled_codex, enabled_gemini, enabled_opencode FROM skills WHERE id = 'skill-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(other_apps.0, 0);
+        assert_eq!(other_apps.1, 0);
+        assert_eq!(other_apps.2, 0);
     }
 }

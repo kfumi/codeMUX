@@ -30,7 +30,7 @@ pub fn get_all_mcp_servers(conn: &Connection) -> Result<Vec<McpServer>> {
         "SELECT {SELECT_COLUMNS} FROM mcp_servers ORDER BY name ASC"
     ))?;
     let servers = stmt
-        .query_map([], |row| row_to_mcp_server(row))?
+        .query_map([], row_to_mcp_server)?
         .collect::<Result<Vec<_>>>()?;
     Ok(servers)
 }
@@ -49,7 +49,7 @@ pub fn get_servers_enabled_for_app(conn: &Connection, app: &str) -> Result<Vec<M
         format!("SELECT {SELECT_COLUMNS} FROM mcp_servers WHERE {column} = 1 ORDER BY name ASC");
     let mut stmt = conn.prepare(&sql)?;
     let servers = stmt
-        .query_map([], |row| row_to_mcp_server(row))?
+        .query_map([], row_to_mcp_server)?
         .collect::<Result<Vec<_>>>()?;
     Ok(servers)
 }
@@ -86,7 +86,7 @@ pub fn get_mcp_server(conn: &Connection, id: &str) -> Result<Option<McpServer>> 
     let mut stmt = conn.prepare(&format!(
         "SELECT {SELECT_COLUMNS} FROM mcp_servers WHERE id = ?1"
     ))?;
-    let mut rows = stmt.query_map(params![id], |row| row_to_mcp_server(row))?;
+    let mut rows = stmt.query_map(params![id], row_to_mcp_server)?;
     match rows.next() {
         Some(row) => Ok(Some(row?)),
         None => Ok(None),

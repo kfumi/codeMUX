@@ -185,10 +185,7 @@ fn rewind_jsonl_before_latest_turn(path: &Path, agent_kind: AgentKind) -> Result
     // Atomic write: write to a temp file first, then rename over the original.
     // This prevents corruption if the process crashes mid-write or the sidecar
     // is concurrently appending to the same file.
-    let tmp_path = path.with_extension(format!(
-        "jsonl.tmp.{}",
-        uuid::Uuid::new_v4()
-    ));
+    let tmp_path = path.with_extension(format!("jsonl.tmp.{}", uuid::Uuid::new_v4()));
     fs::write(&tmp_path, &next_content).map_err(|err| {
         let _ = fs::remove_file(&tmp_path);
         format!(
@@ -1055,6 +1052,7 @@ fn handle_agent_session_mapping_event(app: &AppHandle, event: &str) -> bool {
     true
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_ensure_session_command(
     state: &crate::AppState,
     session_id: &str,
@@ -1128,9 +1126,16 @@ fn build_ensure_session_command(
         }
     }
 
+    let app = match agent_kind {
+        "claude_code" => "claude",
+        "codex" => "codex",
+        "gemini_cli" => "gemini",
+        "opencode" => "opencode",
+        _ => "claude",
+    };
     let enabled_skills = {
         let db = state.db.lock().unwrap();
-        crate::skills::db::get_enabled_skill_names(&db).unwrap_or_default()
+        crate::skills::db::get_enabled_skill_names_for_app(&db, app).unwrap_or_default()
     };
     if !enabled_skills.is_empty() {
         cmd["skills"] = serde_json::json!(enabled_skills);
@@ -1237,6 +1242,7 @@ pub async fn send_permission_update_to_session(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn ensure_agent_session(
     app: AppHandle,
     state: State<'_, crate::AppState>,
@@ -1327,6 +1333,7 @@ pub async fn send_agent_input(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn start_agent_session(
     app: AppHandle,
     state: State<'_, crate::AppState>,
@@ -1718,9 +1725,7 @@ async fn probe_local_proxy_health(port: u16) -> bool {
 #[allow(dead_code)]
 async fn get_live_proxy_port(agent_state: &State<'_, AgentState>) -> Option<u16> {
     let current = *agent_state.proxy_port.lock().await;
-    let Some(port) = current else {
-        return None;
-    };
+    let port = current?;
 
     if port == 0 {
         *agent_state.proxy_port.lock().await = None;

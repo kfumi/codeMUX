@@ -238,34 +238,57 @@ function getCommands(agentKind: AgentKind = 'claude_code'): SlashCommand[] {
 
 // ─── Skill 命令 (动态注册) ─────────────────────────────
 
+import type { SkillApps } from '../types/skill';
+
 interface SkillInfo {
   name: string;
   description: string;
-  is_builtin: boolean;
+  /** 该 skill 在哪些智能体上启用 */
+  apps: SkillApps;
 }
 
-const skillCommands: SlashCommand[] = [];
+interface SkillCommandWithApps {
+  command: SlashCommand;
+  apps: SkillApps;
+}
+
+const skillCommandsWithApps: SkillCommandWithApps[] = [];
 
 /** 注册 skill 命令（应用启动时和 skill 变更时调用） */
 export function registerSkillCommands(skills: SkillInfo[]): void {
-  skillCommands.length = 0;
+  skillCommandsWithApps.length = 0;
   for (const skill of skills) {
-    skillCommands.push({
+    const command: SlashCommand = {
       name: skill.name,
       description: skill.description || skill.name,
       alias: [],
       category: 'skill',
       handler: 'prompt',
       prompt: `/${skill.name} {args}`,
-    });
+    };
+    skillCommandsWithApps.push({ command, apps: skill.apps });
   }
+}
+
+/** 获取指定智能体启用的 skill 命令 */
+function getSkillCommandsForAgent(agentKind: AgentKind): SlashCommand[] {
+  const enabledApps = {
+    claude_code: 'claude',
+    codex: 'codex',
+    gemini_cli: 'gemini',
+    opencode: 'opencode',
+  } as const;
+  const appKey = enabledApps[agentKind] || 'claude';
+  return skillCommandsWithApps
+    .filter((item) => item.apps[appKey] === true)
+    .map((item) => item.command);
 }
 
 // ─── 公开 API ─────────────────────────────────────────
 
 /** 获取所有命令 */
 export function getAllCommands(agentKind: AgentKind = 'claude_code'): SlashCommand[] {
-  return [...getCommands(agentKind), ...skillCommands];
+  return [...getCommands(agentKind), ...getSkillCommandsForAgent(agentKind)];
 }
 
 /** 按名称或别名查找命令 */

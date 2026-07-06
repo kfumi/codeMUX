@@ -68,7 +68,7 @@ fn write_gemini_json(config: &serde_json::Value) -> Result<(), String> {
 
 impl McpAdapter for GeminiAdapter {
     fn should_sync(&self) -> bool {
-        gemini_config_path().parent().map_or(false, |p| p.exists())
+        gemini_config_path().parent().is_some_and(|p| p.exists())
     }
 
     fn sync_single_server(

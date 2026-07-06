@@ -90,7 +90,7 @@ mod tests {
 
     #[tokio::test]
     async fn codex_runtime_kind_name() {
-        let runtime = CodexRuntime::default();
+        let runtime = CodexRuntime;
         assert_eq!(runtime.kind_name(), "codex");
     }
 }

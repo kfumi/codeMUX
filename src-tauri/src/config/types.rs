@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentKind {
+    #[default]
     ClaudeCode,
     Codex,
     GeminiCli,
@@ -18,12 +19,6 @@ impl AgentKind {
             Self::GeminiCli => "gemini_cli",
             Self::Opencode => "opencode",
         }
-    }
-}
-
-impl Default for AgentKind {
-    fn default() -> Self {
-        Self::ClaudeCode
     }
 }
 

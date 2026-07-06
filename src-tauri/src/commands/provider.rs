@@ -297,8 +297,7 @@ fn build_model_urls(base_url: &str) -> Vec<String> {
 
     // Try stripping known compat suffixes and retry
     for suffix in COMPAT_SUFFIXES {
-        if base.ends_with(suffix) {
-            let stripped = &base[..base.len() - suffix.len()];
+        if let Some(stripped) = base.strip_suffix(suffix) {
             candidates.push(format!("{}/v1/models", stripped));
             candidates.push(format!("{}/models", stripped));
         }
@@ -422,13 +421,12 @@ pub async fn test_provider(
             Err(e) => {
                 last_error = e;
                 // Only retry on timeout-like errors
-                if last_error.contains("超时")
+                if (last_error.contains("超时")
                     || last_error.contains("timeout")
-                    || last_error.contains("连接")
+                    || last_error.contains("连接"))
+                    && attempt < max_retries
                 {
-                    if attempt < max_retries {
-                        continue;
-                    }
+                    continue;
                 }
                 return Err(last_error);
             }

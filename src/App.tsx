@@ -78,15 +78,14 @@ function App() {
       .then(() => {
         const skills = useSkillStore.getState().installedSkills;
         registerSkillCommands(
-          skills.filter((skill) => skill.enabled).map((skill) => ({
+          skills.map((skill) => ({
             name: skill.name,
             description: skill.description || skill.display_name || skill.name,
-            is_builtin: skill.is_builtin,
+            apps: skill.apps,
           })),
         );
         logger.info('Skill commands registered', {
           totalSkills: skills.length,
-          enabledSkills: skills.filter((skill) => skill.enabled).length,
         });
       })
       .catch((error) => {

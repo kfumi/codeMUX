@@ -76,12 +76,13 @@ vi.mock('../lib/tauri', () => ({
   },
   skillApi: {
     listInstalled: vi.fn(),
+    listImportable: vi.fn(),
     uninstall: vi.fn(),
-    toggle: vi.fn(),
+    toggleApp: vi.fn(),
     getContent: vi.fn(),
     syncBuiltins: vi.fn(),
     registerFromDisk: vi.fn(),
-    getEnabledNames: vi.fn(),
+    importFromApps: vi.fn(),
   },
   appApi: {
     getLogDirectory: vi.fn(),

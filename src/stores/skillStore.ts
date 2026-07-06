@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Skill } from '../types/skill';
+import type { ImportableSkill, Skill, SkillApps } from '../types/skill';
 import { skillApi } from '../lib/tauri';
 
 interface SkillStore {
@@ -8,8 +8,10 @@ interface SkillStore {
   error: string | null;
 
   fetchInstalled: () => Promise<void>;
+  listImportable: () => Promise<ImportableSkill[]>;
   uninstallSkill: (id: string) => Promise<void>;
-  toggleSkill: (id: string, enabled: boolean) => Promise<void>;
+  toggleApp: (id: string, app: keyof SkillApps, enabled: boolean) => Promise<void>;
+  importFromApps: (selected?: string[] | null) => Promise<number>;
   getSkillContent: (id: string) => Promise<string>;
   syncBuiltins: () => Promise<void>;
   registerFromDisk: (name: string) => Promise<void>;
@@ -30,6 +32,10 @@ export const useSkillStore = create<SkillStore>((set, get) => ({
     }
   },
 
+  listImportable: async () => {
+    return skillApi.listImportable();
+  },
+
   uninstallSkill: async (id: string) => {
     try {
       await skillApi.uninstall(id);
@@ -42,14 +48,27 @@ export const useSkillStore = create<SkillStore>((set, get) => ({
     }
   },
 
-  toggleSkill: async (id: string, enabled: boolean) => {
+  toggleApp: async (id: string, app: keyof SkillApps, enabled: boolean) => {
     try {
-      await skillApi.toggle(id, enabled);
+      await skillApi.toggleApp(id, app, enabled);
       set((state) => ({
         installedSkills: state.installedSkills.map((s) =>
-          s.id === id ? { ...s, enabled } : s
+          s.id === id ? { ...s, apps: { ...s.apps, [app]: enabled } } : s
         ),
       }));
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
+    }
+  },
+
+  importFromApps: async (selected?: string[] | null) => {
+    try {
+      const result = await skillApi.importFromApps(selected);
+      if (result.total > 0) {
+        await get().fetchInstalled();
+      }
+      return result.total;
     } catch (error) {
       set({ error: String(error) });
       throw error;

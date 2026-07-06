@@ -1,6 +1,7 @@
-use super::builtin;
+use super::adapters;
 use super::db;
-use super::types::Skill;
+use super::ssot;
+use super::types::{Skill, SkillApps};
 use crate::AppState;
 use tauri::State;
 
@@ -73,9 +74,12 @@ fn scan_skills_directory(
             display_name,
             description,
             installed_at: now,
-            enabled: true,
-            is_builtin: false,
+            apps: SkillApps {
+                claude: true,
+                ..Default::default()
+            },
             disk_path: Some(path.to_string_lossy().to_string()),
+            directory: name.clone(),
         };
         let _ = db::upsert_skill(db_guard, &skill);
         discovered.push((name, path));
@@ -194,9 +198,12 @@ fn scan_plugin_skills(db_guard: &rusqlite::Connection) -> Vec<Skill> {
                 display_name,
                 description,
                 installed_at: now,
-                enabled: true,
-                is_builtin: false,
+                apps: SkillApps {
+                    claude: true,
+                    ..Default::default()
+                },
                 disk_path: Some(skill_dir.to_string_lossy().to_string()),
+                directory: skill_name.clone(),
             };
             let _ = db::upsert_skill(db_guard, &skill);
             result.push(skill);
@@ -219,19 +226,40 @@ pub fn uninstall_skill(state: State<'_, AppState>, id: String) -> Result<bool, S
         .map_err(|e| format!("Failed to get skill: {}", e))?
         .ok_or("Skill not found")?;
 
-    if skill.is_builtin {
-        return Err("Cannot uninstall builtin skills".to_string());
-    }
-
     let deleted =
         db::delete_skill(&db_guard, &id).map_err(|e| format!("Failed to delete skill: {}", e))?;
 
     if deleted {
-        // Try to remove from all known directories
-        for base in &[skills_dir(), agents_skills_dir()] {
-            let skill_dir = base.join(&skill.name);
-            if skill_dir.exists() {
-                let _ = std::fs::remove_dir_all(&skill_dir);
+        let directory = if skill.directory.is_empty() {
+            skill.name.clone()
+        } else {
+            skill.directory.clone()
+        };
+
+        // 1. Remove projections from all agent directories via adapters
+        for app in adapters::all_apps() {
+            if let Some(adapter) = adapters::get_adapter(app) {
+                if adapter.should_sync() {
+                    let _ = adapter.remove_skill(&directory);
+                }
+            }
+        }
+
+        // 2. Remove the source skill directory from SSOT (~/.codemux/skills/<dir>)
+        //    so we don't leave behind an empty folder after the user uninstalls.
+        let ssot_dir = ssot::get_ssot_dir();
+        let ssot_skill_dir = ssot_dir.join(&directory);
+        if ssot_skill_dir.exists() {
+            let _ = std::fs::remove_dir_all(&ssot_skill_dir);
+        }
+
+        // 3. If disk_path points elsewhere (e.g. legacy ~/.claude/skills/<name>),
+        //    remove that too so we don't leave orphaned folders.
+        if let Some(ref disk_path) = skill.disk_path {
+            let p = std::path::PathBuf::from(disk_path);
+            // Avoid double-removing the SSOT dir we just deleted
+            if p != ssot_skill_dir && p.exists() {
+                let _ = std::fs::remove_dir_all(&p);
             }
         }
     }
@@ -240,18 +268,34 @@ pub fn uninstall_skill(state: State<'_, AppState>, id: String) -> Result<bool, S
 
 #[tauri::command]
 pub fn toggle_skill(state: State<'_, AppState>, id: String, enabled: bool) -> Result<bool, String> {
-    let db_guard = state.db.lock().unwrap();
-    // Builtins are always enabled
-    if let Some(skill) =
-        db::get_skill(&db_guard, &id).map_err(|e| format!("Failed to get skill: {}", e))?
-    {
-        if skill.is_builtin && !enabled {
-            return Err("Cannot disable builtin skills".to_string());
-        }
-    }
-    db::update_skill_enabled(&db_guard, &id, enabled)
-        .map_err(|e| format!("Failed to toggle skill: {}", e))?;
+    // Legacy wrapper — delegates to toggle_skill_app with app="claude"
+    super::service::toggle_app(state.inner(), &id, "claude", enabled)?;
     Ok(enabled)
+}
+
+#[tauri::command]
+pub fn toggle_skill_app(
+    state: State<'_, AppState>,
+    skill_id: String,
+    app: String,
+    enabled: bool,
+) -> Result<(), String> {
+    super::service::toggle_app(state.inner(), &skill_id, &app, enabled)
+}
+
+#[tauri::command]
+pub fn list_importable_skills(
+    state: State<'_, AppState>,
+) -> Result<Vec<super::types::ImportableSkill>, String> {
+    super::service::list_importable(state.inner())
+}
+
+#[tauri::command]
+pub fn import_skills_from_apps(
+    state: State<'_, AppState>,
+    selected: Option<Vec<String>>,
+) -> Result<super::service::ImportResult, String> {
+    super::service::import_from_apps(state.inner(), selected)
 }
 
 #[tauri::command]
@@ -272,7 +316,7 @@ pub fn get_skill_content(state: State<'_, AppState>, id: String) -> Result<Strin
 
     // Fallback: search known directories by name
     // For prefixed names like "superpowers:brainstorming", extract the skill name part
-    let search_name = skill.name.split(':').last().unwrap_or(&skill.name);
+    let search_name = skill.name.split(':').next_back().unwrap_or(&skill.name);
     if let Some(skill_dir) = find_skill_path(search_name) {
         let skill_md = skill_dir.join("SKILL.md");
         if skill_md.exists() {
@@ -284,63 +328,30 @@ pub fn get_skill_content(state: State<'_, AppState>, id: String) -> Result<Strin
 }
 
 #[tauri::command]
-pub fn sync_builtin_skills(state: State<'_, AppState>) -> Result<Vec<Skill>, String> {
-    let db_guard = state.db.lock().unwrap();
-    let dir = skills_dir();
-
-    let builtins = [
-        ("find-skills", builtin::FIND_SKILLS_CONTENT),
-        ("skill-creator", builtin::SKILL_CREATOR_CONTENT),
-    ];
-
-    let mut result = Vec::new();
-    for (name, fallback_content) in &builtins {
-        let skill_dir = dir.join(name);
-        let skill_md = skill_dir.join("SKILL.md");
-
-        if !skill_md.exists() {
-            let _ = std::fs::create_dir_all(&skill_dir);
-            let _ = std::fs::write(&skill_md, fallback_content);
+pub fn scan_disk_skills(state: State<'_, AppState>) -> Result<Vec<Skill>, String> {
+    // Only run scan + migration when the DB has no skills yet (first-time init).
+    // Subsequent visits read directly from the DB — new skills come in via
+    // the "import from tools" flow, not by re-scanning on every panel open.
+    {
+        let db_guard = state.db.lock().unwrap();
+        let existing =
+            db::list_skills(&db_guard).map_err(|e| format!("Failed to list skills: {}", e))?;
+        if !existing.is_empty() {
+            return Ok(existing);
         }
 
-        let now = chrono::Utc::now().to_rfc3339();
-        let (description, display_name) = if skill_md.exists() {
-            let content = std::fs::read_to_string(&skill_md).unwrap_or_default();
-            db::parse_frontmatter(&content)
-        } else {
-            (None, None)
-        };
-
-        let existing = db::get_skill_by_name(&db_guard, name).unwrap_or(None);
-        let skill = Skill {
-            id: existing
-                .as_ref()
-                .map(|s| s.id.clone())
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
-            name: name.to_string(),
-            display_name,
-            description,
-            installed_at: existing
-                .as_ref()
-                .map(|s| s.installed_at.clone())
-                .unwrap_or_else(|| now.clone()),
-            enabled: true, // Builtins are always enabled
-            is_builtin: true,
-            disk_path: Some(skill_dir.to_string_lossy().to_string()),
-        };
-        let _ = db::upsert_skill(&db_guard, &skill);
-        result.push(skill);
+        // First-time init: run SSOT migration (non-destructive: original files preserved)
+        let _ = ssot::migrate_to_ssot(&db_guard);
     }
 
-    // Scan disk directories for non-builtin skills
-    let builtin_names: std::collections::HashSet<&str> = builtins.iter().map(|(n, _)| *n).collect();
+    let db_guard = state.db.lock().unwrap();
 
+    let mut result = Vec::new();
+
+    // Scan disk directories for skills
     for base in &[skills_dir(), agents_skills_dir()] {
         let discovered = scan_skills_directory(&db_guard, base);
         for (name, _path) in discovered {
-            if builtin_names.contains(name.as_str()) {
-                continue;
-            }
             if let Some(skill) = db::get_skill_by_name(&db_guard, &name).unwrap_or(None) {
                 result.push(skill);
             }
@@ -360,7 +371,7 @@ pub fn register_skill_from_disk(state: State<'_, AppState>, name: String) -> Res
     // Search both directories
     let dir =
         find_skill_path(&name).ok_or_else(|| format!("Skill '{}' not found on disk", name))?;
-    db::register_skill_from_disk(&db_guard, &dir.parent().unwrap_or(&dir), &name)
+    db::register_skill_from_disk(&db_guard, dir.parent().unwrap_or(&dir), &name)
         .map_err(|e| format!("Failed to register skill from disk: {}", e))
 }
 

@@ -119,8 +119,8 @@ pub fn run() {
             let log_dir = app.path().app_log_dir()?;
             info!(target: "app", "Application starting; log directory={}", log_dir.display());
 
-            let conn = db::initialize(&app.handle()).expect("Failed to initialize database");
-            let config = config::load_config(&app.handle());
+            let conn = db::initialize(app.handle()).expect("Failed to initialize database");
+            let config = config::load_config(app.handle());
             info!(
                 target: "app",
                 "Runtime initialized; providers={} theme={:?}",
@@ -237,8 +237,11 @@ pub fn run() {
             skills::commands::list_installed_skills,
             skills::commands::uninstall_skill,
             skills::commands::toggle_skill,
+            skills::commands::toggle_skill_app,
+            skills::commands::list_importable_skills,
+            skills::commands::import_skills_from_apps,
             skills::commands::get_skill_content,
-            skills::commands::sync_builtin_skills,
+            skills::commands::scan_disk_skills,
             skills::commands::register_skill_from_disk,
             skills::commands::get_enabled_skill_names,
         ])

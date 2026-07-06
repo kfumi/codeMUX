@@ -74,7 +74,7 @@ fn write_codex_config(doc: &toml_edit::DocumentMut) -> Result<(), String> {
 
 impl McpAdapter for CodexAdapter {
     fn should_sync(&self) -> bool {
-        codex_config_path().parent().map_or(false, |p| p.exists())
+        codex_config_path().parent().is_some_and(|p| p.exists())
     }
 
     fn sync_single_server(

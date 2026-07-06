@@ -25,7 +25,7 @@ const primaryTabs = [
   { id: 'provider' as const, label: '供应商配置', description: '管理 AI 供应商，激活的供应商将用于智能体。', icon: Plug },
   { id: 'agents' as const, label: '智能体', description: '选择新建对话时默认预选的智能体。', icon: Bot },
   { id: 'mcp' as const, label: 'MCP', description: '管理 MCP 服务器，为智能体扩展工具与能力。', icon: Server },
-  { id: 'skills' as const, label: 'Skills', description: '查看与卸载已安装的 skills，使用 /find-skills 搜索安装新的。', icon: Puzzle },
+  { id: 'skills' as const, label: 'Skills', description: '查看、卸载已安装的 skills，从各智能体工具导入。', icon: Puzzle },
   { id: 'archive' as const, label: '已归档对话', description: '查询、取消归档、删除归档会话。', icon: Archive },
 ];
 

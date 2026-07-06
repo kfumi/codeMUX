@@ -70,9 +70,9 @@ pub fn get_log_files(app: AppHandle) -> Result<Vec<LogFileInfo>, String> {
         let modified = metadata
             .modified()
             .ok()
-            .and_then(|t| {
+            .map(|t| {
                 let datetime: chrono::DateTime<chrono::Local> = t.into();
-                Some(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
+                datetime.format("%Y-%m-%d %H:%M:%S").to_string()
             })
             .unwrap_or_default();
 

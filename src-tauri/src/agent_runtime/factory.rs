@@ -6,8 +6,8 @@ use super::types::AgentRuntime;
 /// Falls back to ClaudeCodeRuntime for unknown kinds.
 pub fn runtime_for_agent_kind(agent_kind: &str) -> Box<dyn AgentRuntime> {
     match agent_kind {
-        "codex" => Box::new(CodexRuntime::default()),
-        _ => Box::new(ClaudeCodeRuntime::default()),
+        "codex" => Box::new(CodexRuntime),
+        _ => Box::new(ClaudeCodeRuntime),
     }
 }
 

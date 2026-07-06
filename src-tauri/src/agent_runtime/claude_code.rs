@@ -93,7 +93,7 @@ mod tests {
 
     #[tokio::test]
     async fn claude_runtime_kind_name() {
-        let runtime = ClaudeCodeRuntime::default();
+        let runtime = ClaudeCodeRuntime;
         assert_eq!(runtime.kind_name(), "claude_code");
     }
 }
