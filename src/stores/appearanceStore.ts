@@ -3,9 +3,11 @@ import { create } from 'zustand';
 import {
   type AccentKey,
   type AppearancePrefs,
+  type ContentWidthKey,
   type FontSizeKey,
   type RadiusKey,
   ACCENTS,
+  CONTENT_WIDTHS,
   DEFAULT_PREFS,
   FONT_SIZES,
   RADII,
@@ -25,6 +27,7 @@ interface AppearanceState {
   setAccent: (accent: AccentKey) => void;
   setFontSize: (fontSize: FontSizeKey) => void;
   setRadius: (radius: RadiusKey) => void;
+  setContentWidth: (contentWidth: ContentWidthKey) => void;
   reset: () => void;
 }
 
@@ -44,6 +47,12 @@ export const useAppearanceStore = create<AppearanceState>((set) => ({
   },
   setRadius: (radius) => {
     const prefs = { ...useAppearanceStore.getState().prefs, radius };
+    savePrefs(prefs);
+    apply(prefs);
+    set({ prefs });
+  },
+  setContentWidth: (contentWidth) => {
+    const prefs = { ...useAppearanceStore.getState().prefs, contentWidth };
     savePrefs(prefs);
     apply(prefs);
     set({ prefs });
@@ -72,4 +81,4 @@ if (typeof window !== 'undefined') {
 
 apply(useAppearanceStore.getState().prefs);
 
-export { ACCENTS, FONT_SIZES, RADII, DEFAULT_PREFS };
+export { ACCENTS, CONTENT_WIDTHS, FONT_SIZES, RADII, DEFAULT_PREFS };

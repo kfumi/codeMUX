@@ -355,7 +355,7 @@ export function CodeMuxComposer({
   };
 
   return (
-    <div ref={composerRootRef} className="relative mx-auto flex w-full max-w-3xl flex-col" onKeyDownCapture={handleComposerKeyDown}>
+    <div ref={composerRootRef} className="relative mx-auto flex w-full flex-col" style={{ maxWidth: 'var(--content-width, 48rem)' }} onKeyDownCapture={handleComposerKeyDown}>
       {menuVisible && (
         <TriggerMenu
           char={activeChar ?? '/'}

@@ -1,7 +1,7 @@
 import { type ReactNode } from 'react';
 import { Check, Monitor, Moon, RotateCcw, Sun } from 'lucide-react';
 
-import { ACCENTS, type AccentKey, type FontSizeKey, type RadiusKey, RADII } from '../../lib/appearance';
+import { ACCENTS, type AccentKey, type ContentWidthKey, type FontSizeKey, type RadiusKey, RADII } from '../../lib/appearance';
 import { cn } from '../../lib/utils';
 import { useAppearanceStore } from '../../stores/appearanceStore';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -203,6 +203,11 @@ const RADIUS_OPTIONS: { value: RadiusKey; label: string }[] = [
   { value: 'round', label: '圆润' },
 ];
 
+const CONTENT_WIDTH_OPTIONS: { value: ContentWidthKey; label: string }[] = [
+  { value: 'fixed', label: '定宽' },
+  { value: 'stream', label: '流式' },
+];
+
 const ACCENT_KEYS = Object.keys(ACCENTS) as AccentKey[];
 
 export function ThemeToggle() {
@@ -214,6 +219,7 @@ export function ThemeToggle() {
   const setAccent = useAppearanceStore((state) => state.setAccent);
   const setFontSize = useAppearanceStore((state) => state.setFontSize);
   const setRadius = useAppearanceStore((state) => state.setRadius);
+  const setContentWidth = useAppearanceStore((state) => state.setContentWidth);
   const reset = useAppearanceStore((state) => state.reset);
 
   return (
@@ -278,6 +284,33 @@ export function ThemeToggle() {
             />
           ))}
         </div>
+      </FormSection>
+
+      <FormSection label="幕布宽度" hint="控制消息幕布与输入区的内容宽度">
+        <div className="grid grid-cols-2 gap-2">
+          {CONTENT_WIDTH_OPTIONS.map((opt) => (
+            <OptionCard
+              key={opt.value}
+              label={opt.label}
+              active={prefs.contentWidth === opt.value}
+              onClick={() => setContentWidth(opt.value)}
+              preview={
+                <div className="flex h-6 w-10 items-center">
+                  {opt.value === 'fixed' ? (
+                    <div className="mx-auto h-3 w-5 rounded-sm border border-foreground/45" />
+                  ) : (
+                    <div className="h-3 w-full rounded-sm border border-foreground/45" />
+                  )}
+                </div>
+              }
+            />
+          ))}
+        </div>
+        <p className="text-xs text-foreground/42">
+          {prefs.contentWidth === 'fixed'
+            ? '定宽模式下，对话消息与发送框宽度固定居中。'
+            : '流式模式下，内容宽度尽量居中撑满中间区域。'}
+        </p>
       </FormSection>
 
       <div className="border-t border-border/40 pt-5">

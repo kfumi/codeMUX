@@ -3,11 +3,13 @@ import type { Theme } from '../types/provider';
 export type AccentKey = 'azure' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet';
 export type FontSizeKey = 'compact' | 'standard' | 'comfortable';
 export type RadiusKey = 'sharp' | 'soft' | 'round';
+export type ContentWidthKey = 'fixed' | 'stream';
 
 export interface AppearancePrefs {
   accent: AccentKey;
   fontSize: FontSizeKey;
   radius: RadiusKey;
+  contentWidth: ContentWidthKey;
 }
 
 export interface AccentPreset {
@@ -38,10 +40,16 @@ export const RADII: Record<RadiusKey, string> = {
   round: '0.85rem',
 };
 
+export const CONTENT_WIDTHS: Record<ContentWidthKey, string> = {
+  fixed: '48rem',
+  stream: '100%',
+};
+
 export const DEFAULT_PREFS: AppearancePrefs = {
   accent: 'azure',
   fontSize: 'standard',
   radius: 'soft',
+  contentWidth: 'fixed',
 };
 
 const STORAGE_KEY = 'codemux:appearance';
@@ -56,6 +64,7 @@ export function loadPrefs(): AppearancePrefs {
       accent: isValidAccent(parsed.accent) ? parsed.accent : DEFAULT_PREFS.accent,
       fontSize: isValidFontSize(parsed.fontSize) ? parsed.fontSize : DEFAULT_PREFS.fontSize,
       radius: isValidRadius(parsed.radius) ? parsed.radius : DEFAULT_PREFS.radius,
+      contentWidth: isValidContentWidth(parsed.contentWidth) ? parsed.contentWidth : DEFAULT_PREFS.contentWidth,
     };
   } catch {
     return DEFAULT_PREFS;
@@ -87,6 +96,7 @@ export function applyAppearance(prefs: AppearancePrefs, isDark: boolean): void {
   root.style.setProperty('--ring', accentColor);
   root.style.setProperty('--glow', accentColor);
   root.style.setProperty('--radius', RADII[prefs.radius]);
+  root.style.setProperty('--content-width', CONTENT_WIDTHS[prefs.contentWidth]);
   root.style.fontSize = FONT_SIZES[prefs.fontSize];
 }
 
@@ -100,4 +110,8 @@ function isValidFontSize(v: unknown): v is FontSizeKey {
 
 function isValidRadius(v: unknown): v is RadiusKey {
   return typeof v === 'string' && v in RADII;
+}
+
+function isValidContentWidth(v: unknown): v is ContentWidthKey {
+  return typeof v === 'string' && v in CONTENT_WIDTHS;
 }

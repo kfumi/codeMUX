@@ -219,9 +219,10 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
           <div
             data-testid="thread-content-shell"
             className={cn(
-              'mx-auto flex w-full max-w-3xl flex-1 flex-col pt-5',
+              'mx-auto flex w-full flex-1 flex-col pt-5',
               showMessageNav ? 'pl-14 pr-4' : 'px-4',
             )}
+            style={{ maxWidth: 'var(--content-width, 48rem)' }}
           >
             <CodeMuxThreadRenderContext.Provider value={threadRenderContextValue}>
               <CodeMuxThreadMessages />
