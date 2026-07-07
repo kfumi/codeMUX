@@ -32,6 +32,15 @@ describe('normalizeLocalMarkdownHref', () => {
     );
   });
 
+  it('strips trailing line numbers from local file links without stripping Windows drive letters', () => {
+    expect(normalizeLocalMarkdownHref('D:/project/ai-code/codeMUX/src/App.tsx:359')).toBe(
+      'D:/project/ai-code/codeMUX/src/App.tsx',
+    );
+    expect(normalizeLocalMarkdownHref('D:/project/ai-code/codeMUX/src/App.tsx:359:12')).toBe(
+      'D:/project/ai-code/codeMUX/src/App.tsx',
+    );
+  });
+
   it('does not treat web links as local files', () => {
     expect(normalizeLocalMarkdownHref('https://example.com/docs/spec.md')).toBeNull();
   });
@@ -83,6 +92,25 @@ describe('CodeMuxMarkdownLink', () => {
       'D:/project/ai-code/codeMUX',
     );
     expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('opens a clicked local file link with a line suffix by reading the file path only', async () => {
+    readFile.mockResolvedValue('export function App() {}');
+
+    render(
+      <CodeMuxMarkdownLink href="D:/project/ai-code/codeMUX/src/App.tsx:359">
+        App.tsx:359
+      </CodeMuxMarkdownLink>,
+    );
+
+    fireEvent.click(screen.getByRole('link', { name: 'App.tsx:359' }));
+
+    await waitFor(() => {
+      expect(readFile).toHaveBeenCalledWith(
+        'D:/project/ai-code/codeMUX/src/App.tsx',
+        'D:/project/ai-code/codeMUX',
+      );
+    });
   });
 
   it('keeps external links opening through the shell', () => {

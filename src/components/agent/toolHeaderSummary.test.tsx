@@ -82,4 +82,11 @@ describe('tool header summaries', () => {
     expect(screen.getByText('ToolCallCard')).toBeTruthy();
     expect(screen.getByText('Explore tool message rendering')).toBeTruthy();
   });
+
+  it('shows Claude TaskStop with a Chinese display name', () => {
+    renderWithTooltip(<ToolCallCard toolName="TaskStop" input={{}} status="done" />);
+
+    expect(screen.getByText('子智能体结束')).toBeTruthy();
+    expect(screen.queryByText('TaskStop')).toBeNull();
+  });
 });

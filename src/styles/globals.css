@@ -101,7 +101,7 @@
   }
 
   .dark {
-    --background: 220 7% 8%;
+    --background: 220 8% 10%;
     --foreground: 220 10% 88%;
     --card: 220 7% 10%;
     --card-foreground: 220 11% 88%;
@@ -123,14 +123,14 @@
     --input: 220 7% 20%;
     --ring: 198 42% 49%;
     --glow: 198 42% 49%;
-    --sidebar-bg: 220 7% 7%;
+    --sidebar-bg: 220 8% 5%;
     --sidebar-fg: 220 10% 87%;
     --sidebar-border: 220 7% 17%;
     --sidebar-muted: 220 7% 13%;
     --sidebar-accent: 198 42% 49%;
     --sidebar-glow: 198 42% 49%;
-    --settings-sidebar-bg: 220 7% 9%;
-    --shell-bg: linear-gradient(180deg, hsl(220 7% 8%), hsl(220 7% 7%));
+    --settings-sidebar-bg: 220 8% 7%;
+    --shell-bg: linear-gradient(180deg, hsl(220 8% 10%), hsl(220 8% 7%));
     --surface-1: 220 7% 9%;
     --surface-2: 220 7% 11%;
     --surface-3: 220 7% 15%;

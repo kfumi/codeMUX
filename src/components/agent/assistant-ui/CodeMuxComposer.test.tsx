@@ -187,10 +187,11 @@ describe('CodeMuxComposer', () => {
   });
 
   it('aligns the Lexical placeholder with the editable input and removes the inner input frame', () => {
-    render(<CodeMuxComposer sessionId="session-1" />);
+    const { container } = render(<CodeMuxComposer sessionId="session-1" />);
 
     const className = lexicalProps[0]?.className ?? '';
 
+    expect((container.firstElementChild as HTMLElement | null)?.style.maxWidth).toBe('var(--content-width, 52rem)');
     expect(className).toContain('relative');
     expect(className).toContain('[&_.aui-lexical-input]:px-2');
     expect(className).toContain('[&_.aui-lexical-input]:py-1');
@@ -464,6 +465,22 @@ describe('CodeMuxComposer', () => {
 
   it('restores the normal composer after a user question receives a tool result', () => {
     useAgentStore.setState({ events: { 'session-1': answeredQuestionEvents } });
+
+    render(<CodeMuxComposer sessionId="session-1" placeholder="输入消息..." />);
+
+    expect(screen.queryByText('允许读取 Codex 官方手册吗？')).toBeNull();
+    expect(screen.getByText('输入消息...')).toBeTruthy();
+  });
+
+  it('does not restore an unanswered user question after a later user message', () => {
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          ...pendingQuestionEvents,
+          { kind: 'user', data: { content: '继续执行后续任务' } },
+        ],
+      },
+    });
 
     render(<CodeMuxComposer sessionId="session-1" placeholder="输入消息..." />);
 

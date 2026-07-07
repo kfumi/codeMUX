@@ -217,11 +217,8 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
         >
           <div
             data-testid="thread-content-shell"
-            className={cn(
-              'mx-auto flex w-full flex-1 flex-col pt-5',
-              showMessageNav ? 'pl-14 pr-4' : 'px-4',
-            )}
-            style={{ maxWidth: 'var(--content-width, 48rem)' }}
+            className="mx-auto flex w-full flex-1 flex-col px-10 pt-5"
+            style={{ maxWidth: 'var(--content-width, 52rem)' }}
           >
             <CodeMuxThreadRenderContext.Provider value={threadRenderContextValue}>
               <CodeMuxThreadMessages />
@@ -363,7 +360,8 @@ function UserMessage({
   return (
     <MessagePrimitive.Root
       id={sourceEventIndex != null ? `msg-${sourceEventIndex}` : undefined}
-      className="mb-5 flex w-full justify-end"
+      data-message-row
+      className="group/message-row mb-5 flex w-full justify-end"
     >
       <div data-user-message-column="true" className="flex w-fit max-w-10/12 min-w-0 flex-col items-end">
         {imageAttachments.length > 0 ? (
@@ -401,8 +399,8 @@ function UserMessage({
             {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           </button>
         ) : null}
-        <div className="flex items-center justify-end gap-1">
-          <MessageFooter timestamp={timestamp} className="justify-end" />
+        <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity duration-150 group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100">
+          <MessageFooter timestamp={timestamp} className="justify-end" revealOnHover />
           {canRewind ? (
             <Button
               type="button"
@@ -893,7 +891,7 @@ function AssistantLikeMessage({
     isFinal && message.metadata.custom?.sourceRole !== 'system' && (footerStats !== undefined || sourceTimestamp !== undefined);
 
   return (
-    <MessagePrimitive.Root className="mb-5 flex w-full justify-start">
+    <MessagePrimitive.Root data-message-row className="group/message-row mb-5 flex w-full justify-start">
       <div
         className={cn(
           'w-full min-w-0 space-y-2 text-sm leading-relaxed',
@@ -964,7 +962,7 @@ function AssistantLikeMessage({
           </MessagePrimitive.GroupedParts>
         ) : null}
         {!shouldHideCollapsedContent && shouldRenderFooter ? (
-          <MessageFooter timestamp={sourceTimestamp} stats={footerStats} />
+          <MessageFooter timestamp={sourceTimestamp} stats={footerStats} revealOnHover />
         ) : null}
       </div>
     </MessagePrimitive.Root>

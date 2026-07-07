@@ -391,7 +391,7 @@ export function CodeMuxComposer({
   };
 
   return (
-    <div ref={composerRootRef} className="relative mx-auto flex w-full flex-col" style={{ maxWidth: 'var(--content-width, 48rem)' }} onKeyDownCapture={handleComposerKeyDown}>
+    <div ref={composerRootRef} className="relative mx-auto flex w-full flex-col" style={{ maxWidth: 'var(--content-width, 52rem)' }} onKeyDownCapture={handleComposerKeyDown}>
       {menuVisible && (
         <TriggerMenu
           char={activeChar ?? '/'}
@@ -678,6 +678,9 @@ function findLatestPendingUserQuestion(events: AgentMessage[], dismissedIds: Set
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
+    if (event.kind === 'user') {
+      return null;
+    }
     if (event.kind !== 'ask_user_question') {
       continue;
     }

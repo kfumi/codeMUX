@@ -667,6 +667,17 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.queryByText('21:40')).toBeNull();
   });
 
+  it('keeps final message footer hidden until the full message row is hovered', () => {
+    render(<Harness sessionId="session-completed-turn" />);
+
+    const footer = screen.getByText('耗时 73.0s').closest('[data-message-footer]');
+    const row = screen.getByText('Fixed and verified.').closest('[data-message-row]');
+
+    expect(row?.className).toContain('group/message-row');
+    expect(footer?.className).toContain('opacity-0');
+    expect(footer?.className).toContain('group-hover/message-row:opacity-100');
+  });
+
   it('renders the reasoning trigger like the native assistant-ui component', () => {
     const { container } = render(<Harness sessionId="session-reasoning" />);
     const trigger = container.querySelector('[data-slot="reasoning-trigger"]');
@@ -1214,12 +1225,14 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     });
   });
 
-  it('keeps the thread content shell padded for left navigation without shifting the composer off center', () => {
+  it('keeps the message navigation floating without shifting thread content off center', () => {
     render(<Harness sessionId="session-nav" />);
 
     const shell = screen.getByTestId('thread-content-shell');
-    expect(shell.className).toContain('pl-14');
-    expect(shell.className).toContain('pr-4');
+    expect(shell.className).toContain('px-4');
+    expect(shell.className).not.toContain('pl-14');
+    expect(shell.className).not.toContain('pr-4');
+    expect((shell as HTMLElement).style.maxWidth).toBe('var(--content-width, 52rem)');
   });
 
   it('shows the message navigation popover on keyboard focus and scrolls to the selected turn', () => {

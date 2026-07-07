@@ -18,18 +18,25 @@ type MessageFooterProps = {
   timestamp?: number;
   stats?: MessageFooterStats;
   className?: string;
+  revealOnHover?: boolean;
 };
 
-export function MessageFooter({ timestamp, stats, className }: MessageFooterProps) {
+export function MessageFooter({ timestamp, stats, className, revealOnHover = false }: MessageFooterProps) {
   const hasStats =
     stats &&
     (stats.durationMs != null ||
       stats.inputTokens != null ||
       stats.outputTokens != null);
+  const revealClass = revealOnHover
+    ? 'opacity-0 transition-opacity duration-150 group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100'
+    : undefined;
 
   if (!timestamp && !hasStats) {
     return (
-      <div className={cn('mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground/68', className)}>
+      <div
+        data-message-footer
+        className={cn('mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground/68', revealClass, className)}
+      >
         <ActionBarPrimitive.Root autohide="never" className="flex items-center gap-1">
           <MessageCopyButton />
         </ActionBarPrimitive.Root>
@@ -47,8 +54,10 @@ export function MessageFooter({ timestamp, stats, className }: MessageFooterProp
 
   return (
     <div
+      data-message-footer
       className={cn(
         'mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground/68',
+        revealClass,
         className,
       )}
       style={{ fontFamily: "'JetBrains Mono', monospace" }}

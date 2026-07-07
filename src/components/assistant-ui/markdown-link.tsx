@@ -71,21 +71,21 @@ export function normalizeLocalMarkdownHref(href?: string): string | null {
   }
 
   if (href.startsWith(`${LOCAL_FILE_LINK_ORIGIN}/?path=`)) {
-    return decodeURIComponent(href.slice(`${LOCAL_FILE_LINK_ORIGIN}/?path=`.length));
+    return stripLocalFileLineSuffix(decodeURIComponent(href.slice(`${LOCAL_FILE_LINK_ORIGIN}/?path=`.length)));
   }
 
   if (href.startsWith('file://')) {
     const withoutScheme = href.slice('file://'.length);
-    return normalizeWindowsDrivePrefix(decodeURIComponent(withoutScheme));
+    return stripLocalFileLineSuffix(normalizeWindowsDrivePrefix(decodeURIComponent(withoutScheme)));
   }
 
   const decoded = safeDecodeURIComponent(href);
   if (isWindowsAbsolutePath(decoded) || decoded.startsWith('/')) {
-    return normalizeWindowsDrivePrefix(decoded);
+    return stripLocalFileLineSuffix(normalizeWindowsDrivePrefix(decoded));
   }
 
   if (!/^[a-z][a-z\d+.-]*:/i.test(decoded)) {
-    return decoded;
+    return stripLocalFileLineSuffix(decoded);
   }
 
   return null;
@@ -151,6 +151,10 @@ function safeDecodeURIComponent(value: string): string {
 
 function normalizeWindowsDrivePrefix(value: string): string {
   return value.replace(/^\/([A-Za-z]:[\\/])/, '$1');
+}
+
+function stripLocalFileLineSuffix(value: string): string {
+  return value.replace(/:(\d+)(?::\d+)?$/, '');
 }
 
 function isWindowsAbsolutePath(value: string): boolean {
