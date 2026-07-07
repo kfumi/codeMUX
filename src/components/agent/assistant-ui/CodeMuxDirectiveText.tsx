@@ -9,10 +9,22 @@ type DirectiveSegment =
   | { kind: 'text'; text: string }
   | { kind: 'directive'; directiveKind: CodeMuxDirectiveKind; value: string; label: string };
 
-// Match commands only at line start (not in paths like root/root/dist)
+// Match commands, file mentions, and markdown-link references.
 // Commands and file mentions must be at the start of text or after whitespace.
 // Avoid treating log fragments like "emit@http://..." as file references.
-const DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w:-]*)(?=\s|$)|(^|\s)(@(?![A-Za-z][A-Za-z0-9+.-]*:\/\/)[^\s]+)/g;
+// [label](path) is the format for files (label without prefix) and commands (label starts with $).
+// <command-message>...</command-name>...</command-args> is Claude Code CLI's command XML format.
+// @path is legacy.
+const COMMAND_XML_RE = /<command-message>[\s\S]*?<\/command-message>\s*<command-name>[\s\S]*?<\/command-name>(?:\s*<command-args>[\s\S]*?<\/command-args>)?/;
+const DIRECTIVE_RE = new RegExp(
+  [
+    `(${COMMAND_XML_RE.source})`,
+    `(^|\\s)(\\/[A-Za-z][\\w:-]*)(?=\\s|$)`,
+    `(^|\\s)(@(?![A-Za-z][A-Za-z0-9+.-]*://)[^\\s]+)`,
+    `(^|\\s)(\\[[^\\]]+\\]\\([^)]+\\))`,
+  ].join('|'),
+  'g',
+);
 type DirectiveTone = 'default' | 'inverted';
 
 export function CodeMuxDirectiveChip({
@@ -82,13 +94,27 @@ export function parseDirectiveText(text: string): DirectiveSegment[] {
   let lastIndex = 0;
 
   for (const match of text.matchAll(DIRECTIVE_RE)) {
-    const leading = match[1] ?? match[3] ?? '';
-    // Group 2 is slash command, Group 4 is @file
-    const value = match[2] || match[4] || '';
+    // Group 1: XML command (no leading)
+    // Group 2/3: bare /command leading+value
+    // Group 4/5: @file leading+value
+    // Group 6/7: [label](path) leading+value
+    const isXml = Boolean(match[1]);
+    const leading = isXml ? '' : (match[2] ?? match[4] ?? match[6] ?? '');
+    const value = match[1] || match[3] || match[5] || match[7] || '';
     const valueStart = match.index + leading.length;
 
     if (valueStart > lastIndex) {
       segments.push({ kind: 'text', text: text.slice(lastIndex, valueStart) });
+    }
+
+    if (isXml) {
+      // Claude Code XML splits into command chip (name) + text (args)
+      const xmlSegments = parseClaudeCommandXmlSegments(value);
+      for (const seg of xmlSegments) {
+        segments.push(seg);
+      }
+      lastIndex = valueStart + value.length;
+      continue;
     }
 
     const directive = toDirectiveSegment(value);
@@ -111,8 +137,30 @@ function toDirectiveSegment(value: string): DirectiveSegment | null {
       kind: 'directive',
       directiveKind: 'command',
       value,
-      label: value,
+      label: value.replace(/^\//, ''),
     };
+  }
+
+  if (value.startsWith('[')) {
+    const linkMatch = /^\[([^\]]*)\]\(([^)]*)\)$/.exec(value);
+    if (linkMatch) {
+      const label = linkMatch[1];
+      const path = linkMatch[2];
+      if (label.startsWith('$')) {
+        return {
+          kind: 'directive',
+          directiveKind: 'command',
+          value,
+          label: label.slice(1),
+        };
+      }
+      return {
+        kind: 'directive',
+        directiveKind: path.endsWith('/') ? 'directory' : 'file',
+        value,
+        label: label || getPathLabel(path),
+      };
+    }
   }
 
   if (value.startsWith('@')) {
@@ -127,6 +175,26 @@ function toDirectiveSegment(value: string): DirectiveSegment | null {
   }
 
   return null;
+}
+
+function parseClaudeCommandXmlSegments(value: string): DirectiveSegment[] {
+  const match = COMMAND_XML_RE.exec(value);
+  if (!match) return [{ kind: 'text', text: value }];
+  const fullMatch = match[0];
+  const nameMatch = /<command-name>\s*([\s\S]*?)\s*<\/command-name>/.exec(fullMatch);
+  const argsMatch = /<command-args>\s*([\s\S]*?)\s*<\/command-args>/.exec(fullMatch);
+  const commandName = (nameMatch?.[1]?.trim() || '').replace(/^\//, '');
+  const commandArgs = argsMatch?.[1]?.trim() || '';
+
+  const segments: DirectiveSegment[] = [
+    { kind: 'directive', directiveKind: 'command', value: fullMatch, label: commandName },
+  ];
+
+  if (commandArgs) {
+    segments.push({ kind: 'text', text: ` ${commandArgs}` });
+  }
+
+  return segments;
 }
 
 function getPathLabel(path: string) {

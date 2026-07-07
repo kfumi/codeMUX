@@ -1,5 +1,6 @@
 import { invoke, Channel } from '@tauri-apps/api/core';
 import type { AgentKind, ReasoningEffort, Session, SessionMode } from '../types/session';
+import type { AgentUserMessageLocator } from '../types/agent';
 import type { AgentInputPayload } from '../types/agentInput';
 import type { AgentConfigUpdateMap, AppConfig, NotificationSettings, Provider, Theme } from '../types/provider';
 import type { AgentPermissionConfig, AgentPlanMode } from './agentPermissions';
@@ -239,8 +240,8 @@ export const agentApi = {
   loadCodexSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_codex_session_events', { appSessionId }),
   /** Rewind the latest visible turn in the provider session history. */
-  rewindSession: (appSessionId: string, agentKind: AgentKind): Promise<void> =>
-    invokeLogged('rewind_agent_session', { appSessionId, agentKind }),
+  rewindSession: (appSessionId: string, agentKind: AgentKind, target?: AgentUserMessageLocator): Promise<void> =>
+    invokeLogged('rewind_agent_session', { appSessionId, agentKind, target }),
   getSessionInfo: (appSessionId: string, agentKind: AgentKind): Promise<{ agentSessionId: string | null; messagePath: string | null }> =>
     invokeLogged('get_agent_session_info', { appSessionId, agentKind }),
   startProxy: (apiKey: string, baseUrl: string, providerName: string, codexNeedsProxy?: boolean): Promise<number> =>

@@ -317,6 +317,18 @@ pub fn get_agent_session_mapping(
     }))
 }
 
+pub fn delete_agent_session_mapping(
+    conn: &Connection,
+    app_session_id: &str,
+    agent_kind: AgentKind,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM agent_session_mappings WHERE app_session_id = ?1 AND agent_kind = ?2",
+        params![app_session_id, agent_kind.as_str()],
+    )?;
+    Ok(())
+}
+
 pub fn delete_session(conn: &Connection, session_id: &str) -> Result<()> {
     conn.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])?;
     Ok(())
@@ -371,9 +383,9 @@ pub fn update_session_permissions(
 #[cfg(test)]
 mod tests {
     use super::{
-        archive_session, get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
-        set_session_pinned, unarchive_session, update_session_provider,
-        upsert_agent_session_mapping,
+        archive_session, delete_agent_session_mapping, get_agent_session_mapping,
+        get_all_archived_sessions, get_all_sessions, set_session_pinned, unarchive_session,
+        update_session_provider, upsert_agent_session_mapping,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -437,6 +449,35 @@ mod tests {
 
         let loaded = get_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode).unwrap();
         assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn deletes_one_agent_session_mapping_for_rewind() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-1", "Test", "claude_code", "agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        upsert_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode, "claude-a")
+            .unwrap();
+        upsert_agent_session_mapping(&conn, "session-1", AgentKind::Codex, "codex-a").unwrap();
+
+        delete_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode).unwrap();
+
+        assert!(
+            get_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            get_agent_session_mapping(&conn, "session-1", AgentKind::Codex)
+                .unwrap()
+                .expect("codex mapping should remain")
+                .agent_session_id,
+            "codex-a"
+        );
     }
 
     #[test]

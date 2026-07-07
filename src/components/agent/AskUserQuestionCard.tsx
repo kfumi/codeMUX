@@ -311,6 +311,10 @@ export function AskUserQuestionCard({
   const headerText = questions[0]?.header || '需要你的输入';
   const progressText = hasMultipleQuestions && !submitted ? ` (${answeredCount}/${questions.length})` : '';
 
+  if (isComposer && submitted) {
+    return null;
+  }
+
   if (isComposer && !submitted) {
     return (
       <div className="space-y-3">

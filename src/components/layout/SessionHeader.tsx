@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { Archive, Copy, FolderOpen, Mail, MoreHorizontal, Pencil, Pin, PinOff } from 'lucide-react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 
 import { agentApi } from '../../lib/tauri';
 import { useProjectStore } from '../../stores/projectStore';
@@ -29,7 +30,6 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const handleRenameOpen = () => {
     setRenameValue(session?.title || '');
@@ -46,11 +46,11 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
 
   const copyText = async (value: string | null | undefined, missingMessage = '没有可复制的内容') => {
     if (!value) {
-      setActionMessage(missingMessage);
+      toast.error(missingMessage);
       return;
     }
     await navigator.clipboard.writeText(value);
-    setActionMessage('已复制');
+    toast.success('已复制');
   };
 
   const copyAgentSessionValue = async (field: 'agentSessionId' | 'messagePath') => {
@@ -139,11 +139,6 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {actionMessage && (
-        <span className="text-[12px] text-muted-foreground/70" data-tauri-drag-region>
-          {actionMessage}
-        </span>
-      )}
     </>
   );
 }

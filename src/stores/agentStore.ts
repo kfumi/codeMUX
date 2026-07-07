@@ -26,6 +26,7 @@ import type {
   AgentToolResult,
   AgentSystemMessage,
   AgentResultMessage,
+  AgentUserMessageLocator,
   SidecarReadyEvent,
   SidecarErrorEvent,
   TodoItem,
@@ -36,7 +37,7 @@ import type { AgentInputPayload, UserAttachmentPreview } from '../types/agentInp
 import { inferModelSupportsVision, markModelVisionUnsupported } from '../lib/modelVisionCapabilities';
 
 export type AgentMessage =
-  | { kind: 'user'; data: { content: string; attachments?: UserAttachmentPreview[] } }
+  | { kind: 'user'; data: { content: string; attachments?: UserAttachmentPreview[]; locator?: AgentUserMessageLocator } }
   | { kind: 'assistant'; data: AgentAssistantMessage }
   | { kind: 'tool_result'; data: AgentToolResult }
   | { kind: 'system'; data: AgentSystemMessage }
@@ -497,6 +498,7 @@ function parseAgentEvent(raw: string): AgentMessage {
           }
           if (event.kind === 'user') {
             if (
+              data.isMeta === true ||
               data.isCompactSummary === true ||
               data.isVisibleInTranscriptOnly === true ||
               isClaudeCompactSummaryText(event.data.content)
@@ -584,6 +586,21 @@ function truncateTitle(text: string, maxLen = 30): string {
   return firstLine.slice(0, maxLen) + '...';
 }
 
+function extractTitleFromCommandMessage(content: string): string | null {
+  const trimmed = content.trimStart();
+  // Claude Code slash command display: /command-name args
+  const slashMatch = /^\/\S+\s+(.*)$/.exec(trimmed);
+  if (slashMatch) {
+    return slashMatch[1].trim() || null;
+  }
+  // Chip format: [$xxx](yyy) args
+  const chipMatch = /^\[\$[^\]]+\]\([^)]+\)\s*([\s\S]*)$/.exec(trimmed);
+  if (chipMatch) {
+    return chipMatch[1].trim() || null;
+  }
+  return null;
+}
+
 type FileOriginalSnapshot = { content: string; isNew: boolean; toolUseId?: string };
 
 function findOriginalSnapshotKey(
@@ -646,6 +663,14 @@ function buildInputPayloadFromUserEvent(event: Extract<AgentMessage, { kind: 'us
     : { text: event.data.content };
 }
 
+function hasStrongRewindLocator(locator: AgentUserMessageLocator | undefined): boolean {
+  return Boolean(
+    locator?.providerMessageId?.trim()
+    || typeof locator?.lineIndex === 'number'
+    || typeof locator?.sourceEventIndex === 'number',
+  );
+}
+
 function removeSessionEntry<T>(record: Record<string, T>, sessionId: string): Record<string, T> {
   const { [sessionId]: _removed, ...rest } = record;
   return rest;
@@ -669,24 +694,26 @@ function buildTurnSyntheticResult(
   turnStartTime: number,
   sessionId: string,
 ): { insertAt: number; result: AgentMessage } | null {
-  let totalInput = 0, totalOutput = 0, totalCacheRead = 0, totalCacheCreate = 0;
   let lastAssistantIdx = -1;
+  let lastUsage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number } | null = null;
 
   for (let i = startIdx; i < endIdx; i++) {
     if (events[i].kind === 'assistant') {
       lastAssistantIdx = i;
       const evt = events[i] as any;
-      const usage = evt.data?.message?.usage || evt.data?.usage;
-      if (usage) {
-        totalInput += usage.input_tokens || 0;
-        totalOutput += usage.output_tokens || 0;
-        totalCacheRead += usage.cache_read_input_tokens || 0;
-        totalCacheCreate += usage.cache_creation_input_tokens || 0;
+      const msg = evt.data?.message;
+      const usage = msg?.usage || evt.data?.usage;
+      // Prefer the message with stop_reason (e.g. "end_turn") — for Claude extended
+      // thinking the SDK emits two assistant messages (thinking + text) that share the
+      // same input_tokens; summing would double-count.  Taking only the last one with
+      // stop_reason gives the correct cumulative usage for the turn.
+      if (usage && (!lastUsage || msg?.stop_reason)) {
+        lastUsage = usage;
       }
     }
   }
 
-  if (totalInput === 0 && totalOutput === 0) return null;
+  if (!lastUsage || (lastUsage.input_tokens === 0 && lastUsage.output_tokens === 0)) return null;
   if (lastAssistantIdx < 0) return null;
 
   const endTime = timestamps[endIdx - 1] || timestamps[lastAssistantIdx] || 0;
@@ -702,8 +729,10 @@ function buildTurnSyntheticResult(
         duration_ms: durationMs, duration_api_ms: 0,
         num_turns: 1, result: '',
         usage: {
-          input_tokens: totalInput, output_tokens: totalOutput,
-          cache_creation_input_tokens: totalCacheCreate, cache_read_input_tokens: totalCacheRead,
+          input_tokens: lastUsage.input_tokens || 0,
+          output_tokens: lastUsage.output_tokens || 0,
+          cache_creation_input_tokens: lastUsage.cache_creation_input_tokens || 0,
+          cache_read_input_tokens: lastUsage.cache_read_input_tokens || 0,
         },
       } as AgentResultMessage,
     },
@@ -1059,10 +1088,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       mediaType: image.mediaType,
       dataUrl: image.dataUrl,
     }));
-    if (!hasExistingUserMsg && !userContent.startsWith('/')) {
-      const title = truncateTitle(userContent);
-      if (title) {
-        useSessionStore.getState().updateSessionTitle(sessionId, title);
+    if (!hasExistingUserMsg) {
+      const extracted = extractTitleFromCommandMessage(userContent);
+      const titleContent = extracted !== null ? extracted : userContent;
+      if (titleContent.trim()) {
+        const title = truncateTitle(titleContent);
+        if (title) {
+          useSessionStore.getState().updateSessionTitle(sessionId, title);
+        }
       }
     }
 
@@ -1076,7 +1109,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       kind: 'user',
       data: {
         content: userContent,
-        attachments: userAttachments,
+        ...(userAttachments ? { attachments: userAttachments } : {}),
       },
     };
     const userTs = Date.now();
@@ -1748,19 +1781,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
         // Fallback: if no per-turn results were generated, create a single one at the end
         if (turnResults.length === 0) {
-          let totalInput = 0, totalOutput = 0, totalCacheRead = 0, totalCacheCreate = 0;
+          let fallbackUsage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number } | null = null;
           for (const evt of events) {
             if (evt.kind === 'assistant') {
-              const usage = (evt.data as any)?.message?.usage;
-              if (usage) {
-                totalInput += usage.input_tokens || 0;
-                totalOutput += usage.output_tokens || 0;
-                totalCacheRead += usage.cache_read_input_tokens || 0;
-                totalCacheCreate += usage.cache_creation_input_tokens || 0;
+              const msg = (evt.data as any)?.message;
+              const usage = msg?.usage;
+              if (usage && (!fallbackUsage || msg?.stop_reason)) {
+                fallbackUsage = usage;
               }
             }
           }
-          if (totalInput > 0 || totalOutput > 0) {
+          if (fallbackUsage && (fallbackUsage.input_tokens > 0 || fallbackUsage.output_tokens > 0)) {
             const validTs = timestamps.filter((t) => t > 0);
             events.push({
               kind: 'result',
@@ -1771,7 +1802,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 duration_api_ms: 0,
                 num_turns: events.filter((e) => e.kind === 'user').length,
                 result: '',
-                usage: { input_tokens: totalInput, output_tokens: totalOutput, cache_creation_input_tokens: totalCacheCreate, cache_read_input_tokens: totalCacheRead },
+                usage: {
+                  input_tokens: fallbackUsage.input_tokens || 0,
+                  output_tokens: fallbackUsage.output_tokens || 0,
+                  cache_creation_input_tokens: fallbackUsage.cache_creation_input_tokens || 0,
+                  cache_read_input_tokens: fallbackUsage.cache_read_input_tokens || 0,
+                },
               } as AgentResultMessage,
             });
             timestamps.push(validTs[validTs.length - 1] || 0);
@@ -1857,8 +1893,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     const agentKind: AgentKind = getSessionAgentKind(sessionId) ?? 'claude_code';
     const payload = buildInputPayloadFromUserEvent(userEvent);
+    const target = hasStrongRewindLocator(userEvent.data.locator)
+      ? userEvent.data.locator
+      : undefined;
 
-    await agentApi.rewindSession(sessionId, agentKind);
+    await agentApi.rewindSession(sessionId, agentKind, target);
 
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);

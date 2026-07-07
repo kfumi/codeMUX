@@ -12,12 +12,23 @@ import { SessionHeader } from './SessionHeader';
 const mocks = vi.hoisted(() => ({
   openInExplorer: vi.fn(),
   getSessionInfo: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (command: string, args?: Record<string, unknown>) => {
     if (command === 'open_in_explorer') return mocks.openInExplorer(args);
     return Promise.resolve();
+  },
+}));
+
+vi.mock('sonner', () => ({
+  toast: {
+    success: mocks.toastSuccess,
+    error: mocks.toastError,
+    info: vi.fn(),
+    warning: vi.fn(),
   },
 }));
 
@@ -156,7 +167,7 @@ describe('SessionHeader', () => {
     openMenu();
     fireEvent.click(screen.getByText('复制任务路径'));
 
-    await waitFor(() => expect(screen.getByText('未找到任务路径')).toBeTruthy());
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('未找到任务路径'));
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 });

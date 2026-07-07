@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::config::types::AgentKind;
 use crate::db::operations;
 use log::{debug, info, warn};
+use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 
@@ -123,9 +124,52 @@ fn split_jsonl_preserving_newlines(content: &str) -> Vec<String> {
         .collect()
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RewindTarget {
+    pub provider_message_id: Option<String>,
+    pub source_event_index: Option<usize>,
+    pub line_index: Option<usize>,
+    pub role: Option<String>,
+    pub text_fingerprint: Option<String>,
+    pub turn_ordinal: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RewindOutcome {
+    truncated_to_empty: bool,
+}
+
 fn is_claude_visible_user_value(value: &serde_json::Value) -> bool {
-    should_include_claude_history_event(value)
-        && value.get("type").and_then(|entry| entry.as_str()) == Some("user")
+    if !should_include_claude_history_event(value) {
+        return false;
+    }
+    value.get("type").and_then(|entry| entry.as_str()) == Some("user")
+}
+
+// A turn boundary marks the end of a previous turn when scanning backwards.
+// We stop scanning at `result` events and at assistant messages that carry a
+// `text` content block (the final reply to the user). Thinking-only and
+// tool_use-only assistant messages are mid-turn and must NOT stop the scan —
+// Claude Code emits thinking, tool_use, and text as separate assistant lines,
+// so only the text line reliably signals "turn finished replying".
+fn is_claude_turn_boundary(value: &serde_json::Value) -> bool {
+    let msg_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    if msg_type == "result" {
+        return true;
+    }
+    if msg_type == "assistant" {
+        return value
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+            })
+            .unwrap_or(false);
+    }
+    false
 }
 
 fn is_codex_visible_user_value(value: &serde_json::Value) -> bool {
@@ -151,7 +195,201 @@ fn is_rewind_user_value(value: &serde_json::Value, agent_kind: AgentKind) -> boo
     }
 }
 
+fn extract_provider_message_id(value: &serde_json::Value, agent_kind: AgentKind) -> Option<String> {
+    let direct = ["uuid", "id", "message_id", "messageId"]
+        .iter()
+        .find_map(|key| value.get(key).and_then(|entry| entry.as_str()));
+    if direct.is_some() {
+        return direct.map(ToString::to_string);
+    }
+
+    if matches!(agent_kind, AgentKind::Codex) {
+        return value.get("payload").and_then(|payload| {
+            ["id", "uuid", "message_id", "messageId"]
+                .iter()
+                .find_map(|key| payload.get(key).and_then(|entry| entry.as_str()))
+                .map(ToString::to_string)
+        });
+    }
+
+    None
+}
+
+fn extract_user_text_for_rewind(value: &serde_json::Value) -> String {
+    let Some(message) = value.get("message") else {
+        return value
+            .get("payload")
+            .and_then(|payload| {
+                payload
+                    .get("message")
+                    .or_else(|| payload.get("text"))
+                    .and_then(|entry| entry.as_str())
+            })
+            .unwrap_or("")
+            .to_string();
+    };
+
+    let Some(content) = message.get("content") else {
+        return String::new();
+    };
+
+    if let Some(text) = content.as_str() {
+        return text.to_string();
+    }
+
+    content
+        .as_array()
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter_map(|block| {
+                    if block.get("type").and_then(|entry| entry.as_str()) == Some("text") {
+                        block.get("text").and_then(|entry| entry.as_str())
+                    } else if block.get("type").and_then(|entry| entry.as_str())
+                        == Some("input_text")
+                    {
+                        block.get("text").and_then(|entry| entry.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
+}
+
+fn normalize_rewind_text(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn is_targetable_rewind_user_value(value: &serde_json::Value, agent_kind: AgentKind) -> bool {
+    if !is_rewind_user_value(value, agent_kind) {
+        return false;
+    }
+
+    if value
+        .get("isMeta")
+        .and_then(|entry| entry.as_bool())
+        .unwrap_or(false)
+    {
+        return false;
+    }
+
+    let content = value
+        .get("message")
+        .and_then(|message| message.get("content"));
+    if content
+        .and_then(|entry| entry.as_array())
+        .map(|blocks| {
+            blocks.iter().any(|block| {
+                block.get("type").and_then(|entry| entry.as_str()) == Some("tool_result")
+            })
+        })
+        .unwrap_or(false)
+    {
+        return false;
+    }
+
+    let text = extract_user_text_for_rewind(value);
+    let trimmed = text.trim_start();
+    if trimmed.starts_with("Base directory for this skill: ")
+        || (trimmed.starts_with("# AGENTS.md instructions for ")
+            && trimmed.contains("<INSTRUCTIONS>"))
+    {
+        return false;
+    }
+
+    true
+}
+
+fn rewind_target_matches(
+    value: &serde_json::Value,
+    line_index: usize,
+    targetable_ordinal: usize,
+    agent_kind: AgentKind,
+    target: &RewindTarget,
+) -> bool {
+    if let Some(role) = target
+        .role
+        .as_deref()
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    {
+        if role != "user" {
+            return false;
+        }
+    }
+
+    if let Some(provider_message_id) = target
+        .provider_message_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    {
+        if extract_provider_message_id(value, agent_kind).as_deref() == Some(provider_message_id) {
+            return true;
+        }
+    }
+
+    if target.line_index == Some(line_index) {
+        return true;
+    }
+
+    if let Some(source_event_index) = target.source_event_index {
+        if source_event_index == line_index {
+            return true;
+        }
+    }
+
+    if let Some(turn_ordinal) = target.turn_ordinal {
+        if turn_ordinal == targetable_ordinal {
+            if let Some(text_fingerprint) = target
+                .text_fingerprint
+                .as_deref()
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+            {
+                return normalize_rewind_text(&extract_user_text_for_rewind(value))
+                    == normalize_rewind_text(text_fingerprint);
+            }
+            return true;
+        }
+    }
+
+    false
+}
+
+fn find_rewind_user_line_by_target(
+    lines: &[String],
+    agent_kind: AgentKind,
+    target: &RewindTarget,
+) -> Option<usize> {
+    let mut targetable_ordinal = 0usize;
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+        if !is_targetable_rewind_user_value(&value, agent_kind) {
+            continue;
+        }
+        targetable_ordinal += 1;
+        if rewind_target_matches(&value, index, targetable_ordinal, agent_kind, target) {
+            return Some(index);
+        }
+    }
+
+    None
+}
+
 fn find_latest_rewind_user_line(lines: &[String], agent_kind: AgentKind) -> Option<usize> {
+    // Step 1: find the latest user line (any type: "user" — plain text, meta,
+    // command XML echo, or tool_result). All of these belong to the current turn.
+    let mut latest_user_index: Option<usize> = None;
     for (index, line) in lines.iter().enumerate().rev() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -161,24 +399,78 @@ fn find_latest_rewind_user_line(lines: &[String], agent_kind: AgentKind) -> Opti
             continue;
         };
         if is_rewind_user_value(&value, agent_kind) {
-            return Some(index);
+            latest_user_index = Some(index);
+            break;
+        }
+    }
+    let latest_user_index = latest_user_index?;
+
+    // For Codex there is no explicit result/text-only assistant boundary marker
+    // in the JSONL, so we treat the latest user line as the turn start.
+    if !matches!(
+        agent_kind,
+        AgentKind::ClaudeCode | AgentKind::GeminiCli | AgentKind::Opencode
+    ) {
+        return Some(latest_user_index);
+    }
+
+    // Step 2: scan backwards to find the earliest user line in this turn.
+    // We stop at turn boundaries (result events, text-only assistant replies).
+    // Assistant messages with tool_use blocks are within-turn (mid-turn tool
+    // calls), so we keep scanning past them. All user lines encountered
+    // (including meta, XML echo, tool_result) belong to this turn.
+    let mut earliest_user_index = latest_user_index;
+    for index in (0..latest_user_index).rev() {
+        let trimmed = lines[index].trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+        if is_claude_turn_boundary(&value) {
+            break;
+        }
+        if is_rewind_user_value(&value, agent_kind) {
+            earliest_user_index = index;
         }
     }
 
-    None
+    Some(earliest_user_index)
 }
 
-fn rewind_jsonl_before_latest_turn(path: &Path, agent_kind: AgentKind) -> Result<(), String> {
+#[cfg(test)]
+fn rewind_jsonl_before_latest_turn(
+    path: &Path,
+    agent_kind: AgentKind,
+) -> Result<RewindOutcome, String> {
+    rewind_jsonl_before_target_turn(path, agent_kind, None)
+}
+
+fn rewind_jsonl_before_target_turn(
+    path: &Path,
+    agent_kind: AgentKind,
+    target: Option<RewindTarget>,
+) -> Result<RewindOutcome, String> {
     use std::fs;
 
     let content = fs::read_to_string(path)
         .map_err(|err| format!("Failed to read session history {}: {}", path.display(), err))?;
     let lines = split_jsonl_preserving_newlines(&content);
-    let Some(user_line_index) = find_latest_rewind_user_line(&lines, agent_kind) else {
-        return Err(format!(
-            "No rewindable user message found in session history {}",
-            path.display()
-        ));
+    let user_line_index = if let Some(target) = target.as_ref() {
+        find_rewind_user_line_by_target(&lines, agent_kind, target).ok_or_else(|| {
+            format!(
+                "Target rewind user message not found in session history {}",
+                path.display()
+            )
+        })?
+    } else {
+        find_latest_rewind_user_line(&lines, agent_kind).ok_or_else(|| {
+            format!(
+                "No rewindable user message found in session history {}",
+                path.display()
+            )
+        })?
     };
 
     let next_content = lines[..user_line_index].concat();
@@ -201,6 +493,19 @@ fn rewind_jsonl_before_latest_turn(path: &Path, agent_kind: AgentKind) -> Result
             path.display(),
             err
         )
+    })?;
+
+    Ok(RewindOutcome {
+        truncated_to_empty: !lines[..user_line_index].iter().any(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                return false;
+            }
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+                return false;
+            };
+            is_targetable_rewind_user_value(&value, agent_kind)
+        }),
     })
 }
 
@@ -329,7 +634,7 @@ pub async fn load_claude_session_events(
     let file = fs::File::open(&jsonl_path).map_err(|e| format!("Failed to open JSONL: {}", e))?;
     let reader = BufReader::new(file);
 
-    for line_result in reader.lines() {
+    for (line_index, line_result) in reader.lines().enumerate() {
         let line = match line_result {
             Ok(l) => l,
             Err(_) => continue,
@@ -339,12 +644,15 @@ pub async fn load_claude_session_events(
             continue;
         }
 
-        let val: serde_json::Value = match serde_json::from_str(trimmed) {
+        let mut val: serde_json::Value = match serde_json::from_str(trimmed) {
             Ok(v) => v,
             Err(_) => continue,
         };
 
         if should_include_claude_history_event(&val) {
+            if let Some(obj) = val.as_object_mut() {
+                obj.insert("__lineIndex".to_string(), serde_json::json!(line_index));
+            }
             messages.push(val);
         }
     }
@@ -360,6 +668,7 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
     let item_type = val.get("type")?.as_str()?;
     let payload = val.get("payload")?;
     let timestamp = val.get("timestamp").cloned();
+    let line_index = val.get("__lineIndex").cloned();
 
     if item_type == "response_item" {
         let payload_type = payload.get("type")?.as_str()?;
@@ -456,14 +765,24 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
             if content.starts_with("<environment_context>") {
                 return None;
             }
-            return Some(serde_json::json!({
+            let provider_message_id = ["id", "uuid", "message_id", "messageId"]
+                .iter()
+                .find_map(|key| payload.get(key).and_then(|entry| entry.as_str()));
+            let mut converted = serde_json::json!({
                 "type": "user",
                 "timestamp": timestamp,
                 "message": {
                     "role": "user",
                     "content": claude_content
                 }
-            }));
+            });
+            if let Some(provider_message_id) = provider_message_id {
+                converted["uuid"] = serde_json::json!(provider_message_id);
+            }
+            if let Some(line_index) = line_index {
+                converted["__lineIndex"] = line_index;
+            }
+            return Some(converted);
         }
 
         // Function call → tool_use
@@ -586,6 +905,20 @@ fn is_codex_assistant_response_message(val: &serde_json::Value) -> bool {
             == Some("assistant")
 }
 
+fn is_codex_user_response_message(val: &serde_json::Value) -> bool {
+    val.get("type").and_then(|t| t.as_str()) == Some("response_item")
+        && val
+            .get("payload")
+            .and_then(|payload| payload.get("type"))
+            .and_then(|t| t.as_str())
+            == Some("message")
+        && val
+            .get("payload")
+            .and_then(|payload| payload.get("role"))
+            .and_then(|role| role.as_str())
+            == Some("user")
+}
+
 fn convert_codex_agent_message_to_claude_format(
     val: &serde_json::Value,
 ) -> Option<serde_json::Value> {
@@ -611,6 +944,48 @@ fn convert_codex_agent_message_to_claude_format(
             "content": [{ "type": "text", "text": text }]
         }
     }))
+}
+
+fn convert_codex_user_event_to_claude_format(val: &serde_json::Value) -> Option<serde_json::Value> {
+    if val.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
+        return None;
+    }
+
+    let payload = val.get("payload")?;
+    if payload.get("type").and_then(|t| t.as_str()) != Some("user_message") {
+        return None;
+    }
+
+    let text = payload
+        .get("message")
+        .or_else(|| payload.get("text"))
+        .and_then(|entry| entry.as_str())?
+        .trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    let mut converted = serde_json::json!({
+        "type": "user",
+        "timestamp": val.get("timestamp").cloned(),
+        "message": {
+            "role": "user",
+            "content": text
+        }
+    });
+
+    if let Some(provider_message_id) = ["id", "uuid", "message_id", "messageId"]
+        .iter()
+        .find_map(|key| payload.get(key).and_then(|entry| entry.as_str()))
+    {
+        converted["uuid"] = serde_json::json!(provider_message_id);
+    }
+
+    if let Some(line_index) = val.get("__lineIndex").cloned() {
+        converted["__lineIndex"] = line_index;
+    }
+
+    Some(converted)
 }
 
 fn convert_codex_compacted_to_compact_boundary(
@@ -664,6 +1039,9 @@ fn convert_codex_history_values_to_events(
     let has_agent_messages = raw_events
         .iter()
         .any(|val| convert_codex_agent_message_to_claude_format(val).is_some());
+    let has_user_events = raw_events
+        .iter()
+        .any(|val| convert_codex_user_event_to_claude_format(val).is_some());
     let mut messages = Vec::new();
     let mut turns: Vec<TurnInfo> = Vec::new();
     let mut msg_idx: usize = 0;
@@ -694,6 +1072,13 @@ fn convert_codex_history_values_to_events(
             if let Some(payload) = val.get("payload") {
                 let payload_type = payload.get("type").and_then(|t| t.as_str());
                 match payload_type {
+                    Some("user_message") => {
+                        if let Some(converted) = convert_codex_user_event_to_claude_format(val) {
+                            current_turn.compaction_only = false;
+                            messages.push(converted);
+                            msg_idx += 1;
+                        }
+                    }
                     Some("agent_message") => {
                         if let Some(converted) = convert_codex_agent_message_to_claude_format(val) {
                             current_turn.last_assistant_msg_idx = Some(msg_idx);
@@ -726,6 +1111,9 @@ fn convert_codex_history_values_to_events(
         }
 
         if has_agent_messages && is_codex_assistant_response_message(val) {
+            continue;
+        }
+        if has_user_events && is_codex_user_response_message(val) {
             continue;
         }
 
@@ -836,7 +1224,12 @@ fn read_json_stream_values(path: &Path) -> Result<Vec<serde_json::Value>, String
 
     for item in stream {
         match item {
-            Ok(value) => values.push(value),
+            Ok(mut value) => {
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("__lineIndex".to_string(), serde_json::json!(values.len()));
+                }
+                values.push(value);
+            }
             Err(error) => {
                 warn!(
                     target: "agent",
@@ -1464,6 +1857,7 @@ pub async fn rewind_agent_session(
     agent_state: State<'_, AgentState>,
     app_session_id: String,
     agent_kind: String,
+    target: Option<RewindTarget>,
 ) -> Result<(), String> {
     let agent_kind = AgentKind::from_str(&agent_kind)?;
     let Some(agent_session_id) = get_agent_session_id(state.inner(), &app_session_id, agent_kind)?
@@ -1491,23 +1885,52 @@ pub async fn rewind_agent_session(
         )
     })?;
 
-    rewind_jsonl_before_latest_turn(&history_path, agent_kind)?;
+    let rewind_outcome =
+        rewind_jsonl_before_target_turn(&history_path, agent_kind, target.clone())?;
 
     if agent_kind == AgentKind::Codex {
         let interactive_path = codex_interactive_events_dir(&home)
             .join(format!("{}.jsonl", sanitize_file_segment(&app_session_id)));
         if interactive_path.exists() {
-            let _ = rewind_jsonl_before_latest_turn(&interactive_path, agent_kind);
+            let _ = rewind_jsonl_before_target_turn(&interactive_path, agent_kind, target.clone());
         }
     }
 
-    let cmd = serde_json::json!({
-        "type": "reset_session",
-        "sessionId": app_session_id,
-    });
-    let sidecars = agent_state.sidecars.lock().await;
-    if let Some(handle) = sidecars.get(&app_session_id) {
-        handle.send_command(&cmd.to_string()).await?;
+    if rewind_outcome.truncated_to_empty {
+        {
+            let db = state.db.lock().unwrap();
+            operations::delete_agent_session_mapping(&db, &app_session_id, agent_kind)
+                .map_err(|err| format!("Failed to clear rewound agent session mapping: {}", err))?;
+        }
+        info!(
+            target: "agent",
+            "Cleared agent session mapping after rewinding first message app_session_id={} agent_kind={}",
+            app_session_id,
+            agent_kind.as_str()
+        );
+
+        let sidecar = {
+            let mut sidecars = agent_state.sidecars.lock().await;
+            sidecars.remove(&app_session_id)
+        };
+        if let Some(mut handle) = sidecar {
+            info!(
+                target: "agent",
+                "Shutting down sidecar after rewinding first message app_session_id={} agent_kind={}",
+                app_session_id,
+                agent_kind.as_str()
+            );
+            handle.shutdown().await;
+        }
+    } else {
+        let cmd = serde_json::json!({
+            "type": "reset_session",
+            "sessionId": app_session_id,
+        });
+        let sidecars = agent_state.sidecars.lock().await;
+        if let Some(handle) = sidecars.get(&app_session_id) {
+            handle.send_command(&cmd.to_string()).await?;
+        }
     }
 
     info!(
@@ -1748,7 +2171,8 @@ mod tests {
         convert_codex_item_to_claude_format, find_codex_session_jsonl,
         parse_proxy_port_from_stderr, read_codex_interactive_events_from_dir,
         read_json_stream_values, resolve_agent_session_info, rewind_jsonl_before_latest_turn,
-        should_include_claude_history_event, sort_events_by_timestamp_stable,
+        rewind_jsonl_before_target_turn, should_include_claude_history_event,
+        sort_events_by_timestamp_stable, RewindTarget,
     };
     use crate::config::types::AgentKind;
 
@@ -1882,6 +2306,412 @@ mod tests {
     }
 
     #[test]
+    fn rewinds_claude_jsonl_command_turn_removes_meta_and_xml_echo_together() {
+        // When a command turn contains multiple user lines (the plain-text
+        // command, the isMeta expansion, and the <command-message> XML echo),
+        // all of them belong to the same turn and must be removed together.
+        // The previous turn's content must be preserved.
+        let path = std::env::temp_dir().join(format!(
+            "codemux-claude-rewind-cmd-test-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"/init\"}}\n",
+                "{\"type\":\"user\",\"isMeta\":true,\"message\":{\"role\":\"user\",\"content\":\"expanded init prompt\"}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<command-message>init</command-message><command-name>/init</command-name><command-args></command-args>\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"init answer\"}]}}\n",
+                "{\"type\":\"result\",\"subtype\":\"success\"}\n"
+            ),
+        )
+        .unwrap();
+
+        rewind_jsonl_before_latest_turn(&path, AgentKind::ClaudeCode).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            content,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n"
+            )
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rewinds_claude_jsonl_keeps_tool_result_within_previous_turn() {
+        // A tool_result line has type "user" but belongs to the previous turn.
+        // When the latest user line is a plain-text message from a later turn,
+        // the earlier tool_result (and its surrounding assistant tool_use and
+        // text-only reply) must all be preserved as part of that earlier turn.
+        let path = std::env::temp_dir().join(format!(
+            "codemux-claude-rewind-tool-test-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"bash\",\"input\":{}}]}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"done\"}]}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"second\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"second answer\"}]}}\n"
+            ),
+        )
+        .unwrap();
+
+        rewind_jsonl_before_latest_turn(&path, AgentKind::ClaudeCode).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        // The whole first turn (user, tool_use, tool_result, assistant reply)
+        // is kept; only the second turn is removed.
+        assert_eq!(
+            content,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"bash\",\"input\":{}}]}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"done\"}]}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n"
+            )
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rewinds_claude_jsonl_drops_whole_turn_when_tool_result_is_latest_user() {
+        // When the latest user line is a tool_result (e.g. the turn is still
+        // mid-flight), scanning backwards must walk past the assistant tool_use
+        // and reach the turn's first user line, removing the whole turn.
+        let path = std::env::temp_dir().join(format!(
+            "codemux-claude-rewind-toolresult-latest-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"second\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"bash\",\"input\":{}}]}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"done\"}]}}\n"
+            ),
+        )
+        .unwrap();
+
+        rewind_jsonl_before_latest_turn(&path, AgentKind::ClaudeCode).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        // The whole second turn (user, tool_use, tool_result) is removed;
+        // only the first turn survives.
+        assert_eq!(
+            content,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n"
+            )
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rewinds_claude_jsonl_command_turn_walks_past_thinking_assistant() {
+        // Real Claude Code JSONL emits thinking, tool_use, and text as separate
+        // assistant lines. A command turn looks like:
+        //   user (XML echo) → user (isMeta) → assistant (thinking) →
+        //   assistant (tool_use) → user (tool_result) → user (isMeta) →
+        //   assistant (thinking) → assistant (text = final reply)
+        // The thinking-only assistant must NOT be treated as a turn boundary,
+        // otherwise the scan stops too early and the command's XML echo / isMeta
+        // lines survive in the JSONL — which re-surface as a phantom command
+        // message on the next history load.
+        let path = std::env::temp_dir().join(format!(
+            "codemux-claude-rewind-thinking-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<command-message>find-skills</command-message><command-name>/find-skills</command-name><command-args>触发技能</command-args>\"}}\n",
+                "{\"type\":\"user\",\"isMeta\":true,\"message\":{\"role\":\"user\",\"content\":\"expanded prompt\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"planning\"}]}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Skill\",\"input\":{}}]}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"done\"}]}}\n",
+                "{\"type\":\"user\",\"isMeta\":true,\"message\":{\"role\":\"user\",\"content\":\"Base directory for this skill\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"reflecting\"}]}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"skill answer\"}]}}\n"
+            ),
+        )
+        .unwrap();
+
+        rewind_jsonl_before_latest_turn(&path, AgentKind::ClaudeCode).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        // The entire command turn (XML echo + isMeta + thinking + tool_use +
+        // tool_result + isMeta + thinking + text) is removed; only the first
+        // plain-text turn survives.
+        assert_eq!(
+            content,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n"
+            )
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rewinds_claude_jsonl_by_target_uuid_ignores_later_skill_user_lines() {
+        let path = std::env::temp_dir().join(format!(
+            "codemux-claude-rewind-target-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n",
+                "{\"type\":\"user\",\"uuid\":\"u2\",\"message\":{\"role\":\"user\",\"content\":\"use skill\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Skill\",\"input\":{}}]}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"done\"}]}}\n",
+                "{\"type\":\"user\",\"isMeta\":true,\"message\":{\"role\":\"user\",\"content\":\"Base directory for this skill\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"skill answer\"}]}}\n"
+            ),
+        )
+        .unwrap();
+
+        rewind_jsonl_before_target_turn(
+            &path,
+            AgentKind::ClaudeCode,
+            Some(RewindTarget {
+                provider_message_id: Some("u2".to_string()),
+                source_event_index: None,
+                line_index: None,
+                role: Some("user".to_string()),
+                text_fingerprint: Some("use skill".to_string()),
+                turn_ordinal: Some(2),
+            }),
+        )
+        .unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            content,
+            concat!(
+                "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n"
+            )
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rewind_target_missing_does_not_truncate_latest_turn() {
+        let path = std::env::temp_dir().join(format!(
+            "codemux-claude-rewind-target-missing-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        let original = concat!(
+            "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+            "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n"
+        );
+        std::fs::write(&path, original).unwrap();
+
+        let error = rewind_jsonl_before_target_turn(
+            &path,
+            AgentKind::ClaudeCode,
+            Some(RewindTarget {
+                provider_message_id: Some("missing".to_string()),
+                source_event_index: None,
+                line_index: None,
+                role: Some("user".to_string()),
+                text_fingerprint: None,
+                turn_ordinal: None,
+            }),
+        )
+        .expect_err("missing target should not fall back to latest");
+
+        assert!(error.contains("Target rewind user message not found"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rewind_single_claude_user_reports_empty_history() {
+        let path = std::env::temp_dir().join(format!(
+            "codemux-claude-rewind-empty-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+        )
+        .unwrap();
+
+        let outcome = rewind_jsonl_before_target_turn(
+            &path,
+            AgentKind::ClaudeCode,
+            Some(RewindTarget {
+                provider_message_id: Some("u1".to_string()),
+                source_event_index: None,
+                line_index: None,
+                role: Some("user".to_string()),
+                text_fingerprint: Some("first".to_string()),
+                turn_ordinal: None,
+            }),
+        )
+        .unwrap();
+
+        assert!(outcome.truncated_to_empty);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rewind_first_claude_tool_turn_after_system_line_reports_empty_user_history() {
+        let path = std::env::temp_dir().join(format!(
+            "codemux-claude-rewind-first-tool-turn-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s1\"}\n",
+                "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"use skill\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Skill\",\"input\":{}}]}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"done\"}]}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"answer\"}]}}\n"
+            ),
+        )
+        .unwrap();
+
+        let outcome = rewind_jsonl_before_target_turn(
+            &path,
+            AgentKind::ClaudeCode,
+            Some(RewindTarget {
+                provider_message_id: Some("u1".to_string()),
+                source_event_index: None,
+                line_index: None,
+                role: Some("user".to_string()),
+                text_fingerprint: Some("use skill".to_string()),
+                turn_ordinal: None,
+            }),
+        )
+        .unwrap();
+
+        assert!(outcome.truncated_to_empty);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s1\"}\n"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rewinds_codex_jsonl_by_target_payload_id_ignores_tool_outputs() {
+        let path = std::env::temp_dir().join(format!(
+            "codemux-codex-rewind-target-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"input_text\",\"text\":\"first\"}]}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"first answer\"}]}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"id\":\"u2\",\"content\":[{\"type\":\"input_text\",\"text\":\"use skill\"}]}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"call_id\":\"call_skill\",\"name\":\"Skill\",\"arguments\":\"{}\"}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"call_skill\",\"output\":\"done\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        rewind_jsonl_before_target_turn(
+            &path,
+            AgentKind::Codex,
+            Some(RewindTarget {
+                provider_message_id: Some("u2".to_string()),
+                source_event_index: None,
+                line_index: None,
+                role: Some("user".to_string()),
+                text_fingerprint: Some("use skill".to_string()),
+                turn_ordinal: Some(2),
+            }),
+        )
+        .unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            content,
+            concat!(
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"input_text\",\"text\":\"first\"}]}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"first answer\"}]}}\n"
+            )
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rewinds_codex_event_msg_user_by_target_payload_id() {
+        let path = std::env::temp_dir().join(format!(
+            "codemux-codex-rewind-event-msg-target-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"thread-1\"}}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"id\":\"u1\",\"message\":\"first\"}}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"first answer\"}}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"id\":\"u2\",\"message\":\"use skill\"}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"call_id\":\"call_skill\",\"name\":\"tool_search\",\"arguments\":\"{}\"}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"call_skill\",\"output\":\"done\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        rewind_jsonl_before_target_turn(
+            &path,
+            AgentKind::Codex,
+            Some(RewindTarget {
+                provider_message_id: Some("u2".to_string()),
+                source_event_index: None,
+                line_index: None,
+                role: Some("user".to_string()),
+                text_fingerprint: Some("use skill".to_string()),
+                turn_ordinal: None,
+            }),
+        )
+        .unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            content,
+            concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"thread-1\"}}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"id\":\"u1\",\"message\":\"first\"}}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"first answer\"}}\n"
+            )
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn parse_proxy_port_from_reuse_log() {
         let lines = vec![
             "[codex-compat-proxy] port 15722 busy, retrying (1/5)...".to_string(),
@@ -1889,6 +2719,25 @@ mod tests {
         ];
 
         assert_eq!(parse_proxy_port_from_stderr(&lines), Some(15722));
+    }
+
+    #[test]
+    fn convert_codex_user_message_preserves_provider_message_id() {
+        let converted = convert_codex_item_to_claude_format(&serde_json::json!({
+            "type": "response_item",
+            "__lineIndex": 4,
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "id": "codex-user-1",
+                "content": [{ "type": "input_text", "text": "hello" }]
+            }
+        }))
+        .expect("codex user message should convert");
+
+        assert_eq!(converted["type"], "user");
+        assert_eq!(converted["uuid"], "codex-user-1");
+        assert_eq!(converted["__lineIndex"], 4);
     }
 
     #[test]
@@ -2025,6 +2874,70 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn codex_history_converts_event_msg_user_message_with_locator_fields() {
+        let raw_events = vec![serde_json::json!({
+            "__lineIndex": 8,
+            "timestamp": "2026-07-03T17:31:58.238Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "user_message",
+                "id": "event-user-1",
+                "message": "use skill"
+            }
+        })];
+
+        let converted = convert_codex_history_values_to_events(&raw_events, "app-session-1");
+
+        assert_eq!(converted.len(), 1);
+        assert_eq!(
+            converted[0],
+            serde_json::json!({
+                "type": "user",
+                "uuid": "event-user-1",
+                "__lineIndex": 8,
+                "timestamp": "2026-07-03T17:31:58.238Z",
+                "message": {
+                    "role": "user",
+                    "content": "use skill"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn codex_history_prefers_event_msg_user_message_over_response_item_user() {
+        let raw_events = vec![
+            serde_json::json!({
+                "__lineIndex": 8,
+                "timestamp": "2026-07-03T17:31:58.238Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "user_message",
+                    "id": "event-user-1",
+                    "message": "use skill"
+                }
+            }),
+            serde_json::json!({
+                "__lineIndex": 9,
+                "timestamp": "2026-07-03T17:31:58.239Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "id": "response-user-1",
+                    "content": [{ "type": "input_text", "text": "use skill" }]
+                }
+            }),
+        ];
+
+        let converted = convert_codex_history_values_to_events(&raw_events, "app-session-1");
+
+        assert_eq!(converted.len(), 1);
+        assert_eq!(converted[0]["uuid"], "event-user-1");
+        assert_eq!(converted[0]["__lineIndex"], 8);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 ﻿import type { AgentMessage } from '../../../stores/agentStore';
 import { isClaudeTaskNotificationUserEvent, isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
-import type { ContentBlock } from '../../../types/agent';
+import type { AgentUserMessageLocator, ContentBlock } from '../../../types/agent';
 import type { UserAttachmentPreview } from '../../../types/agentInput';
 import { buildAssistantResultTargetSet } from './assistantResultTargets';
 
@@ -39,6 +39,7 @@ export type CodeMuxAssistantMessage = {
     sourceKind: AgentMessage['kind'];
     isFinalAssistantMessage?: boolean;
     attachments?: UserAttachmentPreview[];
+    locator?: AgentUserMessageLocator;
   };
 };
 
@@ -188,7 +189,7 @@ export function convertAgentEventsToAssistantMessages(
     }
 
     if (event.kind === 'error') {
-      const text = event.data.error.trim();
+      const text = typeof event.data.error === 'string' ? event.data.error.trim() : '';
       if (text.length > 0 && !attachLatestPendingToolError(messages, toolCallLocationById, text)) {
         // Fall through to isVisibleEventKind below to render as data-codemux-event
       } else {
@@ -198,7 +199,10 @@ export function convertAgentEventsToAssistantMessages(
 
     if (event.kind === 'result') {
       if (event.data.is_error) {
-        attachLatestPendingToolError(messages, toolCallLocationById, event.data.result.trim());
+        const text = typeof event.data.result === 'string' ? event.data.result.trim() : '';
+        if (text.length > 0) {
+          attachLatestPendingToolError(messages, toolCallLocationById, text);
+        }
       }
       return;
     }
@@ -706,6 +710,9 @@ function createMessage(
       sourceKind: event.kind,
       ...(event.kind === 'user' && event.data.attachments?.length
         ? { attachments: event.data.attachments }
+        : {}),
+      ...(event.kind === 'user' && event.data.locator
+        ? { locator: event.data.locator }
         : {}),
     },
   };

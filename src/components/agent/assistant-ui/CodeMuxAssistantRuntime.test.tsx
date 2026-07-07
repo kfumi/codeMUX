@@ -759,9 +759,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
   it('does not resolve Claude-only slash commands in Codex sessions', () => {
     expect(resolveSlashCommand('/security-review', 'codex')).toBeNull();
     expect(resolveSlashCommand('/permissions', 'codex')).toBeNull();
-    expect(resolveSlashCommand('/plan add tests', 'codex')).toMatchObject({
-      command: expect.objectContaining({ name: 'plan' }),
-      args: 'add tests',
+    expect(resolveSlashCommand('/init', 'codex')).toMatchObject({
+      command: expect.objectContaining({ name: 'init' }),
     });
     expect(resolveSlashCommand('/security-review', 'claude_code')?.command.name).toBe('security-review');
   });
@@ -884,12 +883,12 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       parentId: null,
       sourceId: null,
       runConfig: undefined,
-      content: [{ type: 'text', text: '/plan inspect this screenshot' }],
+      content: [{ type: 'text', text: '/init inspect this screenshot' }],
       attachments: [
         {
           id: 'image-1',
           type: 'image',
-          name: 'plan.png',
+          name: 'init.png',
           contentType: 'image/png',
           status: { type: 'complete' },
           content: [{ type: 'image', image: 'data:image/png;base64,abc123' }],
@@ -900,15 +899,17 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     });
 
     expect(payload.images).toHaveLength(1);
+    // resolveSlashCommand parses text regardless of attachments; image-gating lives in handleMessage
     expect(resolveSlashCommand(payload.text, 'codex')).toMatchObject({
-      command: expect.objectContaining({ name: 'plan' }),
+      command: expect.objectContaining({ name: 'init' }),
+      args: 'inspect this screenshot',
     });
   });
 
   it('renders directive text in user messages as chips', () => {
     const { container } = render(<Harness sessionId="session-directives" />);
 
-    expect(screen.getByText('/review').closest('[data-directive-type="command"]')).toBeTruthy();
+    expect(screen.getByText('review').closest('[data-directive-type="command"]')).toBeTruthy();
     expect(screen.getByText('App.tsx').closest('[data-directive-type="file"]')).toBeTruthy();
     expect(screen.getByText('please check this')).toBeTruthy();
     // Now file chips have a leading icon
@@ -1042,11 +1043,9 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.queryByText('结果 119')).toBeNull();
   }, 30_000);
 
-  it('keeps short streaming thinking complete but renders only the latest window for very long thinking', () => {
+  it('does not render streaming thinking content but shows token estimate in status line', () => {
     const shortThinking = 'short thinking stays fully visible';
-    const longThinkingHead = 'long-thinking-head';
-    const longThinkingTail = 'long-thinking-tail';
-    const longThinking = `${longThinkingHead}${'x'.repeat(21_000)}${longThinkingTail}`;
+    const longThinking = `${'x'.repeat(21_000)}`;
 
     useAgentStore.setState((state) => ({
       isRunning: { ...state.isRunning, 'session-stream-short': true, 'session-stream-long': true },
@@ -1058,17 +1057,22 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       },
     }));
 
-    const view = render(<Harness sessionId="session-stream-short" />);
-    fireEvent.click(view.container.querySelector('[data-slot="reasoning-trigger"]')!);
+    const { container } = render(<Harness sessionId="session-stream-short" />);
 
-    expect(screen.getByText(shortThinking)).toBeTruthy();
+    // Thinking content is NOT rendered during streaming
+    expect(container.textContent).not.toContain(shortThinking);
+    // No collapsible reasoning block is rendered while thinking is in progress
+    expect(container.querySelector('[data-slot="reasoning-trigger"]')).toBeNull();
+    // Status line shows thinking label and token estimate
+    expect(container.textContent).toContain('思考中');
+    expect(container.textContent).toContain('tokens');
 
-    view.unmount();
+    cleanup();
     const longView = render(<Harness sessionId="session-stream-long" />);
-    fireEvent.click(longView.container.querySelector('[data-slot="reasoning-trigger"]')!);
-
-    expect(longView.container.textContent).not.toContain(longThinkingHead);
-    expect(screen.getByText(new RegExp(`${longThinkingTail}$`))).toBeTruthy();
+    // Long thinking content is also NOT rendered (no streaming render at all)
+    expect(longView.container.querySelector('[data-slot="reasoning-trigger"]')).toBeNull();
+    expect(longView.container.textContent).toContain('思考中');
+    expect(longView.container.textContent).toContain('tokens');
   });
 
   it('renders live streaming text with markdown parsing using Streamdown', () => {
@@ -1123,7 +1127,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     const toggle = screen.getByRole('button', { name: /灞曞紑AI杩囩▼|展开AI过程/ });
     expect(toggle.textContent).toContain('已处理');
-    expect(toggle.textContent).toContain('1m 13s');
+    expect(toggle.textContent).toContain('1m13s');
 
     fireEvent.click(toggle);
 

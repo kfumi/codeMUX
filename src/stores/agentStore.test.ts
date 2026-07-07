@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Session } from '../types/session';
+import type { AgentUserMessageLocator } from '../types/agent';
 
 const startSessionMock = vi.fn<
   (
@@ -19,7 +20,7 @@ const saveEventsMock = vi.fn<(sessionId: string, eventsJson: string) => Promise<
 const getEventsMock = vi.fn<(sessionId: string) => Promise<string>>();
 const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
-const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string) => Promise<void>>();
+const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator) => Promise<void>>();
 
 vi.mock('../lib/tauri', () => ({
   agentApi: {
@@ -428,29 +429,44 @@ describe('agent store Codex history loading', () => {
     });
   });
 
-  it('restores Codex command prompt templates as user-facing slash directives', async () => {
-    const { useAgentStore } = await import('./agentStore');
-    const { findCommand, renderCommandPrompt } = await import('../lib/slashCommands');
-    const session = await primeSession('codex');
-    const plan = findCommand('plan', 'codex')!;
-
-    loadCodexSessionEventsMock.mockResolvedValueOnce([
-      {
+  it('treats isMeta user events from the live stream as raw, not as user turns', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
         type: 'user',
-        timestamp: '2026-06-20T10:00:00.000Z',
-        message: {
-          role: 'user',
-          content: renderCommandPrompt(plan, 'add login flow'),
-        },
-      },
-    ]);
-
-    await useAgentStore.getState().loadSessionMessages(session.id);
-
-    expect(useAgentStore.getState().events[session.id]?.[0]).toEqual({
-      kind: 'user',
-      data: { content: '/plan add login flow' },
+        isMeta: true,
+        message: { role: 'user', content: 'expanded slash command prompt' },
+      }));
+      onEvent(JSON.stringify({
+        type: 'assistant',
+        uuid: 'assistant-1',
+        session_id: sessionId,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      }));
+      onEvent(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        uuid: 'result-1',
+        session_id: sessionId,
+        duration_ms: 1,
+        duration_api_ms: 1,
+        num_turns: 1,
+        result: '',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }));
     });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, '/review', 'D:\\project\\ai-code\\codeMUX', undefined, undefined, undefined, undefined, undefined, '/review');
+
+    const events = useAgentStore.getState().events[session.id] ?? [];
+    const userEvents = events.filter((event) => event.kind === 'user');
+    expect(userEvents).toHaveLength(1);
+    expect(userEvents[0]).toEqual({ kind: 'user', data: { content: '/review' } });
   });
 
   it('restores Codex task progress from persisted update_plan calls', async () => {
@@ -1360,6 +1376,13 @@ describe('agent store Codex history loading', () => {
             data: {
               content: 'inspect image',
               attachments: [{ type: 'image', name: 'screen.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
+              locator: {
+                providerMessageId: 'codex-user-2',
+                lineIndex: 12,
+                role: 'user',
+                textFingerprint: 'inspect image',
+                turnOrdinal: 2,
+              },
             },
           },
           {
@@ -1398,7 +1421,13 @@ describe('agent store Codex history loading', () => {
 
     const payload = await useAgentStore.getState().rewindLastTurn(session.id);
 
-    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'codex');
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'codex', {
+      providerMessageId: 'codex-user-2',
+      lineIndex: 12,
+      role: 'user',
+      textFingerprint: 'inspect image',
+      turnOrdinal: 2,
+    });
     expect(payload).toEqual({
       text: 'inspect image',
       images: [{ name: 'screen.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
@@ -1412,6 +1441,34 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().streamingThinking[session.id]).toBe('');
     expect(useAgentStore.getState().streamingText[session.id]).toBe('');
     expect(useAgentStore.getState().changedFiles[session.id]).toBeUndefined();
+  });
+
+  it('rewinds optimistic live user messages without sending a weak target', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'live prompt' } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-live',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+        ],
+      },
+      eventTimestamps: { [session.id]: [100, 200] },
+    });
+
+    await useAgentStore.getState().rewindLastTurn(session.id);
+
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', undefined);
   });
 
   it('marks an inactive session unread after a rewound turn completes', async () => {

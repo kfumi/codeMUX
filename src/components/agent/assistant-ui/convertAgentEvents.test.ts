@@ -4,6 +4,60 @@ import type { AgentMessage } from '../../../stores/agentStore';
 import { convertAgentEventsToAssistantMessages } from './convertAgentEvents';
 
 describe('convertAgentEventsToAssistantMessages', () => {
+  it('copies user message locator into assistant-ui metadata', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'user',
+        data: {
+          content: 'use skill safely',
+          locator: {
+            providerMessageId: 'provider-user-1',
+            lineIndex: 7,
+            role: 'user',
+            textFingerprint: 'use skill safely',
+            turnOrdinal: 2,
+          },
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages[0]?.metadata.locator).toEqual({
+      providerMessageId: 'provider-user-1',
+      lineIndex: 7,
+      role: 'user',
+      textFingerprint: 'use skill safely',
+      turnOrdinal: 2,
+    });
+  });
+
+  it('does not crash on error or result events with missing text fields', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'error',
+        data: { type: 'sidecar_error' } as AgentMessage['data'],
+      },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'error',
+          is_error: true,
+          uuid: 'result-1',
+          session_id: 'session-1',
+          duration_ms: 0,
+          duration_api_ms: 0,
+          num_turns: 1,
+          result: undefined as unknown as string,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      },
+    ];
+
+    expect(() => convertAgentEventsToAssistantMessages(events)).not.toThrow();
+  });
+
   it('renders assistant narration before a pending tool call when live events arrive out of order', () => {
     const events: AgentMessage[] = [
       {

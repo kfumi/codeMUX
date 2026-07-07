@@ -82,6 +82,7 @@ function App() {
             name: skill.name,
             description: skill.description || skill.display_name || skill.name,
             apps: skill.apps,
+            diskPath: skill.disk_path,
           })),
         );
         logger.info('Skill commands registered', {

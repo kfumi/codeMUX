@@ -18,6 +18,16 @@ export interface ContentBlock {
   input?: Record<string, unknown>;
 }
 
+/** Locator for mapping visible UI user messages back to provider history rows. */
+export interface AgentUserMessageLocator {
+  providerMessageId?: string;
+  sourceEventIndex?: number;
+  lineIndex?: number;
+  role?: 'user';
+  textFingerprint?: string;
+  turnOrdinal?: number;
+}
+
 /** Parsed assistant message */
 export interface AgentAssistantMessage {
   type: 'assistant';

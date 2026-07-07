@@ -35,7 +35,16 @@ export function computeContextUsageFromEvents(
 
     if (usedTokens === 0 && event.kind === 'assistant') {
       const data: any = event.data;
-      const usage = data?.last_token_usage || data?.message?.usage || data?.usage;
+      const msg = data?.message;
+      // Skip thinking-only messages from Claude extended thinking — the SDK emits
+      // two assistant messages (thinking + text) that share the same input_tokens.
+      // The thinking-only message has a thinking content block but no stop_reason
+      // and output_tokens=0; summing both would double-count input/cache tokens.
+      // Only skip when there's a thinking block AND no stop_reason (not a Codex msg).
+      if (msg && !msg.stop_reason && hasThinkingContentOnly(msg.content)) {
+        continue;
+      }
+      const usage = data?.last_token_usage || msg?.usage || data?.usage;
       const tokenUsage = readTokenUsage(usage);
 
       if (tokenUsage && tokenUsage.total > 0) {
@@ -97,6 +106,13 @@ function readTokenUsage(usage: any): { input: number; cached: number; output: nu
 
 function readNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function hasThinkingContentOnly(content: unknown): boolean {
+  if (!Array.isArray(content) || content.length === 0) return false;
+  return content.every(
+    (block: any) => block?.type === 'thinking',
+  );
 }
 
 function getSessionContextLimit({

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { registerSkillCommands } from '../../../lib/slashCommands';
 import { usePreviewStore } from '../../../stores/previewStore';
-import { TooltipProvider } from '@/components/ui/tooltip';
+import { TooltipProvider } from '../../ui/tooltip';
 import { CodeMuxComposer, findLatestPendingProposedPlan } from './CodeMuxComposer';
 
 let composerText = '';
@@ -119,7 +119,7 @@ vi.mock('@assistant-ui/react-lexical', () => ({
         {Chip ? (
           <>
             <Chip directiveId="src/App.tsx" directiveType="file" label="App.tsx" />
-            <Chip directiveId="review" directiveType="command" label="/review" />
+            <Chip directiveId="review" directiveType="command" label="review" />
           </>
         ) : null}
       </div>
@@ -216,7 +216,7 @@ describe('CodeMuxComposer', () => {
   it('renders slash command chips with the command directive treatment', () => {
     render(<CodeMuxComposer sessionId="session-1" />);
 
-    const chip = screen.getByText('/review').closest('[data-directive-type="command"]');
+    const chip = screen.getByText('review').closest('[data-directive-type="command"]');
 
     expect(chip).toBeTruthy();
     expect(chip?.className).toContain('codemux-directive-command');
@@ -277,10 +277,32 @@ describe('CodeMuxComposer', () => {
     const segments = lexicalProps[0]?.formatter?.parse('/review @src/App.tsx plain') ?? [];
 
     expect(segments).toEqual([
-      { kind: 'mention', type: 'command', label: '/review', id: 'review' },
+      { kind: 'mention', type: 'command', label: 'review', id: 'review' },
       { kind: 'text', text: ' ' },
       { kind: 'mention', type: 'file', label: 'App.tsx', id: 'src/App.tsx' },
       { kind: 'text', text: ' plain' },
+    ]);
+  });
+
+  it('parses chip-format commands as command directive chips', () => {
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    const segments = lexicalProps[0]?.formatter?.parse('[$review](review) args') ?? [];
+
+    expect(segments).toEqual([
+      { kind: 'mention', type: 'command', label: 'review', id: 'review' },
+      { kind: 'text', text: ' args' },
+    ]);
+  });
+
+  it('parses chip-format skill commands as command directive chips', () => {
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    const segments = lexicalProps[0]?.formatter?.parse('[$skill-installer](C:\\skills\\SKILL.md) install') ?? [];
+
+    expect(segments).toEqual([
+      { kind: 'mention', type: 'command', label: 'skill-installer', id: 'skill-installer' },
+      { kind: 'text', text: ' install' },
     ]);
   });
 
@@ -290,7 +312,7 @@ describe('CodeMuxComposer', () => {
     const segments = lexicalProps[0]?.formatter?.parse('/superpowers:brainstorming 测试') ?? [];
 
     expect(segments).toEqual([
-      { kind: 'mention', type: 'command', label: '/superpowers:brainstorming', id: 'superpowers:brainstorming' },
+      { kind: 'mention', type: 'command', label: 'superpowers:brainstorming', id: 'superpowers:brainstorming' },
       { kind: 'text', text: ' 测试' },
     ]);
   });
@@ -305,27 +327,35 @@ describe('CodeMuxComposer', () => {
     expect(segments).toEqual([{ kind: 'text', text }]);
   });
 
-  it('opens slash suggestions for a trigger before existing text', () => {
-    composerText = '/rev 已有文本';
+  it('opens slash suggestions for a trigger at the cursor', () => {
+    composerText = '/rev';
 
     render(<CodeMuxComposer sessionId="session-1" />);
 
     expect(document.querySelector('[data-command-id="review"]')).toBeTruthy();
   });
 
-  it('closes slash suggestions after selecting a command before existing text', () => {
+  it('does not open slash suggestions when cursor is away from trigger', () => {
     composerText = '/rev 已有文本';
+
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    expect(document.querySelector('[data-command-id]')).toBeNull();
+  });
+
+  it('closes slash suggestions after selecting a command', () => {
+    composerText = '/rev';
 
     render(<CodeMuxComposer sessionId="session-1" />);
 
     fireEvent.click(document.querySelector('[data-command-id="review"]') as Element);
 
-    expect(setComposerTextMock).toHaveBeenCalledWith('/review 已有文本');
+    expect(setComposerTextMock).toHaveBeenCalledWith('[$review](review) ');
     expect(document.querySelector('[data-command-id="review"]')).toBeNull();
   });
 
   it('closes file suggestions after selecting a file reference', () => {
-    composerText = '@Ap 已有文本';
+    composerText = '@Ap';
     usePreviewStore.setState({
       treeRoot: [{ name: 'App.tsx', path: 'D:/project/codeMUX/src/App.tsx', isDir: false }],
     });
@@ -334,7 +364,7 @@ describe('CodeMuxComposer', () => {
 
     fireEvent.click(document.querySelector('[data-file-id="App.tsx"]') as Element);
 
-    expect(setComposerTextMock).toHaveBeenCalledWith('@App.tsx 已有文本');
+    expect(setComposerTextMock).toHaveBeenCalledWith('[App.tsx](App.tsx) ');
     expect(document.querySelector('[data-file-id="App.tsx"]')).toBeNull();
   });
 
@@ -390,7 +420,7 @@ describe('CodeMuxComposer', () => {
   });
 
   it('selects a suggestion with Enter without bubbling the key event to submit handlers', () => {
-    composerText = '/rev 已有文本';
+    composerText = '/rev';
     const bubbleSpy = vi.fn();
 
     render(
@@ -401,7 +431,7 @@ describe('CodeMuxComposer', () => {
 
     fireEvent.keyDown(screen.getByTestId('lexical-composer-input'), { key: 'Enter' });
 
-    expect(setComposerTextMock).toHaveBeenCalledWith('/review 已有文本');
+    expect(setComposerTextMock).toHaveBeenCalledWith('[$review](review) ');
     expect(bubbleSpy).not.toHaveBeenCalled();
   });
 

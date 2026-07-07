@@ -24,6 +24,7 @@ describe('parseSdkUserMessage', () => {
     expect(
       parseSdkUserMessage({
         type: 'user',
+        uuid: 'claude-user-1',
         message: {
           role: 'user',
           content: [
@@ -37,7 +38,14 @@ describe('parseSdkUserMessage', () => {
       }),
     ).toEqual({
       kind: 'user',
-      data: { content: 'stop here' },
+      data: {
+        content: 'stop here',
+        locator: {
+          providerMessageId: 'claude-user-1',
+          role: 'user',
+          textFingerprint: 'stop here',
+        },
+      },
     });
   });
 
@@ -125,6 +133,31 @@ describe('parseSdkUserMessage', () => {
 });
 
 describe('mapPersistedClaudeMessage', () => {
+  it('keeps persisted user message locator with line index', () => {
+    expect(
+      mapPersistedClaudeMessage({
+        type: 'user',
+        uuid: 'history-user-1',
+        __lineIndex: 12,
+        message: {
+          role: 'user',
+          content: 'restore this turn',
+        },
+      }),
+    ).toEqual({
+      kind: 'user',
+      data: {
+        content: 'restore this turn',
+        locator: {
+          providerMessageId: 'history-user-1',
+          lineIndex: 12,
+          role: 'user',
+          textFingerprint: 'restore this turn',
+        },
+      },
+    });
+  });
+
   it('suppresses Codex injected AGENTS instructions from user-visible history', () => {
     expect(
       mapPersistedClaudeMessage(
@@ -352,7 +385,8 @@ describe('mapPersistedClaudeMessage', () => {
     });
   });
 
-  it('strips Claude CLI command XML tags and extracts the command name', () => {
+  it('converts Claude CLI command XML echo to slash command display', () => {
+    const xml = '<command-message>code-review</command-message>\n<command-name>/code-review</command-name>';
     const event = mapPersistedClaudeMessage(
       {
         type: 'user',
@@ -361,7 +395,7 @@ describe('mapPersistedClaudeMessage', () => {
           content: [
             {
               type: 'text',
-              text: '<command-message>code-review</command-message>\n<command-name>/code-review</command-name>',
+              text: xml,
             },
           ],
         },
@@ -376,7 +410,12 @@ describe('mapPersistedClaudeMessage', () => {
     });
   });
 
-  it('extracts command names from Claude command XML regardless of tag order', () => {
+  it('converts Claude command XML to slash command regardless of tag order', () => {
+    const xml = [
+      '<command-name>/compact</command-name>',
+      '<command-message>compact</command-message>',
+      '<command-args></command-args>',
+    ].join('\n');
     const event = mapPersistedClaudeMessage(
       {
         type: 'user',
@@ -385,11 +424,7 @@ describe('mapPersistedClaudeMessage', () => {
           content: [
             {
               type: 'text',
-              text: [
-                '<command-name>/compact</command-name>',
-                '<command-message>compact</command-message>',
-                '<command-args></command-args>',
-              ].join('\n'),
+              text: xml,
             },
           ],
         },
@@ -404,7 +439,12 @@ describe('mapPersistedClaudeMessage', () => {
     });
   });
 
-  it('keeps Claude command arguments visible with the command name', () => {
+  it('converts Claude command XML with arguments to slash command display', () => {
+    const xml = [
+      '<command-message>superpowers:executing-plans</command-message>',
+      '<command-name>/superpowers:executing-plans</command-name>',
+      '<command-args>我已经使用superpowers生成设计文档和实现计划文档，现在请你基于superpowers的TDD按照文档帮我实现需求并完成好测试。</command-args>',
+    ].join('\n');
     const event = mapPersistedClaudeMessage(
       {
         type: 'user',
@@ -413,11 +453,7 @@ describe('mapPersistedClaudeMessage', () => {
           content: [
             {
               type: 'text',
-              text: [
-                '<command-message>superpowers:executing-plans</command-message>',
-                '<command-name>/superpowers:executing-plans</command-name>',
-                '<command-args>我已经使用superpowers生成设计文档和实现计划文档，现在请你基于superpowers的TDD按照文档帮我实现需求并完成好测试。</command-args>',
-              ].join('\n'),
+              text: xml,
             },
           ],
         },
@@ -428,29 +464,22 @@ describe('mapPersistedClaudeMessage', () => {
 
     expect(event).toEqual({
       kind: 'user',
-      data: {
-        content:
-          '/superpowers:executing-plans 我已经使用superpowers生成设计文档和实现计划文档，现在请你基于superpowers的TDD按照文档帮我实现需求并完成好测试。',
-      },
+      data: { content: '/superpowers:executing-plans 我已经使用superpowers生成设计文档和实现计划文档，现在请你基于superpowers的TDD按照文档帮我实现需求并完成好测试。' },
     });
   });
 
-  it('normalizes live Claude command XML user events to command display text', () => {
+  it('filters live Claude command XML echo since the local display message is already stored', () => {
+    const xml = [
+      '<command-name>/compact</command-name>',
+      '<command-message>compact</command-message>',
+      '<command-args></command-args>',
+    ].join('\n');
     const event = normalizeClaudeUserEvent({
       kind: 'user',
-      data: {
-        content: [
-          '<command-name>/compact</command-name>',
-          '<command-message>compact</command-message>',
-          '<command-args></command-args>',
-        ].join('\n'),
-      },
+      data: { content: xml },
     });
 
-    expect(event).toEqual({
-      kind: 'user',
-      data: { content: '/compact' },
-    });
+    expect(event).toBeNull();
   });
 
   it('skips persisted Claude compact summary transcript-only messages', () => {
@@ -544,7 +573,8 @@ describe('mapPersistedClaudeMessage', () => {
     });
   });
 
-  it('strips Claude CLI command XML tags but keeps surrounding text', () => {
+  it('preserves Claude CLI command XML tags with surrounding text for rendering', () => {
+    const xml = '<command-message>code-review</command-message>\n<command-name>/code-review</command-name>';
     const event = mapPersistedClaudeMessage(
       {
         type: 'user',
@@ -553,7 +583,7 @@ describe('mapPersistedClaudeMessage', () => {
           content: [
             {
               type: 'text',
-              text: 'Please review this\n<command-message>code-review</command-message>\n<command-name>/code-review</command-name>',
+              text: `Please review this\n${xml}`,
             },
           ],
         },
@@ -564,7 +594,7 @@ describe('mapPersistedClaudeMessage', () => {
 
     expect(event).toEqual({
       kind: 'user',
-      data: { content: 'Please review this' },
+      data: { content: `Please review this\n${xml}` },
     });
   });
 

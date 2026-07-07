@@ -35,6 +35,7 @@ import {
   normalizeAgentInputPayload,
   type AgentInputPayload,
 } from './agentInputPayload.js';
+import { shouldCaptureClaudeSessionMapping } from './claudeSessionMapping.js';
 
 // Suppress unhandled abort rejections from child process termination during interrupt.
 // These are expected when the user cancels a running Codex turn.
@@ -722,7 +723,7 @@ export class SessionRuntime {
           process.stderr.write(`[sidecar]   -> assistant usage: ${JSON.stringify(usage || 'NONE')}\n`);
         }
 
-        if (typeof appSessionId === 'string') {
+        if (typeof appSessionId === 'string' && shouldCaptureClaudeSessionMapping(msg)) {
           const sdkSessionId = typeof msg.session_id === 'string' ? String(msg.session_id) : undefined;
           if (sdkSessionId && this.config?.agentSessionId !== sdkSessionId) {
             if (this.config) {

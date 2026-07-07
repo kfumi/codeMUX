@@ -315,17 +315,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
     if (command.handler === 'prompt' && command.prompt) {
       const displayContent = formatCommandDisplay(command, args);
-      if (agentKind === 'codex' && command.name === 'plan') {
-        await updateSessionPermissions(sessionId, permissionConfig, 'on');
-        if (!args) {
-          return;
-        }
-      }
-
       const prompt = renderCommandPrompt(command, args);
       await handleSend({ text: prompt }, displayContent);
     }
-  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, agentKind, handleSend, permissionConfig, updateSessionPermissions]);
+  }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, agentKind, handleSend]);
 
   return (
     <div ref={containerRef} className="flex h-full flex-col">

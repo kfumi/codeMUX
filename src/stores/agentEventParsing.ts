@@ -2,6 +2,7 @@ import type {
   AgentAssistantMessage,
   AgentResultMessage,
   AgentToolResult,
+  AgentUserMessageLocator,
 } from '../types/agent';
 import type { AgentKind } from '../types/session';
 import { formatPromptAsCommandDisplay } from '../lib/slashCommands';
@@ -12,7 +13,7 @@ export const INTERRUPT_MARKER = '[Request interrupted by user]';
 const CODEX_COLLABORATION_POLICY_RE = /<codemux-codex-collaboration-policy>[\s\S]*?<\/codemux-codex-collaboration-policy>\s*/g;
 
 export type ParsedStoreEvent =
-  | { kind: 'user'; data: { content: string; attachments?: UserAttachmentPreview[] } }
+  | { kind: 'user'; data: { content: string; attachments?: UserAttachmentPreview[]; locator?: AgentUserMessageLocator } }
   | { kind: 'assistant'; data: AgentAssistantMessage }
   | { kind: 'tool_result'; data: AgentToolResult }
   | { kind: 'result'; data: AgentResultMessage }
@@ -53,9 +54,13 @@ export function parseSdkUserMessage(data: Record<string, unknown>): ParsedStoreE
   }
 
   if (typeof message?.content === 'string') {
+    const contentText = stripCodexCollaborationPolicyBlock(message.content);
     return {
       kind: 'user',
-      data: { content: stripCodexCollaborationPolicyBlock(message.content) },
+      data: {
+        content: contentText,
+        ...buildUserLocator(data, contentText),
+      },
     };
   }
 
@@ -70,8 +75,43 @@ export function parseSdkUserMessage(data: Record<string, unknown>): ParsedStoreE
     data: {
       content: textParts.join('\n'),
       ...(attachments.length > 0 ? { attachments } : {}),
+      ...buildUserLocator(data, textParts.join('\n')),
     },
   };
+}
+
+function buildUserLocator(raw: Record<string, unknown>, text: string): { locator?: AgentUserMessageLocator } {
+  const providerMessageId = [
+    raw.uuid,
+    raw.id,
+    raw.message_id,
+    raw.messageId,
+  ]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .find((value) => value.length > 0);
+
+  const lineIndex = readNumber(raw.__lineIndex) ?? readNumber(raw.lineIndex);
+  const sourceEventIndex = readNumber(raw.sourceEventIndex);
+  const turnOrdinal = readNumber(raw.turnOrdinal);
+
+  if (!providerMessageId && lineIndex === undefined && sourceEventIndex === undefined && turnOrdinal === undefined) {
+    return {};
+  }
+
+  return {
+    locator: {
+      ...(providerMessageId ? { providerMessageId } : {}),
+      ...(lineIndex !== undefined ? { lineIndex } : {}),
+      ...(sourceEventIndex !== undefined ? { sourceEventIndex } : {}),
+      role: 'user',
+      textFingerprint: fingerprintUserText(text),
+      ...(turnOrdinal !== undefined ? { turnOrdinal } : {}),
+    },
+  };
+}
+
+function fingerprintUserText(text: string): string {
+  return text.split(/\s+/).filter(Boolean).join(' ');
 }
 
 function extractImageAttachments(content: unknown[]): UserAttachmentPreview[] {
@@ -142,8 +182,7 @@ export function isAgentInjectedUserMessage(text: string): boolean {
     ) ||
     // Skill base directory injection
     (
-      normalized.startsWith('Base directory for this skill: ') &&
-      normalized.includes('<SUBAGENT-STOP>')
+      normalized.startsWith('Base directory for this skill: ')
     )
   );
 }
@@ -185,42 +224,58 @@ export function isClaudeTaskNotificationUserEvent(data: Record<string, unknown>)
   );
 }
 
-const CLAUDE_COMMAND_NAME_RE = /<command-name>\s*([\s\S]*?)\s*<\/command-name>/;
-const CLAUDE_COMMAND_ARGS_RE = /<command-args>\s*([\s\S]*?)\s*<\/command-args>/;
-const CLAUDE_COMMAND_TAGS_RE = /<command-(?:message|name|args)>[\s\S]*?<\/command-(?:message|name|args)>/g;
 const CLAUDE_LOCAL_COMPACT_STDOUT_RE = /^\s*<local-command-stdout>\s*Compacted\s*<\/local-command-stdout>\s*$/;
 const CLAUDE_COMPACT_SUMMARY_PREFIX = 'This session is being continued from a previous conversation that ran out of context.';
 const CODEX_COMPACT_SUMMARY_PREFIX = 'Another language model started to solve this problem and produced a summary';
 
 /**
- * Strip Claude CLI's internal XML command tags from persisted user messages.
- * When the content is purely command tags, returns the command name (e.g. "/code-review").
- * When there is additional text alongside the tags, strips the tags and returns the rest.
+ * Detects whether content is a pure Claude CLI command XML echo
+ * (e.g. `<command-message>...</command-name>...`). Only matches when the
+ * entire trimmed content is the XML block — not when XML is embedded in
+ * surrounding text.
  */
-function stripClaudeCommandTags(content: string): string {
-  const match = content.match(CLAUDE_COMMAND_NAME_RE);
-  if (!match) return content;
-
-  const commandName = match[1]?.trim();
-  const commandArgs = content.match(CLAUDE_COMMAND_ARGS_RE)?.[1]?.trim();
-  const withoutTags = content.replace(CLAUDE_COMMAND_TAGS_RE, '').trim();
-
-  if (!withoutTags && commandName && commandArgs) {
-    return `${commandName} ${commandArgs}`;
+export function isClaudeCommandXmlEcho(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('<command-message>') && !trimmed.startsWith('<command-name>')) {
+    return false;
   }
+  const endsWithTag =
+    trimmed.endsWith('</command-args>') ||
+    trimmed.endsWith('</command-name>') ||
+    trimmed.endsWith('</command-message>');
+  return endsWithTag && trimmed.includes('<command-name>');
+}
 
-  // Content is purely command tags — use the command name as display text
-  if (!withoutTags && commandName) return commandName;
-
-  // Mixed content — strip tags, keep the rest
-  return withoutTags || content;
+/**
+ * Converts a pure Claude CLI command XML echo into `/command args` display
+ * form so it can be rendered as a chip and edited in the composer on rewind.
+ * Returns null if the content is not a pure command XML echo.
+ */
+export function convertClaudeCommandXmlToDisplay(content: string): string | null {
+  const trimmed = content.trim();
+  if (!isClaudeCommandXmlEcho(trimmed)) {
+    return null;
+  }
+  const nameMatch = /<command-name>\s*([\s\S]*?)\s*<\/command-name>/.exec(trimmed);
+  if (!nameMatch) {
+    return null;
+  }
+  const argsMatch = /<command-args>\s*([\s\S]*?)\s*<\/command-args>/.exec(trimmed);
+  const commandName = nameMatch[1].trim().replace(/^\//, '');
+  const commandArgs = argsMatch?.[1]?.trim() || '';
+  return `/${commandName}${commandArgs ? ` ${commandArgs}` : ''}`;
 }
 
 export function normalizeClaudeUserEvent(
   event: Extract<ParsedStoreEvent, { kind: 'user' }>,
 ): Extract<ParsedStoreEvent, { kind: 'user' }> | null {
-  const content = stripClaudeCommandTags(event.data.content);
+  const content = event.data.content;
   if (isClaudeLocalCompactStdout(content)) {
+    return null;
+  }
+  // Filter out Claude CLI's XML command echo — the local display message
+  // (added by startQuery) is already in the store, so the echo is redundant.
+  if (isClaudeCommandXmlEcho(content)) {
     return null;
   }
 
@@ -387,6 +442,17 @@ export function mapPersistedClaudeMessage(
 
     if (event.kind !== 'user') {
       return event;
+    }
+
+    // For persisted Claude Code messages, convert the CLI's XML command echo
+    // into `/command args` display form. This runs before normalizeClaudeUserEvent
+    // (which would filter the XML out) because persisted history has no local
+    // display message — the XML echo is the only record of the command.
+    if (agentKind === 'claude_code') {
+      const converted = convertClaudeCommandXmlToDisplay(event.data.content);
+      if (converted !== null) {
+        return { ...event, data: { ...event.data, content: converted } };
+      }
     }
 
     // Strip Claude CLI's internal XML command tags from persisted messages

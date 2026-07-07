@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 const ANIMATION_DURATION = 200;
 const ReasoningOpenContext = createContext(false);
 
-function formatCompactTokens(value: number): string {
+export function formatCompactTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m tokens`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k tokens`;
   return `${value} tokens`;
@@ -120,7 +120,7 @@ function ReasoningTrigger({
 }) {
   const durationText = duration != null ? ` (${duration}s)` : '';
   const tokenText = tokenCount != null && tokenCount > 0 ? ` · ${formatCompactTokens(tokenCount)}` : '';
-  const label = `深度思考${durationText}${tokenText}`;
+  const label = `思考${durationText}${tokenText}`;
 
   return (
     <CollapsibleTrigger

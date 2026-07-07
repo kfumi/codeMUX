@@ -6,7 +6,7 @@ use std::collections::HashMap;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tauri::State;
 
 /// Empty tree hash — the tree object git uses for a repo with zero commits.
@@ -93,11 +93,8 @@ fn run_git_with_env(
     }
 }
 
-fn ensure_git_repo(root: &Path) -> Result<(), String> {
-    if run_git(root, &["rev-parse", "--is-inside-work-tree"]).is_ok() {
-        return Ok(());
-    }
-    run_git(root, &["init"]).map(|_| ())
+fn is_inside_git_repo(root: &Path) -> bool {
+    run_git(root, &["rev-parse", "--is-inside-work-tree"]).is_ok()
 }
 
 fn temp_index_path() -> PathBuf {
@@ -201,10 +198,30 @@ fn count_file_lines(path: &Path) -> usize {
         .unwrap_or(0)
 }
 
-fn git_head_tree(root: &Path) -> Result<String, String> {
-    match run_git(root, &["rev-parse", "HEAD^{tree}"]) {
-        Ok(output) => Ok(String::from_utf8_lossy(&output).trim().to_string()),
-        Err(_) => Ok(EMPTY_TREE_HASH.to_string()),
+fn git_head_tree(root: &Path) -> Result<Option<String>, String> {
+    match run_git(root, &["rev-parse", "--verify", "HEAD^{tree}"]) {
+        Ok(output) => Ok(Some(String::from_utf8_lossy(&output).trim().to_string())),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Ensures the empty tree object exists in the object database and returns its hash.
+/// In repos with no commits, the well-known empty tree hash may not exist as a loose
+/// object, causing `git diff --cached <hash>` to fail. `git mktree` with empty input
+/// creates the object.
+fn ensure_empty_tree_object(root: &Path) -> Result<String, String> {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(root).arg("mktree");
+    command.stdin(Stdio::null());
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000);
+    let output = command
+        .output()
+        .map_err(|e| format!("Failed to execute git: {}", e))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Ok(EMPTY_TREE_HASH.to_string())
     }
 }
 
@@ -264,11 +281,17 @@ fn read_worktree_file(root: &Path, relative_path: &str) -> Option<String> {
 fn git_numstat_map(
     root: &Path,
     area: GitStatusArea,
-    head_tree: &str,
+    head_tree: Option<&str>,
 ) -> Result<HashMap<String, (usize, usize)>, String> {
     let args: Vec<&str> = match area {
         GitStatusArea::Unstaged => vec!["diff", "--numstat", "--no-renames"],
-        GitStatusArea::Staged => vec!["diff", "--cached", "--numstat", "--no-renames", head_tree],
+        GitStatusArea::Staged => {
+            let mut base = vec!["diff", "--cached", "--numstat", "--no-renames"];
+            if let Some(tree) = head_tree {
+                base.push(tree);
+            }
+            base
+        }
     };
     let output = run_git(root, &args)?;
     let text = String::from_utf8_lossy(&output);
@@ -296,22 +319,24 @@ pub fn read_git_status_changes(
     let root = project_path
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
-    ensure_git_repo(&root)?;
+    if !is_inside_git_repo(&root) {
+        return Err("当前项目不是 Git 仓库".to_string());
+    }
 
     let head_tree = git_head_tree(&root)?;
     let args: Vec<&str> = match area {
         GitStatusArea::Unstaged => vec!["diff", "--name-status", "--no-renames"],
-        GitStatusArea::Staged => vec![
-            "diff",
-            "--cached",
-            "--name-status",
-            "--no-renames",
-            &head_tree,
-        ],
+        GitStatusArea::Staged => {
+            let mut base = vec!["diff", "--cached", "--name-status", "--no-renames"];
+            if let Some(tree) = &head_tree {
+                base.push(tree.as_str());
+            }
+            base
+        }
     };
     let diff_output = run_git(&root, &args)?;
     let diff_text = String::from_utf8_lossy(&diff_output);
-    let numstat = git_numstat_map(&root, area, &head_tree)?;
+    let numstat = git_numstat_map(&root, area, head_tree.as_deref())?;
     let mut changes = Vec::new();
 
     for line in diff_text.lines() {
@@ -368,7 +393,9 @@ pub fn read_git_status_change_detail(
     let root = project_path
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
-    ensure_git_repo(&root)?;
+    if !is_inside_git_repo(&root) {
+        return Err("当前项目不是 Git 仓库".to_string());
+    }
 
     let relative_path = path_to_repo_relative(&root, file_path);
     let summary = read_git_status_changes(&root, area)?
@@ -380,7 +407,10 @@ pub fn read_git_status_change_detail(
     let original = match area {
         GitStatusArea::Staged => {
             if summary.status != "added" {
-                read_tree_file(&root, &head_tree, &relative_path)?
+                match &head_tree {
+                    Some(tree) => read_tree_file(&root, tree, &relative_path)?,
+                    None => None,
+                }
             } else {
                 None
             }
@@ -424,7 +454,9 @@ pub fn stage_git_status_changes_for_paths(
     let root = project_path
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
-    ensure_git_repo(&root)?;
+    if !is_inside_git_repo(&root) {
+        return Err("当前项目不是 Git 仓库".to_string());
+    }
 
     match file_path {
         Some(file_path) => {
@@ -442,15 +474,22 @@ pub fn unstage_git_status_changes_for_paths(
     let root = project_path
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
-    ensure_git_repo(&root)?;
+    if !is_inside_git_repo(&root) {
+        return Err("当前项目不是 Git 仓库".to_string());
+    }
 
     let head_tree = git_head_tree(&root)?;
-    match file_path {
-        Some(file_path) => {
+    match (head_tree.as_deref(), file_path) {
+        (Some(tree), Some(file_path)) => {
             let relative_path = path_to_repo_relative(&root, file_path);
-            run_git(&root, &["reset", "-q", &head_tree, "--", &relative_path]).map(|_| ())
+            run_git(&root, &["reset", "-q", tree, "--", &relative_path]).map(|_| ())
         }
-        None => run_git(&root, &["reset", "-q", &head_tree, "--", "."]).map(|_| ()),
+        (Some(tree), None) => run_git(&root, &["reset", "-q", tree, "--", "."]).map(|_| ()),
+        (None, Some(file_path)) => {
+            let relative_path = path_to_repo_relative(&root, file_path);
+            run_git(&root, &["rm", "--cached", "-q", "--", &relative_path]).map(|_| ())
+        }
+        (None, None) => run_git(&root, &["read-tree", "--empty"]).map(|_| ()),
     }
 }
 
@@ -458,7 +497,9 @@ pub fn read_git_repository_state(project_path: &Path) -> Result<GitRepositorySta
     let root = project_path
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
-    ensure_git_repo(&root)?;
+    if !is_inside_git_repo(&root) {
+        return Err("当前项目不是 Git 仓库".to_string());
+    }
 
     let current_output = run_git(&root, &["branch", "--show-current"])?;
     let current_branch_text = String::from_utf8_lossy(&current_output).trim().to_string();
@@ -503,7 +544,9 @@ pub fn create_git_branch_in_project(
     let root = project_path
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
-    ensure_git_repo(&root)?;
+    if !is_inside_git_repo(&root) {
+        return Err("当前项目不是 Git 仓库".to_string());
+    }
     let branch_name = validate_branch_name(&root, branch_name)?;
     run_git(&root, &["branch", &branch_name])?;
     if checkout {
@@ -519,7 +562,9 @@ pub fn checkout_git_branch_in_project(
     let root = project_path
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
-    ensure_git_repo(&root)?;
+    if !is_inside_git_repo(&root) {
+        return Err("当前项目不是 Git 仓库".to_string());
+    }
     let branch_name = validate_branch_name(&root, branch_name)?;
     if has_uncommitted_changes(&root)? {
         return Err("请先提交或还原当前修改，再切换分支".to_string());
@@ -561,7 +606,9 @@ pub fn revert_git_status_changes_in_project(
     let root = project_path
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
-    ensure_git_repo(&root)?;
+    if !is_inside_git_repo(&root) {
+        return Err("当前项目不是 Git 仓库".to_string());
+    }
 
     match (area, file_path) {
         (GitStatusArea::Unstaged, Some(file_path)) => {
@@ -593,7 +640,9 @@ pub fn commit_git_changes_in_project(project_path: &Path, message: &str) -> Resu
     let root = project_path
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
-    ensure_git_repo(&root)?;
+    if !is_inside_git_repo(&root) {
+        return Err("当前项目不是 Git 仓库".to_string());
+    }
     let message = message.trim();
     if message.is_empty() {
         return Err("提交信息不能为空".to_string());
@@ -610,7 +659,9 @@ pub fn push_git_branch_in_project(project_path: &Path) -> Result<(), String> {
     let root = project_path
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
-    ensure_git_repo(&root)?;
+    if !is_inside_git_repo(&root) {
+        return Err("当前项目不是 Git 仓库".to_string());
+    }
 
     let current_output = run_git(&root, &["branch", "--show-current"])?;
     let current_branch = String::from_utf8_lossy(&current_output).trim().to_string();
@@ -663,7 +714,9 @@ pub fn build_commit_message_prompt_in_project(project_path: &Path) -> Result<Str
     let root = project_path
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
-    ensure_git_repo(&root)?;
+    if !is_inside_git_repo(&root) {
+        return Err("当前项目不是 Git 仓库".to_string());
+    }
     if run_git(&root, &["diff", "--cached", "--quiet"]).is_ok() {
         return Err("没有已暂存修改可生成提交信息".to_string());
     }
@@ -949,7 +1002,9 @@ pub fn read_git_changed_files_for_tree(
     let root = project_path
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
-    ensure_git_repo(&root)?;
+    if !is_inside_git_repo(&root) {
+        return Ok(Vec::new());
+    }
 
     let index_file = temp_index_path();
     if let Err(err) = run_git_with_env(&root, &["read-tree", baseline_tree], Some(&index_file)) {
@@ -1046,10 +1101,15 @@ pub fn get_git_changed_files_since_head(
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
 
-    // Get the HEAD tree hash; fall back to empty tree for repos with no commits
-    let head_tree = match run_git(&root, &["rev-parse", "HEAD^{tree}"]) {
-        Ok(output) => String::from_utf8_lossy(&output).trim().to_string(),
-        Err(_) => EMPTY_TREE_HASH.to_string(),
+    if !is_inside_git_repo(&root) {
+        return Ok(Vec::new());
+    }
+
+    // Get the HEAD tree hash; for repos with no commits, ensure the empty tree
+    // object exists so that `git diff --cached <tree>` succeeds.
+    let head_tree = match git_head_tree(&root)? {
+        Some(tree) => tree,
+        None => ensure_empty_tree_object(&root)?,
     };
 
     read_git_changed_files_for_tree(&root, &head_tree)

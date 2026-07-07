@@ -17,7 +17,7 @@ import {
 type CodeMuxAssistantRuntimeProviderProps = {
   sessionId: string;
   agentKind?: AgentKind;
-  onSend: (content: AgentInputPayload) => Promise<void>;
+  onSend: (content: AgentInputPayload, displayContent?: string) => Promise<void>;
   onCommand: (command: SlashCommand, args: string) => void | Promise<void>;
   children: ReactNode;
 };
@@ -75,9 +75,24 @@ function SessionScopedAssistantRuntime({
         return;
       }
 
-      const slashCommand = (payload.images?.length ?? 0) === 0
-        ? resolveSlashCommand(payload.text, agentKind)
-        : null;
+      const hasImages = (payload.images?.length ?? 0) > 0;
+      const chipCommand = hasImages ? null : resolveChipCommand(payload.text, agentKind);
+
+      if (chipCommand) {
+        if (agentKind === 'claude_code') {
+          await onCommand(chipCommand.command, chipCommand.args);
+          return;
+        }
+        if (chipCommand.command.name === 'init') {
+          const initPrompt = chipCommand.command.prompt || '';
+          await onSend({ text: initPrompt }, payload.text);
+          return;
+        }
+        await onSend(payload);
+        return;
+      }
+
+      const slashCommand = hasImages ? null : resolveSlashCommand(payload.text, agentKind);
       if (slashCommand) {
         await onCommand(slashCommand.command, slashCommand.args);
         return;
@@ -85,7 +100,7 @@ function SessionScopedAssistantRuntime({
 
       await onSend(payload);
     },
-    [onCommand, onSend],
+    [onCommand, onSend, agentKind],
   );
 
   const handleNew = useCallback(
@@ -249,4 +264,18 @@ export function resolveSlashCommand(content: string, agentKind: AgentKind = 'cla
   return command
     ? { command, args: firstSpaceIndex === -1 ? '' : content.slice(firstSpaceIndex + 1).trim() }
     : null;
+}
+
+const CHIP_COMMAND_RE = /^\[\$([^\]]+)\]\([^)]+\)\s*([\s\S]*)$/;
+
+export function resolveChipCommand(
+  content: string,
+  agentKind: AgentKind = 'claude_code',
+): { command: SlashCommand; args: string } | null {
+  const match = CHIP_COMMAND_RE.exec(content.trim());
+  if (!match) return null;
+  const [, name, rest] = match;
+  const args = rest.trim();
+  const command = findCommand(name, agentKind);
+  return command ? { command, args } : null;
 }

@@ -35,6 +35,8 @@ export interface SlashCommand {
   action?: (ctx: CommandContext, args: string) => void | Promise<void>;
   /** 发送给 agent 的 prompt 模板，{args} 会被替换为用户输入的参数 */
   prompt?: string;
+  /** Skill 命令对应的 SKILL.md 文件绝对路径 (仅 skill 类别) */
+  filePath?: string;
 }
 
 export function renderCommandPrompt(command: SlashCommand, args: string): string {
@@ -64,19 +66,10 @@ export function formatPromptAsCommandDisplay(prompt: string, agentKind: AgentKin
     return formatCommandDisplay(command, args);
   }
 
-  if (
-    agentKind === 'codex' &&
-    normalizedPrompt.startsWith('## Code review guidelines:') &&
-    normalizedPrompt.includes('Review the current code changes')
-  ) {
-    return '/review';
-  }
-
   return null;
 }
 
 const codexPromptTemplates = {
-  plan: '$plan {args}',
   init: `Generate a file named AGENTS.md that serves as a contributor guide for this repository.
 Your goal is to produce a clear, concise, and well-structured document with descriptive headings and actionable explanations for each section.
 Follow the outline below, but adapt as needed — add sections if relevant, and omit those that do not apply to this project.
@@ -119,37 +112,6 @@ Commit & Pull Request Guidelines
 (Optional) Add other sections if relevant, such as Security & Configuration Tips, Architecture Overview, or Agent-Specific Instructions.
 
 `,
-  review: `## Code review guidelines:
-# Review Guidelines
-
-You are acting as a reviewer for a proposed code change made by another engineer.
-
-Review the change and respond in normal Markdown. Do not return JSON, XML, a findings object, or any structured review schema.
-
-When feedback should be attached directly to a changed line, emit one \`::code-comment{...}\` directive for that issue. The directive creates an inline code comment in the review UI; keep the visible response as normal Markdown. Emit no directives when there are no actionable inline comments.
-
-Required \`code-comment\` attributes: \`title\`, \`body\`, and \`file\`. Optional attributes: \`start\`, \`end\`, and \`priority\`. Use the shortest useful line range. \`file\` should be an absolute path or include the workspace folder segment.
-
-Focus on discrete, actionable issues the original author would likely fix if they knew about them. Prefer no issues over speculative or low-signal feedback.
-
-General guidelines for whether to call out an issue:
-
-1. It meaningfully impacts correctness, performance, security, or maintainability.
-2. It is discrete and actionable.
-3. It was introduced by the change under review.
-4. The author would likely fix it once aware.
-5. It does not rely on unstated assumptions about intent.
-6. It identifies the affected behavior clearly rather than speculating broadly.
-
-When you call out an issue, include the relevant file and line or function in prose, explain the scenario where it matters, and keep the explanation concise. Use priority labels such as \`[P1]\` or \`[P2]\` only when helpful to communicate severity.
-
-If there are no actionable issues, say that directly and briefly.
-Review the current code changes (staged, unstaged, and untracked files) and provide concise, actionable feedback in a normal Markdown response.
-
-Additional focus:
-{args}
-## My request for Codex:
-请检查我未提交的更改`,
 } as const;
 
 const sharedCommands: SlashCommand[] = [
@@ -207,15 +169,7 @@ const claudeBuiltInCommands: SlashCommand[] = [
 ];
 
 const codexBuiltInCommands: SlashCommand[] = [
-//   { name: 'permissions', description: '查看或调整 Codex 权限模式', alias: ['权限'], category: 'builtin', handler: 'prompt', prompt: '/permissions' },
-//   { name: 'diff', description: '查看当前工作区改动差异', alias: ['差异'], category: 'builtin', handler: 'prompt', prompt: '/diff' },
-//   { name: 'model', description: '切换 Codex 使用的模型', alias: ['模型'], category: 'builtin', handler: 'prompt', prompt: '/model' },
-  { name: 'plan', description: '进入或退出计划模式', alias: ['计划'], category: 'builtin', handler: 'prompt', prompt: codexPromptTemplates.plan },
   { name: 'init', description: '生成 AGENTS.md 项目指导文件', alias: ['初始化'], category: 'builtin', handler: 'prompt', prompt: codexPromptTemplates.init },
-  { name: 'review', description: '请求 Codex 审查当前改动', alias: ['审查'], category: 'builtin', handler: 'prompt', prompt: codexPromptTemplates.review },
-//   { name: 'status', description: '显示 Codex 会话和工作区状态', alias: ['状态'], category: 'builtin', handler: 'prompt', prompt: '/status' },
-//   { name: 'compact', description: '压缩当前对话上下文', alias: ['压缩'], category: 'builtin', handler: 'prompt', prompt: '/compact' },
-//   { name: 'new', description: '开始新的 Codex 对话', alias: ['新建'], category: 'builtin', handler: 'prompt', prompt: '/new' },
 ];
 
 const customCommands: SlashCommand[] = [];
@@ -245,6 +199,8 @@ interface SkillInfo {
   description: string;
   /** 该 skill 在哪些智能体上启用 */
   apps: SkillApps;
+  /** SKILL.md 文件绝对路径 */
+  diskPath?: string | null;
 }
 
 interface SkillCommandWithApps {
@@ -265,6 +221,7 @@ export function registerSkillCommands(skills: SkillInfo[]): void {
       category: 'skill',
       handler: 'prompt',
       prompt: `/${skill.name} {args}`,
+      filePath: skill.diskPath ?? undefined,
     };
     skillCommandsWithApps.push({ command, apps: skill.apps });
   }

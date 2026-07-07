@@ -73,14 +73,22 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export const CODEMUX_FORMATTER: Unstable_DirectiveFormatter = {
-  serialize: (item) => (item.type === 'file' || item.type === 'directory' ? `@${item.id} ` : `/${item.id} `),
+  serialize: (item) => {
+    if (item.type === 'file' || item.type === 'directory') {
+      const label = getPathLabel(item.id);
+      return `[${label}](${item.id}) `;
+    }
+    const filePath = (item.metadata?.filePath as string) || '';
+    const path = filePath || item.id;
+    return `[$${item.id}](${path}) `;
+  },
   parse: parseComposerDirectives,
 };
 
 const MAX_FILE_RESULTS = 50;
 const EMPTY_EVENTS: AgentMessage[] = [];
 const TRIGGER_RE = /(^|\s)([/@])([^\s]*)(?=\s|$)/g;
-const PARSE_DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w:-]*)(?=\s|$)|(^|\s)(@(?![A-Za-z][A-Za-z0-9+.-]*:\/\/)[^\s]+)/g;
+const PARSE_DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w:-]*)(?=\s|$)|(^|\s)(@(?![A-Za-z][A-Za-z0-9+.-]*:\/\/)[^\s]+)|(^|\s)(\[[^\]]+\]\([^)]+\))/g;
 const logger = createLogger('CodeMuxComposer');
 
 type FileEntry = { name: string; relativePath: string; isDir: boolean };
@@ -166,8 +174,36 @@ export function CodeMuxComposer({
   const [manualTrigger, setManualTrigger] = useState<'/' | '@' | null>(null);
   const [suppressedTrigger, setSuppressedTrigger] = useState<ActiveTrigger | null>(null);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+
+  // Track cursor position by comparing text changes, so trigger detection only
+  // fires for the trigger near the cursor — not stale triggers elsewhere in the text.
+  const prevTextRef = useRef(composerText);
+  const cursorOffsetRef = useRef<number>(composerText.length);
+  if (composerText !== prevTextRef.current) {
+    const prevText = prevTextRef.current;
+    if (prevText.length === 0) {
+      cursorOffsetRef.current = composerText.length;
+    } else {
+      let prefixLen = 0;
+      const minLen = Math.min(prevText.length, composerText.length);
+      while (prefixLen < minLen && prevText[prefixLen] === composerText[prefixLen]) {
+        prefixLen++;
+      }
+      let suffixLen = 0;
+      while (
+        suffixLen < prevText.length - prefixLen &&
+        suffixLen < composerText.length - prefixLen &&
+        prevText[prevText.length - 1 - suffixLen] === composerText[composerText.length - 1 - suffixLen]
+      ) {
+        suffixLen++;
+      }
+      cursorOffsetRef.current = composerText.length - suffixLen;
+    }
+    prevTextRef.current = composerText;
+  }
+
   const activeTrigger = useMemo(() => {
-    const trigger = detectActiveTrigger(composerText);
+    const trigger = detectActiveTrigger(composerText, cursorOffsetRef.current);
     if (!trigger || isSameTrigger(trigger, suppressedTrigger)) {
       return null;
     }
@@ -398,6 +434,7 @@ export function CodeMuxComposer({
             </div>
             {pendingQuestion ? (
               <AskUserQuestionCard
+                key={pendingQuestion.toolUseId}
                 sessionId={sessionId}
                 toolUseId={pendingQuestion.toolUseId}
                 questions={pendingQuestion.questions}
@@ -893,7 +930,8 @@ function getProjectRelativeReference(file: File, projectPath: string | null | un
 
 function appendComposerReference(text: string, reference: string): string {
   const prefix = text.length === 0 || /\s$/.test(text) ? text : `${text} `;
-  return `${prefix}@${reference} `;
+  const label = getPathLabel(reference);
+  return `${prefix}[${label}](${reference}) `;
 }
 
 function normalizeReferencePath(path: string): string {
@@ -1024,17 +1062,23 @@ function groupCommands(commands: SlashCommand[], query: string) {
 
 type ActiveTrigger = { char: '/' | '@'; start: number; query: string };
 
-function detectActiveTrigger(text: string): ActiveTrigger | null {
-  let lastMatch: RegExpExecArray | null = null;
+function detectActiveTrigger(text: string, cursorOffset: number): ActiveTrigger | null {
   for (const m of text.matchAll(TRIGGER_RE)) {
-    lastMatch = m;
+    const start = (m.index ?? 0) + (m[1]?.length ?? 0);
+    const query = m[3] ?? '';
+    // Only consider the trigger if the cursor is within the query range
+    // (after the trigger char, at or before the end of the query).
+    if (cursorOffset < start + 1 || cursorOffset > start + 1 + query.length) {
+      continue;
+    }
+    if (m[2] !== '/' && m[2] !== '@') return null;
+    return {
+      char: m[2],
+      start,
+      query,
+    };
   }
-  if (!lastMatch || (lastMatch[2] !== '/' && lastMatch[2] !== '@')) return null;
-  return {
-    char: lastMatch[2],
-    start: (lastMatch.index ?? 0) + (lastMatch[1]?.length ?? 0),
-    query: lastMatch[3] ?? '',
-  };
+  return null;
 }
 
 function isSameTrigger(a: ActiveTrigger, b: ActiveTrigger | null) {
@@ -1075,8 +1119,8 @@ export function parseComposerDirectives(text: string): Unstable_DirectiveSegment
   let lastIndex = 0;
 
   for (const match of text.matchAll(PARSE_DIRECTIVE_RE)) {
-    const leading = match[1] ?? match[3] ?? '';
-    const raw = match[2] || match[4] || '';
+    const leading = match[1] ?? match[3] ?? match[5] ?? '';
+    const raw = match[2] || match[4] || match[6] || '';
     const start = match.index + leading.length;
     if (start > lastIndex) {
       segments.push({ kind: 'text', text: text.slice(lastIndex, start) });
@@ -1093,17 +1137,38 @@ export function parseComposerDirectives(text: string): Unstable_DirectiveSegment
 }
 
 function toDirectiveMention(raw: string): Unstable_DirectiveSegment {
-  if (raw.startsWith('/')) {
-    return { kind: 'mention', type: 'command', label: raw, id: raw.slice(1) };
+  if (raw.startsWith('[')) {
+    const linkMatch = /^\[([^\]]*)\]\(([^)]*)\)$/.exec(raw);
+    if (linkMatch) {
+      const label = linkMatch[1];
+      const path = linkMatch[2];
+      if (label.startsWith('$')) {
+        return { kind: 'mention', type: 'command', label: label.slice(1), id: label.slice(1) };
+      }
+      return {
+        kind: 'mention',
+        type: path.endsWith('/') ? 'directory' : 'file',
+        label: label || getPathLabel(path),
+        id: path,
+      };
+    }
   }
 
-  const id = raw.slice(1);
-  return {
-    kind: 'mention',
-    type: id.endsWith('/') ? 'directory' : 'file',
-    label: getPathLabel(id),
-    id,
-  };
+  if (raw.startsWith('@')) {
+    const id = raw.slice(1);
+    return {
+      kind: 'mention',
+      type: id.endsWith('/') ? 'directory' : 'file',
+      label: getPathLabel(id),
+      id,
+    };
+  }
+
+  if (raw.startsWith('/')) {
+    return { kind: 'mention', type: 'command', label: raw.slice(1), id: raw.slice(1) };
+  }
+
+  return { kind: 'mention', type: 'file', label: raw, id: raw };
 }
 
 function getPathLabel(path: string) {
@@ -1117,7 +1182,7 @@ function toTriggerItem(command: SlashCommand): Unstable_TriggerItem {
     type: 'command',
     label: `/${command.name}`,
     description: command.description,
-    metadata: { category: command.category, argsHint: command.argsHint ?? '' },
+    metadata: { category: command.category, argsHint: command.argsHint ?? '', filePath: command.filePath ?? '' },
   };
 }
 

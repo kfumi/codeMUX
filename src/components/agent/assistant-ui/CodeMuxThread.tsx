@@ -23,6 +23,7 @@ import {
   ReasoningRoot,
   ReasoningText,
   ReasoningTrigger,
+  formatCompactTokens,
 } from '@/components/assistant-ui/reasoning';
 import { cn } from '../../../lib/utils';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
@@ -36,7 +37,7 @@ import {
 } from './CodeMuxMessageParts';
 import { CodeMuxDirectiveText } from './CodeMuxDirectiveText';
 import { buildAssistantResultTargetMap } from './assistantResultTargets';
-import { RunningElapsedTimer } from './running-elapsed';
+import { RunningElapsedTimer, formatElapsed } from './running-elapsed';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 import { CODEMUX_FORMATTER, DIRECTIVE_CHIP } from './CodeMuxComposer';
 
@@ -73,8 +74,6 @@ const EMPTY_EVENTS: AgentMessage[] = [];
 const EMPTY_TIMESTAMPS: number[] = [];
 const INTERRUPT_LABEL = '用户中断请求';
 const COLLAPSED_USER_MESSAGE_CLASS = 'max-h-80 overflow-hidden';
-const STREAMING_THINKING_PROTECTION_THRESHOLD = 20_000;
-const STREAMING_THINKING_VISIBLE_CHARS = 8_000;
 const MESSAGE_NAV_HIDE_BREAKPOINT = 860;
 const GROUP_BY_PART = groupPartByType({
   reasoning: ['group-thinking'],
@@ -1038,22 +1037,12 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
     return null;
   }
 
-  const visibleThinking = getVisibleStreamingThinking(thinking);
+  const isThinking = thinking.length > 0;
+  const thinkingTokenEstimate = Math.ceil(thinking.length / 4);
 
   return (
     <div className="mb-5 flex w-full justify-start">
       <div className="w-full min-w-0 space-y-2 text-sm leading-relaxed">
-        {thinking && (
-          <ReasoningRoot variant="ghost">
-            <ReasoningTrigger active tokenCount={Math.ceil(thinking.length / 4)} />
-            <ReasoningContent aria-busy>
-              <ReasoningText>
-                <div className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{visibleThinking}</div>
-              </ReasoningText>
-            </ReasoningContent>
-          </ReasoningRoot>
-        )}
-
         {visibleText ? (
           <div
             data-streaming-text="markdown"
@@ -1076,11 +1065,22 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
           <div
             className={cn(
               'flex items-center gap-2.5 py-1 text-sm text-muted-foreground/60 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
-              !thinking && !visibleText && 'text-muted-foreground',
+              !isThinking && !visibleText && 'text-muted-foreground',
             )}
           >
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
-            <RunningElapsedTimer startTime={queryStartTime} />
+            {isThinking ? (
+              <>
+                <RunningElapsedTimer startTime={queryStartTime} label="思考中" />
+                {thinkingTokenEstimate > 0 ? (
+                  <span className="text-sm text-muted-foreground/50 tabular-nums">
+                    · {formatCompactTokens(thinkingTokenEstimate)}
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <RunningElapsedTimer startTime={queryStartTime} label={visibleText ? '生成中' : '运行中'} />
+            )}
           </div>
         ) : null}
       </div>
@@ -1105,14 +1105,6 @@ function getLastAssistantText(events: AgentMessage[]): string {
   }
 
   return '';
-}
-
-function getVisibleStreamingThinking(thinking: string): string {
-  if (thinking.length <= STREAMING_THINKING_PROTECTION_THRESHOLD) {
-    return thinking;
-  }
-
-  return thinking.slice(-STREAMING_THINKING_VISIBLE_CHARS);
 }
 
 function getMessageText(message: MessageState) {
@@ -1254,15 +1246,7 @@ function getSourceEventIndices(message: MessageState): number[] {
 }
 
 function formatCompactDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.round(ms / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-
-  if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
-  }
-
-  return `${seconds}s`;
+  return formatElapsed(Math.max(0, ms));
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
