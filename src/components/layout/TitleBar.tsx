@@ -16,6 +16,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import type { Theme } from '../../types/provider';
 import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
+import { ProjectOpenTargetButton } from './ProjectOpenTargetButton';
 
 type AppWindowLike = {
   isMaximized(): Promise<boolean>;
@@ -52,6 +53,7 @@ interface TitleBarProps {
   leftContent?: ReactNode;
   rightContent?: ReactNode;
   controlsContent?: ReactNode;
+  projectOpenPath?: string | null;
   sidePanelAvailable?: boolean;
 }
 
@@ -59,6 +61,7 @@ export function TitleBar({
   leftContent,
   rightContent,
   controlsContent,
+  projectOpenPath,
   sidePanelAvailable = true,
 }: TitleBarProps) {
   const [appWindow, setAppWindow] = useState<AppWindowLike | null>(null);
@@ -153,6 +156,9 @@ export function TitleBar({
           <div className="hidden shrink-0 items-center min-[760px]:flex">
             {controlsContent}
           </div>
+        ) : null}
+        {projectOpenPath ? (
+          <ProjectOpenTargetButton projectPath={projectOpenPath} />
         ) : null}
         {sidePanelAvailable && (
           <Tooltip>

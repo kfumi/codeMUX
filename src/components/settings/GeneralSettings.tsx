@@ -3,8 +3,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { Copy, FolderOpen, Check } from 'lucide-react';
 
 import { appApi } from '../../lib/tauri';
+import { getOpenTargetOption, normalizeOpenTarget, OPEN_TARGET_OPTIONS, type OpenTarget } from '../../lib/openTargets';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { Button } from '../ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Switch } from '../ui/switch';
 import { NotificationSettingsSection } from './NotificationSettingsSection';
 
@@ -12,7 +14,9 @@ export function GeneralSettings() {
   const [configDir, setConfigDir] = useState<string>('');
   const [copied, setCopied] = useState(false);
   const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
+  const defaultOpenTarget = useSettingsStore((state) => normalizeOpenTarget(state.config?.default_open_target));
   const setCompactAiOutput = useSettingsStore((state) => state.setCompactAiOutput);
+  const setDefaultOpenTarget = useSettingsStore((state) => state.setDefaultOpenTarget);
 
   useEffect(() => {
     appApi.getAppDataDirectory().then(setConfigDir).catch(() => {});
@@ -55,6 +59,52 @@ export function GeneralSettings() {
               void setCompactAiOutput(checked);
             }}
           />
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <label className="text-sm text-foreground/74">项目打开</label>
+        <div className="flex items-center justify-between gap-4 rounded-xl bg-muted/40 p-4">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground/90">默认文件打开目标</div>
+            <p className="mt-1 text-xs leading-relaxed text-foreground/60">
+              设置默认打开文件和文件夹的位置，对话页项目打开按钮会默认使用此项。
+            </p>
+          </div>
+          <Select
+            value={defaultOpenTarget}
+            onValueChange={(value) => {
+              void setDefaultOpenTarget(value as OpenTarget);
+            }}
+          >
+            <SelectTrigger aria-label="默认文件打开目标" className="h-9 w-44 shrink-0 rounded-lg">
+              <SelectValue>
+                {(() => {
+                  const option = getOpenTargetOption(defaultOpenTarget);
+                  const Icon = option.Icon;
+                  return (
+                    <span className="flex items-center gap-2">
+                      <Icon className="h-3.5 w-3.5 text-foreground/60" />
+                      <span>{option.label}</span>
+                    </span>
+                  );
+                })()}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent align="end">
+              {OPEN_TARGET_OPTIONS.map((option) => {
+                const Icon = option.Icon;
+                return (
+                  <SelectItem key={option.value} value={option.value}>
+                    <span className="flex items-center gap-2">
+                      <Icon className="h-3.5 w-3.5 text-foreground/60" />
+                      <span>{option.label}</span>
+                    </span>
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 

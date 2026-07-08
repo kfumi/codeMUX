@@ -42,6 +42,7 @@ const config: AppConfig = {
   },
   theme: 'System',
   compact_ai_output: false,
+  default_open_target: 'file_explorer',
 };
 
 describe('resolveAgentProviderConfig', () => {

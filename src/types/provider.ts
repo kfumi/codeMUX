@@ -1,5 +1,6 @@
 import type { AgentKind } from './session';
 import type { ClaudePermissionConfig, CodexPermissionConfig } from '../lib/agentPermissions';
+import type { OpenTarget } from '../lib/openTargets';
 
 export type Theme = 'Light' | 'Dark' | 'System';
 
@@ -59,6 +60,7 @@ export interface AppConfig {
   agent_defaults: AgentDefaults;
   agent_configs: AgentConfigMap;
   compact_ai_output: boolean;
+  default_open_target: OpenTarget;
   notifications: NotificationSettings;
   theme: Theme;
 }

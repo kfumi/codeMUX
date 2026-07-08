@@ -175,7 +175,7 @@ export function CodeMuxModelSelector({
           data-testid="model-selector-content"
           data-slot="model-selector-content"
           data-side={position.side}
-          className="surface-panel fixed z-160 overflow-hidden rounded-xl border border-border/70 bg-popover/98 p-0 text-popover-foreground shadow-[0_18px_48px_-24px_hsl(var(--foreground)/0.34)] backdrop-blur-md"
+          className="surface-panel fixed z-160 flex flex-col overflow-hidden rounded-xl border border-border/70 bg-popover/98 p-0 text-popover-foreground shadow-[0_18px_48px_-24px_hsl(var(--foreground)/0.34)] backdrop-blur-md"
           style={{
             ...(position.side === 'top' ? { bottom: position.bottom } : { top: position.top }),
             left: position.left,
@@ -188,7 +188,7 @@ export function CodeMuxModelSelector({
               role="listbox"
               aria-label="Providers"
               data-slot="provider-selector-list"
-              className="max-h-36 overflow-y-auto border-b border-border/62 p-1.5"
+              className="max-h-36 flex-none overflow-y-auto border-b border-border/62 p-1.5"
             >
               {normalizedProviders.map((provider) => {
                 const active = provider.id === selectedProviderId;
@@ -219,8 +219,7 @@ export function CodeMuxModelSelector({
             role="listbox"
             aria-label="Models"
             data-slot="model-selector-list"
-            className="overflow-y-auto p-1.5"
-            style={{ maxHeight: Math.max(120, position.maxHeight - 45) }}
+            className="min-h-0 flex-1 overflow-y-auto p-1.5"
           >
             {normalizedModels.length === 0 ? (
               <div className="px-3 py-2 text-sm text-muted-foreground">未找到模型</div>
@@ -253,7 +252,7 @@ export function CodeMuxModelSelector({
               })
             )}
           </div>
-          <div data-slot="model-selector-effort" className="flex items-center justify-between gap-3 border-t border-border/62 px-3 py-2">
+          <div data-slot="model-selector-effort" className="flex flex-none items-center justify-between gap-3 border-t border-border/62 px-3 py-2">
             <span className="text-xs text-muted-foreground">推理强度</span>
             <div role="group" aria-label="Thinking" className="flex items-center gap-0.5">
               {EFFORT_OPTIONS.map((option) => {

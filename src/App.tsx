@@ -170,6 +170,7 @@ function App() {
           sidePanelAvailable={activeView === 'app'}
           sidePanelProjectPath={activeView === 'app' ? sidePanelProjectPath : null}
           sidePanelScopeId={activeView === 'app' ? sidePanelScopeId : 'settings'}
+          projectOpenPath={activeView === 'app' && activeSessionId ? sidePanelProjectPath : null}
           headerContent={activeView === 'app' && activeSessionId ? (
             <Suspense fallback={null}>
               <SessionHeader sessionId={activeSessionId} />

@@ -19,6 +19,7 @@ const baseConfig: AppConfig = {
     opencode: {},
   },
   compact_ai_output: false,
+  default_open_target: 'file_explorer',
   notifications: {
     system_enabled: true,
     sound_enabled: false,

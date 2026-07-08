@@ -7,6 +7,7 @@ const updateAgentConfigMock = vi.fn<(agentKind: string, config: Record<string, u
 const deleteProviderMock = vi.fn<(providerId: string) => Promise<void>>();
 const setCompactAiOutputMock = vi.fn<(enabled: boolean) => Promise<void>>();
 const setNotificationSettingsMock = vi.fn<(settings: Record<string, unknown>) => Promise<void>>();
+const setDefaultOpenTargetMock = vi.fn<(target: string) => Promise<void>>();
 
 vi.mock('../lib/tauri', () => ({
   configApi: {
@@ -21,6 +22,7 @@ vi.mock('../lib/tauri', () => ({
     updateAgentConfig: updateAgentConfigMock,
     setCompactAiOutput: setCompactAiOutputMock,
     setNotificationSettings: setNotificationSettingsMock,
+    setDefaultOpenTarget: setDefaultOpenTargetMock,
   },
 }));
 
@@ -43,6 +45,7 @@ const baseConfig: AppConfig = {
   },
   theme: 'System',
   compact_ai_output: false,
+  default_open_target: 'file_explorer',
   notifications: {
     system_enabled: true,
     sound_enabled: false,
@@ -92,6 +95,15 @@ describe('settings store agent config actions', () => {
 
     expect(setCompactAiOutputMock).toHaveBeenCalledWith(true);
     expect(useSettingsStore.getState().config?.compact_ai_output).toBe(true);
+  });
+
+  it('persists the default project open target', async () => {
+    const { useSettingsStore } = await import('./settingsStore');
+
+    await useSettingsStore.getState().setDefaultOpenTarget('vscode');
+
+    expect(setDefaultOpenTargetMock).toHaveBeenCalledWith('vscode');
+    expect(useSettingsStore.getState().config?.default_open_target).toBe('vscode');
   });
 
   it('keeps the active provider consistent when the active provider is deleted', async () => {

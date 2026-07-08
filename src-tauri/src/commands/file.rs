@@ -2,6 +2,294 @@ use log::{debug, info};
 use serde::Serialize;
 use tauri::AppHandle;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpenProjectCommand {
+    program: String,
+    args: Vec<String>,
+}
+
+#[cfg(test)]
+fn build_open_project_command(
+    target: &str,
+    path: &str,
+    os: &str,
+) -> Result<OpenProjectCommand, String> {
+    build_open_project_commands(target, path, os)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| format!("Unsupported project open target: {}", target))
+}
+
+fn cmd_start_command(program: impl Into<String>, args: Vec<String>) -> OpenProjectCommand {
+    let mut command_args = vec![
+        "/C".to_string(),
+        "start".to_string(),
+        "".to_string(),
+        program.into(),
+    ];
+    command_args.extend(args);
+    OpenProjectCommand {
+        program: "cmd".to_string(),
+        args: command_args,
+    }
+}
+
+fn env_path(var: &str, segments: &[&str]) -> Option<String> {
+    let mut path = std::env::var_os(var).map(std::path::PathBuf::from)?;
+    for segment in segments {
+        path.push(segment);
+    }
+    Some(path.to_string_lossy().to_string())
+}
+
+fn push_unique_command(commands: &mut Vec<OpenProjectCommand>, command: OpenProjectCommand) {
+    let program_path = std::path::Path::new(&command.program);
+    if program_path.is_absolute() && !program_path.exists() {
+        return;
+    }
+
+    if !commands
+        .iter()
+        .any(|candidate| candidate.program.eq_ignore_ascii_case(&command.program))
+    {
+        commands.push(command);
+    }
+}
+
+fn windows_local_app_data_candidates() -> Vec<std::path::PathBuf> {
+    let mut roots = Vec::new();
+
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        roots.push(std::path::PathBuf::from(local_app_data));
+    }
+
+    let username = std::env::var_os("USERNAME")
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            std::env::var_os("USERPROFILE").and_then(|profile| {
+                std::path::Path::new(&profile)
+                    .file_name()
+                    .map(|name| name.to_os_string())
+            })
+        });
+
+    if let Some(username) = username {
+        let username = username.to_string_lossy();
+        for drive in 'C'..='Z' {
+            roots.push(std::path::PathBuf::from(format!(
+                "{}:\\Users\\{}\\AppData\\Local",
+                drive, username
+            )));
+        }
+    }
+
+    roots.dedup();
+    roots
+}
+
+fn push_windows_local_program(
+    commands: &mut Vec<OpenProjectCommand>,
+    program_segments: &[&str],
+    args: Vec<String>,
+) {
+    for root in windows_local_app_data_candidates() {
+        let mut program = root;
+        for segment in program_segments {
+            program.push(segment);
+        }
+        push_unique_command(
+            commands,
+            OpenProjectCommand {
+                program: program.to_string_lossy().to_string(),
+                args: args.clone(),
+            },
+        );
+    }
+}
+
+fn powershell_set_location_command(path: &str) -> String {
+    format!("Set-Location -LiteralPath '{}'", path.replace('\'', "''"))
+}
+
+fn build_open_project_commands(
+    target: &str,
+    path: &str,
+    os: &str,
+) -> Result<Vec<OpenProjectCommand>, String> {
+    let commands = match target {
+        "vscode" => match os {
+            "windows" => {
+                let mut commands = Vec::new();
+                push_windows_local_program(
+                    &mut commands,
+                    &["Programs", "Microsoft VS Code", "Code.exe"],
+                    vec![path.to_string()],
+                );
+                for base in ["PROGRAMFILES", "ProgramFiles(x86)"] {
+                    if let Some(code_exe) = env_path(base, &["Microsoft VS Code", "Code.exe"]) {
+                        push_unique_command(
+                            &mut commands,
+                            OpenProjectCommand {
+                                program: code_exe,
+                                args: vec![path.to_string()],
+                            },
+                        );
+                    }
+                }
+                push_unique_command(
+                    &mut commands,
+                    OpenProjectCommand {
+                        program: "code".to_string(),
+                        args: vec![path.to_string()],
+                    },
+                );
+                commands
+            }
+            "macos" => vec![OpenProjectCommand {
+                program: "open".to_string(),
+                args: vec![
+                    "-a".to_string(),
+                    "Visual Studio Code".to_string(),
+                    path.to_string(),
+                ],
+            }],
+            _ => vec![OpenProjectCommand {
+                program: "code".to_string(),
+                args: vec![path.to_string()],
+            }],
+        },
+        "cursor" => match os {
+            "windows" => {
+                let mut commands = Vec::new();
+                push_windows_local_program(
+                    &mut commands,
+                    &["Programs", "cursor", "Cursor.exe"],
+                    vec![path.to_string()],
+                );
+                push_windows_local_program(
+                    &mut commands,
+                    &["Programs", "Cursor", "Cursor.exe"],
+                    vec![path.to_string()],
+                );
+                for base in ["LOCALAPPDATA", "PROGRAMFILES"] {
+                    if let Some(cursor_exe) = env_path(base, &["Programs", "Cursor", "Cursor.exe"])
+                    {
+                        push_unique_command(
+                            &mut commands,
+                            OpenProjectCommand {
+                                program: cursor_exe,
+                                args: vec![path.to_string()],
+                            },
+                        );
+                    }
+                }
+                commands
+            }
+            "macos" => vec![OpenProjectCommand {
+                program: "open".to_string(),
+                args: vec!["-a".to_string(), "Cursor".to_string(), path.to_string()],
+            }],
+            _ => vec![OpenProjectCommand {
+                program: "cursor".to_string(),
+                args: vec![path.to_string()],
+            }],
+        },
+        "file_explorer" => match os {
+            "windows" => vec![OpenProjectCommand {
+                program: "explorer".to_string(),
+                args: vec![path.to_string()],
+            }],
+            "macos" => vec![OpenProjectCommand {
+                program: "open".to_string(),
+                args: vec![path.to_string()],
+            }],
+            _ => vec![OpenProjectCommand {
+                program: "xdg-open".to_string(),
+                args: vec![path.to_string()],
+            }],
+        },
+        "terminal" => match os {
+            "windows" => vec![
+                OpenProjectCommand {
+                    program: "wt".to_string(),
+                    args: vec!["-d".to_string(), path.to_string()],
+                },
+                cmd_start_command("wt", vec!["-d".to_string(), path.to_string()]),
+                cmd_start_command(
+                    "powershell",
+                    vec![
+                        "-NoExit".to_string(),
+                        "-Command".to_string(),
+                        powershell_set_location_command(path),
+                    ],
+                ),
+            ],
+            "macos" => vec![OpenProjectCommand {
+                program: "open".to_string(),
+                args: vec!["-a".to_string(), "Terminal".to_string(), path.to_string()],
+            }],
+            _ => vec![OpenProjectCommand {
+                program: "x-terminal-emulator".to_string(),
+                args: vec!["--working-directory".to_string(), path.to_string()],
+            }],
+        },
+        "git_bash" => match os {
+            "windows" => {
+                let mut commands = Vec::new();
+                for base in ["PROGRAMFILES", "ProgramFiles(x86)"] {
+                    if let Some(git_bash) = env_path(base, &["Git", "git-bash.exe"]) {
+                        commands.push(OpenProjectCommand {
+                            program: git_bash,
+                            args: vec![format!("--cd={}", path)],
+                        });
+                    }
+                }
+                commands.push(OpenProjectCommand {
+                    program: "C:\\Program Files\\Git\\git-bash.exe".to_string(),
+                    args: vec![format!("--cd={}", path)],
+                });
+                commands.push(OpenProjectCommand {
+                    program: "C:\\Program Files (x86)\\Git\\git-bash.exe".to_string(),
+                    args: vec![format!("--cd={}", path)],
+                });
+                commands.push(cmd_start_command(
+                    "git-bash.exe",
+                    vec![format!("--cd={}", path)],
+                ));
+                commands
+            }
+            _ => vec![OpenProjectCommand {
+                program: "git-bash".to_string(),
+                args: vec![format!("--cd={}", path)],
+            }],
+        },
+        _ => return Err(format!("Unsupported project open target: {}", target)),
+    };
+
+    Ok(commands)
+}
+
+fn spawn_open_project_commands(commands: Vec<OpenProjectCommand>) -> Result<(), String> {
+    let mut errors = Vec::new();
+
+    for command in commands {
+        match std::process::Command::new(&command.program)
+            .args(&command.args)
+            .spawn()
+        {
+            Ok(_) => return Ok(()),
+            Err(error) => {
+                errors.push(format!("{}: {}", command.program, error));
+            }
+        }
+    }
+
+    Err(format!(
+        "Failed to open project. Tried: {}",
+        errors.join("; ")
+    ))
+}
+
 /// Resolve a file path against an optional base path, with security validation.
 /// Returns the canonical path if it passes the security check.
 fn resolve_secure_path(
@@ -95,6 +383,17 @@ pub fn open_in_explorer(path: String) -> Result<(), String> {
             .map_err(|e| format!("Failed to open file manager: {}", e))?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn open_project_path(path: String, target: String) -> Result<(), String> {
+    if !std::path::Path::new(&path).is_dir() {
+        return Err(format!("Not a directory: {}", path));
+    }
+
+    info!(target: "file", "Opening project path={} target={}", path, target);
+    let commands = build_open_project_commands(&target, &path, std::env::consts::OS)?;
+    spawn_open_project_commands(commands)
 }
 
 #[tauri::command]
@@ -273,4 +572,61 @@ fn list_dir_recursive(
     });
 
     Ok(entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_open_project_command, build_open_project_commands};
+
+    #[test]
+    fn builds_windows_terminal_open_project_command() {
+        let command =
+            build_open_project_command("terminal", "D:\\project\\app", "windows").unwrap();
+
+        assert_eq!(command.program, "wt");
+        assert_eq!(command.args, vec!["-d", "D:\\project\\app"]);
+    }
+
+    #[test]
+    fn rejects_unsupported_open_project_targets() {
+        let error =
+            build_open_project_command("unknown", "D:\\project\\app", "windows").unwrap_err();
+
+        assert_eq!(error, "Unsupported project open target: unknown");
+    }
+
+    #[test]
+    fn builds_windows_vscode_candidates_with_exe_launchers() {
+        let commands =
+            build_open_project_commands("vscode", "D:\\project\\app", "windows").unwrap();
+
+        assert!(commands
+            .iter()
+            .any(|command| command.program.ends_with("Code.exe")));
+        assert!(commands.iter().all(|command| command.program != "cmd"));
+    }
+
+    #[test]
+    fn builds_cursor_target_instead_of_visual_studio() {
+        let commands =
+            build_open_project_commands("cursor", "D:\\project\\app", "windows").unwrap();
+
+        assert!(commands
+            .iter()
+            .any(|command| command.program.ends_with("Cursor.exe")));
+        assert!(commands.iter().all(|command| command.program != "cmd"));
+        assert!(
+            build_open_project_commands("visual_studio", "D:\\project\\app", "windows").is_err()
+        );
+    }
+
+    #[test]
+    fn builds_windows_git_bash_candidates_with_known_install_path() {
+        let commands =
+            build_open_project_commands("git_bash", "D:\\project\\app", "windows").unwrap();
+
+        assert!(commands
+            .iter()
+            .any(|command| command.program.ends_with("Git\\git-bash.exe")));
+    }
 }

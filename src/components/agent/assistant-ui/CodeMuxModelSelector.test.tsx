@@ -178,4 +178,50 @@ describe('CodeMuxModelSelector', () => {
       });
     }
   });
+
+  it('keeps the model list as the scrollable panel body when providers are shown', () => {
+    render(
+      <CodeMuxAssistantRuntimeProvider sessionId="session-1" onSend={vi.fn()} onCommand={vi.fn()}>
+        <CodeMuxModelSelector
+          value="model-1"
+          models={Array.from({ length: 24 }, (_, index) => `model-${index + 1}`)}
+          providers={[
+            {
+              id: 'provider-1',
+              name: 'Provider 1',
+              api_key: 'key',
+              anthropic_base_url: 'https://provider-1.example',
+              openai_base_url: '',
+              default_model: 'model-1',
+              models: ['model-1'],
+            },
+            {
+              id: 'provider-2',
+              name: 'Provider 2',
+              api_key: 'key',
+              anthropic_base_url: '',
+              openai_base_url: 'https://provider-2.example/v1',
+              default_model: 'model-2',
+              models: ['model-2'],
+            },
+          ]}
+          providerId="provider-1"
+          onProviderChange={vi.fn()}
+          onChange={vi.fn()}
+          reasoningEffort="medium"
+          onReasoningEffortChange={vi.fn()}
+        />
+      </CodeMuxAssistantRuntimeProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('combobox'));
+
+    const panel = screen.getByTestId('model-selector-content');
+    const modelList = panel.querySelector('[data-slot="model-selector-list"]');
+
+    expect(panel.className).toContain('flex');
+    expect(panel.className).toContain('flex-col');
+    expect(modelList?.className).toContain('min-h-0');
+    expect(modelList?.className).toContain('flex-1');
+  });
 });

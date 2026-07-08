@@ -15,6 +15,7 @@ interface MainLayoutProps {
   headerContent?: ReactNode;
   sidebarAccessory?: ReactNode;
   titleBarControls?: ReactNode;
+  projectOpenPath?: string | null;
   sidePanelAvailable?: boolean;
   sidePanelProjectPath?: string | null;
   sidePanelScopeId?: string;
@@ -26,6 +27,7 @@ export function MainLayout({
   headerContent,
   sidebarAccessory,
   titleBarControls,
+  projectOpenPath,
   sidePanelAvailable = true,
   sidePanelProjectPath,
   sidePanelScopeId = 'global',
@@ -130,6 +132,7 @@ export function MainLayout({
           leftContent={sidebarCollapsed ? sidebarControls : undefined}
           rightContent={headerContent}
           controlsContent={titleBarControls}
+          projectOpenPath={projectOpenPath}
           sidePanelAvailable={sidePanelAvailable}
         />
 

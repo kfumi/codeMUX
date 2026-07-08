@@ -8,10 +8,11 @@ import { useSettingsStore } from '../stores/settingsStore';
 import type { AppConfig } from '../types/provider';
 import { useAgentNotifications } from './useAgentNotifications';
 
-const { sendNotificationMock, requestPermissionMock, isPermissionGrantedMock, showMainWindowMock, audioPlayMock } = vi.hoisted(() => ({
+const { sendNotificationMock, requestPermissionMock, isPermissionGrantedMock, onActionMock, showMainWindowMock, audioPlayMock } = vi.hoisted(() => ({
   sendNotificationMock: vi.fn(),
   requestPermissionMock: vi.fn(async () => 'granted'),
   isPermissionGrantedMock: vi.fn(async () => true),
+  onActionMock: vi.fn(async () => ({ unregister: vi.fn(async () => {}) })),
   showMainWindowMock: vi.fn(async () => {}),
   audioPlayMock: vi.fn(async () => {}),
 }));
@@ -22,6 +23,7 @@ vi.mock('@tauri-apps/plugin-notification', () => ({
   isPermissionGranted: () => isPermissionGrantedMock(),
   requestPermission: () => requestPermissionMock(),
   sendNotification: (payload: unknown) => sendNotificationMock(payload),
+  onAction: (callback: unknown) => onActionMock(callback),
 }));
 
 vi.mock('../lib/tauri', async () => {
@@ -46,6 +48,7 @@ const baseConfig: AppConfig = {
     opencode: {},
   },
   compact_ai_output: false,
+  default_open_target: 'file_explorer',
   notifications: {
     system_enabled: true,
     sound_enabled: false,
@@ -442,7 +445,35 @@ describe('useAgentNotifications', () => {
       expect(sendNotificationMock).toHaveBeenCalledWith({
         title: '任务已完成',
         body: '重构设置页',
+        autoCancel: true,
+        extra: { sessionId: 'session-1' },
       });
+    });
+  });
+
+  it('opens the app and switches to the session when a Tauri fallback notification is clicked', async () => {
+    const setActiveSession = vi.fn();
+    useSessionStore.setState({ setActiveSession } as Partial<ReturnType<typeof useSessionStore.getState>>);
+    vi.stubGlobal('Notification', undefined);
+    render(<Harness />);
+
+    useAgentStore.setState({
+      events: { 'session-1': [{ kind: 'done' }] },
+      eventTimestamps: { 'session-1': [1] },
+    });
+
+    await waitFor(() => {
+      expect(sendNotificationMock).toHaveBeenCalledWith(expect.objectContaining({
+        extra: { sessionId: 'session-1' },
+      }));
+    });
+
+    const actionCallback = onActionMock.mock.calls[0]?.[0] as ((payload: unknown) => void) | undefined;
+    actionCallback?.({ extra: { sessionId: 'session-1' } });
+
+    await waitFor(() => {
+      expect(showMainWindowMock).toHaveBeenCalled();
+      expect(setActiveSession).toHaveBeenCalledWith('session-1');
     });
   });
 

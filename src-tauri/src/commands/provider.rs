@@ -272,6 +272,26 @@ pub fn set_notification_settings(
     Ok(())
 }
 
+#[tauri::command]
+pub fn set_default_open_target(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    target: String,
+) -> Result<(), String> {
+    if !matches!(
+        target.as_str(),
+        "vscode" | "cursor" | "file_explorer" | "terminal" | "git_bash"
+    ) {
+        return Err(format!("Unsupported project open target: {}", target));
+    }
+
+    info!(target: "provider", "Setting default open target target={}", target);
+    let mut config = state.config.lock().unwrap();
+    config.default_open_target = target;
+    config::save_config(&app, &config)?;
+    Ok(())
+}
+
 #[derive(serde::Serialize)]
 pub struct ModelInfo {
     pub id: String,

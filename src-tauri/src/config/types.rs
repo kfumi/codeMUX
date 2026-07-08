@@ -72,6 +72,10 @@ fn default_notification_sound() -> String {
     "ding".to_string()
 }
 
+fn default_open_target() -> String {
+    "file_explorer".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationSettings {
     #[serde(default = "default_true")]
@@ -231,6 +235,8 @@ pub struct AppConfig {
     pub agent_configs: AgentConfigs,
     #[serde(default = "default_false")]
     pub compact_ai_output: bool,
+    #[serde(default = "default_open_target")]
+    pub default_open_target: String,
     #[serde(default)]
     pub notifications: NotificationSettings,
     pub theme: Theme,
@@ -262,6 +268,7 @@ impl Default for AppConfig {
             agent_defaults: AgentDefaults::default(),
             agent_configs: AgentConfigs::default(),
             compact_ai_output: false,
+            default_open_target: default_open_target(),
             notifications: NotificationSettings::default(),
             theme: Theme::System,
         }
@@ -305,6 +312,19 @@ mod tests {
         assert!(config.notifications.system_enabled);
         assert!(!config.notifications.sound_enabled);
         assert_eq!(config.notifications.sound, "ding");
+    }
+
+    #[test]
+    fn old_config_json_deserializes_with_default_open_target() {
+        let raw = serde_json::json!({
+            "providers": [],
+            "active_provider_id": null,
+            "theme": "System"
+        });
+
+        let config: AppConfig = serde_json::from_value(raw).unwrap();
+
+        assert_eq!(config.default_open_target, "file_explorer");
     }
 
     #[test]

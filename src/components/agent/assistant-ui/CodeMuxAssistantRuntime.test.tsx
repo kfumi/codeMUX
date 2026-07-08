@@ -619,6 +619,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         },
         theme: 'System',
         compact_ai_output: false,
+        default_open_target: 'file_explorer',
       },
     }));
     useSidePanelStore.getState().reset();

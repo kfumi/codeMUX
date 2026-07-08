@@ -112,6 +112,43 @@ describe('parseSdkUserMessage', () => {
     });
   });
 
+  it('extracts Codex input_image data URLs as user attachments', () => {
+    expect(
+      parseSdkUserMessage({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: '<image name=[Image #1] path="C:\\Users\\94910\\AppData\\Local\\Temp\\image.png">' },
+            {
+              type: 'input_image',
+              image_url: 'data:image/png;base64,iVBORw0KGgo=',
+              detail: 'high',
+            },
+            { type: 'input_text', text: '</image>' },
+            {
+              type: 'input_text',
+              text: '<codemux-codex-collaboration-policy>\npolicy_version: codemux-codex-collaboration-policy/v1\n</codemux-codex-collaboration-policy>\n\nDescribe this image.',
+            },
+          ],
+        },
+      }),
+    ).toEqual({
+      kind: 'user',
+      data: {
+        content: '<image name=[Image #1] path="C:\\Users\\94910\\AppData\\Local\\Temp\\image.png">\n</image>\nDescribe this image.',
+        attachments: [
+          {
+            type: 'image',
+            name: 'image-1.png',
+            mediaType: 'image/png',
+            dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+          },
+        ],
+      },
+    });
+  });
+
   it('keeps tool results as tool_result events', () => {
     const event = parseSdkUserMessage({
       type: 'user',

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   isPermissionGranted,
+  onAction,
   requestPermission,
   sendNotification,
 } from '@tauri-apps/plugin-notification';
@@ -46,7 +47,7 @@ function useAppInactive(): boolean {
   return inactive;
 }
 
-async function sendTauriNotification(title: string, body: string): Promise<void> {
+async function sendTauriNotification(candidate: { title: string; body: string; sessionId: string }): Promise<void> {
   try {
     let permissionGranted = await isPermissionGranted();
     if (!permissionGranted) {
@@ -54,7 +55,12 @@ async function sendTauriNotification(title: string, body: string): Promise<void>
     }
 
     if (permissionGranted) {
-      sendNotification({ title, body });
+      sendNotification({
+        title: candidate.title,
+        body: candidate.body,
+        autoCancel: true,
+        extra: { sessionId: candidate.sessionId },
+      });
     }
   } catch {
     logger.error('Failed to send system notification');
@@ -81,9 +87,20 @@ async function showAppSession(sessionId: string) {
   }
 }
 
-// Tauri notification actions are mobile-only. Desktop uses the Web
-// Notification API so notification clicks can reopen CodeMUX and select
-// the originating session. The Tauri plugin remains the fallback sender.
+function extractNotificationSessionId(notification: unknown): string | null {
+  if (!notification || typeof notification !== 'object') {
+    return null;
+  }
+
+  const extra = (notification as { extra?: unknown }).extra;
+  if (!extra || typeof extra !== 'object') {
+    return null;
+  }
+
+  const sessionId = (extra as { sessionId?: unknown }).sessionId;
+  return typeof sessionId === 'string' && sessionId.trim() ? sessionId : null;
+}
+
 async function sendClickableNotification(candidate: { title: string; body: string; sessionId: string }) {
   const notificationCtor = typeof window !== 'undefined' ? window.Notification : undefined;
   if (notificationCtor) {
@@ -108,7 +125,7 @@ async function sendClickableNotification(candidate: { title: string; body: strin
     }
   }
 
-  await sendTauriNotification(candidate.title, candidate.body);
+  await sendTauriNotification(candidate);
 }
 
 function findPreviousUserEventIndex(events: AgentMessage[], eventIndex: number): number {
@@ -154,6 +171,33 @@ export function useAgentNotifications() {
     () => new Map(sessions.map((session) => [session.id, session.title])),
     [sessions],
   );
+
+  useEffect(() => {
+    let disposed = false;
+    let unregister: (() => Promise<void>) | undefined;
+
+    void onAction((notification) => {
+      const sessionId = extractNotificationSessionId(notification);
+      if (sessionId) {
+        void showAppSession(sessionId);
+      }
+    })
+      .then((listener) => {
+        if (disposed) {
+          void listener.unregister();
+          return;
+        }
+        unregister = () => listener.unregister();
+      })
+      .catch(() => {
+        logger.debug('Tauri notification action listener setup failed');
+      });
+
+    return () => {
+      disposed = true;
+      void unregister?.();
+    };
+  }, []);
 
   useEffect(() => {
     const settings = notificationSettings ?? {

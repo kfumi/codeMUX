@@ -46,6 +46,7 @@ describe('AgentSettingsPanel', () => {
         },
         theme: 'System',
         compact_ai_output: false,
+        default_open_target: 'file_explorer',
       },
       setDefaultAgentKind: vi.fn(),
       getDefaultAgentKind: () => 'codex',

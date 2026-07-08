@@ -3,6 +3,7 @@ import type { AgentKind, ReasoningEffort, Session, SessionMode } from '../types/
 import type { AgentUserMessageLocator } from '../types/agent';
 import type { AgentInputPayload } from '../types/agentInput';
 import type { AgentConfigUpdateMap, AppConfig, NotificationSettings, Provider, Theme } from '../types/provider';
+import type { OpenTarget } from './openTargets';
 import type { AgentPermissionConfig, AgentPlanMode } from './agentPermissions';
 import type { Project } from '../types/project';
 import type { McpServer } from '../types/mcp';
@@ -283,6 +284,8 @@ export const configApi = {
     invokeLogged('set_compact_ai_output', { enabled }),
   setNotificationSettings: (settings: NotificationSettings): Promise<void> =>
     invokeLogged('set_notification_settings', { settings }),
+  setDefaultOpenTarget: (target: OpenTarget): Promise<void> =>
+    invokeLogged('set_default_open_target', { target }),
   fetchModels: (apiKey: string, baseUrl: string): Promise<ModelInfo[]> =>
     invokeLogged('fetch_provider_models', { apiKey, baseUrl }),
   testProvider: (providerId: string): Promise<string> =>
@@ -297,6 +300,8 @@ export const fileApi = {
     invokeLogged('delete_file', { path, basePath }),
   listDirectory: (path: string, depth?: number, basePath?: string): Promise<FileTreeNode[]> =>
     invokeLogged('list_directory', { path, depth, basePath }),
+  openProjectPath: (path: string, target: OpenTarget): Promise<void> =>
+    invokeLogged('open_project_path', { path, target }),
 };
 
 export const gitApi = {

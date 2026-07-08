@@ -72,6 +72,7 @@ describe('session store createSession', () => {
         },
         theme: 'System',
         compact_ai_output: false,
+        default_open_target: 'file_explorer',
       },
       isLoading: false,
       error: null,

@@ -1073,6 +1073,9 @@ fn convert_codex_history_values_to_events(
                 let payload_type = payload.get("type").and_then(|t| t.as_str());
                 match payload_type {
                     Some("user_message") => {
+                        if has_matching_codex_image_response_user(raw_events, val) {
+                            continue;
+                        }
                         if let Some(converted) = convert_codex_user_event_to_claude_format(val) {
                             current_turn.compaction_only = false;
                             messages.push(converted);
@@ -1113,7 +1116,10 @@ fn convert_codex_history_values_to_events(
         if has_agent_messages && is_codex_assistant_response_message(val) {
             continue;
         }
-        if has_user_events && is_codex_user_response_message(val) {
+        if has_user_events
+            && is_codex_user_response_message(val)
+            && !codex_response_user_has_image(val)
+        {
             continue;
         }
 
@@ -1199,6 +1205,85 @@ fn convert_codex_history_values_to_events(
     }
 
     messages
+}
+
+fn has_matching_codex_image_response_user(
+    raw_events: &[serde_json::Value],
+    event_msg: &serde_json::Value,
+) -> bool {
+    let Some(event_payload) = event_msg.get("payload") else {
+        return false;
+    };
+    let event_id = ["id", "uuid", "message_id", "messageId"]
+        .iter()
+        .find_map(|key| event_payload.get(key).and_then(|entry| entry.as_str()));
+    let event_text = event_payload
+        .get("message")
+        .or_else(|| event_payload.get("text"))
+        .and_then(|entry| entry.as_str())
+        .map(str::trim)
+        .unwrap_or("");
+
+    raw_events.iter().any(|candidate| {
+        if !codex_response_user_has_image(candidate) {
+            return false;
+        }
+        let Some(payload) = candidate.get("payload") else {
+            return false;
+        };
+        let response_id = ["id", "uuid", "message_id", "messageId"]
+            .iter()
+            .find_map(|key| payload.get(key).and_then(|entry| entry.as_str()));
+        if event_id.is_some() && event_id == response_id {
+            return true;
+        }
+        extract_codex_response_user_text(payload) == event_text
+    })
+}
+
+fn codex_response_user_has_image(value: &serde_json::Value) -> bool {
+    if !is_codex_user_response_message(value) {
+        return false;
+    }
+    let Some(content) = value
+        .get("payload")
+        .and_then(|payload| payload.get("content"))
+        .and_then(|content| content.as_array())
+    else {
+        return false;
+    };
+
+    content.iter().any(|block| {
+        block.get("type").and_then(|entry| entry.as_str()) == Some("input_image")
+            && block
+                .get("image_url")
+                .and_then(|entry| entry.as_str())
+                .and_then(parse_image_data_url)
+                .is_some()
+    })
+}
+
+fn extract_codex_response_user_text(payload: &serde_json::Value) -> String {
+    payload
+        .get("content")
+        .and_then(|content| content.as_array())
+        .map(|content| {
+            content
+                .iter()
+                .filter_map(|block| {
+                    if block.get("type").and_then(|entry| entry.as_str()) != Some("input_text") {
+                        return None;
+                    }
+                    let text = block.get("text").and_then(|entry| entry.as_str())?;
+                    if is_codex_image_text_marker(text) {
+                        return None;
+                    }
+                    Some(text)
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
 }
 
 fn is_codex_image_text_marker(text: &str) -> bool {
@@ -2938,6 +3023,58 @@ mod tests {
         assert_eq!(converted.len(), 1);
         assert_eq!(converted[0]["uuid"], "event-user-1");
         assert_eq!(converted[0]["__lineIndex"], 8);
+    }
+
+    #[test]
+    fn codex_history_keeps_response_item_user_when_it_contains_an_image() {
+        let raw_events = vec![
+            serde_json::json!({
+                "__lineIndex": 8,
+                "timestamp": "2026-07-08T15:59:12.248Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "user_message",
+                    "id": "event-user-1",
+                    "message": "Describe this image."
+                }
+            }),
+            serde_json::json!({
+                "__lineIndex": 9,
+                "timestamp": "2026-07-08T15:59:12.249Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "id": "response-user-1",
+                    "content": [
+                        { "type": "input_text", "text": "<image name=[Image #1] path=\"C:\\Users\\94910\\AppData\\Local\\Temp\\image.png\">" },
+                        { "type": "input_image", "image_url": "data:image/png;base64,abc123", "detail": "high" },
+                        { "type": "input_text", "text": "</image>" },
+                        { "type": "input_text", "text": "Describe this image." }
+                    ]
+                }
+            }),
+        ];
+
+        let converted = convert_codex_history_values_to_events(&raw_events, "app-session-1");
+
+        assert_eq!(converted.len(), 1);
+        assert_eq!(converted[0]["uuid"], "response-user-1");
+        assert_eq!(converted[0]["__lineIndex"], 9);
+        assert_eq!(
+            converted[0]["message"]["content"],
+            serde_json::json!([
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "abc123"
+                    }
+                },
+                { "type": "text", "text": "Describe this image." }
+            ])
+        );
     }
 
     #[test]

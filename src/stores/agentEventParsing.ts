@@ -65,7 +65,7 @@ export function parseSdkUserMessage(data: Record<string, unknown>): ParsedStoreE
   }
 
   const textParts = content
-    ?.filter((block) => isRecord(block) && block.type === 'text')
+    ?.filter((block) => isRecord(block) && (block.type === 'text' || block.type === 'input_text'))
     .map((block) => stripCodexCollaborationPolicyBlock(String(block.text || '')))
     .filter((text) => text.length > 0) ?? [];
   const attachments = extractImageAttachments(content ?? []);
@@ -118,7 +118,7 @@ function extractImageAttachments(content: unknown[]): UserAttachmentPreview[] {
   const attachments: UserAttachmentPreview[] = [];
 
   for (const block of content) {
-    if (!isRecord(block) || block.type !== 'image') {
+    if (!isRecord(block) || (block.type !== 'image' && block.type !== 'input_image')) {
       continue;
     }
 
@@ -130,11 +130,14 @@ function extractImageAttachments(content: unknown[]): UserAttachmentPreview[] {
         : undefined;
     const data = typeof source?.data === 'string' ? source.data : undefined;
     const sourceType = typeof source?.type === 'string' ? source.type : undefined;
+    const imageUrl = typeof block.image_url === 'string' ? block.image_url : undefined;
     const dataUrl = sourceType === 'base64' && mediaType && data
       ? `data:${mediaType};base64,${data}`
       : typeof source?.url === 'string' && source.url.startsWith('data:image/')
         ? source.url
-        : undefined;
+        : imageUrl?.startsWith('data:image/')
+          ? imageUrl
+          : undefined;
 
     if (!dataUrl) {
       continue;

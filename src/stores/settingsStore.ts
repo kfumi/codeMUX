@@ -6,6 +6,7 @@ import { useNewSessionStore } from './newSessionStore';
 import { getDefaultAgentKind } from '../types/agentRegistry';
 import type { AgentKind } from '../types/session';
 import { normalizeNotificationSettings } from '../lib/notificationSettings';
+import { normalizeOpenTarget, type OpenTarget } from '../lib/openTargets';
 
 function applyThemeLocally(theme: Theme) {
   if (typeof document === 'undefined') {
@@ -40,6 +41,7 @@ interface SettingsState {
   fetchConfig: () => Promise<void>;
   setTheme: (theme: Theme) => Promise<void>;
   setCompactAiOutput: (enabled: boolean) => Promise<void>;
+  setDefaultOpenTarget: (target: OpenTarget) => Promise<void>;
   setNotificationSettings: (settings: NotificationSettings) => Promise<void>;
   setActiveProvider: (providerId: string) => Promise<void>;
   updateProvider: (provider: Provider) => Promise<void>;
@@ -70,6 +72,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const rawConfig = await configApi.get();
       const config = {
         ...rawConfig,
+        default_open_target: normalizeOpenTarget(rawConfig.default_open_target),
         notifications: normalizeNotificationSettings(rawConfig.notifications),
       };
       useNewSessionStore.getState().setSelectedAgentKind(config.agent_defaults.default_agent_kind);
@@ -110,6 +113,24 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (error) {
       set((state) => ({
         config: state.config ? { ...state.config, compact_ai_output: previousValue } : state.config,
+        error: String(error),
+      }));
+    }
+  },
+
+  setDefaultOpenTarget: async (target: OpenTarget) => {
+    const previousTarget = normalizeOpenTarget(get().config?.default_open_target);
+    const nextTarget = normalizeOpenTarget(target);
+    set((state) => ({
+      config: state.config ? { ...state.config, default_open_target: nextTarget } : state.config,
+      error: null,
+    }));
+
+    try {
+      await configApi.setDefaultOpenTarget(nextTarget);
+    } catch (error) {
+      set((state) => ({
+        config: state.config ? { ...state.config, default_open_target: previousTarget } : state.config,
         error: String(error),
       }));
     }
