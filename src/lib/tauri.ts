@@ -128,8 +128,25 @@ function summarizeInvokeArgs(args?: Record<string, unknown>) {
 }
 
 async function invokeLogged<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  const isAgentCommand = command.startsWith('agent_') || command.startsWith('ensure_agent') || command.startsWith('start_agent') || command.startsWith('send_agent') || command.startsWith('interrupt_agent') || command.startsWith('reset_agent') || command.startsWith('shutdown_agent') || command.startsWith('rewind_agent');
+  
+  if (isAgentCommand) {
+    logger.debug('Tauri command invoked', {
+      command,
+      ...summarizeInvokeArgs(args),
+    });
+  }
+  
   try {
-    return await invoke<T>(command, args);
+    const result = await invoke<T>(command, args);
+    if (isAgentCommand) {
+      logger.debug('Tauri command succeeded', {
+        command,
+        ...summarizeInvokeArgs(args),
+        resultType: result !== undefined ? typeof result : 'void',
+      });
+    }
+    return result;
   } catch (error) {
     logger.error('Tauri command failed', {
       command,

@@ -23,10 +23,12 @@ import {
   ReasoningRoot,
   ReasoningText,
   ReasoningTrigger,
-  formatCompactTokens,
 } from '@/components/assistant-ui/reasoning';
 import { cn } from '../../../lib/utils';
+import { createLogger } from '../../../lib/logger';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
+
+const logger = createLogger('CodeMuxThread');
 import { isInterruptMarker } from '../../../stores/agentEventParsing';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import {
@@ -1031,12 +1033,32 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
   );
   const visibleText = duplicateLiveText ? '' : text;
 
+  useEffect(() => {
+    if (isRunning && thinking.length > 0) {
+      logger.debug('Streaming thinking updated', {
+        sessionId,
+        thinkingLength: thinking.length,
+        isRunning,
+      });
+    }
+  }, [sessionId, thinking, isRunning]);
+
+  useEffect(() => {
+    if (isRunning && text.length > 0) {
+      logger.debug('Streaming text updated', {
+        sessionId,
+        textLength: text.length,
+        isRunning,
+        duplicate: duplicateLiveText,
+      });
+    }
+  }, [sessionId, text, isRunning, duplicateLiveText]);
+
   if (stopped || (!isRunning && !thinking && !visibleText)) {
     return null;
   }
 
   const isThinking = thinking.length > 0;
-  const thinkingTokenEstimate = Math.ceil(thinking.length / 4);
 
   return (
     <div className="mb-5 flex w-full justify-start">
@@ -1067,18 +1089,7 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
             )}
           >
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
-            {isThinking ? (
-              <>
-                <RunningElapsedTimer startTime={queryStartTime} label="思考中" />
-                {thinkingTokenEstimate > 0 ? (
-                  <span className="text-sm text-muted-foreground/50 tabular-nums">
-                    · {formatCompactTokens(thinkingTokenEstimate)}
-                  </span>
-                ) : null}
-              </>
-            ) : (
-              <RunningElapsedTimer startTime={queryStartTime} label={visibleText ? '生成中' : '运行中'} />
-            )}
+            <RunningElapsedTimer startTime={queryStartTime} label="思考中" />
           </div>
         ) : null}
       </div>

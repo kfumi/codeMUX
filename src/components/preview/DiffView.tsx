@@ -7,6 +7,22 @@ interface DiffViewProps {
   newContent: string;
 }
 
+type DiffLine = {
+  type: 'added' | 'removed' | 'unchanged';
+  content: string;
+  oldLineNum: number | null;
+  newLineNum: number | null;
+};
+
+type DisplayDiffLine = DiffLine | {
+  type: 'omitted';
+  content: string;
+  oldLineNum: null;
+  newLineNum: null;
+};
+
+const DIFF_CONTEXT_LINES = 3;
+
 export function DiffView({ oldContent, newContent }: DiffViewProps) {
   const changes: Change[] = useMemo(() => diffLines(oldContent, newContent), [oldContent, newContent]);
 
@@ -14,32 +30,8 @@ export function DiffView({ oldContent, newContent }: DiffViewProps) {
     return countDiffChanges(changes);
   }, [changes]);
 
-  // Build lines with line numbers
   const diffLinesData = useMemo(() => {
-    const result: Array<{
-      type: 'added' | 'removed' | 'unchanged';
-      content: string;
-      oldLineNum: number | null;
-      newLineNum: number | null;
-    }> = [];
-
-    let oldLine = 1;
-    let newLine = 1;
-
-    for (const change of changes) {
-      const lines = splitDiffLines(change.value);
-      for (const line of lines) {
-        if (change.added) {
-          result.push({ type: 'added', content: line, oldLineNum: null, newLineNum: newLine++ });
-        } else if (change.removed) {
-          result.push({ type: 'removed', content: line, oldLineNum: oldLine++, newLineNum: null });
-        } else {
-          result.push({ type: 'unchanged', content: line, oldLineNum: oldLine++, newLineNum: newLine++ });
-        }
-      }
-    }
-
-    return result;
+    return compactDiffLines(buildDiffLines(changes), DIFF_CONTEXT_LINES);
   }, [changes]);
 
   return (
@@ -59,6 +51,8 @@ export function DiffView({ oldContent, newContent }: DiffViewProps) {
                 ? 'bg-[#dafbe1] text-[#116329] dark:bg-[#12361f] dark:text-[#d8f7df]'
                 : line.type === 'removed'
                   ? 'bg-[#ffebe9] text-[#82071e] dark:bg-[#4a1515] dark:text-[#ffd7d5]'
+                  : line.type === 'omitted'
+                    ? 'bg-muted/35 text-muted-foreground/55'
                   : '';
             const gutterClass =
               line.type === 'added'
@@ -67,7 +61,7 @@ export function DiffView({ oldContent, newContent }: DiffViewProps) {
                   ? 'text-[#cf222e]/70 dark:text-[#ff7b72]/75'
                   : 'text-muted-foreground/40';
 
-            const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
+            const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : line.type === 'omitted' ? '' : ' ';
 
             return (
               <div key={index} className={`table-row whitespace-pre ${bgClass}`}>
@@ -86,4 +80,56 @@ export function DiffView({ oldContent, newContent }: DiffViewProps) {
       </div>
     </div>
   );
+}
+
+function buildDiffLines(changes: Change[]): DiffLine[] {
+  const result: DiffLine[] = [];
+  let oldLine = 1;
+  let newLine = 1;
+
+  for (const change of changes) {
+    const lines = splitDiffLines(change.value);
+    for (const line of lines) {
+      if (change.added) {
+        result.push({ type: 'added', content: line, oldLineNum: null, newLineNum: newLine++ });
+      } else if (change.removed) {
+        result.push({ type: 'removed', content: line, oldLineNum: oldLine++, newLineNum: null });
+      } else {
+        result.push({ type: 'unchanged', content: line, oldLineNum: oldLine++, newLineNum: newLine++ });
+      }
+    }
+  }
+
+  return result;
+}
+
+function compactDiffLines(lines: DiffLine[], contextLines: number): DisplayDiffLine[] {
+  const changedLineIndexes = lines
+    .map((line, index) => (line.type === 'unchanged' ? -1 : index))
+    .filter((index) => index >= 0);
+
+  if (changedLineIndexes.length === 0) return lines;
+
+  const visibleIndexes = new Set<number>();
+  for (const index of changedLineIndexes) {
+    const start = Math.max(0, index - contextLines);
+    const end = Math.min(lines.length - 1, index + contextLines);
+    for (let visibleIndex = start; visibleIndex <= end; visibleIndex += 1) {
+      visibleIndexes.add(visibleIndex);
+    }
+  }
+
+  const result: DisplayDiffLine[] = [];
+  let previousWasOmitted = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (visibleIndexes.has(index)) {
+      result.push(lines[index]);
+      previousWasOmitted = false;
+    } else if (!previousWasOmitted) {
+      result.push({ type: 'omitted', content: '...', oldLineNum: null, newLineNum: null });
+      previousWasOmitted = true;
+    }
+  }
+
+  return result;
 }

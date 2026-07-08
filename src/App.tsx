@@ -110,6 +110,7 @@ function App() {
   const handleStartNewSession = async (input: AgentInputPayload) => {
     const {
       selectedAgentKind,
+      selectedProviderId,
       selectedModel,
       selectedReasoningEffort,
       selectedPermissionConfig,
@@ -120,6 +121,7 @@ function App() {
     const { provider, apiKey, baseUrl, model, runtimeModel, codexNeedsProxy } = resolveAgentProviderConfig({
       agentKind: selectedAgentKind,
       config,
+      sessionProviderId: selectedProviderId,
       sessionModel: selectedModel,
     });
 

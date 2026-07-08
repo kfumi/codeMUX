@@ -323,6 +323,17 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
     if (/abort/i.test(errorMsg) || errorMsg.includes('The operation was aborted')) {
       return null;
     }
+    const knownError = getKnownSidecarErrorDisplay(errorMsg);
+    if (knownError) {
+      return (
+        <div className="text-xs rounded-xl p-3 my-1 border animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] border-[hsl(var(--warning)/0.14)]">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span className="break-all whitespace-pre-wrap">{knownError}</span>
+          </div>
+        </div>
+      );
+    }
     // Parse codex stderr format: "[codex] <label>: <message>"
     const match = errorMsg.match(/^\[codex\]\s*(?:SDK\s*)?(\w[\w\s]*?):\s*(.+)$/s);
     const label = match ? match[1].trim() : undefined;
@@ -401,6 +412,14 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
       resultContent={getStringRecordValue(eventData, 'resultContent')}
     />
   );
+}
+
+function getKnownSidecarErrorDisplay(errorMsg: string): string | null {
+  if (/Query timed out: no message received for 300s/.test(errorMsg)) {
+    return '等待用户回复超时，请重新发送消息继续';
+  }
+
+  return null;
 }
 
 function isAskUserQuestionData(value: unknown): value is AskUserQuestionData {

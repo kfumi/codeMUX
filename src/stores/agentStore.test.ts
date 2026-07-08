@@ -668,6 +668,7 @@ describe('agent store Codex history loading', () => {
       expect(useAgentStore.getState().streamingThinking[session.id]).toBe(
         'chunk-0;chunk-1;chunk-2;chunk-3;chunk-4;',
       );
+      expect('streamingThinkingDurations' in useAgentStore.getState()).toBe(false);
     } finally {
       requestAnimationFrameMock.mockRestore();
       vi.useRealTimers();

@@ -104,8 +104,8 @@ pub fn run() {
                     }),
                     Target::new(TargetKind::Webview),
                 ])
-                .level(log::LevelFilter::Info)
-                .level_for("codemux_lib", log::LevelFilter::Info)
+                .level(log::LevelFilter::Debug)
+                .level_for("codemux_lib", log::LevelFilter::Debug)
                 .rotation_strategy(RotationStrategy::KeepSome(10))
                 .max_file_size(1_048_576)
                 .timezone_strategy(TimezoneStrategy::UseLocal)

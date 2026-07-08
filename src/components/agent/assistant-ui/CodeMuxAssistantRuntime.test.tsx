@@ -1054,7 +1054,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.queryByText('结果 119')).toBeNull();
   }, 30_000);
 
-  it('does not render streaming thinking content but shows token estimate in status line', () => {
+  it('does not render streaming thinking content and only shows elapsed thinking status', () => {
     const shortThinking = 'short thinking stays fully visible';
     const longThinking = `${'x'.repeat(21_000)}`;
 
@@ -1074,16 +1074,16 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(container.textContent).not.toContain(shortThinking);
     // No collapsible reasoning block is rendered while thinking is in progress
     expect(container.querySelector('[data-slot="reasoning-trigger"]')).toBeNull();
-    // Status line shows thinking label and token estimate
+    // Status line shows thinking label and elapsed time only
     expect(container.textContent).toContain('思考中');
-    expect(container.textContent).toContain('tokens');
+    expect(container.textContent).not.toContain('tokens');
 
     cleanup();
     const longView = render(<Harness sessionId="session-stream-long" />);
     // Long thinking content is also NOT rendered (no streaming render at all)
     expect(longView.container.querySelector('[data-slot="reasoning-trigger"]')).toBeNull();
     expect(longView.container.textContent).toContain('思考中');
-    expect(longView.container.textContent).toContain('tokens');
+    expect(longView.container.textContent).not.toContain('tokens');
   });
 
   it('renders live streaming text with markdown parsing using Streamdown', () => {

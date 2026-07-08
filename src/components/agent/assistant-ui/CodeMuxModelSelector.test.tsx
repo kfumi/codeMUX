@@ -28,7 +28,7 @@ describe('CodeMuxModelSelector', () => {
 
     const trigger = screen.getByRole('combobox');
     expect(trigger.textContent).toContain('gpt-5');
-    expect(trigger.textContent).toContain('Medium');
+    expect(trigger.textContent).toContain('中');
 
     fireEvent.click(trigger);
     const list = screen.getByRole('listbox');
@@ -37,6 +37,49 @@ describe('CodeMuxModelSelector', () => {
     fireEvent.click(within(list).getByText('gpt-5-mini'));
 
     expect(onChange).toHaveBeenCalledWith('gpt-5-mini');
+  });
+
+  it('lets users switch providers and picks the next provider default model', () => {
+    const onChange = vi.fn();
+    const onProviderChange = vi.fn();
+
+    render(
+      <CodeMuxAssistantRuntimeProvider sessionId="session-1" onSend={vi.fn()} onCommand={vi.fn()}>
+        <CodeMuxModelSelector
+          value="claude-sonnet-4"
+          models={['claude-sonnet-4']}
+          providers={[
+            {
+              id: 'anthropic',
+              name: 'Anthropic',
+              api_key: 'key',
+              anthropic_base_url: 'https://api.anthropic.com',
+              openai_base_url: '',
+              default_model: 'claude-sonnet-4',
+              models: ['claude-sonnet-4'],
+            },
+            {
+              id: 'openrouter',
+              name: 'OpenRouter',
+              api_key: 'key',
+              anthropic_base_url: 'https://openrouter.ai/api/v1',
+              openai_base_url: 'https://openrouter.ai/api/v1',
+              default_model: 'claude-opus-4-1',
+              models: ['claude-opus-4-1', 'claude-haiku-3-5'],
+            },
+          ]}
+          providerId="anthropic"
+          onProviderChange={onProviderChange}
+          onChange={onChange}
+        />
+      </CodeMuxAssistantRuntimeProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('combobox'));
+    fireEvent.click(screen.getByRole('option', { name: 'OpenRouter' }));
+
+    expect(onProviderChange).toHaveBeenCalledWith('openrouter', 'claude-opus-4-1');
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it('allows switching reasoning effort from the selector panel', () => {
@@ -55,7 +98,7 @@ describe('CodeMuxModelSelector', () => {
     );
 
     fireEvent.click(screen.getByRole('combobox'));
-    fireEvent.click(screen.getByRole('button', { name: 'High' }));
+    fireEvent.click(screen.getByRole('button', { name: '高' }));
 
     expect(onReasoningEffortChange).toHaveBeenCalledWith('high');
   });

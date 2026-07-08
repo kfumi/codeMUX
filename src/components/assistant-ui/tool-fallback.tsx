@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-const ANIMATION_DURATION = 200;
+const ANIMATION_DURATION = 0;
 
 export type ToolFallbackRootProps = Omit<
   React.ComponentProps<typeof Collapsible>,
@@ -121,7 +121,7 @@ function ToolFallbackTrigger({
       </span>
       <ChevronDownIcon
         className={cn(
-          'size-3.5 shrink-0 text-muted-foreground/52 transition-transform duration-(--animation-duration) ease-out',
+          'size-3.5 shrink-0 text-muted-foreground/52 transition-transform',
           'group-data-[state=closed]/trigger:-rotate-90',
           'group-data-[state=open]/trigger:rotate-0',
         )}
@@ -141,14 +141,8 @@ function ToolFallbackContent({
     <CollapsibleContent
       data-slot="tool-fallback-content"
       className={cn(
-        'relative overflow-hidden text-sm outline-none',
-        'group/collapsible-content ease-out',
-        'data-[state=closed]:animate-collapsible-up',
-        'data-[state=open]:animate-collapsible-down',
-        'data-[state=closed]:fill-mode-forwards',
-        'data-[state=closed]:pointer-events-none',
-        'data-[state=open]:duration-(--animation-duration)',
-        'data-[state=closed]:duration-(--animation-duration)',
+        'relative text-sm outline-none',
+        'group/collapsible-content',
         className,
       )}
       {...props}
@@ -236,7 +230,7 @@ function ToolFallbackConversationResult({
         className={cn('aui-tool-fallback-result flex w-full justify-start', className)}
         {...props}
     >
-      <div className="aui-tool-fallback-result-content aui-md min-w-0 max-w-full rounded-xl rounded-tl-md px-1 py-1 text-sm leading-6 text-foreground/84">
+      <div className="aui-tool-fallback-result-content aui-md min-w-0 max-w-full rounded-xl rounded-tl-md px-1 py-1 text-xs leading-6 text-foreground/84 bg-muted">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>
           {resultText}
         </ReactMarkdown>

@@ -60,6 +60,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     sessionModel: session?.model,
   });
   const providerModels = useMemo(() => getProviderModelList(resolvedProvider), [resolvedProvider]);
+  const availableProviders = config?.providers ?? [];
   const reasoningEffort = session?.reasoning_effort ?? 'medium';
   const agentKind = session?.agent_kind ?? 'claude_code';
   const formatSelectedProviderModel = useCallback((item: string) => formatModelDisplayName({
@@ -222,6 +223,26 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
   }, [model, reasoningEffort, resolvedProvider?.id, session, sessionId]);
 
+  const handleProviderChange = useCallback(async (nextProviderId: string, nextModel: string) => {
+    if (!session || !nextProviderId || !nextModel || (nextProviderId === resolvedProvider?.id && nextModel === model)) {
+      return;
+    }
+
+    useSessionStore.setState((state) => ({
+      sessions: state.sessions.map((entry) =>
+        entry.id === sessionId ? { ...entry, provider_id: nextProviderId, model: nextModel, reasoning_effort: reasoningEffort } : entry,
+      ),
+    }));
+
+    try {
+      await sessionApi.updateProvider(sessionId, nextProviderId, nextModel, reasoningEffort);
+    } catch (error) {
+      useAgentStore.setState((state) => ({
+        error: { ...state.error, [sessionId]: String(error) },
+      }));
+    }
+  }, [model, reasoningEffort, resolvedProvider?.id, session, sessionId]);
+
   const handleReasoningEffortChange = useCallback(async (nextEffort: ReasoningEffort) => {
     const latestSession = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
     if (!latestSession || latestSession.reasoning_effort === nextEffort) {
@@ -337,6 +358,9 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                     value={model || ''}
                     models={providerModels}
                     onChange={handleModelChange}
+                    providers={availableProviders}
+                    providerId={resolvedProvider?.id ?? null}
+                    onProviderChange={handleProviderChange}
                     reasoningEffort={reasoningEffort}
                     onReasoningEffortChange={handleReasoningEffortChange}
                     getDisplayName={formatSelectedProviderModel}

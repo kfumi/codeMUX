@@ -180,4 +180,27 @@ describe('AskUserQuestionCard', () => {
       expect(screen.getByText('已取消')).toBeTruthy();
     });
   });
+
+  it('renders expired questions as disabled and does not send stale tool responses', () => {
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="tool-1"
+        expired
+        questions={[{
+          question: '需要继续吗？',
+          options: [{ label: '继续' }],
+        }]}
+      />,
+    );
+
+    expect(screen.getByText('等待用户回复超时，请重新发送消息继续')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '提交' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '取消' }).hasAttribute('disabled')).toBe(true);
+
+    fireEvent.click(screen.getByText('继续'));
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+
+    expect(sendToolResponse).not.toHaveBeenCalled();
+  });
 });

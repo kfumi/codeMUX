@@ -11,7 +11,7 @@ import { inferReasoningConfig } from './codexReasoning.js';
 import { CodexChatHistory, convertChatCompletionToResponses } from './codexChatCompat.js';
 import { buildToolResultEvent } from './runtimeEvents.js';
 import crypto from 'node:crypto';
-import { waitForInteractiveToolResponse } from './interactiveToolResponses.js';
+import { isInteractiveToolTimeoutResponse, waitForInteractiveToolResponse } from './interactiveToolResponses.js';
 import {
   buildRequestUserInputBlockedEvent,
   getActiveCodexCollaborationPolicy,
@@ -19,6 +19,9 @@ import {
   type CodexCollaborationPolicy,
 } from './codexCollaborationPolicy.js';
 import { getActivePermissionState } from './activePermissionState.js';
+
+const INTERACTIVE_USER_INPUT_TIMEOUT_MS = 300_000;
+const INTERACTIVE_USER_INPUT_TIMEOUT_MESSAGE = '等待用户回复超时，请重新发送消息继续';
 
 export type ProxyConfig = {
   apiKey: string;
@@ -670,7 +673,19 @@ async function resolveInteractiveUserInputToolCalls(
         tool_use_id: toolCall.id,
         questions,
       });
-      response = await waitForInteractiveToolResponse(toolCall.id);
+      response = await waitForInteractiveToolResponse(toolCall.id, {
+        sessionId: activeSessionId,
+        timeoutMs: INTERACTIVE_USER_INPUT_TIMEOUT_MS,
+      });
+      if (isInteractiveToolTimeoutResponse(response)) {
+        isError = true;
+        emitEvent({
+          type: 'ask_user_question_timeout',
+          tool_use_id: toolCall.id,
+          timeout_ms: INTERACTIVE_USER_INPUT_TIMEOUT_MS,
+          message: INTERACTIVE_USER_INPUT_TIMEOUT_MESSAGE,
+        });
+      }
       persistInteractiveUserInputHistory(activeSessionId, toolCall, questions, response);
     }
 

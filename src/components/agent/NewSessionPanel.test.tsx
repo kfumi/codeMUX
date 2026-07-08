@@ -39,14 +39,23 @@ vi.mock('./assistant-ui/CodeMuxComposer', () => ({
 }));
 
 vi.mock('./assistant-ui/CodeMuxModelSelector', () => ({
-  CodeMuxModelSelector: ({ models, onChange }: any) => (
-    <select aria-label="Models" onChange={(event) => onChange(event.target.value)}>
-      {models.map((model: string) => (
-        <option key={model} value={model}>
-          {model}
-        </option>
-      ))}
-    </select>
+  CodeMuxModelSelector: ({ models, providers, providerId, onChange, onProviderChange }: any) => (
+    <div>
+      <select aria-label="Providers" value={providerId ?? ''} onChange={(event) => onProviderChange?.(event.target.value, 'gpt-5')}>
+        {providers?.map((provider: any) => (
+          <option key={provider.id} value={provider.id}>
+            {provider.name}
+          </option>
+        ))}
+      </select>
+      <select aria-label="Models" onChange={(event) => onChange(event.target.value)}>
+        {models.map((model: string) => (
+          <option key={model} value={model}>
+            {model}
+          </option>
+        ))}
+      </select>
+    </div>
   ),
 }));
 
@@ -66,6 +75,7 @@ describe('NewSessionPanel', () => {
     });
     useNewSessionStore.setState({
       selectedAgentKind: 'claude_code',
+      selectedProviderId: null,
       selectedModel: null,
       selectedReasoningEffort: 'medium',
       draftProjectId: null,
@@ -81,6 +91,14 @@ describe('NewSessionPanel', () => {
           openai_base_url: 'https://api.openai.com/v1',
           default_model: 'claude-sonnet-4-20250514',
           models: ['claude-sonnet-4-20250514', 'claude-opus-4-1'],
+        }, {
+          id: 'provider-2',
+          name: 'Provider 2',
+          api_key: 'key-2',
+          anthropic_base_url: 'https://provider-2.example',
+          openai_base_url: 'https://provider-2.example/v1',
+          default_model: 'gpt-5',
+          models: ['gpt-5', 'gpt-5-mini'],
         }],
         active_provider_id: 'provider-1',
         agent_defaults: { default_agent_kind: 'claude_code' },
@@ -143,6 +161,17 @@ describe('NewSessionPanel', () => {
     });
 
     expect(useNewSessionStore.getState().selectedModel).toBe('claude-opus-4-1');
+  });
+
+  it('lets the draft choose a provider and its default model', () => {
+    render(<NewSessionPanel onSubmit={vi.fn()} />);
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Providers' }), {
+      target: { value: 'provider-2' },
+    });
+
+    expect(useNewSessionStore.getState().selectedProviderId).toBe('provider-2');
+    expect(useNewSessionStore.getState().selectedModel).toBe('gpt-5');
   });
 
   it('submits through the shared runtime send handler', async () => {

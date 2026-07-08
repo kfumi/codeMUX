@@ -9,8 +9,9 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { AgentPanel } from './AgentPanel';
 
-const { ensureSessionMock } = vi.hoisted(() => ({
+const { ensureSessionMock, updateProviderMock } = vi.hoisted(() => ({
   ensureSessionMock: vi.fn(() => Promise.resolve()),
+  updateProviderMock: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('../../lib/tauri', () => ({
@@ -21,7 +22,7 @@ vi.mock('../../lib/tauri', () => ({
     resetSession: vi.fn(),
   },
   sessionApi: {
-    updateProvider: vi.fn(() => Promise.resolve()),
+    updateProvider: updateProviderMock,
     touch: vi.fn(() => Promise.resolve()),
     updateTitle: vi.fn(() => Promise.resolve()),
   },
@@ -51,13 +52,26 @@ vi.mock('./assistant-ui/CodeMuxThread', () => ({
 }));
 
 vi.mock('./assistant-ui/CodeMuxComposer', () => ({
-  CodeMuxComposer: ({ permissionSelector }: { permissionSelector?: React.ReactNode }) => (
-    <div data-testid="composer">{permissionSelector}</div>
+  CodeMuxComposer: ({ modelSelector, permissionSelector }: { modelSelector?: React.ReactNode; permissionSelector?: React.ReactNode }) => (
+    <div data-testid="composer">
+      {modelSelector}
+      {permissionSelector}
+    </div>
   ),
 }));
 
 vi.mock('./assistant-ui/CodeMuxModelSelector', () => ({
-  CodeMuxModelSelector: () => <div data-testid="model-selector" />,
+  CodeMuxModelSelector: ({ providers, providerId, onProviderChange }: any) => (
+    <button
+      type="button"
+      data-testid="model-selector"
+      data-provider-id={providerId}
+      data-provider-count={providers?.length ?? 0}
+      onClick={() => onProviderChange?.('provider-2', 'claude-opus-4-1')}
+    >
+      切换供应商
+    </button>
+  ),
 }));
 
 describe('AgentPanel session bootstrapping', () => {
@@ -67,6 +81,7 @@ describe('AgentPanel session bootstrapping', () => {
       disconnect() {}
     });
     ensureSessionMock.mockClear();
+    updateProviderMock.mockClear();
 
     useSessionStore.setState({
       sessions: [{
@@ -103,6 +118,14 @@ describe('AgentPanel session bootstrapping', () => {
           openai_base_url: 'https://api.openai.com/v1',
           default_model: 'claude-sonnet-4-20250514',
           models: ['claude-sonnet-4-20250514'],
+        }, {
+          id: 'provider-2',
+          name: 'Provider 2',
+          api_key: 'key-2',
+          anthropic_base_url: 'https://provider-2.example',
+          openai_base_url: 'https://provider-2.example/v1',
+          default_model: 'claude-opus-4-1',
+          models: ['claude-opus-4-1'],
         }],
         active_provider_id: 'provider-1',
         agent_defaults: { default_agent_kind: 'claude_code' },
@@ -155,5 +178,23 @@ describe('AgentPanel session bootstrapping', () => {
     render(<AgentPanel sessionId="session-running" />);
 
     expect(screen.getByTitle('变更前确认')).toHaveProperty('disabled', false);
+  });
+  it('persists provider and default model changes for the active session', async () => {
+    useAgentStore.setState({ isRunning: { 'session-running': false } });
+
+    render(<AgentPanel sessionId="session-running" />);
+
+    expect(screen.getByTestId('model-selector').dataset.providerId).toBe('provider-1');
+    expect(screen.getByTestId('model-selector').dataset.providerCount).toBe('2');
+    screen.getByTestId('model-selector').click();
+
+    await waitFor(() => {
+      expect(updateProviderMock).toHaveBeenCalledWith('session-running', 'provider-2', 'claude-opus-4-1', 'medium');
+    });
+    expect(useSessionStore.getState().sessions[0]).toMatchObject({
+      provider_id: 'provider-2',
+      model: 'claude-opus-4-1',
+      reasoning_effort: 'medium',
+    });
   });
 });

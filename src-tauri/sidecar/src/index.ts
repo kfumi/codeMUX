@@ -53,6 +53,7 @@ const WARM_START_TIMEOUT_MS = 30_000;
 const WARM_QUERY_WAIT_WINDOW_MS = 500;
 const MESSAGE_TIMEOUT_MS = 300_000;
 const COMPACT_TIMEOUT_MS = 60_000;
+const ASK_USER_QUESTION_TIMEOUT_MESSAGE = '等待用户回复超时，请重新发送消息继续';
 
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
 type UpdatePermissionsCommand = Extract<SidecarCommand, { type: 'update_permissions' }>;
@@ -74,9 +75,106 @@ type QueryOptions = Record<string, unknown> & {
   pathToClaudeCodeExecutable?: string;
 };
 
+type PendingToolResponseResult =
+  | { kind: 'answered'; value: unknown }
+  | { kind: 'expired' };
+
 /** Pending tool responses waiting for user input */
-const pendingToolResponses = new Map<string, { resolve: (value: unknown) => void }>();
+const pendingToolResponses = new Map<string, {
+  sessionId?: string;
+  timeoutTimer?: ReturnType<typeof setTimeout>;
+  resolve: (value: PendingToolResponseResult) => void;
+}>();
 const SIDECAR_DIST_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+function waitForClaudeToolResponse(
+  toolUseId: string,
+  sessionId?: string,
+  timeoutMs = MESSAGE_TIMEOUT_MS,
+): Promise<PendingToolResponseResult> {
+  return new Promise((resolve) => {
+    const timeoutTimer = setTimeout(() => {
+      expireClaudeToolResponse(toolUseId);
+    }, timeoutMs);
+    if (timeoutTimer.unref) timeoutTimer.unref();
+    pendingToolResponses.set(toolUseId, {
+      sessionId,
+      timeoutTimer,
+      resolve,
+    });
+  });
+}
+
+function resolveClaudeToolResponse(toolUseId: string, response: unknown): boolean {
+  const pending = pendingToolResponses.get(toolUseId);
+  if (!pending) {
+    return false;
+  }
+
+  pendingToolResponses.delete(toolUseId);
+  if (pending.timeoutTimer) {
+    clearTimeout(pending.timeoutTimer);
+  }
+  pending.resolve({ kind: 'answered', value: response });
+  return true;
+}
+
+function expireClaudeToolResponse(toolUseId: string): boolean {
+  const pending = pendingToolResponses.get(toolUseId);
+  if (!pending) {
+    return false;
+  }
+
+  pendingToolResponses.delete(toolUseId);
+  if (pending.timeoutTimer) {
+    clearTimeout(pending.timeoutTimer);
+  }
+  emitAskUserQuestionTimeout(toolUseId);
+  pending.resolve({ kind: 'expired' });
+  return true;
+}
+
+function expireClaudeToolResponses(sessionId?: string): number {
+  let expired = 0;
+  for (const [toolUseId, pending] of Array.from(pendingToolResponses.entries())) {
+    if (sessionId && pending.sessionId !== sessionId) {
+      continue;
+    }
+    if (expireClaudeToolResponse(toolUseId)) {
+      expired += 1;
+    }
+  }
+  return expired;
+}
+
+function clearClaudeToolResponses(sessionId?: string): number {
+  let cleared = 0;
+  for (const [toolUseId, pending] of Array.from(pendingToolResponses.entries())) {
+    if (sessionId && pending.sessionId !== sessionId) {
+      continue;
+    }
+    if (pending.timeoutTimer) {
+      clearTimeout(pending.timeoutTimer);
+    }
+    pendingToolResponses.delete(toolUseId);
+    pending.resolve({ kind: 'expired' });
+    cleared += 1;
+  }
+  return cleared;
+}
+
+function emitAskUserQuestionTimeout(toolUseId: string): void {
+  emit({
+    type: 'ask_user_question_timeout',
+    tool_use_id: toolUseId,
+    timeout_ms: MESSAGE_TIMEOUT_MS,
+    message: ASK_USER_QUESTION_TIMEOUT_MESSAGE,
+  });
+}
+
+function isQueryIdleTimeout(errorText: string): boolean {
+  return errorText.includes('Query timed out: no message received');
+}
 
 function findClaudeExecutable(): string | undefined {
   try {
@@ -237,6 +335,7 @@ export class SessionRuntime {
   }
 
   async interrupt(): Promise<void> {
+    clearClaudeToolResponses(this.config?.sessionId);
     if (!this.queryHandle) {
       if (this.abortController && !this.abortController.signal.aborted) {
         this.abortController.abort('user_interrupt_no_query');
@@ -311,6 +410,7 @@ export class SessionRuntime {
   }
 
   private async resetForReconfigure(): Promise<void> {
+    clearClaudeToolResponses(this.config?.sessionId);
     this.finishTurn();
     this.closeQueryHandle('reconfigure');
     if (this.warmQuery) {
@@ -561,10 +661,15 @@ export class SessionRuntime {
             tool_use_id: toolUseId,
             questions,
           });
-          const userAnswers = await new Promise<string[]>((resolve) => {
-            pendingToolResponses.set(toolUseId, { resolve: resolve as (v: unknown) => void });
-          });
-          pendingToolResponses.delete(toolUseId);
+          const response = await waitForClaudeToolResponse(toolUseId, config.sessionId);
+          if (response.kind === 'expired') {
+            return {
+              behavior: 'deny',
+              message: ASK_USER_QUESTION_TIMEOUT_MESSAGE,
+              toolUseID: toolUseId,
+            };
+          }
+          const userAnswers = response.value as string[];
           const answersRecord: Record<string, string> = {};
           questions.forEach((q: any, i: number) => {
             const answer = userAnswers[i];
@@ -612,10 +717,15 @@ export class SessionRuntime {
             allowOther: false,
           }],
         });
-        const userAnswers = await new Promise<unknown[]>((resolve) => {
-          pendingToolResponses.set(toolUseId, { resolve: resolve as (v: unknown) => void });
-        });
-        pendingToolResponses.delete(toolUseId);
+        const response = await waitForClaudeToolResponse(toolUseId, config.sessionId);
+        if (response.kind === 'expired') {
+          return {
+            behavior: 'deny',
+            message: ASK_USER_QUESTION_TIMEOUT_MESSAGE,
+            toolUseID: toolUseId,
+          };
+        }
+        const userAnswers = response.value as unknown[];
         const answerValue = userAnswers[0];
         if (applyPermissionElevation(answerValue, { sessionId: config.sessionId, agentKind: 'claude_code' })) {
           return { behavior: 'allow', updatedInput: input, toolUseID: toolUseId };
@@ -783,17 +893,25 @@ export class SessionRuntime {
       const errorMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
       const normalizedError = errorMsg.toLowerCase();
       const isAbort = normalizedError.includes('abort');
+      const isIdleTimeout = isQueryIdleTimeout(errorMsg);
       const isGracefulInterruptCleanup = Boolean(
         this.abortController?.signal.aborted &&
         (normalizedError.includes('stream closed') || normalizedError.includes('query timed out')),
       );
       this.clearStaleResumeMapping(errorMsg);
+      if (isIdleTimeout) {
+        expireClaudeToolResponses(appSessionId);
+        this.closeQueryHandle('timeout');
+      }
       if (!isAbort && !isGracefulInterruptCleanup) {
         emit({ type: 'sidecar_error', error: errorMsg });
       } else {
         process.stderr.write(`[sidecar] Suppressed interrupt cleanup error: ${errorMsg}\n`);
       }
       this.finishTurn();
+      if (isIdleTimeout && this.config) {
+        this.startWarmup(this.activeConfigGeneration);
+      }
     } finally {
       clearCompactTimer();
       if (shouldEmitDoneOnClaudeIteratorCompletion({
@@ -878,13 +996,16 @@ async function main(): Promise<void> {
       case 'ensure_session': {
         const flavor = getRuntimeFlavor(cmd.agentKind);
         activeAgentKind = cmd.agentKind;
+        process.stderr.write(`[sidecar] ensure_session received: sessionId=${cmd.sessionId} agentKind=${cmd.agentKind} flavor=${flavor} cwd=${cmd.cwd}\n`);
         try {
           if (flavor === 'codex') {
             await codexRuntime.ensure(cmd);
           } else {
             await runtime.ensure(cmd);
           }
+          process.stderr.write(`[sidecar] ensure_session completed: sessionId=${cmd.sessionId} agentKind=${cmd.agentKind}\n`);
         } catch (err) {
+          process.stderr.write(`[sidecar] ensure_session failed: sessionId=${cmd.sessionId} error=${String(err)}\n`);
           emit({ type: 'sidecar_error', error: String(err) });
         }
         break;
@@ -907,11 +1028,13 @@ async function main(): Promise<void> {
         // Fire-and-forget: don't await sendInput so the command loop stays
         // responsive. The interrupt command can then call interruptActiveTurn()
         // immediately to abort the running stream.
+        process.stderr.write(`[sidecar] send_input received: agentKind=${activeAgentKind} promptLength=${cmd.prompt.length}\n`);
         if (getRuntimeFlavor(activeAgentKind) === 'codex') {
           codexRuntime.sendInput(cmd.prompt, cmd.inputPayload).catch((err) => {
             // Suppress abort errors — these are expected when the user interrupts.
             const msg = String(err).toLowerCase();
             if (!msg.includes('abort')) {
+              process.stderr.write(`[sidecar] send_input failed: error=${String(err)}\n`);
               emit({ type: 'sidecar_error', error: String(err) });
             } else {
               process.stderr.write(`[sidecar] Suppressed send_input abort error: ${String(err)}\n`);
@@ -919,6 +1042,7 @@ async function main(): Promise<void> {
           });
         } else {
           runtime.sendInput(cmd.prompt, cmd.inputPayload).catch((err) => {
+            process.stderr.write(`[sidecar] send_input failed: error=${String(err)}\n`);
             emit({ type: 'sidecar_error', error: String(err) });
           });
         }
@@ -954,9 +1078,7 @@ async function main(): Promise<void> {
         }
         break;
       case 'tool_response': {
-        const pending = pendingToolResponses.get(cmd.toolUseId);
-        if (pending) {
-          pending.resolve(cmd.response);
+        if (resolveClaudeToolResponse(cmd.toolUseId, cmd.response)) {
           process.stderr.write(`[sidecar] tool_response resolved for toolUseId=${cmd.toolUseId}\n`);
         } else if (resolveInteractiveToolResponse(cmd.toolUseId, cmd.response)) {
           process.stderr.write(`[sidecar] interactive tool_response resolved for toolUseId=${cmd.toolUseId}\n`);

@@ -23,6 +23,7 @@ interface AskUserQuestionCardProps {
   toolUseId: string;
   questions: AskUserQuestion[];
   submitted?: boolean;
+  expired?: boolean;
   resultContent?: string;
   variant?: 'message' | 'composer';
   onSubmitted?: () => void;
@@ -83,6 +84,7 @@ export function AskUserQuestionCard({
   toolUseId,
   questions,
   submitted: propSubmitted,
+  expired = false,
   resultContent,
   variant = 'message',
   onSubmitted,
@@ -101,7 +103,9 @@ export function AskUserQuestionCard({
   const [otherTexts, setOtherTexts] = useState<Record<number, string>>({});
   const [submitted, setSubmitted] = useState(propSubmitted || false);
   const [submitting, setSubmitting] = useState(false);
-  const [submittedAnswers, setSubmittedAnswers] = useState<string[]>(parsedAnswers);
+  const [submittedAnswers, setSubmittedAnswers] = useState<string[]>(
+    expired ? questions.map(() => '已超时') : parsedAnswers,
+  );
 
   // Subscribe to forceStopped so interrupted sessions render as non-interactive cancelled cards.
   const forceStopped = useAgentStore((s) => s.forceStopped[sessionId] ?? false);
@@ -126,7 +130,7 @@ export function AskUserQuestionCard({
   const allAnswered = questions.every((_, i) => isQuestionAnswered(i));
 
   const toggleOption = (qIdx: number, oIdx: number) => {
-    if (submitted) return;
+    if (submitted || expired) return;
 
     setSelections((prev) => {
       const next = { ...prev };
@@ -155,7 +159,7 @@ export function AskUserQuestionCard({
   const isOtherSelected = (qIdx: number) => selections[qIdx]?.has(OTHER_IDX);
 
   const handleSubmit = async () => {
-    if (!allAnswered || submitting) return;
+    if (expired || !allAnswered || submitting) return;
 
     setSubmitting(true);
 
@@ -202,7 +206,7 @@ export function AskUserQuestionCard({
   };
 
   const handleCancel = async () => {
-    if (submitting) return;
+    if (expired || submitting) return;
 
     setSubmitting(true);
 
@@ -233,8 +237,10 @@ export function AskUserQuestionCard({
             <button
               key={oIdx}
               onClick={() => toggleOption(qIdx, oIdx)}
+              disabled={expired}
               className={cn(
                 'w-full cursor-pointer border px-3 py-2 text-left text-sm transition-colors',
+                expired && 'cursor-not-allowed opacity-65',
                 isComposer ? 'rounded-none border-x-0 border-b-0 border-t border-border/12 first:border-t-0' : 'rounded-md',
                 selected
                   ? isComposer
@@ -269,8 +275,10 @@ export function AskUserQuestionCard({
         {q.allowOther !== false && (
           <button
             onClick={() => toggleOption(qIdx, OTHER_IDX)}
+            disabled={expired}
             className={cn(
               'w-full cursor-pointer border px-3 py-2 text-left text-sm transition-colors',
+              expired && 'cursor-not-allowed opacity-65',
               isComposer ? 'rounded-none border-x-0 border-b-0 border-t border-border/12' : 'rounded-md',
               isOtherSelected(qIdx)
                 ? isComposer ? 'bg-muted/62 text-foreground' : 'border-primary/40 bg-primary/10 text-foreground'
@@ -344,17 +352,17 @@ export function AskUserQuestionCard({
         <div className="flex items-center justify-end gap-2 px-1">
           <button
             onClick={handleCancel}
-            disabled={submitting}
+            disabled={submitting || expired}
             className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground disabled:opacity-60"
           >
             跳过
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!allAnswered || submitting}
+            disabled={!allAnswered || submitting || expired}
             className={cn(
               'rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors',
-              allAnswered && !submitting
+              allAnswered && !submitting && !expired
                 ? 'bg-foreground text-background hover:bg-foreground/90'
                 : 'cursor-not-allowed bg-muted/40 text-muted-foreground',
             )}
@@ -384,6 +392,11 @@ export function AskUserQuestionCard({
 
       {isExpanded && (
         <div className="space-y-3 border-t px-3 py-3">
+          {expired ? (
+            <div className="rounded-md border border-[hsl(var(--warning)/0.22)] bg-[hsl(var(--warning)/0.08)] px-3 py-2 text-xs font-medium text-[hsl(var(--warning))]">
+              等待用户回复超时，请重新发送消息继续
+            </div>
+          ) : null}
           {submitted ? (
             questions.map((q, qIdx) => (
               <div key={qIdx}>
@@ -413,16 +426,16 @@ export function AskUserQuestionCard({
               <div className="mt-3 flex gap-2">
                 <button
                   onClick={handleCancel}
-                  disabled={submitting}
+                  disabled={submitting || expired}
                   className="flex-1 cursor-pointer rounded-md bg-muted/40 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60"
                 >
                   取消
                 </button>
                 <button
                   onClick={handleSubmit}
-                  disabled={!allAnswered || submitting}
+                  disabled={!allAnswered || submitting || expired}
                   className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
-                    allAnswered && !submitting
+                    allAnswered && !submitting && !expired
                       ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                       : 'cursor-not-allowed bg-muted/40 text-muted-foreground'
                   }`}
@@ -437,16 +450,16 @@ export function AskUserQuestionCard({
               <div className="flex gap-2">
                 <button
                   onClick={handleCancel}
-                  disabled={submitting}
+                  disabled={submitting || expired}
                   className="flex-1 cursor-pointer rounded-md bg-muted/40 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60"
                 >
                   取消
                 </button>
                 <button
                   onClick={handleSubmit}
-                  disabled={!allAnswered || submitting}
+                  disabled={!allAnswered || submitting || expired}
                   className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
-                    allAnswered && !submitting
+                    allAnswered && !submitting && !expired
                       ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                       : 'cursor-not-allowed bg-muted/40 text-muted-foreground'
                   }`}

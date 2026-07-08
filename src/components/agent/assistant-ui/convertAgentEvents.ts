@@ -242,7 +242,31 @@ export function convertAgentEventsToAssistantMessages(
       return;
     }
 
+    if (event.kind === 'ask_user_question_timeout') {
+      const message = event.data.message || '等待用户回复超时，请重新发送消息继续';
+      const attachedToolResult = attachToolResult(
+        messages,
+        toolCallLocationById,
+        event.data.tool_use_id,
+        message,
+        true,
+      );
+
+      if (!attachedToolResult) {
+        pendingToolResultsById.set(event.data.tool_use_id, {
+          content: message,
+          isError: true,
+        });
+      }
+
+      return;
+    }
+
     if (isVisibleEventKind(event.kind)) {
+      if (event.kind === 'api_retry' && updatePreviousApiRetryMessage(messages, event, index)) {
+        return;
+      }
+
       const part = createEventPart(event.kind, event);
       messages.push(
         createMessage(
@@ -260,6 +284,23 @@ export function convertAgentEventsToAssistantMessages(
   markFinalAssistantMessages(messages, events);
 
   return messages;
+}
+
+function updatePreviousApiRetryMessage(
+  messages: CodeMuxAssistantMessage[],
+  event: Extract<AgentMessage, { kind: 'api_retry' }>,
+  index: number,
+): boolean {
+  const previous = messages[messages.length - 1];
+  if (!previous || previous.metadata.sourceKind !== 'api_retry') {
+    return false;
+  }
+
+  previous.id = `api_retry-${index}`;
+  previous.content = [createEventPart('api_retry', event)];
+  previous.metadata.sourceEventIndex = index;
+  previous.metadata.sourceEventIndices = [...previous.metadata.sourceEventIndices, index];
+  return true;
 }
 
 function isHiddenClaudeCompactUserEvent(

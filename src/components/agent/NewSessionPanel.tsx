@@ -26,11 +26,13 @@ interface NewSessionPanelProps {
 export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const {
     selectedAgentKind,
+    selectedProviderId,
     selectedModel,
     selectedReasoningEffort,
     selectedPermissionConfig,
     selectedPlanMode,
     setSelectedAgentKind,
+    setSelectedProviderId,
     setSelectedModel,
     setSelectedReasoningEffort,
     setSelectedPermissionConfig,
@@ -45,15 +47,20 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const clearEvents = useAgentStore((state) => state.clearEvents);
 
   const selectedAgent = getAgentDefinition(selectedAgentKind);
-  const providerModels = useMemo(() => getProviderModelList(activeProvider), [activeProvider]);
-  const effectiveModel = selectedModel || getPrimaryProviderModel(activeProvider);
+  const availableProviders = config?.providers ?? [];
+  const selectedProvider = useMemo(
+    () => availableProviders.find((provider) => provider.id === selectedProviderId) ?? activeProvider,
+    [activeProvider, availableProviders, selectedProviderId],
+  );
+  const providerModels = useMemo(() => getProviderModelList(selectedProvider), [selectedProvider]);
+  const effectiveModel = selectedModel || getPrimaryProviderModel(selectedProvider);
   const formatSelectedProviderModel = useMemo(() => (
     (item: string) => formatModelDisplayName({
       model: item,
       agentKind: selectedAgentKind,
-      usesLargeContext: activeProvider?.context_1m,
+      usesLargeContext: selectedProvider?.context_1m,
     })
-  ), [activeProvider?.context_1m, selectedAgentKind]);
+  ), [selectedProvider?.context_1m, selectedAgentKind]);
   const draftProject = useMemo(
     () => projects.find((project) => project.id === draftProjectId) ?? null,
     [draftProjectId, projects],
@@ -158,6 +165,12 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                   value={effectiveModel}
                   models={providerModels}
                   onChange={setSelectedModel}
+                  providers={availableProviders}
+                  providerId={selectedProvider?.id ?? null}
+                  onProviderChange={(providerId, model) => {
+                    setSelectedProviderId(providerId);
+                    setSelectedModel(model || null);
+                  }}
                   reasoningEffort={selectedReasoningEffort}
                   onReasoningEffortChange={setSelectedReasoningEffort}
                   getDisplayName={formatSelectedProviderModel}

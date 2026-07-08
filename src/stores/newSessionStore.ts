@@ -9,6 +9,7 @@ import {
 
 interface NewSessionState {
   selectedAgentKind: AgentKind;
+  selectedProviderId: string | null;
   selectedModel: string | null;
   selectedReasoningEffort: ReasoningEffort;
   selectedPermissionConfig: AgentPermissionConfig;
@@ -18,6 +19,7 @@ interface NewSessionState {
   openDraft: (projectId?: string | null) => void;
   closeDraft: () => void;
   setSelectedAgentKind: (agentKind: AgentKind) => void;
+  setSelectedProviderId: (providerId: string | null) => void;
   setSelectedModel: (model: string | null) => void;
   setSelectedReasoningEffort: (effort: ReasoningEffort) => void;
   setSelectedPermissionConfig: (permissionConfig: AgentPermissionConfig) => void;
@@ -26,6 +28,7 @@ interface NewSessionState {
 
 export const useNewSessionStore = create<NewSessionState>((set) => ({
   selectedAgentKind: 'claude_code',
+  selectedProviderId: null,
   selectedModel: null,
   selectedReasoningEffort: 'medium',
   selectedPermissionConfig: buildDefaultPermissionConfig('claude_code'),
@@ -35,6 +38,7 @@ export const useNewSessionStore = create<NewSessionState>((set) => ({
   openDraft: (draftProjectId = null) => set((state) => ({
     draftProjectId,
     isDraftOpen: true,
+    selectedProviderId: null,
     selectedModel: null,
     selectedReasoningEffort: 'medium',
     selectedPermissionConfig: buildDefaultPermissionConfig(state.selectedAgentKind),
@@ -43,6 +47,7 @@ export const useNewSessionStore = create<NewSessionState>((set) => ({
   closeDraft: () => set((state) => ({
     draftProjectId: null,
     isDraftOpen: false,
+    selectedProviderId: null,
     selectedModel: null,
     selectedReasoningEffort: 'medium',
     selectedPermissionConfig: buildDefaultPermissionConfig(state.selectedAgentKind),
@@ -53,6 +58,7 @@ export const useNewSessionStore = create<NewSessionState>((set) => ({
     selectedPermissionConfig: buildDefaultPermissionConfig(selectedAgentKind),
     selectedPlanMode: 'off',
   }),
+  setSelectedProviderId: (selectedProviderId) => set({ selectedProviderId }),
   setSelectedModel: (selectedModel) => set({ selectedModel }),
   setSelectedReasoningEffort: (selectedReasoningEffort) => set({ selectedReasoningEffort }),
   setSelectedPermissionConfig: (selectedPermissionConfig) => set({ selectedPermissionConfig }),

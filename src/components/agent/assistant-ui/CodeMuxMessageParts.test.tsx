@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
 import { getStreamStatusDisplay } from './CodeMuxMessageParts';
-import { CodeMuxToolCallMessagePart } from './CodeMuxMessageParts';
+import { CodeMuxDataMessagePart, CodeMuxToolCallMessagePart } from './CodeMuxMessageParts';
 
 function renderWithTooltip(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>);
@@ -147,5 +147,29 @@ describe('CodeMuxToolCallMessagePart', () => {
     expect(contentBody?.className).not.toContain('overflow-y-auto');
     expect(contentBody?.className).not.toContain('max-h-40');
     expect(diffViewer?.className).toContain('overflow-auto');
+  });
+});
+
+describe('CodeMuxDataMessagePart', () => {
+  it('把 askUserQuestion 等待超时的 sidecar 错误展示成中文提示', () => {
+    render(
+      <CodeMuxDataMessagePart
+        name="codemux-event"
+        data={{
+          eventKind: 'error',
+          event: {
+            kind: 'error',
+            data: {
+              type: 'sidecar_error',
+              error: 'Query timed out: no message received for 300s (after msg #412)\nError: Query timed out: no message received for 300s (after msg #412)\n    at Timeout._onTimeout (file:///D:/project/ai-code/codeMUX/src-tauri/sidecar/dist/index.js:692:32)',
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('等待用户回复超时，请重新发送消息继续')).toBeTruthy();
+    expect(screen.queryByText(/Timeout\._onTimeout/)).toBeNull();
+    expect(screen.queryByText(/Query timed out/)).toBeNull();
   });
 });

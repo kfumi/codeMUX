@@ -3,7 +3,9 @@ import { Check, ChevronDown } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { getPrimaryProviderModel, getProviderModelList } from '../../../lib/providerModels';
 import { cn } from '../../../lib/utils';
+import type { Provider } from '../../../types/provider';
 
 type ReasoningEffort = 'low' | 'medium' | 'high';
 type PanelPosition = {
@@ -19,6 +21,9 @@ interface CodeMuxModelSelectorProps {
   value: string;
   models: string[];
   onChange: (model: string) => void;
+  providers?: Provider[];
+  providerId?: string | null;
+  onProviderChange?: (providerId: string, model: string) => void;
   reasoningEffort?: ReasoningEffort;
   onReasoningEffortChange?: (effort: ReasoningEffort) => void;
   getDisplayName?: (model: string) => string;
@@ -42,6 +47,9 @@ export function CodeMuxModelSelector({
   value,
   models,
   onChange,
+  providers = [],
+  providerId,
+  onProviderChange,
   reasoningEffort = 'medium',
   onReasoningEffortChange,
   getDisplayName = (model) => model,
@@ -70,6 +78,8 @@ export function CodeMuxModelSelector({
     });
   }, [models]);
   const selectedModel = value || normalizedModels[0] || '';
+  const normalizedProviders = useMemo(() => providers.filter((provider) => provider.id.trim()), [providers]);
+  const selectedProviderId = providerId || normalizedProviders[0]?.id || null;
   const selectedModelDisplayName = selectedModel ? getDisplayName(selectedModel) : '';
   const selectedEffortName = EFFORT_OPTIONS.find((option) => option.id === reasoningEffort)?.name;
 
@@ -149,6 +159,15 @@ export function CodeMuxModelSelector({
     setOpen(false);
   };
 
+  const handleProviderSelect = (provider: Provider) => {
+    if (!onProviderChange || provider.id === selectedProviderId) {
+      return;
+    }
+
+    const nextModel = getPrimaryProviderModel(provider) || getProviderModelList(provider)[0] || '';
+    onProviderChange(provider.id, nextModel);
+  };
+
   const panel = open
     ? createPortal(
         <div
@@ -164,6 +183,38 @@ export function CodeMuxModelSelector({
             maxHeight: position.maxHeight,
           }}
         >
+          {normalizedProviders.length > 1 ? (
+            <div
+              role="listbox"
+              aria-label="Providers"
+              data-slot="provider-selector-list"
+              className="max-h-36 overflow-y-auto border-b border-border/62 p-1.5"
+            >
+              {normalizedProviders.map((provider) => {
+                const active = provider.id === selectedProviderId;
+                return (
+                  <button
+                    key={provider.id}
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    onClick={() => handleProviderSelect(provider)}
+                    className={cn(
+                      'relative flex w-full items-center rounded-lg py-2 pl-3 pr-9 text-left text-sm outline-none transition-colors hover:bg-muted/56 focus:bg-muted/56',
+                      active ? 'text-foreground' : 'text-foreground/76',
+                    )}
+                  >
+                    <span className="truncate font-medium">{provider.name}</span>
+                    {active ? (
+                      <span className="absolute right-3 flex h-4 w-4 items-center justify-center">
+                        <Check className="h-4 w-4" />
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
           <div
             role="listbox"
             aria-label="Models"

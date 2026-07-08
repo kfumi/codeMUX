@@ -12,7 +12,7 @@ import { MarkdownText } from '@/components/assistant-ui/markdown-text';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 
-const ANIMATION_DURATION = 200;
+const ANIMATION_DURATION = 0;
 const ReasoningOpenContext = createContext(false);
 
 export function formatCompactTokens(value: number): string {
@@ -93,13 +93,6 @@ function ReasoningFade({ className, ...props }: React.ComponentProps<'div'>) {
         'aui-reasoning-fade pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8',
         'bg-[linear-gradient(to_top,var(--color-background),transparent)]',
         'group-data-[variant=muted]/reasoning-root:bg-[linear-gradient(to_top,hsl(var(--muted)/0.5),transparent)]',
-        'fade-in-0 animate-in',
-        'group-data-[state=open]/collapsible-content:animate-out',
-        'group-data-[state=open]/collapsible-content:fade-out-0',
-        'group-data-[state=open]/collapsible-content:delay-[calc(var(--animation-duration)*0.75)]',
-        'group-data-[state=open]/collapsible-content:fill-mode-forwards',
-        'duration-(--animation-duration)',
-        'group-data-[state=open]/collapsible-content:duration-(--animation-duration)',
         className,
       )}
       {...props}
@@ -154,7 +147,7 @@ function ReasoningTrigger({
         data-slot="reasoning-trigger-chevron"
         className={cn(
           'aui-reasoning-trigger-chevron mt-0.5 size-4 shrink-0',
-          'transition-transform duration-(--animation-duration) ease-out',
+          'transition-transform',
           'group-data-[state=closed]/trigger:-rotate-90',
           'group-data-[state=open]/trigger:rotate-0',
         )}
@@ -172,14 +165,8 @@ function ReasoningContent({
     <CollapsibleContent
       data-slot="reasoning-content"
       className={cn(
-        'aui-reasoning-content text-muted-foreground relative overflow-hidden text-sm outline-none',
-        'group/collapsible-content ease-out',
-        'data-[state=closed]:animate-collapsible-up',
-        'data-[state=open]:animate-collapsible-down',
-        'data-[state=closed]:fill-mode-forwards',
-        'data-[state=closed]:pointer-events-none',
-        'data-[state=open]:duration-(--animation-duration)',
-        'data-[state=closed]:duration-(--animation-duration)',
+        'aui-reasoning-content text-muted-foreground relative text-xs outline-none',
+        'group/collapsible-content',
         className,
       )}
       {...props}
@@ -196,15 +183,6 @@ function ReasoningText({ className, ...props }: React.ComponentProps<'div'>) {
       data-slot="reasoning-text"
       className={cn(
         'aui-reasoning-text relative z-0 max-h-40 overflow-y-auto ps-6 pt-2 pe-2 pb-2 leading-relaxed scrollbar-gutter-stable',
-        'transform-gpu transition-[transform,opacity]',
-        'group-data-[state=open]/collapsible-content:animate-in',
-        'group-data-[state=closed]/collapsible-content:animate-out',
-        'group-data-[state=open]/collapsible-content:fade-in-0',
-        'group-data-[state=closed]/collapsible-content:fade-out-0',
-        'group-data-[state=open]/collapsible-content:slide-in-from-top-4',
-        'group-data-[state=closed]/collapsible-content:slide-out-to-top-4',
-        'group-data-[state=open]/collapsible-content:duration-(--animation-duration)',
-        'group-data-[state=closed]/collapsible-content:duration-(--animation-duration)',
         className,
       )}
       {...props}

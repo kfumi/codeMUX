@@ -9,7 +9,7 @@ import {
   resolveCodexCollaborationPolicy,
   setActiveCodexCollaborationPolicy,
 } from './codexCollaborationPolicy.js';
-import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
+import { clearInteractiveToolResponses, expireInteractiveToolResponses, resolveInteractiveToolResponse } from './interactiveToolResponses.js';
 import { setActiveSessionId } from './codexRuntime.js';
 import { clearActivePermissionState } from './activePermissionState.js';
 
@@ -69,6 +69,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   clearActivePermissionState();
+  clearInteractiveToolResponses();
   delete process.env.CODEMUX_CODEX_INTERACTIVE_EVENTS_DIR;
   stdoutSpy?.mockRestore();
   stdoutSpy = null;
@@ -78,6 +79,21 @@ afterEach(async () => {
       await cleanup();
     }
   }
+});
+
+it('expires pending interactive user input tool calls', async () => {
+  const { waitForInteractiveToolResponse } = await import('./interactiveToolResponses.js');
+  const responsePromise = waitForInteractiveToolResponse('call-timeout', {
+    sessionId: 'session-timeout',
+    timeoutMs: 300000,
+  });
+
+  expect(expireInteractiveToolResponses('session-timeout', '等待用户回复超时，请重新发送消息继续')).toBe(1);
+  await expect(responsePromise).resolves.toEqual({
+    answers: {},
+    cancelled: true,
+    reason_code: 'user_input_timeout',
+  });
 });
 
 describe('createCodexCompatProxyServer', () => {

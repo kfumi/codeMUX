@@ -4,8 +4,11 @@ import { useCallback, useMemo, useRef, type ReactNode } from 'react';
 
 import type { SlashCommand } from '../../../lib/slashCommands';
 import { findCommand } from '../../../lib/slashCommands';
+import { createLogger } from '../../../lib/logger';
 import { useAgentStore } from '../../../stores/agentStore';
 import type { AgentMessage } from '../../../stores/agentStore';
+
+const logger = createLogger('CodeMuxAssistantRuntime');
 import type { AgentInputPayload } from '../../../types/agentInput';
 import type { AgentKind } from '../../../types/session';
 import {
@@ -62,10 +65,15 @@ function SessionScopedAssistantRuntime({
   const eventTimestampsRef = useRef(eventTimestamps);
   eventTimestampsRef.current = eventTimestamps;
 
-  const messages = useMemo(
-    () => convertAgentEventsToAssistantMessages(events),
-    [events],
-  );
+  const messages = useMemo(() => {
+    const result = convertAgentEventsToAssistantMessages(events);
+    logger.debug('Converted events to assistant messages', {
+      sessionId,
+      eventCount: events.length,
+      messageCount: result.length,
+    });
+    return result;
+  }, [events, sessionId]);
 
   const handleMessage = useCallback(
     async (message: AppendMessage) => {

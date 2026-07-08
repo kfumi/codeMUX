@@ -737,4 +737,26 @@ describe('CodeMuxComposer', () => {
     expect(screen.getByText('允许读取 Codex 官方手册吗？')).toBeTruthy();
     expect(screen.queryByText('实施此计划？')).toBeNull();
   });
+
+  it('does not render expired user questions in the composer', () => {
+    useAgentStore.setState({
+      events: {
+        'session-1': [
+          ...pendingQuestionEvents,
+          {
+            kind: 'ask_user_question_timeout',
+            data: {
+              tool_use_id: 'question-1',
+              timeout_ms: 300000,
+              message: '等待用户回复超时，请重新发送消息继续',
+            },
+          },
+        ],
+      },
+    });
+
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    expect(screen.queryByText('允许读取 Codex 官方手册吗？')).toBeNull();
+  });
 });

@@ -7,7 +7,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { cn } from '@/lib/utils';
 import { getToolDisplayName } from '@/components/agent/toolHeaderSummary';
 
-const ANIMATION_DURATION = 200;
+const ANIMATION_DURATION = 0;
 
 const toolGroupVariants = cva('aui-tool-group-root group/tool-group w-full', {
   variants: {
@@ -141,7 +141,7 @@ function ToolGroupTrigger({
       <ChevronDownIcon
         data-slot="tool-group-trigger-chevron"
         className={cn(
-          'size-4 shrink-0 transition-transform duration-(--animation-duration) ease-out',
+          'size-4 shrink-0 transition-transform',
           'group-data-[state=closed]/trigger:-rotate-90',
           'group-data-[state=open]/trigger:rotate-0',
         )}
@@ -159,14 +159,8 @@ function ToolGroupContent({
     <CollapsibleContent
       data-slot="tool-group-content"
       className={cn(
-        'relative overflow-hidden text-sm outline-none',
-        'group/collapsible-content ease-out',
-        'data-[state=closed]:animate-collapsible-up',
-        'data-[state=open]:animate-collapsible-down',
-        'data-[state=closed]:fill-mode-forwards',
-        'data-[state=closed]:pointer-events-none',
-        'data-[state=open]:duration-(--animation-duration)',
-        'data-[state=closed]:duration-(--animation-duration)',
+        'relative text-sm outline-none',
+        'group/collapsible-content',
         className,
       )}
       {...props}

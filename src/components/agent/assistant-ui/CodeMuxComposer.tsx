@@ -675,6 +675,7 @@ function ProposedPlanApprovalCard({
 
 function findLatestPendingUserQuestion(events: AgentMessage[], dismissedIds: Set<string>): PendingUserQuestion | null {
   const answeredIds = collectAnsweredToolUseIds(events);
+  const expiredIds = collectExpiredQuestionIds(events);
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
@@ -686,7 +687,7 @@ function findLatestPendingUserQuestion(events: AgentMessage[], dismissedIds: Set
     }
 
     const toolUseId = event.data.tool_use_id;
-    if (answeredIds.has(toolUseId) || dismissedIds.has(toolUseId)) {
+    if (answeredIds.has(toolUseId) || expiredIds.has(toolUseId) || dismissedIds.has(toolUseId)) {
       continue;
     }
 
@@ -697,6 +698,18 @@ function findLatestPendingUserQuestion(events: AgentMessage[], dismissedIds: Set
   }
 
   return null;
+}
+
+function collectExpiredQuestionIds(events: AgentMessage[]): Set<string> {
+  const ids = new Set<string>();
+
+  for (const event of events) {
+    if (event.kind === 'ask_user_question_timeout') {
+      ids.add(event.data.tool_use_id);
+    }
+  }
+
+  return ids;
 }
 
 export function findLatestPendingProposedPlan(events: AgentMessage[], dismissedKeys: Set<string>): PendingProposedPlan | null {

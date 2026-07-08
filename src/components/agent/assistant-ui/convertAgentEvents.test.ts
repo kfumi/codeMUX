@@ -4,6 +4,68 @@ import type { AgentMessage } from '../../../stores/agentStore';
 import { convertAgentEventsToAssistantMessages } from './convertAgentEvents';
 
 describe('convertAgentEventsToAssistantMessages', () => {
+  it('collapses repeated api retry events into one visible status message', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'api_retry',
+        data: {
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: 7,
+          max_retries: 10,
+          retry_delay_ms: 1000,
+          error_status: 429,
+          error: 'rate_limit',
+        },
+      },
+      {
+        kind: 'api_retry',
+        data: {
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: 8,
+          max_retries: 10,
+          retry_delay_ms: 1000,
+          error_status: 429,
+          error: 'rate_limit',
+        },
+      },
+      {
+        kind: 'api_retry',
+        data: {
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: 10,
+          max_retries: 10,
+          retry_delay_ms: 0,
+          error_status: 429,
+          error: 'rate_limit',
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: 'system',
+      metadata: {
+        sourceEventIndex: 2,
+        sourceEventIndices: [0, 1, 2],
+      },
+    });
+    expect(messages[0]?.content[0]).toMatchObject({
+      type: 'data-codemux-event',
+      eventKind: 'api_retry',
+      event: expect.objectContaining({
+        data: expect.objectContaining({
+          attempt: 10,
+          max_retries: 10,
+        }),
+      }),
+    });
+  });
+
   it('copies user message locator into assistant-ui metadata', () => {
     const events: AgentMessage[] = [
       {
@@ -432,6 +494,48 @@ describe('convertAgentEventsToAssistantMessages', () => {
         },
         result: '继续',
         isError: false,
+      },
+    ]);
+  });
+
+  it('marks ask-user-question timeout events as errored tool results', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'ask_user_question',
+        data: {
+          tool_use_id: 'question-timeout-1',
+          questions: [{
+            question: '是否继续？',
+            options: [{ label: '继续' }, { label: '取消' }],
+          }],
+        },
+      },
+      {
+        kind: 'ask_user_question_timeout',
+        data: {
+          tool_use_id: 'question-timeout-1',
+          timeout_ms: 300000,
+          message: '等待用户回复超时，请重新发送消息继续',
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content).toEqual([
+      {
+        type: 'tool-call',
+        toolCallId: 'question-timeout-1',
+        toolName: 'AskUserQuestion',
+        args: {
+          questions: [{
+            question: '是否继续？',
+            options: [{ label: '继续' }, { label: '取消' }],
+          }],
+        },
+        result: '等待用户回复超时，请重新发送消息继续',
+        isError: true,
       },
     ]);
   });

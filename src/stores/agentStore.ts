@@ -47,6 +47,7 @@ export type AgentMessage =
   | { kind: 'stream_status'; data: { message: string; is_reconnecting: boolean; mode_blocked?: ModeBlockedDiagnostic | null } }
   | { kind: 'api_retry'; data: { attempt: number; max_retries: number; retry_delay_ms: number; error_status: number; error: string } }
   | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; allowOther?: boolean }> } }
+  | { kind: 'ask_user_question_timeout'; data: { tool_use_id: string; timeout_ms: number; message: string } }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
   | { kind: 'mcp_status'; data: { servers: Record<string, string>; status?: string } }
   | { kind: 'proxy_status'; data: { running: boolean; port: number | null; upstreamBaseUrl: string | null } }
@@ -85,8 +86,6 @@ interface AgentState {
   streamingThinking: Record<string, string>;
   /** Accumulated streaming text per session (from stream_event text deltas) */
   streamingText: Record<string, string>;
-  /** Thinking durations computed from streaming events (key: session_id, value: ms) */
-  streamingThinkingDurations: Record<string, number[]>;
   /** Sessions that were force-stopped (interrupt) — suppress streaming UI immediately */
   forceStopped: Record<string, boolean>;
   streamingToolInputs: Record<string, Record<string, string>>;
@@ -128,8 +127,6 @@ const logger = createLogger('agentStore');
 const pendingStreamingBuffers = new Map<string, StreamingBuffer>();
 const pendingStreamingFlushHandles = new Map<string, ReturnType<typeof setTimeout>>();
 const sessionsWithLiveTextStream = new Set<string>();
-/** Per-session thinking start timestamps (set on content_block_start, cleared on content_block_stop) */
-const pendingThinkingStartTimes = new Map<string, number>();
 const streamingTelemetry = new Map<string, { deltas: number; flushes: number; uiUpdates: number }>();
 
 function scheduleStreamingFlush(callback: () => void) {
@@ -525,6 +522,8 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'result', data };
       case 'ask_user_question':
         return { kind: 'ask_user_question', data };
+      case 'ask_user_question_timeout':
+        return { kind: 'ask_user_question_timeout', data };
       case 'file_snapshot':
         return { kind: 'file_snapshot', data };
       case 'stream_event':
@@ -1041,7 +1040,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   todos: {},
   streamingThinking: {},
   streamingText: {},
-  streamingThinkingDurations: {},
   forceStopped: {},
   streamingToolInputs: {},
   streamingToolMeta: {},
@@ -1055,11 +1053,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string, inputPayload?: AgentInputPayload) => {
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
-    pendingThinkingStartTimes.delete(sessionId);
-    // Clear streaming thinking durations for new query
-    set((s) => ({
-      streamingThinkingDurations: { ...s.streamingThinkingDurations, [sessionId]: [] },
-    }));
     logger.info('MODEL_TRACE startQuery dispatching to Tauri', {
       sessionId,
       cwd,
@@ -1219,6 +1212,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         if (event.kind === 'streaming' || event.kind === 'streaming_batch') {
           if (!get().isRunning[sessionId] || get().forceStopped[sessionId]) return;
           const streamEvents = event.kind === 'streaming_batch' ? event.data.events : [event.data.event];
+          logger.debug('Received streaming events', { sessionId, count: streamEvents.length, batch: event.kind === 'streaming_batch' });
           for (const rawStreamEvent of streamEvents) {
           const streamEvent = rawStreamEvent as Record<string, unknown>;
           const eventType = streamEvent.type as string;
@@ -1236,16 +1230,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           if (eventType === 'content_block_start') {
             const contentBlock = streamEvent.content_block as Record<string, unknown> | undefined;
             if (contentBlock?.type === 'thinking') {
+              logger.debug('Thinking block started', { sessionId });
               flushPendingStreaming(sessionId, set);
-              pendingThinkingStartTimes.set(sessionId, Date.now());
               clearStreamingTextField(sessionId, 'streamingThinking', set, get);
             } else if (contentBlock?.type === 'text') {
+              logger.debug('Text block started', { sessionId });
               flushPendingStreaming(sessionId, set);
               clearStreamingTextField(sessionId, 'streamingText', set, get);
             } else if (contentBlock?.type === 'tool_use') {
               const toolId = contentBlock.id as string;
               const toolName = contentBlock.name as string;
               const blockIndex = streamEvent.index as number | undefined;
+              logger.debug('Tool use block started', { sessionId, toolId, toolName, blockIndex });
               set((s) => ({
                 streamingToolMeta: {
                   ...s.streamingToolMeta,
@@ -1273,6 +1269,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               queueStreamingDelta(sessionId, 'text', delta.text, set);
             }
           } else if (eventType === 'content_block_stop') {
+            const blockType = (streamEvent.content_block as Record<string, unknown> | undefined)?.type as string | undefined;
+            if (blockType === 'thinking') {
+              logger.debug('Thinking block stopped', { sessionId });
+            } else if (blockType === 'text') {
+              logger.debug('Text block stopped', { sessionId });
+            } else if (blockType === 'tool_use') {
+              const toolId = findToolId(streamEvent.index as number | undefined);
+              logger.debug('Tool use block stopped', { sessionId, toolId });
+            }
             logStreamingTelemetry(sessionId, 'content_block_stop');
             streamingTelemetry.delete(sessionId);
             const blockIndex = streamEvent.index as number | undefined;
@@ -1411,6 +1416,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         // When the complete assistant message arrives, filter out blocks
         // that were already displayed via streaming to avoid duplicate display.
         if (event.kind === 'assistant') {
+          logger.debug('Processing assistant event', { sessionId, blockCount: (event.data?.message?.content as any[] | undefined)?.length ?? 0 });
           // Commit any pending simulated stream immediately before processing.
           commitPendingSimulatedStream(sessionId, set);
 
@@ -1470,24 +1476,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             return;
           }
 
-          // Compute thinking duration from streaming timestamps
-          const hasThinkingBlock = filtered.some((b: any) => b?.type === 'thinking');
-          if (hasThinkingBlock) {
-            const thinkingStart = pendingThinkingStartTimes.get(sessionId);
-            pendingThinkingStartTimes.delete(sessionId);
-            if (thinkingStart) {
-              const duration = Date.now() - thinkingStart;
-              if (duration > 0) {
-                set((s) => ({
-                  streamingThinkingDurations: {
-                    ...s.streamingThinkingDurations,
-                    [sessionId]: [...(s.streamingThinkingDurations[sessionId] || []), duration],
-                  },
-                }));
-              }
-            }
-          }
-
           set((s) => {
             const updates: Partial<AgentState> = {};
             if (replacedExistingTools.changed) {
@@ -1523,6 +1511,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
 
         if (event.kind === 'result') {
+          logger.info('Agent query result received', {
+            sessionId,
+            isError: event.data?.is_error,
+            tokenUsage: event.data?.usage
+              ? {
+                  input: event.data.usage.input_tokens,
+                  output: event.data.usage.output_tokens,
+                  ...(event.data.usage as any).reasoning_output_tokens !== undefined
+                    ? { reasoning: (event.data.usage as any).reasoning_output_tokens }
+                    : {},
+                }
+              : undefined,
+          });
           commitPendingSimulatedStream(sessionId, set);
         }
 
@@ -1643,7 +1644,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
     clearSimulatedStream(sessionId);
-    pendingThinkingStartTimes.delete(sessionId);
     const state = get();
     const isRunning = state.isRunning[sessionId] ?? false;
     const forceStopped = state.forceStopped[sessionId] ?? false;
@@ -1684,7 +1684,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   clearEvents: (sessionId: string) => {
     clearPendingStreaming(sessionId);
     clearSimulatedStream(sessionId);
-    pendingThinkingStartTimes.delete(sessionId);
     set((state) => {
       const newEvents = { ...state.events };
       delete newEvents[sessionId];
@@ -1702,11 +1701,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       delete newStreaming[sessionId];
       const newStreamingText = { ...state.streamingText };
       delete newStreamingText[sessionId];
-      const newStreamingDurations = { ...state.streamingThinkingDurations };
-      delete newStreamingDurations[sessionId];
       const newForceStopped = { ...state.forceStopped };
       delete newForceStopped[sessionId];
-      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, mcpRuntimeStatus: newMcpRuntimeStatus, todos: newTodos, streamingThinking: newStreaming, streamingText: newStreamingText, streamingThinkingDurations: newStreamingDurations, forceStopped: newForceStopped };
+      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, mcpRuntimeStatus: newMcpRuntimeStatus, todos: newTodos, streamingThinking: newStreaming, streamingText: newStreamingText, forceStopped: newForceStopped };
     });
   },
 
@@ -1902,7 +1899,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
     clearSimulatedStream(sessionId);
-    pendingThinkingStartTimes.delete(sessionId);
 
     set((s) => ({
       events: { ...s.events, [sessionId]: events.slice(0, userIndex) },
@@ -1914,7 +1910,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       todos: removeSessionEntry(s.todos, sessionId),
       streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
       streamingText: { ...s.streamingText, [sessionId]: '' },
-      streamingThinkingDurations: removeSessionEntry(s.streamingThinkingDurations, sessionId),
       forceStopped: { ...s.forceStopped, [sessionId]: false },
       streamingToolInputs: removeSessionEntry(s.streamingToolInputs, sessionId),
       streamingToolMeta: removeSessionEntry(s.streamingToolMeta, sessionId),
