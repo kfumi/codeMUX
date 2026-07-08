@@ -179,6 +179,267 @@ describe('CodexSessionRuntime', () => {
     }
   });
 
+  it('uses the current cumulative Codex usage as the first live turn token usage', async () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        config: {
+          sessionId: string;
+          cwd: string;
+          model: string;
+        };
+        thread: {
+          id: string;
+          runStreamed: () => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).config = {
+        sessionId: 'session-1',
+        cwd: 'D:/repo',
+        model: 'gpt-5',
+      };
+      (runtime as unknown as {
+        thread: {
+          id: string;
+          runStreamed: () => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).thread = {
+        id: 'codex-thread-1',
+        runStreamed: async () => ({
+          events: (async function* () {
+            yield {
+              type: 'turn.completed',
+              usage: {
+                input_tokens: 100,
+                cached_input_tokens: 20,
+                output_tokens: 5,
+                reasoning_output_tokens: 3,
+              },
+            } as ThreadEvent;
+          })(),
+        }),
+      };
+
+      await (runtime as unknown as {
+        runInput: (prompt: string, inputPayload: undefined, includeImages: boolean) => Promise<void>;
+      }).runInput('hello', undefined, false);
+
+      const resultEvent = writes
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line))
+        .find((event) => event.type === 'result');
+
+      expect(resultEvent).toMatchObject({
+        usage: {
+          input_tokens: 100,
+          output_tokens: 5,
+          cache_read_input_tokens: 20,
+        },
+        last_token_usage: {
+          input_tokens: 100,
+          output_tokens: 5,
+          cached_input_tokens: 20,
+          total_tokens: 108,
+        },
+      });
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it('derives live Codex turn token usage from adjacent turn.completed usages in the same stream', async () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        config: {
+          sessionId: string;
+          cwd: string;
+          model: string;
+        };
+        thread: {
+          id: string;
+          runStreamed: () => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).config = {
+        sessionId: 'session-1',
+        cwd: 'D:/repo',
+        model: 'gpt-5',
+      };
+
+      (runtime as unknown as {
+        thread: {
+          id: string;
+          runStreamed: () => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).thread = {
+        id: 'codex-thread-1',
+        runStreamed: async () => ({
+          events: (async function* () {
+            yield {
+              type: 'turn.completed',
+              usage: {
+                input_tokens: 100,
+                cached_input_tokens: 20,
+                output_tokens: 5,
+                reasoning_output_tokens: 0,
+              },
+            } as ThreadEvent;
+            yield {
+              type: 'turn.completed',
+              usage: {
+                input_tokens: 175,
+                cached_input_tokens: 35,
+                output_tokens: 13,
+                reasoning_output_tokens: 2,
+              },
+            } as ThreadEvent;
+          })(),
+        }),
+      };
+
+      await (runtime as unknown as {
+        runInput: (prompt: string, inputPayload: undefined, includeImages: boolean) => Promise<void>;
+      }).runInput('hello', undefined, false);
+
+      const resultEvents = writes
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line))
+        .filter((event) => event.type === 'result');
+
+      expect(resultEvents[0]).toMatchObject({
+        usage: {
+          input_tokens: 175,
+          output_tokens: 13,
+          cache_read_input_tokens: 35,
+        },
+        last_token_usage: {
+          input_tokens: 75,
+          output_tokens: 8,
+          cached_input_tokens: 15,
+          total_tokens: 85,
+        },
+      });
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it('uses restored Codex total token usage as the baseline when a stream has one turn.completed usage', async () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        config: {
+          sessionId: string;
+          cwd: string;
+          model: string;
+        };
+        previousTotalUsage: {
+          threadId: string;
+          usage: {
+            input_tokens: number;
+            cached_input_tokens: number;
+            output_tokens: number;
+            reasoning_output_tokens: number;
+          };
+        };
+        thread: {
+          id: string;
+          runStreamed: () => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).config = {
+        sessionId: 'session-1',
+        cwd: 'D:/repo',
+        model: 'gpt-5',
+      };
+      (runtime as unknown as {
+        previousTotalUsage: {
+          threadId: string;
+          usage: {
+            input_tokens: number;
+            cached_input_tokens: number;
+            output_tokens: number;
+            reasoning_output_tokens: number;
+          };
+        };
+      }).previousTotalUsage = {
+        threadId: 'codex-thread-1',
+        usage: {
+          input_tokens: 1000,
+          cached_input_tokens: 100,
+          output_tokens: 200,
+          reasoning_output_tokens: 10,
+        },
+      };
+      (runtime as unknown as {
+        thread: {
+          id: string;
+          runStreamed: () => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+      }).thread = {
+        id: 'codex-thread-1',
+        runStreamed: async () => ({
+          events: (async function* () {
+            yield {
+              type: 'turn.completed',
+              usage: {
+                input_tokens: 1125,
+                cached_input_tokens: 125,
+                output_tokens: 225,
+                reasoning_output_tokens: 15,
+              },
+            } as ThreadEvent;
+          })(),
+        }),
+      };
+
+      await (runtime as unknown as {
+        runInput: (prompt: string, inputPayload: undefined, includeImages: boolean) => Promise<void>;
+      }).runInput('resume', undefined, false);
+
+      const resultEvent = writes
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line))
+        .find((event) => event.type === 'result');
+
+      expect(resultEvent).toMatchObject({
+        last_token_usage: {
+          input_tokens: 125,
+          output_tokens: 25,
+          cached_input_tokens: 25,
+          total_tokens: 155,
+        },
+      });
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
   it('treats a missing response.completed stream close as success after an assistant message completed', async () => {
     const writes: string[] = [];
     const stdoutSpy = vi
@@ -399,9 +660,10 @@ describe('CodexSessionRuntime', () => {
       expect(streamedInput).toEqual([
         {
           type: 'text',
-          text: expect.stringContaining('Execution policy (plan mode): work in planning-only style.'),
+          text: expect.stringContaining('Execution policy (plan mode): # Plan Mode (Conversational)'),
         },
       ]);
+      expect(JSON.stringify(streamedInput)).toContain('effective_mode: plan');
       expect(JSON.stringify(streamedInput)).toContain('build a login form');
       expect(JSON.stringify(streamedInput)).not.toContain('$plan build a login form');
     } finally {

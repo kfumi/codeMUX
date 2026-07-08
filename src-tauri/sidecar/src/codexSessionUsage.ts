@@ -10,6 +10,21 @@ export async function readLatestCodexLastTokenUsage(
   threadId: string | null | undefined,
   sessionsRoot = join(homedir(), '.codex', 'sessions'),
 ): Promise<CodexTokenUsage | null> {
+  return readLatestCodexTokenUsage(threadId, 'last_token_usage', sessionsRoot);
+}
+
+export async function readLatestCodexTotalTokenUsage(
+  threadId: string | null | undefined,
+  sessionsRoot = join(homedir(), '.codex', 'sessions'),
+): Promise<CodexTokenUsage | null> {
+  return readLatestCodexTokenUsage(threadId, 'total_token_usage', sessionsRoot);
+}
+
+async function readLatestCodexTokenUsage(
+  threadId: string | null | undefined,
+  usageKey: 'last_token_usage' | 'total_token_usage',
+  sessionsRoot: string,
+): Promise<CodexTokenUsage | null> {
   if (!threadId) {
     return null;
   }
@@ -33,7 +48,7 @@ export async function readLatestCodexLastTokenUsage(
 
     const value = parseJsonObject(trimmed);
     const usage = value?.type === 'event_msg' && isRecord(value.payload)
-      ? readLastTokenUsage(value.payload)
+      ? readTokenUsage(value.payload, usageKey)
       : null;
     if (usage) {
       latestUsage = usage;
@@ -98,12 +113,15 @@ async function sessionFileMatches(path: string, threadId: string): Promise<boole
   return false;
 }
 
-function readLastTokenUsage(payload: Record<string, unknown>): CodexTokenUsage | null {
+function readTokenUsage(
+  payload: Record<string, unknown>,
+  usageKey: 'last_token_usage' | 'total_token_usage',
+): CodexTokenUsage | null {
   if (payload.type !== 'token_count' || !isRecord(payload.info)) {
     return null;
   }
 
-  const usage = payload.info.last_token_usage;
+  const usage = payload.info[usageKey];
   if (!isRecord(usage)) {
     return null;
   }

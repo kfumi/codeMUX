@@ -4,9 +4,69 @@ import { join } from 'path';
 
 import { describe, expect, it } from 'vitest';
 
-import { readLatestCodexLastTokenUsage } from './codexSessionUsage.js';
+import {
+  readLatestCodexLastTokenUsage,
+  readLatestCodexTotalTokenUsage,
+} from './codexSessionUsage.js';
 
 describe('readLatestCodexLastTokenUsage', () => {
+  it('reads the last token_count.info.total_token_usage for a Codex thread', async () => {
+    const root = join(tmpdir(), `codemux-codex-total-usage-${crypto.randomUUID()}`);
+    const sessionDir = join(root, '2026', '06', '18');
+    const sessionFile = join(sessionDir, 'rollout.jsonl');
+    await mkdir(sessionDir, { recursive: true });
+
+    await writeFile(
+      sessionFile,
+      [
+        JSON.stringify({ type: 'session_meta', payload: { id: 'thread-1' } }),
+        JSON.stringify({
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              total_token_usage: {
+                input_tokens: 1000,
+                cached_input_tokens: 100,
+                output_tokens: 200,
+                reasoning_output_tokens: 30,
+                total_tokens: 1230,
+              },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              total_token_usage: {
+                input_tokens: 2000,
+                cached_input_tokens: 200,
+                output_tokens: 400,
+                reasoning_output_tokens: 60,
+                total_tokens: 2460,
+              },
+            },
+          },
+        }),
+      ].join('\n'),
+      'utf8',
+    );
+
+    try {
+      await expect(readLatestCodexTotalTokenUsage('thread-1', root)).resolves.toEqual({
+        input_tokens: 2000,
+        cached_input_tokens: 200,
+        output_tokens: 400,
+        reasoning_output_tokens: 60,
+        total_tokens: 2460,
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('reads the last token_count.info.last_token_usage for a Codex thread', async () => {
     const root = join(tmpdir(), `codemux-codex-usage-${crypto.randomUUID()}`);
     const sessionDir = join(root, '2026', '06', '18');
