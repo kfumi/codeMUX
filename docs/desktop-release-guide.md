@@ -1,6 +1,6 @@
-# codeMUX 桌面端发版指南
+# CodeMUX 桌面端发版指南
 
-本文档用于说明如何在私有源码仓库中构建安装包，并自动发布到公开下载仓库 `kfumi/codeMUX-desktop` 的 GitHub Releases。
+本文档用于说明如何在私有源码仓库中构建 CodeMUX 安装包，并自动发布到公开下载仓库 `kfumi/codeMUX-desktop` 的 GitHub Releases。
 
 ## 当前发布链路
 

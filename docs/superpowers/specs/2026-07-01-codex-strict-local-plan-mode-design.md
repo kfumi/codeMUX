@@ -2,18 +2,18 @@
 
 ## Context
 
-codeMUX currently implements Codex plan mode as a lightweight combination of:
+CodeMUX currently implements Codex plan mode as a lightweight combination of:
 
 - `planMode: "on" | "off"` stored on the app session.
 - A `$plan` text prefix added in the sidecar before `Thread.runStreamed()`.
 - Codex SDK thread permissions switched to `read-only`, `on-request`, and `network-off` while plan mode is on, matching desktop-cc-gui strict-local.
 
-`desktop-cc-gui` uses a stronger collaboration-mode model. It treats plan mode as a runtime policy with normalized `code` and `plan` modes, injected developer instructions, request-user-input rules, thread-scoped state, and strict-local enforcement. This design adapts that behavior to codeMUX's current React + Tauri + TypeScript sidecar architecture without switching away from the OpenAI Codex SDK.
+`desktop-cc-gui` uses a stronger collaboration-mode model. It treats plan mode as a runtime policy with normalized `code` and `plan` modes, injected developer instructions, request-user-input rules, thread-scoped state, and strict-local enforcement. This design adapts that behavior to CodeMUX's current React + Tauri + TypeScript sidecar architecture without switching away from the OpenAI Codex SDK.
 
 ## Goals
 
 - Make Codex plan mode a strict runtime policy rather than a prompt prefix.
-- Align codeMUX with the `desktop-cc-gui` strict-local behavior for Codex:
+- Align CodeMUX with the `desktop-cc-gui` strict-local behavior for Codex:
   - `code` mode blocks follow-up question tools.
   - `plan` mode blocks repository-mutating work.
   - `plan` mode requires structured user-input requests for blockers.
@@ -31,7 +31,7 @@ codeMUX currently implements Codex plan mode as a lightweight combination of:
 
 ## Current Implementation Summary
 
-Current codeMUX touchpoints:
+Current CodeMUX touchpoints:
 
 - Frontend permission mapping lives in `src/lib/agentPermissions.ts`.
 - The session-level plan flag is displayed and changed through `src/components/agent/AgentPermissionSelector.tsx`.

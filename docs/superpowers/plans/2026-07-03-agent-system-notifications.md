@@ -2,7 +2,7 @@
 
 > **面向 agentic workers：** 必需子技能：使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans` 逐任务实现本计划。步骤使用 checkbox（`- [ ]`）语法便于跟踪。
 
-**Goal:** 当 codeMUX 失焦、最小化或隐藏到托盘时，对等待用户输入和 AI 任务完成发出系统通知，并支持可选提示音。
+**Goal:** 当 CodeMUX 失焦、最小化或隐藏到托盘时，对等待用户输入和 AI 任务完成发出系统通知，并支持可选提示音。
 
 **Architecture:** 使用前端统一调度层读取 `agentStore`、`sessionStore`、`settingsStore` 和窗口活跃状态，生成去重后的通知候选；桌面通知优先使用 Web Notification API 以获得 `onclick` 跳转能力，Tauri notification 插件负责权限/兜底发送；提示音由前端播放 `public/sounds/` 资源。设置持久化沿用现有 `AppConfig`、Rust command、`configApi`、`settingsStore` 模式。
 
@@ -1082,7 +1082,7 @@ export function useAgentNotifications() {
 
 ```typescript
 // Tauri notification actions are mobile-only. Desktop uses the Web
-// Notification API so notification clicks can reopen codeMUX and select
+// Notification API so notification clicks can reopen CodeMUX and select
 // the originating session. The Tauri plugin remains the fallback sender.
 ```
 
@@ -1300,7 +1300,7 @@ export function NotificationSettingsSection() {
               系统通知
             </div>
             <p className="mt-1 text-xs leading-relaxed text-foreground/60">
-              codeMUX 不活跃时，任务完成或等待你回复会显示系统通知。
+              CodeMUX 不活跃时，任务完成或等待你回复会显示系统通知。
             </p>
           </div>
           <Switch
@@ -1449,10 +1449,10 @@ npm run tauri dev
 手动步骤：
 
 1. 打开设置 > 常规，确认系统通知开启、提示音关闭。
-2. 切到其他应用，使 codeMUX 失焦。
+2. 切到其他应用，使 CodeMUX 失焦。
 3. 让一个会话完成任务，确认 Windows 右下角出现“任务已完成”通知。
 4. 触发 `ask_user_question` 或权限审批，确认出现“需要你的回复”或“需要你的审批”通知。
-5. 点击通知，确认 codeMUX 显示、聚焦，并切换到对应会话。
+5. 点击通知，确认 CodeMUX 显示、聚焦，并切换到对应会话。
 6. 开启提示音并选择 `clear`，重复完成事件，确认播放短提示音。
 7. 关闭系统通知，重复完成事件，确认不弹通知。
 

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将 codeMUX 的 Codex 兼容代理模块化重构，对齐 CC Switch 指导文档，支持全模型族推理参数和流式 `<think>` 标签检测。
+**Goal:** 将 CodeMUX 的 Codex 兼容代理模块化重构，对齐 CC Switch 指导文档，支持全模型族推理参数和流式 `<think>` 标签检测。
 
 **Architecture:** 将现有单体 `codexChatCompat.ts` 拆分为 4 个职责单一的新模块（推理配置、请求转换、流式转换、历史缓存），增强 `codexCompatProxy.ts` 的超时和错误处理。数据流：SDK Request → proxy routing → request transform（含推理注入）→ upstream fetch → stream transform（含 <think> 检测）→ SSE to SDK。
 

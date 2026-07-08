@@ -2,7 +2,7 @@
 
 ## Context
 
-codeMUX already has a first-pass permission system for Claude Code and Codex:
+CodeMUX already has a first-pass permission system for Claude Code and Codex:
 
 - Frontend permission presets live in `src/lib/agentPermissions.ts` and `src/components/agent/AgentPermissionSelector.tsx`.
 - Session-level `permission_config` and `plan_mode` are persisted in SQLite and injected into sidecar `ensure_session` commands by `src-tauri/src/agent/commands.rs`.

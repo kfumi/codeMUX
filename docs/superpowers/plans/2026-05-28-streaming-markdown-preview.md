@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 为 codeMUX 实现流式输出、Markdown 渲染和三栏代码预览面板，让 AI 对话支持逐 token 显示、富文本渲染和文件变更预览。
+**Goal:** 为 CodeMUX 实现流式输出、Markdown 渲染和三栏代码预览面板，让 AI 对话支持逐 token 显示、富文本渲染和文件变更预览。
 
 **Architecture:** 后端通过 Tauri v2 Channel API 将 SSE 流式 token 推送到前端；前端用 react-markdown 渲染 AI 消息，代码块使用 highlight.js 高亮；右侧新增可折叠预览面板展示文件内容和 diff。
 
@@ -1100,7 +1100,7 @@ function App() {
         ) : (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <h2 className="text-2xl font-bold mb-2">欢迎使用 codeMUX</h2>
+              <h2 className="text-2xl font-bold mb-2">欢迎使用 CodeMUX</h2>
               <p className="text-muted-foreground">点击 "新对话" 开始</p>
             </div>
           </div>

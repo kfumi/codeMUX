@@ -107,7 +107,7 @@ fn resolve_node_runtime_path(
 
 fn missing_node_prerequisite_error(node_command: &str, script_path: &str) -> String {
     format!(
-        "Node.js 18+ is required to run agent sessions. Install Node.js from https://nodejs.org/, make sure `{}` is available in PATH, then restart codeMUX. Sidecar script: {}",
+        "Node.js 18+ is required to run agent sessions. Install Node.js from https://nodejs.org/, make sure `{}` is available in PATH, then restart CodeMUX. Sidecar script: {}",
         node_command, script_path
     )
 }
@@ -339,6 +339,6 @@ mod tests {
 
         assert!(message.contains("Node.js 18+ is required"));
         assert!(message.contains("https://nodejs.org/"));
-        assert!(message.contains("restart codeMUX"));
+        assert!(message.contains("restart CodeMUX"));
     }
 }

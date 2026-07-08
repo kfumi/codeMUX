@@ -1,4 +1,4 @@
-# codeMUX 实现计划
+# CodeMUX 实现计划
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -217,7 +217,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 function App() {
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <h1 className="text-2xl font-bold p-4">codeMUX</h1>
+      <h1 className="text-2xl font-bold p-4">CodeMUX</h1>
       <p className="px-4 text-muted-foreground">AI编码工具聚合平台</p>
     </div>
   );
@@ -232,7 +232,7 @@ export default App;
 npm run tauri dev
 ```
 
-Expected: 应用窗口显示 "codeMUX" 和 "AI编码工具聚合平台"
+Expected: 应用窗口显示 "CodeMUX" 和 "AI编码工具聚合平台"
 
 - [ ] **Step 7: 提交代码**
 
@@ -451,7 +451,7 @@ use tauri::AppHandle;
 pub fn get_database_path(app: &AppHandle) -> PathBuf {
     let app_dir = app.path().app_data_dir().expect("Failed to get app data dir");
     std::fs::create_dir_all(&app_dir).expect("Failed to create app data dir");
-    app_dir.join("codemux.db")
+    app_dir.join("CodeMUX.db")
 }
 
 pub fn initialize(app: &AppHandle) -> Result<Connection> {
@@ -1592,7 +1592,7 @@ export function Sidebar({ onNewSession, onOpenSettings }: SidebarProps) {
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 border-b">
-        <h1 className="text-xl font-bold">codeMUX</h1>
+        <h1 className="text-xl font-bold">CodeMUX</h1>
       </div>
 
       <div className="p-2">
@@ -1774,7 +1774,7 @@ function App() {
           <p>对话区域 - 会话 {activeSessionId}</p>
         ) : (
           <div className="text-center">
-            <h2 className="text-2xl font-bold mb-2">欢迎使用 codeMUX</h2>
+            <h2 className="text-2xl font-bold mb-2">欢迎使用 CodeMUX</h2>
             <p className="text-muted-foreground">
               点击 "新对话" 开始
             </p>
@@ -2047,7 +2047,7 @@ function App() {
       ) : (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
-            <h2 className="text-2xl font-bold mb-2">欢迎使用 codeMUX</h2>
+            <h2 className="text-2xl font-bold mb-2">欢迎使用 CodeMUX</h2>
             <p className="text-muted-foreground">点击 "新对话" 开始</p>
           </div>
         </div>
@@ -2284,7 +2284,7 @@ function App() {
         ) : (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <h2 className="text-2xl font-bold mb-2">欢迎使用 codeMUX</h2>
+              <h2 className="text-2xl font-bold mb-2">欢迎使用 CodeMUX</h2>
               <p className="text-muted-foreground">点击 "新对话" 开始</p>
             </div>
           </div>
@@ -2349,7 +2349,7 @@ git commit -m "feat: 添加设置对话框（主题切换、供应商配置）"
 
 ```bash
 git add .
-git commit -m "feat: 完成 codeMUX MVP 功能"
+git commit -m "feat: 完成 CodeMUX MVP 功能"
 ```
 
 ---

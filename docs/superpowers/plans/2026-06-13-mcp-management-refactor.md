@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将 codeMUX 现有的 Claude-only MCP 管理重构为以数据库为唯一真相源的统一 MCP 管理系统，支持 Claude、Codex、Gemini、OpenCode 的 per-tool 启用、导入、同步和按需探测。
+**Goal:** 将 CodeMUX 现有的 Claude-only MCP 管理重构为以数据库为唯一真相源的统一 MCP 管理系统，支持 Claude、Codex、Gemini、OpenCode 的 per-tool 启用、导入、同步和按需探测。
 
 **Architecture:** 后端把 `McpServer` 从强类型 `transport + enabled` 改为 `server JSON + apps flags`，并通过 `McpService` 统一调度 SQLite、adapter 和 Tauri commands。前端把设置页改成 per-tool 开关和按需探测模型；Claude sidecar 只接收当前工具启用的 `mcpServers`，启动探测和 `mcpServerInstructions` 缓存全部移除。
 

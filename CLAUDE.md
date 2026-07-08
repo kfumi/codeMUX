@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-codeMUX is a Tauri 2 desktop app that provides a unified interface for multiple AI coding agents (Claude Code, OpenAI Codex, and more planned). It has three layers: a React/Vite frontend, a Rust backend, and a Node.js sidecar that wraps the agent SDKs.
+CodeMUX is a Tauri 2 desktop app that provides a unified interface for multiple AI coding agents (Claude Code, OpenAI Codex, and more planned). It has three layers: a React/Vite frontend, a Rust backend, and a Node.js sidecar that wraps the agent SDKs.
 
 ## Common Commands
 

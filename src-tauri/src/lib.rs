@@ -31,6 +31,10 @@ fn should_activate_main_window_for_second_instance(window_label: &str) -> bool {
     window_label == MAIN_WINDOW_LABEL
 }
 
+fn should_register_single_instance_plugin(is_debug_build: bool) -> bool {
+    !is_debug_build
+}
+
 fn show_window<R: tauri::Runtime, M: Manager<R>>(manager: &M, window_label: &str) {
     if let Some(window) = manager.get_webview_window(window_label) {
         let _ = window.unminimize();
@@ -81,9 +85,11 @@ pub fn run() {
 
     #[cfg(desktop)]
     {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            activate_main_window_for_second_instance(app);
-        }));
+        if should_register_single_instance_plugin(cfg!(debug_assertions)) {
+            builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+                activate_main_window_for_second_instance(app);
+            }));
+        }
     }
 
     builder
@@ -137,14 +143,14 @@ pub fn run() {
             app.manage(commands::terminal::TerminalState::default());
 
             let tray_menu = MenuBuilder::new(app)
-                .text(TRAY_OPEN_ID, "打开 codeMUX")
+                .text(TRAY_OPEN_ID, "打开 CodeMUX")
                 .separator()
                 .text(TRAY_QUIT_ID, "退出")
                 .build()?;
 
             let mut tray_builder = TrayIconBuilder::with_id("main-tray")
                 .menu(&tray_menu)
-                .tooltip("codeMUX")
+                .tooltip("CodeMUX")
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| handle_tray_menu_event(app, event.id().as_ref()));
 
@@ -251,7 +257,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_activate_main_window_for_second_instance, should_hide_to_tray};
+    use super::{
+        should_activate_main_window_for_second_instance, should_hide_to_tray,
+        should_register_single_instance_plugin,
+    };
 
     #[test]
     fn hides_only_the_main_window_to_tray() {
@@ -263,5 +272,11 @@ mod tests {
     fn activates_only_the_main_window_for_second_instance() {
         assert!(should_activate_main_window_for_second_instance("main"));
         assert!(!should_activate_main_window_for_second_instance("settings"));
+    }
+
+    #[test]
+    fn registers_single_instance_only_for_production_builds() {
+        assert!(!should_register_single_instance_plugin(true));
+        assert!(should_register_single_instance_plugin(false));
     }
 }

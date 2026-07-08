@@ -2,11 +2,11 @@
 
 ## Overview
 
-将 codeMUX 从简单聊天客户端升级为 AI Agent 编码平台，通过集成 `@anthropic-ai/claude-agent-sdk` TypeScript SDK，让用户可以在 codeMUX 中启动 Claude Agent 进行自主编码任务。
+将 CodeMUX 从简单聊天客户端升级为 AI Agent 编码平台，通过集成 `@anthropic-ai/claude-agent-sdk` TypeScript SDK，让用户可以在 CodeMUX 中启动 Claude Agent 进行自主编码任务。
 
 ## Goals
 
-- 用户在 codeMUX 中手动选择 Claude Agent 作为 AI 后端
+- 用户在 CodeMUX 中手动选择 Claude Agent 作为 AI 后端
 - 完全交互式体验：实时流式展示思考过程、工具调用、diff、命令执行
 - 项目工作区模式：Agent 在用户打开的项目目录下工作
 - 先集成 Claude Agent，后续扩展 Codex CLI
@@ -17,7 +17,7 @@
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                  codeMUX Frontend (React)        │
+│                  CodeMUX Frontend (React)        │
 │  ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │
 │  │ ChatPanel │ │ Preview  │ │ AgentEventPanel  │ │
 │  │ (existing)│ │ (existing)│ │ (NEW)            │ │

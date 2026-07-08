@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const getNameMock = vi.fn(async () => 'codeMUX');
+const getNameMock = vi.fn(async () => 'CodeMUX');
 const getVersionMock = vi.fn(async () => '1.0.0');
 const getTauriVersionMock = vi.fn(async () => '2.0.0');
 
@@ -45,7 +45,7 @@ describe('AboutSettings', () => {
 
     render(<AboutSettings />);
 
-    await screen.findByText('codeMUX');
+    await screen.findByText('CodeMUX');
 
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
 
@@ -66,7 +66,7 @@ describe('AboutSettings', () => {
 
     render(<AboutSettings />);
 
-    await screen.findByText('codeMUX');
+    await screen.findByText('CodeMUX');
 
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
 
@@ -83,12 +83,12 @@ describe('AboutSettings', () => {
 
     render(<AboutSettings />);
 
-    await screen.findByText('codeMUX');
+    await screen.findByText('CodeMUX');
 
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
 
     expect(await screen.findByText('已经是最新版本')).toBeTruthy();
-    expect(screen.getByText('当前安装的 codeMUX 已经是最新版本。')).toBeTruthy();
+    expect(screen.getByText('当前安装的 CodeMUX 已经是最新版本。')).toBeTruthy();
   });
 
   it('手动检查失败时弹出失败提示且不展示底层错误原因', async () => {
@@ -97,7 +97,7 @@ describe('AboutSettings', () => {
 
     render(<AboutSettings />);
 
-    await screen.findByText('codeMUX');
+    await screen.findByText('CodeMUX');
 
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
 
@@ -142,5 +142,14 @@ describe('AboutSettings', () => {
     fireEvent.click(button);
 
     expect(mockUpdaterContext.checkForUpdates).not.toHaveBeenCalled();
+  });
+
+  it('读取应用信息失败时仍显示规范品牌名', async () => {
+    getNameMock.mockRejectedValueOnce(new Error('unavailable'));
+    const { AboutSettings } = await import('./AboutSettings');
+
+    render(<AboutSettings />);
+
+    expect(await screen.findByText('CodeMUX')).toBeTruthy();
   });
 });

@@ -1,6 +1,6 @@
 # Codex 代理对齐 CC Switch 指导文档 — 设计方案
 
-> 目标：将 codeMUX 的 Codex 兼容代理与 `docs/codex-routing-proxy-guide.md` 对齐，覆盖中等范围（P0+P1 + 部分 P2），支持全模型族推理参数。
+> 目标：将 CodeMUX 的 Codex 兼容代理与 `docs/codex-routing-proxy-guide.md` 对齐，覆盖中等范围（P0+P1 + 部分 P2），支持全模型族推理参数。
 
 ---
 

@@ -45,7 +45,7 @@ export function NotificationSettingsSection() {
               系统通知
             </div>
             <p className="mt-1 text-xs leading-relaxed text-foreground/60">
-              codeMUX 不活跃时，任务完成或等待你回复会显示系统通知。
+              CodeMUX 不活跃时，任务完成或等待你回复会显示系统通知。
             </p>
           </div>
           <Switch

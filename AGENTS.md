@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-codeMUX is a Tauri 2 desktop app: React/Vite frontend, Rust backend, and TypeScript sidecar.
+CodeMUX is a Tauri 2 desktop app: React/Vite frontend, Rust backend, and TypeScript sidecar.
 
 - `src/` contains frontend components, stores, utilities, types, hooks, styles, and tests.
 - `src-tauri/src/` contains Rust commands, config, database, MCP, skills, and agent runtimes.

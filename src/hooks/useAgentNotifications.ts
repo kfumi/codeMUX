@@ -82,7 +82,7 @@ async function showAppSession(sessionId: string) {
 }
 
 // Tauri notification actions are mobile-only. Desktop uses the Web
-// Notification API so notification clicks can reopen codeMUX and select
+// Notification API so notification clicks can reopen CodeMUX and select
 // the originating session. The Tauri plugin remains the fallback sender.
 async function sendClickableNotification(candidate: { title: string; body: string; sessionId: string }) {
   const notificationCtor = typeof window !== 'undefined' ? window.Notification : undefined;

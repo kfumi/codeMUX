@@ -1,10 +1,10 @@
 # Skills 管理与使用系统设计
 
-> codeMUX 自定义 skill 系统 — 支持市场浏览、安装/卸载、内置 skills、slash 命令集成
+> CodeMUX 自定义 skill 系统 — 支持市场浏览、安装/卸载、内置 skills、slash 命令集成
 
 ## 概述
 
-为 codeMUX 添加一套完整的 skill 管理系统，让用户可以：
+为 CodeMUX 添加一套完整的 skill 管理系统，让用户可以：
 - 从 GitHub 仓库（如 `anthropics/skills`）浏览和安装 skills
 - 在 Settings UI 中管理已安装的 skills（启用/禁用/卸载）
 - 使用内置的 `find-skills` 和 `skill-creator` skills

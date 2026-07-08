@@ -1,4 +1,4 @@
-﻿# assistant-ui Runtime Adapter Migration Design
+# assistant-ui Runtime Adapter Migration Design
 
 Date: 2026-06-08
 Status: Approved for design, pending implementation plan
@@ -43,12 +43,12 @@ High-level flow:
 
 ```text
 src/components/agent/assistant-ui/
-  CodeMuxAssistantRuntime.tsx
-  CodeMuxThread.tsx
-  CodeMuxComposer.tsx
-  CodeMuxMessage.tsx
-  CodeMuxMessageParts.tsx
-  CodeMuxToolFallback.tsx
+  CodeMUXAssistantRuntime.tsx
+  CodeMUXThread.tsx
+  CodeMUXComposer.tsx
+  CodeMUXMessage.tsx
+  CodeMUXMessageParts.tsx
+  CodeMUXToolFallback.tsx
   convertAgentEvents.ts
 ```
 
@@ -56,7 +56,7 @@ The exact names can change during implementation, but the migration should keep 
 
 ## Runtime Adapter Design
 
-Create a hook similar to `useCodeMuxAssistantRuntime(sessionId, options)`.
+Create a hook similar to `useCodeMUXAssistantRuntime(sessionId, options)`.
 
 Responsibilities:
 

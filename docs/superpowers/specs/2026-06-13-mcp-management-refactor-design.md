@@ -1,6 +1,6 @@
 # MCP 统一管理重构设计
 
-> 将 codeMUX 的 MCP 管理功能重构为 per-tool 启用控制 + 多工具配置同步架构，对齐 CC Switch 项目的 MCP 统一管理指导文档。
+> 将 CodeMUX 的 MCP 管理功能重构为 per-tool 启用控制 + 多工具配置同步架构，对齐 CC Switch 项目的 MCP 统一管理指导文档。
 
 ---
 
@@ -8,7 +8,7 @@
 
 ### 1.1 当前问题
 
-codeMUX 现有的 MCP 管理存在以下限制：
+CodeMUX 现有的 MCP 管理存在以下限制：
 
 1. **单一启用开关**：`enabled: boolean` 无法区分"哪些工具使用这个 MCP 服务器"
 2. **仅 Claude 适配**：所有变更只同步到 `~/.claude.json`，不支持 Codex/Gemini/OpenCode

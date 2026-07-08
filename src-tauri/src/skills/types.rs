@@ -22,7 +22,7 @@ pub struct Skill {
     pub directory: String,
 }
 
-/// A skill discovered in an agent's skills directory that is not yet managed by codeMUX.
+/// A skill discovered in an agent's skills directory that is not yet managed by CodeMUX.
 /// Used by the import preview dialog to let the user choose which skills to import.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportableSkill {

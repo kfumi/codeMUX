@@ -8,7 +8,7 @@
 
 ## Overview
 
-在 codeMUX 的 Agent 对话面板中，实现点击文件路径打开右侧面板预览文件内容，支持项目文件树浏览和修改前后代码对比（Unified Diff）。
+在 CodeMUX 的 Agent 对话面板中，实现点击文件路径打开右侧面板预览文件内容，支持项目文件树浏览和修改前后代码对比（Unified Diff）。
 
 ### 用户故事
 

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="src-tauri/icons/128x128@2x.png" width="120" alt="codeMUX Logo">
+  <img src="src-tauri/icons/128x128@2x.png" width="120" alt="CodeMUX Logo">
 </p>
 
-<h1 align="center">codeMUX</h1>
+<h1 align="center">CodeMUX</h1>
 
 <p align="center">
   <strong>一个把 AI 编码 CLI 变成桌面工作台的本地优先应用</strong>
@@ -30,9 +30,9 @@
 
 ---
 
-## codeMUX 是什么
+## CodeMUX 是什么
 
-`codeMUX` 是一个基于 `Tauri 2 + React + Rust` 的跨平台桌面应用，目标不是做一个“再包一层聊天窗口”，而是把真实的 AI 编码工作流搬到一个更顺手的 GUI 里。
+`CodeMUX` 是一个基于 `Tauri 2 + React + Rust` 的跨平台桌面应用，目标不是做一个“再包一层聊天窗口”，而是把真实的 AI 编码工作流搬到一个更顺手的 GUI 里。
 
 如果你平时在 `Claude Code`、`Codex` 这类 CLI 智能体上工作，通常会遇到这些问题：
 
@@ -41,7 +41,7 @@
 - MCP、Skills、权限模式、历史会话都缺少统一管理入口
 - 想做代码审查或开一个项目终端，还要在应用外反复切换
 
-`codeMUX` 的做法是把这些环节收拢到一个桌面工作台里：会话、项目、Provider、Agent、MCP、Skills、Review、Terminal 都放在同一个界面中完成。
+`CodeMUX` 的做法是把这些环节收拢到一个桌面工作台里：会话、项目、Provider、Agent、MCP、Skills、Review、Terminal 都放在同一个界面中完成。
 
 当前真正可用的核心运行时：
 

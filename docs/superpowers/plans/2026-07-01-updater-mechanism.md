@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 为 codeMUX 接入 Tauri 2 软件更新检测、启动静默检查、关于页手动检查、下载安装和重启流程。
+**Goal:** 为 CodeMUX 接入 Tauri 2 软件更新检测、启动静默检查、关于页手动检查、下载安装和重启流程。
 
 **Architecture:** Tauri 层启用 updater/process 插件并配置 GitHub Releases `latest.json` 端点；前端新增 updater Hook 和 Context 作为单一状态源；`App.tsx` 挂载全局更新提示，`AboutSettings.tsx` 提供手动检查入口。
 
@@ -788,7 +788,7 @@ export function UpdateToast({
           {stage === 'latest' && (
             <div>
               <h3 className="text-sm font-semibold text-foreground/90">当前已是最新版本</h3>
-              <p className="text-xs text-foreground/58">codeMUX 已保持最新。</p>
+              <p className="text-xs text-foreground/58">CodeMUX 已保持最新。</p>
             </div>
           )}
 
@@ -899,7 +899,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const checkForUpdatesMock = vi.fn();
 
 vi.mock('@tauri-apps/api/app', () => ({
-  getName: vi.fn(async () => 'codeMUX'),
+  getName: vi.fn(async () => 'CodeMUX'),
   getVersion: vi.fn(async () => '0.0.4'),
   getTauriVersion: vi.fn(async () => '2.0.0'),
 }));

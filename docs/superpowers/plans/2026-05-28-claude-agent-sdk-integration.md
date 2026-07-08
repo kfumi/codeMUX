@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Integrate `@anthropic-ai/claude-agent-sdk` into codeMUX so users can run Claude Agent for autonomous coding tasks with full interactive UI.
+**Goal:** Integrate `@anthropic-ai/claude-agent-sdk` into CodeMUX so users can run Claude Agent for autonomous coding tasks with full interactive UI.
 
 **Architecture:** A Node.js sidecar process runs the Claude Agent SDK (`query()`), communicating with the Rust backend via stdin/stdout JSON. The Rust layer manages the sidecar lifecycle and forwards `SDKMessage` events to the frontend via Tauri IPC Channel. The frontend renders each event type (thinking, tool_use, tool_result, text, diff) as specialized UI components.
 
@@ -1813,7 +1813,7 @@ function App() {
         ) : (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <h2 className="text-2xl font-bold mb-2">欢迎使用 codeMUX</h2>
+              <h2 className="text-2xl font-bold mb-2">欢迎使用 CodeMUX</h2>
               <p className="text-muted-foreground">点击 "快速对话" 或 "Agent 任务" 开始</p>
             </div>
           </div>
@@ -1845,7 +1845,7 @@ export function Sidebar({ onNewSession, onOpenSettings }: SidebarProps) {
   return (
     <div className="flex flex-col h-full bg-background">
       <div className="p-3 border-b">
-        <h1 className="text-lg font-bold text-foreground">codeMUX</h1>
+        <h1 className="text-lg font-bold text-foreground">CodeMUX</h1>
       </div>
 
       {/* Top actions */}

@@ -1,4 +1,4 @@
-﻿# assistant-ui Runtime Adapter Implementation Plan
+# assistant-ui Runtime Adapter Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -56,7 +56,7 @@ npm ls @assistant-ui/react
 Expected:
 
 ```text
-codemux@0.1.0
+CodeMUX@0.1.0
 `-- @assistant-ui/react@0.14.14
 ```
 
@@ -92,19 +92,19 @@ Create `src/components/agent/assistant-ui/convertAgentEvents.ts` with this imple
 import type { AgentMessage } from '../../../stores/agentStore';
 import type { ContentBlock } from '../../../types/agent';
 
-type CodeMuxMessageRole = 'user' | 'assistant' | 'system';
+type CodeMUXMessageRole = 'user' | 'assistant' | 'system';
 
-type CodeMuxTextPart = {
+type CodeMUXTextPart = {
   type: 'text';
   text: string;
 };
 
-type CodeMuxReasoningPart = {
+type CodeMUXReasoningPart = {
   type: 'reasoning';
   text: string;
 };
 
-type CodeMuxToolCallPart = {
+type CodeMUXToolCallPart = {
   type: 'tool-call';
   toolCallId: string;
   toolName: string;
@@ -112,31 +112,31 @@ type CodeMuxToolCallPart = {
   result?: unknown;
 };
 
-type CodeMuxCustomPart = {
+type CodeMUXCustomPart = {
   type: 'data-codemux-event';
   eventKind: AgentMessage['kind'];
   event: AgentMessage;
 };
 
-export type CodeMuxAssistantPart =
-  | CodeMuxTextPart
-  | CodeMuxReasoningPart
-  | CodeMuxToolCallPart
-  | CodeMuxCustomPart;
+export type CodeMUXAssistantPart =
+  | CodeMUXTextPart
+  | CodeMUXReasoningPart
+  | CodeMUXToolCallPart
+  | CodeMUXCustomPart;
 
-export type CodeMuxAssistantMessage = {
+export type CodeMUXAssistantMessage = {
   id: string;
-  role: CodeMuxMessageRole;
-  content: CodeMuxAssistantPart[];
+  role: CodeMUXMessageRole;
+  content: CodeMUXAssistantPart[];
   metadata?: {
     sourceEventIndex: number;
     sourceKind: AgentMessage['kind'];
   };
 };
 
-export function convertAgentEventsToAssistantMessages(events: AgentMessage[]): CodeMuxAssistantMessage[] {
-  const messages: CodeMuxAssistantMessage[] = [];
-  const toolCallById = new Map<string, CodeMuxToolCallPart>();
+export function convertAgentEventsToAssistantMessages(events: AgentMessage[]): CodeMUXAssistantMessage[] {
+  const messages: CodeMUXAssistantMessage[] = [];
+  const toolCallById = new Map<string, CodeMUXToolCallPart>();
 
   events.forEach((event, index) => {
     if (event.kind === 'user') {
@@ -174,11 +174,11 @@ export function convertAgentEventsToAssistantMessages(events: AgentMessage[]): C
 
 function createMessage(
   id: string,
-  role: CodeMuxMessageRole,
-  content: CodeMuxAssistantPart[],
+  role: CodeMUXMessageRole,
+  content: CodeMUXAssistantPart[],
   event: AgentMessage,
   index: number,
-): CodeMuxAssistantMessage {
+): CodeMUXAssistantMessage {
   return {
     id,
     role,
@@ -192,20 +192,20 @@ function createMessage(
 
 function convertAssistantContent(
   content: ContentBlock[],
-  toolCallById: Map<string, CodeMuxToolCallPart>,
-): CodeMuxAssistantPart[] {
+  toolCallById: Map<string, CodeMUXToolCallPart>,
+): CodeMUXAssistantPart[] {
   return content.flatMap((block) => {
     if (block.type === 'text' && block.text) {
-      return [{ type: 'text', text: block.text } satisfies CodeMuxTextPart];
+      return [{ type: 'text', text: block.text } satisfies CodeMUXTextPart];
     }
 
     if (block.type === 'thinking' && block.thinking) {
-      return [{ type: 'reasoning', text: block.thinking } satisfies CodeMuxReasoningPart];
+      return [{ type: 'reasoning', text: block.thinking } satisfies CodeMUXReasoningPart];
     }
 
     if (block.type === 'tool_use') {
       const toolCallId = block.id || `${block.name || 'tool'}-${toolCallById.size}`;
-      const toolPart: CodeMuxToolCallPart = {
+      const toolPart: CodeMUXToolCallPart = {
         type: 'tool-call',
         toolCallId,
         toolName: block.name || 'tool',
@@ -221,8 +221,8 @@ function convertAssistantContent(
 
 function attachToolResults(
   event: Extract<AgentMessage, { kind: 'tool_result' }>,
-  toolCallById: Map<string, CodeMuxToolCallPart>,
-  fallbackPart: CodeMuxCustomPart,
+  toolCallById: Map<string, CodeMUXToolCallPart>,
+  fallbackPart: CodeMUXCustomPart,
 ): void {
   for (const result of event.data.message.content) {
     const toolPart = toolCallById.get(result.tool_use_id);
@@ -278,13 +278,13 @@ import { AssistantRuntimeProvider, useExternalStoreRuntime } from '@assistant-ui
 import { useAgentStore } from '../../../stores/agentStore';
 import { convertAgentEventsToAssistantMessages } from './convertAgentEvents';
 
-interface CodeMuxAssistantRuntimeProviderProps {
+interface CodeMUXAssistantRuntimeProviderProps {
   sessionId: string;
   onSend: (content: string) => Promise<void>;
   children: ReactNode;
 }
 
-export function CodeMuxAssistantRuntimeProvider({ sessionId, onSend, children }: CodeMuxAssistantRuntimeProviderProps) {
+export function CodeMUXAssistantRuntimeProvider({ sessionId, onSend, children }: CodeMUXAssistantRuntimeProviderProps) {
   const events = useAgentStore((state) => state.events[sessionId] || []);
   const convertedMessages = useMemo(() => convertAgentEventsToAssistantMessages(events), [events]);
 
@@ -332,7 +332,7 @@ Run:
 npm run build
 ```
 
-Expected: any failure should identify exact assistant-ui type names or content-part shape issues. Fix only the type boundary in `CodeMuxAssistantRuntime.tsx` or `convertAgentEvents.ts`.
+Expected: any failure should identify exact assistant-ui type names or content-part shape issues. Fix only the type boundary in `CodeMUXAssistantRuntime.tsx` or `convertAgentEvents.ts`.
 
 ---
 
@@ -352,13 +352,13 @@ import { ToolCallCard } from '../ToolCallCard';
 import { TerminalBlock } from '../TerminalBlock';
 import { DiffBlock } from '../DiffBlock';
 import { AskUserQuestionCard } from '../AskUserQuestionCard';
-import type { CodeMuxAssistantPart } from './convertAgentEvents';
+import type { CodeMUXAssistantPart } from './convertAgentEvents';
 
-interface CodeMuxMessagePartProps {
-  part: CodeMuxAssistantPart;
+interface CodeMUXMessagePartProps {
+  part: CodeMUXAssistantPart;
 }
 
-export function CodeMuxMessagePart({ part }: CodeMuxMessagePartProps) {
+export function CodeMUXMessagePart({ part }: CodeMUXMessagePartProps) {
   if (part.type === 'text') {
     return <MarkdownRenderer content={part.text} />;
   }
@@ -376,17 +376,17 @@ export function CodeMuxMessagePart({ part }: CodeMuxMessagePartProps) {
   }
 
   if (part.eventKind === 'streaming') {
-    return <CodeMuxEventFallback title="Streaming event" data={part.event.data} />;
+    return <CodeMUXEventFallback title="Streaming event" data={part.event.data} />;
   }
 
   if (part.eventKind === 'raw') {
-    return <CodeMuxEventFallback title="Raw agent event" data={part.event.data} />;
+    return <CodeMUXEventFallback title="Raw agent event" data={part.event.data} />;
   }
 
-  return <CodeMuxEventFallback title={part.eventKind} data={part.event} />;
+  return <CodeMUXEventFallback title={part.eventKind} data={part.event} />;
 }
 
-function CodeMuxEventFallback({ title, data }: { title: string; data: unknown }) {
+function CodeMUXEventFallback({ title, data }: { title: string; data: unknown }) {
   return (
     <details className="rounded-lg border border-border/60 bg-muted/30 p-3 text-xs text-muted-foreground">
       <summary className="cursor-pointer text-foreground">{title}</summary>
@@ -402,7 +402,7 @@ export { TerminalBlock, DiffBlock };
 
 - [ ] **Step 2: Fix prop mismatches against existing renderers**
 
-Open each existing renderer signature and adjust only the wrapper calls in `CodeMuxMessageParts.tsx`:
+Open each existing renderer signature and adjust only the wrapper calls in `CodeMUXMessageParts.tsx`:
 
 ```powershell
 Get-Content src\components\agent\ToolCallCard.tsx -TotalCount 80
@@ -438,7 +438,7 @@ import { ThreadPrimitive, MessagePrimitive } from '@assistant-ui/react';
 import { cn } from '../../../lib/utils';
 import { CodeMuxMessagePart } from './CodeMuxMessageParts';
 
-export function CodeMuxThread() {
+export function CodeMUXThread() {
   return (
     <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
       <ThreadPrimitive.Viewport className="flex-1 overflow-y-auto px-4 py-5">
@@ -474,15 +474,15 @@ function UserText({ text }: { text: string }) {
 }
 
 function AssistantText({ text }: { text: string }) {
-  return <CodeMuxMessagePart part={{ type: 'text', text }} />;
+  return <CodeMUXMessagePart part={{ type: 'text', text }} />;
 }
 
 function AssistantReasoning({ text }: { text: string }) {
-  return <CodeMuxMessagePart part={{ type: 'reasoning', text }} />;
+  return <CodeMUXMessagePart part={{ type: 'reasoning', text }} />;
 }
 
 function AssistantToolCall(props: { toolCallId: string; toolName: string; args: Record<string, unknown>; result?: unknown }) {
-  return <CodeMuxMessagePart part={{ type: 'tool-call', ...props }} />;
+  return <CodeMUXMessagePart part={{ type: 'tool-call', ...props }} />;
 }
 ```
 
@@ -495,14 +495,14 @@ rg "declare namespace ThreadPrimitive|Messages" node_modules\@assistant-ui\react
 rg "declare namespace MessagePrimitive|Content" node_modules\@assistant-ui\react -n
 ```
 
-Expected: `CodeMuxThread.tsx` compiles with the installed primitive API.
+Expected: `CodeMUXThread.tsx` compiles with the installed primitive API.
 
 - [ ] **Step 3: Keep styling compact**
 
 Confirm the class names preserve CodeMUX density:
 
 ```powershell
-Select-String -Path src\components\agent\assistant-ui\CodeMuxThread.tsx -Pattern "max-w-4xl|text-sm|overflow-y-auto|space-y-3"
+Select-String -Path src\components\agent\assistant-ui\CodeMUXThread.tsx -Pattern "max-w-4xl|text-sm|overflow-y-auto|space-y-3"
 ```
 
 Expected: all four patterns are present.
@@ -522,7 +522,7 @@ Create `src/components/agent/assistant-ui/CodeMuxComposer.tsx`:
 import type { SlashCommand } from '../../../lib/slashCommands';
 import { AgentInput } from '../AgentInput';
 
-interface CodeMuxComposerProps {
+interface CodeMUXComposerProps {
   onSend: (content: string) => Promise<void>;
   onCommand: (command: SlashCommand, args: string) => void | Promise<void>;
   onStop?: () => void;
@@ -530,7 +530,7 @@ interface CodeMuxComposerProps {
   modelName?: string;
 }
 
-export function CodeMuxComposer(props: CodeMuxComposerProps) {
+export function CodeMUXComposer(props: CodeMUXComposerProps) {
   return <AgentInput {...props} />;
 }
 ```
@@ -555,7 +555,7 @@ Run:
 npm run build
 ```
 
-Expected: no TypeScript errors from `CodeMuxComposer.tsx`.
+Expected: no TypeScript errors from `CodeMUXComposer.tsx`.
 
 ---
 
@@ -579,11 +579,11 @@ import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 Find the JSX that renders `AgentMessageList` and `AgentInput`. Replace that central region with:
 
 ```tsx
-<CodeMuxAssistantRuntimeProvider sessionId={sessionId} onSend={handleSend}>
+<CodeMUXAssistantRuntimeProvider sessionId={sessionId} onSend={handleSend}>
   <div className="flex min-h-0 flex-1 flex-col">
-    <CodeMuxThread />
+    <CodeMUXThread />
     <div className="border-t border-border bg-background/95 p-4">
-      <CodeMuxComposer
+      <CodeMUXComposer
         onSend={handleSend}
         onCommand={handleCommand}
         onStop={() => interrupt(sessionId)}

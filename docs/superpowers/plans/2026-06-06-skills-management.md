@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 为 codeMUX 添加完整的 skill 管理系统，支持从 GitHub 仓库浏览/安装/卸载 skills，内置 find-skills 和 skill-creator，集成到 slash 命令菜单。
+**Goal:** 为 CodeMUX 添加完整的 skill 管理系统，支持从 GitHub 仓库浏览/安装/卸载 skills，内置 find-skills 和 skill-creator，集成到 slash 命令菜单。
 
 **Architecture:** Rust 后端新增 `skills` 模块（types → db → github → commands），通过 GitHub API 浏览仓库中的 skills，安装到 `~/.claude/skills/` 并记录到 SQLite。前端新增 `skillStore` + `SkillsSettings` UI + slash 命令集成。Sidecar 新增 `skills` 选项传递给 Claude Agent SDK。
 

@@ -59,8 +59,8 @@ fn git_repository_state_tracks_current_branch_and_local_branches() {
 
     let project = temp_project();
     Command::new("git").arg("-C").arg(&project).arg("init").output().unwrap();
-    Command::new("git").arg("-C").arg(&project).args(["config", "user.email", "codemux@example.test"]).output().unwrap();
-    Command::new("git").arg("-C").arg(&project).args(["config", "user.name", "codeMUX"]).output().unwrap();
+    Command::new("git").arg("-C").arg(&project).args(["config", "user.email", "CodeMUX@example.test"]).output().unwrap();
+    Command::new("git").arg("-C").arg(&project).args(["config", "user.name", "CodeMUX"]).output().unwrap();
     fs::write(project.join("README.md"), "hello\n").unwrap();
     Command::new("git").arg("-C").arg(&project).args(["add", "."]).output().unwrap();
     Command::new("git").arg("-C").arg(&project).args(["commit", "-m", "initial"]).output().unwrap();
@@ -84,8 +84,8 @@ fn git_branch_create_and_checkout_changes_current_branch() {
 
     let project = temp_project();
     Command::new("git").arg("-C").arg(&project).arg("init").output().unwrap();
-    Command::new("git").arg("-C").arg(&project).args(["config", "user.email", "codemux@example.test"]).output().unwrap();
-    Command::new("git").arg("-C").arg(&project).args(["config", "user.name", "codeMUX"]).output().unwrap();
+    Command::new("git").arg("-C").arg(&project).args(["config", "user.email", "CodeMUX@example.test"]).output().unwrap();
+    Command::new("git").arg("-C").arg(&project).args(["config", "user.name", "CodeMUX"]).output().unwrap();
     fs::write(project.join("README.md"), "hello\n").unwrap();
     Command::new("git").arg("-C").arg(&project).args(["add", "."]).output().unwrap();
     Command::new("git").arg("-C").arg(&project).args(["commit", "-m", "initial"]).output().unwrap();
@@ -106,8 +106,8 @@ fn git_checkout_branch_rejects_dirty_worktree() {
 
     let project = temp_project();
     Command::new("git").arg("-C").arg(&project).arg("init").output().unwrap();
-    Command::new("git").arg("-C").arg(&project).args(["config", "user.email", "codemux@example.test"]).output().unwrap();
-    Command::new("git").arg("-C").arg(&project).args(["config", "user.name", "codeMUX"]).output().unwrap();
+    Command::new("git").arg("-C").arg(&project).args(["config", "user.email", "CodeMUX@example.test"]).output().unwrap();
+    Command::new("git").arg("-C").arg(&project).args(["config", "user.name", "CodeMUX"]).output().unwrap();
     fs::write(project.join("README.md"), "hello\n").unwrap();
     Command::new("git").arg("-C").arg(&project).args(["add", "."]).output().unwrap();
     Command::new("git").arg("-C").arg(&project).args(["commit", "-m", "initial"]).output().unwrap();
@@ -315,8 +315,8 @@ fn git_revert_unstaged_changes_restores_tracked_and_removes_untracked() {
 
     let project = temp_project();
     Command::new("git").arg("-C").arg(&project).arg("init").output().unwrap();
-    Command::new("git").arg("-C").arg(&project).args(["config", "user.email", "codemux@example.test"]).output().unwrap();
-    Command::new("git").arg("-C").arg(&project).args(["config", "user.name", "codeMUX"]).output().unwrap();
+    Command::new("git").arg("-C").arg(&project).args(["config", "user.email", "CodeMUX@example.test"]).output().unwrap();
+    Command::new("git").arg("-C").arg(&project).args(["config", "user.name", "CodeMUX"]).output().unwrap();
     fs::write(project.join("tracked.txt"), "one\n").unwrap();
     Command::new("git").arg("-C").arg(&project).args(["add", "."]).output().unwrap();
     Command::new("git").arg("-C").arg(&project).args(["commit", "-m", "initial"]).output().unwrap();
@@ -339,8 +339,8 @@ fn git_revert_staged_changes_restores_worktree() {
 
     let project = temp_project();
     Command::new("git").arg("-C").arg(&project).arg("init").output().unwrap();
-    Command::new("git").arg("-C").arg(&project).args(["config", "user.email", "codemux@example.test"]).output().unwrap();
-    Command::new("git").arg("-C").arg(&project).args(["config", "user.name", "codeMUX"]).output().unwrap();
+    Command::new("git").arg("-C").arg(&project).args(["config", "user.email", "CodeMUX@example.test"]).output().unwrap();
+    Command::new("git").arg("-C").arg(&project).args(["config", "user.name", "CodeMUX"]).output().unwrap();
     fs::write(project.join("tracked.txt"), "one\n").unwrap();
     Command::new("git").arg("-C").arg(&project).args(["add", "."]).output().unwrap();
     Command::new("git").arg("-C").arg(&project).args(["commit", "-m", "initial"]).output().unwrap();
@@ -363,8 +363,8 @@ fn git_commit_requires_staged_changes_and_returns_hash() {
 
     let project = temp_project();
     Command::new("git").arg("-C").arg(&project).arg("init").output().unwrap();
-    Command::new("git").arg("-C").arg(&project).args(["config", "user.email", "codemux@example.test"]).output().unwrap();
-    Command::new("git").arg("-C").arg(&project).args(["config", "user.name", "codeMUX"]).output().unwrap();
+    Command::new("git").arg("-C").arg(&project).args(["config", "user.email", "CodeMUX@example.test"]).output().unwrap();
+    Command::new("git").arg("-C").arg(&project).args(["config", "user.name", "CodeMUX"]).output().unwrap();
 
     let empty_err = commit_git_changes_in_project(&project, "feat: empty").unwrap_err();
     assert!(empty_err.contains("没有已暂存修改可提交"));

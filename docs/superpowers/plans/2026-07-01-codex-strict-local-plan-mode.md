@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rework Codex plan mode so codeMUX enforces desktop-cc-gui style strict-local collaboration semantics in the existing Codex SDK sidecar.
+**Goal:** Rework Codex plan mode so CodeMUX enforces desktop-cc-gui style strict-local collaboration semantics in the existing Codex SDK sidecar.
 
 **Architecture:** Add a focused sidecar policy module that normalizes `planMode` into `code` or `plan`, injects strict-local directives into Codex input, and exposes helpers for blocking forbidden tool behavior. Wire that module into `codexRuntime.ts` and `codexCompatProxy.ts`, keeping existing frontend controls while adding a compact diagnostic path for mode-blocked events.
 

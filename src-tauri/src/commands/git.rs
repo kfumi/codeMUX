@@ -1236,7 +1236,7 @@ mod tests {
         Command::new("git")
             .arg("-C")
             .arg(project)
-            .args(["config", "user.name", "codeMUX"])
+            .args(["config", "user.name", "CodeMUX"])
             .output()
             .unwrap();
     }
@@ -1715,7 +1715,7 @@ mod tests {
         Command::new("git")
             .arg("-C")
             .arg(&project)
-            .args(["config", "user.name", "codeMUX"])
+            .args(["config", "user.name", "CodeMUX"])
             .output()
             .unwrap();
 
@@ -1819,7 +1819,7 @@ mod tests {
         Command::new("git")
             .arg("-C")
             .arg(&project)
-            .args(["config", "user.name", "codeMUX"])
+            .args(["config", "user.name", "CodeMUX"])
             .output()
             .unwrap();
 

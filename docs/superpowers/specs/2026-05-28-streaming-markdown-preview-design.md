@@ -2,7 +2,7 @@
 
 ## 概述
 
-为 codeMUX 实现三个核心功能：流式输出（token-by-token 显示 AI 响应）、Markdown 渲染（代码高亮、富文本展示）、三栏布局代码预览面板（文件链接 + 内联 Diff 视图）。
+为 CodeMUX 实现三个核心功能：流式输出（token-by-token 显示 AI 响应）、Markdown 渲染（代码高亮、富文本展示）、三栏布局代码预览面板（文件链接 + 内联 Diff 视图）。
 
 ## 功能一：流式输出
 

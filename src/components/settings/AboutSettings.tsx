@@ -54,10 +54,10 @@ export function AboutSettings() {
     <div className="space-y-6">
       {/* App identity */}
       <div className="flex flex-col items-center gap-4 rounded-xl bg-muted/40 p-6">
-        <img src="/logo.png" alt="codeMUX" className="h-16 w-16 rounded-2xl" />
+        <img src="/logo.png" alt="CodeMUX" className="h-16 w-16 rounded-2xl" />
         <div className="text-center">
           <h2 className="text-lg font-semibold text-foreground/90">
-            {info?.name ?? 'codeMUX'}
+            {info?.name ?? 'CodeMUX'}
           </h2>
           <p className="text-sm text-foreground/60">AI 编码工具聚合平台</p>
           {info?.version && (
@@ -142,7 +142,7 @@ export function AboutSettings() {
           <DialogHeader>
             <DialogTitle>已经是最新版本</DialogTitle>
             <DialogDescription>
-              当前安装的 codeMUX 已经是最新版本。
+              当前安装的 CodeMUX 已经是最新版本。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
