@@ -227,6 +227,25 @@ export function isClaudeTaskNotificationUserEvent(data: Record<string, unknown>)
   );
 }
 
+function isSyntheticNoResponseAssistantEvent(raw: Record<string, unknown>): boolean {
+  const message = asRecord(raw.message);
+  if (message?.stop_reason !== 'stop_sequence') {
+    return false;
+  }
+
+  const content = message.content;
+  if (!Array.isArray(content)) {
+    return false;
+  }
+
+  const textParts = content
+    .filter((block) => isRecord(block) && block.type === 'text')
+    .map((block) => String(block.text || '').trim())
+    .filter(Boolean);
+
+  return textParts.length === 1 && textParts[0] === 'No response requested.';
+}
+
 const CLAUDE_LOCAL_COMPACT_STDOUT_RE = /^\s*<local-command-stdout>\s*Compacted\s*<\/local-command-stdout>\s*$/;
 const CLAUDE_COMPACT_SUMMARY_PREFIX = 'This session is being continued from a previous conversation that ran out of context.';
 const CODEX_COMPACT_SUMMARY_PREFIX = 'Another language model started to solve this problem and produced a summary';
@@ -419,6 +438,10 @@ export function mapPersistedClaudeMessage(
   }
 
   if (msgType === 'assistant') {
+    if (isSyntheticNoResponseAssistantEvent(raw)) {
+      return null;
+    }
+
     return { kind: 'assistant', data: raw as unknown as AgentAssistantMessage };
   }
 

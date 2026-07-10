@@ -353,6 +353,22 @@ describe('mapPersistedClaudeMessage', () => {
     ).toBeNull();
   });
 
+  it('suppresses synthetic no-response assistant messages from persisted history', () => {
+    expect(
+      mapPersistedClaudeMessage({
+        type: 'assistant',
+        uuid: 'assistant-no-response',
+        message: {
+          model: '<synthetic>',
+          role: 'assistant',
+          stop_reason: 'stop_sequence',
+          content: [{ type: 'text', text: 'No response requested.' }],
+        },
+        parent_tool_use_id: null,
+      }),
+    ).toBeNull();
+  });
+
   it('suppresses Claude task notification user messages from user-visible history', () => {
     expect(
       mapPersistedClaudeMessage(

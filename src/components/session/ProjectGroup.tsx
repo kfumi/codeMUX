@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ChevronRight, Folder, FolderOpen, MessageSquarePlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, Folder, FolderOpen, MessageSquarePlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 
 import { Session } from '../../types/session';
 import { Project } from '../../types/project';
@@ -11,6 +11,10 @@ import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { cn } from '../../lib/utils';
+
+const INITIAL_VISIBLE_PROJECT_SESSIONS = 5;
+const FIRST_EXPANDED_PROJECT_SESSIONS = 15;
+const PROJECT_SESSION_EXPAND_STEP = 10;
 
 interface ProjectGroupProps {
   project: Project;
@@ -53,12 +57,30 @@ export function ProjectGroup({
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(project.name);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [visibleSessionLimit, setVisibleSessionLimit] = useState(INITIAL_VISIBLE_PROJECT_SESSIONS);
+  const visibleSessions = sessions.slice(0, visibleSessionLimit);
+  const hasHiddenSessions = visibleSessionLimit < sessions.length;
+  const canCollapseSessions = sessions.length > INITIAL_VISIBLE_PROJECT_SESSIONS
+    && visibleSessionLimit > INITIAL_VISIBLE_PROJECT_SESSIONS;
 
   const handleRename = () => {
     if (renameValue.trim() && renameValue !== project.name) {
       onRenameProject(project.id, renameValue.trim());
     }
     setRenaming(false);
+  };
+
+  const handleExpandSessions = () => {
+    setVisibleSessionLimit((current) => {
+      const next = current <= INITIAL_VISIBLE_PROJECT_SESSIONS
+        ? FIRST_EXPANDED_PROJECT_SESSIONS
+        : current + PROJECT_SESSION_EXPAND_STEP;
+      return Math.min(next, sessions.length);
+    });
+  };
+
+  const handleCollapseSessions = () => {
+    setVisibleSessionLimit(INITIAL_VISIBLE_PROJECT_SESSIONS);
   };
 
   return (
@@ -145,7 +167,7 @@ export function ProjectGroup({
       </div>
       {expanded && (
         <div className="ml-4 mt-1 space-y-0.5 border-l border-[hsl(var(--sidebar-border))]/45 pl-2.5">
-          {sessions.map((session) => (
+          {visibleSessions.map((session) => (
             <SessionItem
               key={session.id}
               session={session}
@@ -160,6 +182,32 @@ export function ProjectGroup({
               onCloseMenu={onCloseMenu}
             />
           ))}
+          {(hasHiddenSessions || canCollapseSessions) && (
+            <div className="flex items-center gap-1.5 pt-1">
+              {hasHiddenSessions && (
+                <button
+                  type="button"
+                  aria-label={`展开显示项目 ${project.name} 的更多对话`}
+                  onClick={handleExpandSessions}
+                  className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-[hsl(var(--sidebar-fg))]/52 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
+                >
+                  <ChevronDown className="h-3 w-3" />
+                  展开显示
+                </button>
+              )}
+              {canCollapseSessions && (
+                <button
+                  type="button"
+                  aria-label={`折叠显示项目 ${project.name} 的对话`}
+                  onClick={handleCollapseSessions}
+                  className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-[hsl(var(--sidebar-fg))]/52 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
+                >
+                  <ChevronUp className="h-3 w-3" />
+                  折叠显示
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 

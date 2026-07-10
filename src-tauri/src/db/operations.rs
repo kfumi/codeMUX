@@ -259,10 +259,9 @@ pub fn unarchive_session(conn: &Connection, session_id: &str) -> Result<()> {
 }
 
 pub fn set_session_pinned(conn: &Connection, session_id: &str, pinned: bool) -> Result<()> {
-    let now = Utc::now().to_rfc3339();
     conn.execute(
-        "UPDATE sessions SET is_pinned = ?1, updated_at = ?2 WHERE id = ?3",
-        params![if pinned { 1 } else { 0 }, now, session_id],
+        "UPDATE sessions SET is_pinned = ?1 WHERE id = ?2",
+        params![if pinned { 1 } else { 0 }, session_id],
     )?;
     Ok(())
 }

@@ -212,6 +212,55 @@ describe('SessionList', () => {
     expect(screen.getByText('Project Session')).toBeTruthy();
   });
 
+  it('lazily expands project session history in fixed increments', () => {
+    useProjectStore.setState({
+      projects: [makeProject({ id: 'project-1', name: 'codeMUX' })],
+      activeProjectId: null,
+      isLoading: false,
+      error: null,
+      collapsedProjects: new Set<string>(),
+    });
+    useSessionStore.setState({
+      sessions: Array.from({ length: 16 }, (_, index) => makeSession({
+        id: `project-session-${index + 1}`,
+        title: `Project Session ${String(index + 1).padStart(2, '0')}`,
+        project_id: 'project-1',
+      })),
+      archivedSessions: [],
+      activeSessionId: null,
+      isLoading: false,
+      isArchivedLoading: false,
+      error: null,
+      unreadSessions: new Set<string>(),
+    });
+
+    renderSessionList();
+
+    expect(screen.getByText('Project Session 01')).toBeTruthy();
+    expect(screen.getByText('Project Session 05')).toBeTruthy();
+    expect(screen.queryByText('Project Session 06')).toBeNull();
+    expect(screen.getByRole('button', { name: '展开显示项目 codeMUX 的更多对话' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '折叠显示项目 codeMUX 的对话' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '展开显示项目 codeMUX 的更多对话' }));
+
+    expect(screen.getByText('Project Session 15')).toBeTruthy();
+    expect(screen.queryByText('Project Session 16')).toBeNull();
+    expect(screen.getByRole('button', { name: '展开显示项目 codeMUX 的更多对话' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '折叠显示项目 codeMUX 的对话' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '展开显示项目 codeMUX 的更多对话' }));
+
+    expect(screen.getByText('Project Session 16')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '展开显示项目 codeMUX 的更多对话' })).toBeNull();
+    expect(screen.getByRole('button', { name: '折叠显示项目 codeMUX 的对话' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '折叠显示项目 codeMUX 的对话' }));
+
+    expect(screen.getByText('Project Session 05')).toBeTruthy();
+    expect(screen.queryByText('Project Session 06')).toBeNull();
+  });
+
   it('collapses and expands the entire conversations section from its header', () => {
     useSessionStore.setState({
       sessions: [makeSession({ id: 'session-active', title: 'Active Session' })],
