@@ -247,7 +247,7 @@ describe('CodexSessionRuntime', () => {
           input_tokens: 100,
           output_tokens: 5,
           cached_input_tokens: 20,
-          total_tokens: 108,
+          total_tokens: 105,
         },
       });
     } finally {
@@ -333,7 +333,7 @@ describe('CodexSessionRuntime', () => {
           input_tokens: 75,
           output_tokens: 8,
           cached_input_tokens: 15,
-          total_tokens: 85,
+          total_tokens: 83,
         },
       });
     } finally {
@@ -432,7 +432,7 @@ describe('CodexSessionRuntime', () => {
           input_tokens: 125,
           output_tokens: 25,
           cached_input_tokens: 25,
-          total_tokens: 155,
+          total_tokens: 150,
         },
       });
     } finally {

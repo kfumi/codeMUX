@@ -3,6 +3,28 @@ import { attachConsole, debug, error, info, trace, warn } from '@tauri-apps/plug
 type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 type LogContext = Record<string, unknown>;
 
+const LEVEL_PRIORITY: Record<LogLevel, number> = {
+  trace: 0,
+  debug: 1,
+  info: 2,
+  warn: 3,
+  error: 4,
+};
+
+// Client-side level gate: short-circuits low-level logs BEFORE the IPC call.
+// Tauri's @tauri-apps/plugin-log has no JS-side filtering — every debug()/trace()
+// call crosses the IPC bridge even if the Rust side drops it. During high-frequency
+// streaming events this saturates the IPC channel and freezes the app.
+let minLevel: LogLevel = import.meta.env.DEV ? 'debug' : 'info';
+
+export function setMinLogLevel(level: LogLevel) {
+  minLevel = level;
+}
+
+export function getMinLogLevel(): LogLevel {
+  return minLevel;
+}
+
 type Logger = {
   trace: (message: string, context?: LogContext) => void;
   debug: (message: string, context?: LogContext) => void;
@@ -62,6 +84,8 @@ function formatConsolePayload(scope: string, message: string, context?: LogConte
 }
 
 async function emit(level: LogLevel, scope: string, message: string, context?: LogContext, err?: unknown) {
+  if (LEVEL_PRIORITY[level] < LEVEL_PRIORITY[minLevel]) return;
+
   const scopedMessage = `[${scope}] ${message}`;
   const keyValues = normalizeContext(context, err);
 

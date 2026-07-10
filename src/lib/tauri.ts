@@ -257,6 +257,13 @@ export const agentApi = {
   /** Load session events from Codex's JSONL session file. */
   loadCodexSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_codex_session_events', { appSessionId }),
+  /** Load latest token usage snapshot directly from the agent history file. */
+  loadLatestTokenUsage: (
+    appSessionId: string,
+    agentKind: AgentKind,
+    freshness: 'live_synced' | 'restored',
+  ): Promise<Record<string, unknown> | null> =>
+    invokeLogged('load_agent_latest_token_usage', { appSessionId, agentKind, freshness }),
   /** Rewind the latest visible turn in the provider session history. */
   rewindSession: (appSessionId: string, agentKind: AgentKind, target?: AgentUserMessageLocator): Promise<void> =>
     invokeLogged('rewind_agent_session', { appSessionId, agentKind, target }),

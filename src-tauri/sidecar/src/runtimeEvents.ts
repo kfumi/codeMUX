@@ -105,7 +105,7 @@ export function buildCodexResultEvent({
     output_tokens: usage.output_tokens,
     reasoning_output_tokens: usage.reasoning_output_tokens,
   };
-  const totalTokens = lastUsage.input_tokens + lastUsage.output_tokens + (lastUsage.reasoning_output_tokens ?? 0);
+  const totalTokens = lastUsage.total_tokens ?? lastUsage.input_tokens + lastUsage.output_tokens;
   return {
     type: 'result',
     subtype: 'success',
@@ -143,7 +143,6 @@ export function normalizeClaudeResultEvent(
     return {
       ...event,
       usage,
-      ...(readModelContextWindow(event.modelUsage) ? { model_context_window: readModelContextWindow(event.modelUsage) } : {}),
     };
   }
 
@@ -151,8 +150,7 @@ export function normalizeClaudeResultEvent(
   if (modelUsage) {
     return {
       ...event,
-      usage: modelUsage.usage,
-      ...(modelUsage.modelContextWindow ? { model_context_window: modelUsage.modelContextWindow } : {}),
+      usage: modelUsage,
     };
   }
 
@@ -172,10 +170,12 @@ function readClaudeUsage(value: unknown): ClaudeTokenUsage | null {
   }
 
   const usage = {
-    input_tokens: readNumber(value.input_tokens),
-    output_tokens: readNumber(value.output_tokens),
-    cache_read_input_tokens: readNumber(value.cache_read_input_tokens),
-    cache_creation_input_tokens: readNumber(value.cache_creation_input_tokens),
+    input_tokens: readFlexibleNumber(value.input_tokens ?? value.inputTokens),
+    output_tokens: readFlexibleNumber(value.output_tokens ?? value.outputTokens),
+    cache_read_input_tokens: readFlexibleNumber(
+      value.cache_read_input_tokens ?? value.cacheReadInputTokens ?? value.cached_input_tokens ?? value.cachedInputTokens,
+    ),
+    cache_creation_input_tokens: readFlexibleNumber(value.cache_creation_input_tokens ?? value.cacheCreationInputTokens),
   };
 
   return usage.input_tokens > 0 || usage.output_tokens > 0 || usage.cache_read_input_tokens > 0 || usage.cache_creation_input_tokens > 0
@@ -183,13 +183,12 @@ function readClaudeUsage(value: unknown): ClaudeTokenUsage | null {
     : null;
 }
 
-function readClaudeUsageFromModelUsage(value: unknown): { usage: ClaudeTokenUsage; modelContextWindow?: number } | null {
+function readClaudeUsageFromModelUsage(value: unknown): ClaudeTokenUsage | null {
   if (!isRecord(value)) {
     return null;
   }
 
   let result: ClaudeTokenUsage | null = null;
-  let modelContextWindow: number | undefined;
 
   for (const entry of Object.values(value)) {
     if (!isRecord(entry)) {
@@ -197,10 +196,10 @@ function readClaudeUsageFromModelUsage(value: unknown): { usage: ClaudeTokenUsag
     }
 
     const usage = {
-      input_tokens: readNumber(entry.inputTokens),
-      output_tokens: readNumber(entry.outputTokens),
-      cache_read_input_tokens: readNumber(entry.cacheReadInputTokens),
-      cache_creation_input_tokens: readNumber(entry.cacheCreationInputTokens),
+      input_tokens: readFlexibleNumber(entry.inputTokens ?? entry.input_tokens),
+      output_tokens: readFlexibleNumber(entry.outputTokens ?? entry.output_tokens),
+      cache_read_input_tokens: readFlexibleNumber(entry.cacheReadInputTokens ?? entry.cache_read_input_tokens),
+      cache_creation_input_tokens: readFlexibleNumber(entry.cacheCreationInputTokens ?? entry.cache_creation_input_tokens),
     };
 
     if (usage.input_tokens > 0 || usage.output_tokens > 0 || usage.cache_read_input_tokens > 0 || usage.cache_creation_input_tokens > 0) {
@@ -213,36 +212,20 @@ function readClaudeUsageFromModelUsage(value: unknown): { usage: ClaudeTokenUsag
           }
         : usage;
     }
-
-    const contextWindow = readNumber(entry.contextWindow);
-    if (!modelContextWindow && contextWindow > 0) {
-      modelContextWindow = contextWindow;
-    }
   }
 
-  return result ? { usage: result, modelContextWindow } : null;
+  return result;
 }
 
-function readModelContextWindow(value: unknown): number | undefined {
-  if (!isRecord(value)) {
-    return undefined;
+function readFlexibleNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value >= 0 ? value : 0;
   }
-
-  for (const entry of Object.values(value)) {
-    if (!isRecord(entry)) {
-      continue;
-    }
-    const contextWindow = readNumber(entry.contextWindow);
-    if (contextWindow > 0) {
-      return contextWindow;
-    }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
   }
-
-  return undefined;
-}
-
-function readNumber(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  return 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

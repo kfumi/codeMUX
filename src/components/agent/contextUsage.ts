@@ -1,6 +1,3 @@
-import type { AgentMessage } from '../../stores/agentStore';
-import type { AgentKind } from '../../types/session';
-
 const DEFAULT_CONTEXT_TOKENS = 258_400;
 const LARGE_CONTEXT_TOKENS = 1_000_000;
 const LARGE_CONTEXT_MODEL_SUFFIX = '[1m]';
@@ -13,221 +10,149 @@ export type ContextUsage = {
   outputTokens: number;
 };
 
-type UsageSnapshot = {
-  input: number;
-  cached: number;
-  output: number;
+export type TokenUsageBreakdown = {
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
 };
 
-export function computeContextUsageFromEvents(
-  events: AgentMessage[],
-  {
-    model,
-    sessionProviderUsesLargeContext,
-    activeProviderUsesLargeContext,
-    agentKind = 'claude_code',
-  }: {
-    model?: string | null;
-    sessionProviderUsesLargeContext: boolean;
-    activeProviderUsesLargeContext: boolean;
-    agentKind?: AgentKind;
-  },
-): ContextUsage {
-  let usedTokens = 0;
-  let inputTokens = 0;
-  let cachedTokens = 0;
-  let outputTokens = 0;
-  let modelContextWindow: number | undefined;
+export type ThreadTokenUsage = {
+  total: TokenUsageBreakdown;
+  last: TokenUsageBreakdown;
+  modelContextWindow: number | null;
+  contextUsageSource?: string | null;
+  contextUsageFreshness?: 'live_synced' | 'restored' | 'syncing' | string | null;
+};
 
-  if (agentKind === 'claude_code') {
-    const lastResult = findLastResult(events);
-    if (lastResult) {
-      const data: any = lastResult.data;
-      const usage = readResultUsage(data);
-      if (usage) {
-        inputTokens = usage.input;
-        cachedTokens = usage.cached;
-        outputTokens = usage.output;
-        usedTokens = inputTokens;
-      }
-      modelContextWindow = readPositiveNumber(data?.model_context_window);
-    } else {
-      const usage = findLastClaudeAssistantUsage(events);
-      if (usage) {
-        inputTokens = usage.input;
-        cachedTokens = usage.cached;
-        outputTokens = usage.output;
-        usedTokens = inputTokens;
-      }
-    }
-  } else {
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      const event = events[index];
+type ContextUsageOptions = {
+  tokenUsage?: ThreadTokenUsage | null;
+  model?: string | null;
+  sessionProviderUsesLargeContext: boolean;
+  activeProviderUsesLargeContext: boolean;
+};
 
-      if (usedTokens === 0 && event.kind === 'assistant') {
-        const data: any = event.data;
-        const msg = data?.message;
-
-        if (msg && !msg.stop_reason && hasThinkingContentOnly(msg.content)) {
-          continue;
-        }
-        const usage = data?.last_token_usage || msg?.usage || data?.usage;
-        const tokenUsage = readTokenUsage(usage);
-
-        if (tokenUsage && tokenUsage.total > 0) {
-          inputTokens = tokenUsage.input;
-          cachedTokens = tokenUsage.cached;
-          outputTokens = tokenUsage.output;
-          usedTokens = tokenUsage.total;
-        }
-
-        if (!modelContextWindow && data?.model_context_window) {
-          modelContextWindow = data.model_context_window;
-        }
-      }
-
-      if (usedTokens === 0 && event.kind === 'result') {
-        const data: any = event.data;
-        const usage = data?.last_token_usage || data?.usage;
-        const tokenUsage = readTokenUsage(usage);
-
-        if (tokenUsage && tokenUsage.total > 0) {
-          inputTokens = tokenUsage.input;
-          cachedTokens = tokenUsage.cached;
-          outputTokens = tokenUsage.output;
-          usedTokens = tokenUsage.total;
-        }
-
-        if (!modelContextWindow && data?.model_context_window) {
-          modelContextWindow = data.model_context_window;
-        }
-      }
-
-      if (usedTokens > 0 && modelContextWindow) {
-        break;
-      }
-    }
-  }
-
-  const totalTokens = getSessionContextLimit({
-    model,
-    sessionProviderUsesLargeContext,
-    activeProviderUsesLargeContext,
-    modelContextWindow,
-  });
-
-  return { usedTokens, totalTokens, inputTokens, cachedTokens, outputTokens };
-}
-
-function findLastResult(events: AgentMessage[]): Extract<AgentMessage, { kind: 'result' }> | null {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    if (event.kind === 'result') {
-      return event;
-    }
-  }
-
-  return null;
-}
-
-function readResultUsage(data: any): UsageSnapshot | null {
-  const usage = data?.last_token_usage ?? data?.usage;
-  const tokenUsage = readTokenUsage(usage);
-  return tokenUsage && hasAnyToken(tokenUsage) ? tokenUsage : null;
-}
-
-function findLastClaudeAssistantUsage(events: AgentMessage[]): UsageSnapshot | null {
-  let lastUsage: UsageSnapshot | null = null;
-
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    if (event.kind === 'assistant') {
-      const data: any = event.data;
-      const msg = data?.message;
-      const usage = msg?.usage || data?.usage;
-
-      if (usage) {
-        const tokenUsage = readTokenUsage(usage);
-        if (!tokenUsage || !hasAnyToken(tokenUsage)) {
-          continue;
-        }
-
-        if (msg?.stop_reason) {
-          return tokenUsage;
-        }
-
-        if (!lastUsage) {
-          lastUsage = tokenUsage;
-        }
-      } else {
-        const messageWithUsage = findLastMessageWithUsage(data);
-        if (messageWithUsage && !lastUsage) {
-          const tokenUsage = readTokenUsage(messageWithUsage);
-          if (tokenUsage && hasAnyToken(tokenUsage)) {
-            lastUsage = tokenUsage;
-          }
-        }
-      }
-    }
-  }
-
-  return lastUsage;
-}
-
-function findLastMessageWithUsage(data: any): { input_tokens: number; cache_read_input_tokens: number; output_tokens: number } | null {
-  if (!data) return null;
-
-  if (data.type === 'message' && data.usage) {
-    return data.usage;
-  }
-
-  if (Array.isArray(data.messages)) {
-    for (let i = data.messages.length - 1; i >= 0; i--) {
-      const msg = data.messages[i];
-      if (msg.type === 'message' && msg.usage) {
-        return msg.usage;
-      }
-    }
-  }
-
-  if (data.message && data.message.type === 'message' && data.message.usage) {
-    return data.message.usage;
-  }
-
-  return null;
-}
-
-function readTokenUsage(usage: any): UsageSnapshot & { total: number } | null {
-  if (!usage) {
+export function normalizeThreadTokenUsage(raw: unknown): ThreadTokenUsage | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return null;
   }
 
-  const input = readNumber(usage.input_tokens);
-  const cached = readNumber(usage.cached_input_tokens ?? usage.cache_read_input_tokens);
-  const output = readNumber(usage.output_tokens);
-  const total = input + output;
+  const record = raw as Record<string, unknown>;
+  const last = readBreakdown(record.last) ?? readUsageSnapshot(record);
+  const total = readBreakdown(record.total) ?? last;
+  const modelContextWindow = readOptionalPositiveNumber(
+    record.modelContextWindow ?? record.model_context_window,
+  );
 
-  return { input, cached, output, total };
+  if (!last || !total || !hasAnyBreakdownToken(last)) {
+    return null;
+  }
+
+  return {
+    total,
+    last,
+    modelContextWindow,
+    contextUsageSource: readOptionalString(record.contextUsageSource ?? record.context_usage_source),
+    contextUsageFreshness: readOptionalString(record.contextUsageFreshness ?? record.context_usage_freshness),
+  };
 }
 
-function hasAnyToken(usage: UsageSnapshot): boolean {
-  return usage.input > 0 || usage.cached > 0 || usage.output > 0;
+export function buildContextUsageViewModel({
+  tokenUsage,
+  model,
+  sessionProviderUsesLargeContext,
+  activeProviderUsesLargeContext,
+}: ContextUsageOptions): ContextUsage | null {
+  if (!tokenUsage) {
+    return null;
+  }
+
+  const inputTokens = Math.max(tokenUsage.last.inputTokens, 0);
+  const cachedTokens = Math.max(tokenUsage.last.cachedInputTokens, 0);
+  const outputTokens = Math.max(tokenUsage.last.outputTokens, 0);
+  const usedTokens = Math.max(tokenUsage.last.totalTokens || tokenUsage.total.totalTokens, 0);
+  if (usedTokens <= 0 && inputTokens <= 0 && cachedTokens <= 0 && outputTokens <= 0) {
+    return null;
+  }
+
+  return {
+    usedTokens,
+    totalTokens: getSessionContextLimit({
+      model,
+      sessionProviderUsesLargeContext,
+      activeProviderUsesLargeContext,
+      modelContextWindow: tokenUsage.modelContextWindow ?? undefined,
+    }),
+    inputTokens,
+    cachedTokens,
+    outputTokens,
+  };
+}
+
+function readBreakdown(value: unknown): TokenUsageBreakdown | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  return readUsageSnapshot(value as Record<string, unknown>);
+}
+
+function readUsageSnapshot(usage: Record<string, unknown>): TokenUsageBreakdown | null {
+  const inputTokens = readNumber(usage.inputTokens ?? usage.input_tokens);
+  const cacheReadValue = usage.cacheReadInputTokens ?? usage.cache_read_input_tokens;
+  const cachedInputTokens = readNumber(
+    usage.cachedInputTokens
+      ?? usage.cached_input_tokens
+      ?? cacheReadValue,
+  );
+  const outputTokens = readNumber(usage.outputTokens ?? usage.output_tokens);
+  const reasoningOutputTokens = 0;
+  const explicitTotal = readNumber(usage.totalTokens ?? usage.total_tokens);
+  const totalTokens = explicitTotal > 0
+    ? explicitTotal
+    : cacheReadValue != null
+      ? inputTokens + cachedInputTokens
+      : inputTokens + outputTokens;
+
+  if (inputTokens <= 0 && cachedInputTokens <= 0 && outputTokens <= 0 && totalTokens <= 0) {
+    return null;
+  }
+
+  return {
+    totalTokens,
+    inputTokens,
+    cachedInputTokens,
+    outputTokens,
+    reasoningOutputTokens,
+  };
+}
+
+function hasAnyBreakdownToken(usage: TokenUsageBreakdown): boolean {
+  return usage.totalTokens > 0
+    || usage.inputTokens > 0
+    || usage.cachedInputTokens > 0
+    || usage.outputTokens > 0;
 }
 
 function readNumber(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(value, 0);
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.max(parsed, 0) : 0;
+  }
+  return 0;
 }
 
-function readPositiveNumber(value: unknown): number | undefined {
+function readOptionalPositiveNumber(value: unknown): number | null {
   const number = readNumber(value);
-  return number > 0 ? number : undefined;
+  return number > 0 ? number : null;
 }
 
-function hasThinkingContentOnly(content: unknown): boolean {
-  if (!Array.isArray(content) || content.length === 0) return false;
-  return content.every(
-    (block: any) => block?.type === 'thinking',
-  );
+function readOptionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
 
 function getSessionContextLimit({

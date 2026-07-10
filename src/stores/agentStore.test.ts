@@ -20,6 +20,7 @@ const saveEventsMock = vi.fn<(sessionId: string, eventsJson: string) => Promise<
 const getEventsMock = vi.fn<(sessionId: string) => Promise<string>>();
 const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
+const loadLatestTokenUsageMock = vi.fn<(appSessionId: string, agentKind: string, freshness: 'live_synced' | 'restored') => Promise<Record<string, unknown> | null>>();
 const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator) => Promise<void>>();
 
 vi.mock('../lib/tauri', () => ({
@@ -36,6 +37,7 @@ vi.mock('../lib/tauri', () => ({
     getEvents: getEventsMock,
     loadClaudeSessionEvents: loadClaudeSessionEventsMock,
     loadCodexSessionEvents: loadCodexSessionEventsMock,
+    loadLatestTokenUsage: loadLatestTokenUsageMock,
     rewindSession: rewindSessionMock,
     startProxy: vi.fn(),
     stopProxy: vi.fn(),
@@ -121,6 +123,8 @@ describe('agent store Codex history loading', () => {
       error: {},
       mcpRuntimeStatus: {},
       todos: {},
+      tokenUsageBySession: {},
+      tokenUsageRefreshRequests: {},
       streamingThinking: {},
       streamingText: {},
       forceStopped: {},
@@ -176,6 +180,7 @@ describe('agent store Codex history loading', () => {
     }));
     loadClaudeSessionEventsMock.mockResolvedValue([]);
     loadCodexSessionEventsMock.mockResolvedValue([]);
+    loadLatestTokenUsageMock.mockResolvedValue(null);
     rewindSessionMock.mockResolvedValue();
     localStorage.clear();
   });
@@ -231,6 +236,171 @@ describe('agent store Codex history loading', () => {
       .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
 
     expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+  });
+
+  it('refreshes Claude Code token usage from history after a successful result and ignores result usage', async () => {
+    loadLatestTokenUsageMock.mockResolvedValueOnce({
+      total: {
+        totalTokens: 25_440,
+        inputTokens: 352,
+        cachedInputTokens: 25_088,
+        outputTokens: 152,
+        reasoningOutputTokens: 0,
+      },
+      last: {
+        totalTokens: 25_440,
+        inputTokens: 352,
+        cachedInputTokens: 25_088,
+        outputTokens: 152,
+        reasoningOutputTokens: 0,
+      },
+      modelContextWindow: 258_400,
+      contextUsageSource: 'history_file',
+      contextUsageFreshness: 'live_synced',
+    });
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        uuid: 'result-live-usage',
+        session_id: sessionId,
+        duration_ms: 5,
+        duration_api_ms: 4,
+        num_turns: 1,
+        result: '',
+        usage: {
+          input_tokens: 999_999,
+          output_tokens: 25,
+          cache_read_input_tokens: 50,
+          cache_creation_input_tokens: 0,
+        },
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
+
+    await vi.waitFor(() => {
+      expect(loadLatestTokenUsageMock).toHaveBeenCalledWith(session.id, 'claude_code', 'live_synced');
+    });
+    expect(useAgentStore.getState().tokenUsageBySession[session.id]).toMatchObject({
+      last: {
+        totalTokens: 25_440,
+        inputTokens: 352,
+        cachedInputTokens: 25_088,
+        outputTokens: 152,
+      },
+      modelContextWindow: 258_400,
+      contextUsageSource: 'history_file',
+      contextUsageFreshness: 'live_synced',
+    });
+  });
+
+  it('does not refresh token usage for failed results', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'result',
+        subtype: 'error',
+        is_error: true,
+        uuid: 'failed-result',
+        session_id: sessionId,
+        duration_ms: 5,
+        duration_api_ms: 4,
+        num_turns: 1,
+        result: 'failed',
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(loadLatestTokenUsageMock).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().tokenUsageBySession[session.id]).toBeUndefined();
+  });
+
+  it('ignores legacy sidecar token_usage_update events without appending a message', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'token_usage_update',
+        session_id: sessionId,
+        token_usage: {
+          total: { totalTokens: 55_074, inputTokens: 21_700, cachedInputTokens: 32_800, outputTokens: 574 },
+          last: { totalTokens: 55_074, inputTokens: 21_700, cachedInputTokens: 32_800, outputTokens: 574 },
+          modelContextWindow: 258_400,
+        },
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useAgentStore.getState().events[session.id].map((event) => event.kind)).toEqual([
+      'user',
+    ]);
+    expect(loadLatestTokenUsageMock).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().tokenUsageBySession[session.id]).toBeUndefined();
+  });
+
+  it('keeps existing token usage while syncing and ignores stale refresh responses', async () => {
+    let resolveFirst: (value: Record<string, unknown> | null) => void = () => {};
+    let resolveSecond: (value: Record<string, unknown> | null) => void = () => {};
+    loadLatestTokenUsageMock
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockReturnValueOnce(new Promise((resolve) => { resolveSecond = resolve; }));
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+    useAgentStore.getState().setSessionTokenUsage(session.id, {
+      total: { totalTokens: 100, inputTokens: 80, cachedInputTokens: 50, outputTokens: 20, reasoningOutputTokens: 0 },
+      last: { totalTokens: 100, inputTokens: 80, cachedInputTokens: 50, outputTokens: 20, reasoningOutputTokens: 0 },
+      modelContextWindow: 258_400,
+      contextUsageSource: 'history_file',
+      contextUsageFreshness: 'restored',
+    });
+
+    const first = useAgentStore.getState().refreshLatestTokenUsage(session.id, 'live_synced');
+    const second = useAgentStore.getState().refreshLatestTokenUsage(session.id, 'live_synced');
+
+    expect(useAgentStore.getState().tokenUsageBySession[session.id]).toMatchObject({
+      last: { totalTokens: 100 },
+      contextUsageFreshness: 'syncing',
+    });
+
+    resolveSecond({
+      total: { totalTokens: 200, inputTokens: 180, cachedInputTokens: 70, outputTokens: 20, reasoningOutputTokens: 0 },
+      last: { totalTokens: 200, inputTokens: 180, cachedInputTokens: 70, outputTokens: 20, reasoningOutputTokens: 0 },
+      modelContextWindow: 258_400,
+      contextUsageSource: 'history_file',
+      contextUsageFreshness: 'live_synced',
+    });
+    await second;
+
+    resolveFirst({
+      total: { totalTokens: 150, inputTokens: 140, cachedInputTokens: 60, outputTokens: 10, reasoningOutputTokens: 0 },
+      last: { totalTokens: 150, inputTokens: 140, cachedInputTokens: 60, outputTokens: 10, reasoningOutputTokens: 0 },
+      modelContextWindow: 258_400,
+      contextUsageSource: 'history_file',
+      contextUsageFreshness: 'live_synced',
+    });
+    await first;
+
+    expect(useAgentStore.getState().tokenUsageBySession[session.id]).toMatchObject({
+      last: { totalTokens: 200 },
+      contextUsageFreshness: 'live_synced',
+    });
   });
 
   it('removes reconnecting stream status after a successful Codex result', async () => {
@@ -1134,6 +1304,77 @@ describe('agent store Codex history loading', () => {
     expect(loaderMock).toHaveBeenCalledWith(session.id);
     expect(getEventsMock).not.toHaveBeenCalled();
     expect(useAgentStore.getState().events[session.id]).toBeUndefined();
+  });
+
+  it('refreshes Claude Code token usage from history after loading historical messages', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+    loadLatestTokenUsageMock.mockResolvedValueOnce({
+      total: {
+        totalTokens: 260,
+        inputTokens: 200,
+        cachedInputTokens: 60,
+        outputTokens: 40,
+        reasoningOutputTokens: 0,
+      },
+      last: {
+        totalTokens: 260,
+        inputTokens: 200,
+        cachedInputTokens: 60,
+        outputTokens: 40,
+        reasoningOutputTokens: 0,
+      },
+      modelContextWindow: 258_400,
+      contextUsageSource: 'history_file',
+      contextUsageFreshness: 'restored',
+    });
+
+    loadClaudeSessionEventsMock.mockResolvedValueOnce([
+      {
+        type: 'user',
+        timestamp: '2026-07-10T12:00:00.000Z',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'hello' }],
+        },
+      },
+      {
+        type: 'assistant',
+        timestamp: '2026-07-10T12:00:03.000Z',
+        uuid: 'assistant-historical',
+        session_id: session.id,
+        message: {
+          role: 'assistant',
+          stop_reason: 'end_turn',
+          content: [{ type: 'text', text: 'reply' }],
+          usage: {
+            input_tokens: 200,
+            output_tokens: 40,
+            cache_read_input_tokens: 60,
+            cache_creation_input_tokens: 0,
+          },
+        },
+      },
+    ]);
+
+    await useAgentStore.getState().loadSessionMessages(session.id);
+
+    expect(useAgentStore.getState().events[session.id]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'result' }),
+      ]),
+    );
+    expect(loadLatestTokenUsageMock).toHaveBeenCalledWith(session.id, 'claude_code', 'restored');
+    expect(useAgentStore.getState().tokenUsageBySession[session.id]).toMatchObject({
+      total: {
+        totalTokens: 260,
+        inputTokens: 200,
+        cachedInputTokens: 60,
+        outputTokens: 40,
+      },
+      contextUsageSource: 'history_file',
+      contextUsageFreshness: 'restored',
+    });
   });
 
   it('loads historical Claude Agent tool calls without subagent linkage and filters sidechain history', async () => {
