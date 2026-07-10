@@ -15,7 +15,7 @@ import { getProviderMode } from './sessionRuntimeHelpers.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion.js';
 import { CodexSessionRuntime, interruptActiveTurn } from './codexRuntime.js';
-import { getRuntimeFlavor } from './runtimeEvents.js';
+import { getRuntimeFlavor, normalizeClaudeResultEvent, type ClaudeTokenUsage } from './runtimeEvents.js';
 import { proxyManager } from './proxyManager.js';
 import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
 import { emit } from './streamEventBatcher.js';
@@ -765,6 +765,7 @@ export class SessionRuntime {
     let compacting = false;
     let sawResult = false;
     let compactTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastAssistantUsage: ClaudeTokenUsage | null = null;
 
     const clearCompactTimer = () => {
       if (compactTimer) {
@@ -831,6 +832,10 @@ export class SessionRuntime {
           const assistant = result.value as any;
           const usage = assistant?.message?.usage || assistant?.usage;
           process.stderr.write(`[sidecar]   -> assistant usage: ${JSON.stringify(usage || 'NONE')}\n`);
+          const normalizedUsage = normalizeClaudeAssistantUsage(usage);
+          if (normalizedUsage) {
+            lastAssistantUsage = normalizedUsage;
+          }
         }
 
         if (typeof appSessionId === 'string' && shouldCaptureClaudeSessionMapping(msg)) {
@@ -850,7 +855,16 @@ export class SessionRuntime {
           }
         }
 
-        emit(result.value);
+        const eventToEmit = msg.type === 'result'
+          ? normalizeClaudeResultEvent(result.value as Record<string, unknown>, lastAssistantUsage)
+          : result.value;
+
+        if (msg.type === 'result') {
+          const resultEvent = eventToEmit as Record<string, unknown>;
+          process.stderr.write(`[sidecar]   -> result usage: ${JSON.stringify(resultEvent.usage || 'NONE')}, modelUsage=${JSON.stringify(resultEvent.modelUsage || 'NONE')}\n`);
+        }
+
+        emit(eventToEmit);
 
         if (msg.type === 'system' && msg.subtype === 'init' && Array.isArray((msg as any).mcp_servers)) {
           const mcpServers = (msg as any).mcp_servers as Array<{ name: string; status: string }>;
@@ -961,6 +975,28 @@ export class SessionRuntime {
 
 function normalizeReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | undefined {
   return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
+}
+
+function normalizeClaudeAssistantUsage(value: unknown): ClaudeTokenUsage | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const usage = value as Record<string, unknown>;
+  const normalized = {
+    input_tokens: readFiniteNumber(usage.input_tokens),
+    output_tokens: readFiniteNumber(usage.output_tokens),
+    cache_read_input_tokens: readFiniteNumber(usage.cache_read_input_tokens),
+    cache_creation_input_tokens: readFiniteNumber(usage.cache_creation_input_tokens),
+  };
+
+  return normalized.input_tokens > 0 || normalized.output_tokens > 0 || normalized.cache_read_input_tokens > 0 || normalized.cache_creation_input_tokens > 0
+    ? normalized
+    : null;
+}
+
+function readFiniteNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 function normalizePlanMode(value: unknown): AgentPlanMode {

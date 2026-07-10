@@ -9,18 +9,16 @@ type DirectiveSegment =
   | { kind: 'text'; text: string }
   | { kind: 'directive'; directiveKind: CodeMuxDirectiveKind; value: string; label: string };
 
-// Match commands, file mentions, and markdown-link references.
-// Commands and file mentions must be at the start of text or after whitespace.
+// Match commands and markdown-link references.
+// Commands must be at the start of text or after whitespace.
 // Avoid treating log fragments like "emit@http://..." as file references.
 // [label](path) is the format for files (label without prefix) and commands (label starts with $).
 // <command-message>...</command-name>...</command-args> is Claude Code CLI's command XML format.
-// @path is legacy.
 const COMMAND_XML_RE = /<command-message>[\s\S]*?<\/command-message>\s*<command-name>[\s\S]*?<\/command-name>(?:\s*<command-args>[\s\S]*?<\/command-args>)?/;
 const DIRECTIVE_RE = new RegExp(
   [
     `(${COMMAND_XML_RE.source})`,
     `(^|\\s)(\\/[A-Za-z][\\w:-]*)(?=\\s|$)`,
-    `(^|\\s)(@(?![A-Za-z][A-Za-z0-9+.-]*://)[^\\s]+)`,
     `(^|\\s)(\\[[^\\]]+\\]\\([^)]+\\))`,
   ].join('|'),
   'g',
@@ -96,11 +94,10 @@ export function parseDirectiveText(text: string): DirectiveSegment[] {
   for (const match of text.matchAll(DIRECTIVE_RE)) {
     // Group 1: XML command (no leading)
     // Group 2/3: bare /command leading+value
-    // Group 4/5: @file leading+value
-    // Group 6/7: [label](path) leading+value
+    // Group 4/5: [label](path) leading+value
     const isXml = Boolean(match[1]);
-    const leading = isXml ? '' : (match[2] ?? match[4] ?? match[6] ?? '');
-    const value = match[1] || match[3] || match[5] || match[7] || '';
+    const leading = isXml ? '' : (match[2] ?? match[4] ?? '');
+    const value = match[1] || match[3] || match[5] || '';
     const valueStart = match.index + leading.length;
 
     if (valueStart > lastIndex) {
@@ -161,17 +158,6 @@ function toDirectiveSegment(value: string): DirectiveSegment | null {
         label: label || getPathLabel(path),
       };
     }
-  }
-
-  if (value.startsWith('@')) {
-    const path = value.slice(1);
-    if (!path) return null;
-    return {
-      kind: 'directive',
-      directiveKind: path.endsWith('/') ? 'directory' : 'file',
-      value,
-      label: getPathLabel(path),
-    };
   }
 
   return null;

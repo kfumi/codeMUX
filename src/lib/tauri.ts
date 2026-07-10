@@ -415,4 +415,6 @@ export const appApi = {
   getLogFiles: (): Promise<LogFileInfo[]> => invokeLogged('get_log_files'),
   readLogFile: (fileName: string): Promise<string> => invokeLogged('read_log_file', { fileName }),
   showMainWindow: (): Promise<void> => invokeLogged('show_main_window_command'),
+  sendAgentNotification: (payload: { title: string; body: string; sessionId: string }): Promise<void> =>
+    invokeLogged('send_agent_notification_command', payload),
 };

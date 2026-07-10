@@ -1,10 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  isPermissionGranted,
-  onAction,
-  requestPermission,
-  sendNotification,
-} from '@tauri-apps/plugin-notification';
+import { listen } from '@tauri-apps/api/event';
 
 import { buildAgentNotificationCandidate } from '../lib/agentNotifications';
 import { createLogger } from '../lib/logger';
@@ -47,21 +42,13 @@ function useAppInactive(): boolean {
   return inactive;
 }
 
-async function sendTauriNotification(candidate: { title: string; body: string; sessionId: string }): Promise<void> {
+async function sendNativeAgentNotification(candidate: { title: string; body: string; sessionId: string }): Promise<void> {
   try {
-    let permissionGranted = await isPermissionGranted();
-    if (!permissionGranted) {
-      permissionGranted = await requestPermission() === 'granted';
-    }
-
-    if (permissionGranted) {
-      sendNotification({
-        title: candidate.title,
-        body: candidate.body,
-        autoCancel: true,
-        extra: { sessionId: candidate.sessionId },
-      });
-    }
+    await appApi.sendAgentNotification({
+      title: candidate.title,
+      body: candidate.body,
+      sessionId: candidate.sessionId,
+    });
   } catch {
     logger.error('Failed to send system notification');
   }
@@ -87,45 +74,13 @@ async function showAppSession(sessionId: string) {
   }
 }
 
-function extractNotificationSessionId(notification: unknown): string | null {
-  if (!notification || typeof notification !== 'object') {
+function extractNotificationSessionId(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') {
     return null;
   }
 
-  const extra = (notification as { extra?: unknown }).extra;
-  if (!extra || typeof extra !== 'object') {
-    return null;
-  }
-
-  const sessionId = (extra as { sessionId?: unknown }).sessionId;
+  const sessionId = (payload as { sessionId?: unknown }).sessionId;
   return typeof sessionId === 'string' && sessionId.trim() ? sessionId : null;
-}
-
-async function sendClickableNotification(candidate: { title: string; body: string; sessionId: string }) {
-  const notificationCtor = typeof window !== 'undefined' ? window.Notification : undefined;
-  if (notificationCtor) {
-    try {
-      let permission = notificationCtor.permission;
-      if (permission !== 'granted') {
-        permission = await notificationCtor.requestPermission();
-      }
-
-      if (permission === 'granted') {
-        const notification = new notificationCtor(candidate.title, {
-          body: candidate.body,
-          tag: `codemux-${candidate.sessionId}`,
-        });
-        notification.onclick = () => {
-          void showAppSession(candidate.sessionId);
-        };
-        return;
-      }
-    } catch {
-      logger.debug('Web Notification setup failed');
-    }
-  }
-
-  await sendTauriNotification(candidate);
 }
 
 function findPreviousUserEventIndex(events: AgentMessage[], eventIndex: number): number {
@@ -174,23 +129,23 @@ export function useAgentNotifications() {
 
   useEffect(() => {
     let disposed = false;
-    let unregister: (() => Promise<void>) | undefined;
+    let unregister: (() => void) | undefined;
 
-    void onAction((notification) => {
-      const sessionId = extractNotificationSessionId(notification);
+    void listen('agent-notification-clicked', (event) => {
+      const sessionId = extractNotificationSessionId(event.payload);
       if (sessionId) {
         void showAppSession(sessionId);
       }
     })
-      .then((listener) => {
+      .then((unlisten) => {
         if (disposed) {
-          void listener.unregister();
+          unlisten();
           return;
         }
-        unregister = () => listener.unregister();
+        unregister = unlisten;
       })
       .catch(() => {
-        logger.debug('Tauri notification action listener setup failed');
+        logger.debug('Agent notification click listener setup failed');
       });
 
     return () => {
@@ -237,7 +192,7 @@ export function useAgentNotifications() {
         const isLiveEvent = eventTimestamp >= hookStartedAtRef.current;
 
         if (shouldSendNotification) {
-          void sendClickableNotification(candidate);
+          void sendNativeAgentNotification(candidate);
         }
 
         if (settings.sound_enabled && isTerminal && isLiveEvent) {

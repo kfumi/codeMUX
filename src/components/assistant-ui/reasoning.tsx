@@ -172,7 +172,6 @@ function ReasoningContent({
       {...props}
     >
       {children}
-      <ReasoningFade />
     </CollapsibleContent>
   );
 }
@@ -183,6 +182,17 @@ function ReasoningText({ className, ...props }: React.ComponentProps<'div'>) {
       data-slot="reasoning-text"
       className={cn(
         'aui-reasoning-text relative z-0 max-h-40 overflow-y-auto ps-6 pt-2 pe-2 pb-2 leading-relaxed scrollbar-gutter-stable',
+        '[&_.aui-md-h1]:text-sm [&_.aui-md-h1]:leading-5',
+        '[&_.aui-md-h2]:text-sm [&_.aui-md-h2]:leading-5',
+        '[&_.aui-md-h3]:text-xs [&_.aui-md-h3]:leading-5',
+        '[&_.aui-md-h4]:text-xs [&_.aui-md-h4]:leading-5',
+        '[&_.aui-md-h5]:text-xs [&_.aui-md-h5]:leading-5',
+        '[&_.aui-md-h6]:text-xs [&_.aui-md-h6]:leading-5',
+        '[&_.aui-md-table]:text-xs',
+        '[&_[data-streamdown=\'code-block\']]:text-[11px]',
+        '[&_[data-streamdown=\'code-block-header\']]:text-[11px]',
+        '[&_[data-streamdown=\'code-block-body\']]:text-[11px]',
+        '[&_pre]:text-[11px] [&_code]:text-[11px]',
         className,
       )}
       {...props}

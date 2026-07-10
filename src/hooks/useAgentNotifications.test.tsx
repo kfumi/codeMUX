@@ -8,12 +8,23 @@ import { useSettingsStore } from '../stores/settingsStore';
 import type { AppConfig } from '../types/provider';
 import { useAgentNotifications } from './useAgentNotifications';
 
-const { sendNotificationMock, requestPermissionMock, isPermissionGrantedMock, onActionMock, showMainWindowMock, audioPlayMock } = vi.hoisted(() => ({
+const {
+  sendNotificationMock,
+  requestPermissionMock,
+  isPermissionGrantedMock,
+  onActionMock,
+  listenMock,
+  showMainWindowMock,
+  sendAgentNotificationMock,
+  audioPlayMock,
+} = vi.hoisted(() => ({
   sendNotificationMock: vi.fn(),
   requestPermissionMock: vi.fn(async () => 'granted'),
   isPermissionGrantedMock: vi.fn(async () => true),
   onActionMock: vi.fn(async () => ({ unregister: vi.fn(async () => {}) })),
+  listenMock: vi.fn(async () => vi.fn()),
   showMainWindowMock: vi.fn(async () => {}),
+  sendAgentNotificationMock: vi.fn(async () => {}),
   audioPlayMock: vi.fn(async () => {}),
 }));
 
@@ -26,6 +37,10 @@ vi.mock('@tauri-apps/plugin-notification', () => ({
   onAction: (callback: unknown) => onActionMock(callback),
 }));
 
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: (event: string, callback: unknown) => listenMock(event, callback),
+}));
+
 vi.mock('../lib/tauri', async () => {
   const actual = await vi.importActual<typeof import('../lib/tauri')>('../lib/tauri');
   return {
@@ -33,6 +48,7 @@ vi.mock('../lib/tauri', async () => {
     appApi: {
       ...actual.appApi,
       showMainWindow: showMainWindowMock,
+      sendAgentNotification: sendAgentNotificationMock,
     },
   };
 });
@@ -114,7 +130,7 @@ describe('useAgentNotifications', () => {
     });
   });
 
-  it('sends a notification for a new waiting-input event while inactive', async () => {
+  it('sends a native agent notification for a new waiting-input event while inactive', async () => {
     render(<Harness />);
 
     useAgentStore.setState({
@@ -134,9 +150,10 @@ describe('useAgentNotifications', () => {
     });
 
     await waitFor(() => {
-      expect(notificationInstances[0]).toMatchObject({
+      expect(sendAgentNotificationMock).toHaveBeenCalledWith({
         title: '需要你的回复',
-        options: { body: '重构设置页：是否继续？' },
+        body: '重构设置页：是否继续？',
+        sessionId: 'session-1',
       });
     });
   });
@@ -173,57 +190,9 @@ describe('useAgentNotifications', () => {
     });
 
     await waitFor(() => {
-      expect(notificationInstances).toHaveLength(1);
+      expect(sendAgentNotificationMock).toHaveBeenCalledTimes(1);
     });
     expect(audioPlayMock).not.toHaveBeenCalled();
-  });
-
-  it('requests Web Notification permission so the notification can be clicked', async () => {
-    const requestPermission = vi.fn(async () => 'granted');
-    vi.stubGlobal('Notification', class {
-      static permission = 'default';
-      static requestPermission = requestPermission;
-      onclick: (() => void) | null = null;
-
-      constructor(public title: string, public options?: NotificationOptions) {
-        notificationInstances.push(this);
-      }
-    });
-    render(<Harness />);
-
-    useAgentStore.setState({
-      events: { 'session-1': [{ kind: 'done' }] },
-      eventTimestamps: { 'session-1': [1] },
-    });
-
-    await waitFor(() => {
-      expect(requestPermission).toHaveBeenCalled();
-      expect(notificationInstances).toHaveLength(1);
-    });
-  });
-
-  it('requests permission when the injected Notification API is not already granted', async () => {
-    const requestPermission = vi.fn(async () => 'granted');
-    vi.stubGlobal('Notification', class {
-      static permission = 'denied';
-      static requestPermission = requestPermission;
-      onclick: (() => void) | null = null;
-
-      constructor(public title: string, public options?: NotificationOptions) {
-        notificationInstances.push(this);
-      }
-    });
-    render(<Harness />);
-
-    useAgentStore.setState({
-      events: { 'session-1': [{ kind: 'done' }] },
-      eventTimestamps: { 'session-1': [1] },
-    });
-
-    await waitFor(() => {
-      expect(requestPermission).toHaveBeenCalled();
-      expect(notificationInstances).toHaveLength(1);
-    });
   });
 
   it('does not send duplicate notifications for the same event', async () => {
@@ -235,10 +204,10 @@ describe('useAgentNotifications', () => {
     });
 
     await waitFor(() => {
-      expect(notificationInstances.length).toBeGreaterThanOrEqual(1);
+      expect(sendAgentNotificationMock).toHaveBeenCalledTimes(1);
     });
 
-    const countAfterFirst = notificationInstances.length;
+    const countAfterFirst = sendAgentNotificationMock.mock.calls.length;
 
     // Trigger the same event key again by adding a new event to the same session
     useAgentStore.setState({
@@ -249,7 +218,7 @@ describe('useAgentNotifications', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     // No new notification for the already-dispatched done event
-    expect(notificationInstances).toHaveLength(countAfterFirst);
+    expect(sendAgentNotificationMock).toHaveBeenCalledTimes(countAfterFirst);
   });
 
   it('does not notify for historical events loaded while the app is focused after losing focus later', async () => {
@@ -278,14 +247,14 @@ describe('useAgentNotifications', () => {
     });
 
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(notificationInstances).toHaveLength(0);
+    expect(sendAgentNotificationMock).not.toHaveBeenCalled();
     expect(audioPlayMock).not.toHaveBeenCalled();
 
     focused = false;
     window.dispatchEvent(new Event('blur'));
 
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(notificationInstances).toHaveLength(0);
+    expect(sendAgentNotificationMock).not.toHaveBeenCalled();
     expect(audioPlayMock).not.toHaveBeenCalled();
   });
 
@@ -321,7 +290,7 @@ describe('useAgentNotifications', () => {
     await waitFor(() => {
       expect(audioPlayMock).toHaveBeenCalledTimes(1);
     });
-    expect(notificationInstances).toHaveLength(0);
+    expect(sendAgentNotificationMock).not.toHaveBeenCalled();
   });
 
   it('allows a later task completion in the same session to notify again', async () => {
@@ -333,7 +302,7 @@ describe('useAgentNotifications', () => {
     });
 
     await waitFor(() => {
-      expect(notificationInstances).toHaveLength(1);
+      expect(sendAgentNotificationMock).toHaveBeenCalledTimes(1);
     });
 
     useAgentStore.setState({
@@ -348,7 +317,7 @@ describe('useAgentNotifications', () => {
     });
 
     await waitFor(() => {
-      expect(notificationInstances).toHaveLength(2);
+      expect(sendAgentNotificationMock).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -366,7 +335,7 @@ describe('useAgentNotifications', () => {
     });
 
     await waitFor(() => {
-      expect(notificationInstances).toHaveLength(1);
+      expect(sendAgentNotificationMock).toHaveBeenCalledTimes(1);
     });
 
     useAgentStore.setState({
@@ -397,7 +366,7 @@ describe('useAgentNotifications', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    expect(notificationInstances).toHaveLength(1);
+    expect(sendAgentNotificationMock).toHaveBeenCalledTimes(1);
   });
 
   it('notifies again when a rewound turn completes at the same event index', async () => {
@@ -414,7 +383,7 @@ describe('useAgentNotifications', () => {
     });
 
     await waitFor(() => {
-      expect(notificationInstances).toHaveLength(1);
+      expect(sendAgentNotificationMock).toHaveBeenCalledTimes(1);
     });
 
     useAgentStore.setState({
@@ -428,12 +397,11 @@ describe('useAgentNotifications', () => {
     });
 
     await waitFor(() => {
-      expect(notificationInstances).toHaveLength(2);
+      expect(sendAgentNotificationMock).toHaveBeenCalledTimes(2);
     });
   });
 
-  it('uses the Tauri notification plugin fallback when Web Notification is unavailable', async () => {
-    vi.stubGlobal('Notification', undefined);
+  it('does not use the JS notification plugin path for desktop agent notifications', async () => {
     render(<Harness />);
 
     useAgentStore.setState({
@@ -442,56 +410,27 @@ describe('useAgentNotifications', () => {
     });
 
     await waitFor(() => {
-      expect(sendNotificationMock).toHaveBeenCalledWith({
+      expect(sendAgentNotificationMock).toHaveBeenCalledWith({
         title: '任务已完成',
         body: '重构设置页',
-        autoCancel: true,
-        extra: { sessionId: 'session-1' },
+        sessionId: 'session-1',
       });
     });
+    expect(sendNotificationMock).not.toHaveBeenCalled();
+    expect(onActionMock).not.toHaveBeenCalled();
   });
 
-  it('opens the app and switches to the session when a Tauri fallback notification is clicked', async () => {
-    const setActiveSession = vi.fn();
-    useSessionStore.setState({ setActiveSession } as Partial<ReturnType<typeof useSessionStore.getState>>);
-    vi.stubGlobal('Notification', undefined);
-    render(<Harness />);
-
-    useAgentStore.setState({
-      events: { 'session-1': [{ kind: 'done' }] },
-      eventTimestamps: { 'session-1': [1] },
-    });
-
-    await waitFor(() => {
-      expect(sendNotificationMock).toHaveBeenCalledWith(expect.objectContaining({
-        extra: { sessionId: 'session-1' },
-      }));
-    });
-
-    const actionCallback = onActionMock.mock.calls[0]?.[0] as ((payload: unknown) => void) | undefined;
-    actionCallback?.({ extra: { sessionId: 'session-1' } });
-
-    await waitFor(() => {
-      expect(showMainWindowMock).toHaveBeenCalled();
-      expect(setActiveSession).toHaveBeenCalledWith('session-1');
-    });
-  });
-
-  it('opens the app and switches to the session when the notification is clicked', async () => {
+  it('opens the app and switches to the session when the backend notification click event arrives', async () => {
     const setActiveSession = vi.fn();
     useSessionStore.setState({ setActiveSession } as Partial<ReturnType<typeof useSessionStore.getState>>);
     render(<Harness />);
 
-    useAgentStore.setState({
-      events: { 'session-1': [{ kind: 'done' }] },
-      eventTimestamps: { 'session-1': [1] },
-    });
-
     await waitFor(() => {
-      expect(notificationInstances).toHaveLength(1);
+      expect(listenMock).toHaveBeenCalledWith('agent-notification-clicked', expect.any(Function));
     });
 
-    notificationInstances[0].onclick?.();
+    const clickCallback = listenMock.mock.calls[0]?.[1] as ((event: { payload: unknown }) => void) | undefined;
+    clickCallback?.({ payload: { sessionId: 'session-1' } });
 
     await waitFor(() => {
       expect(showMainWindowMock).toHaveBeenCalled();

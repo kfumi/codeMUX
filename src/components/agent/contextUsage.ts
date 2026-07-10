@@ -1,4 +1,5 @@
 import type { AgentMessage } from '../../stores/agentStore';
+import type { AgentKind } from '../../types/session';
 
 const DEFAULT_CONTEXT_TOKENS = 258_400;
 const LARGE_CONTEXT_TOKENS = 1_000_000;
@@ -12,16 +13,24 @@ export type ContextUsage = {
   outputTokens: number;
 };
 
+type UsageSnapshot = {
+  input: number;
+  cached: number;
+  output: number;
+};
+
 export function computeContextUsageFromEvents(
   events: AgentMessage[],
   {
     model,
     sessionProviderUsesLargeContext,
     activeProviderUsesLargeContext,
+    agentKind = 'claude_code',
   }: {
     model?: string | null;
     sessionProviderUsesLargeContext: boolean;
     activeProviderUsesLargeContext: boolean;
+    agentKind?: AgentKind;
   },
 ): ContextUsage {
   let usedTokens = 0;
@@ -30,54 +39,73 @@ export function computeContextUsageFromEvents(
   let outputTokens = 0;
   let modelContextWindow: number | undefined;
 
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-
-    if (usedTokens === 0 && event.kind === 'assistant') {
-      const data: any = event.data;
-      const msg = data?.message;
-      // Skip thinking-only messages from Claude extended thinking — the SDK emits
-      // two assistant messages (thinking + text) that share the same input_tokens.
-      // The thinking-only message has a thinking content block but no stop_reason
-      // and output_tokens=0; summing both would double-count input/cache tokens.
-      // Only skip when there's a thinking block AND no stop_reason (not a Codex msg).
-      if (msg && !msg.stop_reason && hasThinkingContentOnly(msg.content)) {
-        continue;
+  if (agentKind === 'claude_code') {
+    const lastResult = findLastResult(events);
+    if (lastResult) {
+      const data: any = lastResult.data;
+      const usage = readResultUsage(data);
+      if (usage) {
+        inputTokens = usage.input;
+        cachedTokens = usage.cached;
+        outputTokens = usage.output;
+        usedTokens = inputTokens;
       }
-      const usage = data?.last_token_usage || msg?.usage || data?.usage;
-      const tokenUsage = readTokenUsage(usage);
-
-      if (tokenUsage && tokenUsage.total > 0) {
-        inputTokens = tokenUsage.input;
-        cachedTokens = tokenUsage.cached;
-        outputTokens = tokenUsage.output;
-        usedTokens = tokenUsage.total;
-      }
-
-      if (!modelContextWindow && data?.model_context_window) {
-        modelContextWindow = data.model_context_window;
+      modelContextWindow = readPositiveNumber(data?.model_context_window);
+    } else {
+      const usage = findLastClaudeAssistantUsage(events);
+      if (usage) {
+        inputTokens = usage.input;
+        cachedTokens = usage.cached;
+        outputTokens = usage.output;
+        usedTokens = inputTokens;
       }
     }
+  } else {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
 
-    if (usedTokens === 0 && event.kind === 'result') {
-      const data: any = event.data;
-      const usage = data?.last_token_usage || data?.usage;
-      const tokenUsage = readTokenUsage(usage);
+      if (usedTokens === 0 && event.kind === 'assistant') {
+        const data: any = event.data;
+        const msg = data?.message;
 
-      if (tokenUsage && tokenUsage.total > 0) {
-        inputTokens = tokenUsage.input;
-        cachedTokens = tokenUsage.cached;
-        outputTokens = tokenUsage.output;
-        usedTokens = tokenUsage.total;
+        if (msg && !msg.stop_reason && hasThinkingContentOnly(msg.content)) {
+          continue;
+        }
+        const usage = data?.last_token_usage || msg?.usage || data?.usage;
+        const tokenUsage = readTokenUsage(usage);
+
+        if (tokenUsage && tokenUsage.total > 0) {
+          inputTokens = tokenUsage.input;
+          cachedTokens = tokenUsage.cached;
+          outputTokens = tokenUsage.output;
+          usedTokens = tokenUsage.total;
+        }
+
+        if (!modelContextWindow && data?.model_context_window) {
+          modelContextWindow = data.model_context_window;
+        }
       }
 
-      if (!modelContextWindow && data?.model_context_window) {
-        modelContextWindow = data.model_context_window;
-      }
-    }
+      if (usedTokens === 0 && event.kind === 'result') {
+        const data: any = event.data;
+        const usage = data?.last_token_usage || data?.usage;
+        const tokenUsage = readTokenUsage(usage);
 
-    if (usedTokens > 0 && modelContextWindow) {
-      break;
+        if (tokenUsage && tokenUsage.total > 0) {
+          inputTokens = tokenUsage.input;
+          cachedTokens = tokenUsage.cached;
+          outputTokens = tokenUsage.output;
+          usedTokens = tokenUsage.total;
+        }
+
+        if (!modelContextWindow && data?.model_context_window) {
+          modelContextWindow = data.model_context_window;
+        }
+      }
+
+      if (usedTokens > 0 && modelContextWindow) {
+        break;
+      }
     }
   }
 
@@ -91,7 +119,85 @@ export function computeContextUsageFromEvents(
   return { usedTokens, totalTokens, inputTokens, cachedTokens, outputTokens };
 }
 
-function readTokenUsage(usage: any): { input: number; cached: number; output: number; total: number } | null {
+function findLastResult(events: AgentMessage[]): Extract<AgentMessage, { kind: 'result' }> | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.kind === 'result') {
+      return event;
+    }
+  }
+
+  return null;
+}
+
+function readResultUsage(data: any): UsageSnapshot | null {
+  const usage = data?.last_token_usage ?? data?.usage;
+  const tokenUsage = readTokenUsage(usage);
+  return tokenUsage && hasAnyToken(tokenUsage) ? tokenUsage : null;
+}
+
+function findLastClaudeAssistantUsage(events: AgentMessage[]): UsageSnapshot | null {
+  let lastUsage: UsageSnapshot | null = null;
+
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.kind === 'assistant') {
+      const data: any = event.data;
+      const msg = data?.message;
+      const usage = msg?.usage || data?.usage;
+
+      if (usage) {
+        const tokenUsage = readTokenUsage(usage);
+        if (!tokenUsage || !hasAnyToken(tokenUsage)) {
+          continue;
+        }
+
+        if (msg?.stop_reason) {
+          return tokenUsage;
+        }
+
+        if (!lastUsage) {
+          lastUsage = tokenUsage;
+        }
+      } else {
+        const messageWithUsage = findLastMessageWithUsage(data);
+        if (messageWithUsage && !lastUsage) {
+          const tokenUsage = readTokenUsage(messageWithUsage);
+          if (tokenUsage && hasAnyToken(tokenUsage)) {
+            lastUsage = tokenUsage;
+          }
+        }
+      }
+    }
+  }
+
+  return lastUsage;
+}
+
+function findLastMessageWithUsage(data: any): { input_tokens: number; cache_read_input_tokens: number; output_tokens: number } | null {
+  if (!data) return null;
+
+  if (data.type === 'message' && data.usage) {
+    return data.usage;
+  }
+
+  if (Array.isArray(data.messages)) {
+    for (let i = data.messages.length - 1; i >= 0; i--) {
+      const msg = data.messages[i];
+      if (msg.type === 'message' && msg.usage) {
+        return msg.usage;
+      }
+    }
+  }
+
+  if (data.message && data.message.type === 'message' && data.message.usage) {
+    return data.message.usage;
+  }
+
+  return null;
+}
+
+function readTokenUsage(usage: any): UsageSnapshot & { total: number } | null {
   if (!usage) {
     return null;
   }
@@ -104,8 +210,17 @@ function readTokenUsage(usage: any): { input: number; cached: number; output: nu
   return { input, cached, output, total };
 }
 
+function hasAnyToken(usage: UsageSnapshot): boolean {
+  return usage.input > 0 || usage.cached > 0 || usage.output > 0;
+}
+
 function readNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function readPositiveNumber(value: unknown): number | undefined {
+  const number = readNumber(value);
+  return number > 0 ? number : undefined;
 }
 
 function hasThinkingContentOnly(content: unknown): boolean {

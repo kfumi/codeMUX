@@ -160,7 +160,8 @@ export function CodeMuxComposer({
     model: modelName,
     sessionProviderUsesLargeContext: false,
     activeProviderUsesLargeContext: false,
-  }), [events, modelName]);
+    agentKind,
+  }), [events, modelName, agentKind]);
   const commands = useMemo(() => getAllCommands(agentKind), [agentKind]);
 
   const treeRoot = usePreviewStore((state) => state.treeRoot);

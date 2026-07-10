@@ -38,6 +38,17 @@ describe('CodeMuxDirectiveText', () => {
     expect(container.querySelector('[data-directive-type="file"]')).toBeNull();
   });
 
+  it('does not parse legacy @file mentions as file directives', () => {
+    const text = '看看 @xxxxx.tsx 这个组件';
+
+    expect(parseDirectiveText(text)).toEqual([{ kind: 'text', text }]);
+
+    const { container } = render(<CodeMuxDirectiveText text={text} />);
+
+    expect(container.querySelector('[data-directive-type="file"]')).toBeNull();
+    expect(screen.getByText(text)).toBeTruthy();
+  });
+
   it('parses chip-format commands as command directives', () => {
     expect(parseDirectiveText('[$review](review) args')).toEqual([
       {
@@ -47,6 +58,18 @@ describe('CodeMuxDirectiveText', () => {
         label: 'review',
       },
       { kind: 'text', text: ' args' },
+    ]);
+  });
+
+  it('parses markdown-link file references as file directives', () => {
+    expect(parseDirectiveText('[CodeMuxThread.tsx](src/components/agent/assistant-ui/CodeMuxThread.tsx) 里看看')).toEqual([
+      {
+        kind: 'directive',
+        directiveKind: 'file',
+        value: '[CodeMuxThread.tsx](src/components/agent/assistant-ui/CodeMuxThread.tsx)',
+        label: 'CodeMuxThread.tsx',
+      },
+      { kind: 'text', text: ' 里看看' },
     ]);
   });
 

@@ -18,6 +18,13 @@ export type CodexTokenUsage = {
   total_tokens?: number;
 };
 
+export type ClaudeTokenUsage = {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+};
+
 type AssistantContentBlock =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string }
@@ -121,6 +128,125 @@ export function buildCodexResultEvent({
       total_tokens: totalTokens,
     },
   };
+}
+
+export function normalizeClaudeResultEvent(
+  event: Record<string, unknown>,
+  fallbackUsage: ClaudeTokenUsage | null = null,
+): Record<string, unknown> {
+  if (event.type !== 'result') {
+    return event;
+  }
+
+  const usage = readClaudeUsage(event.usage);
+  if (usage) {
+    return {
+      ...event,
+      usage,
+      ...(readModelContextWindow(event.modelUsage) ? { model_context_window: readModelContextWindow(event.modelUsage) } : {}),
+    };
+  }
+
+  const modelUsage = readClaudeUsageFromModelUsage(event.modelUsage);
+  if (modelUsage) {
+    return {
+      ...event,
+      usage: modelUsage.usage,
+      ...(modelUsage.modelContextWindow ? { model_context_window: modelUsage.modelContextWindow } : {}),
+    };
+  }
+
+  if (fallbackUsage) {
+    return {
+      ...event,
+      usage: fallbackUsage,
+    };
+  }
+
+  return event;
+}
+
+function readClaudeUsage(value: unknown): ClaudeTokenUsage | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const usage = {
+    input_tokens: readNumber(value.input_tokens),
+    output_tokens: readNumber(value.output_tokens),
+    cache_read_input_tokens: readNumber(value.cache_read_input_tokens),
+    cache_creation_input_tokens: readNumber(value.cache_creation_input_tokens),
+  };
+
+  return usage.input_tokens > 0 || usage.output_tokens > 0 || usage.cache_read_input_tokens > 0 || usage.cache_creation_input_tokens > 0
+    ? usage
+    : null;
+}
+
+function readClaudeUsageFromModelUsage(value: unknown): { usage: ClaudeTokenUsage; modelContextWindow?: number } | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  let result: ClaudeTokenUsage | null = null;
+  let modelContextWindow: number | undefined;
+
+  for (const entry of Object.values(value)) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+
+    const usage = {
+      input_tokens: readNumber(entry.inputTokens),
+      output_tokens: readNumber(entry.outputTokens),
+      cache_read_input_tokens: readNumber(entry.cacheReadInputTokens),
+      cache_creation_input_tokens: readNumber(entry.cacheCreationInputTokens),
+    };
+
+    if (usage.input_tokens > 0 || usage.output_tokens > 0 || usage.cache_read_input_tokens > 0 || usage.cache_creation_input_tokens > 0) {
+      result = result
+        ? {
+            input_tokens: result.input_tokens + usage.input_tokens,
+            output_tokens: result.output_tokens + usage.output_tokens,
+            cache_read_input_tokens: result.cache_read_input_tokens + usage.cache_read_input_tokens,
+            cache_creation_input_tokens: result.cache_creation_input_tokens + usage.cache_creation_input_tokens,
+          }
+        : usage;
+    }
+
+    const contextWindow = readNumber(entry.contextWindow);
+    if (!modelContextWindow && contextWindow > 0) {
+      modelContextWindow = contextWindow;
+    }
+  }
+
+  return result ? { usage: result, modelContextWindow } : null;
+}
+
+function readModelContextWindow(value: unknown): number | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  for (const entry of Object.values(value)) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+    const contextWindow = readNumber(entry.contextWindow);
+    if (contextWindow > 0) {
+      return contextWindow;
+    }
+  }
+
+  return undefined;
+}
+
+function readNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export function buildCodexToolUseContent(item: ThreadItem, context: ToolUseContext = {}): AssistantContentBlock | null {

@@ -7,15 +7,23 @@ mod mcp;
 mod skills;
 
 use log::info;
+use serde::Serialize;
 use std::sync::Mutex;
 use tauri::menu::MenuBuilder;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
-use tauri::{Manager, Window, WindowEvent};
+use tauri::{Emitter, Manager, Window, WindowEvent};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
 const MAIN_WINDOW_LABEL: &str = "main";
+const NOTIFICATION_CLICKED_EVENT: &str = "agent-notification-clicked";
 const TRAY_OPEN_ID: &str = "tray_open";
 const TRAY_QUIT_ID: &str = "tray_quit";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentNotificationClickPayload {
+    session_id: String,
+}
 
 pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
@@ -60,6 +68,66 @@ fn hide_window_to_tray<R: tauri::Runtime>(window: &Window<R>) {
 #[tauri::command]
 fn show_main_window_command(app: tauri::AppHandle) {
     show_main_window(&app);
+}
+
+fn handle_agent_notification_activated<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    session_id: String,
+) {
+    show_main_window(app);
+    let _ = app.emit(
+        NOTIFICATION_CLICKED_EVENT,
+        AgentNotificationClickPayload { session_id },
+    );
+}
+
+#[cfg(windows)]
+fn send_agent_notification_impl<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    title: String,
+    body: String,
+    session_id: String,
+) -> Result<(), String> {
+    use tauri_winrt_notification::{Duration, Toast};
+
+    let app_for_activation = app.clone();
+    Toast::new("com.codemux.desktop")
+        .title(&title)
+        .text1(&body)
+        .duration(Duration::Short)
+        .on_activated(move |_| {
+            handle_agent_notification_activated(&app_for_activation, session_id.clone());
+            Ok(())
+        })
+        .show()
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(windows))]
+fn send_agent_notification_impl<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    title: String,
+    body: String,
+    _session_id: String,
+) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+
+    app.notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn send_agent_notification_command(
+    app: tauri::AppHandle,
+    title: String,
+    body: String,
+    session_id: String,
+) -> Result<(), String> {
+    send_agent_notification_impl(app, title, body, session_id)
 }
 
 fn handle_tray_menu_event<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event_id: &str) {
@@ -181,6 +249,7 @@ pub fn run() {
             commands::app::get_log_files,
             commands::app::read_log_file,
             show_main_window_command,
+            send_agent_notification_command,
             commands::session::create_session,
             commands::session::get_all_sessions,
             commands::session::get_archived_sessions,

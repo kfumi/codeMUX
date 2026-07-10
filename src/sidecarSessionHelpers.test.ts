@@ -7,6 +7,7 @@ import {
 } from '../src-tauri/sidecar/src/sessionRuntimeHelpers';
 import {
   buildCodexResultEvent,
+  normalizeClaudeResultEvent,
   getRuntimeFlavor,
 } from '../src-tauri/sidecar/src/runtimeEvents';
 
@@ -145,6 +146,75 @@ describe('buildCodexResultEvent', () => {
         output_tokens: 5,
         cached_input_tokens: 3,
         total_tokens: 22,
+      },
+    });
+  });
+});
+
+describe('normalizeClaudeResultEvent', () => {
+  it('keeps SDK result usage when it is already present', () => {
+    expect(normalizeClaudeResultEvent({
+      type: 'result',
+      subtype: 'success',
+      usage: {
+        input_tokens: 61_541,
+        output_tokens: 58,
+        cache_read_input_tokens: 71,
+        cache_creation_input_tokens: 0,
+      },
+    })).toMatchObject({
+      usage: {
+        input_tokens: 61_541,
+        output_tokens: 58,
+        cache_read_input_tokens: 71,
+        cache_creation_input_tokens: 0,
+      },
+    });
+  });
+
+  it('normalizes SDK result modelUsage into the existing usage shape', () => {
+    expect(normalizeClaudeResultEvent({
+      type: 'result',
+      subtype: 'success',
+      usage: null,
+      modelUsage: {
+        'glm-4.7-flash': {
+          inputTokens: 61_541,
+          outputTokens: 58,
+          cacheReadInputTokens: 71,
+          cacheCreationInputTokens: 0,
+          webSearchRequests: 0,
+          costUSD: 0,
+          contextWindow: 258_400,
+          maxOutputTokens: 8_192,
+        },
+      },
+    })).toMatchObject({
+      usage: {
+        input_tokens: 61_541,
+        output_tokens: 58,
+        cache_read_input_tokens: 71,
+        cache_creation_input_tokens: 0,
+      },
+      model_context_window: 258_400,
+    });
+  });
+
+  it('falls back to the last non-zero assistant usage when result usage is absent', () => {
+    expect(normalizeClaudeResultEvent({
+      type: 'result',
+      subtype: 'success',
+    }, {
+      input_tokens: 11_464,
+      output_tokens: 607,
+      cache_read_input_tokens: 49_537,
+      cache_creation_input_tokens: 0,
+    })).toMatchObject({
+      usage: {
+        input_tokens: 11_464,
+        output_tokens: 607,
+        cache_read_input_tokens: 49_537,
+        cache_creation_input_tokens: 0,
       },
     });
   });
