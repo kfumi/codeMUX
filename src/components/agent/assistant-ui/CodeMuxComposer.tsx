@@ -42,7 +42,7 @@ import { useSessionStore } from '../../../stores/sessionStore';
 import { mapExecutionModeToPermissionConfig } from '../../../lib/agentPermissions';
 import type { AgentKind } from '../../../types/session';
 import { ContextDisplay } from '../../assistant-ui/context-display';
-import { computeContextUsageFromEvents } from '../contextUsage';
+import { buildContextUsageViewModel } from '../contextUsage';
 import { AskUserQuestionCard, type AskUserQuestion } from '../AskUserQuestionCard';
 import { CodeMuxDirectiveChip, type CodeMuxDirectiveKind } from './CodeMuxDirectiveText';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
@@ -153,15 +153,16 @@ export function CodeMuxComposer({
   const attachmentCount = useAuiState((state) => state.composer.attachments.length);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
+  const tokenUsage = useAgentStore((state) => state.tokenUsageBySession[sessionId] ?? null);
   const updateSessionPermissions = useSessionStore((state) => state.updateSessionPermissions);
   const [dismissedQuestionIds, setDismissedQuestionIds] = useState<Set<string>>(() => new Set());
   const [dismissedPlanKeys, setDismissedPlanKeys] = useState<Set<string>>(() => new Set());
-  const contextUsage = useMemo(() => computeContextUsageFromEvents(events, {
+  const contextUsage = useMemo(() => buildContextUsageViewModel({
+    tokenUsage,
     model: modelName,
     sessionProviderUsesLargeContext: false,
     activeProviderUsesLargeContext: false,
-    agentKind,
-  }), [events, modelName, agentKind]);
+  }), [tokenUsage, modelName]);
   const commands = useMemo(() => getAllCommands(agentKind), [agentKind]);
 
   const treeRoot = usePreviewStore((state) => state.treeRoot);
@@ -501,7 +502,7 @@ export function CodeMuxComposer({
                 {permissionSelector}
               </div>
               <div className="flex items-center gap-2">
-                {contextUsage.usedTokens > 0 && (
+                {contextUsage ? (
                   <ContextDisplay
                     usedTokens={contextUsage.usedTokens}
                     totalTokens={contextUsage.totalTokens}
@@ -510,7 +511,7 @@ export function CodeMuxComposer({
                     cachedTokens={contextUsage.cachedTokens}
                     outputTokens={contextUsage.outputTokens}
                   />
-                )}
+                ) : null}
                 {modelSelector ?? (
                   <span className="max-w-54 truncate rounded-full border border-border/45 bg-[hsl(var(--surface-2))]/64 px-2.5 py-1 text-[11px] text-muted-foreground/74">
                     {modelName ?? ''}

@@ -161,7 +161,6 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     return newResult;
   }, [events]);
 
-  // Incremental result stats calculation
   const resultStatsCacheRef = useRef<{ events: AgentMessage[]; result: Record<number, MessageFooterStats> }>({ events: [], result: {} });
   const resultStatsByAssistantIndex = useMemo(() => {
     const cache = resultStatsCacheRef.current;
@@ -1343,27 +1342,17 @@ function incrementAssistantResultStatsMap(
   const resultIndexByAssistantIndex = buildAssistantResultTargetMap(events);
 
   for (const [assistantIndex, resultIndex] of resultIndexByAssistantIndex) {
-    // Only process new results
     if (resultIndex < fromIndex) continue;
     const event = events[resultIndex];
     if (event?.kind !== 'result') continue;
 
-    const ltu = (event.data as any).last_token_usage;
-    const usage = event.data.usage;
-    statsMap[assistantIndex] = {
-      durationMs: event.data.duration_ms,
-      numTurns: event.data.num_turns,
-      inputTokens: ltu ? ltu.input_tokens : (usage?.input_tokens || 0),
-      outputTokens: ltu ? ltu.output_tokens : (usage?.output_tokens || 0),
-      cacheReadTokens: ltu ? (ltu.cached_input_tokens || 0) : (usage?.cache_read_input_tokens || 0),
-      cacheCreationTokens: ltu ? 0 : (usage?.cache_creation_input_tokens || 0),
-    };
+    statsMap[assistantIndex] = buildFooterStatsFromResultEvent(event);
   }
 
   return statsMap;
 }
 
-function buildAssistantResultStatsMap(
+export function buildAssistantResultStatsMap(
   events: AgentMessage[],
 ): Record<number, MessageFooterStats> {
   const statsMap: Record<number, MessageFooterStats> = {};
@@ -1375,19 +1364,25 @@ function buildAssistantResultStatsMap(
       continue;
     }
 
-    const ltu = (event.data as any).last_token_usage;
-    const usage = event.data.usage;
-    statsMap[assistantIndex] = {
-      durationMs: event.data.duration_ms,
-      numTurns: event.data.num_turns,
-      inputTokens: ltu ? ltu.input_tokens : (usage?.input_tokens || 0),
-      outputTokens: ltu ? ltu.output_tokens : (usage?.output_tokens || 0),
-      cacheReadTokens: ltu ? (ltu.cached_input_tokens || 0) : (usage?.cache_read_input_tokens || 0),
-      cacheCreationTokens: ltu ? 0 : (usage?.cache_creation_input_tokens || 0),
-    };
+    statsMap[assistantIndex] = buildFooterStatsFromResultEvent(event);
   }
 
   return statsMap;
+}
+
+function buildFooterStatsFromResultEvent(
+  event: Extract<AgentMessage, { kind: 'result' }>,
+): MessageFooterStats {
+  const ltu = (event.data as any).last_token_usage;
+  const usage = event.data.usage;
+  return {
+    durationMs: event.data.duration_ms,
+    numTurns: event.data.num_turns,
+    inputTokens: ltu ? ltu.input_tokens : (usage?.input_tokens || 0),
+    outputTokens: ltu ? ltu.output_tokens : (usage?.output_tokens || 0),
+    cacheReadTokens: ltu ? (ltu.cached_input_tokens || 0) : (usage?.cache_read_input_tokens || 0),
+    cacheCreationTokens: ltu ? 0 : (usage?.cache_creation_input_tokens || 0),
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, any> {

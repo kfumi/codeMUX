@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   buildMcpInstructions,
@@ -102,7 +104,7 @@ describe('buildCodexResultEvent', () => {
         input_tokens: 10,
         output_tokens: 5,
         cached_input_tokens: 3,
-        total_tokens: 22,
+        total_tokens: 15,
       },
     });
   });
@@ -145,7 +147,7 @@ describe('buildCodexResultEvent', () => {
         input_tokens: 10,
         output_tokens: 5,
         cached_input_tokens: 3,
-        total_tokens: 22,
+        total_tokens: 25,
       },
     });
   });
@@ -172,8 +174,8 @@ describe('normalizeClaudeResultEvent', () => {
     });
   });
 
-  it('normalizes SDK result modelUsage into the existing usage shape', () => {
-    expect(normalizeClaudeResultEvent({
+  it('normalizes SDK result modelUsage into the existing usage shape without treating it as context usage', () => {
+    const normalized = normalizeClaudeResultEvent({
       type: 'result',
       subtype: 'success',
       usage: null,
@@ -189,15 +191,76 @@ describe('normalizeClaudeResultEvent', () => {
           maxOutputTokens: 8_192,
         },
       },
-    })).toMatchObject({
+    });
+
+    expect(normalized).toMatchObject({
       usage: {
         input_tokens: 61_541,
         output_tokens: 58,
         cache_read_input_tokens: 71,
         cache_creation_input_tokens: 0,
       },
-      model_context_window: 258_400,
     });
+    expect(normalized).not.toHaveProperty('token_usage');
+    expect(normalized).not.toHaveProperty('model_context_window');
+  });
+
+  it('does not create a context snapshot from SDK modelUsage alone', () => {
+    const normalized = normalizeClaudeResultEvent({
+      type: 'result',
+      subtype: 'success',
+      usage: null,
+      modelUsage: {
+        'glm-4.7-flash': {
+          inputTokens: 61_541,
+          outputTokens: 58,
+          cacheReadInputTokens: 71,
+          cacheCreationInputTokens: 0,
+          contextWindow: 258_400,
+        },
+      },
+    });
+
+    expect(normalized).toMatchObject({
+      usage: {
+        input_tokens: 61_541,
+        output_tokens: 58,
+        cache_read_input_tokens: 71,
+      },
+    });
+    expect(normalized).not.toHaveProperty('token_usage');
+  });
+
+  it('keeps aggregate result usage and does not emit token_usage from assistant fallback', () => {
+    const normalized = normalizeClaudeResultEvent({
+      type: 'result',
+      subtype: 'success',
+      usage: null,
+      modelUsage: {
+        'glm-4.7-flash': {
+          inputTokens: 150_000,
+          outputTokens: 2_000,
+          cacheReadInputTokens: 10_000,
+          cacheCreationInputTokens: 0,
+          contextWindow: 258_400,
+        },
+      },
+    }, {
+      input_tokens: 11_464,
+      output_tokens: 607,
+      cache_read_input_tokens: 49_537,
+      cache_creation_input_tokens: 0,
+    });
+
+    expect(normalized).toMatchObject({
+      usage: {
+        input_tokens: 150_000,
+        output_tokens: 2_000,
+        cache_read_input_tokens: 10_000,
+      },
+    });
+    expect(normalized).not.toHaveProperty('token_usage');
+    expect(normalized).not.toHaveProperty('model_context_window');
   });
 
   it('falls back to the last non-zero assistant usage when result usage is absent', () => {
@@ -217,5 +280,18 @@ describe('normalizeClaudeResultEvent', () => {
         cache_creation_input_tokens: 0,
       },
     });
+  });
+});
+
+describe('legacy Claude context display channel', () => {
+  it('does not keep legacy Claude context display probes in sidecar runtime', () => {
+    const sidecarDir = join(process.cwd(), 'src-tauri', 'sidecar', 'src');
+    const index = readFileSync(join(sidecarDir, 'index.ts'), 'utf8');
+    const runtimeEvents = readFileSync(join(sidecarDir, 'runtimeEvents.ts'), 'utf8');
+
+    expect(index).not.toContain('fetchClaudeContextCommandUsageSnapshot');
+    expect(index).not.toContain('buildClaudeTokenUsageUpdateEvent');
+    expect(runtimeEvents).not.toContain('buildClaudeTokenUsageUpdateEvent');
+    expect(runtimeEvents).not.toContain('extractClaudeContextUsageSnapshot');
   });
 });

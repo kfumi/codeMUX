@@ -1,256 +1,119 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AgentMessage } from '../../stores/agentStore';
-import { computeContextUsageFromEvents } from './contextUsage';
+import { buildAssistantResultStatsMap } from './assistant-ui/CodeMuxThread';
+import {
+  buildContextUsageViewModel,
+  normalizeThreadTokenUsage,
+} from './contextUsage';
 
-describe('computeContextUsageFromEvents', () => {
-  it('uses Codex last_token_usage fields for context stats', () => {
-    const events: AgentMessage[] = [
-      {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid: 'assistant-1',
-          session_id: 'session-1',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: 'Codex reply' }],
-          },
-          parent_tool_use_id: null,
-        },
-      },
-      {
-        kind: 'result',
-        data: {
-          type: 'result',
-          subtype: 'success',
-          is_error: false,
-          uuid: 'result-1',
-          session_id: 'session-1',
-          duration_ms: 10,
-          duration_api_ms: 10,
-          num_turns: 1,
-          result: '',
-          usage: {
-            input_tokens: 1000,
-            output_tokens: 2000,
-            cache_read_input_tokens: 3000,
-          },
-          last_token_usage: {
-            input_tokens: 10,
-            cached_input_tokens: 5,
-            output_tokens: 20,
-            total_tokens: 42,
-          },
-          model_context_window: 258400,
-        },
-      },
-    ];
+describe('history-file context usage view model', () => {
+  it('normalizes Claude cache-read usage as input plus cache for context used tokens', () => {
+    const tokenUsage = normalizeThreadTokenUsage({
+      input_tokens: 352,
+      cache_read_input_tokens: 25_088,
+      output_tokens: 152,
+      model_context_window: 258_400,
+      context_usage_source: 'history_file',
+      context_usage_freshness: 'restored',
+    });
 
-    expect(computeContextUsageFromEvents(events, {
-      model: 'gpt-5-codex',
+    expect(tokenUsage).toMatchObject({
+      last: {
+        totalTokens: 25_440,
+        inputTokens: 352,
+        cachedInputTokens: 25_088,
+        outputTokens: 152,
+        reasoningOutputTokens: 0,
+      },
+      modelContextWindow: 258_400,
+      contextUsageSource: 'history_file',
+      contextUsageFreshness: 'restored',
+    });
+
+    expect(buildContextUsageViewModel({
+      tokenUsage,
+      model: 'claude-sonnet',
       sessionProviderUsesLargeContext: false,
       activeProviderUsesLargeContext: false,
-      agentKind: 'codex',
     })).toEqual({
-      usedTokens: 30,
-      totalTokens: 258400,
-      inputTokens: 10,
-      cachedTokens: 5,
-      outputTokens: 20,
+      usedTokens: 25_440,
+      totalTokens: 258_400,
+      inputTokens: 352,
+      cachedTokens: 25_088,
+      outputTokens: 152,
     });
   });
 
-  it('excludes Claude cache tokens and upstream total_tokens from context total', () => {
-    const events: AgentMessage[] = [
-      {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid: 'assistant-1',
-          session_id: 'session-1',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: 'Claude reply' }],
-            usage: {
-              input_tokens: 100,
-              cache_read_input_tokens: 300,
-              cache_creation_input_tokens: 50,
-              output_tokens: 25,
-              total_tokens: 475,
-            },
-          },
-          parent_tool_use_id: null,
-        },
+  it('normalizes Codex total_tokens as the context used value and ignores reasoning', () => {
+    const tokenUsage = normalizeThreadTokenUsage({
+      total: {
+        total_tokens: 156_061,
+        input_tokens: 154_933,
+        cached_input_tokens: 148_864,
+        output_tokens: 1_128,
+        reasoning_output_tokens: 666,
       },
-    ];
-
-    expect(computeContextUsageFromEvents(events, {
-      model: 'claude-sonnet-4-20250514',
-      sessionProviderUsesLargeContext: false,
-      activeProviderUsesLargeContext: false,
-      agentKind: 'claude_code',
-    })).toMatchObject({
-      usedTokens: 100,
-      inputTokens: 100,
-      cachedTokens: 300,
-      outputTokens: 25,
+      last: {
+        total_tokens: 156_061,
+        input_tokens: 154_933,
+        cached_input_tokens: 148_864,
+        output_tokens: 1_128,
+        reasoning_output_tokens: 666,
+      },
+      model_context_window: 258_400,
+      context_usage_source: 'history_file',
+      context_usage_freshness: 'live_synced',
     });
-  });
 
-  it('uses the Claude 1M runtime model suffix for the fallback context limit', () => {
-    const events: AgentMessage[] = [
-      {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid: 'assistant-1',
-          session_id: 'session-1',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: 'Claude reply' }],
-            usage: {
-              input_tokens: 100,
-              output_tokens: 50,
-            },
-          },
-          parent_tool_use_id: null,
-        },
+    expect(tokenUsage).toMatchObject({
+      last: {
+        totalTokens: 156_061,
+        inputTokens: 154_933,
+        cachedInputTokens: 148_864,
+        outputTokens: 1_128,
+        reasoningOutputTokens: 0,
       },
-    ];
-
-    expect(computeContextUsageFromEvents(events, {
-      model: 'claude-sonnet-4-20250514[1m]',
-      sessionProviderUsesLargeContext: true,
-      activeProviderUsesLargeContext: true,
-      agentKind: 'claude_code',
-    })).toMatchObject({
-      usedTokens: 100,
-      totalTokens: 1_000_000,
     });
-  });
 
-  it('uses type: "message" usage for Claude Code historical sessions', () => {
-    const events: AgentMessage[] = [
-      {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid: 'assistant-1',
-          session_id: 'session-1',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: 'Claude reply' }],
-          },
-          messages: [
-            {
-              type: 'message',
-              role: 'assistant',
-              content: [{ type: 'text', text: 'message 1' }],
-            },
-            {
-              type: 'message',
-              role: 'assistant',
-              content: [{ type: 'text', text: 'message 2' }],
-              usage: {
-                input_tokens: 100,
-                cache_read_input_tokens: 50,
-                output_tokens: 25,
-              },
-            },
-          ],
-          parent_tool_use_id: null,
-        },
-      },
-    ];
-
-    expect(computeContextUsageFromEvents(events, {
-      model: 'claude-sonnet-4-20250514',
-      sessionProviderUsesLargeContext: false,
-      activeProviderUsesLargeContext: false,
-      agentKind: 'claude_code',
-    })).toMatchObject({
-      usedTokens: 100,
-      inputTokens: 100,
-      cachedTokens: 50,
-      outputTokens: 25,
-    });
-  });
-
-  it('uses data.type: "message" usage for Claude Code', () => {
-    const events: AgentMessage[] = [
-      {
-        kind: 'assistant',
-        data: {
-          type: 'message',
-          role: 'assistant',
-          content: [{ type: 'text', text: 'Claude reply' }],
-          usage: {
-            input_tokens: 200,
-            cache_read_input_tokens: 100,
-            output_tokens: 75,
-          },
-        },
-      },
-    ];
-
-    expect(computeContextUsageFromEvents(events, {
-      model: 'claude-sonnet-4-20250514',
-      sessionProviderUsesLargeContext: false,
-      activeProviderUsesLargeContext: false,
-      agentKind: 'claude_code',
-    })).toMatchObject({
-      usedTokens: 200,
-      inputTokens: 200,
-      cachedTokens: 100,
-      outputTokens: 75,
-    });
-  });
-
-  it('does not use type: "message" for Codex', () => {
-    const events: AgentMessage[] = [
-      {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid: 'assistant-1',
-          session_id: 'session-1',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: 'Codex reply' }],
-          },
-          messages: [
-            {
-              type: 'message',
-              role: 'assistant',
-              content: [{ type: 'text', text: 'message 1' }],
-              usage: {
-                input_tokens: 100,
-                cache_read_input_tokens: 50,
-                output_tokens: 25,
-              },
-            },
-          ],
-          parent_tool_use_id: null,
-        },
-      },
-    ];
-
-    expect(computeContextUsageFromEvents(events, {
+    expect(buildContextUsageViewModel({
+      tokenUsage,
       model: 'gpt-5-codex',
       sessionProviderUsesLargeContext: false,
       activeProviderUsesLargeContext: false,
-      agentKind: 'codex',
-    })).toMatchObject({
-      usedTokens: 0,
-      inputTokens: 0,
-      cachedTokens: 0,
-      outputTokens: 0,
+    })?.usedTokens).toBe(156_061);
+  });
+
+  it('falls back Codex-like usage without total_tokens to input plus output', () => {
+    const tokenUsage = normalizeThreadTokenUsage({
+      input_tokens: 20,
+      cached_input_tokens: 7,
+      output_tokens: 5,
+      reasoning_output_tokens: 999,
+    });
+
+    expect(tokenUsage?.last).toMatchObject({
+      totalTokens: 25,
+      inputTokens: 20,
+      cachedInputTokens: 7,
+      outputTokens: 5,
+      reasoningOutputTokens: 0,
     });
   });
 
-  it('excludes cache_read_input_tokens from total for Claude Code synthetic result events', () => {
-    const events: AgentMessage[] = [
+  it('returns null when no history usage snapshot exists', () => {
+    expect(buildContextUsageViewModel({
+      tokenUsage: null,
+      model: 'claude-sonnet',
+      sessionProviderUsesLargeContext: false,
+      activeProviderUsesLargeContext: false,
+    })).toBeNull();
+  });
+});
+
+describe('message footer stats', () => {
+  it('maps every turn result back to its assistant footer with duration and token stats', () => {
+    expect(buildAssistantResultStatsMap([
+      { kind: 'user', data: { content: 'first' } },
       {
         kind: 'assistant',
         data: {
@@ -259,139 +122,7 @@ describe('computeContextUsageFromEvents', () => {
           session_id: 'session-1',
           message: {
             role: 'assistant',
-            content: [{ type: 'text', text: 'Claude reply' }],
-          },
-          parent_tool_use_id: null,
-        },
-      },
-      {
-        kind: 'result',
-        data: {
-          type: 'result',
-          subtype: 'success',
-          is_error: false,
-          uuid: 'synthetic-turn-1',
-          session_id: 'session-1',
-          duration_ms: 1000,
-          duration_api_ms: 0,
-          num_turns: 1,
-          result: '',
-          usage: {
-            input_tokens: 100,
-            output_tokens: 25,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 50,
-          },
-          last_token_usage: {
-            input_tokens: 100,
-            output_tokens: 25,
-            cached_input_tokens: 50,
-            total_tokens: 175,
-          },
-        },
-      },
-    ];
-
-    expect(computeContextUsageFromEvents(events, {
-      model: 'claude-sonnet-4-20250514',
-      sessionProviderUsesLargeContext: false,
-      activeProviderUsesLargeContext: false,
-      agentKind: 'claude_code',
-    })).toMatchObject({
-      usedTokens: 100,
-      inputTokens: 100,
-      cachedTokens: 50,
-      outputTokens: 25,
-    });
-  });
-
-  it('treats a Claude Code result without usage as a boundary instead of reusing older usage', () => {
-    const events: AgentMessage[] = [
-      {
-        kind: 'result',
-        data: {
-          type: 'result',
-          subtype: 'success',
-          is_error: false,
-          uuid: 'result-old',
-          session_id: 'session-1',
-          duration_ms: 1000,
-          duration_api_ms: 0,
-          num_turns: 1,
-          result: '',
-          usage: {
-            input_tokens: 22_000,
-            output_tokens: 100,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 3_000,
-          },
-        },
-      },
-      {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid: 'assistant-old',
-          session_id: 'session-1',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: 'Old Claude reply' }],
-            stop_reason: 'end_turn',
-            usage: {
-              input_tokens: 11_464,
-              cache_read_input_tokens: 49_537,
-              output_tokens: 607,
-            },
-          },
-          parent_tool_use_id: null,
-        },
-      },
-      {
-        kind: 'result',
-        data: {
-          type: 'result',
-          subtype: 'success',
-          is_error: false,
-          uuid: 'result-empty',
-          session_id: 'session-1',
-          duration_ms: 1000,
-          duration_api_ms: 0,
-          num_turns: 1,
-          result: '',
-          usage: {
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
-          },
-        },
-      },
-    ];
-
-    expect(computeContextUsageFromEvents(events, {
-      model: 'glm-4.7-flash',
-      sessionProviderUsesLargeContext: false,
-      activeProviderUsesLargeContext: false,
-      agentKind: 'claude_code',
-    })).toMatchObject({
-      usedTokens: 0,
-      inputTokens: 0,
-      cachedTokens: 0,
-      outputTokens: 0,
-    });
-  });
-
-  it('does not include cache_read_input_tokens in total for Codex result events', () => {
-    const events: AgentMessage[] = [
-      {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid: 'assistant-1',
-          session_id: 'session-1',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: 'Codex reply' }],
+            content: [{ type: 'text', text: 'first reply' }],
           },
           parent_tool_use_id: null,
         },
@@ -404,35 +135,74 @@ describe('computeContextUsageFromEvents', () => {
           is_error: false,
           uuid: 'result-1',
           session_id: 'session-1',
-          duration_ms: 1000,
-          duration_api_ms: 0,
+          duration_ms: 1_250,
+          duration_api_ms: 900,
           num_turns: 1,
           result: '',
           usage: {
-            input_tokens: 100,
-            output_tokens: 25,
-            cache_read_input_tokens: 50,
+            input_tokens: 40,
+            output_tokens: 6,
+            cache_read_input_tokens: 20,
           },
           last_token_usage: {
-            input_tokens: 100,
-            cached_input_tokens: 50,
-            output_tokens: 25,
-            total_tokens: 125,
+            input_tokens: 40,
+            output_tokens: 6,
+            cached_input_tokens: 20,
+            total_tokens: 60,
           },
         },
       },
-    ];
-
-    expect(computeContextUsageFromEvents(events, {
-      model: 'gpt-5-codex',
-      sessionProviderUsesLargeContext: false,
-      activeProviderUsesLargeContext: false,
-      agentKind: 'codex',
-    })).toMatchObject({
-      usedTokens: 125,
-      inputTokens: 100,
-      cachedTokens: 50,
-      outputTokens: 25,
+      { kind: 'user', data: { content: 'second' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-2',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'second reply' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'result-2',
+          session_id: 'session-1',
+          duration_ms: 2_500,
+          duration_api_ms: 2_000,
+          num_turns: 1,
+          result: '',
+          usage: {
+            input_tokens: 70,
+            output_tokens: 10,
+            cache_read_input_tokens: 50,
+          },
+        },
+      },
+    ])).toEqual({
+      1: {
+        durationMs: 1_250,
+        numTurns: 1,
+        inputTokens: 40,
+        outputTokens: 6,
+        cacheReadTokens: 20,
+        cacheCreationTokens: 0,
+      },
+      4: {
+        durationMs: 2_500,
+        numTurns: 1,
+        inputTokens: 70,
+        outputTokens: 10,
+        cacheReadTokens: 50,
+        cacheCreationTokens: 0,
+      },
     });
+
   });
 });

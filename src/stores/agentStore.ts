@@ -35,6 +35,10 @@ import type {
 import type { AgentKind, ReasoningEffort } from '../types/session';
 import type { AgentInputPayload, UserAttachmentPreview } from '../types/agentInput';
 import { inferModelSupportsVision, markModelVisionUnsupported } from '../lib/modelVisionCapabilities';
+import {
+  normalizeThreadTokenUsage,
+  type ThreadTokenUsage,
+} from '../components/agent/contextUsage';
 
 export type AgentMessage =
   | { kind: 'user'; data: { content: string; attachments?: UserAttachmentPreview[]; locator?: AgentUserMessageLocator } }
@@ -82,6 +86,10 @@ interface AgentState {
   mcpRuntimeStatus: Record<string, string | null>;
   /** Current todos per session (extracted from TodoWrite / Task tools) */
   todos: Record<string, TodoItem[]>;
+  /** Latest normalized token/context usage snapshot per session */
+  tokenUsageBySession: Record<string, ThreadTokenUsage | null>;
+  /** Latest in-flight history usage refresh request id per session */
+  tokenUsageRefreshRequests: Record<string, number>;
   /** Accumulated streaming thinking text per session (from stream_event deltas) */
   streamingThinking: Record<string, string>;
   /** Accumulated streaming text per session (from stream_event text deltas) */
@@ -103,6 +111,10 @@ interface AgentState {
   interrupt: (sessionId: string) => Promise<void>;
   /** Clear events for a session */
   clearEvents: (sessionId: string) => void;
+  /** Store the latest normalized token/context usage snapshot for a session */
+  setSessionTokenUsage: (sessionId: string, usage: ThreadTokenUsage | null) => void;
+  /** Refresh token/context usage from the agent history file */
+  refreshLatestTokenUsage: (sessionId: string, freshness: 'live_synced' | 'restored') => Promise<void>;
   /** Load historical messages for a session */
   loadSessionMessages: (sessionId: string) => Promise<void>;
   /** Clear changed files for a session */
@@ -733,6 +745,15 @@ function buildTurnSyntheticResult(
           cache_creation_input_tokens: lastUsage.cache_creation_input_tokens || 0,
           cache_read_input_tokens: lastUsage.cache_read_input_tokens || 0,
         },
+        last_token_usage: {
+          input_tokens: lastUsage.input_tokens || 0,
+          output_tokens: lastUsage.output_tokens || 0,
+          cached_input_tokens: lastUsage.cache_read_input_tokens || 0,
+          total_tokens:
+            (lastUsage.input_tokens || 0)
+            + (lastUsage.cache_read_input_tokens || 0)
+            + (lastUsage.output_tokens || 0),
+        },
       } as AgentResultMessage,
     },
   };
@@ -1038,6 +1059,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   error: {},
   mcpRuntimeStatus: {},
   todos: {},
+  tokenUsageBySession: {},
+  tokenUsageRefreshRequests: {},
   streamingThinking: {},
   streamingText: {},
   forceStopped: {},
@@ -1158,6 +1181,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           return;
         }
 
+        if (event.kind === 'raw' && event.data?.type === 'token_usage_update') {
+          return;
+        }
+
         if (event.kind === 'raw' && isClaudeCompactSummaryRawEvent(event.data)) {
           return;
         }
@@ -1212,177 +1239,176 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         if (event.kind === 'streaming' || event.kind === 'streaming_batch') {
           if (!get().isRunning[sessionId] || get().forceStopped[sessionId]) return;
           const streamEvents = event.kind === 'streaming_batch' ? event.data.events : [event.data.event];
-          logger.debug('Received streaming events', { sessionId, count: streamEvents.length, batch: event.kind === 'streaming_batch' });
           for (const rawStreamEvent of streamEvents) {
-          const streamEvent = rawStreamEvent as Record<string, unknown>;
-          const eventType = streamEvent.type as string;
-          const findToolId = (idx: number | undefined): string | undefined => {
-            if (idx !== undefined) {
-              const byIndex = get().streamingToolIndexMap[sessionId]?.[idx];
-              if (byIndex) return byIndex;
-            }
-            const meta = get().streamingToolMeta[sessionId];
-            if (!meta) return undefined;
-            const entries = Object.entries(meta);
-            return entries.length > 0 ? entries[entries.length - 1][0] : undefined;
-          };
-
-          if (eventType === 'content_block_start') {
-            const contentBlock = streamEvent.content_block as Record<string, unknown> | undefined;
-            if (contentBlock?.type === 'thinking') {
-              logger.debug('Thinking block started', { sessionId });
-              flushPendingStreaming(sessionId, set);
-              clearStreamingTextField(sessionId, 'streamingThinking', set, get);
-            } else if (contentBlock?.type === 'text') {
-              logger.debug('Text block started', { sessionId });
-              flushPendingStreaming(sessionId, set);
-              clearStreamingTextField(sessionId, 'streamingText', set, get);
-            } else if (contentBlock?.type === 'tool_use') {
-              const toolId = contentBlock.id as string;
-              const toolName = contentBlock.name as string;
-              const blockIndex = streamEvent.index as number | undefined;
-              logger.debug('Tool use block started', { sessionId, toolId, toolName, blockIndex });
-              set((s) => ({
-                streamingToolMeta: {
-                  ...s.streamingToolMeta,
-                  [sessionId]: { ...(s.streamingToolMeta[sessionId] || {}), [toolId]: { name: toolName, index: blockIndex ?? -1 } },
-                },
-                streamingToolInputs: {
-                  ...s.streamingToolInputs,
-                  [sessionId]: { ...(s.streamingToolInputs[sessionId] || {}), [toolId]: '' },
-                },
-                streamingToolIndexMap: blockIndex !== undefined
-                  ? { ...s.streamingToolIndexMap, [sessionId]: { ...(s.streamingToolIndexMap[sessionId] || {}), [blockIndex]: toolId } }
-                  : s.streamingToolIndexMap,
-              }));
-            }
-          } else if (eventType === 'content_block_delta') {
-            const delta = streamEvent.delta as Record<string, unknown> | undefined;
-            if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
-              const toolId = findToolId(streamEvent.index as number | undefined);
-              if (toolId) {
-                appendPendingStreamingToolInput(sessionId, toolId, delta.partial_json);
+            const streamEvent = rawStreamEvent as Record<string, unknown>;
+            const eventType = streamEvent.type as string;
+            const findToolId = (idx: number | undefined): string | undefined => {
+              if (idx !== undefined) {
+                const byIndex = get().streamingToolIndexMap[sessionId]?.[idx];
+                if (byIndex) return byIndex;
               }
-            } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-              queueStreamingDelta(sessionId, 'thinking', delta.thinking, set);
-            } else if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
-              queueStreamingDelta(sessionId, 'text', delta.text, set);
-            }
-          } else if (eventType === 'content_block_stop') {
-            const blockType = (streamEvent.content_block as Record<string, unknown> | undefined)?.type as string | undefined;
-            if (blockType === 'thinking') {
-              logger.debug('Thinking block stopped', { sessionId });
-            } else if (blockType === 'text') {
-              logger.debug('Text block stopped', { sessionId });
-            } else if (blockType === 'tool_use') {
-              const toolId = findToolId(streamEvent.index as number | undefined);
-              logger.debug('Tool use block stopped', { sessionId, toolId });
-            }
-            logStreamingTelemetry(sessionId, 'content_block_stop');
-            streamingTelemetry.delete(sessionId);
-            const blockIndex = streamEvent.index as number | undefined;
-            const toolId = findToolId(blockIndex);
-            const toolMeta = toolId ? get().streamingToolMeta[sessionId]?.[toolId] : undefined;
-            if (toolId && toolMeta) {
-              // Skip if this tool_use block already exists in events (real event arrived first)
-              const alreadyExists = (get().events[sessionId] || []).some((evt) =>
-                evt.kind === 'assistant' && (evt.data?.message?.content || []).some((b: any) => b?.type === 'tool_use' && b.id === toolId)
-              );
-              if (alreadyExists) {
-                clearPendingStreamingToolInputs(sessionId);
+              const meta = get().streamingToolMeta[sessionId];
+              if (!meta) return undefined;
+              const entries = Object.entries(meta);
+              return entries.length > 0 ? entries[entries.length - 1][0] : undefined;
+            };
+
+            if (eventType === 'content_block_start') {
+              const contentBlock = streamEvent.content_block as Record<string, unknown> | undefined;
+              if (contentBlock?.type === 'thinking') {
+                logger.debug('Thinking block started', { sessionId });
+                flushPendingStreaming(sessionId, set);
+                clearStreamingTextField(sessionId, 'streamingThinking', set, get);
+              } else if (contentBlock?.type === 'text') {
+                logger.debug('Text block started', { sessionId });
+                flushPendingStreaming(sessionId, set);
+                clearStreamingTextField(sessionId, 'streamingText', set, get);
+              } else if (contentBlock?.type === 'tool_use') {
+                const toolId = contentBlock.id as string;
+                const toolName = contentBlock.name as string;
+                const blockIndex = streamEvent.index as number | undefined;
+                logger.debug('Tool use block started', { sessionId, toolId, toolName, blockIndex });
                 set((s) => ({
-                  streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
-                  streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
-                  streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
+                  streamingToolMeta: {
+                    ...s.streamingToolMeta,
+                    [sessionId]: { ...(s.streamingToolMeta[sessionId] || {}), [toolId]: { name: toolName, index: blockIndex ?? -1 } },
+                  },
+                  streamingToolInputs: {
+                    ...s.streamingToolInputs,
+                    [sessionId]: { ...(s.streamingToolInputs[sessionId] || {}), [toolId]: '' },
+                  },
+                  streamingToolIndexMap: blockIndex !== undefined
+                    ? { ...s.streamingToolIndexMap, [sessionId]: { ...(s.streamingToolIndexMap[sessionId] || {}), [blockIndex]: toolId } }
+                    : s.streamingToolIndexMap,
                 }));
-                return;
               }
-              const rawJson = readPendingStreamingToolInput(sessionId, toolId, get()) || '{}';
-              let parsedInput: Record<string, unknown> = {};
-              try { parsedInput = JSON.parse(rawJson); } catch {}
-
-              // Capture original file content from disk BEFORE the tool executes.
-              // At content_block_stop time the file is still unmodified on disk.
-              // Fire-and-forget: snapshot is stored async, re-extraction happens on next event.
-              if ((toolMeta.name === 'Write' || toolMeta.name === 'Edit') && parsedInput.file_path) {
-                const filePath = parsedInput.file_path as string;
-                const projectPath = usePreviewStore.getState().projectPath || undefined;
-                fileApi.readFile(filePath, projectPath).then((original) => {
-                  set((s) => {
-                    const sessionOriginals = preserveFirstOriginalSnapshot(
-                      s.fileOriginals[sessionId] || {},
-                      filePath,
-                      { content: original, isNew: false, toolUseId: toolId },
-                    );
-                    const events = s.events[sessionId] || [];
-                    return {
-                      fileOriginals: { ...s.fileOriginals, [sessionId]: sessionOriginals },
-                      changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(events, s.acknowledgedFiles[sessionId], sessionOriginals) },
-                    };
-                  });
-                }).catch(() => {
-                  set((s) => {
-                    const sessionOriginals = preserveFirstOriginalSnapshot(
-                      s.fileOriginals[sessionId] || {},
-                      filePath,
-                      { content: '', isNew: true, toolUseId: toolId },
-                    );
-                    return { fileOriginals: { ...s.fileOriginals, [sessionId]: sessionOriginals } };
-                  });
-                });
-              }
-
-              const toolUseBlock: import('../types/agent').ContentBlock = {
-                type: 'tool_use',
-                id: toolId,
-                name: toolMeta.name,
-                input: parsedInput,
-              };
-              const syntheticAssistant: import('../types/agent').AgentAssistantMessage = {
-                type: 'assistant',
-                uuid: `stream-${toolId}`,
-                session_id: sessionId,
-                message: { role: 'assistant', content: [toolUseBlock] },
-                parent_tool_use_id: null,
-              };
-              const syntheticEvent: AgentMessage = { kind: 'assistant', data: syntheticAssistant };
-              clearPendingStreamingToolInputs(sessionId);
-              set((s) => {
-                const prev = s.events[sessionId] || [];
-                const newEvents = [...prev, syntheticEvent];
-                const extractedTodos = extractTodosFromEvents(newEvents);
-                const prevIds = s.streamedToolUseIds[sessionId] || new Set<string>();
-                const newIds = new Set(prevIds);
-                newIds.add(toolId);
-                // Un-acknowledge files that have new edits/writes since last save
-                let acknowledged = s.acknowledgedFiles[sessionId];
-                if (acknowledged && acknowledged.size > 0) {
-                  const rawPath = parsedInput.file_path as string;
-                  if (rawPath && acknowledged.has(normalizeFilePath(rawPath))) {
-                    const newAcknowledged = new Set(acknowledged);
-                    newAcknowledged.delete(normalizeFilePath(rawPath));
-                    acknowledged = newAcknowledged;
-                    try {
-                      localStorage.setItem(`acknowledged-files-${sessionId}`, JSON.stringify(Array.from(newAcknowledged)));
-                    } catch {}
-                  }
+            } else if (eventType === 'content_block_delta') {
+              const delta = streamEvent.delta as Record<string, unknown> | undefined;
+              if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+                const toolId = findToolId(streamEvent.index as number | undefined);
+                if (toolId) {
+                  appendPendingStreamingToolInput(sessionId, toolId, delta.partial_json);
                 }
-                return {
-                  events: { ...s.events, [sessionId]: newEvents },
-                  eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
-                  todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
-                  changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
-                  streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
-                  streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
-                  streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
-                  streamedToolUseIds: { ...s.streamedToolUseIds, [sessionId]: newIds },
-                  ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
+              } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+                queueStreamingDelta(sessionId, 'thinking', delta.thinking, set);
+              } else if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
+                queueStreamingDelta(sessionId, 'text', delta.text, set);
+              }
+            } else if (eventType === 'content_block_stop') {
+              const blockType = (streamEvent.content_block as Record<string, unknown> | undefined)?.type as string | undefined;
+              if (blockType === 'thinking') {
+                logger.debug('Thinking block stopped', { sessionId });
+              } else if (blockType === 'text') {
+                logger.debug('Text block stopped', { sessionId });
+              } else if (blockType === 'tool_use') {
+                const toolId = findToolId(streamEvent.index as number | undefined);
+                logger.debug('Tool use block stopped', { sessionId, toolId });
+              }
+              logStreamingTelemetry(sessionId, 'content_block_stop');
+              streamingTelemetry.delete(sessionId);
+              const blockIndex = streamEvent.index as number | undefined;
+              const toolId = findToolId(blockIndex);
+              const toolMeta = toolId ? get().streamingToolMeta[sessionId]?.[toolId] : undefined;
+              if (toolId && toolMeta) {
+                // Skip if this tool_use block already exists in events (real event arrived first)
+                const alreadyExists = (get().events[sessionId] || []).some((evt) =>
+                  evt.kind === 'assistant' && (evt.data?.message?.content || []).some((b: any) => b?.type === 'tool_use' && b.id === toolId)
+                );
+                if (alreadyExists) {
+                  clearPendingStreamingToolInputs(sessionId);
+                  set((s) => ({
+                    streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
+                    streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
+                    streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
+                  }));
+                  return;
+                }
+                const rawJson = readPendingStreamingToolInput(sessionId, toolId, get()) || '{}';
+                let parsedInput: Record<string, unknown> = {};
+                try { parsedInput = JSON.parse(rawJson); } catch {}
+
+                // Capture original file content from disk BEFORE the tool executes.
+                // At content_block_stop time the file is still unmodified on disk.
+                // Fire-and-forget: snapshot is stored async, re-extraction happens on next event.
+                if ((toolMeta.name === 'Write' || toolMeta.name === 'Edit') && parsedInput.file_path) {
+                  const filePath = parsedInput.file_path as string;
+                  const projectPath = usePreviewStore.getState().projectPath || undefined;
+                  fileApi.readFile(filePath, projectPath).then((original) => {
+                    set((s) => {
+                      const sessionOriginals = preserveFirstOriginalSnapshot(
+                        s.fileOriginals[sessionId] || {},
+                        filePath,
+                        { content: original, isNew: false, toolUseId: toolId },
+                      );
+                      const events = s.events[sessionId] || [];
+                      return {
+                        fileOriginals: { ...s.fileOriginals, [sessionId]: sessionOriginals },
+                        changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(events, s.acknowledgedFiles[sessionId], sessionOriginals) },
+                      };
+                    });
+                  }).catch(() => {
+                    set((s) => {
+                      const sessionOriginals = preserveFirstOriginalSnapshot(
+                        s.fileOriginals[sessionId] || {},
+                        filePath,
+                        { content: '', isNew: true, toolUseId: toolId },
+                      );
+                      return { fileOriginals: { ...s.fileOriginals, [sessionId]: sessionOriginals } };
+                    });
+                  });
+                }
+
+                const toolUseBlock: import('../types/agent').ContentBlock = {
+                  type: 'tool_use',
+                  id: toolId,
+                  name: toolMeta.name,
+                  input: parsedInput,
                 };
-              });
-            } else {
-              flushPendingStreaming(sessionId, set);
+                const syntheticAssistant: import('../types/agent').AgentAssistantMessage = {
+                  type: 'assistant',
+                  uuid: `stream-${toolId}`,
+                  session_id: sessionId,
+                  message: { role: 'assistant', content: [toolUseBlock] },
+                  parent_tool_use_id: null,
+                };
+                const syntheticEvent: AgentMessage = { kind: 'assistant', data: syntheticAssistant };
+                clearPendingStreamingToolInputs(sessionId);
+                set((s) => {
+                  const prev = s.events[sessionId] || [];
+                  const newEvents = [...prev, syntheticEvent];
+                  const extractedTodos = extractTodosFromEvents(newEvents);
+                  const prevIds = s.streamedToolUseIds[sessionId] || new Set<string>();
+                  const newIds = new Set(prevIds);
+                  newIds.add(toolId);
+                  // Un-acknowledge files that have new edits/writes since last save
+                  let acknowledged = s.acknowledgedFiles[sessionId];
+                  if (acknowledged && acknowledged.size > 0) {
+                    const rawPath = parsedInput.file_path as string;
+                    if (rawPath && acknowledged.has(normalizeFilePath(rawPath))) {
+                      const newAcknowledged = new Set(acknowledged);
+                      newAcknowledged.delete(normalizeFilePath(rawPath));
+                      acknowledged = newAcknowledged;
+                      try {
+                        localStorage.setItem(`acknowledged-files-${sessionId}`, JSON.stringify(Array.from(newAcknowledged)));
+                      } catch {}
+                    }
+                  }
+                  return {
+                    events: { ...s.events, [sessionId]: newEvents },
+                    eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
+                    todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
+                    changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
+                    streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
+                    streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
+                    streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
+                    streamedToolUseIds: { ...s.streamedToolUseIds, [sessionId]: newIds },
+                    ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
+                  };
+                });
+              } else {
+                flushPendingStreaming(sessionId, set);
+              }
             }
-          }
           }
           return;
         }
@@ -1624,6 +1650,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             terminalEvent: event.kind,
             isError: event.kind === 'error' || (event.kind === 'result' && Boolean(event.data?.is_error)),
           });
+          if (event.kind === 'result' && !event.data?.is_error) {
+            void get().refreshLatestTokenUsage(sessionId, 'live_synced');
+          }
         }
       }, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy, payloadForModel);
     } catch (err) {
@@ -1697,14 +1726,94 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       delete newMcpRuntimeStatus[sessionId];
       const newTodos = { ...state.todos };
       delete newTodos[sessionId];
+      const newTokenUsage = { ...state.tokenUsageBySession };
+      delete newTokenUsage[sessionId];
+      const newTokenUsageRefreshRequests = { ...state.tokenUsageRefreshRequests };
+      delete newTokenUsageRefreshRequests[sessionId];
       const newStreaming = { ...state.streamingThinking };
       delete newStreaming[sessionId];
       const newStreamingText = { ...state.streamingText };
       delete newStreamingText[sessionId];
       const newForceStopped = { ...state.forceStopped };
       delete newForceStopped[sessionId];
-      return { events: newEvents, eventTimestamps: newTimestamps, isRunning: newRunning, error: newError, mcpRuntimeStatus: newMcpRuntimeStatus, todos: newTodos, streamingThinking: newStreaming, streamingText: newStreamingText, forceStopped: newForceStopped };
+      return {
+        events: newEvents,
+        eventTimestamps: newTimestamps,
+        isRunning: newRunning,
+        error: newError,
+        mcpRuntimeStatus: newMcpRuntimeStatus,
+        todos: newTodos,
+        tokenUsageBySession: newTokenUsage,
+        tokenUsageRefreshRequests: newTokenUsageRefreshRequests,
+        streamingThinking: newStreaming,
+        streamingText: newStreamingText,
+        forceStopped: newForceStopped,
+      };
     });
+  },
+
+  setSessionTokenUsage: (sessionId: string, usage: ThreadTokenUsage | null) => {
+    set((state) => ({
+      tokenUsageBySession: {
+        ...state.tokenUsageBySession,
+        [sessionId]: usage,
+      },
+    }));
+  },
+
+  refreshLatestTokenUsage: async (sessionId: string, freshness: 'live_synced' | 'restored') => {
+    const agentKind: AgentKind = getSessionAgentKind(sessionId) ?? 'claude_code';
+    const requestId = Date.now() + Math.random();
+
+    set((state) => {
+      const existing = state.tokenUsageBySession[sessionId] ?? null;
+      return {
+        tokenUsageRefreshRequests: {
+          ...state.tokenUsageRefreshRequests,
+          [sessionId]: requestId,
+        },
+        tokenUsageBySession: existing
+          ? {
+              ...state.tokenUsageBySession,
+              [sessionId]: {
+                ...existing,
+                contextUsageFreshness: 'syncing',
+              },
+            }
+          : state.tokenUsageBySession,
+      };
+    });
+
+    try {
+      const rawUsage = await agentApi.loadLatestTokenUsage(sessionId, agentKind, freshness);
+      const normalized = normalizeThreadTokenUsage(rawUsage);
+      set((state) => {
+        if (state.tokenUsageRefreshRequests[sessionId] !== requestId) {
+          return {};
+        }
+        return {
+          tokenUsageRefreshRequests: removeSessionEntry(state.tokenUsageRefreshRequests, sessionId),
+          tokenUsageBySession: {
+            ...state.tokenUsageBySession,
+            [sessionId]: normalized,
+          },
+        };
+      });
+    } catch (error) {
+      logger.warn('Failed to refresh latest token usage from history file', {
+        sessionId,
+        agentKind,
+        freshness,
+      }, serializeError(error));
+      set((state) => {
+        if (state.tokenUsageRefreshRequests[sessionId] !== requestId) {
+          return {};
+        }
+        return {
+          tokenUsageRefreshRequests: removeSessionEntry(state.tokenUsageRefreshRequests, sessionId),
+        };
+      });
+    }
   },
 
   loadSessionMessages: async (sessionId: string) => {
@@ -1805,6 +1914,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   cache_creation_input_tokens: fallbackUsage.cache_creation_input_tokens || 0,
                   cache_read_input_tokens: fallbackUsage.cache_read_input_tokens || 0,
                 },
+                last_token_usage: {
+                  input_tokens: fallbackUsage.input_tokens || 0,
+                  output_tokens: fallbackUsage.output_tokens || 0,
+                  cached_input_tokens: fallbackUsage.cache_read_input_tokens || 0,
+                  total_tokens:
+                    (fallbackUsage.input_tokens || 0)
+                    + (fallbackUsage.cache_read_input_tokens || 0)
+                    + (fallbackUsage.output_tokens || 0),
+                },
               } as AgentResultMessage,
             });
             timestamps.push(validTs[validTs.length - 1] || 0);
@@ -1817,6 +1935,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
         todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
       }));
+      await get().refreshLatestTokenUsage(sessionId, 'restored');
       logger.info('Loaded session events from agent JSONL', {
         sessionId,
         agentKind: agentKind ?? 'claude_code',
@@ -1908,6 +2027,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       error: { ...s.error, [sessionId]: null },
       mcpRuntimeStatus: removeSessionEntry(s.mcpRuntimeStatus, sessionId),
       todos: removeSessionEntry(s.todos, sessionId),
+      tokenUsageBySession: removeSessionEntry(s.tokenUsageBySession, sessionId),
+      tokenUsageRefreshRequests: removeSessionEntry(s.tokenUsageRefreshRequests, sessionId),
       streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
       streamingText: { ...s.streamingText, [sessionId]: '' },
       forceStopped: { ...s.forceStopped, [sessionId]: false },

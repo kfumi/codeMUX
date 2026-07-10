@@ -306,6 +306,7 @@ pub fn run() {
             agent::commands::delete_codex_session_files,
             agent::commands::load_claude_session_events,
             agent::commands::load_codex_session_events,
+            agent::commands::load_agent_latest_token_usage,
             agent::commands::rewind_agent_session,
             agent::commands::get_agent_session_info,
             agent::commands::start_codex_proxy,

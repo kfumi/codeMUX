@@ -15,7 +15,11 @@ import { getProviderMode } from './sessionRuntimeHelpers.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion.js';
 import { CodexSessionRuntime, interruptActiveTurn } from './codexRuntime.js';
-import { getRuntimeFlavor, normalizeClaudeResultEvent, type ClaudeTokenUsage } from './runtimeEvents.js';
+import {
+  getRuntimeFlavor,
+  normalizeClaudeResultEvent,
+  type ClaudeTokenUsage,
+} from './runtimeEvents.js';
 import { proxyManager } from './proxyManager.js';
 import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
 import { emit } from './streamEventBatcher.js';
@@ -54,6 +58,12 @@ const WARM_QUERY_WAIT_WINDOW_MS = 500;
 const MESSAGE_TIMEOUT_MS = 300_000;
 const COMPACT_TIMEOUT_MS = 60_000;
 const ASK_USER_QUESTION_TIMEOUT_MESSAGE = '等待用户回复超时，请重新发送消息继续';
+
+// Gate per-message stderr logs. Each stderr line is read by the Rust backend,
+// mutex-locked into a capture buffer, and logged via tracing — so per-message
+// writes during streaming (hundreds/sec) cause severe I/O and lock contention.
+// Enable with CODEMUX_MESSAGE_DEBUG=1 when debugging message flow.
+const DEBUG_MESSAGE_LOGS = process.env.CODEMUX_MESSAGE_DEBUG === '1';
 
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
 type UpdatePermissionsCommand = Extract<SidecarCommand, { type: 'update_permissions' }>;
@@ -251,6 +261,7 @@ export class SessionRuntime {
   private turnActive = false;
   private generation = 0;
   private activeConfigGeneration = 0;
+  private claudeExecutablePath: string | undefined;
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     const normalized = this.normalizeConfig(cmd);
@@ -554,6 +565,7 @@ export class SessionRuntime {
       sidecarDir: SIDECAR_DIST_DIR,
       pathClaude,
     });
+    this.claudeExecutablePath = claudePath ?? pathClaude ?? 'claude';
     const claudeSessionId = config.agentSessionId;
     const envKey = process.env.ANTHROPIC_API_KEY;
     const envUrl = process.env.ANTHROPIC_BASE_URL;
@@ -820,7 +832,9 @@ export class SessionRuntime {
 
         msgCount += 1;
         const msg = result.value as Record<string, unknown>;
-        process.stderr.write(`[sidecar] Message #${msgCount}: type=${msg.type}, subtype=${String(msg.subtype || 'none')}\n`);
+        if (DEBUG_MESSAGE_LOGS) {
+          process.stderr.write(`[sidecar] Message #${msgCount}: type=${msg.type}, subtype=${String(msg.subtype || 'none')}\n`);
+        }
 
         if (msg.type === 'system' && msg.subtype === 'status' && (msg as any).status === 'compacting') {
           compacting = true;
@@ -831,13 +845,14 @@ export class SessionRuntime {
         if (msg.type === 'assistant') {
           const assistant = result.value as any;
           const usage = assistant?.message?.usage || assistant?.usage;
-          process.stderr.write(`[sidecar]   -> assistant usage: ${JSON.stringify(usage || 'NONE')}\n`);
+          if (DEBUG_MESSAGE_LOGS) {
+            process.stderr.write(`[sidecar]   -> assistant usage: ${JSON.stringify(usage || 'NONE')}\n`);
+          }
           const normalizedUsage = normalizeClaudeAssistantUsage(usage);
           if (normalizedUsage) {
             lastAssistantUsage = normalizedUsage;
           }
         }
-
         if (typeof appSessionId === 'string' && shouldCaptureClaudeSessionMapping(msg)) {
           const sdkSessionId = typeof msg.session_id === 'string' ? String(msg.session_id) : undefined;
           if (sdkSessionId && this.config?.agentSessionId !== sdkSessionId) {

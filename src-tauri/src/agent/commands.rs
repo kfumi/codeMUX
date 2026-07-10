@@ -10,6 +10,9 @@ use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 
+use super::context_usage::{
+    latest_claude_usage_from_values, latest_codex_usage_from_values, ThreadTokenUsageSnapshot,
+};
 use super::{spawn_sidecar, SidecarHandle};
 
 fn home_dir() -> Result<PathBuf, String> {
@@ -588,6 +591,33 @@ fn resolve_agent_session_info(
     })
 }
 
+fn load_latest_token_usage_for_agent_session(
+    home: &Path,
+    agent_kind: AgentKind,
+    agent_session_id: &str,
+    freshness: &str,
+) -> Result<Option<ThreadTokenUsageSnapshot>, String> {
+    let history_path = match agent_kind {
+        AgentKind::ClaudeCode => find_claude_session_jsonl(&home.join(".claude"), agent_session_id),
+        AgentKind::Codex => {
+            find_codex_session_jsonl(&home.join(".codex").join("sessions"), agent_session_id)
+        }
+        AgentKind::GeminiCli | AgentKind::Opencode => None,
+    };
+    let Some(history_path) = history_path else {
+        return Ok(None);
+    };
+
+    let values = read_json_stream_values(&history_path)?;
+    let snapshot = match agent_kind {
+        AgentKind::ClaudeCode => latest_claude_usage_from_values(&values, freshness),
+        AgentKind::Codex => latest_codex_usage_from_values(&values, freshness),
+        AgentKind::GeminiCli | AgentKind::Opencode => None,
+    };
+
+    Ok(snapshot)
+}
+
 #[tauri::command]
 pub async fn get_agent_session_info(
     state: State<'_, crate::AppState>,
@@ -597,6 +627,33 @@ pub async fn get_agent_session_info(
     let agent_kind = AgentKind::from_str(&agent_kind)?;
     let agent_session_id = get_agent_session_id(state.inner(), &app_session_id, agent_kind)?;
     resolve_agent_session_info(&home_dir()?, agent_kind, agent_session_id)
+}
+
+#[tauri::command]
+pub async fn load_agent_latest_token_usage(
+    state: State<'_, crate::AppState>,
+    app_session_id: String,
+    agent_kind: String,
+    freshness: Option<String>,
+) -> Result<Option<ThreadTokenUsageSnapshot>, String> {
+    let agent_kind = AgentKind::from_str(&agent_kind)?;
+    let Some(agent_session_id) = get_agent_session_id(state.inner(), &app_session_id, agent_kind)?
+    else {
+        return Ok(None);
+    };
+    let home = home_dir()?;
+    let freshness = freshness.unwrap_or_else(|| "restored".to_string());
+
+    tokio::task::spawn_blocking(move || {
+        load_latest_token_usage_for_agent_session(
+            &home,
+            agent_kind,
+            &agent_session_id,
+            &freshness,
+        )
+    })
+    .await
+    .map_err(|err| format!("Failed to join token usage loader: {}", err))?
 }
 
 #[tauri::command]
@@ -2254,9 +2311,10 @@ mod tests {
     use super::{
         build_update_permissions_command_from_snapshot, convert_codex_history_values_to_events,
         convert_codex_item_to_claude_format, find_codex_session_jsonl,
-        parse_proxy_port_from_stderr, read_codex_interactive_events_from_dir,
-        read_json_stream_values, resolve_agent_session_info, rewind_jsonl_before_latest_turn,
-        rewind_jsonl_before_target_turn, should_include_claude_history_event,
+        load_latest_token_usage_for_agent_session, parse_proxy_port_from_stderr,
+        read_codex_interactive_events_from_dir, read_json_stream_values, resolve_agent_session_info,
+        rewind_jsonl_before_latest_turn, rewind_jsonl_before_target_turn,
+        should_include_claude_history_event,
         sort_events_by_timestamp_stable, RewindTarget,
     };
     use crate::config::types::AgentKind;
@@ -2321,6 +2379,74 @@ mod tests {
             info.message_path.as_deref(),
             Some(jsonl.to_string_lossy().as_ref())
         );
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn loads_latest_claude_token_usage_from_agent_session_file() {
+        let temp =
+            std::env::temp_dir().join(format!("codemux-claude-usage-test-{}", uuid::Uuid::new_v4()));
+        let project_dir = temp.join(".claude").join("projects").join("d--project");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        std::fs::write(
+            project_dir.join("claude-session-1.jsonl"),
+            concat!(
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":10,\"cache_read_input_tokens\":20,\"output_tokens\":3}}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":30,\"cache_read_input_tokens\":40,\"output_tokens\":5}}}\n"
+            ),
+        )
+        .unwrap();
+
+        let usage = load_latest_token_usage_for_agent_session(
+            &temp,
+            AgentKind::ClaudeCode,
+            "claude-session-1",
+            "restored",
+        )
+        .expect("load should not fail")
+        .expect("usage should exist");
+
+        assert_eq!(usage.last.total_tokens, 70);
+        assert_eq!(usage.last.input_tokens, 30);
+        assert_eq!(usage.last.cached_input_tokens, 40);
+        assert_eq!(usage.last.output_tokens, 5);
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn loads_latest_codex_token_usage_from_agent_session_file() {
+        let temp =
+            std::env::temp_dir().join(format!("codemux-codex-usage-test-{}", uuid::Uuid::new_v4()));
+        let sessions_dir = temp
+            .join(".codex")
+            .join("sessions")
+            .join("2026")
+            .join("07")
+            .join("11");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+        std::fs::write(
+            sessions_dir.join("rollout.jsonl"),
+            concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-session-1\"}}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":20,\"cached_input_tokens\":7,\"output_tokens\":5},\"model_context_window\":258400}}}\n"
+            ),
+        )
+        .unwrap();
+
+        let usage = load_latest_token_usage_for_agent_session(
+            &temp,
+            AgentKind::Codex,
+            "codex-session-1",
+            "live_synced",
+        )
+        .expect("load should not fail")
+        .expect("usage should exist");
+
+        assert_eq!(usage.last.total_tokens, 25);
+        assert_eq!(usage.last.cached_input_tokens, 7);
+        assert_eq!(usage.model_context_window, Some(258_400));
 
         let _ = std::fs::remove_dir_all(&temp);
     }
