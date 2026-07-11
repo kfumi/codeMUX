@@ -1,0 +1,115 @@
+﻿import { describe, expect, it, vi } from 'vitest';
+import type { AgentInputPayload } from './agentInputPayload.js';
+import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
+import { OpenCodeRuntime } from './opencodeRuntime.js';
+import type { OpenCodeSdkPort } from './opencodeSdk.js';
+
+function createConfig(agentSessionId?: string): OpenCodeSessionConfig {
+  return {
+    cwd: 'D:/workspace/demo',
+    sessionId: 'codemux-session-1',
+    ...(agentSessionId ? { agentSessionId } : {}),
+    provider: 'openai',
+    model: 'gpt-5',
+    credentialSource: 'codemux',
+  };
+}
+
+function createPort() {
+  const server = { close: vi.fn() };
+  const client = {
+    createSession: vi.fn().mockResolvedValue({ id: 'opencode-new' }),
+    restoreSession: vi.fn().mockResolvedValue({ id: 'opencode-existing' }),
+    prompt: vi.fn().mockResolvedValue(undefined),
+    abort: vi.fn().mockResolvedValue(true),
+  };
+  const port: OpenCodeSdkPort = {
+    start: vi.fn().mockResolvedValue({ server, client }),
+  };
+  return { port, server, client };
+}
+
+describe('OpenCodeRuntime', () => {
+  it('starts an isolated server before creating a new session and returns the mapping', async () => {
+    const { port, client } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+
+    const mapping = await runtime.start();
+
+    expect(port.start).toHaveBeenCalledWith({ cwd: 'D:/workspace/demo' });
+    expect(client.createSession).toHaveBeenCalledWith({ cwd: 'D:/workspace/demo' });
+    expect(mapping).toEqual<OpenCodeSessionMapping>({
+      sessionId: 'codemux-session-1',
+      agentSessionId: 'opencode-new',
+    });
+  });
+
+  it('restores an existing session and never creates a replacement when restoration fails', async () => {
+    const { port, client } = createPort();
+    client.restoreSession.mockRejectedValue(new Error('session not found'));
+    const runtime = new OpenCodeRuntime(createConfig('opencode-missing'), port);
+
+    await expect(runtime.start()).rejects.toThrow(
+      'Failed to restore OpenCode session "opencode-missing": session not found',
+    );
+    expect(client.createSession).not.toHaveBeenCalled();
+    await expect(runtime.start()).rejects.toThrow('Failed to restore OpenCode session "opencode-missing": session not found');
+    expect(client.createSession).not.toHaveBeenCalled();
+  });
+
+  it('sends the prompt to the current session without exposing SDK objects', async () => {
+    const { port, client } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+    const inputPayload: AgentInputPayload = { text: 'hello', images: [] };
+
+    await expect(runtime.sendInput('hello', inputPayload)).resolves.toBeUndefined();
+    expect(client.prompt).toHaveBeenCalledWith({
+      sessionId: 'opencode-new',
+      prompt: 'hello',
+      inputPayload,
+      provider: 'openai',
+      model: 'gpt-5',
+    });
+  });
+
+  it('interrupts an active task and treats abort rejection as an expected interruption', async () => {
+    const { port, client } = createPort();
+    let rejectPrompt!: (reason: unknown) => void;
+    client.prompt.mockReturnValueOnce(new Promise<void>((_, reject) => { rejectPrompt = reject; }));
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+
+    const sendPromise = runtime.sendInput('long task');
+    await vi.waitFor(() => expect(client.prompt).toHaveBeenCalled());
+    await expect(runtime.interrupt()).resolves.toBeUndefined();
+    rejectPrompt(new DOMException('The operation was aborted', 'AbortError'));
+    await expect(sendPromise).resolves.toBeUndefined();
+    expect(client.abort).toHaveBeenCalledWith('opencode-new');
+  });
+
+  it('is idempotent for shutdown and dispose, and clears session before stopping server', async () => {
+    const { port, server, client } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+
+    await runtime.shutdown();
+    await runtime.dispose();
+    await runtime.shutdown();
+
+    expect(client.abort).not.toHaveBeenCalled();
+    expect(server.close).toHaveBeenCalledTimes(1);
+    await expect(runtime.sendInput('after dispose')).rejects.toThrow('OpenCode runtime is not started');
+  });
+
+  it('resetSession clears the current session and allows a new one on the next start', async () => {
+    const { port, client } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+
+    await runtime.resetSession();
+    await runtime.start();
+
+    expect(client.createSession).toHaveBeenCalledTimes(2);
+  });
+});
