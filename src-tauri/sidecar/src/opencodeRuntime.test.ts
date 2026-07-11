@@ -50,6 +50,7 @@ function createPort() {
     restoreSession: vi.fn().mockResolvedValue({ id: 'opencode-existing' }),
     prompt: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(true),
+    respondToPermission: vi.fn().mockResolvedValue(true),
   };
   const port: OpenCodeSdkPort = {
     start: vi.fn().mockResolvedValue({ server, client }),
@@ -68,6 +69,52 @@ function deferred<T>() {
 }
 
 describe('OpenCodeRuntime', () => {
+  it('registers native permission requests before emitting a unified permission event', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { agentId: 'agent-1', emitEvent: (event) => emitted.push(event), eventIdFactory: () => 'event-1' });
+    await runtime.start();
+
+    const rawPermission = { id: 'permission-1', sessionID: 'opencode-new', type: 'future_permission', title: 'Do something', metadata: { path: 'a.txt' } };
+    onEvent({ type: 'permission.updated', properties: rawPermission });
+
+    expect(runtime.permissions.get('permission-1')).toMatchObject({ permissionType: 'future_permission', raw: rawPermission });
+    expect(emitted).toContainEqual(expect.objectContaining({
+      type: 'permission',
+      request_id: 'permission-1',
+      agent_id: 'agent-1',
+      session_id: 'codemux-session-1',
+      opencode_session_id: 'opencode-new',
+      raw_permission: rawPermission,
+    }));
+    await runtime.respondToPermission('permission-1', { approved: true });
+    expect(client.respondToPermission).toHaveBeenCalledWith({ sessionId: 'opencode-new', requestId: 'permission-1', response: 'once' });
+    await runtime.shutdown();
+  });
+
+  it('cancels pending permissions during interrupt without calling native response twice', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+    onEvent({ type: 'permission.updated', properties: { id: 'permission-1', sessionID: 'opencode-new', type: 'read', title: 'Read', metadata: {} } });
+    await runtime.interrupt();
+    expect(runtime.permissions.size).toBe(0);
+    expect(client.respondToPermission).toHaveBeenCalledTimes(1);
+    await runtime.shutdown();
+    expect(client.respondToPermission).toHaveBeenCalledTimes(1);
+  });
+
   it('subscribes to SDK events, normalizes them, and deduplicates repeated events', async () => {
     const { port, client } = createPort();
     const emitted: unknown[] = [];

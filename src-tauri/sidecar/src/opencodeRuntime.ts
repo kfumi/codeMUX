@@ -1,5 +1,6 @@
 import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInputPayload.js';
 import { emit } from './streamEventBatcher.js';
+import { OpenCodePermissionRegistry, type OpenCodePermissionResponse } from './opencodePermissions.js';
 import { extractOpenCodeUsageUpdate, mergeOpenCodeUsage, getOpenCodeEventIdentity, isOpenCodeSessionScopedEvent, getOpenCodeEventSessionId, getOpenCodePayloadKey, getOpenCodeToolId, getOpenCodeToolStatus, toCodeMuxEvent } from './opencodeEvents.js';
 import type { OpenCodeEventSubscription } from './opencodeSdk.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
@@ -29,6 +30,7 @@ export interface OpenCodeRuntimeOptions {
   agentId?: string;
   emitEvent?: (event: unknown) => void;
   eventIdFactory?: () => string;
+  permissionTimeoutMs?: number;
 }
 
 export class OpenCodeRuntime {
@@ -39,6 +41,7 @@ export class OpenCodeRuntime {
   private readonly agentId: string;
   private readonly emitEvent: (event: unknown) => void;
   private readonly eventIdFactory: () => string;
+  readonly permissions: OpenCodePermissionRegistry;
   private server: OpenCodeServerHandle | undefined;
   private client: OpenCodeClientPort | undefined;
   private agentSessionId: string | undefined;
@@ -70,6 +73,7 @@ export class OpenCodeRuntime {
     this.agentId = options.agentId ?? config.sessionId;
     this.emitEvent = options.emitEvent ?? emit;
     this.eventIdFactory = options.eventIdFactory ?? (() => crypto.randomUUID());
+    this.permissions = new OpenCodePermissionRegistry({ timeoutMs: options.permissionTimeoutMs });
     if (!Number.isFinite(this.activeTaskTimeoutMs) || this.activeTaskTimeoutMs <= 0) {
       throw new RangeError('OpenCode active task timeout must be a positive finite number');
     }
@@ -138,6 +142,10 @@ export class OpenCodeRuntime {
 
   interrupt(): Promise<void> {
     return this.enqueueLifecycle(() => this.interruptInternal());
+  }
+
+  respondToPermission(requestId: string, response: OpenCodePermissionResponse, codeMuxSessionId = this.config.sessionId): Promise<void> {
+    return this.permissions.respond(requestId, codeMuxSessionId, response);
   }
 
   resetSession(): Promise<void> {
@@ -321,6 +329,15 @@ export class OpenCodeRuntime {
     if (eventSessionId && eventSessionId !== activeSessionId) {
       return;
     }
+    if (type === 'permission.updated') {
+      this.handlePermissionEvent(event, eventSessionId);
+      if (identity) {
+        this.rememberSeenEventId(identity);
+      } else if (payloadKey) {
+        this.rememberSeenPayloadKey(payloadKey);
+      }
+      return;
+    }
     const terminalSessionId = eventSessionId ?? activeSessionId;
     if (terminalSessionId && this.terminalSessionIds.has(terminalSessionId) && isTerminalEventType(type)) {
       return;
@@ -404,6 +421,52 @@ export class OpenCodeRuntime {
     this.usage = { input_tokens: 0, output_tokens: 0 };
     this.turnStartedAt = 0;
   }
+
+  private handlePermissionEvent(event: unknown, eventSessionId: string | undefined): void {
+    const properties = asRecord(asRecord(event)?.properties);
+    const requestId = readString(properties?.id);
+    if (!requestId) {
+      return;
+    }
+    const permissionType = readString(properties?.type) ?? 'unknown';
+    const description = readString(properties?.title) ?? permissionType;
+    const metadata = asRecord(properties?.metadata);
+    const openCodeSessionId = eventSessionId ?? readString(properties?.sessionID);
+    const rawPermission = properties ?? event;
+    this.permissions.add({
+      requestId,
+      openCodeSessionId,
+      codeMuxSessionId: this.config.sessionId,
+      permissionType,
+      description,
+      metadata,
+      raw: rawPermission,
+      respond: async (response) => {
+        const client = this.client;
+        if (!client || !openCodeSessionId) {
+          throw new Error('OpenCode permission response session is unavailable');
+        }
+        await client.respondToPermission({ sessionId: openCodeSessionId, requestId, response });
+      },
+    });
+    this.emitEvent({
+      type: 'permission',
+      subtype: 'request',
+      agent_id: this.agentId,
+      session_id: this.config.sessionId,
+      ...(openCodeSessionId ? { agent_session_id: openCodeSessionId, opencode_session_id: openCodeSessionId } : {}),
+      sequence: this.eventSequence,
+      request_id: requestId,
+      permission_id: requestId,
+      permission_type: permissionType,
+      description,
+      ...(metadata ? { metadata } : {}),
+      raw_permission: rawPermission,
+      raw_permission_payload: rawPermission,
+    });
+    this.eventSequence += 1;
+  }
+
   private async closeEventSubscription(errors: unknown[]): Promise<void> {
     const subscription = this.eventSubscription;
     this.eventSubscription = undefined;
@@ -417,6 +480,7 @@ export class OpenCodeRuntime {
     }
   }
   private async interruptInternal(): Promise<void> {
+    await this.permissions.cancelAll(this.config.sessionId);
     const client = this.client;
     const sessionId = this.agentSessionId;
     if (!client || !sessionId || !this.activeTask) {
@@ -437,6 +501,7 @@ export class OpenCodeRuntime {
     this.state = 'disposing';
     const errors: unknown[] = [];
     try {
+      await this.permissions.cancelAll(this.config.sessionId);
       try {
         await this.interruptInternal();
       } catch (error) {
@@ -564,4 +629,12 @@ function isAbortError(error: unknown): boolean {
 
 function isTerminalEventType(type: string): boolean {
   return type === 'session.idle' || type === 'session.error' || type === 'session.interrupted' || type === 'session.aborted' || type === 'server.disconnected' || type === 'server.error' || type === 'disconnect' || type === 'connection.error';
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }

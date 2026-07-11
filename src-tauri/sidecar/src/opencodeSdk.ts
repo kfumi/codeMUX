@@ -1,6 +1,7 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/client';
 import { createOpencodeServer } from '@opencode-ai/sdk/server';
 import type { AgentInputImage, AgentInputPayload } from './agentInputPayload.js';
+import type { OpenCodeNativePermissionResponse } from './opencodePermissions.js';
 
 export interface OpenCodeServerHandle {
   close(): void | Promise<void>;
@@ -34,6 +35,7 @@ export interface OpenCodeClientPort {
   restoreSession(input: { cwd: string; sessionId: string }): Promise<OpenCodeSessionHandle>;
   prompt(input: OpenCodePromptInput): Promise<void>;
   abort(sessionId: string): Promise<boolean | void>;
+  respondToPermission(input: { sessionId: string; requestId: string; response: OpenCodeNativePermissionResponse }): Promise<boolean | void>;
   subscribe?(input: { cwd: string; onEvent: (event: unknown) => void; onError: (error: unknown) => void; onRetry?: (error: unknown) => void; onDisconnect?: (error: unknown) => void }): Promise<OpenCodeEventSubscription>;
 }
 
@@ -220,6 +222,16 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
             return readResponse(
               'OpenCode session interrupt',
               await client.session.abort({ path: { id: sessionId }, query: { directory: cwd } }),
+            );
+          },
+          async respondToPermission({ sessionId, requestId, response }) {
+            return readResponse(
+              'OpenCode permission response',
+              await client.postSessionIdPermissionsPermissionId({
+                path: { id: sessionId, permissionID: requestId },
+                query: { directory: cwd },
+                body: { response },
+              }),
             );
           },
         },
