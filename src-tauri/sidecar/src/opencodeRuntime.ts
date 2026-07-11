@@ -1,6 +1,6 @@
 import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInputPayload.js';
 import { emit } from './streamEventBatcher.js';
-import { extractOpenCodeUsage, mergeOpenCodeUsage, getOpenCodeEventIdentity, getOpenCodeEventSessionId, getOpenCodePayloadKey, getOpenCodeToolId, getOpenCodeToolStatus, toCodeMuxEvent } from './opencodeEvents.js';
+import { extractOpenCodeUsageUpdate, mergeOpenCodeUsage, getOpenCodeEventIdentity, isOpenCodeSessionScopedEvent, getOpenCodeEventSessionId, getOpenCodePayloadKey, getOpenCodeToolId, getOpenCodeToolStatus, toCodeMuxEvent } from './opencodeEvents.js';
 import type { OpenCodeEventSubscription } from './opencodeSdk.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
 import {
@@ -288,12 +288,31 @@ export class OpenCodeRuntime {
   private handleSdkEvent(event: unknown): void {
     const eventSessionId = getOpenCodeEventSessionId(event);
     const activeSessionId = this.agentSessionId;
+    const type = typeof (event as { type?: unknown })?.type === 'string' ? (event as { type: string }).type : '';
+    if (isOpenCodeSessionScopedEvent(type) && !eventSessionId) {
+      const diagnosticEvents = toCodeMuxEvent(event, {
+        agentId: this.agentId,
+        sessionId: this.config.sessionId,
+        agentSessionId: this.agentSessionId,
+        sequence: this.eventSequence,
+        durationMs: this.turnStartedAt > 0 ? Date.now() - this.turnStartedAt : 0,
+        usage: this.usage,
+        terminalSessionIds: this.terminalSessionIds,
+        terminalToolIds: this.terminalToolIds,
+        turnId: this.turnId,
+        eventIdFactory: this.eventIdFactory,
+      });
+      for (const diagnosticEvent of diagnosticEvents) {
+        this.emitEvent(diagnosticEvent);
+      }
+      this.eventSequence += diagnosticEvents.length;
+      return;
+    }
     if (eventSessionId && eventSessionId !== activeSessionId) {
       return;
     }
     const identity = getOpenCodeEventIdentity(event, this.turnId);
     const payloadKey = identity ? undefined : getOpenCodePayloadKey(event);
-    const type = typeof (event as { type?: unknown })?.type === 'string' ? (event as { type: string }).type : '';
     if ((identity && this.seenEventIds.has(identity)) || (payloadKey && this.seenPayloadKeys.has(payloadKey))) {
       return;
     }
@@ -312,9 +331,9 @@ export class OpenCodeRuntime {
     } else if (payloadKey) {
       this.rememberSeenPayloadKey(payloadKey);
     }
-    const nextUsage = extractOpenCodeUsage(event);
-    if (nextUsage) {
-      this.usage = mergeOpenCodeUsage(this.usage, nextUsage);
+    const usageUpdate = extractOpenCodeUsageUpdate(event);
+    if (usageUpdate) {
+      this.usage = mergeOpenCodeUsage(this.usage, usageUpdate.usage, usageUpdate.mode);
     }
     const events = toCodeMuxEvent(event, {
       agentId: this.agentId,

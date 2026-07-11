@@ -19,6 +19,7 @@ export interface OpenCodeEventContext extends RuntimeEventContext {
   terminalSessionIds?: ReadonlySet<string>;
   terminalToolIds?: ReadonlySet<string>;
   turnId?: number;
+  eventIdFactory: () => string;
 }
 
 export function getOpenCodeEventIdentity(event: unknown, turnId = 0): string | undefined {
@@ -81,12 +82,19 @@ export function getOpenCodeToolStatus(event: unknown): string | undefined {
   return readString(state?.status);
 }
 
-export function extractOpenCodeUsage(event: unknown): OpenCodeTokenUsage | undefined {
+export type OpenCodeUsageUpdate = {
+  usage: OpenCodeTokenUsage;
+  mode: 'snapshot' | 'step';
+};
+
+export function extractOpenCodeUsageUpdate(event: unknown): OpenCodeUsageUpdate | undefined {
   const record = asRecord(event);
   const properties = asRecord(record?.properties);
   const part = asRecord(properties?.part);
   const info = asRecord(properties?.info);
-  const tokens = asRecord(part?.tokens) ?? asRecord(info?.tokens);
+  const partTokens = asRecord(part?.tokens);
+  const infoTokens = asRecord(info?.tokens);
+  const tokens = partTokens ?? infoTokens;
   if (!tokens) return undefined;
   const cache = asRecord(tokens.cache);
   const input = readNumber(tokens.input);
@@ -95,19 +103,28 @@ export function extractOpenCodeUsage(event: unknown): OpenCodeTokenUsage | undef
   const cacheRead = readNumber(cache?.read);
   const cacheWrite = readNumber(cache?.write);
   if (input === undefined && output === undefined && reasoning === undefined && cacheRead === undefined && cacheWrite === undefined) return undefined;
+  // SDK message.updated info.tokens are cumulative snapshots; step-finish part.tokens are per-step deltas.
   return {
-    input_tokens: input ?? 0,
-    output_tokens: output ?? 0,
-    ...(reasoning !== undefined ? { reasoning_output_tokens: reasoning } : {}),
-    ...(cacheRead !== undefined ? { cached_input_tokens: cacheRead } : {}),
-    ...(cacheWrite !== undefined ? { cache_write_input_tokens: cacheWrite } : {}),
+    mode: partTokens ? 'step' : 'snapshot',
+    usage: {
+      input_tokens: input ?? 0,
+      output_tokens: output ?? 0,
+      ...(reasoning !== undefined ? { reasoning_output_tokens: reasoning } : {}),
+      ...(cacheRead !== undefined ? { cached_input_tokens: cacheRead } : {}),
+      ...(cacheWrite !== undefined ? { cache_write_input_tokens: cacheWrite } : {}),
+    },
   };
 }
 
-export function mergeOpenCodeUsage(previous: OpenCodeTokenUsage, next: OpenCodeTokenUsage): OpenCodeTokenUsage {
+export function extractOpenCodeUsage(event: unknown): OpenCodeTokenUsage | undefined {
+  return extractOpenCodeUsageUpdate(event)?.usage;
+}
+
+export function mergeOpenCodeUsage(previous: OpenCodeTokenUsage, next: OpenCodeTokenUsage, mode: 'snapshot' | 'step' = 'snapshot'): OpenCodeTokenUsage {
+  const mergeValue = (previousValue: number, nextValue: number): number => mode === 'step' ? previousValue + nextValue : Math.max(previousValue, nextValue);
   const merged: OpenCodeTokenUsage = {
-    input_tokens: Math.max(previous.input_tokens, next.input_tokens),
-    output_tokens: Math.max(previous.output_tokens, next.output_tokens),
+    input_tokens: mergeValue(previous.input_tokens, next.input_tokens),
+    output_tokens: mergeValue(previous.output_tokens, next.output_tokens),
   };
   const optionalKeys: Array<keyof Pick<OpenCodeTokenUsage, 'cached_input_tokens' | 'cache_write_input_tokens' | 'cache_creation_input_tokens' | 'reasoning_output_tokens'>> = [
     'cached_input_tokens',
@@ -119,11 +136,12 @@ export function mergeOpenCodeUsage(previous: OpenCodeTokenUsage, next: OpenCodeT
     const value = next[key];
     const previousValue = previous[key];
     if (value !== undefined || previousValue !== undefined) {
-      merged[key] = Math.max(previousValue ?? 0, value ?? 0);
+      merged[key] = mergeValue(previousValue ?? 0, value ?? 0);
     }
   }
   return merged;
 }
+
 
 export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): CodeMuxEvent[] {
   const identity = getOpenCodeEventIdentity(event, context.turnId);
@@ -138,7 +156,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
   if (isTerminalSessionEvent(type) && sessionId && context.terminalSessionIds?.has(sessionId)) return [];
 
   const events: CodeMuxEvent[] = [];
-  if (isSessionScopedEvent(type) && !eventSessionId) {
+  if (isOpenCodeSessionScopedEvent(type) && !eventSessionId) {
     events.push(buildEnvelope({ type: 'diagnostic', subtype: 'missing_session_id', event_type: type }, context, undefined));
     return events.map((output, index) => ({ ...output, sequence: context.sequence + index }));
   }
@@ -248,7 +266,7 @@ function buildAssistantEnvelope(context: OpenCodeEventContext, sessionId: string
 }
 
 function buildEnvelope(event: CodeMuxEvent, context: OpenCodeEventContext, sessionId: string | undefined): CodeMuxEvent {
-  return { ...event, ...routingMetadata(context, sessionId), uuid: context.eventIdFactory?.() ?? crypto.randomUUID() };
+  return { ...event, ...routingMetadata(context, sessionId), uuid: context.eventIdFactory() };
 }
 
 function routingMetadata(context: OpenCodeEventContext, sessionId: string | undefined): CodeMuxEvent {
@@ -260,7 +278,7 @@ function routingMetadata(context: OpenCodeEventContext, sessionId: string | unde
   };
 }
 
-function isSessionScopedEvent(type: string): boolean {
+export function isOpenCodeSessionScopedEvent(type: string): boolean {
   return type.startsWith('session.') || type.startsWith('message.') || type.startsWith('tool.') || type.startsWith('permission.');
 }
 
