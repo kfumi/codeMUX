@@ -108,8 +108,9 @@ describe('OpenCodePermissionRegistry', () => {
     registry.add(request({ respond }));
     const response = registry.respond('permission-1', 'codemux-session-1', { approved: true });
     await vi.waitFor(() => expect(respond).toHaveBeenCalledTimes(1));
-    await registry.cancelAll('codemux-session-1');
+    const cancellation = registry.cancelAll('codemux-session-1');
     rejectNative(new Error('late native failure'));
+    await cancellation;
     await expect(response).rejects.toThrow('response failed');
     expect(registry.size).toBe(0);
   });
@@ -130,12 +131,85 @@ describe('OpenCodePermissionRegistry', () => {
       expect(respondB).toHaveBeenCalledTimes(1);
     });
 
-    await registry.cancelAll('session-a');
+    const cancellation = registry.cancelAll('session-a');
     rejectA(new Error('Session A late failure'));
     rejectB(new Error('Session B transient failure'));
+    await cancellation;
     await expect(responseA).rejects.toThrow('response failed');
     await expect(responseB).rejects.toThrow('response failed');
     expect(registry.get('permission-a')).toBeUndefined();
     expect(registry.get('permission-b')).toBeDefined();
+  });
+
+  it('does not extend the absolute deadline after response failure', async () => {
+    vi.useFakeTimers();
+    try {
+      const registry = new OpenCodePermissionRegistry({ timeoutMs: 100 });
+      let rejectNative!: (error: Error) => void;
+      const respond = vi.fn().mockImplementationOnce(() => new Promise<boolean>((_, reject) => { rejectNative = reject; })).mockResolvedValue(true);
+      registry.add(request({ respond }));
+
+      const response = registry.respond('permission-1', 'codemux-session-1', { approved: true });
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(60);
+      rejectNative(new Error('temporary native failure'));
+      await expect(response).rejects.toThrow('response failed');
+      await vi.advanceTimersByTimeAsync(39);
+      expect(respond).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(respond).toHaveBeenCalledTimes(2);
+      expect(respond).toHaveBeenLastCalledWith('reject');
+      expect(registry.get('permission-1')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('updates responding metadata without creating a second native response', async () => {
+    let resolveNative!: (value: boolean) => void;
+    const respond = vi.fn().mockImplementation(() => new Promise<boolean>((resolve) => { resolveNative = resolve; }));
+    const registry = new OpenCodePermissionRegistry();
+    registry.add(request({ respond }));
+
+    const response = registry.respond('permission-1', 'codemux-session-1', { approved: true });
+    await vi.waitFor(() => expect(respond).toHaveBeenCalledTimes(1));
+    const updated = registry.upsert(request({ permissionType: 'write', description: 'Updated', metadata: { path: 'new.txt' }, raw: { id: 'permission-1', type: 'write', title: 'Updated' }, respond: vi.fn() }));
+    expect(updated.updated).toBe(true);
+    expect(registry.get('permission-1')).toMatchObject({ permissionType: 'write', description: 'Updated', metadata: { path: 'new.txt' } });
+    resolveNative(true);
+    await response;
+    expect(respond).toHaveBeenCalledTimes(1);
+    expect(registry.get('permission-1')).toBeUndefined();
+  });
+
+  it('reclaims request state and session generations after cancellation completes', async () => {
+    const registry = new OpenCodePermissionRegistry();
+    registry.add(request({ requestId: 'permission-a', codeMuxSessionId: 'session-a' }));
+    registry.add(request({ requestId: 'permission-b', codeMuxSessionId: 'session-b' }));
+    expect(registry.trackedSessionCount).toBe(2);
+
+    await registry.cancelAll('session-a');
+    expect(registry.size).toBe(1);
+    expect(registry.trackedSessionCount).toBe(1);
+    await registry.cancelAll('session-b');
+    expect(registry.size).toBe(0);
+    expect(registry.trackedSessionCount).toBe(0);
+  });
+
+  it('reports expired when responding after the absolute deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      const registry = new OpenCodePermissionRegistry({ timeoutMs: 100 });
+      const respond = vi.fn().mockResolvedValue(true);
+      registry.add(request({ respond }));
+      vi.setSystemTime(Date.now() + 100);
+
+      const error = await registry.respond('permission-1', 'codemux-session-1', { approved: true }).catch((cause) => cause);
+      expect(error).toMatchObject({ code: 'expired' });
+      expect(respond).toHaveBeenCalledWith('reject');
+      expect(registry.get('permission-1')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
