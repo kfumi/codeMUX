@@ -1,10 +1,13 @@
-﻿import type { AgentInputPayload } from './agentInputPayload.js';
+import type { AgentInputPayload } from './agentInputPayload.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
 import {
   mapOpenCodeImages,
   officialOpenCodeSdkPort,
   type OpenCodeClientPort,
   type OpenCodeSdkPort,
+  type OpenCodeSdkReadyResources,
+  type OpenCodeSdkStartFailure,
+  type OpenCodeSdkStartResources,
   type OpenCodeServerHandle,
 } from './opencodeSdk.js';
 
@@ -36,22 +39,39 @@ export class OpenCodeRuntime {
 
     this.state = 'starting';
     if (!this.client) {
-      const resources = await this.sdk.start({ cwd: this.config.cwd });
+      let resources: OpenCodeSdkReadyResources;
+      try {
+        resources = await this.sdk.start({ cwd: this.config.cwd });
+      } catch (error) {
+        this.retainStartResources(getStartFailureResources(error));
+        const cleanupError = await this.closeServerAfterStartFailure();
+        this.state = cleanupError ? 'cleanup_failed' : 'idle';
+        if (cleanupError) {
+          throw aggregateErrors('OpenCode SDK start and cleanup failed', [error, cleanupError]);
+        }
+        throw error;
+      }
       this.server = resources.server;
       this.client = resources.client;
     }
 
+    const client = this.client;
+    if (!client) {
+      this.state = 'idle';
+      throw new Error('OpenCode client is unavailable after server startup');
+    }
+
     try {
       const session = this.agentSessionId
-        ? await this.client.restoreSession({ cwd: this.config.cwd, sessionId: this.agentSessionId })
-        : await this.client.createSession({ cwd: this.config.cwd });
+        ? await client.restoreSession({ cwd: this.config.cwd, sessionId: this.agentSessionId })
+        : await client.createSession({ cwd: this.config.cwd });
       this.agentSessionId = session.id;
       this.state = 'started';
       return this.mapping();
     } catch (error) {
       const requestedSessionId = this.config.agentSessionId;
       const cleanupError = await this.closeServerAfterStartFailure();
-      this.state = 'idle';
+      this.state = cleanupError ? 'cleanup_failed' : 'idle';
       const startError = requestedSessionId
         ? new Error(`Failed to restore OpenCode session "${requestedSessionId}": ${String(errorMessage(error))}`)
         : error;
@@ -155,6 +175,15 @@ export class OpenCodeRuntime {
     };
   }
 
+  private retainStartResources(resources: OpenCodeSdkStartResources | undefined): void {
+    if (resources?.server) {
+      this.server = resources.server;
+    }
+    if (resources?.client) {
+      this.client = resources.client;
+    }
+  }
+
   private async disposeResources(): Promise<void> {
     const errors: unknown[] = [];
     try {
@@ -213,10 +242,18 @@ export class OpenCodeRuntime {
   }
 }
 
-function aggregateErrors(message: string, errors: unknown[]): Error {
-  if (errors.length === 1 && errors[0] instanceof Error) {
-    return new AggregateError(errors, message);
+function getStartFailureResources(error: unknown): OpenCodeSdkStartResources | undefined {
+  if (!isOpenCodeSdkStartFailure(error)) {
+    return undefined;
   }
+  return error.resources;
+}
+
+function isOpenCodeSdkStartFailure(error: unknown): error is OpenCodeSdkStartFailure {
+  return typeof error === 'object' && error !== null && 'resources' in error;
+}
+
+function aggregateErrors(message: string, errors: unknown[]): Error {
   return new AggregateError(errors, message);
 }
 

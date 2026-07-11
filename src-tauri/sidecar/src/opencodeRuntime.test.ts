@@ -1,8 +1,8 @@
-﻿import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AgentInputPayload } from './agentInputPayload.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
 import { OpenCodeRuntime } from './opencodeRuntime.js';
-import type { OpenCodeSdkPort } from './opencodeSdk.js';
+import type { OpenCodeSdkPort, OpenCodeSdkStartFailure } from './opencodeSdk.js';
 
 function createConfig(agentSessionId?: string): OpenCodeSessionConfig {
   return {
@@ -130,6 +130,41 @@ describe('OpenCodeRuntime', () => {
     await expect(runtime.sendInput('after dispose')).rejects.toThrow('OpenCode runtime is not started');
   });
 
+  it('recovers to a retryable state when sdk.start fails after creating partial resources', async () => {
+    const { port, server, client } = createPort();
+    const startFailure = Object.assign(new Error('client creation failed'), {
+      resources: { server, client },
+    }) as OpenCodeSdkStartFailure;
+    port.start
+      .mockRejectedValueOnce(startFailure)
+      .mockResolvedValueOnce({ server, client });
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+
+    await expect(runtime.start()).rejects.toThrow('client creation failed');
+    expect(server.close).toHaveBeenCalledTimes(1);
+    await expect(runtime.start()).resolves.toEqual({
+      sessionId: 'codemux-session-1',
+      agentSessionId: 'opencode-new',
+    });
+    expect(port.start).toHaveBeenCalledTimes(2);
+  });
+
+  it('retains a server when session startup and its close both fail, then shuts it down on retry', async () => {
+    const { port, server, client } = createPort();
+    client.createSession.mockRejectedValueOnce(new Error('session creation failed'));
+    server.close
+      .mockRejectedValueOnce(new Error('server close failed'))
+      .mockResolvedValue(undefined);
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+
+    await expect(runtime.start()).rejects.toThrow('OpenCode start failed and cleanup failed');
+    expect(port.start).toHaveBeenCalledTimes(1);
+    await expect(runtime.start()).rejects.toThrow('OpenCode runtime cannot start in state cleanup_failed');
+
+    await expect(runtime.shutdown()).resolves.toBeUndefined();
+    expect(server.close).toHaveBeenCalledTimes(2);
+    expect(port.start).toHaveBeenCalledTimes(1);
+  });
   it('resetSession clears the current session and allows a new one on the next start', async () => {
     const { port, client } = createPort();
     const runtime = new OpenCodeRuntime(createConfig(), port);

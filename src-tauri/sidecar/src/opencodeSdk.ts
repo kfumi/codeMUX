@@ -1,4 +1,4 @@
-﻿import { createOpencodeClient } from '@opencode-ai/sdk/client';
+import { createOpencodeClient } from '@opencode-ai/sdk/client';
 import { createOpencodeServer } from '@opencode-ai/sdk/server';
 import type { AgentInputImage, AgentInputPayload } from './agentInputPayload.js';
 
@@ -32,11 +32,22 @@ export interface OpenCodeClientPort {
   abort(sessionId: string): Promise<boolean | void>;
 }
 
+export interface OpenCodeSdkStartResources {
+  server?: OpenCodeServerHandle;
+  client?: OpenCodeClientPort;
+}
+
+export interface OpenCodeSdkStartFailure extends Error {
+  resources?: OpenCodeSdkStartResources;
+}
+
+export interface OpenCodeSdkReadyResources {
+  server: OpenCodeServerHandle;
+  client: OpenCodeClientPort;
+}
+
 export interface OpenCodeSdkPort {
-  start(input: { cwd: string }): Promise<{
-    server: OpenCodeServerHandle;
-    client: OpenCodeClientPort;
-  }>;
+  start(input: { cwd: string }): Promise<OpenCodeSdkReadyResources>;
 }
 
 function readResponse<T>(operation: string, response: { data?: T; error?: unknown }): T {
@@ -111,7 +122,16 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
         },
       };
     } catch (error) {
-      await server.close();
+      try {
+        await server.close();
+      } catch (closeError) {
+        const failure = new AggregateError(
+          [error, closeError],
+          'OpenCode SDK start and initial server cleanup failed',
+        ) as OpenCodeSdkStartFailure;
+        failure.resources = { server };
+        throw failure;
+      }
       throw error;
     }
   },
