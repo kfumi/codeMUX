@@ -14,6 +14,7 @@ export interface OpenCodeEventContext extends RuntimeEventContext {
   durationMs?: number;
   usage?: OpenCodeTokenUsage;
   seenEventIds?: ReadonlySet<string>;
+  seenPayloadKeys?: ReadonlySet<string>;
   terminalSessionIds?: ReadonlySet<string>;
   terminalToolIds?: ReadonlySet<string>;
   turnId?: number;
@@ -36,6 +37,23 @@ export function getOpenCodeEventIdentity(event: unknown, turnId = 0): string | u
     return `${type}:${sessionId}:turn:${turnId}`;
   }
   return undefined;
+}
+
+export function getOpenCodePayloadKey(event: unknown): string {
+  const record = asRecord(event);
+  const properties = asRecord(record?.properties);
+  const part = asRecord(properties?.part);
+  const type = typeof record?.type === 'string' ? record.type : 'unknown';
+  const sessionId = getOpenCodeEventSessionId(event) ?? '';
+  const identifiers = [
+    readString(part?.id),
+    readString(part?.callID),
+    readString(part?.messageID),
+    readString(properties?.messageID),
+    readString(properties?.toolID),
+    readString(properties?.toolId),
+  ].filter((value): value is string => value !== undefined);
+  return `${type}:session:${sessionId}:ids:${identifiers.join('|')}:payload:${stableStringify(event)}`;
 }
 
 export function getOpenCodeEventSessionId(event: unknown): string | undefined {
@@ -86,7 +104,8 @@ export function extractOpenCodeUsage(event: unknown): OpenCodeTokenUsage | undef
 
 export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): CodeMuxEvent[] {
   const identity = getOpenCodeEventIdentity(event, context.turnId);
-  if (identity && context.seenEventIds?.has(identity)) return [];
+  const payloadKey = identity ? undefined : getOpenCodePayloadKey(event);
+  if ((identity && context.seenEventIds?.has(identity)) || (payloadKey && context.seenPayloadKeys?.has(payloadKey))) return [];
 
   const record = asRecord(event);
   const type = typeof record?.type === 'string' ? record.type : 'unknown';

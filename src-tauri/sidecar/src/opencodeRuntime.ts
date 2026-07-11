@@ -1,6 +1,6 @@
 import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInputPayload.js';
 import { emit } from './streamEventBatcher.js';
-import { extractOpenCodeUsage, getOpenCodeEventIdentity, getOpenCodeEventSessionId, getOpenCodeToolId, getOpenCodeToolStatus, toCodeMuxEvent } from './opencodeEvents.js';
+import { extractOpenCodeUsage, getOpenCodeEventIdentity, getOpenCodeEventSessionId, getOpenCodePayloadKey, getOpenCodeToolId, getOpenCodeToolStatus, toCodeMuxEvent } from './opencodeEvents.js';
 import type { OpenCodeEventSubscription } from './opencodeSdk.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
 import {
@@ -20,6 +20,7 @@ type RuntimeState = 'idle' | 'starting' | 'started' | 'disposing' | 'cleanup_fai
 export const DEFAULT_ACTIVE_TASK_TIMEOUT_MS = 30_000;
 export const DEFAULT_SERVER_CLOSE_TIMEOUT_MS = 10_000;
 const MAX_SEEN_EVENT_IDS = 2_048;
+const MAX_SEEN_PAYLOAD_KEYS = 2_048;
 
 export interface OpenCodeRuntimeOptions {
   activeTaskTimeoutMs?: number;
@@ -45,6 +46,7 @@ export class OpenCodeRuntime {
   private state: RuntimeState = 'idle';
   private eventSubscription: OpenCodeEventSubscription | undefined;
   private readonly seenEventIds = new Map<string, true>();
+  private readonly seenPayloadKeys = new Map<string, true>();
   private readonly terminalSessionIds = new Set<string>();
   private readonly terminalToolIds = new Set<string>();
   private eventSequence = 0;
@@ -285,8 +287,9 @@ export class OpenCodeRuntime {
       return;
     }
     const identity = getOpenCodeEventIdentity(event, this.turnId);
+    const payloadKey = identity ? undefined : getOpenCodePayloadKey(event);
     const type = typeof (event as { type?: unknown })?.type === 'string' ? (event as { type: string }).type : '';
-    if (identity && this.seenEventIds.has(identity)) {
+    if ((identity && this.seenEventIds.has(identity)) || (payloadKey && this.seenPayloadKeys.has(payloadKey))) {
       return;
     }
     const terminalSessionId = eventSessionId ?? activeSessionId;
@@ -301,6 +304,8 @@ export class OpenCodeRuntime {
 
     if (identity) {
       this.rememberSeenEventId(identity);
+    } else if (payloadKey) {
+      this.rememberSeenPayloadKey(payloadKey);
     }
     const nextUsage = extractOpenCodeUsage(event);
     if (nextUsage) {
@@ -348,7 +353,18 @@ export class OpenCodeRuntime {
     }
   }
 
+  private rememberSeenPayloadKey(key: string): void {
+    this.seenPayloadKeys.set(key, true);
+    while (this.seenPayloadKeys.size > MAX_SEEN_PAYLOAD_KEYS) {
+      const oldest = this.seenPayloadKeys.keys().next().value;
+      if (oldest === undefined) break;
+      this.seenPayloadKeys.delete(oldest);
+    }
+  }
+
   private clearEventState(): void {
+    this.seenEventIds.clear();
+    this.seenPayloadKeys.clear();
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
     this.usage = { input_tokens: 0, output_tokens: 0 };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getOpenCodeEventIdentity, toCodeMuxEvent, type OpenCodeEventContext } from './opencodeEvents.js';
+import { getOpenCodeEventIdentity, getOpenCodePayloadKey, toCodeMuxEvent, type OpenCodeEventContext } from './opencodeEvents.js';
 
 function context(overrides: Partial<OpenCodeEventContext> = {}): OpenCodeEventContext {
   return { agentId: 'agent-1', sessionId: 'codemux-session-1', agentSessionId: 'opencode-session-1', sequence: 7, durationMs: 123, usage: { input_tokens: 10, output_tokens: 4, reasoning_output_tokens: 2, cached_input_tokens: 3, cache_write_input_tokens: 1 }, ...overrides };
@@ -57,6 +57,22 @@ describe('OpenCode event normalization', () => {
     expect(lateRunning).toEqual([]);
   });
 
+  it('deduplicates identical non-terminal payloads without dropping changed increments', () => {
+    const first = { type: 'message.part.updated', properties: { sessionID: 'opencode-session-1', part: { id: 'part-1', type: 'text' }, delta: 'first' } };
+    const replay = { type: 'message.part.updated', properties: { sessionID: 'opencode-session-1', part: { id: 'part-1', type: 'text' }, delta: 'first' } };
+    const second = { type: 'message.part.updated', properties: { sessionID: 'opencode-session-1', part: { id: 'part-1', type: 'text' }, delta: 'second' } };
+    const replayKey = getOpenCodePayloadKey(replay);
+    expect(replayKey).toBe(getOpenCodePayloadKey(first));
+    expect(getOpenCodePayloadKey(second)).not.toBe(replayKey);
+    expect(toCodeMuxEvent(replay, context({ seenPayloadKeys: new Set([replayKey!]) }))).toEqual([]);
+    expect(toCodeMuxEvent(second, context({ seenPayloadKeys: new Set([replayKey!]) }))).toHaveLength(1);
+  });
+
+  it('deduplicates identical unknown diagnostics by stable payload', () => {
+    const event = { type: 'future.event', properties: { sessionID: 'opencode-session-1', value: { b: 2, a: 1 } } };
+    const key = getOpenCodePayloadKey(event);
+    expect(toCodeMuxEvent(event, context({ seenPayloadKeys: new Set([key!]) }))).toEqual([]);
+  });
   it('uses a stable session and turn key when a terminal event has no provider event ID', () => {
     const first = { type: 'session.idle', properties: { sessionID: 'opencode-session-1', turnID: 'turn-1', noise: 'first' } };
     const replay = { type: 'session.idle', properties: { sessionID: 'opencode-session-1', turnID: 'turn-1', noise: 'replay' } };

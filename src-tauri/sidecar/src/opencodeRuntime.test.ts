@@ -525,8 +525,10 @@ describe('OpenCodeRuntime', () => {
 
     const textPart = (delta: string) => ({ type: 'message.part.updated', properties: { part: { id: 'part-1', sessionID: 'opencode-new', messageID: 'message-1', type: 'text' }, delta } });
     onEvent(textPart('first'));
+    onEvent(textPart('first'));
     onEvent(textPart('second'));
     const toolPart = (status: string, extra: Record<string, unknown> = {}) => ({ type: 'message.part.updated', properties: { part: { id: 'tool-part-1', sessionID: 'opencode-new', messageID: 'message-1', type: 'tool', callID: 'call-1', tool: 'search', state: { status, input: {}, ...extra } } } });
+    onEvent(toolPart('running'));
     onEvent(toolPart('running'));
     onEvent(toolPart('completed', { output: { matches: ['a'] } }));
     onEvent(toolPart('running'));
@@ -534,6 +536,22 @@ describe('OpenCodeRuntime', () => {
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'assistant')).toHaveLength(3));
     expect(emitted.filter((event) => (event as { event_kind?: string }).event_kind === 'tool_result')).toHaveLength(1);
     expect(emitted.filter((event) => (event as { type?: string }).type === 'assistant').map((event) => (event as { event_kind?: string }).event_kind)).toEqual([undefined, undefined, 'tool_call']);
+    await runtime.shutdown();
+  });
+  it('suppresses identical unknown event replays without suppressing changed payloads', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+    onEvent({ type: 'future.event', properties: { sessionID: 'opencode-new', value: 1 } });
+    onEvent({ type: 'future.event', properties: { sessionID: 'opencode-new', value: 1 } });
+    onEvent({ type: 'future.event', properties: { sessionID: 'opencode-new', value: 2 } });
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { subtype?: string }).subtype === 'unknown_event')).toHaveLength(2));
     await runtime.shutdown();
   });
   it('allows the official ID-less session.idle fixture to complete two prompt turns', async () => {
