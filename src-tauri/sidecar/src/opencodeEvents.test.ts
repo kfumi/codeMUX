@@ -41,4 +41,19 @@ describe('OpenCode event normalization', () => {
     expect(second).toEqual([]);
     expect(getOpenCodeEventIdentity(event)).toBe(getOpenCodeEventIdentity(event));
   });
+
+  it('uses the event session ID for terminal metadata when context has none', () => {
+    const events = toCodeMuxEvent({ type: 'session.error', properties: { sessionID: 'event-session', error: { name: 'UnknownError', data: { message: 'failed' } } } }, context({ agentSessionId: undefined }));
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'error', agent_session_id: 'event-session', opencode_session_id: 'event-session' }),
+      expect.objectContaining({ type: 'result', agent_session_id: 'event-session', opencode_session_id: 'event-session' }),
+    ]));
+  });
+
+  it('serializes structured tool output and suppresses terminal tool states supplied by context', () => {
+    const completed = toCodeMuxEvent({ type: 'message.part.updated', properties: { part: { id: 'part-1', sessionID: 'opencode-session-1', messageID: 'message-1', type: 'tool', callID: 'call-1', tool: 'search', state: { status: 'completed', input: {}, output: { matches: ['a', 'b'] }, title: 'search', metadata: {}, time: { start: 1, end: 2 } } } } }, context());
+    const lateRunning = toCodeMuxEvent({ type: 'message.part.updated', properties: { part: { id: 'part-1', sessionID: 'opencode-session-1', messageID: 'message-1', type: 'tool', callID: 'call-1', tool: 'search', state: { status: 'running', input: {} } } } }, context({ terminalToolIds: new Set(['call-1']) }));
+    expect(completed[0]).toMatchObject({ message: { content: [{ content: '{"matches":["a","b"]}' }] } });
+    expect(lateRunning).toEqual([]);
+  });
 });

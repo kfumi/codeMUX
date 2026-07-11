@@ -1,6 +1,6 @@
 import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInputPayload.js';
 import { emit } from './streamEventBatcher.js';
-import { extractOpenCodeUsage, getOpenCodeEventIdentity, toCodeMuxEvent } from './opencodeEvents.js';
+import { extractOpenCodeUsage, getOpenCodeEventIdentity, getOpenCodeEventSessionId, getOpenCodeToolId, getOpenCodeToolStatus, toCodeMuxEvent } from './opencodeEvents.js';
 import type { OpenCodeEventSubscription } from './opencodeSdk.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
 import {
@@ -44,6 +44,8 @@ export class OpenCodeRuntime {
   private state: RuntimeState = 'idle';
   private eventSubscription: OpenCodeEventSubscription | undefined;
   private readonly seenEventIds = new Set<string>();
+  private readonly terminalSessionIds = new Set<string>();
+  private readonly terminalToolIds = new Set<string>();
   private eventSequence = 0;
   private usage: import('./runtimeEvents.js').OpenCodeTokenUsage = { input_tokens: 0, output_tokens: 0 };
   private turnStartedAt = 0;
@@ -133,6 +135,7 @@ export class OpenCodeRuntime {
     return this.enqueueLifecycle(async () => {
       await this.interruptInternal();
       await this.waitForActiveTaskIfPresent();
+      this.clearEventState();
       this.agentSessionId = undefined;
     });
   }
@@ -272,10 +275,26 @@ export class OpenCodeRuntime {
   }
 
   private handleSdkEvent(event: unknown): void {
+    const eventSessionId = getOpenCodeEventSessionId(event);
+    const activeSessionId = this.agentSessionId;
+    if (eventSessionId && eventSessionId !== activeSessionId) {
+      return;
+    }
     const identity = getOpenCodeEventIdentity(event);
     if (this.seenEventIds.has(identity)) {
       return;
     }
+    const type = typeof (event as { type?: unknown })?.type === 'string' ? (event as { type: string }).type : '';
+    const terminalSessionId = eventSessionId ?? activeSessionId;
+    if (terminalSessionId && this.terminalSessionIds.has(terminalSessionId) && isTerminalEventType(type)) {
+      return;
+    }
+    const toolId = getOpenCodeToolId(event);
+    const toolStatus = getOpenCodeToolStatus(event);
+    if (toolId && this.terminalToolIds.has(toolId)) {
+      return;
+    }
+
     this.seenEventIds.add(identity);
     const nextUsage = extractOpenCodeUsage(event);
     if (nextUsage) {
@@ -288,17 +307,30 @@ export class OpenCodeRuntime {
       sequence: this.eventSequence,
       durationMs: this.turnStartedAt > 0 ? Date.now() - this.turnStartedAt : 0,
       usage: this.usage,
+      terminalSessionIds: this.terminalSessionIds,
+      terminalToolIds: this.terminalToolIds,
     });
     for (const normalizedEvent of events) {
       this.emitEvent(normalizedEvent);
     }
     this.eventSequence += events.length;
-    if (events.some((eventItem) => eventItem.type === 'result')) {
+    if (terminalSessionId && isTerminalEventType(type) && events.some((eventItem) => eventItem.type === 'result' || eventItem.type === 'error')) {
+      this.terminalSessionIds.add(terminalSessionId);
       this.turnStartedAt = 0;
       this.usage = { input_tokens: 0, output_tokens: 0 };
     }
+    if (toolId && (toolStatus === 'completed' || toolStatus === 'error')) {
+      this.terminalToolIds.add(toolId);
+    }
   }
 
+  private clearEventState(): void {
+    this.seenEventIds.clear();
+    this.terminalSessionIds.clear();
+    this.terminalToolIds.clear();
+    this.usage = { input_tokens: 0, output_tokens: 0 };
+    this.turnStartedAt = 0;
+  }
   private async closeEventSubscription(errors: unknown[]): Promise<void> {
     const subscription = this.eventSubscription;
     this.eventSubscription = undefined;
@@ -455,4 +487,8 @@ function isAbortError(error: unknown): boolean {
     message.includes('cancelled') ||
     message.includes('canceled')
   );
+}
+
+function isTerminalEventType(type: string): boolean {
+  return type === 'session.idle' || type === 'session.error' || type === 'session.interrupted' || type === 'session.aborted' || type === 'server.disconnected' || type === 'server.error' || type === 'disconnect' || type === 'connection.error';
 }

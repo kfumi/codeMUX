@@ -402,4 +402,53 @@ describe('OpenCodeRuntime', () => {
 
     expect(client.createSession).toHaveBeenCalledTimes(2);
   });
+
+  it('filters events from old and unrelated OpenCode sessions', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => { onEvent = input.onEvent; return { close: vi.fn() }; });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+    onEvent({ type: 'message.part.updated', properties: { part: { id: 'old', sessionID: 'old-session', messageID: 'm', type: 'text', text: 'old' }, delta: 'old' } });
+    onEvent({ type: 'message.part.updated', properties: { part: { id: 'other', sessionID: 'other-session', messageID: 'm', type: 'text', text: 'other' }, delta: 'other' } });
+    onEvent({ type: 'message.part.updated', properties: { part: { id: 'current', sessionID: 'opencode-new', messageID: 'm', type: 'text', text: 'current' }, delta: 'current' } });
+    await vi.waitFor(() => expect(emitted).toHaveLength(1));
+    expect(emitted[0]).toMatchObject({ message: { content: [{ text: 'current' }] } });
+    await runtime.shutdown();
+  });
+
+  it('emits one terminal result and ignores late tool starts and duplicate interruption', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => { onEvent = input.onEvent; return { close: vi.fn() }; });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+    const complete = { type: 'session.idle', properties: { sessionID: 'opencode-new' } };
+    onEvent(complete);
+    onEvent({ type: 'session.error', properties: { sessionID: 'opencode-new', error: { name: 'UnknownError', data: { message: 'late error' } } } });
+    onEvent({ type: 'message.part.updated', properties: { part: { id: 'tool-part', sessionID: 'opencode-new', messageID: 'm', type: 'tool', callID: 'call-1', tool: 'bash', state: { status: 'completed', input: {}, output: 'done', title: 'bash', metadata: {}, time: { start: 1, end: 2 } } } } });
+    onEvent({ type: 'message.part.updated', properties: { part: { id: 'tool-part', sessionID: 'opencode-new', messageID: 'm', type: 'tool', callID: 'call-1', tool: 'bash', state: { status: 'running', input: {} } } } });
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
+    expect(emitted.filter((event) => (event as { type?: string }).event_kind === 'tool_call')).toHaveLength(0);
+    await runtime.shutdown();
+  });
+
+  it('clears event state when resetting to a new OpenCode session', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => { onEvent = input.onEvent; return { close: vi.fn() }; });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+    const oldEvent = { type: 'message.part.updated', properties: { part: { id: 'same-part', sessionID: 'opencode-new', messageID: 'm', type: 'text', text: 'first' }, delta: 'first' } };
+    onEvent(oldEvent);
+    await runtime.resetSession();
+    client.createSession.mockResolvedValueOnce({ id: 'opencode-reset' });
+    await runtime.start();
+    onEvent({ ...oldEvent, properties: { ...oldEvent.properties, part: { ...(oldEvent.properties as { part: Record<string, unknown> }).part, sessionID: 'opencode-reset' } } });
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'assistant')).toHaveLength(2));
+    await runtime.shutdown();
+  });
 });
