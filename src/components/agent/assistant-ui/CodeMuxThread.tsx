@@ -27,6 +27,7 @@ import {
 import { cn } from '../../../lib/utils';
 import { createLogger } from '../../../lib/logger';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
+import type { ThreadTokenUsage } from '../contextUsage';
 
 const logger = createLogger('CodeMuxThread');
 import { isInterruptMarker } from '../../../stores/agentEventParsing';
@@ -96,6 +97,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
+  const tokenUsage = useAgentStore((state) => state.tokenUsageBySession[sessionId] ?? null);
   const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
@@ -161,22 +163,13 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     return newResult;
   }, [events]);
 
-  const resultStatsCacheRef = useRef<{ events: AgentMessage[]; result: Record<number, MessageFooterStats> }>({ events: [], result: {} });
   const resultStatsByAssistantIndex = useMemo(() => {
-    const cache = resultStatsCacheRef.current;
-    if (cache.events === events) {
-      return cache.result;
-    }
-    const prevLen = cache.events.length;
-    if (prevLen > 0 && prevLen < events.length && cache.events[0] === events[0]) {
-      const newResult = incrementAssistantResultStatsMap(cache.result, events, prevLen);
-      resultStatsCacheRef.current = { events, result: newResult };
-      return newResult;
-    }
-    const newResult = buildAssistantResultStatsMap(events);
-    resultStatsCacheRef.current = { events, result: newResult };
-    return newResult;
-  }, [events]);
+    const latestAssistantIndex = findLatestAssistantIndex(events);
+    const stats = buildFooterStatsFromTokenUsage(tokenUsage);
+    return latestAssistantIndex >= 0 && stats
+      ? { [latestAssistantIndex]: stats }
+      : {};
+  }, [events, tokenUsage]);
 
   const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
   const latestRewindableUserIndex = useMemo(() => findLatestRewindableUserIndex(events), [events]);
@@ -1333,56 +1326,29 @@ export function buildToolDurationMap(events: AgentMessage[]): Record<string, num
   return durations;
 }
 
-function incrementAssistantResultStatsMap(
-  prevStats: Record<number, MessageFooterStats>,
-  events: AgentMessage[],
-  fromIndex: number,
-): Record<number, MessageFooterStats> {
-  const statsMap = { ...prevStats };
-  const resultIndexByAssistantIndex = buildAssistantResultTargetMap(events);
-
-  for (const [assistantIndex, resultIndex] of resultIndexByAssistantIndex) {
-    if (resultIndex < fromIndex) continue;
-    const event = events[resultIndex];
-    if (event?.kind !== 'result') continue;
-
-    statsMap[assistantIndex] = buildFooterStatsFromResultEvent(event);
+export function buildFooterStatsFromTokenUsage(
+  tokenUsage: ThreadTokenUsage | null | undefined,
+): MessageFooterStats | undefined {
+  if (!tokenUsage) {
+    return undefined;
   }
 
-  return statsMap;
-}
-
-export function buildAssistantResultStatsMap(
-  events: AgentMessage[],
-): Record<number, MessageFooterStats> {
-  const statsMap: Record<number, MessageFooterStats> = {};
-  const resultIndexByAssistantIndex = buildAssistantResultTargetMap(events);
-
-  for (const [assistantIndex, resultIndex] of resultIndexByAssistantIndex) {
-    const event = events[resultIndex];
-    if (event?.kind !== 'result') {
-      continue;
-    }
-
-    statsMap[assistantIndex] = buildFooterStatsFromResultEvent(event);
-  }
-
-  return statsMap;
-}
-
-function buildFooterStatsFromResultEvent(
-  event: Extract<AgentMessage, { kind: 'result' }>,
-): MessageFooterStats {
-  const ltu = (event.data as any).last_token_usage;
-  const usage = event.data.usage;
   return {
-    durationMs: event.data.duration_ms,
-    numTurns: event.data.num_turns,
-    inputTokens: ltu ? ltu.input_tokens : (usage?.input_tokens || 0),
-    outputTokens: ltu ? ltu.output_tokens : (usage?.output_tokens || 0),
-    cacheReadTokens: ltu ? (ltu.cached_input_tokens || 0) : (usage?.cache_read_input_tokens || 0),
-    cacheCreationTokens: ltu ? 0 : (usage?.cache_creation_input_tokens || 0),
+    inputTokens: Math.max(tokenUsage.last.inputTokens, 0),
+    outputTokens: Math.max(tokenUsage.last.outputTokens, 0),
+    cacheReadTokens: Math.max(tokenUsage.last.cachedInputTokens, 0),
+    cacheCreationTokens: 0,
   };
+}
+
+function findLatestAssistantIndex(events: AgentMessage[]): number {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (events[index].kind === 'assistant') {
+      return index;
+    }
+  }
+
+  return -1;
 }
 
 function isRecord(value: unknown): value is Record<string, any> {

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildAssistantResultStatsMap } from './assistant-ui/CodeMuxThread';
+import { buildFooterStatsFromTokenUsage } from './assistant-ui/CodeMuxThread';
 import {
   buildContextUsageViewModel,
   normalizeThreadTokenUsage,
+  type ThreadTokenUsage,
 } from './contextUsage';
 
 describe('history-file context usage view model', () => {
@@ -111,98 +112,32 @@ describe('history-file context usage view model', () => {
 });
 
 describe('message footer stats', () => {
-  it('maps every turn result back to its assistant footer with duration and token stats', () => {
-    expect(buildAssistantResultStatsMap([
-      { kind: 'user', data: { content: 'first' } },
-      {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid: 'assistant-1',
-          session_id: 'session-1',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: 'first reply' }],
-          },
-          parent_tool_use_id: null,
-        },
+  it('builds footer stats from session token usage without reasoning', () => {
+    const tokenUsage: ThreadTokenUsage = {
+      total: {
+        totalTokens: 156_061,
+        inputTokens: 154_933,
+        cachedInputTokens: 148_864,
+        outputTokens: 1_128,
+        reasoningOutputTokens: 0,
       },
-      {
-        kind: 'result',
-        data: {
-          type: 'result',
-          subtype: 'success',
-          is_error: false,
-          uuid: 'result-1',
-          session_id: 'session-1',
-          duration_ms: 1_250,
-          duration_api_ms: 900,
-          num_turns: 1,
-          result: '',
-          usage: {
-            input_tokens: 40,
-            output_tokens: 6,
-            cache_read_input_tokens: 20,
-          },
-          last_token_usage: {
-            input_tokens: 40,
-            output_tokens: 6,
-            cached_input_tokens: 20,
-            total_tokens: 60,
-          },
-        },
+      last: {
+        totalTokens: 156_061,
+        inputTokens: 154_933,
+        cachedInputTokens: 148_864,
+        outputTokens: 1_128,
+        reasoningOutputTokens: 0,
       },
-      { kind: 'user', data: { content: 'second' } },
-      {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid: 'assistant-2',
-          session_id: 'session-1',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: 'second reply' }],
-          },
-          parent_tool_use_id: null,
-        },
-      },
-      {
-        kind: 'result',
-        data: {
-          type: 'result',
-          subtype: 'success',
-          is_error: false,
-          uuid: 'result-2',
-          session_id: 'session-1',
-          duration_ms: 2_500,
-          duration_api_ms: 2_000,
-          num_turns: 1,
-          result: '',
-          usage: {
-            input_tokens: 70,
-            output_tokens: 10,
-            cache_read_input_tokens: 50,
-          },
-        },
-      },
-    ])).toEqual({
-      1: {
-        durationMs: 1_250,
-        numTurns: 1,
-        inputTokens: 40,
-        outputTokens: 6,
-        cacheReadTokens: 20,
-        cacheCreationTokens: 0,
-      },
-      4: {
-        durationMs: 2_500,
-        numTurns: 1,
-        inputTokens: 70,
-        outputTokens: 10,
-        cacheReadTokens: 50,
-        cacheCreationTokens: 0,
-      },
-    });
+      modelContextWindow: 258_400,
+      contextUsageSource: 'history_file',
+      contextUsageFreshness: 'live_synced',
+    };
 
+    expect(buildFooterStatsFromTokenUsage(tokenUsage)).toEqual({
+      inputTokens: 154_933,
+      outputTokens: 1_128,
+      cacheReadTokens: 148_864,
+      cacheCreationTokens: 0,
+    });
   });
 });
