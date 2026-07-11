@@ -7,7 +7,7 @@ import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { registerSkillCommands } from '../../../lib/slashCommands';
 import { usePreviewStore } from '../../../stores/previewStore';
 import { TooltipProvider } from '../../ui/tooltip';
-import { CodeMuxComposer, findLatestPendingProposedPlan } from './CodeMuxComposer';
+import { CODEMUX_FORMATTER, CodeMuxComposer, createCodeMuxFormatter, findLatestPendingProposedPlan } from './CodeMuxComposer';
 
 let composerText = '';
 
@@ -184,6 +184,55 @@ describe('CodeMuxComposer', () => {
     usePreviewStore.setState({ treeRoot: null });
     registerSkillCommands([]);
     cleanup();
+  });
+
+  it('serializes Codex skill directives with the complete SKILL.md path', () => {
+    const result = CODEMUX_FORMATTER.serialize({
+      id: 'superpowers:brainstorming',
+      type: 'command',
+      label: '/superpowers:brainstorming',
+      metadata: {
+        category: 'skill',
+        agentKind: 'codex',
+        filePath: 'C:\\Users\\94910\\.codex\\superpowers\\skills\\brainstorming',
+      },
+    });
+
+    expect(result).toBe('[$superpowers:brainstorming](C:\\Users\\94910\\.codex\\superpowers\\skills\\brainstorming\\SKILL.md) ');
+  });
+
+  it('preserves the Codex skill path after directive text is parsed again', () => {
+    const skillPath = 'C:\\Users\\94910\\.codex\\superpowers\\skills\\brainstorming';
+    registerSkillCommands([{
+      name: 'superpowers:brainstorming',
+      description: 'Brainstorming',
+      apps: { claude: true, codex: true, gemini: false, opencode: false },
+      diskPath: skillPath,
+    }]);
+    const formatter = createCodeMuxFormatter('codex');
+    const segments = formatter.parse('[$superpowers:brainstorming](C:\\Users\\94910\\.codex\\superpowers\\skills\\brainstorming\\SKILL.md)');
+    const mention = segments.find((segment) => segment.kind === 'mention');
+
+    expect(mention && formatter.serialize({
+      id: mention.id,
+      type: mention.type,
+      label: mention.label,
+    })).toBe('[$superpowers:brainstorming](C:\\Users\\94910\\.codex\\superpowers\\skills\\brainstorming\\SKILL.md) ');
+  });
+
+  it('keeps Claude Code skill directives using the command name', () => {
+    const result = CODEMUX_FORMATTER.serialize({
+      id: 'superpowers:brainstorming',
+      type: 'command',
+      label: '/superpowers:brainstorming',
+      metadata: {
+        category: 'skill',
+        agentKind: 'claude_code',
+        filePath: 'C:\\Users\\94910\\.codex\\superpowers\\skills\\brainstorming',
+      },
+    });
+
+    expect(result).toBe('[$superpowers:brainstorming](superpowers:brainstorming) ');
   });
 
   it('aligns the Lexical placeholder with the editable input and removes the inner input frame', () => {
@@ -434,6 +483,22 @@ describe('CodeMuxComposer', () => {
 
     expect(setComposerTextMock).toHaveBeenCalledWith('[$review](review) ');
     expect(bubbleSpy).not.toHaveBeenCalled();
+  });
+
+  it('serializes a selected Codex skill with its complete path', () => {
+    registerSkillCommands([{
+      name: 'superpowers:brainstorming',
+      description: 'Brainstorming',
+      apps: { claude: true, codex: true, gemini: false, opencode: false },
+      diskPath: 'C:\\Users\\94910\\.codex\\superpowers\\skills\\brainstorming',
+    }]);
+    composerText = '/superpowers';
+
+    render(<CodeMuxComposer sessionId="session-1" agentKind="codex" />);
+
+    fireEvent.click(document.querySelector('[data-command-id="superpowers:brainstorming"]') as Element);
+
+    expect(setComposerTextMock).toHaveBeenCalledWith('[$superpowers:brainstorming](C:\\Users\\94910\\.codex\\superpowers\\skills\\brainstorming\\SKILL.md) ');
   });
 
   it('uses Codex slash commands for Codex sessions', () => {

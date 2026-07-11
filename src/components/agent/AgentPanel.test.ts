@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildFooterStatsFromTokenUsage } from './assistant-ui/CodeMuxThread';
+import type { AgentMessage } from '../../stores/agentStore';
+import { buildAssistantResultStatsMap } from './assistant-ui/CodeMuxThread';
 import {
   buildContextUsageViewModel,
   normalizeThreadTokenUsage,
@@ -112,32 +113,112 @@ describe('history-file context usage view model', () => {
 });
 
 describe('message footer stats', () => {
-  it('builds footer stats from session token usage without reasoning', () => {
-    const tokenUsage: ThreadTokenUsage = {
-      total: {
-        totalTokens: 156_061,
-        inputTokens: 154_933,
-        cachedInputTokens: 148_864,
-        outputTokens: 1_128,
-        reasoningOutputTokens: 0,
+  it('maps Claude and Codex result stats back to every assistant turn', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'user',
+        data: {
+          type: 'user',
+          uuid: 'user-claude',
+          session_id: 'session-1',
+          message: { role: 'user', content: [{ type: 'text', text: 'Claude' }] },
+          parent_tool_use_id: null,
+        },
       },
-      last: {
-        totalTokens: 156_061,
-        inputTokens: 154_933,
-        cachedInputTokens: 148_864,
-        outputTokens: 1_128,
-        reasoningOutputTokens: 0,
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-claude',
+          session_id: 'session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Claude reply' }] },
+          parent_tool_use_id: null,
+        },
       },
-      modelContextWindow: 258_400,
-      contextUsageSource: 'history_file',
-      contextUsageFreshness: 'live_synced',
-    };
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'result-claude',
+          session_id: 'session-1',
+          duration_ms: 1_200,
+          duration_api_ms: 1_000,
+          num_turns: 1,
+          result: 'Claude result',
+          usage: {
+            input_tokens: 352,
+            output_tokens: 152,
+            cache_read_input_tokens: 25_088,
+            cache_creation_input_tokens: 0,
+          },
+        },
+      },
+      {
+        kind: 'user',
+        data: {
+          type: 'user',
+          uuid: 'user-codex',
+          session_id: 'session-1',
+          message: { role: 'user', content: [{ type: 'text', text: 'Codex' }] },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-codex',
+          session_id: 'session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Codex reply' }] },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'result-codex',
+          session_id: 'session-1',
+          duration_ms: 2_300,
+          duration_api_ms: 2_000,
+          num_turns: 1,
+          result: 'Codex result',
+          usage: {
+            input_tokens: 154_933,
+            output_tokens: 1_128,
+            cache_read_input_tokens: 148_864,
+          },
+          last_token_usage: {
+            input_tokens: 154_933,
+            cached_input_tokens: 148_864,
+            output_tokens: 1_128,
+            total_tokens: 156_061,
+          },
+        },
+      },
+    ];
 
-    expect(buildFooterStatsFromTokenUsage(tokenUsage)).toEqual({
-      inputTokens: 154_933,
-      outputTokens: 1_128,
-      cacheReadTokens: 148_864,
-      cacheCreationTokens: 0,
+    expect(buildAssistantResultStatsMap(events)).toEqual({
+      1: {
+        durationMs: 1_200,
+        numTurns: 1,
+        inputTokens: 352,
+        outputTokens: 152,
+        cacheReadTokens: 25_088,
+        cacheCreationTokens: 0,
+      },
+      4: {
+        durationMs: 2_300,
+        numTurns: 1,
+        inputTokens: 154_933,
+        outputTokens: 1_128,
+        cacheReadTokens: 148_864,
+        cacheCreationTokens: 0,
+      },
     });
   });
 });

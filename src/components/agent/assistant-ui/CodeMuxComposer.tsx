@@ -33,7 +33,7 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FC, typ
 
 import type { AgentMessage } from '../../../stores/agentStore';
 import type { SlashCommand } from '../../../lib/slashCommands';
-import { getAllCommands } from '../../../lib/slashCommands';
+import { findCommand, getAllCommands } from '../../../lib/slashCommands';
 import { createLogger, serializeError } from '../../../lib/logger';
 import { cn } from '../../../lib/utils';
 import { useAgentStore } from '../../../stores/agentStore';
@@ -72,18 +72,33 @@ const CATEGORY_LABELS: Record<string, string> = {
   skill: '技能',
 };
 
-export const CODEMUX_FORMATTER: Unstable_DirectiveFormatter = {
-  serialize: (item) => {
-    if (item.type === 'file' || item.type === 'directory') {
-      const label = getPathLabel(item.id);
-      return `[${label}](${item.id}) `;
-    }
-    const filePath = (item.metadata?.filePath as string) || '';
-    const path = filePath || item.id;
-    return `[$${item.id}](${path}) `;
-  },
-  parse: parseComposerDirectives,
-};
+export function createCodeMuxFormatter(agentKind: AgentKind = 'claude_code'): Unstable_DirectiveFormatter {
+  return {
+    serialize: (item) => {
+      if (item.type === 'file' || item.type === 'directory') {
+        const label = getPathLabel(item.id);
+        return `[${label}](${item.id}) `;
+      }
+
+      const metadata = item.metadata ?? {};
+      const command = item.type === 'command' ? findCommand(item.id, agentKind) : undefined;
+      const filePath = typeof metadata.filePath === 'string' && metadata.filePath
+        ? metadata.filePath
+        : command?.filePath ?? '';
+      const category = metadata.category ?? command?.category;
+      const itemAgentKind = metadata.agentKind ?? agentKind;
+      const path = category === 'skill'
+        ? itemAgentKind === 'codex' && filePath
+          ? appendSkillFilePath(filePath)
+          : item.id
+        : filePath || item.id;
+      return '[$' + item.id + '](' + path + ') ';
+    },
+    parse: parseComposerDirectives,
+  };
+}
+
+export const CODEMUX_FORMATTER = createCodeMuxFormatter();
 
 const MAX_FILE_RESULTS = 50;
 const EMPTY_EVENTS: AgentMessage[] = [];
@@ -164,6 +179,7 @@ export function CodeMuxComposer({
     activeProviderUsesLargeContext: false,
   }), [tokenUsage, modelName]);
   const commands = useMemo(() => getAllCommands(agentKind), [agentKind]);
+  const formatter = useMemo(() => createCodeMuxFormatter(agentKind), [agentKind]);
 
   const treeRoot = usePreviewStore((state) => state.treeRoot);
   const fileItemsRef = useRef<FileEntry[]>([]);
@@ -213,7 +229,7 @@ export function CodeMuxComposer({
   }, [commands, composerText, projectPath, suppressedTrigger, treeRoot]);
   const activeChar = activeTrigger?.char ?? manualTrigger;
   const activeQuery = activeTrigger?.query ?? '';
-  const slashItemsByCategory = useMemo(() => groupCommands(commands, activeQuery), [commands, activeQuery]);
+  const slashItemsByCategory = useMemo(() => groupCommands(commands, activeQuery, agentKind), [commands, activeQuery, agentKind]);
   const slashItems = useMemo(() => slashItemsByCategory.flatMap((group) => group.items), [slashItemsByCategory]);
   const pendingQuestion = useMemo(
     () => findLatestPendingUserQuestion(events, dismissedQuestionIds),
@@ -348,7 +364,7 @@ export function CodeMuxComposer({
   };
 
   const selectTriggerItem = (item: Unstable_TriggerItem) => {
-    const nextText = replaceActiveTrigger(composerText, activeTrigger, item);
+    const nextText = replaceActiveTrigger(composerText, activeTrigger, item, formatter);
     setManualTrigger(null);
     setSuppressedTrigger(getSelectedTrigger(activeTrigger, item));
     aui.composer().setText(nextText);
@@ -474,7 +490,7 @@ export function CodeMuxComposer({
                 submitMode="enter"
                 placeholder={placeholder}
                 directiveChip={DIRECTIVE_CHIP}
-                formatter={CODEMUX_FORMATTER}
+                formatter={formatter}
                 onPaste={handleComposerPaste}
                 className="relative min-h-10 max-h-50 w-full overflow-y-auto text-sm leading-6 text-foreground outline-none [&_.aui-lexical-input]:min-h-10 [&_.aui-lexical-input]:max-h-50 [&_.aui-lexical-input]:overflow-y-auto [&_.aui-lexical-input]:border-0 [&_.aui-lexical-input]:bg-transparent [&_.aui-lexical-input]:px-2 [&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:text-sm [&_.aui-lexical-input]:leading-6 [&_.aui-lexical-input]:text-foreground [&_.aui-lexical-input]:shadow-none [&_.aui-lexical-input]:outline-none [&_.aui-lexical-input]:ring-0 [&_.aui-lexical-input]:focus-visible:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:left-2 [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-sm [&_.aui-lexical-placeholder]:leading-6 [&_.aui-lexical-placeholder]:text-muted-foreground/70"
               />
@@ -1070,11 +1086,13 @@ function TriggerMenuItem({
   );
 }
 
-function groupCommands(commands: SlashCommand[], query: string) {
+function groupCommands(commands: SlashCommand[], query: string, agentKind: AgentKind) {
   const q = query.trim().toLowerCase();
   return CATEGORY_ORDER.map((category) => ({
     category: { id: category, label: CATEGORY_LABELS[category] },
-    items: commands.filter((command) => command.category === category && matchesCommand(command, q)).map(toTriggerItem),
+    items: commands
+      .filter((command) => command.category === category && matchesCommand(command, q))
+      .map((command) => toTriggerItem(command, agentKind)),
   })).filter((group) => group.items.length > 0);
 }
 
@@ -1124,8 +1142,13 @@ function isCompletedTrigger(trigger: ActiveTrigger, commands: SlashCommand[], fi
   return files.some((file) => file.relativePath === trigger.query || file.name === trigger.query);
 }
 
-function replaceActiveTrigger(text: string, active: ActiveTrigger | null, item: Unstable_TriggerItem) {
-  const directive = CODEMUX_FORMATTER.serialize(item);
+function replaceActiveTrigger(
+  text: string,
+  active: ActiveTrigger | null,
+  item: Unstable_TriggerItem,
+  formatter: Unstable_DirectiveFormatter,
+) {
+  const directive = formatter.serialize(item);
   if (!active) return directive;
   const end = active.start + active.char.length + active.query.length;
   const suffix = text.slice(end).replace(/^[ \t]+/, '');
@@ -1189,18 +1212,28 @@ function toDirectiveMention(raw: string): Unstable_DirectiveSegment {
   return { kind: 'mention', type: 'file', label: raw, id: raw };
 }
 
+function appendSkillFilePath(directoryPath: string): string {
+  const normalized = directoryPath.replace(/[\\/]+$/, '');
+  const separator = directoryPath.includes('\\') ? '\\' : '/';
+  return normalized + separator + 'SKILL.md';
+}
 function getPathLabel(path: string) {
   const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
   return normalized.split('/').filter(Boolean).pop() || path;
 }
 
-function toTriggerItem(command: SlashCommand): Unstable_TriggerItem {
+function toTriggerItem(command: SlashCommand, agentKind: AgentKind): Unstable_TriggerItem {
   return {
     id: command.name,
     type: 'command',
     label: `/${command.name}`,
     description: command.description,
-    metadata: { category: command.category, argsHint: command.argsHint ?? '', filePath: command.filePath ?? '' },
+    metadata: {
+      category: command.category,
+      agentKind,
+      argsHint: command.argsHint ?? '',
+      filePath: command.filePath ?? '',
+    },
   };
 }
 
