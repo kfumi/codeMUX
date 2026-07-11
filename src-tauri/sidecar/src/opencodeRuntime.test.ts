@@ -578,6 +578,27 @@ describe('OpenCodeRuntime', () => {
     await runtime.shutdown();
   });
 
+  it('deduplicates sessionless diagnostics by event or payload identity', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+    const sessionlessMessage = (value: number) => ({ type: 'message.updated', properties: { info: { tokens: { input: value, output: value } } } });
+    onEvent(sessionlessMessage(1));
+    onEvent(sessionlessMessage(1));
+    onEvent(sessionlessMessage(2));
+    onEvent({ type: 'future.sessionless', properties: { value: 'same' } });
+    onEvent({ type: 'future.sessionless', properties: { value: 'same' } });
+    onEvent({ type: 'future.sessionless', properties: { value: 'changed' } });
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { subtype?: string }).subtype === 'missing_session_id')).toHaveLength(2));
+    expect(emitted.filter((event) => (event as { subtype?: string }).subtype === 'unknown_event')).toHaveLength(2);
+    await runtime.shutdown();
+  });
   it('adds step-finish usage and ignores an exact repeated step payload', async () => {
     const { port, client } = createPort();
     const emitted: unknown[] = [];

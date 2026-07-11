@@ -289,7 +289,17 @@ export class OpenCodeRuntime {
     const eventSessionId = getOpenCodeEventSessionId(event);
     const activeSessionId = this.agentSessionId;
     const type = typeof (event as { type?: unknown })?.type === 'string' ? (event as { type: string }).type : '';
+    const identity = getOpenCodeEventIdentity(event, this.turnId);
+    const payloadKey = identity ? undefined : getOpenCodePayloadKey(event);
+    if ((identity && this.seenEventIds.has(identity)) || (payloadKey && this.seenPayloadKeys.has(payloadKey))) {
+      return;
+    }
     if (isOpenCodeSessionScopedEvent(type) && !eventSessionId) {
+      if (identity) {
+        this.rememberSeenEventId(identity);
+      } else if (payloadKey) {
+        this.rememberSeenPayloadKey(payloadKey);
+      }
       const diagnosticEvents = toCodeMuxEvent(event, {
         agentId: this.agentId,
         sessionId: this.config.sessionId,
@@ -309,11 +319,6 @@ export class OpenCodeRuntime {
       return;
     }
     if (eventSessionId && eventSessionId !== activeSessionId) {
-      return;
-    }
-    const identity = getOpenCodeEventIdentity(event, this.turnId);
-    const payloadKey = identity ? undefined : getOpenCodePayloadKey(event);
-    if ((identity && this.seenEventIds.has(identity)) || (payloadKey && this.seenPayloadKeys.has(payloadKey))) {
       return;
     }
     const terminalSessionId = eventSessionId ?? activeSessionId;
