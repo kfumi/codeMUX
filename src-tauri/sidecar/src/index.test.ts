@@ -206,6 +206,35 @@ describe('sidecar command dispatcher', () => {
     await Promise.all([firstResponse, duplicateResponse]);
   });
 
+  it('allows the same permission request id after replacing the OpenCode runtime', async () => {
+    const first = createRuntime();
+    const second = createRuntime();
+    let resolveFirst!: () => void;
+    let resolveSecond!: () => void;
+    first.respondToPermission.mockReturnValue(new Promise<void>((resolve) => { resolveFirst = resolve; }));
+    second.respondToPermission.mockReturnValue(new Promise<void>((resolve) => { resolveSecond = resolve; }));
+    const createOpenCodeRuntime = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: createRuntime(),
+      codexRuntime: createRuntime(),
+      createOpenCodeRuntime,
+      emit: vi.fn(),
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'opencode', cwd: 'D:\\one', sessionId: 'session-1' });
+    const firstResponse = dispatcher.dispatch({ type: 'respond_to_permission', requestId: 'reused-request', sessionId: 'session-1', response: 'always' });
+    await vi.waitFor(() => expect(first.respondToPermission).toHaveBeenCalledTimes(1));
+    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'opencode', cwd: 'D:\\two', sessionId: 'session-2' });
+    const secondResponse = dispatcher.dispatch({ type: 'respond_to_permission', requestId: 'reused-request', sessionId: 'session-2', response: 'reject' });
+    await vi.waitFor(() => expect(second.respondToPermission).toHaveBeenCalledTimes(1));
+
+    resolveFirst();
+    resolveSecond();
+    await Promise.all([firstResponse, secondResponse]);
+  });
+
   it('accepts the formal permission response command shape', () => {
     const command: SidecarCommand = {
       type: 'respond_to_permission',

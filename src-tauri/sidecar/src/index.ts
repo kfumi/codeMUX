@@ -1049,7 +1049,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
   let activeAgentKind: string | undefined;
   let activeOpenCodeRuntime: SidecarRuntime | undefined;
   let ensureTail: Promise<void> = Promise.resolve();
-  const pendingPermissionResponses = new Map<string, Promise<void>>();
+  const pendingPermissionResponses = new Map<SidecarRuntime, Map<string, Promise<void>>>();
 
   const emitError = (error: unknown): void => {
     options.emit({ type: 'sidecar_error', error: String(error) });
@@ -1174,18 +1174,24 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           emitError('OpenCode runtime is not initialized');
           return;
         }
-        if (pendingPermissionResponses.has(cmd.requestId)) return;
+        const runtimePendingResponses = pendingPermissionResponses.get(current) ?? new Map<string, Promise<void>>();
+        pendingPermissionResponses.set(current, runtimePendingResponses);
+        const responseKey = `${cmd.sessionId}:${cmd.requestId}`;
+        if (runtimePendingResponses.has(responseKey)) return;
         const responseTask = Promise.resolve()
           .then(() => current.respondToPermission!(cmd.requestId, cmd.response as OpenCodePermissionResponse, cmd.sessionId))
           .catch((error) => {
             emitError(error);
           })
           .finally(() => {
-            if (pendingPermissionResponses.get(cmd.requestId) === responseTask) {
-              pendingPermissionResponses.delete(cmd.requestId);
+            if (runtimePendingResponses.get(responseKey) === responseTask) {
+              runtimePendingResponses.delete(responseKey);
+            }
+            if (runtimePendingResponses.size === 0 && pendingPermissionResponses.get(current) === runtimePendingResponses) {
+              pendingPermissionResponses.delete(current);
             }
           });
-        pendingPermissionResponses.set(cmd.requestId, responseTask);
+        runtimePendingResponses.set(responseKey, responseTask);
         return;
       }
       case 'shutdown': {
