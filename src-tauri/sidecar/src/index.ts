@@ -15,6 +15,9 @@ import { getProviderMode } from './sessionRuntimeHelpers.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion.js';
 import { CodexSessionRuntime, interruptActiveTurn } from './codexRuntime.js';
+import { OpenCodeRuntime } from './opencodeRuntime.js';
+import type { OpenCodePermissionResponse } from './opencodePermissions.js';
+import type { OpenCodeSessionConfig } from './types.js';
 import {
   getRuntimeFlavor,
   normalizeClaudeResultEvent,
@@ -1021,8 +1024,208 @@ function normalizePlanMode(value: unknown): AgentPlanMode {
 const runtime = new SessionRuntime();
 const codexRuntime = new CodexSessionRuntime();
 
-/** Tracks which runtime is active for the current session. */
-let activeAgentKind: string | undefined;
+type SidecarRuntime = {
+  ensure(cmd: EnsureSessionCommand): Promise<void>;
+  updatePermissions?(cmd: UpdatePermissionsCommand): void | Promise<void>;
+  sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void>;
+  resetSession(sessionId: string): Promise<void>;
+  interrupt(): Promise<void>;
+  shutdown(): Promise<void>;
+  respondToPermission?(requestId: string, response: OpenCodePermissionResponse, sessionId: string): Promise<void>;
+};
+
+type SidecarCommandDispatcherOptions = {
+  claudeRuntime: SidecarRuntime;
+  codexRuntime: SidecarRuntime;
+  createOpenCodeRuntime: (cmd: EnsureSessionCommand) => SidecarRuntime;
+  emit: (event: unknown) => void;
+  startProxy?: (cmd: Extract<SidecarCommand, { type: 'start_proxy' }>) => Promise<unknown>;
+  stopProxy: () => Promise<void>;
+  getProxyStatus?: () => Record<string, unknown>;
+  exit: (code: number) => void;
+};
+
+export function createSidecarCommandDispatcher(options: SidecarCommandDispatcherOptions) {
+  let activeAgentKind: string | undefined;
+  let activeOpenCodeRuntime: SidecarRuntime | undefined;
+  let ensureTail: Promise<void> = Promise.resolve();
+
+  const emitError = (error: unknown): void => {
+    options.emit({ type: 'sidecar_error', error: String(error) });
+  };
+
+  const isAbortError = (error: unknown): boolean => {
+    const message = String(error).toLowerCase();
+    return message.includes('abort') || message.includes('the operation was aborted');
+  };
+
+  const shutdownOpenCodeRuntime = async (): Promise<void> => {
+    const current = activeOpenCodeRuntime;
+    if (!current) return;
+    await current.shutdown();
+    if (activeOpenCodeRuntime === current) {
+      activeOpenCodeRuntime = undefined;
+    }
+  };
+
+  const ensureSession = async (cmd: EnsureSessionCommand): Promise<void> => {
+    const flavor = getRuntimeFlavor(cmd.agentKind);
+    activeAgentKind = cmd.agentKind;
+    if (flavor !== 'opencode') {
+      await shutdownOpenCodeRuntime();
+      const selectedRuntime = flavor === 'codex' ? options.codexRuntime : options.claudeRuntime;
+      await selectedRuntime.ensure(cmd);
+      return;
+    }
+
+    await shutdownOpenCodeRuntime();
+    const nextRuntime = options.createOpenCodeRuntime(cmd);
+    try {
+      await nextRuntime.ensure(cmd);
+    } catch (error) {
+      try {
+        await nextRuntime.shutdown();
+      } catch (cleanupError) {
+        emitError(`${String(error)}; OpenCode cleanup failed: ${String(cleanupError)}`);
+      }
+      throw error;
+    }
+    activeOpenCodeRuntime = nextRuntime;
+  };
+
+  const dispatchEnsure = (cmd: EnsureSessionCommand): Promise<void> => {
+    const operation = ensureTail.then(() => ensureSession(cmd), () => ensureSession(cmd));
+    ensureTail = operation.then(() => undefined, () => undefined);
+    return operation;
+  };
+
+  const selectedRuntime = (): SidecarRuntime | undefined => {
+    const flavor = getRuntimeFlavor(activeAgentKind);
+    if (flavor === 'opencode') return activeOpenCodeRuntime;
+    return flavor === 'codex' ? options.codexRuntime : options.claudeRuntime;
+  };
+
+  const dispatch = async (cmd: SidecarCommand): Promise<void> => {
+    switch (cmd.type) {
+      case 'ensure_session':
+        try {
+          await dispatchEnsure(cmd);
+        } catch (error) {
+          emitError(error);
+        }
+        return;
+      case 'update_permissions': {
+        activeAgentKind = cmd.agentKind ?? activeAgentKind;
+        const flavor = getRuntimeFlavor(activeAgentKind);
+        try {
+          if (flavor !== 'opencode') {
+            await (flavor === 'codex' ? options.codexRuntime : options.claudeRuntime).updatePermissions?.(cmd);
+          }
+        } catch (error) {
+          emitError(error);
+        }
+        return;
+      }
+      case 'send_input': {
+        const current = selectedRuntime();
+        if (!current) {
+          emitError('OpenCode runtime is not initialized');
+          return;
+        }
+        void current.sendInput(cmd.prompt, cmd.inputPayload).catch((error) => {
+          if (!isAbortError(error)) emitError(error);
+        });
+        return;
+      }
+      case 'reset_session':
+        try {
+          const current = selectedRuntime();
+          if (!current) throw new Error('OpenCode runtime is not initialized');
+          await current.resetSession(cmd.sessionId);
+        } catch (error) {
+          emitError(error);
+        }
+        return;
+      case 'interrupt':
+        try {
+          if (getRuntimeFlavor(activeAgentKind) === 'codex') interruptActiveTurn();
+          const current = selectedRuntime();
+          if (!current) throw new Error('OpenCode runtime is not initialized');
+          await current.interrupt();
+        } catch (error) {
+          if (!isAbortError(error)) emitError(error);
+        }
+        return;
+      case 'tool_response':
+        if (!resolveClaudeToolResponse(cmd.toolUseId, cmd.response)) {
+          resolveInteractiveToolResponse(cmd.toolUseId, cmd.response);
+        }
+        return;
+      case 'respond_to_permission':
+        try {
+          const current = getRuntimeFlavor(activeAgentKind) === 'opencode' ? activeOpenCodeRuntime : undefined;
+          if (!current?.respondToPermission) throw new Error('OpenCode runtime is not initialized');
+          await current.respondToPermission(cmd.requestId, cmd.response as OpenCodePermissionResponse, cmd.sessionId);
+        } catch (error) {
+          emitError(error);
+        }
+        return;
+      case 'shutdown':
+        try {
+          await options.stopProxy();
+          await shutdownOpenCodeRuntime();
+          if (getRuntimeFlavor(activeAgentKind) !== 'opencode') {
+            await (getRuntimeFlavor(activeAgentKind) === 'codex' ? options.codexRuntime : options.claudeRuntime).shutdown();
+          }
+          options.exit(0);
+        } catch (error) {
+          emitError(error);
+        }
+        return;
+      case 'start_proxy':
+        try {
+          await options.startProxy?.(cmd);
+          if (options.getProxyStatus) options.emit({ type: 'proxy_status', ...options.getProxyStatus() });
+        } catch (error) {
+          options.emit({ type: 'sidecar_error', error: `Failed to start proxy: ${String(error)}` });
+        }
+        return;
+      case 'stop_proxy':
+        try {
+          await options.stopProxy();
+          if (options.getProxyStatus) options.emit({ type: 'proxy_status', ...options.getProxyStatus() });
+        } catch (error) {
+          options.emit({ type: 'sidecar_error', error: `Failed to stop proxy: ${String(error)}` });
+        }
+        return;
+      case 'proxy_status':
+        if (options.getProxyStatus) options.emit({ type: 'proxy_status', ...options.getProxyStatus() });
+        return;
+    }
+  };
+
+  return { dispatch };
+}
+
+function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime {
+  const config: OpenCodeSessionConfig = {
+    cwd: ensureWorkingDirectory(cmd.cwd),
+    sessionId: cmd.sessionId ?? crypto.randomUUID(),
+    ...(cmd.agentSessionId ? { agentSessionId: cmd.agentSessionId } : {}),
+    provider: cmd.provider ?? 'opencode',
+    model: cmd.model ?? 'default',
+    credentialSource: cmd.credentialSource ?? 'none',
+  };
+  const openCodeRuntime = new OpenCodeRuntime(config);
+  return {
+    ensure: async () => { await openCodeRuntime.start(); },
+    sendInput: (prompt, inputPayload) => openCodeRuntime.sendInput(prompt, inputPayload),
+    resetSession: () => openCodeRuntime.resetSession(),
+    interrupt: () => openCodeRuntime.interrupt(),
+    shutdown: () => openCodeRuntime.shutdown(),
+    respondToPermission: (requestId, response, sessionId) => openCodeRuntime.respondToPermission(requestId, response, sessionId),
+  };
+}
 
 async function main(): Promise<void> {
   loadClaudeSettingsEnv();
@@ -1030,6 +1233,16 @@ async function main(): Promise<void> {
   emit({ type: 'sidecar_ready' });
 
   const rl = readline.createInterface({ input: process.stdin });
+  const dispatcher = createSidecarCommandDispatcher({
+    claudeRuntime: runtime,
+    codexRuntime,
+    createOpenCodeRuntime: createOpenCodeSidecarRuntime,
+    emit,
+    startProxy: (cmd) => proxyManager.start(cmd.apiKey, cmd.baseUrl, cmd.providerName, cmd.codexNeedsProxy),
+    stopProxy: () => proxyManager.stop(),
+    getProxyStatus: () => proxyManager.getStatus(),
+    exit: (code) => process.exit(code),
+  });
 
   for await (const line of rl) {
     const trimmed = line.trim();
@@ -1043,137 +1256,13 @@ async function main(): Promise<void> {
       continue;
     }
 
-    switch (cmd.type) {
-      case 'ensure_session': {
-        const flavor = getRuntimeFlavor(cmd.agentKind);
-        activeAgentKind = cmd.agentKind;
-        process.stderr.write(`[sidecar] ensure_session received: sessionId=${cmd.sessionId} agentKind=${cmd.agentKind} flavor=${flavor} cwd=${cmd.cwd}\n`);
-        try {
-          if (flavor === 'codex') {
-            await codexRuntime.ensure(cmd);
-          } else {
-            await runtime.ensure(cmd);
-          }
-          process.stderr.write(`[sidecar] ensure_session completed: sessionId=${cmd.sessionId} agentKind=${cmd.agentKind}\n`);
-        } catch (err) {
-          process.stderr.write(`[sidecar] ensure_session failed: sessionId=${cmd.sessionId} error=${String(err)}\n`);
-          emit({ type: 'sidecar_error', error: String(err) });
-        }
-        break;
-      }
-      case 'update_permissions': {
-        const flavor = getRuntimeFlavor(cmd.agentKind ?? activeAgentKind);
-        activeAgentKind = cmd.agentKind ?? activeAgentKind;
-        try {
-          if (flavor === 'codex') {
-            codexRuntime.updatePermissions(cmd);
-          } else {
-            runtime.updatePermissions(cmd);
-          }
-        } catch (err) {
-          emit({ type: 'sidecar_error', error: String(err) });
-        }
-        break;
-      }
-      case 'send_input':
-        // Fire-and-forget: don't await sendInput so the command loop stays
-        // responsive. The interrupt command can then call interruptActiveTurn()
-        // immediately to abort the running stream.
-        process.stderr.write(`[sidecar] send_input received: agentKind=${activeAgentKind} promptLength=${cmd.prompt.length}\n`);
-        if (getRuntimeFlavor(activeAgentKind) === 'codex') {
-          codexRuntime.sendInput(cmd.prompt, cmd.inputPayload).catch((err) => {
-            // Suppress abort errors — these are expected when the user interrupts.
-            const msg = String(err).toLowerCase();
-            if (!msg.includes('abort')) {
-              process.stderr.write(`[sidecar] send_input failed: error=${String(err)}\n`);
-              emit({ type: 'sidecar_error', error: String(err) });
-            } else {
-              process.stderr.write(`[sidecar] Suppressed send_input abort error: ${String(err)}\n`);
-            }
-          });
-        } else {
-          runtime.sendInput(cmd.prompt, cmd.inputPayload).catch((err) => {
-            process.stderr.write(`[sidecar] send_input failed: error=${String(err)}\n`);
-            emit({ type: 'sidecar_error', error: String(err) });
-          });
-        }
-        break;
-      case 'reset_session':
-        try {
-          if (getRuntimeFlavor(activeAgentKind) === 'codex') {
-            await codexRuntime.resetSession(cmd.sessionId);
-          } else {
-            await runtime.resetSession(cmd.sessionId);
-          }
-        } catch (err) {
-          emit({ type: 'sidecar_error', error: String(err) });
-        }
-        break;
-      case 'interrupt':
-        try {
-          if (getRuntimeFlavor(activeAgentKind) === 'codex') {
-            // Immediately abort the active stream (bypasses blocked stdin loop).
-            interruptActiveTurn();
-            await codexRuntime.interrupt();
-          } else {
-            await runtime.interrupt();
-          }
-        } catch (err) {
-          // Suppress abort errors — these are expected when interrupting a turn.
-          const msg = String(err).toLowerCase();
-          if (!msg.includes('abort')) {
-            emit({ type: 'sidecar_error', error: String(err) });
-          } else {
-            process.stderr.write(`[sidecar] Suppressed interrupt abort error: ${String(err)}\n`);
-          }
-        }
-        break;
-      case 'tool_response': {
-        if (resolveClaudeToolResponse(cmd.toolUseId, cmd.response)) {
-          process.stderr.write(`[sidecar] tool_response resolved for toolUseId=${cmd.toolUseId}\n`);
-        } else if (resolveInteractiveToolResponse(cmd.toolUseId, cmd.response)) {
-          process.stderr.write(`[sidecar] interactive tool_response resolved for toolUseId=${cmd.toolUseId}\n`);
-        } else {
-          process.stderr.write(`[sidecar] tool_response: no pending request for toolUseId=${cmd.toolUseId}\n`);
-        }
-        break;
-      }
-      case 'shutdown':
-        await proxyManager.stop();
-        if (getRuntimeFlavor(activeAgentKind) === 'codex') {
-          await codexRuntime.shutdown();
-        } else {
-          await runtime.shutdown();
-        }
-        process.exit(0);
-        break;
-      case 'start_proxy':
-        try {
-          const result = await proxyManager.start(cmd.apiKey, cmd.baseUrl, cmd.providerName, cmd.codexNeedsProxy);
-          emit({ type: 'proxy_status', ...proxyManager.getStatus() });
-          if (result) {
-            process.stderr.write(`[sidecar] Proxy started on port ${result.port}\n`);
-          }
-        } catch (err) {
-          emit({ type: 'sidecar_error', error: `Failed to start proxy: ${String(err)}` });
-        }
-        break;
-      case 'stop_proxy':
-        try {
-          await proxyManager.stop();
-          emit({ type: 'proxy_status', ...proxyManager.getStatus() });
-        } catch (err) {
-          emit({ type: 'sidecar_error', error: `Failed to stop proxy: ${String(err)}` });
-        }
-        break;
-      case 'proxy_status':
-        emit({ type: 'proxy_status', ...proxyManager.getStatus() });
-        break;
-    }
+    await dispatcher.dispatch(cmd);
   }
 }
 
-main().catch((err) => {
-  emit({ type: 'sidecar_error', error: `Fatal: ${String(err)}` });
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === path.join(SIDECAR_DIST_DIR, 'index.js')) {
+  main().catch((err) => {
+    emit({ type: 'sidecar_error', error: `Fatal: ${String(err)}` });
+    process.exit(1);
+  });
+}

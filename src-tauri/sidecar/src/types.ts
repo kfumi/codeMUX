@@ -36,6 +36,7 @@ export type SidecarCommand =
   | { type: 'interrupt' }
   | { type: 'shutdown' }
   | { type: 'tool_response'; toolUseId: string; response: unknown }
+  | { type: 'respond_to_permission'; requestId: string; sessionId: string; response: unknown }
   | { type: 'start_proxy'; apiKey: string; baseUrl: string; providerName?: string; codexNeedsProxy?: boolean }
   | { type: 'stop_proxy' }
   | { type: 'proxy_status' };

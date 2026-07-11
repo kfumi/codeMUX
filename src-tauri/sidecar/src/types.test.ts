@@ -9,8 +9,7 @@ import type {
 import { buildOpenCodeResultEvent, getRuntimeFlavor } from './runtimeEvents.js';
 
 describe('OpenCode runtime contract', () => {
-  it('does not expose the Task 5 permission command before command dispatch is wired', () => {
-    // @ts-expect-error Task 5 owns this command union member.
+  it('exposes the formal OpenCode permission response command', () => {
     const command: SidecarCommand = { type: 'respond_to_permission', requestId: 'permission-1', sessionId: 'session-1', response: { approved: true } };
     expect(command).toBeDefined();
   });
