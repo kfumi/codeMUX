@@ -56,4 +56,15 @@ describe('OpenCode event normalization', () => {
     expect(completed[0]).toMatchObject({ message: { content: [{ content: '{"matches":["a","b"]}' }] } });
     expect(lateRunning).toEqual([]);
   });
+
+  it('uses a stable session and turn key when a terminal event has no provider event ID', () => {
+    const first = { type: 'session.idle', properties: { sessionID: 'opencode-session-1', turnID: 'turn-1', noise: 'first' } };
+    const replay = { type: 'session.idle', properties: { sessionID: 'opencode-session-1', turnID: 'turn-1', noise: 'replay' } };
+    const second = { type: 'session.idle', properties: { sessionID: 'opencode-session-1', turnID: 'turn-2' } };
+    expect(getOpenCodeEventIdentity(first)).toBe(getOpenCodeEventIdentity(replay));
+    expect(getOpenCodeEventIdentity(first)).not.toBe(getOpenCodeEventIdentity(second));
+    expect(getOpenCodeEventIdentity({ type: 'session.idle', id: 'provider-1', properties: { sessionID: 'opencode-session-1', noise: 'first' } })).toBe(getOpenCodeEventIdentity({ type: 'session.idle', id: 'provider-1', properties: { sessionID: 'opencode-session-1', noise: 'replay' } }));
+    expect(toCodeMuxEvent(first, context())).toHaveLength(1);
+    expect(toCodeMuxEvent(second, context())).toHaveLength(1);
+  });
 });

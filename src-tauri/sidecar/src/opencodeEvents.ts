@@ -25,7 +25,12 @@ export function getOpenCodeEventIdentity(event: unknown): string {
   const candidates = [record?.id, properties?.id, part?.id, part?.callID, properties?.messageID];
   const explicitId = candidates.find((value): value is string => typeof value === 'string' && value.length > 0);
   if (explicitId) {
-    return `${String(record?.type ?? 'unknown')}:${explicitId}:${stableStringify(event)}`;
+    return `${String(record?.type ?? 'unknown')}:${getOpenCodeEventSessionId(event) ?? 'session'}:id:${explicitId}`;
+  }
+  const turnKey = readString(properties?.turnID) ?? readString(properties?.turnId) ?? readString(properties?.turn_id);
+  const sessionId = getOpenCodeEventSessionId(event);
+  if (turnKey && sessionId) {
+    return `${String(record?.type ?? 'unknown')}:${sessionId}:turn:${turnKey}`;
   }
   return stableStringify(event);
 }
