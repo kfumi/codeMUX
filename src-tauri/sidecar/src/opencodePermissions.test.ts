@@ -113,4 +113,29 @@ describe('OpenCodePermissionRegistry', () => {
     await expect(response).rejects.toThrow('response failed');
     expect(registry.size).toBe(0);
   });
+
+  it('isolates cancellation generations between Session A and Session B', async () => {
+    const registry = new OpenCodePermissionRegistry();
+    let rejectA!: (error: Error) => void;
+    let rejectB!: (error: Error) => void;
+    const respondA = vi.fn().mockImplementation(() => new Promise<boolean>((_, reject) => { rejectA = reject; }));
+    const respondB = vi.fn().mockImplementation(() => new Promise<boolean>((_, reject) => { rejectB = reject; }));
+    registry.add(request({ requestId: 'permission-a', codeMuxSessionId: 'session-a', respond: respondA }));
+    registry.add(request({ requestId: 'permission-b', codeMuxSessionId: 'session-b', respond: respondB }));
+
+    const responseA = registry.respond('permission-a', 'session-a', { approved: true });
+    const responseB = registry.respond('permission-b', 'session-b', { approved: true });
+    await vi.waitFor(() => {
+      expect(respondA).toHaveBeenCalledTimes(1);
+      expect(respondB).toHaveBeenCalledTimes(1);
+    });
+
+    await registry.cancelAll('session-a');
+    rejectA(new Error('Session A late failure'));
+    rejectB(new Error('Session B transient failure'));
+    await expect(responseA).rejects.toThrow('response failed');
+    await expect(responseB).rejects.toThrow('response failed');
+    expect(registry.get('permission-a')).toBeUndefined();
+    expect(registry.get('permission-b')).toBeDefined();
+  });
 });

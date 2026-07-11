@@ -61,8 +61,8 @@ export class OpenCodePermissionRegistry {
   private readonly timeoutMs: number;
   private readonly pending = new Map<string, PendingPermission>();
   private readonly cancelled = new Set<string>();
-  private readonly inFlight = new Set<string>();
-  private cancellationEpoch = 0;
+  private readonly inFlight = new Map<string, { codeMuxSessionId: string; generation: number }>();
+  private readonly cancellationGenerations = new Map<string, number>();
 
   constructor(options: OpenCodePermissionRegistryOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 5 * 60_000;
@@ -122,8 +122,8 @@ export class OpenCodePermissionRegistry {
   async respond(requestId: string, codeMuxSessionId: string, response: OpenCodePermissionResponse): Promise<void> {
     const nativeResponse = toNativeResponse(response);
     const pending = this.takePending(requestId);
-    const responseEpoch = this.cancellationEpoch;
-    this.inFlight.add(requestId);
+    const responseGeneration = this.getCancellationGeneration(pending.codeMuxSessionId);
+    this.inFlight.set(requestId, { codeMuxSessionId: pending.codeMuxSessionId, generation: responseGeneration });
     if (pending.codeMuxSessionId !== codeMuxSessionId) {
       this.restorePending(pending);
       this.inFlight.delete(requestId);
@@ -132,7 +132,7 @@ export class OpenCodePermissionRegistry {
     try {
       await pending.respond(nativeResponse);
     } catch (error) {
-      if (responseEpoch === this.cancellationEpoch && !this.cancelled.has(requestId) && !this.pending.has(requestId)) {
+      if (responseGeneration === this.getCancellationGeneration(pending.codeMuxSessionId) && !this.cancelled.has(requestId) && !this.pending.has(requestId)) {
         this.restorePending(pending);
       }
       this.inFlight.delete(requestId);
@@ -142,14 +142,25 @@ export class OpenCodePermissionRegistry {
   }
 
   async cancelAll(codeMuxSessionId?: string): Promise<OpenCodePermissionCancelResult[]> {
-    this.cancellationEpoch += 1;
+    const affectedSessionIds = new Set<string>();
+    if (codeMuxSessionId) {
+      affectedSessionIds.add(codeMuxSessionId);
+    } else {
+      for (const pending of this.pending.values()) affectedSessionIds.add(pending.codeMuxSessionId);
+      for (const request of this.inFlight.values()) affectedSessionIds.add(request.codeMuxSessionId);
+    }
+    for (const sessionId of affectedSessionIds) {
+      this.cancellationGenerations.set(sessionId, this.getCancellationGeneration(sessionId) + 1);
+    }
     const requests = [...this.pending.values()].filter((pending) => !codeMuxSessionId || pending.codeMuxSessionId === codeMuxSessionId);
     for (const pending of requests) {
       this.cancelled.add(pending.requestId);
       this.remove(pending.requestId);
     }
-    for (const requestId of this.inFlight) {
-      this.cancelled.add(requestId);
+    for (const [requestId, request] of this.inFlight) {
+      if (!codeMuxSessionId || request.codeMuxSessionId === codeMuxSessionId) {
+        this.cancelled.add(requestId);
+      }
     }
     return Promise.all(requests.map(async (pending) => {
       try {
@@ -191,6 +202,10 @@ export class OpenCodePermissionRegistry {
   private scheduleTimeout(pending: PendingPermission): void {
     pending.timeoutHandle = setTimeout(() => void this.expire(pending.requestId), this.timeoutMs);
     pending.timeoutHandle.unref?.();
+  }
+
+  private getCancellationGeneration(codeMuxSessionId: string): number {
+    return this.cancellationGenerations.get(codeMuxSessionId) ?? 0;
   }
 
   private remove(requestId: string): void {
