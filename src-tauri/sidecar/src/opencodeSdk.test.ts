@@ -37,16 +37,19 @@ describe('official OpenCode SDK adapter', () => {
     const subscription = await resources.client.subscribe!({ cwd: 'D:/workspace/demo', onEvent: (event) => received.push(event), onError: vi.fn(), onRetry: (error) => retries.push(error), onDisconnect: (error) => disconnects.push(error) });
 
     expect(sdkMocks.eventSubscribe).toHaveBeenCalledTimes(1);
-    const options = sdkMocks.eventSubscribe.mock.calls[0][0] as { onSseError?: (error: unknown) => void };
+    const options = sdkMocks.eventSubscribe.mock.calls[0][0] as { onSseError?: (error: unknown) => void; onSseEvent?: (event: { id?: string }) => void };
     expect(typeof options.onSseError).toBe('function');
     options.onSseError!(new Error('socket lost'));
     expect(retries).toHaveLength(1);
     expect(disconnects).toHaveLength(0);
+    options.onSseEvent?.({ id: 'sse-event-1' });
     resolveStream();
     await vi.waitFor(() => expect(received).toHaveLength(1));
-    expect(received[0]).toMatchObject({ type: 'server.connected' });
+    expect(received[0]).toMatchObject({ type: 'server.connected', eventId: 'sse-event-1' });
     await vi.waitFor(() => expect(disconnects).toHaveLength(1));
     expect(disconnects[0]).toMatchObject({ message: 'OpenCode SSE stream ended' });
     await subscription.close();
+    options.onSseError!(new Error('late retry'));
+    expect(retries).toHaveLength(1);
   });
 });

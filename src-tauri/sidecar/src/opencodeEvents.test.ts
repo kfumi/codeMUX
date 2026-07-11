@@ -57,6 +57,17 @@ describe('OpenCode event normalization', () => {
     expect(lateRunning).toEqual([]);
   });
 
+  it('replays identical conversion output with an injected event ID factory', () => {
+    const event = { type: 'message.part.updated', properties: { sessionID: 'opencode-session-1', part: { id: 'part-1', type: 'text' }, delta: 'stable' } };
+    const deterministicContext = context({ eventIdFactory: () => 'fixed-event-id' });
+    expect(toCodeMuxEvent(event, deterministicContext)).toEqual(toCodeMuxEvent(event, deterministicContext));
+  });
+
+  it('diagnoses session-scoped events without an explicit session ID', () => {
+    const events = toCodeMuxEvent({ type: 'message.part.updated', properties: { part: { id: 'part-1', type: 'text' }, delta: 'orphaned' } }, context());
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'diagnostic', subtype: 'missing_session_id' });
+  });
   it('deduplicates identical non-terminal payloads without dropping changed increments', () => {
     const first = { type: 'message.part.updated', properties: { sessionID: 'opencode-session-1', part: { id: 'part-1', type: 'text' }, delta: 'first' } };
     const replay = { type: 'message.part.updated', properties: { sessionID: 'opencode-session-1', part: { id: 'part-1', type: 'text' }, delta: 'first' } };
@@ -68,6 +79,11 @@ describe('OpenCode event normalization', () => {
     expect(toCodeMuxEvent(second, context({ seenPayloadKeys: new Set([replayKey!]) }))).toHaveLength(1);
   });
 
+  it('bounds payload replay keys for oversized events', () => {
+    const event = { type: 'future.event', properties: { sessionID: 'opencode-session-1', value: 'x'.repeat(200_000) } };
+    const key = getOpenCodePayloadKey(event);
+    expect(Buffer.byteLength(key, 'utf8')).toBeLessThan(512);
+  });
   it('deduplicates identical unknown diagnostics by stable payload', () => {
     const event = { type: 'future.event', properties: { sessionID: 'opencode-session-1', value: { b: 2, a: 1 } } };
     const key = getOpenCodePayloadKey(event);

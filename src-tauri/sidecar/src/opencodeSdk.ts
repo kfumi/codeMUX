@@ -180,21 +180,33 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
             );
           },
           async subscribe({ cwd: sessionCwd, onEvent, onError, onRetry, onDisconnect }) {
-            const reportRetry = onRetry ?? (() => undefined);
-            const reportDisconnect = onDisconnect ?? onError;
+            let closed = false;
+            let nextEventId: string | undefined;
+            const reportRetry = (error: unknown) => {
+              if (!closed) onRetry?.(error);
+            };
+            const reportDisconnect = (error: unknown) => {
+              if (!closed) (onDisconnect ?? onError)(error);
+            };
             const result = await client.event.subscribe({
               query: { directory: sessionCwd },
               onSseError: reportRetry,
+              onSseEvent: (event: { id?: string }) => {
+                nextEventId = event.id;
+              },
             });
-            let closed = false;
             void (async () => {
               try {
                 for await (const event of result.stream) {
-                  if (!closed) onEvent(event);
+                  if (!closed) {
+                    const eventId = nextEventId;
+                    nextEventId = undefined;
+                    onEvent(eventId && typeof event === 'object' && event !== null ? { ...event, eventId } : event);
+                  }
                 }
-                if (!closed) reportDisconnect(new Error('OpenCode SSE stream ended'));
+                reportDisconnect(new Error('OpenCode SSE stream ended'));
               } catch (error) {
-                if (!closed) reportDisconnect(error);
+                reportDisconnect(error);
               }
             })();
             return {

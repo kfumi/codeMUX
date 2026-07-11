@@ -46,6 +46,10 @@ type ToolUseContext = {
   timeoutMs?: number;
 };
 
+function createEventId(factory?: () => string): string {
+  return factory?.() ?? crypto.randomUUID();
+}
+
 export function getRuntimeFlavor(agentKind?: string): RuntimeFlavor {
   if (agentKind === 'codex') {
     return 'codex';
@@ -79,7 +83,7 @@ export function buildOpenCodeResultEvent({
     session_id: context.sessionId,
     ...(context.agentSessionId ? { agent_session_id: context.agentSessionId } : {}),
     sequence: context.sequence,
-    uuid: crypto.randomUUID(),
+    uuid: createEventId(context.eventIdFactory),
     duration_ms: durationMs,
     duration_api_ms: durationMs,
     num_turns: 1,
@@ -111,13 +115,15 @@ export function buildOpenCodeResultEvent({
 export function buildAssistantEvent({
   sessionId,
   content,
+  eventIdFactory,
 }: {
   sessionId: string;
   content: AssistantContentBlock[];
+  eventIdFactory?: () => string;
 }) {
   return {
     type: 'assistant',
-    uuid: crypto.randomUUID(),
+    uuid: createEventId(eventIdFactory),
     session_id: sessionId,
     message: {
       role: 'assistant' as const,
@@ -132,15 +138,17 @@ export function buildToolResultEvent({
   toolUseId,
   content,
   isError = false,
+  eventIdFactory,
 }: {
   sessionId: string;
   toolUseId: string;
+  eventIdFactory?: () => string;
   content: string;
   isError?: boolean;
 }) {
   return {
     type: 'user',
-    uuid: crypto.randomUUID(),
+    uuid: createEventId(eventIdFactory),
     session_id: sessionId,
     message: {
       role: 'user' as const,

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { RuntimeEventContext } from './types.js';
 import {
   buildAssistantEvent,
@@ -22,7 +23,6 @@ export interface OpenCodeEventContext extends RuntimeEventContext {
 
 export function getOpenCodeEventIdentity(event: unknown, turnId = 0): string | undefined {
   const record = asRecord(event);
-  const properties = asRecord(record?.properties);
   const explicitId = [
     record?.id,
     record?.eventId,
@@ -53,7 +53,10 @@ export function getOpenCodePayloadKey(event: unknown): string {
     readString(properties?.toolID),
     readString(properties?.toolId),
   ].filter((value): value is string => value !== undefined);
-  return `${type}:session:${sessionId}:ids:${identifiers.join('|')}:payload:${stableStringify(event)}`;
+  const canonical = Buffer.from(stableStringify(event), 'utf8');
+  const boundedCanonical = canonical.subarray(0, 64 * 1024);
+  const fingerprint = createHash('sha256').update(boundedCanonical).update(`length:${canonical.length}`).digest('hex');
+  return `${type}:session:${sessionId}:ids:${identifiers.join('|')}:payload_sha256:${fingerprint}`;
 }
 
 export function getOpenCodeEventSessionId(event: unknown): string | undefined {
@@ -102,6 +105,27 @@ export function extractOpenCodeUsage(event: unknown): OpenCodeTokenUsage | undef
   };
 }
 
+export function mergeOpenCodeUsage(previous: OpenCodeTokenUsage, next: OpenCodeTokenUsage): OpenCodeTokenUsage {
+  const merged: OpenCodeTokenUsage = {
+    input_tokens: Math.max(previous.input_tokens, next.input_tokens),
+    output_tokens: Math.max(previous.output_tokens, next.output_tokens),
+  };
+  const optionalKeys: Array<keyof Pick<OpenCodeTokenUsage, 'cached_input_tokens' | 'cache_write_input_tokens' | 'cache_creation_input_tokens' | 'reasoning_output_tokens'>> = [
+    'cached_input_tokens',
+    'cache_write_input_tokens',
+    'cache_creation_input_tokens',
+    'reasoning_output_tokens',
+  ];
+  for (const key of optionalKeys) {
+    const value = next[key];
+    const previousValue = previous[key];
+    if (value !== undefined || previousValue !== undefined) {
+      merged[key] = Math.max(previousValue ?? 0, value ?? 0);
+    }
+  }
+  return merged;
+}
+
 export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): CodeMuxEvent[] {
   const identity = getOpenCodeEventIdentity(event, context.turnId);
   const payloadKey = identity ? undefined : getOpenCodePayloadKey(event);
@@ -111,10 +135,14 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
   const type = typeof record?.type === 'string' ? record.type : 'unknown';
   const properties = asRecord(record?.properties) ?? {};
   const eventSessionId = getOpenCodeEventSessionId(event);
-  const sessionId = eventSessionId ?? context.agentSessionId;
+  const sessionId = eventSessionId;
   if (isTerminalSessionEvent(type) && sessionId && context.terminalSessionIds?.has(sessionId)) return [];
 
   const events: CodeMuxEvent[] = [];
+  if (isSessionScopedEvent(type) && !eventSessionId) {
+    events.push(buildEnvelope({ type: 'diagnostic', subtype: 'missing_session_id', event_type: type }, context, undefined));
+    return events.map((output, index) => ({ ...output, sequence: context.sequence + index }));
+  }
   switch (type) {
     case 'message.part.updated': {
       const part = asRecord(properties.part);
@@ -143,7 +171,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
           const rawOutput = status === 'completed' ? state?.output : state?.error;
           const output = serializeToolValue(rawOutput ?? (status === 'error' ? 'OpenCode tool failed' : ''));
           events.push({
-            ...buildToolResultEvent({ sessionId: context.sessionId, toolUseId: callId, content: output, isError: status === 'error' }),
+            ...buildToolResultEvent({ sessionId: context.sessionId, toolUseId: callId, content: output, isError: status === 'error', eventIdFactory: context.eventIdFactory }),
             ...routingMetadata(context, sessionId),
             event_kind: 'tool_result',
           });
@@ -207,7 +235,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
 }
 
 function buildResultEvents(context: OpenCodeEventContext, status: OpenCodeResultStatus, sessionId?: string): CodeMuxEvent[] {
-  const resultContext = sessionId ? { ...context, agentSessionId: sessionId } : context;
+  const resultContext = { ...context, agentSessionId: sessionId };
   return [{ ...buildOpenCodeResultEvent({ context: resultContext, usage: context.usage ?? emptyUsage(), durationMs: context.durationMs ?? 0, status }) as CodeMuxEvent, ...routingMetadata(context, sessionId) }];
 }
 
@@ -217,20 +245,24 @@ function buildFailureEvents(context: OpenCodeEventContext, error: unknown, sessi
 }
 
 function buildAssistantEnvelope(context: OpenCodeEventContext, sessionId: string | undefined, content: Array<Record<string, unknown>>): CodeMuxEvent {
-  return { ...buildAssistantEvent({ sessionId: context.sessionId, content: content as AssistantContentBlock[] }), ...routingMetadata(context, sessionId) };
+  return { ...buildAssistantEvent({ sessionId: context.sessionId, content: content as AssistantContentBlock[], eventIdFactory: context.eventIdFactory }), ...routingMetadata(context, sessionId) };
 }
 
 function buildEnvelope(event: CodeMuxEvent, context: OpenCodeEventContext, sessionId: string | undefined): CodeMuxEvent {
-  return { ...event, ...routingMetadata(context, sessionId), uuid: crypto.randomUUID() };
+  return { ...event, ...routingMetadata(context, sessionId), uuid: context.eventIdFactory?.() ?? crypto.randomUUID() };
 }
 
 function routingMetadata(context: OpenCodeEventContext, sessionId: string | undefined): CodeMuxEvent {
-  const openCodeSessionId = sessionId ?? context.agentSessionId;
+  const openCodeSessionId = sessionId;
   return {
     agent_id: context.agentId,
     session_id: context.sessionId,
     ...(openCodeSessionId ? { agent_session_id: openCodeSessionId, opencode_session_id: openCodeSessionId } : {}),
   };
+}
+
+function isSessionScopedEvent(type: string): boolean {
+  return type.startsWith('session.') || type.startsWith('message.') || type.startsWith('tool.') || type.startsWith('permission.');
 }
 
 function isTerminalSessionEvent(type: string): boolean {

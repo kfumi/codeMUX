@@ -148,6 +148,13 @@ describe('OpenCodeRuntime', () => {
     await expect(shutdownPromise).resolves.toBeUndefined();
     expect(server.close).toHaveBeenCalledTimes(1);
   });
+  it('fails start and runs cleanup when event subscription initialization rejects', async () => {
+    const { port, client, server } = createPort();
+    client.subscribe = vi.fn().mockRejectedValue(new Error('subscribe unavailable'));
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await expect(runtime.start()).rejects.toThrow('subscribe unavailable');
+    expect(server.close).toHaveBeenCalledTimes(1);
+  });
   it('restores an existing session and never creates a replacement when restoration fails', async () => {
     const { port, client } = createPort();
     client.restoreSession.mockRejectedValue(new Error('session not found'));
@@ -505,7 +512,6 @@ describe('OpenCodeRuntime', () => {
     await runtime.sendInput('second turn');
     onEvent({ type: 'session.status', properties: { sessionID: 'opencode-new', status: { type: 'busy' } } });
     onEvent(idle);
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1);
     onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new', id: 'idle-2' } });
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(2));
@@ -552,6 +558,24 @@ describe('OpenCodeRuntime', () => {
     onEvent({ type: 'future.event', properties: { sessionID: 'opencode-new', value: 1 } });
     onEvent({ type: 'future.event', properties: { sessionID: 'opencode-new', value: 2 } });
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { subtype?: string }).subtype === 'unknown_event')).toHaveLength(2));
+    await runtime.shutdown();
+  });
+  it('preserves cumulative reasoning and cache usage across multiple SDK usage events', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+    const usageEvent = (id: string, tokens: Record<string, unknown>) => ({ type: 'message.updated', id, properties: { info: { sessionID: 'opencode-new', tokens } } });
+    onEvent(usageEvent('usage-1', { input: 10, output: 2, reasoning: 1, cache: { read: 3, write: 4 } }));
+    onEvent(usageEvent('usage-2', { input: 14, output: 5, reasoning: 3, cache: { read: 8, write: 6 } }));
+    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
+    expect(emitted.find((event) => (event as { type?: string }).type === 'result')).toMatchObject({ usage: { input_tokens: 14, output_tokens: 5, reasoning_output_tokens: 3, cache_read_input_tokens: 8, cache_write_input_tokens: 6 } });
     await runtime.shutdown();
   });
   it('allows the official ID-less session.idle fixture to complete two prompt turns', async () => {

@@ -24,6 +24,7 @@ export interface RuntimeEventContext {
   sessionId: string;
   agentSessionId?: string;
   sequence: number;
+  eventIdFactory?: () => string;
 }
 
 // Commands from Rust to sidecar (via stdin)
