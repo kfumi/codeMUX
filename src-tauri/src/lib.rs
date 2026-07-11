@@ -512,6 +512,7 @@ pub fn run() {
             agent::commands::shutdown_agent,
             agent::commands::reset_agent_session,
             agent::commands::send_tool_response,
+            agent::commands::respond_to_agent_permission,
             agent::commands::delete_claude_session_files,
             agent::commands::delete_codex_session_files,
             agent::commands::load_claude_session_events,

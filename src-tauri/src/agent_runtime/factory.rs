@@ -1,5 +1,6 @@
 use super::claude_code::ClaudeCodeRuntime;
 use super::codex::CodexRuntime;
+use super::opencode::OpenCodeRuntime;
 use super::types::AgentRuntime;
 
 /// Resolve a runtime instance for the given agent_kind string.
@@ -7,6 +8,7 @@ use super::types::AgentRuntime;
 pub fn runtime_for_agent_kind(agent_kind: &str) -> Box<dyn AgentRuntime> {
     match agent_kind {
         "codex" => Box::new(CodexRuntime),
+        "opencode" => Box::new(OpenCodeRuntime),
         _ => Box::new(ClaudeCodeRuntime),
     }
 }
@@ -55,6 +57,9 @@ mod tests {
 
         let codex = runtime_for_agent_kind("codex");
         assert_eq!(codex.kind_name(), "codex");
+
+        let opencode = runtime_for_agent_kind("opencode");
+        assert_eq!(opencode.kind_name(), "opencode");
     }
 
     #[test]

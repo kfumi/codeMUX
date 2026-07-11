@@ -14,6 +14,7 @@ use super::context_usage::{
     latest_claude_usage_from_values, latest_codex_usage_from_values, ThreadTokenUsageSnapshot,
 };
 use super::{spawn_sidecar, SidecarHandle};
+use crate::agent_runtime::opencode::OpenCodeRuntime;
 
 fn home_dir() -> Result<PathBuf, String> {
     std::env::var("USERPROFILE")
@@ -645,12 +646,7 @@ pub async fn load_agent_latest_token_usage(
     let freshness = freshness.unwrap_or_else(|| "restored".to_string());
 
     tokio::task::spawn_blocking(move || {
-        load_latest_token_usage_for_agent_session(
-            &home,
-            agent_kind,
-            &agent_session_id,
-            &freshness,
-        )
+        load_latest_token_usage_for_agent_session(&home, agent_kind, &agent_session_id, &freshness)
     })
     .await
     .map_err(|err| format!("Failed to join token usage loader: {}", err))?
@@ -1855,10 +1851,7 @@ pub async fn send_agent_input(
     prompt: String,
     input_payload: Option<serde_json::Value>,
 ) -> Result<(), String> {
-    let mut cmd = serde_json::json!({
-        "type": "send_input",
-        "prompt": prompt,
-    });
+    let mut cmd = OpenCodeRuntime::send_input_command(prompt);
     if let Some(payload) = input_payload {
         cmd["inputPayload"] = payload;
     }
@@ -1907,10 +1900,7 @@ pub async fn start_agent_session(
 
     send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 
-    let mut input_cmd = serde_json::json!({
-        "type": "send_input",
-        "prompt": prompt,
-    });
+    let mut input_cmd = OpenCodeRuntime::send_input_command(prompt);
     if let Some(payload) = input_payload {
         input_cmd["inputPayload"] = payload;
     }
@@ -1925,7 +1915,7 @@ pub async fn interrupt_agent_session(
     info!(target: "agent", "Interrupt requested for session_id={}", session_id);
     let sidecars = agent_state.sidecars.lock().await;
     if let Some(handle) = sidecars.get(&session_id) {
-        let _ = handle.send_command(r#"{"type":"interrupt"}"#).await;
+        OpenCodeRuntime::send_command(handle, OpenCodeRuntime::interrupt_command()).await?;
         info!(target: "agent", "Interrupt command sent, sidecar kept alive for session_id={}", session_id);
     } else {
         debug!(target: "agent", "Interrupt skipped; no active sidecar for session_id={}", session_id);
@@ -1973,15 +1963,23 @@ pub async fn send_tool_response(
 }
 
 #[tauri::command]
+pub async fn respond_to_agent_permission(
+    agent_state: State<'_, AgentState>,
+    session_id: String,
+    request_id: String,
+    response: serde_json::Value,
+) -> Result<(), String> {
+    let cmd = OpenCodeRuntime::respond_to_permission_command(&request_id, &session_id, response);
+    send_command_to_session(&agent_state, &session_id, cmd).await
+}
+
+#[tauri::command]
 pub async fn reset_agent_session(
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
     info!(target: "agent", "Reset requested for session_id={}", session_id);
-    let cmd = serde_json::json!({
-        "type": "reset_session",
-        "sessionId": session_id,
-    });
+    let cmd = OpenCodeRuntime::reset_session_command(&session_id);
 
     let sidecars = agent_state.sidecars.lock().await;
     if let Some(handle) = sidecars.get(&session_id) {
@@ -2312,9 +2310,9 @@ mod tests {
         build_update_permissions_command_from_snapshot, convert_codex_history_values_to_events,
         convert_codex_item_to_claude_format, find_codex_session_jsonl,
         load_latest_token_usage_for_agent_session, parse_proxy_port_from_stderr,
-        read_codex_interactive_events_from_dir, read_json_stream_values, resolve_agent_session_info,
-        rewind_jsonl_before_latest_turn, rewind_jsonl_before_target_turn,
-        should_include_claude_history_event,
+        read_codex_interactive_events_from_dir, read_json_stream_values,
+        resolve_agent_session_info, rewind_jsonl_before_latest_turn,
+        rewind_jsonl_before_target_turn, should_include_claude_history_event,
         sort_events_by_timestamp_stable, RewindTarget,
     };
     use crate::config::types::AgentKind;
@@ -2385,8 +2383,10 @@ mod tests {
 
     #[test]
     fn loads_latest_claude_token_usage_from_agent_session_file() {
-        let temp =
-            std::env::temp_dir().join(format!("codemux-claude-usage-test-{}", uuid::Uuid::new_v4()));
+        let temp = std::env::temp_dir().join(format!(
+            "codemux-claude-usage-test-{}",
+            uuid::Uuid::new_v4()
+        ));
         let project_dir = temp.join(".claude").join("projects").join("d--project");
         std::fs::create_dir_all(&project_dir).unwrap();
         std::fs::write(
@@ -2975,6 +2975,15 @@ mod tests {
                 "planMode": "on"
             })
         );
+
+        let opencode_cmd = build_update_permissions_command_from_snapshot(
+            "session-opencode",
+            "opencode",
+            Some(r#"{"kind":"opencode","allow":"ask"}"#.to_string()),
+            Some("off".to_string()),
+        );
+        assert_eq!(opencode_cmd["agentKind"], "opencode");
+        assert_eq!(opencode_cmd["permissionConfig"]["kind"], "opencode");
     }
 
     #[test]

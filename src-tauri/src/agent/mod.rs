@@ -50,7 +50,8 @@ impl SidecarHandle {
 
     /// Kill the sidecar process.
     pub async fn shutdown(&mut self) {
-        let _ = self.send_command(r#"{"type":"shutdown"}"#).await;
+        let command = crate::agent_runtime::opencode::OpenCodeRuntime::shutdown_command();
+        let _ = self.send_command(&command.to_string()).await;
         let _ = self.child.wait().await;
     }
 }
