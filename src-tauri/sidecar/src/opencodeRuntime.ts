@@ -1,6 +1,7 @@
 import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInputPayload.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
 import {
+  closeOpenCodeServerWithTimeout,
   mapOpenCodeImages,
   officialOpenCodeSdkPort,
   type OpenCodeClientPort,
@@ -73,6 +74,9 @@ export class OpenCodeRuntime {
   async sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void> {
     const client = this.client;
     const sessionId = this.agentSessionId;
+    if (this.shutdownPromise || this.state === 'disposing' || this.state === 'cleanup_failed') {
+      throw new Error('OpenCode runtime is shutting down');
+    }
     if (this.state !== 'started' || !client || !sessionId) {
       throw new Error('OpenCode runtime is not started');
     }
@@ -172,7 +176,10 @@ export class OpenCodeRuntime {
     if (!this.client) {
       let resources: OpenCodeSdkReadyResources;
       try {
-        resources = await this.sdk.start({ cwd: this.config.cwd });
+        resources = await this.sdk.start({
+          cwd: this.config.cwd,
+          serverCloseTimeoutMs: this.serverCloseTimeoutMs,
+        });
       } catch (error) {
         this.retainStartResources(getStartFailureResources(error));
         const cleanupError = await this.closeServerAfterStartFailure();
@@ -329,23 +336,7 @@ export class OpenCodeRuntime {
   }
 
   private async closeServerWithTimeout(server: OpenCodeServerHandle): Promise<void> {
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(`OpenCode server close timed out after ${this.serverCloseTimeoutMs}ms`));
-      }, this.serverCloseTimeoutMs);
-    });
-
-    try {
-      await Promise.race([
-        Promise.resolve().then(() => server.close()),
-        timeout,
-      ]);
-    } finally {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-    }
+    await closeOpenCodeServerWithTimeout(server, this.serverCloseTimeoutMs);
   }
 }
 

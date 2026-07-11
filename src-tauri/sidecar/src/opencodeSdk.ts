@@ -46,8 +46,49 @@ export interface OpenCodeSdkReadyResources {
   client: OpenCodeClientPort;
 }
 
+export interface OpenCodeSdkStartInput {
+  cwd: string;
+  serverCloseTimeoutMs?: number;
+}
+
 export interface OpenCodeSdkPort {
-  start(input: { cwd: string }): Promise<OpenCodeSdkReadyResources>;
+  start(input: OpenCodeSdkStartInput): Promise<OpenCodeSdkReadyResources>;
+}
+
+export const DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS = 10_000;
+
+const pendingServerClosePromises = new WeakMap<OpenCodeServerHandle, Promise<void>>();
+
+export function closeOpenCodeServerWithTimeout(
+  server: OpenCodeServerHandle,
+  timeoutMs: number = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS,
+): Promise<void> {
+  let closePromise = pendingServerClosePromises.get(server);
+  if (!closePromise) {
+    const rawClosePromise = Promise.resolve().then(() => server.close());
+    let trackedClosePromise: Promise<void>;
+    trackedClosePromise = rawClosePromise.catch((error) => {
+      if (pendingServerClosePromises.get(server) === trackedClosePromise) {
+        pendingServerClosePromises.delete(server);
+      }
+      throw error;
+    });
+    closePromise = trackedClosePromise;
+    pendingServerClosePromises.set(server, trackedClosePromise);
+  }
+
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(new Error('OpenCode server close timed out after ' + timeoutMs + 'ms'));
+    }, timeoutMs);
+  });
+
+  return Promise.race([closePromise, timeout]).finally(() => {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  });
 }
 
 function readResponse<T>(operation: string, response: { data?: T; error?: unknown }): T {
@@ -79,7 +120,7 @@ function toOpenCodeImage(image: AgentInputImage): OpenCodeImageInput {
 }
 
 export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
-  async start({ cwd }) {
+  async start({ cwd, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS }) {
     const server = await createOpencodeServer({
       hostname: '127.0.0.1',
       port: 0,
@@ -136,7 +177,7 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
       };
     } catch (error) {
       try {
-        await server.close();
+        await closeOpenCodeServerWithTimeout(server, serverCloseTimeoutMs);
       } catch (closeError) {
         const failure = new AggregateError(
           [error, closeError],

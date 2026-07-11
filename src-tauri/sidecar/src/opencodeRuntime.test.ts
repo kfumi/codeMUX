@@ -74,7 +74,7 @@ describe('OpenCodeRuntime', () => {
 
     const mapping = await runtime.start();
 
-    expect(port.start).toHaveBeenCalledWith({ cwd: 'D:/workspace/demo' });
+    expect(port.start).toHaveBeenCalledWith({ cwd: 'D:/workspace/demo', serverCloseTimeoutMs: 10_000 });
     expect(client.createSession).toHaveBeenCalledWith({ cwd: 'D:/workspace/demo' });
     expect(mapping).toEqual<OpenCodeSessionMapping>({
       sessionId: 'codemux-session-1',
@@ -118,6 +118,16 @@ describe('OpenCodeRuntime', () => {
     expect(port.start).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects new prompts once shutdown has been requested', async () => {
+    const { port, server } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+
+    const shutdownPromise = runtime.shutdown();
+    await expect(runtime.sendInput('late prompt')).rejects.toThrow('OpenCode runtime is shutting down');
+    await expect(shutdownPromise).resolves.toBeUndefined();
+    expect(server.close).toHaveBeenCalledTimes(1);
+  });
   it('restores an existing session and never creates a replacement when restoration fails', async () => {
     const { port, client } = createPort();
     client.restoreSession.mockRejectedValue(new Error('session not found'));
@@ -169,6 +179,29 @@ describe('OpenCodeRuntime', () => {
     });
   });
 
+  it('bounds official adapter startup cleanup and preserves the server for runtime retry', async () => {
+    const serverClose = vi.fn(() => new Promise<void>(() => undefined));
+    sdkMocks.createServer.mockResolvedValueOnce({
+      url: 'http://127.0.0.1:4098',
+      close: serverClose,
+    });
+    sdkMocks.createClient.mockImplementationOnce(() => {
+      throw new Error('client initialization failed');
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), officialOpenCodeSdkPort, {
+      serverCloseTimeoutMs: 10,
+    });
+
+    const startedAt = Date.now();
+    const startError = await runtime.start().catch((error: unknown) => error);
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(elapsedMs).toBeLessThan(500);
+    expect(startError).toBeInstanceOf(AggregateError);
+    expect(serverClose).toHaveBeenCalledTimes(1);
+    await runtime.shutdown().catch(() => undefined);
+    expect(serverClose).toHaveBeenCalledTimes(1);
+  });
   it('maps the official adapter prompt body and images to OpenCode SDK parts', async () => {
     sdkMocks.prompt.mockClear();
     const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo' });
@@ -282,8 +315,9 @@ describe('OpenCodeRuntime', () => {
     );
     expect(server.close).toHaveBeenCalledTimes(1);
 
-    await expect(runtime.shutdown()).resolves.toBeUndefined();
-    expect(server.close).toHaveBeenCalledTimes(2);
+    const retryError = await runtime.shutdown().catch((error: unknown) => error);
+    expect(retryError).toBeInstanceOf(AggregateError);
+    expect(server.close).toHaveBeenCalledTimes(1);
   });
 
   it('does not start a new server after dispose and remains idempotent', async () => {
