@@ -63,7 +63,13 @@ describe('OpenCode runtime contract', () => {
 
     expect(buildOpenCodeResultEvent({
       context,
-      usage: { input_tokens: 12, output_tokens: 8 },
+      usage: {
+        input_tokens: 12,
+        output_tokens: 8,
+        cached_input_tokens: 3,
+        cache_write_input_tokens: 2,
+        reasoning_output_tokens: 5,
+      },
       durationMs: 42,
     })).toMatchObject({
       type: 'result',
@@ -71,7 +77,55 @@ describe('OpenCode runtime contract', () => {
       session_id: 'codemux-session-1',
       agent_session_id: 'opencode-session-1',
       sequence: 7,
-      usage: { input_tokens: 12, output_tokens: 8 },
+      usage: {
+        input_tokens: 12,
+        output_tokens: 8,
+        cache_read_input_tokens: 3,
+        cache_write_input_tokens: 2,
+        reasoning_output_tokens: 5,
+      },
+      last_token_usage: {
+        cached_input_tokens: 3,
+        cache_write_input_tokens: 2,
+        reasoning_output_tokens: 5,
+      },
+    });
+  });
+
+  it('omits OpenCode session metadata when no session exists yet', () => {
+    const event = buildOpenCodeResultEvent({
+      context: {
+        agentId: 'opencode',
+        sessionId: 'codemux-session-2',
+        sequence: 1,
+      },
+      usage: { input_tokens: 1, output_tokens: 2 },
+      durationMs: 10,
+    });
+
+    expect(event).not.toHaveProperty('agent_session_id');
+  });
+
+  it('supports explicit error and interrupted result states', () => {
+    const base = {
+      context: {
+        agentId: 'opencode',
+        sessionId: 'codemux-session-3',
+        sequence: 2,
+      },
+      usage: { input_tokens: 1, output_tokens: 2 },
+      durationMs: 10,
+    };
+
+    expect(buildOpenCodeResultEvent({ ...base, status: 'error' })).toMatchObject({
+      subtype: 'error',
+      is_error: true,
+      result: 'error',
+    });
+    expect(buildOpenCodeResultEvent({ ...base, status: 'interrupted' })).toMatchObject({
+      subtype: 'interrupted',
+      is_error: false,
+      result: 'interrupted',
     });
   });
 });

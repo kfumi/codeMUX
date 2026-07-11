@@ -29,8 +29,12 @@ export type OpenCodeTokenUsage = {
   input_tokens: number;
   output_tokens: number;
   cached_input_tokens?: number;
+  cache_write_input_tokens?: number;
+  cache_creation_input_tokens?: number;
   reasoning_output_tokens?: number;
 };
+
+export type OpenCodeResultStatus = 'success' | 'error' | 'interrupted';
 
 type AssistantContentBlock =
   | { type: 'text'; text: string }
@@ -56,15 +60,21 @@ export function buildOpenCodeResultEvent({
   context,
   usage,
   durationMs,
+  status = 'success',
 }: {
   context: RuntimeEventContext;
   usage: OpenCodeTokenUsage;
   durationMs: number;
+  status?: OpenCodeResultStatus;
 }) {
+  const cachedInputTokens = usage.cached_input_tokens ?? 0;
+  const cacheWriteInputTokens = usage.cache_write_input_tokens ?? usage.cache_creation_input_tokens ?? 0;
+  const reasoningOutputTokens = usage.reasoning_output_tokens;
+
   return {
     type: 'result',
-    subtype: 'success',
-    is_error: false,
+    subtype: status,
+    is_error: status === 'error',
     agent_id: context.agentId,
     session_id: context.sessionId,
     ...(context.agentSessionId ? { agent_session_id: context.agentSessionId } : {}),
@@ -73,16 +83,26 @@ export function buildOpenCodeResultEvent({
     duration_ms: durationMs,
     duration_api_ms: durationMs,
     num_turns: 1,
-    result: 'ok',
+    result: status === 'success' ? 'ok' : status,
     usage: {
       input_tokens: usage.input_tokens,
       output_tokens: usage.output_tokens,
-      cache_read_input_tokens: usage.cached_input_tokens ?? 0,
+      cache_read_input_tokens: cachedInputTokens,
+      cache_write_input_tokens: cacheWriteInputTokens,
+      ...(usage.cache_creation_input_tokens !== undefined
+        ? { cache_creation_input_tokens: usage.cache_creation_input_tokens }
+        : {}),
+      ...(reasoningOutputTokens !== undefined ? { reasoning_output_tokens: reasoningOutputTokens } : {}),
     },
     last_token_usage: {
       input_tokens: usage.input_tokens,
       output_tokens: usage.output_tokens,
-      cached_input_tokens: usage.cached_input_tokens ?? 0,
+      cached_input_tokens: cachedInputTokens,
+      cache_write_input_tokens: cacheWriteInputTokens,
+      ...(usage.cache_creation_input_tokens !== undefined
+        ? { cache_creation_input_tokens: usage.cache_creation_input_tokens }
+        : {}),
+      ...(reasoningOutputTokens !== undefined ? { reasoning_output_tokens: reasoningOutputTokens } : {}),
       total_tokens: usage.input_tokens + usage.output_tokens,
     },
   };
