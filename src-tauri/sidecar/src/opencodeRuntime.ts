@@ -1,4 +1,7 @@
 import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInputPayload.js';
+import { emit } from './streamEventBatcher.js';
+import { extractOpenCodeUsage, getOpenCodeEventIdentity, toCodeMuxEvent } from './opencodeEvents.js';
+import type { OpenCodeEventSubscription } from './opencodeSdk.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
 import {
   closeOpenCodeServerWithTimeout,
@@ -20,6 +23,8 @@ export const DEFAULT_SERVER_CLOSE_TIMEOUT_MS = 10_000;
 export interface OpenCodeRuntimeOptions {
   activeTaskTimeoutMs?: number;
   serverCloseTimeoutMs?: number;
+  agentId?: string;
+  emitEvent?: (event: unknown) => void;
 }
 
 export class OpenCodeRuntime {
@@ -27,6 +32,8 @@ export class OpenCodeRuntime {
   private readonly sdk: OpenCodeSdkPort;
   private readonly activeTaskTimeoutMs: number;
   private readonly serverCloseTimeoutMs: number;
+  private readonly agentId: string;
+  private readonly emitEvent: (event: unknown) => void;
   private server: OpenCodeServerHandle | undefined;
   private client: OpenCodeClientPort | undefined;
   private agentSessionId: string | undefined;
@@ -35,6 +42,11 @@ export class OpenCodeRuntime {
   private startPromise: Promise<OpenCodeSessionMapping> | undefined;
   private shutdownPromise: Promise<void> | undefined;
   private state: RuntimeState = 'idle';
+  private eventSubscription: OpenCodeEventSubscription | undefined;
+  private readonly seenEventIds = new Set<string>();
+  private eventSequence = 0;
+  private usage: import('./runtimeEvents.js').OpenCodeTokenUsage = { input_tokens: 0, output_tokens: 0 };
+  private turnStartedAt = 0;
 
   constructor(
     config: OpenCodeSessionConfig,
@@ -45,6 +57,8 @@ export class OpenCodeRuntime {
     this.sdk = sdk;
     this.activeTaskTimeoutMs = options.activeTaskTimeoutMs ?? DEFAULT_ACTIVE_TASK_TIMEOUT_MS;
     this.serverCloseTimeoutMs = options.serverCloseTimeoutMs ?? DEFAULT_SERVER_CLOSE_TIMEOUT_MS;
+    this.agentId = options.agentId ?? config.sessionId;
+    this.emitEvent = options.emitEvent ?? emit;
     if (!Number.isFinite(this.activeTaskTimeoutMs) || this.activeTaskTimeoutMs <= 0) {
       throw new RangeError('OpenCode active task timeout must be a positive finite number');
     }
@@ -84,6 +98,7 @@ export class OpenCodeRuntime {
       throw new Error('OpenCode runtime already has an active task');
     }
 
+    this.turnStartedAt = Date.now();
     const normalizedPayload = normalizeAgentInputPayload(prompt, inputPayload);
     const normalizedPrompt = normalizedPayload.text;
     const task = client.prompt({
@@ -205,6 +220,7 @@ export class OpenCodeRuntime {
         : await client.createSession({ cwd: this.config.cwd });
       this.agentSessionId = session.id;
       this.state = 'started';
+      await this.subscribeToEvents();
       return this.mapping();
     } catch (error) {
       const requestedSessionId = this.config.agentSessionId;
@@ -239,6 +255,62 @@ export class OpenCodeRuntime {
     }
   }
 
+  private async subscribeToEvents(): Promise<void> {
+    const client = this.client;
+    if (!client?.subscribe || this.eventSubscription) {
+      return;
+    }
+    try {
+      this.eventSubscription = await client.subscribe({
+        cwd: this.config.cwd,
+        onEvent: (event) => this.handleSdkEvent(event),
+        onError: (error) => this.handleSdkEvent({ type: 'server.error', properties: { error } }),
+      });
+    } catch (error) {
+      this.handleSdkEvent({ type: 'server.error', properties: { error } });
+    }
+  }
+
+  private handleSdkEvent(event: unknown): void {
+    const identity = getOpenCodeEventIdentity(event);
+    if (this.seenEventIds.has(identity)) {
+      return;
+    }
+    this.seenEventIds.add(identity);
+    const nextUsage = extractOpenCodeUsage(event);
+    if (nextUsage) {
+      this.usage = { ...this.usage, ...nextUsage };
+    }
+    const events = toCodeMuxEvent(event, {
+      agentId: this.agentId,
+      sessionId: this.config.sessionId,
+      agentSessionId: this.agentSessionId,
+      sequence: this.eventSequence,
+      durationMs: this.turnStartedAt > 0 ? Date.now() - this.turnStartedAt : 0,
+      usage: this.usage,
+    });
+    for (const normalizedEvent of events) {
+      this.emitEvent(normalizedEvent);
+    }
+    this.eventSequence += events.length;
+    if (events.some((eventItem) => eventItem.type === 'result')) {
+      this.turnStartedAt = 0;
+      this.usage = { input_tokens: 0, output_tokens: 0 };
+    }
+  }
+
+  private async closeEventSubscription(errors: unknown[]): Promise<void> {
+    const subscription = this.eventSubscription;
+    this.eventSubscription = undefined;
+    if (!subscription) {
+      return;
+    }
+    try {
+      await subscription.close();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
   private async interruptInternal(): Promise<void> {
     const client = this.client;
     const sessionId = this.agentSessionId;
@@ -253,6 +325,7 @@ export class OpenCodeRuntime {
         throw error;
       }
     }
+    this.handleSdkEvent({ type: 'session.interrupted', properties: { sessionID: sessionId } });
   }
 
   private async disposeResources(): Promise<void> {
@@ -272,6 +345,7 @@ export class OpenCodeRuntime {
       }
       this.activeTask = undefined;
 
+      await this.closeEventSubscription(errors);
       this.agentSessionId = undefined;
       this.client = undefined;
 

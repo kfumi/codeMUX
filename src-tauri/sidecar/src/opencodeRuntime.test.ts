@@ -68,6 +68,26 @@ function deferred<T>() {
 }
 
 describe('OpenCodeRuntime', () => {
+  it('subscribes to SDK events, normalizes them, and deduplicates repeated events', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn().mockResolvedValue(undefined) };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { agentId: 'agent-1', emitEvent: (event) => emitted.push(event) });
+
+    await runtime.start();
+    const event = { type: 'message.part.updated', properties: { part: { id: 'part-1', sessionID: 'opencode-new', messageID: 'message-1', type: 'text', text: 'hi' }, delta: 'hi' } };
+    onEvent(event);
+    onEvent(event);
+
+    await vi.waitFor(() => expect(emitted).toHaveLength(1));
+    expect(emitted[0]).toMatchObject({ type: 'assistant', agent_id: 'agent-1', session_id: 'codemux-session-1', agent_session_id: 'opencode-new', sequence: 0 });
+    await runtime.shutdown();
+    expect(client.subscribe).toHaveBeenCalledWith(expect.objectContaining({ cwd: 'D:/workspace/demo' }));
+  });
   it('starts an isolated server before creating a new session and returns the mapping', async () => {
     const { port, client } = createPort();
     const runtime = new OpenCodeRuntime(createConfig(), port);

@@ -36,7 +36,7 @@ export type OpenCodeTokenUsage = {
 
 export type OpenCodeResultStatus = 'success' | 'error' | 'interrupted';
 
-type AssistantContentBlock =
+export type AssistantContentBlock =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> };
