@@ -1,6 +1,6 @@
 ﻿import { createOpencodeClient } from '@opencode-ai/sdk/client';
 import { createOpencodeServer } from '@opencode-ai/sdk/server';
-import type { AgentInputPayload } from './agentInputPayload.js';
+import type { AgentInputImage, AgentInputPayload } from './agentInputPayload.js';
 
 export interface OpenCodeServerHandle {
   close(): void | Promise<void>;
@@ -10,10 +10,17 @@ export interface OpenCodeSessionHandle {
   id: string;
 }
 
+export interface OpenCodeImageInput {
+  name: string;
+  mediaType: string;
+  dataUrl: string;
+}
+
 export interface OpenCodePromptInput {
   sessionId: string;
   prompt: string;
   inputPayload?: AgentInputPayload;
+  images: OpenCodeImageInput[];
   provider: string;
   model: string;
 }
@@ -37,6 +44,14 @@ function readResponse<T>(operation: string, response: { data?: T; error?: unknow
     return response.data;
   }
   throw new Error(`${operation} failed${response.error ? `: ${String(response.error)}` : ''}`);
+}
+
+function toOpenCodeImage(image: AgentInputImage): OpenCodeImageInput {
+  return {
+    name: image.name,
+    mediaType: image.mediaType,
+    dataUrl: image.dataUrl,
+  };
 }
 
 export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
@@ -65,8 +80,16 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
               await client.session.get({ path: { id: sessionId }, query: { directory: sessionCwd } }),
             );
           },
-          async prompt({ sessionId, prompt, inputPayload, provider, model }) {
-            const text = inputPayload?.text ?? prompt;
+          async prompt({ sessionId, prompt, inputPayload, images, provider, model }) {
+            const parts = [
+              { type: 'text' as const, text: inputPayload?.text ?? prompt },
+              ...images.map((image) => ({
+                type: 'file' as const,
+                mime: image.mediaType,
+                filename: image.name,
+                url: image.dataUrl,
+              })),
+            ];
             readResponse(
               'OpenCode prompt',
               await client.session.prompt({
@@ -74,7 +97,7 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
                 query: { directory: cwd },
                 body: {
                   model: { providerID: provider, modelID: model },
-                  parts: [{ type: 'text', text }],
+                  parts,
                 },
               }),
             );
@@ -93,3 +116,7 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
     }
   },
 };
+
+export function mapOpenCodeImages(payload?: AgentInputPayload): OpenCodeImageInput[] {
+  return (payload?.images ?? []).map(toOpenCodeImage);
+}

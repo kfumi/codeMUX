@@ -57,17 +57,21 @@ describe('OpenCodeRuntime', () => {
     expect(client.createSession).not.toHaveBeenCalled();
   });
 
-  it('sends the prompt to the current session without exposing SDK objects', async () => {
+  it('sends text and image payloads to the adapter without exposing SDK objects', async () => {
     const { port, client } = createPort();
     const runtime = new OpenCodeRuntime(createConfig(), port);
     await runtime.start();
-    const inputPayload: AgentInputPayload = { text: 'hello', images: [] };
+    const inputPayload: AgentInputPayload = {
+      text: 'hello',
+      images: [{ name: 'diagram.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
+    };
 
     await expect(runtime.sendInput('hello', inputPayload)).resolves.toBeUndefined();
     expect(client.prompt).toHaveBeenCalledWith({
       sessionId: 'opencode-new',
       prompt: 'hello',
       inputPayload,
+      images: inputPayload.images,
       provider: 'openai',
       model: 'gpt-5',
     });
@@ -88,7 +92,29 @@ describe('OpenCodeRuntime', () => {
     expect(client.abort).toHaveBeenCalledWith('opencode-new');
   });
 
-  it('is idempotent for shutdown and dispose, and clears session before stopping server', async () => {
+  it('continues cleanup after interrupt and active task failures, then aggregates errors', async () => {
+    const { port, server, client } = createPort();
+    let rejectPrompt!: (reason: unknown) => void;
+    client.prompt.mockReturnValueOnce(new Promise<void>((_, reject) => { rejectPrompt = reject; }));
+    client.abort.mockRejectedValueOnce(new Error('interrupt failed'));
+    server.close.mockRejectedValueOnce(new Error('server close failed'));
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+
+    void runtime.sendInput('long task').catch(() => undefined);
+    await vi.waitFor(() => expect(client.prompt).toHaveBeenCalled());
+    rejectPrompt(new Error('active task failed'));
+
+    const cleanupError = await runtime.shutdown().catch((error: unknown) => error);
+    expect(cleanupError).toBeInstanceOf(AggregateError);
+    expect(String(cleanupError)).toContain('OpenCode runtime cleanup failed');
+    expect(server.close).toHaveBeenCalledTimes(1);
+
+    await expect(runtime.shutdown()).resolves.toBeUndefined();
+    expect(server.close).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not start a new server after dispose and remains idempotent', async () => {
     const { port, server, client } = createPort();
     const runtime = new OpenCodeRuntime(createConfig(), port);
     await runtime.start();
@@ -99,6 +125,8 @@ describe('OpenCodeRuntime', () => {
 
     expect(client.abort).not.toHaveBeenCalled();
     expect(server.close).toHaveBeenCalledTimes(1);
+    expect(port.start).toHaveBeenCalledTimes(1);
+    await expect(runtime.start()).rejects.toThrow('OpenCode runtime cannot start in state disposed');
     await expect(runtime.sendInput('after dispose')).rejects.toThrow('OpenCode runtime is not started');
   });
 
