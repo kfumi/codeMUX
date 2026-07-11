@@ -33,6 +33,10 @@ pub struct SidecarHandle {
 }
 
 impl SidecarHandle {
+    pub fn command_sender(&self) -> mpsc::Sender<String> {
+        self.stdin_tx.clone()
+    }
+
     /// Send a command string to the sidecar's stdin.
     pub async fn send_command(&self, cmd: &str) -> Result<(), String> {
         self.stdin_tx
