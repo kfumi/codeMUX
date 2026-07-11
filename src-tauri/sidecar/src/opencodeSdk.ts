@@ -34,7 +34,7 @@ export interface OpenCodeClientPort {
   restoreSession(input: { cwd: string; sessionId: string }): Promise<OpenCodeSessionHandle>;
   prompt(input: OpenCodePromptInput): Promise<void>;
   abort(sessionId: string): Promise<boolean | void>;
-  subscribe?(input: { cwd: string; onEvent: (event: unknown) => void; onError: (error: unknown) => void }): Promise<OpenCodeEventSubscription>;
+  subscribe?(input: { cwd: string; onEvent: (event: unknown) => void; onError: (error: unknown) => void; onDisconnect?: (error: unknown) => void }): Promise<OpenCodeEventSubscription>;
 }
 
 export interface OpenCodeSdkStartResources {
@@ -179,16 +179,21 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
               }),
             );
           },
-          async subscribe({ cwd: sessionCwd, onEvent, onError }) {
-            const result = await client.event.subscribe({ query: { directory: sessionCwd } });
+          async subscribe({ cwd: sessionCwd, onEvent, onError, onDisconnect }) {
+            const reportDisconnect = onDisconnect ?? onError;
+            const result = await client.event.subscribe({
+              query: { directory: sessionCwd },
+              onSseError: reportDisconnect,
+            });
             let closed = false;
             void (async () => {
               try {
                 for await (const event of result.stream) {
                   if (!closed) onEvent(event);
                 }
+                if (!closed) reportDisconnect(new Error('OpenCode SSE stream ended'));
               } catch (error) {
-                if (!closed) onError(error);
+                if (!closed) reportDisconnect(error);
               }
             })();
             return {
