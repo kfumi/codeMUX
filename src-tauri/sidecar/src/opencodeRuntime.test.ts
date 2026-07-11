@@ -115,6 +115,75 @@ describe('OpenCodeRuntime', () => {
     expect(client.respondToPermission).toHaveBeenCalledTimes(1);
   });
 
+  it('blocks new permission registrations during interrupt and leaves no pending requests', async () => {
+    const { port, client } = createPort();
+    let onEvent!: (event: unknown) => void;
+    let resolveCancellation!: () => void;
+    const cancellation = new Promise<boolean>((resolve) => { resolveCancellation = () => resolve(true); });
+    client.respondToPermission = vi.fn().mockReturnValue(cancellation);
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+    onEvent({ type: 'permission.updated', properties: { id: 'permission-1', sessionID: 'opencode-new', type: 'read', title: 'Read', metadata: {} } });
+
+    const interrupt = runtime.interrupt();
+    await vi.waitFor(() => expect(client.respondToPermission).toHaveBeenCalledTimes(1));
+    onEvent({ type: 'permission.updated', properties: { id: 'permission-2', sessionID: 'opencode-new', type: 'write', title: 'Write', metadata: {} } });
+    expect(runtime.permissions.size).toBe(0);
+    resolveCancellation();
+    await interrupt;
+    expect(runtime.permissions.size).toBe(0);
+    await runtime.shutdown();
+  });
+
+  it('updates changed permission payloads and emits one event per changed payload', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+    const first = { type: 'permission.updated', properties: { id: 'permission-1', sessionID: 'opencode-new', type: 'read', title: 'Read', metadata: { path: 'a.txt' } } };
+    const changed = { type: 'permission.updated', properties: { id: 'permission-1', sessionID: 'opencode-new', type: 'write', title: 'Write', metadata: { path: 'b.txt' } } };
+    onEvent(first);
+    onEvent(first);
+    onEvent(changed);
+
+    expect(emitted.filter((event) => (event as { type?: string }).type === 'permission')).toHaveLength(2);
+    expect(runtime.permissions.get('permission-1')).toMatchObject({ permissionType: 'write', description: 'Write', raw: changed.properties });
+    await runtime.shutdown();
+  });
+
+  it('keeps permission registration closed until reset cleanup completes', async () => {
+    const { port, client } = createPort();
+    let onEvent!: (event: unknown) => void;
+    let resolveCancellation!: () => void;
+    const cancellation = new Promise<boolean>((resolve) => { resolveCancellation = () => resolve(true); });
+    client.respondToPermission = vi.fn().mockReturnValue(cancellation);
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+    onEvent({ type: 'permission.updated', properties: { id: 'permission-1', sessionID: 'opencode-new', type: 'read', title: 'Read', metadata: {} } });
+
+    const reset = runtime.resetSession();
+    await vi.waitFor(() => expect(client.respondToPermission).toHaveBeenCalledTimes(1));
+    onEvent({ type: 'permission.updated', properties: { id: 'permission-2', sessionID: 'opencode-new', type: 'write', title: 'Write', metadata: {} } });
+    expect(runtime.permissions.size).toBe(0);
+    resolveCancellation();
+    await reset;
+    expect(runtime.permissions.size).toBe(0);
+    await runtime.shutdown();
+  });
+
   it('subscribes to SDK events, normalizes them, and deduplicates repeated events', async () => {
     const { port, client } = createPort();
     const emitted: unknown[] = [];

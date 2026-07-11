@@ -1,6 +1,5 @@
 import type { AgentInputPayload } from './agentInputPayload.js';
 import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
-import type { OpenCodePermissionResponse } from './opencodePermissions.js';
 
 export type RuntimeFlavor = 'claude' | 'codex' | 'opencode';
 
@@ -37,7 +36,6 @@ export type SidecarCommand =
   | { type: 'interrupt' }
   | { type: 'shutdown' }
   | { type: 'tool_response'; toolUseId: string; response: unknown }
-  | { type: 'respond_to_permission'; requestId: string; sessionId: string; response: OpenCodePermissionResponse }
   | { type: 'start_proxy'; apiKey: string; baseUrl: string; providerName?: string; codexNeedsProxy?: boolean }
   | { type: 'stop_proxy' }
   | { type: 'proxy_status' };

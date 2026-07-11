@@ -60,6 +60,8 @@ export class OpenCodeRuntime {
   private usage: import('./runtimeEvents.js').OpenCodeTokenUsage = { input_tokens: 0, output_tokens: 0 };
   private turnStartedAt = 0;
   private turnId = 0;
+  private permissionCancellationEpoch = 0;
+  private permissionClosing = false;
 
   constructor(
     config: OpenCodeSessionConfig,
@@ -150,10 +152,16 @@ export class OpenCodeRuntime {
 
   resetSession(): Promise<void> {
     return this.enqueueLifecycle(async () => {
-      await this.interruptInternal();
-      await this.waitForActiveTaskIfPresent();
-      this.clearEventState();
-      this.agentSessionId = undefined;
+      const cancellation = this.beginPermissionCancellation();
+      try {
+        await this.interruptInternal();
+        await this.waitForActiveTaskIfPresent();
+        this.clearEventState();
+        this.agentSessionId = undefined;
+        await this.permissions.cancelAll(this.config.sessionId);
+      } finally {
+        this.finishPermissionCancellation(cancellation);
+      }
     });
   }
 
@@ -297,6 +305,9 @@ export class OpenCodeRuntime {
     const eventSessionId = getOpenCodeEventSessionId(event);
     const activeSessionId = this.agentSessionId;
     const type = typeof (event as { type?: unknown })?.type === 'string' ? (event as { type: string }).type : '';
+    if (type === 'permission.updated' && this.permissionClosing) {
+      return;
+    }
     const identity = getOpenCodeEventIdentity(event, this.turnId);
     const payloadKey = identity ? undefined : getOpenCodePayloadKey(event);
     if ((identity && this.seenEventIds.has(identity)) || (payloadKey && this.seenPayloadKeys.has(payloadKey))) {
@@ -433,7 +444,7 @@ export class OpenCodeRuntime {
     const metadata = asRecord(properties?.metadata);
     const openCodeSessionId = eventSessionId ?? readString(properties?.sessionID);
     const rawPermission = properties ?? event;
-    this.permissions.add({
+    this.permissions.upsert({
       requestId,
       openCodeSessionId,
       codeMuxSessionId: this.config.sessionId,
@@ -480,25 +491,30 @@ export class OpenCodeRuntime {
     }
   }
   private async interruptInternal(): Promise<void> {
-    await this.permissions.cancelAll(this.config.sessionId);
-    const client = this.client;
-    const sessionId = this.agentSessionId;
-    if (!client || !sessionId || !this.activeTask) {
-      return;
-    }
-
+    const cancellation = this.beginPermissionCancellation();
     try {
-      await client.abort(sessionId);
-    } catch (error) {
-      if (!isAbortError(error)) {
-        throw error;
+      await this.permissions.cancelAll(this.config.sessionId);
+      const client = this.client;
+      const sessionId = this.agentSessionId;
+      if (client && sessionId && this.activeTask) {
+        try {
+          await client.abort(sessionId);
+        } catch (error) {
+          if (!isAbortError(error)) {
+            throw error;
+          }
+        }
+        this.handleSdkEvent({ type: 'session.interrupted', properties: { sessionID: sessionId } });
       }
+      await this.permissions.cancelAll(this.config.sessionId);
+    } finally {
+      this.finishPermissionCancellation(cancellation);
     }
-    this.handleSdkEvent({ type: 'session.interrupted', properties: { sessionID: sessionId } });
   }
 
   private async disposeResources(): Promise<void> {
     this.state = 'disposing';
+    const cancellation = this.beginPermissionCancellation();
     const errors: unknown[] = [];
     try {
       await this.permissions.cancelAll(this.config.sessionId);
@@ -516,6 +532,7 @@ export class OpenCodeRuntime {
       this.activeTask = undefined;
 
       await this.closeEventSubscription(errors);
+      await this.permissions.cancelAll(this.config.sessionId);
       this.agentSessionId = undefined;
       this.client = undefined;
 
@@ -536,6 +553,23 @@ export class OpenCodeRuntime {
     } catch (error) {
       this.state = 'cleanup_failed';
       throw error;
+    } finally {
+      this.finishPermissionCancellation(cancellation, true);
+    }
+  }
+
+  private beginPermissionCancellation(): { epoch: number; owner: boolean } {
+    if (this.permissionClosing) {
+      return { epoch: this.permissionCancellationEpoch, owner: false };
+    }
+    this.permissionCancellationEpoch += 1;
+    this.permissionClosing = true;
+    return { epoch: this.permissionCancellationEpoch, owner: true };
+  }
+
+  private finishPermissionCancellation(cancellation: { epoch: number; owner: boolean }, keepClosed = false): void {
+    if (cancellation.owner && cancellation.epoch === this.permissionCancellationEpoch && !keepClosed) {
+      this.permissionClosing = false;
     }
   }
 

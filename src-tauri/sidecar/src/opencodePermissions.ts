@@ -37,6 +37,11 @@ export interface OpenCodePermissionRegistryOptions {
   timeoutMs?: number;
 }
 
+export interface OpenCodePermissionUpsertResult {
+  record: OpenCodePermissionRecord;
+  updated: boolean;
+}
+
 interface PendingPermission extends OpenCodePermissionRecord {
   respond: (response: OpenCodeNativePermissionResponse) => Promise<unknown>;
   timeoutHandle?: ReturnType<typeof setTimeout>;
@@ -55,6 +60,9 @@ export class OpenCodePermissionError extends Error {
 export class OpenCodePermissionRegistry {
   private readonly timeoutMs: number;
   private readonly pending = new Map<string, PendingPermission>();
+  private readonly cancelled = new Set<string>();
+  private readonly inFlight = new Set<string>();
+  private cancellationEpoch = 0;
 
   constructor(options: OpenCodePermissionRegistryOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 5 * 60_000;
@@ -68,8 +76,27 @@ export class OpenCodePermissionRegistry {
   }
 
   add(request: OpenCodePermissionRequest): OpenCodePermissionRecord {
-    if (this.pending.has(request.requestId)) {
-      throw new OpenCodePermissionError('not_found', `OpenCode permission request ${request.requestId} is already pending`);
+    return this.upsert(request).record;
+  }
+
+  upsert(request: OpenCodePermissionRequest): OpenCodePermissionUpsertResult {
+    const existing = this.pending.get(request.requestId);
+    this.cancelled.delete(request.requestId);
+    if (existing) {
+      this.remove(request.requestId);
+      const pending: PendingPermission = {
+        ...existing,
+        openCodeSessionId: request.openCodeSessionId,
+        codeMuxSessionId: request.codeMuxSessionId,
+        permissionType: request.permissionType,
+        description: request.description,
+        metadata: request.metadata,
+        raw: request.raw,
+        respond: request.respond,
+      };
+      this.scheduleTimeout(pending);
+      this.pending.set(request.requestId, pending);
+      return { record: this.toRecord(pending), updated: true };
     }
     const pending: PendingPermission = {
       requestId: request.requestId,
@@ -82,12 +109,9 @@ export class OpenCodePermissionRegistry {
       createdAt: Date.now(),
       respond: request.respond,
     };
-    pending.timeoutHandle = setTimeout(() => {
-      void this.expire(request.requestId);
-    }, this.timeoutMs);
-    pending.timeoutHandle.unref?.();
+    this.scheduleTimeout(pending);
     this.pending.set(request.requestId, pending);
-    return this.toRecord(pending);
+    return { record: this.toRecord(pending), updated: false };
   }
 
   get(requestId: string): OpenCodePermissionRecord | undefined {
@@ -98,21 +122,34 @@ export class OpenCodePermissionRegistry {
   async respond(requestId: string, codeMuxSessionId: string, response: OpenCodePermissionResponse): Promise<void> {
     const nativeResponse = toNativeResponse(response);
     const pending = this.takePending(requestId);
+    const responseEpoch = this.cancellationEpoch;
+    this.inFlight.add(requestId);
     if (pending.codeMuxSessionId !== codeMuxSessionId) {
       this.restorePending(pending);
+      this.inFlight.delete(requestId);
       throw new OpenCodePermissionError('session_mismatch', `OpenCode permission request ${requestId} does not belong to session ${codeMuxSessionId}`);
     }
     try {
       await pending.respond(nativeResponse);
     } catch (error) {
+      if (responseEpoch === this.cancellationEpoch && !this.cancelled.has(requestId) && !this.pending.has(requestId)) {
+        this.restorePending(pending);
+      }
+      this.inFlight.delete(requestId);
       throw new OpenCodePermissionError('native_response_failed', `OpenCode permission request ${requestId} response failed`, { cause: error });
     }
+    this.inFlight.delete(requestId);
   }
 
   async cancelAll(codeMuxSessionId?: string): Promise<OpenCodePermissionCancelResult[]> {
+    this.cancellationEpoch += 1;
     const requests = [...this.pending.values()].filter((pending) => !codeMuxSessionId || pending.codeMuxSessionId === codeMuxSessionId);
     for (const pending of requests) {
+      this.cancelled.add(pending.requestId);
       this.remove(pending.requestId);
+    }
+    for (const requestId of this.inFlight) {
+      this.cancelled.add(requestId);
     }
     return Promise.all(requests.map(async (pending) => {
       try {
@@ -145,11 +182,15 @@ export class OpenCodePermissionRegistry {
   }
 
   private restorePending(pending: PendingPermission): void {
-    if (!this.pending.has(pending.requestId)) {
-      pending.timeoutHandle = setTimeout(() => void this.expire(pending.requestId), this.timeoutMs);
-      pending.timeoutHandle.unref?.();
+    if (!this.cancelled.has(pending.requestId) && !this.pending.has(pending.requestId)) {
+      this.scheduleTimeout(pending);
       this.pending.set(pending.requestId, pending);
     }
+  }
+
+  private scheduleTimeout(pending: PendingPermission): void {
+    pending.timeoutHandle = setTimeout(() => void this.expire(pending.requestId), this.timeoutMs);
+    pending.timeoutHandle.unref?.();
   }
 
   private remove(requestId: string): void {

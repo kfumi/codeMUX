@@ -77,4 +77,40 @@ describe('OpenCodePermissionRegistry', () => {
     expect(failing).toHaveBeenCalledWith('reject');
     expect(successful).toHaveBeenCalledWith('reject');
   });
+
+  it('restores a request after native response failure so the user can retry', async () => {
+    const registry = new OpenCodePermissionRegistry();
+    const respond = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary native failure'))
+      .mockResolvedValueOnce(true);
+    registry.add(request({ respond }));
+
+    await expect(registry.respond('permission-1', 'codemux-session-1', { approved: true })).rejects.toThrow('response failed');
+    expect(registry.get('permission-1')).toBeDefined();
+    await registry.respond('permission-1', 'codemux-session-1', { approved: true });
+    expect(respond).toHaveBeenCalledTimes(2);
+    expect(registry.get('permission-1')).toBeUndefined();
+  });
+
+  it('updates an existing request by requestId without throwing', () => {
+    const registry = new OpenCodePermissionRegistry();
+    registry.add(request({ raw: { id: 'permission-1', type: 'read', title: 'old' } }));
+    const updated = registry.upsert(request({ permissionType: 'write', description: 'new', metadata: { path: 'new.txt' }, raw: { id: 'permission-1', type: 'write', title: 'new' } }));
+
+    expect(updated.updated).toBe(true);
+    expect(registry.get('permission-1')).toMatchObject({ permissionType: 'write', description: 'new', metadata: { path: 'new.txt' }, raw: { id: 'permission-1', type: 'write', title: 'new' } });
+  });
+
+  it('does not restore an in-flight failed response after cancellation starts', async () => {
+    const registry = new OpenCodePermissionRegistry();
+    let rejectNative!: (error: Error) => void;
+    const respond = vi.fn().mockImplementation(() => new Promise<boolean>((_, reject) => { rejectNative = reject; }));
+    registry.add(request({ respond }));
+    const response = registry.respond('permission-1', 'codemux-session-1', { approved: true });
+    await vi.waitFor(() => expect(respond).toHaveBeenCalledTimes(1));
+    await registry.cancelAll('codemux-session-1');
+    rejectNative(new Error('late native failure'));
+    await expect(response).rejects.toThrow('response failed');
+    expect(registry.size).toBe(0);
+  });
 });
