@@ -7,8 +7,8 @@ import type {
   Usage,
   WebSearchItem,
 } from '@openai/codex-sdk';
-
-export type RuntimeFlavor = 'claude' | 'codex';
+import type { RuntimeEventContext, RuntimeFlavor } from './types.js';
+export type { RuntimeFlavor } from './types.js';
 
 export type CodexTokenUsage = {
   input_tokens: number;
@@ -25,6 +25,13 @@ export type ClaudeTokenUsage = {
   cache_creation_input_tokens: number;
 };
 
+export type OpenCodeTokenUsage = {
+  input_tokens: number;
+  output_tokens: number;
+  cached_input_tokens?: number;
+  reasoning_output_tokens?: number;
+};
+
 type AssistantContentBlock =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string }
@@ -36,7 +43,49 @@ type ToolUseContext = {
 };
 
 export function getRuntimeFlavor(agentKind?: string): RuntimeFlavor {
-  return agentKind === 'codex' ? 'codex' : 'claude';
+  if (agentKind === 'codex') {
+    return 'codex';
+  }
+  if (agentKind === 'opencode') {
+    return 'opencode';
+  }
+  return 'claude';
+}
+
+export function buildOpenCodeResultEvent({
+  context,
+  usage,
+  durationMs,
+}: {
+  context: RuntimeEventContext;
+  usage: OpenCodeTokenUsage;
+  durationMs: number;
+}) {
+  return {
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    agent_id: context.agentId,
+    session_id: context.sessionId,
+    ...(context.agentSessionId ? { agent_session_id: context.agentSessionId } : {}),
+    sequence: context.sequence,
+    uuid: crypto.randomUUID(),
+    duration_ms: durationMs,
+    duration_api_ms: durationMs,
+    num_turns: 1,
+    result: 'ok',
+    usage: {
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      cache_read_input_tokens: usage.cached_input_tokens ?? 0,
+    },
+    last_token_usage: {
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      cached_input_tokens: usage.cached_input_tokens ?? 0,
+      total_tokens: usage.input_tokens + usage.output_tokens,
+    },
+  };
 }
 
 export function buildAssistantEvent({
