@@ -200,7 +200,7 @@ describe('OpenCodeRuntime', () => {
     expect(startError).toBeInstanceOf(AggregateError);
     expect(serverClose).toHaveBeenCalledTimes(1);
     await runtime.shutdown().catch(() => undefined);
-    expect(serverClose).toHaveBeenCalledTimes(1);
+    expect(serverClose).toHaveBeenCalledTimes(2);
   });
   it('maps the official adapter prompt body and images to OpenCode SDK parts', async () => {
     sdkMocks.prompt.mockClear();
@@ -315,9 +315,9 @@ describe('OpenCodeRuntime', () => {
     );
     expect(server.close).toHaveBeenCalledTimes(1);
 
-    const retryError = await runtime.shutdown().catch((error: unknown) => error);
-    expect(retryError).toBeInstanceOf(AggregateError);
-    expect(server.close).toHaveBeenCalledTimes(1);
+    await expect(runtime.shutdown()).resolves.toBeUndefined();
+    expect(server.close).toHaveBeenCalledTimes(2);
+    await expect(runtime.start()).rejects.toThrow('OpenCode runtime cannot start in state disposed');
   });
 
   it('does not start a new server after dispose and remains idempotent', async () => {

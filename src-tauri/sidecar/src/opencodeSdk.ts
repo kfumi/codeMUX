@@ -84,11 +84,18 @@ export function closeOpenCodeServerWithTimeout(
     }, timeoutMs);
   });
 
-  return Promise.race([closePromise, timeout]).finally(() => {
-    if (timeoutHandle) {
-      clearTimeout(timeoutHandle);
-    }
-  });
+  return Promise.race([closePromise, timeout])
+    .catch((error) => {
+      if (pendingServerClosePromises.get(server) === closePromise) {
+        pendingServerClosePromises.delete(server);
+      }
+      throw error;
+    })
+    .finally(() => {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    });
 }
 
 function readResponse<T>(operation: string, response: { data?: T; error?: unknown }): T {
@@ -176,17 +183,9 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
         },
       };
     } catch (error) {
-      try {
-        await closeOpenCodeServerWithTimeout(server, serverCloseTimeoutMs);
-      } catch (closeError) {
-        const failure = new AggregateError(
-          [error, closeError],
-          'OpenCode SDK start and initial server cleanup failed',
-        ) as OpenCodeSdkStartFailure;
-        failure.resources = { server };
-        throw failure;
-      }
-      throw error;
+      const failure = (error instanceof Error ? error : new Error(String(error))) as OpenCodeSdkStartFailure;
+      failure.resources = { server };
+      throw failure;
     }
   },
 };
