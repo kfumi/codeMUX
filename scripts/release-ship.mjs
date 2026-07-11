@@ -7,7 +7,7 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 
 const versionArg = process.argv[2];
-const dryRun = process.argv.includes("--dry-run");
+const dryRun = process.argv.includes("--dry-run") || process.env.npm_config_dry_run === "true";
 
 if (!versionArg) {
   console.error("用法: npm run release:ship -- <版本号> [--dry-run]");
@@ -68,7 +68,12 @@ if (!dryRun) {
   }
 }
 
-run("node", [path.join(rootDir, "scripts", "prepare-release.mjs"), normalizedVersion]);
+const prepareArgs = [path.join(rootDir, "scripts", "prepare-release.mjs"), normalizedVersion];
+if (dryRun) {
+  prepareArgs.push("--dry-run");
+}
+
+run("node", prepareArgs);
 run("git", [
   "add",
   "package.json",

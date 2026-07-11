@@ -10,12 +10,14 @@ use log::info;
 use serde::Serialize;
 use std::sync::Mutex;
 use tauri::menu::MenuBuilder;
+use tauri::path::BaseDirectory;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager, Window, WindowEvent};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const NOTIFICATION_CLICKED_EVENT: &str = "agent-notification-clicked";
+const WINDOWS_APP_USER_MODEL_ID: &str = "com.codemux.desktop";
 const TRAY_OPEN_ID: &str = "tray_open";
 const TRAY_QUIT_ID: &str = "tray_quit";
 
@@ -47,9 +49,50 @@ fn show_window<R: tauri::Runtime, M: Manager<R>>(manager: &M, window_label: &str
     if let Some(window) = manager.get_webview_window(window_label) {
         let _ = window.unminimize();
         let _ = window.show();
+        bring_window_to_front(&window);
         let _ = window.set_focus();
     }
 }
+
+#[cfg(windows)]
+fn bring_window_to_front<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_NOTOPMOST,
+        HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE,
+    };
+
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+
+    unsafe {
+        let hwnd = hwnd.0 as _;
+        let _ = ShowWindow(hwnd, SW_RESTORE);
+        let _ = SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        );
+        let _ = SetWindowPos(
+            hwnd,
+            HWND_NOTOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        );
+        let _ = BringWindowToTop(hwnd);
+        let _ = SetForegroundWindow(hwnd);
+    }
+}
+
+#[cfg(not(windows))]
+fn bring_window_to_front<R: tauri::Runtime>(_window: &tauri::WebviewWindow<R>) {}
 
 fn show_main_window<R: tauri::Runtime, M: Manager<R>>(manager: &M) {
     show_window(manager, MAIN_WINDOW_LABEL);
@@ -82,19 +125,174 @@ fn handle_agent_notification_activated<R: tauri::Runtime>(
 }
 
 #[cfg(windows)]
+fn set_windows_app_user_model_id() {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+
+    let app_id: Vec<u16> = std::ffi::OsStr::new(WINDOWS_APP_USER_MODEL_ID)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe {
+        let _ = SetCurrentProcessExplicitAppUserModelID(app_id.as_ptr());
+    }
+}
+
+#[cfg(windows)]
+fn resolve_windows_notification_icon_path<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Option<std::path::PathBuf> {
+    app.path()
+        .resolve("icons/Square150x150Logo.png", BaseDirectory::Resource)
+        .ok()
+        .filter(|path| path.exists())
+        .or_else(|| {
+            app.path()
+                .resolve("icons/icon.ico", BaseDirectory::Resource)
+                .ok()
+                .filter(|path| path.exists())
+        })
+}
+
+#[cfg(windows)]
+fn register_windows_notification_app_id<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use winreg::enums::{RegType, HKEY_CURRENT_USER};
+    use winreg::RegKey;
+    use winreg::RegValue;
+
+    fn expandable_string(value: &str) -> RegValue {
+        let mut bytes = Vec::new();
+        for unit in value.encode_utf16().chain(std::iter::once(0)) {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        RegValue {
+            vtype: RegType::REG_EXPAND_SZ,
+            bytes,
+        }
+    }
+
+    let Some(icon_path) = resolve_windows_notification_icon_path(app) else {
+        return;
+    };
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok((app_id_key, _)) = hkcu.create_subkey(format!(
+        r"Software\Classes\AppUserModelId\{}",
+        WINDOWS_APP_USER_MODEL_ID
+    )) else {
+        return;
+    };
+
+    let icon_uri = icon_path.display().to_string();
+    let icon_uri = icon_uri
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&icon_uri)
+        .to_string();
+    let _ = app_id_key.set_raw_value("DisplayName", &expandable_string("CodeMUX"));
+    let _ = app_id_key.set_raw_value("IconUri", &expandable_string(&icon_uri));
+    let _ = app_id_key.set_raw_value("IconBackgroundColor", &expandable_string("0"));
+    let _ = app_id_key.set_value("ShowInSettings", &1u32);
+}
+
+#[cfg(windows)]
+fn repair_windows_start_menu_shortcut_icon() {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let Ok(current_exe) = std::env::current_exe() else {
+        return;
+    };
+
+    let Some(current_exe) = current_exe.to_str() else {
+        return;
+    };
+
+    let script = r#"
+$ErrorActionPreference = 'SilentlyContinue'
+$exePath = $env:CODEMUX_EXE_PATH
+$appId = $env:CODEMUX_APP_USER_MODEL_ID
+if (-not $exePath -or -not $appId) { exit 0 }
+$roots = @(
+  [Environment]::GetFolderPath('StartMenu'),
+  [Environment]::GetFolderPath('CommonStartMenu')
+) | Where-Object { $_ }
+$wsh = New-Object -ComObject WScript.Shell
+$shell = New-Object -ComObject Shell.Application
+foreach ($root in $roots) {
+  $programs = Join-Path $root 'Programs'
+  if (-not (Test-Path -LiteralPath $programs)) { continue }
+  Get-ChildItem -LiteralPath $programs -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue |
+    Where-Object { $_.BaseName -eq 'CodeMUX' } |
+    ForEach-Object {
+      $shortcut = $wsh.CreateShortcut($_.FullName)
+      $folder = $shell.Namespace($_.DirectoryName)
+      $item = $folder.ParseName($_.Name)
+      $shortcutAppId = $item.ExtendedProperty('System.AppUserModel.ID')
+      if ($shortcut.TargetPath -eq $exePath -or $shortcutAppId -eq $appId) {
+        $shortcut.IconLocation = "$exePath,0"
+        $shortcut.Save()
+      }
+    }
+}
+"#;
+
+    let _ = std::process::Command::new("powershell.exe")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ])
+        .env("CODEMUX_EXE_PATH", current_exe)
+        .env("CODEMUX_APP_USER_MODEL_ID", WINDOWS_APP_USER_MODEL_ID)
+        .status();
+}
+
+#[cfg(windows)]
+fn refresh_windows_shell_icon_cache() {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let _ = std::process::Command::new("ie4uinit.exe")
+        .creation_flags(CREATE_NO_WINDOW)
+        .arg("-show")
+        .status();
+}
+
+#[cfg(windows)]
 fn send_agent_notification_impl<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     title: String,
     body: String,
     session_id: String,
 ) -> Result<(), String> {
-    use tauri_winrt_notification::{Duration, Toast};
+    use tauri_winrt_notification::{Duration, IconCrop, Toast};
+
+    register_windows_notification_app_id(&app);
 
     let app_for_activation = app.clone();
-    Toast::new("com.codemux.desktop")
+    let mut toast = Toast::new(WINDOWS_APP_USER_MODEL_ID)
         .title(&title)
         .text1(&body)
-        .duration(Duration::Short)
+        .duration(Duration::Short);
+
+    if let Ok(icon_path) = app
+        .path()
+        .resolve("icons/Square150x150Logo.png", BaseDirectory::Resource)
+    {
+        let toast_icon_path =
+            std::path::PathBuf::from(icon_path.display().to_string().replace('\\', "/"));
+        toast = toast.icon(&toast_icon_path, IconCrop::Square, "CodeMUX");
+    }
+
+    toast
         .on_activated(move |_| {
             handle_agent_notification_activated(&app_for_activation, session_id.clone());
             Ok(())
@@ -192,6 +390,18 @@ pub fn run() {
         .setup(|app| {
             let log_dir = app.path().app_log_dir()?;
             info!(target: "app", "Application starting; log directory={}", log_dir.display());
+
+            #[cfg(windows)]
+            set_windows_app_user_model_id();
+
+            #[cfg(windows)]
+            register_windows_notification_app_id(app.handle());
+
+            #[cfg(windows)]
+            repair_windows_start_menu_shortcut_icon();
+
+            #[cfg(windows)]
+            refresh_windows_shell_icon_cache();
 
             let conn = db::initialize(app.handle()).expect("Failed to initialize database");
             let config = config::load_config(app.handle());

@@ -30,6 +30,8 @@
     "targets": "all",
     "createUpdaterArtifacts": true,
     "resources": {
+      "icons/icon.ico": "icons/icon.ico",
+      "icons/Square150x150Logo.png": "icons/Square150x150Logo.png",
       "sidecar/": "sidecar/"
     },
     "icon": [

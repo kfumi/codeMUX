@@ -9,6 +9,7 @@ const rootDir = path.resolve(__dirname, "..");
 
 const versionArg = process.argv[2];
 const createTag = process.argv.includes("--tag");
+const dryRun = process.argv.includes("--dry-run") || process.env.npm_config_dry_run === "true";
 
 if (!versionArg) {
   console.error("用法: npm run release:prepare -- <版本号> [--tag]");
@@ -29,11 +30,9 @@ const cargoLockPath = path.join(rootDir, "src-tauri", "Cargo.lock");
 
 const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
 packageJson.version = normalizedVersion;
-writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
 
 const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, "utf8"));
 tauriConfig.version = normalizedVersion;
-writeFileSync(tauriConfigPath, `${JSON.stringify(tauriConfig, null, 2)}\n`, "utf8");
 
 const cargoToml = readFileSync(cargoTomlPath, "utf8");
 const updatedCargoToml = cargoToml.replace(
@@ -47,15 +46,25 @@ const updatedCargoLock = cargoLock.replace(
   /(\[\[package\]\]\r?\nname = "codemux"\r?\nversion = )".*"$/m,
   `$1"${normalizedVersion}"`
 );
-writeFileSync(cargoLockPath, updatedCargoLock, "utf8");
+
+if (!dryRun) {
+  writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
+  writeFileSync(tauriConfigPath, `${JSON.stringify(tauriConfig, null, 2)}\n`, "utf8");
+  writeFileSync(cargoTomlPath, updatedCargoToml, "utf8");
+  writeFileSync(cargoLockPath, updatedCargoLock, "utf8");
+}
 
 if (createTag) {
   const tagName = `v${normalizedVersion}`;
-  execFileSync("git", ["tag", tagName], {
-    cwd: rootDir,
-    stdio: "inherit",
-  });
-  console.log(`已创建 Git tag: ${tagName}`);
+  if (dryRun) {
+    console.log(`[dry-run] git tag ${tagName}`);
+  } else {
+    execFileSync("git", ["tag", tagName], {
+      cwd: rootDir,
+      stdio: "inherit",
+    });
+    console.log(`已创建 Git tag: ${tagName}`);
+  }
 }
 
 console.log(`已同步版本号为 ${normalizedVersion}`);
@@ -64,6 +73,9 @@ console.log("- package.json");
 console.log("- src-tauri/tauri.conf.json");
 console.log("- src-tauri/Cargo.toml");
 console.log("- src-tauri/Cargo.lock");
+if (dryRun) {
+  console.log("当前为 dry-run，仅预演版本同步，没有写入文件。");
+}
 console.log("后续步骤:");
 console.log("1. 提交版本变更");
 console.log(`2. 推送代码与标签: git push origin master && git push origin v${normalizedVersion}`);

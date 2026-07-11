@@ -62,6 +62,33 @@ npm run tauri signer generate -- -w ~/.tauri/codemux-updater.key
 
 ## 发版步骤
 
+### 本地手动发版
+
+如果不想使用 GitHub Actions 托管 Runner，可以直接在本地 Windows 构建并整理手动上传文件：
+
+```bash
+npm run release:local -- 0.1.5
+```
+
+这条命令会自动完成：
+
+- 同步 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 版本号
+- 读取本机 `C:\Users\94910\.tauri` 下的 updater 私钥和密码
+- 本地构建 Windows 安装包
+- 自动整理 `.msi`、`.exe`、对应 `.sig`
+- 自动生成可上传的 `latest.json`
+- 在 `out/manual-release/v版本号/` 下生成中文上传清单和 Release 文案
+
+构建完成后，手动打开公开下载仓库上传即可：
+
+- [kfumi/codeMUX-desktop Releases](https://github.com/kfumi/codeMUX-desktop/releases)
+
+注意：
+
+- 该脚本当前仅支持在 Windows 上执行
+- 当前只整理 Windows 产物，不包含 macOS 和 Linux
+- 本地手动发版不会自动提交、打 tag、推送代码
+
 ### 一键发版
 
 推荐直接使用一键发版脚本：
