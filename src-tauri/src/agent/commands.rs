@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -1460,10 +1460,14 @@ pub async fn load_codex_session_events(
     Ok(messages)
 }
 
+type SessionLifecycleLock = Arc<Mutex<()>>;
+type SessionLifecycleLocks = Arc<Mutex<HashMap<String, SessionLifecycleLock>>>;
+type SessionGenerations = Arc<Mutex<HashMap<String, u64>>>;
+
 pub struct AgentState {
     pub sidecars: Arc<Mutex<HashMap<String, SidecarHandle>>>,
-    pub session_startup_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
-    pub disabled_session_mappings: Arc<Mutex<HashSet<String>>>,
+    pub session_startup_locks: SessionLifecycleLocks,
+    pub session_generations: SessionGenerations,
     /// Port of the running codex compat proxy, if any.
     pub proxy_port: Arc<Mutex<Option<u16>>>,
 }
@@ -1473,13 +1477,16 @@ impl Default for AgentState {
         Self {
             sidecars: Arc::new(Mutex::new(HashMap::new())),
             session_startup_locks: Arc::new(Mutex::new(HashMap::new())),
-            disabled_session_mappings: Arc::new(Mutex::new(HashSet::new())),
+            session_generations: Arc::new(Mutex::new(HashMap::new())),
             proxy_port: Arc::new(Mutex::new(None)),
         }
     }
 }
 
-async fn session_lifecycle_lock(agent_state: &AgentState, session_id: &str) -> Arc<Mutex<()>> {
+async fn session_lifecycle_lock(
+    agent_state: &AgentState,
+    session_id: &str,
+) -> SessionLifecycleLock {
     let mut locks = agent_state.session_startup_locks.lock().await;
     locks
         .entry(session_id.to_string())
@@ -1487,20 +1494,25 @@ async fn session_lifecycle_lock(agent_state: &AgentState, session_id: &str) -> A
         .clone()
 }
 
-async fn set_session_mapping_enabled(agent_state: &AgentState, session_id: &str, enabled: bool) {
-    let mut disabled = agent_state.disabled_session_mappings.lock().await;
-    if enabled {
-        disabled.remove(session_id);
-    } else {
-        disabled.insert(session_id.to_string());
-    }
+async fn begin_session_generation(agent_state: &AgentState, session_id: &str) -> u64 {
+    let mut generations = agent_state.session_generations.lock().await;
+    let generation = generations.entry(session_id.to_string()).or_insert(0);
+    *generation = generation
+        .checked_add(1)
+        .expect("session runtime generation exhausted");
+    *generation
 }
 
-async fn session_mapping_is_disabled(
-    disabled_session_mappings: &Arc<Mutex<HashSet<String>>>,
+async fn invalidate_session_generation(agent_state: &AgentState, session_id: &str) {
+    let _ = begin_session_generation(agent_state, session_id).await;
+}
+
+async fn mapping_generation_is_current(
+    session_generations: &SessionGenerations,
     session_id: &str,
+    generation: u64,
 ) -> bool {
-    disabled_session_mappings.lock().await.contains(session_id)
+    session_generations.lock().await.get(session_id).copied() == Some(generation)
 }
 
 async fn ensure_sidecar_for_session(
@@ -1523,7 +1535,7 @@ async fn ensure_sidecar_for_session(
     let (handle, mut rx) = spawn_sidecar(&app, channel).await?;
     let shared_channel = handle.channel.clone();
     let session_startup_locks = agent_state.session_startup_locks.clone();
-    let disabled_session_mappings = agent_state.disabled_session_mappings.clone();
+    let session_generations = agent_state.session_generations.clone();
     let session_id_clone = session_id.to_string();
     let app_handle = app.clone();
     tokio::spawn(async move {
@@ -1531,7 +1543,7 @@ async fn ensure_sidecar_for_session(
             match handle_agent_session_mapping_event(
                 &app_handle,
                 &session_startup_locks,
-                &disabled_session_mappings,
+                &session_generations,
                 &event,
             )
             .await
@@ -1561,9 +1573,16 @@ async fn ensure_sidecar_for_session(
     Ok(())
 }
 
+struct AgentSessionMappingEvent {
+    app_session_id: String,
+    agent_kind: AgentKind,
+    agent_session_id: String,
+    runtime_generation: Option<u64>,
+}
+
 fn parse_agent_session_mapping_event(
     event: &str,
-) -> Result<Option<(String, AgentKind, String)>, String> {
+) -> Result<Option<AgentSessionMappingEvent>, String> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(event) else {
         if event.contains("\"type\"") && event.contains("agent_session_mapping") {
             return Err("Invalid agent session mapping event: malformed JSON".to_string());
@@ -1596,35 +1615,47 @@ fn parse_agent_session_mapping_event(
         )
     })?;
 
-    Ok(Some((
-        app_session_id.to_string(),
+    let runtime_generation = if agent_kind == AgentKind::Opencode {
+        Some(
+            value
+                .get("runtime_generation")
+                .and_then(|entry| entry.as_u64())
+                .ok_or_else(|| {
+                    "Invalid agent session mapping event: missing runtime_generation".to_string()
+                })?,
+        )
+    } else {
+        None
+    };
+
+    Ok(Some(AgentSessionMappingEvent {
+        app_session_id: app_session_id.to_string(),
         agent_kind,
-        agent_session_id.to_string(),
-    )))
+        agent_session_id: agent_session_id.to_string(),
+        runtime_generation,
+    }))
 }
 
 fn persist_agent_session_mapping_event(
     db: &rusqlite::Connection,
     event: &str,
 ) -> Result<bool, String> {
-    let Some((app_session_id, agent_kind, agent_session_id)) =
-        parse_agent_session_mapping_event(event)?
-    else {
+    let Some(mapping) = parse_agent_session_mapping_event(event)? else {
         return Ok(false);
     };
 
     operations::upsert_agent_session_mapping(
-        &db,
-        &app_session_id,
-        agent_kind,
-        &agent_session_id,
+        db,
+        &mapping.app_session_id,
+        mapping.agent_kind,
+        &mapping.agent_session_id,
     )
     .map_err(|error| {
         format!(
             "Failed to persist agent session mapping app_session_id={} agent_kind={} agent_session_id={}: {}",
-            app_session_id,
-            agent_kind.as_str(),
-            agent_session_id,
+            mapping.app_session_id,
+            mapping.agent_kind.as_str(),
+            mapping.agent_session_id,
             error
         )
     })?;
@@ -1634,30 +1665,37 @@ fn persist_agent_session_mapping_event(
 
 async fn handle_agent_session_mapping_event(
     app: &AppHandle,
-    session_startup_locks: &Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
-    disabled_session_mappings: &Arc<Mutex<HashSet<String>>>,
+    session_startup_locks: &SessionLifecycleLocks,
+    session_generations: &SessionGenerations,
     event: &str,
 ) -> Result<bool, String> {
-    let Some((app_session_id, agent_kind, _)) = parse_agent_session_mapping_event(event)? else {
+    let Some(mapping) = parse_agent_session_mapping_event(event)? else {
         return Ok(false);
     };
 
     let session_lock = {
         let mut locks = session_startup_locks.lock().await;
         locks
-            .entry(app_session_id.clone())
+            .entry(mapping.app_session_id.clone())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
     };
     let _lifecycle_guard = session_lock.lock().await;
 
-    if agent_kind == AgentKind::Opencode
-        && session_mapping_is_disabled(disabled_session_mappings, &app_session_id).await
+    if mapping.agent_kind == AgentKind::Opencode
+        && !mapping_generation_is_current(
+            session_generations,
+            &mapping.app_session_id,
+            mapping
+                .runtime_generation
+                .expect("OpenCode mapping generation missing"),
+        )
+        .await
     {
         debug!(
             target: "agent",
             "Dropping stale OpenCode session mapping after reset app_session_id={}",
-            app_session_id
+            mapping.app_session_id
         );
         return Ok(true);
     }
@@ -1669,8 +1707,8 @@ async fn handle_agent_session_mapping_event(
         info!(
             target: "agent",
             "Persisted agent session mapping app_session_id={} agent_kind={}",
-            app_session_id,
-            agent_kind.as_str()
+            mapping.app_session_id,
+            mapping.agent_kind.as_str()
         );
     }
 
@@ -1688,6 +1726,7 @@ fn build_ensure_session_command(
     model: Option<String>,
     reasoning_effort: Option<String>,
     codex_needs_proxy: Option<bool>,
+    runtime_generation: Option<u64>,
 ) -> Result<serde_json::Value, String> {
     let resolved_cwd = if cwd == "." {
         std::env::var("USERPROFILE")
@@ -1702,6 +1741,11 @@ fn build_ensure_session_command(
         "cwd": resolved_cwd,
         "sessionId": session_id,
     });
+    if agent_kind == "opencode" {
+        if let Some(generation) = runtime_generation {
+            cmd["runtimeGeneration"] = serde_json::json!(generation);
+        }
+    }
 
     if let Some(key) = api_key {
         cmd["apiKey"] = serde_json::Value::String(key);
@@ -1913,6 +1957,11 @@ pub async fn ensure_agent_session(
     let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
     let _lifecycle_guard = lifecycle_lock.lock().await;
     let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
+    let runtime_generation = if agent_kind == "opencode" {
+        Some(begin_session_generation(agent_state.inner(), &session_id).await)
+    } else {
+        None
+    };
 
     ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
 
@@ -1932,9 +1981,9 @@ pub async fn ensure_agent_session(
         model,
         reasoning_effort,
         codex_needs_proxy,
+        runtime_generation,
     )?;
 
-    set_session_mapping_enabled(agent_state.inner(), &session_id, true).await;
     // If the proxy is already running (e.g. started manually from settings),
     // tell the sidecar to use it directly instead of starting a new one.
     send_command_to_session(&agent_state, &session_id, cmd).await?;
@@ -1993,6 +2042,11 @@ pub async fn start_agent_session(
     let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
     let _lifecycle_guard = lifecycle_lock.lock().await;
     let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
+    let runtime_generation = if agent_kind == "opencode" {
+        Some(begin_session_generation(agent_state.inner(), &session_id).await)
+    } else {
+        None
+    };
 
     ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
     let ensure_cmd = build_ensure_session_command(
@@ -2005,9 +2059,9 @@ pub async fn start_agent_session(
         model,
         reasoning_effort,
         codex_needs_proxy,
+        runtime_generation,
     )?;
 
-    set_session_mapping_enabled(agent_state.inner(), &session_id, true).await;
     send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 
     let mut input_cmd = OpenCodeRuntime::send_input_command(prompt);
@@ -2047,6 +2101,7 @@ pub async fn shutdown_agent(
     info!(target: "agent", "Shutdown requested for session_id={}", session_id);
     let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
     let _lifecycle_guard = lifecycle_lock.lock().await;
+    invalidate_session_generation(agent_state.inner(), &session_id).await;
     let sidecar = {
         let mut sidecars = agent_state.sidecars.lock().await;
         sidecars.remove(&session_id)
@@ -2110,6 +2165,7 @@ pub async fn reset_agent_session(
     let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
     let _lifecycle_guard = lifecycle_lock.lock().await;
     let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
+    invalidate_session_generation(agent_state.inner(), &session_id).await;
     let cmd = OpenCodeRuntime::reset_session_command(&session_id);
 
     let command_sender = {
@@ -2126,7 +2182,6 @@ pub async fn reset_agent_session(
     }
 
     if agent_kind == "opencode" {
-        set_session_mapping_enabled(agent_state.inner(), &session_id, false).await;
         let db = state.db.lock().unwrap();
         operations::delete_agent_session_mapping(&db, &session_id, AgentKind::Opencode).map_err(
             |error| {
@@ -2465,15 +2520,16 @@ async fn get_live_proxy_port(agent_state: &State<'_, AgentState>) -> Option<u16>
 #[cfg(test)]
 mod tests {
     use super::{
-        build_update_permissions_command_from_snapshot, convert_codex_history_values_to_events,
-        convert_codex_item_to_claude_format, find_codex_session_jsonl,
-        load_latest_token_usage_for_agent_session, parse_agent_session_mapping_event,
-        parse_proxy_port_from_stderr, persist_agent_session_mapping_event,
-        read_codex_interactive_events_from_dir, read_json_stream_values,
-        resolve_agent_session_info, rewind_jsonl_before_latest_turn,
-        rewind_jsonl_before_target_turn, session_lifecycle_lock, session_mapping_is_disabled,
-        set_session_mapping_enabled, should_include_claude_history_event,
-        sort_events_by_timestamp_stable, AgentState, RewindTarget,
+        begin_session_generation, build_update_permissions_command_from_snapshot,
+        convert_codex_history_values_to_events, convert_codex_item_to_claude_format,
+        find_codex_session_jsonl, invalidate_session_generation,
+        load_latest_token_usage_for_agent_session, mapping_generation_is_current,
+        parse_agent_session_mapping_event, parse_proxy_port_from_stderr,
+        persist_agent_session_mapping_event, read_codex_interactive_events_from_dir,
+        read_json_stream_values, resolve_agent_session_info, rewind_jsonl_before_latest_turn,
+        rewind_jsonl_before_target_turn, session_lifecycle_lock,
+        should_include_claude_history_event, sort_events_by_timestamp_stable, AgentState,
+        RewindTarget,
     };
     use crate::config::types::AgentKind;
 
@@ -3149,14 +3205,15 @@ mod tests {
     #[test]
     fn parses_opencode_session_mapping_event_for_database_persistence() {
         let mapping = parse_agent_session_mapping_event(
-            r#"{"type":"agent_session_mapping","app_session_id":"app-session","agent_kind":"opencode","agent_session_id":"opencode-session"}"#,
+            r#"{"type":"agent_session_mapping","app_session_id":"app-session","agent_kind":"opencode","agent_session_id":"opencode-session","runtime_generation":7}"#,
         )
         .expect("mapping event should parse")
         .expect("valid mapping event should return a mapping");
 
-        assert_eq!(mapping.0, "app-session");
-        assert_eq!(mapping.1, AgentKind::Opencode);
-        assert_eq!(mapping.2, "opencode-session");
+        assert_eq!(mapping.app_session_id, "app-session");
+        assert_eq!(mapping.agent_kind, AgentKind::Opencode);
+        assert_eq!(mapping.agent_session_id, "opencode-session");
+        assert_eq!(mapping.runtime_generation, Some(7));
     }
 
     #[test]
@@ -3193,7 +3250,7 @@ mod tests {
 
         let error = persist_agent_session_mapping_event(
             &conn,
-            r#"{"type":"agent_session_mapping","app_session_id":"missing-session","agent_kind":"opencode","agent_session_id":"opencode-session"}"#,
+            r#"{"type":"agent_session_mapping","app_session_id":"missing-session","agent_kind":"opencode","agent_session_id":"opencode-session","runtime_generation":1}"#,
         )
         .unwrap_err();
 
@@ -3244,13 +3301,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn late_opencode_mapping_event_is_disabled_after_reset() {
+    async fn late_old_opencode_mapping_event_is_dropped_after_reset_and_start() {
         let state = AgentState::default();
-        set_session_mapping_enabled(&state, "session-opencode", false).await;
+        let lifecycle_lock = session_lifecycle_lock(&state, "session-opencode").await;
+        let lifecycle_guard = lifecycle_lock.lock().await;
+        let old_generation = begin_session_generation(&state, "session-opencode").await;
+        let old_event_generation = old_generation;
+        let session_generations = state.session_generations.clone();
+        let event_lock = lifecycle_lock.clone();
+        let (event_checked_tx, mut event_checked_rx) = tokio::sync::oneshot::channel();
+        let event_waiter = tokio::spawn(async move {
+            let _event_guard = event_lock.lock().await;
+            let accepted = mapping_generation_is_current(
+                &session_generations,
+                "session-opencode",
+                old_event_generation,
+            )
+            .await;
+            let _ = event_checked_tx.send(accepted);
+        });
+        tokio::task::yield_now().await;
+        assert!(event_checked_rx.try_recv().is_err());
+        invalidate_session_generation(&state, "session-opencode").await;
+        let new_generation = begin_session_generation(&state, "session-opencode").await;
+        drop(lifecycle_guard);
+        event_waiter.await.unwrap();
+        assert!(!event_checked_rx.await.unwrap());
 
-        assert!(
-            session_mapping_is_disabled(&state.disabled_session_mappings, "session-opencode").await
-        );
+        assert_ne!(old_event_generation, new_generation);
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::schema::initialize_database(&conn).unwrap();
@@ -3260,10 +3338,17 @@ mod tests {
         )
         .unwrap();
 
-        let event = r#"{"type":"agent_session_mapping","app_session_id":"session-opencode","agent_kind":"opencode","agent_session_id":"late-session"}"#;
-        if !session_mapping_is_disabled(&state.disabled_session_mappings, "session-opencode").await
+        let event = format!(
+            r#"{{"type":"agent_session_mapping","app_session_id":"session-opencode","agent_kind":"opencode","agent_session_id":"late-session","runtime_generation":{old_event_generation}}}"#
+        );
+        if mapping_generation_is_current(
+            &state.session_generations,
+            "session-opencode",
+            old_event_generation,
+        )
+        .await
         {
-            persist_agent_session_mapping_event(&conn, event).unwrap();
+            persist_agent_session_mapping_event(&conn, &event).unwrap();
         }
         assert!(crate::db::operations::get_agent_session_mapping(
             &conn,

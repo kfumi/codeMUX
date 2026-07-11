@@ -36,6 +36,7 @@ function createConfig(agentSessionId?: string): OpenCodeSessionConfig {
   return {
     cwd: 'D:/workspace/demo',
     sessionId: 'codemux-session-1',
+    runtimeGeneration: 1,
     ...(agentSessionId ? { agentSessionId } : {}),
     provider: 'openai',
     model: 'gpt-5',
@@ -281,6 +282,7 @@ describe('OpenCodeRuntime', () => {
     expect(mapping).toEqual<OpenCodeSessionMapping>({
       sessionId: 'codemux-session-1',
       agentSessionId: 'opencode-new',
+      runtimeGeneration: 1,
     });
   });
 
@@ -299,6 +301,7 @@ describe('OpenCodeRuntime', () => {
     await expect(firstStart).resolves.toEqual({
       sessionId: 'codemux-session-1',
       agentSessionId: 'opencode-new',
+      runtimeGeneration: 1,
     });
     expect(port.start).toHaveBeenCalledTimes(1);
   });
@@ -560,6 +563,7 @@ describe('OpenCodeRuntime', () => {
     await expect(runtime.start()).resolves.toEqual({
       sessionId: 'codemux-session-1',
       agentSessionId: 'opencode-new',
+      runtimeGeneration: 1,
     });
     expect(port.start).toHaveBeenCalledTimes(2);
   });

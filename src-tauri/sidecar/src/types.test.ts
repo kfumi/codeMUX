@@ -23,6 +23,7 @@ describe('OpenCode runtime contract', () => {
       cwd: 'D:\\workspace',
       sessionId: 'codemux-session-1',
       agentSessionId: 'opencode-session-1',
+      runtimeGeneration: 1,
       provider: 'openai-compatible',
       model: 'gpt-5',
       credentialSource: 'codemux',
@@ -31,12 +32,14 @@ describe('OpenCode runtime contract', () => {
     const mapping = {
       sessionId: config.sessionId,
       agentSessionId: config.agentSessionId,
+      runtimeGeneration: config.runtimeGeneration,
     } satisfies OpenCodeSessionMapping;
 
     expect(config).toMatchObject({
       cwd: 'D:\\workspace',
       sessionId: 'codemux-session-1',
       agentSessionId: 'opencode-session-1',
+      runtimeGeneration: 1,
       provider: 'openai-compatible',
       model: 'gpt-5',
       credentialSource: 'codemux',
@@ -44,6 +47,7 @@ describe('OpenCode runtime contract', () => {
     expect(mapping).toEqual({
       sessionId: 'codemux-session-1',
       agentSessionId: 'opencode-session-1',
+      runtimeGeneration: 1,
     });
   });
 
@@ -51,6 +55,7 @@ describe('OpenCode runtime contract', () => {
     const config = {
       cwd: 'D:\\workspace',
       sessionId: 'codemux-session-2',
+      runtimeGeneration: 1,
       provider: 'openai-compatible',
       model: 'gpt-5',
       credentialSource: 'codemux',

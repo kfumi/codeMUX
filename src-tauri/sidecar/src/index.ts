@@ -76,18 +76,21 @@ export function buildOpenCodeSessionMappingEvent(mapping: OpenCodeSessionMapping
   app_session_id: string;
   agent_kind: 'opencode';
   agent_session_id: string;
+  runtime_generation: number;
 } {
   return {
     type: 'agent_session_mapping',
     app_session_id: mapping.sessionId,
     agent_kind: 'opencode',
     agent_session_id: mapping.agentSessionId,
+    runtime_generation: mapping.runtimeGeneration,
   };
 }
 
 type SessionBootstrap = {
   sessionId?: string;
   agentSessionId?: string;
+  runtimeGeneration: number;
   cwd: string;
   apiKey?: string;
   baseUrl?: string;
@@ -417,6 +420,7 @@ export class SessionRuntime {
     return {
       sessionId: cmd.sessionId,
       agentSessionId: cmd.agentSessionId,
+      runtimeGeneration: cmd.runtimeGeneration ?? 0,
       cwd,
       apiKey: cmd.apiKey,
       baseUrl: cmd.baseUrl,
@@ -1260,6 +1264,7 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
     cwd: ensureWorkingDirectory(cmd.cwd),
     sessionId: cmd.sessionId ?? crypto.randomUUID(),
     ...(cmd.agentSessionId ? { agentSessionId: cmd.agentSessionId } : {}),
+    runtimeGeneration: cmd.runtimeGeneration ?? 0,
     provider: cmd.provider ?? 'opencode',
     model: cmd.model ?? 'default',
     credentialSource: cmd.credentialSource ?? 'none',

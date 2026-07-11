@@ -285,6 +285,7 @@ export class OpenCodeRuntime {
     return {
       sessionId: this.config.sessionId,
       agentSessionId: this.agentSessionId,
+      runtimeGeneration: this.config.runtimeGeneration,
     };
   }
 

@@ -19,11 +19,13 @@ describe('sidecar command dispatcher', () => {
     expect(buildOpenCodeSessionMappingEvent({
       sessionId: 'app-session',
       agentSessionId: 'opencode-session',
+      runtimeGeneration: 3,
     })).toEqual({
       type: 'agent_session_mapping',
       app_session_id: 'app-session',
       agent_kind: 'opencode',
       agent_session_id: 'opencode-session',
+      runtime_generation: 3,
     });
   });
 

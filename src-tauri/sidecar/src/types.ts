@@ -9,6 +9,7 @@ export interface OpenCodeSessionConfig {
   cwd: string;
   sessionId: string;
   agentSessionId?: string;
+  runtimeGeneration: number;
   provider: string;
   model: string;
   credentialSource: OpenCodeCredentialSource;
@@ -17,6 +18,7 @@ export interface OpenCodeSessionConfig {
 export interface OpenCodeSessionMapping {
   sessionId: string;
   agentSessionId: string;
+  runtimeGeneration: number;
 }
 
 export interface RuntimeEventContext {
@@ -29,7 +31,7 @@ export interface RuntimeEventContext {
 
 // Commands from Rust to sidecar (via stdin)
 export type SidecarCommand =
-  | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; apiKey?: string; baseUrl?: string; provider?: string; credentialSource?: OpenCodeCredentialSource; model?: string; reasoningEffort?: string; codexNeedsProxy?: boolean; skills?: string[]; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode }
+  | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; runtimeGeneration?: number; apiKey?: string; baseUrl?: string; provider?: string; credentialSource?: OpenCodeCredentialSource; model?: string; reasoningEffort?: string; codexNeedsProxy?: boolean; skills?: string[]; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode }
   | { type: 'update_permissions'; sessionId?: string; agentKind?: string; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode }
   | { type: 'send_input'; prompt: string; inputPayload?: AgentInputPayload }
   | { type: 'reset_session'; sessionId: string }
