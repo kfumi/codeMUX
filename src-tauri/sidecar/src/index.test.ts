@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SidecarCommand } from './types.js';
-import { createSidecarCommandDispatcher } from './index.js';
+import { buildOpenCodeSessionMappingEvent, createSidecarCommandDispatcher } from './index.js';
 
 function createRuntime() {
   return {
@@ -15,6 +15,18 @@ function createRuntime() {
 }
 
 describe('sidecar command dispatcher', () => {
+  it('builds the OpenCode agent session mapping event from the runtime mapping', () => {
+    expect(buildOpenCodeSessionMappingEvent({
+      sessionId: 'app-session',
+      agentSessionId: 'opencode-session',
+    })).toEqual({
+      type: 'agent_session_mapping',
+      app_session_id: 'app-session',
+      agent_kind: 'opencode',
+      agent_session_id: 'opencode-session',
+    });
+  });
+
   it('routes OpenCode lifecycle commands and permission responses', async () => {
     const opencode = createRuntime();
     const emit = vi.fn();

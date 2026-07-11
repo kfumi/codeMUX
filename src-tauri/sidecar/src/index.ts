@@ -17,7 +17,7 @@ import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion
 import { CodexSessionRuntime, interruptActiveTurn } from './codexRuntime.js';
 import { OpenCodeRuntime } from './opencodeRuntime.js';
 import type { OpenCodePermissionResponse } from './opencodePermissions.js';
-import type { OpenCodeSessionConfig } from './types.js';
+import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
 import {
   getRuntimeFlavor,
   normalizeClaudeResultEvent,
@@ -70,6 +70,20 @@ const DEBUG_MESSAGE_LOGS = process.env.CODEMUX_MESSAGE_DEBUG === '1';
 
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
 type UpdatePermissionsCommand = Extract<SidecarCommand, { type: 'update_permissions' }>;
+
+export function buildOpenCodeSessionMappingEvent(mapping: OpenCodeSessionMapping): {
+  type: 'agent_session_mapping';
+  app_session_id: string;
+  agent_kind: 'opencode';
+  agent_session_id: string;
+} {
+  return {
+    type: 'agent_session_mapping',
+    app_session_id: mapping.sessionId,
+    agent_kind: 'opencode',
+    agent_session_id: mapping.agentSessionId,
+  };
+}
 
 type SessionBootstrap = {
   sessionId?: string;
@@ -1252,7 +1266,10 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
   };
   const openCodeRuntime = new OpenCodeRuntime(config);
   return {
-    ensure: async () => { await openCodeRuntime.start(); },
+    ensure: async () => {
+      const mapping = await openCodeRuntime.start();
+      emit(buildOpenCodeSessionMappingEvent(mapping));
+    },
     sendInput: (prompt, inputPayload) => openCodeRuntime.sendInput(prompt, inputPayload),
     updatePermissions: (update) => openCodeRuntime.updatePermissions(update),
     resetSession: () => openCodeRuntime.resetSession(),

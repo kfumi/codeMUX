@@ -461,6 +461,32 @@ mod tests {
     }
 
     #[test]
+    fn deletes_opencode_mapping_for_reset() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-opencode", "OpenCode", "opencode", "chat", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        upsert_agent_session_mapping(
+            &conn,
+            "session-opencode",
+            AgentKind::Opencode,
+            "opencode-session-1",
+        )
+        .unwrap();
+
+        delete_agent_session_mapping(&conn, "session-opencode", AgentKind::Opencode).unwrap();
+
+        assert!(
+            get_agent_session_mapping(&conn, "session-opencode", AgentKind::Opencode)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
     fn deletes_agent_session_mappings_when_session_is_deleted() {
         let conn = Connection::open_in_memory().unwrap();
         initialize_database(&conn).unwrap();

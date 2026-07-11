@@ -70,4 +70,11 @@ mod tests {
         let runtime = runtime_for_agent_kind("");
         assert_eq!(runtime.kind_name(), "claude_code");
     }
+
+    #[test]
+    fn reports_missing_session_instead_of_returning_a_claude_runtime() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        let error = session_runtime_kind_name(&db, "missing-session").unwrap_err();
+        assert!(error.contains("Session not found missing-session"));
+    }
 }

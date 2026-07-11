@@ -34,6 +34,11 @@ fn get_agent_session_id(
         .map_err(|err| err.to_string())
 }
 
+fn resolve_session_agent_kind(state: &crate::AppState, session_id: &str) -> Result<String, String> {
+    let db = state.db.lock().unwrap();
+    crate::agent_runtime::factory::session_runtime_kind_name(&db, session_id)
+}
+
 fn find_claude_session_jsonl(claude_dir: &Path, claude_session_id: &str) -> Option<PathBuf> {
     use std::fs;
 
@@ -1517,6 +1522,31 @@ async fn ensure_sidecar_for_session(
     Ok(())
 }
 
+fn parse_agent_session_mapping_event(event: &str) -> Option<(String, AgentKind, String)> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(event) else {
+        return None;
+    };
+
+    if value.get("type").and_then(|entry| entry.as_str()) != Some("agent_session_mapping") {
+        return None;
+    }
+
+    let app_session_id = value
+        .get("app_session_id")
+        .and_then(|entry| entry.as_str())?;
+    let agent_kind_str = value.get("agent_kind").and_then(|entry| entry.as_str())?;
+    let agent_session_id = value
+        .get("agent_session_id")
+        .and_then(|entry| entry.as_str())?;
+    let agent_kind = AgentKind::from_str(agent_kind_str).ok()?;
+
+    Some((
+        app_session_id.to_string(),
+        agent_kind,
+        agent_session_id.to_string(),
+    ))
+}
+
 fn handle_agent_session_mapping_event(app: &AppHandle, event: &str) -> bool {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(event) else {
         return false;
@@ -1526,29 +1556,10 @@ fn handle_agent_session_mapping_event(app: &AppHandle, event: &str) -> bool {
         return false;
     }
 
-    let Some(app_session_id) = value.get("app_session_id").and_then(|entry| entry.as_str()) else {
-        warn!(target: "agent", "Dropping mapping event without app_session_id");
-        return true;
-    };
-    let Some(agent_kind_str) = value.get("agent_kind").and_then(|entry| entry.as_str()) else {
-        warn!(target: "agent", "Dropping mapping event without agent_kind app_session_id={}", app_session_id);
-        return true;
-    };
-    let Some(agent_session_id) = value
-        .get("agent_session_id")
-        .and_then(|entry| entry.as_str())
+    let Some((app_session_id, agent_kind, agent_session_id)) =
+        parse_agent_session_mapping_event(event)
     else {
-        warn!(target: "agent", "Dropping mapping event without agent_session_id app_session_id={}", app_session_id);
-        return true;
-    };
-
-    let Ok(agent_kind) = AgentKind::from_str(agent_kind_str) else {
-        warn!(
-            target: "agent",
-            "Dropping mapping event with unsupported agent_kind={} app_session_id={}",
-            agent_kind_str,
-            app_session_id
-        );
+        warn!(target: "agent", "Dropping invalid agent session mapping event");
         return true;
     };
 
@@ -1556,9 +1567,9 @@ fn handle_agent_session_mapping_event(app: &AppHandle, event: &str) -> bool {
     let db = state.db.lock().unwrap();
     match operations::upsert_agent_session_mapping(
         &db,
-        app_session_id,
+        &app_session_id,
         agent_kind,
-        agent_session_id,
+        &agent_session_id,
     ) {
         Ok(_) => {
             info!(
@@ -1594,7 +1605,7 @@ fn build_ensure_session_command(
     model: Option<String>,
     reasoning_effort: Option<String>,
     codex_needs_proxy: Option<bool>,
-) -> serde_json::Value {
+) -> Result<serde_json::Value, String> {
     let resolved_cwd = if cwd == "." {
         std::env::var("USERPROFILE")
             .or_else(|_| std::env::var("HOME"))
@@ -1636,24 +1647,27 @@ fn build_ensure_session_command(
                 ))
             },
         )
-        .ok()
+        .map_err(|error| {
+            format!(
+                "Failed to load session permissions for session_id={}: {}",
+                session_id, error
+            )
+        })?
     };
-    if let Some((permission_config, plan_mode)) = permission_snapshot {
-        apply_permission_snapshot_to_command(&mut cmd, session_id, permission_config, plan_mode);
-    }
+    let (permission_config, plan_mode) = permission_snapshot;
+    apply_permission_snapshot_to_command(&mut cmd, session_id, permission_config, plan_mode);
     if let Ok(parsed_agent_kind) = AgentKind::from_str(agent_kind) {
         match get_agent_session_id(state, session_id, parsed_agent_kind) {
             Ok(Some(agent_session_id)) => {
                 cmd["agentSessionId"] = serde_json::Value::String(agent_session_id);
             }
             Ok(None) => {}
-            Err(error) => warn!(
-                target: "agent",
-                "Failed to load agent session mapping for session_id={} agent_kind={} error={}",
-                session_id,
-                agent_kind,
-                error
-            ),
+            Err(error) => {
+                return Err(format!(
+                    "Failed to load agent session mapping for session_id={} agent_kind={}: {}",
+                    session_id, agent_kind, error
+                ))
+            }
         }
     }
 
@@ -1666,13 +1680,18 @@ fn build_ensure_session_command(
     };
     let enabled_skills = {
         let db = state.db.lock().unwrap();
-        crate::skills::db::get_enabled_skill_names_for_app(&db, app).unwrap_or_default()
+        crate::skills::db::get_enabled_skill_names_for_app(&db, app).map_err(|error| {
+            format!(
+                "Failed to load enabled skills for session_id={} agent_kind={}: {}",
+                session_id, agent_kind, error
+            )
+        })?
     };
     if !enabled_skills.is_empty() {
         cmd["skills"] = serde_json::json!(enabled_skills);
     }
 
-    cmd
+    Ok(cmd)
 }
 
 fn apply_permission_snapshot_to_command(
@@ -1798,11 +1817,7 @@ pub async fn ensure_agent_session(
         base_url.as_ref().map(|url| !url.is_empty()).unwrap_or(false)
     );
 
-    let agent_kind = {
-        let db = state.db.lock().unwrap();
-        crate::agent_runtime::factory::session_runtime_kind_name(&db, &session_id)
-            .unwrap_or_else(|_| "claude_code".to_string())
-    };
+    let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
 
     ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
 
@@ -1822,7 +1837,7 @@ pub async fn ensure_agent_session(
         model,
         reasoning_effort,
         codex_needs_proxy,
-    );
+    )?;
 
     // If the proxy is already running (e.g. started manually from settings),
     // tell the sidecar to use it directly instead of starting a new one.
@@ -1879,11 +1894,7 @@ pub async fn start_agent_session(
 ) -> Result<(), String> {
     info!(target: "agent", "Starting agent session wrapper for session_id={}", session_id);
 
-    let agent_kind = {
-        let db = state.db.lock().unwrap();
-        crate::agent_runtime::factory::session_runtime_kind_name(&db, &session_id)
-            .unwrap_or_else(|_| "claude_code".to_string())
-    };
+    let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
 
     ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
     let ensure_cmd = build_ensure_session_command(
@@ -1896,7 +1907,7 @@ pub async fn start_agent_session(
         model,
         reasoning_effort,
         codex_needs_proxy,
-    );
+    )?;
 
     send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 
@@ -1975,10 +1986,12 @@ pub async fn respond_to_agent_permission(
 
 #[tauri::command]
 pub async fn reset_agent_session(
+    state: State<'_, crate::AppState>,
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
     info!(target: "agent", "Reset requested for session_id={}", session_id);
+    let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
     let cmd = OpenCodeRuntime::reset_session_command(&session_id);
 
     let sidecars = agent_state.sidecars.lock().await;
@@ -1986,6 +1999,18 @@ pub async fn reset_agent_session(
         handle.send_command(&cmd.to_string()).await?;
     } else {
         debug!(target: "agent", "Reset skipped; no active sidecar for session_id={}", session_id);
+    }
+
+    if agent_kind == "opencode" {
+        let db = state.db.lock().unwrap();
+        operations::delete_agent_session_mapping(&db, &session_id, AgentKind::Opencode).map_err(
+            |error| {
+                format!(
+                    "Failed to clear OpenCode session mapping for session_id={}: {}",
+                    session_id, error
+                )
+            },
+        )?;
     }
 
     Ok(())
@@ -2309,9 +2334,9 @@ mod tests {
     use super::{
         build_update_permissions_command_from_snapshot, convert_codex_history_values_to_events,
         convert_codex_item_to_claude_format, find_codex_session_jsonl,
-        load_latest_token_usage_for_agent_session, parse_proxy_port_from_stderr,
-        read_codex_interactive_events_from_dir, read_json_stream_values,
-        resolve_agent_session_info, rewind_jsonl_before_latest_turn,
+        load_latest_token_usage_for_agent_session, parse_agent_session_mapping_event,
+        parse_proxy_port_from_stderr, read_codex_interactive_events_from_dir,
+        read_json_stream_values, resolve_agent_session_info, rewind_jsonl_before_latest_turn,
         rewind_jsonl_before_target_turn, should_include_claude_history_event,
         sort_events_by_timestamp_stable, RewindTarget,
     };
@@ -2984,6 +3009,18 @@ mod tests {
         );
         assert_eq!(opencode_cmd["agentKind"], "opencode");
         assert_eq!(opencode_cmd["permissionConfig"]["kind"], "opencode");
+    }
+
+    #[test]
+    fn parses_opencode_session_mapping_event_for_database_persistence() {
+        let mapping = parse_agent_session_mapping_event(
+            r#"{"type":"agent_session_mapping","app_session_id":"app-session","agent_kind":"opencode","agent_session_id":"opencode-session"}"#,
+        )
+        .expect("mapping event should parse");
+
+        assert_eq!(mapping.0, "app-session");
+        assert_eq!(mapping.1, AgentKind::Opencode);
+        assert_eq!(mapping.2, "opencode-session");
     }
 
     #[test]
