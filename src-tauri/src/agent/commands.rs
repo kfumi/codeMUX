@@ -1509,13 +1509,15 @@ async fn ensure_sidecar_for_session(
     session_id: &str,
     channel: tauri::ipc::Channel<String>,
 ) -> Result<(), String> {
-    {
+    let channel_handle = {
         let sidecars = agent_state.sidecars.lock().await;
-        if let Some(handle) = sidecars.get(session_id) {
-            handle.update_channel(channel.clone()).await;
-            info!(target: "agent", "Reusing existing sidecar for session_id={}", session_id);
-            return Ok(());
-        }
+        sidecars.get(session_id).map(SidecarHandle::channel_handle)
+    };
+    if let Some(channel_handle) = channel_handle {
+        let mut current_channel = channel_handle.lock().await;
+        *current_channel = channel;
+        info!(target: "agent", "Reusing existing sidecar for session_id={}", session_id);
+        return Ok(());
     }
 
     let (handle, mut rx) = spawn_sidecar(&app, channel).await?;
@@ -1559,47 +1561,56 @@ async fn ensure_sidecar_for_session(
     Ok(())
 }
 
-fn parse_agent_session_mapping_event(event: &str) -> Option<(String, AgentKind, String)> {
+fn parse_agent_session_mapping_event(
+    event: &str,
+) -> Result<Option<(String, AgentKind, String)>, String> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(event) else {
-        return None;
+        if event.contains("\"type\"") && event.contains("agent_session_mapping") {
+            return Err("Invalid agent session mapping event: malformed JSON".to_string());
+        }
+        return Ok(None);
     };
 
     if value.get("type").and_then(|entry| entry.as_str()) != Some("agent_session_mapping") {
-        return None;
+        return Ok(None);
     }
 
     let app_session_id = value
         .get("app_session_id")
-        .and_then(|entry| entry.as_str())?;
-    let agent_kind_str = value.get("agent_kind").and_then(|entry| entry.as_str())?;
+        .and_then(|entry| entry.as_str())
+        .ok_or_else(|| "Invalid agent session mapping event: missing app_session_id".to_string())?;
+    let agent_kind_str = value
+        .get("agent_kind")
+        .and_then(|entry| entry.as_str())
+        .ok_or_else(|| "Invalid agent session mapping event: missing agent_kind".to_string())?;
     let agent_session_id = value
         .get("agent_session_id")
-        .and_then(|entry| entry.as_str())?;
-    let agent_kind = AgentKind::from_str(agent_kind_str).ok()?;
+        .and_then(|entry| entry.as_str())
+        .ok_or_else(|| {
+            "Invalid agent session mapping event: missing agent_session_id".to_string()
+        })?;
+    let agent_kind = AgentKind::from_str(agent_kind_str).map_err(|_| {
+        format!(
+            "Invalid agent session mapping event: unknown agent_kind={}",
+            agent_kind_str
+        )
+    })?;
 
-    Some((
+    Ok(Some((
         app_session_id.to_string(),
         agent_kind,
         agent_session_id.to_string(),
-    ))
+    )))
 }
 
 fn persist_agent_session_mapping_event(
     db: &rusqlite::Connection,
     event: &str,
 ) -> Result<bool, String> {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(event) else {
-        return Ok(false);
-    };
-
-    if value.get("type").and_then(|entry| entry.as_str()) != Some("agent_session_mapping") {
-        return Ok(false);
-    }
-
     let Some((app_session_id, agent_kind, agent_session_id)) =
-        parse_agent_session_mapping_event(event)
+        parse_agent_session_mapping_event(event)?
     else {
-        return Err("Invalid agent session mapping event".to_string());
+        return Ok(false);
     };
 
     operations::upsert_agent_session_mapping(
@@ -1627,7 +1638,7 @@ async fn handle_agent_session_mapping_event(
     disabled_session_mappings: &Arc<Mutex<HashSet<String>>>,
     event: &str,
 ) -> Result<bool, String> {
-    let Some((app_session_id, agent_kind, _)) = parse_agent_session_mapping_event(event) else {
+    let Some((app_session_id, agent_kind, _)) = parse_agent_session_mapping_event(event)? else {
         return Ok(false);
     };
 
@@ -1856,9 +1867,15 @@ pub async fn send_permission_update_to_session(
     session_id: &str,
 ) -> Result<bool, String> {
     let cmd = build_update_permissions_command(state, session_id)?;
-    let sidecars = agent_state.sidecars.lock().await;
-    if let Some(handle) = sidecars.get(session_id) {
-        handle.send_command(&cmd.to_string()).await?;
+    let command_sender = {
+        let sidecars = agent_state.sidecars.lock().await;
+        sidecars.get(session_id).map(SidecarHandle::command_sender)
+    };
+    if let Some(command_sender) = command_sender {
+        command_sender
+            .send(cmd.to_string())
+            .await
+            .map_err(|_| "Failed to send command to sidecar".to_string())?;
         info!(target: "agent", "Runtime permission update sent for session_id={}", session_id);
         Ok(true)
     } else {
@@ -2006,9 +2023,15 @@ pub async fn interrupt_agent_session(
     session_id: String,
 ) -> Result<(), String> {
     info!(target: "agent", "Interrupt requested for session_id={}", session_id);
-    let sidecars = agent_state.sidecars.lock().await;
-    if let Some(handle) = sidecars.get(&session_id) {
-        OpenCodeRuntime::send_command(handle, OpenCodeRuntime::interrupt_command()).await?;
+    let command_sender = {
+        let sidecars = agent_state.sidecars.lock().await;
+        sidecars.get(&session_id).map(SidecarHandle::command_sender)
+    };
+    if let Some(command_sender) = command_sender {
+        command_sender
+            .send(OpenCodeRuntime::interrupt_command().to_string())
+            .await
+            .map_err(|_| "Failed to send command to sidecar".to_string())?;
         info!(target: "agent", "Interrupt command sent, sidecar kept alive for session_id={}", session_id);
     } else {
         debug!(target: "agent", "Interrupt skipped; no active sidecar for session_id={}", session_id);
@@ -2022,8 +2045,13 @@ pub async fn shutdown_agent(
     session_id: String,
 ) -> Result<(), String> {
     info!(target: "agent", "Shutdown requested for session_id={}", session_id);
-    let mut sidecars = agent_state.sidecars.lock().await;
-    if let Some(mut handle) = sidecars.remove(&session_id) {
+    let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
+    let _lifecycle_guard = lifecycle_lock.lock().await;
+    let sidecar = {
+        let mut sidecars = agent_state.sidecars.lock().await;
+        sidecars.remove(&session_id)
+    };
+    if let Some(mut handle) = sidecar {
         handle.shutdown().await;
     } else {
         debug!(target: "agent", "Shutdown skipped; no active sidecar for session_id={}", session_id);
@@ -2045,9 +2073,15 @@ pub async fn send_tool_response(
         "response": response,
     });
 
-    let sidecars = agent_state.sidecars.lock().await;
-    if let Some(handle) = sidecars.get(&session_id) {
-        handle.send_command(&cmd.to_string()).await?;
+    let command_sender = {
+        let sidecars = agent_state.sidecars.lock().await;
+        sidecars.get(&session_id).map(SidecarHandle::command_sender)
+    };
+    if let Some(command_sender) = command_sender {
+        command_sender
+            .send(cmd.to_string())
+            .await
+            .map_err(|_| "Failed to send command to sidecar".to_string())?;
     } else {
         warn!(target: "agent", "Tool response skipped because no sidecar was found for session_id={} tool_use_id={}", session_id, tool_use_id);
     }
@@ -2183,9 +2217,17 @@ pub async fn rewind_agent_session(
             "type": "reset_session",
             "sessionId": app_session_id,
         });
-        let sidecars = agent_state.sidecars.lock().await;
-        if let Some(handle) = sidecars.get(&app_session_id) {
-            handle.send_command(&cmd.to_string()).await?;
+        let command_sender = {
+            let sidecars = agent_state.sidecars.lock().await;
+            sidecars
+                .get(&app_session_id)
+                .map(SidecarHandle::command_sender)
+        };
+        if let Some(command_sender) = command_sender {
+            command_sender
+                .send(cmd.to_string())
+                .await
+                .map_err(|_| "Failed to send command to sidecar".to_string())?;
         }
     }
 
@@ -3109,11 +3151,39 @@ mod tests {
         let mapping = parse_agent_session_mapping_event(
             r#"{"type":"agent_session_mapping","app_session_id":"app-session","agent_kind":"opencode","agent_session_id":"opencode-session"}"#,
         )
-        .expect("mapping event should parse");
+        .expect("mapping event should parse")
+        .expect("valid mapping event should return a mapping");
 
         assert_eq!(mapping.0, "app-session");
         assert_eq!(mapping.1, AgentKind::Opencode);
         assert_eq!(mapping.2, "opencode-session");
+    }
+
+    #[test]
+    fn rejects_malformed_agent_session_mapping_event_without_db_write() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["app-session", "OpenCode", "opencode", "chat", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+
+        let event = r#"{"type":"agent_session_mapping","app_session_id":"app-session","agent_kind":"opencode"}"#;
+        let error = persist_agent_session_mapping_event(&conn, event).unwrap_err();
+
+        assert!(error.contains("Invalid agent session mapping event"));
+        assert!(crate::db::operations::get_agent_session_mapping(
+            &conn,
+            "app-session",
+            AgentKind::Opencode,
+        )
+        .unwrap()
+        .is_none());
+
+        let malformed_json = r#"{"type":"agent_session_mapping","app_session_id":"app-session""#;
+        let error = persist_agent_session_mapping_event(&conn, malformed_json).unwrap_err();
+        assert!(error.contains("Invalid agent session mapping event"));
     }
 
     #[test]
@@ -3149,6 +3219,27 @@ mod tests {
         tokio::time::timeout(std::time::Duration::from_secs(1), reset)
             .await
             .expect("reset should acquire lifecycle lock")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn shutdown_and_start_share_a_deterministic_session_lifecycle_lock() {
+        let state = AgentState::default();
+        let lock = session_lifecycle_lock(&state, "session-opencode").await;
+        let guard = lock.lock().await;
+        let (started_tx, mut started_rx) = tokio::sync::oneshot::channel();
+        let shutdown = tokio::spawn(async move {
+            let lock = session_lifecycle_lock(&state, "session-opencode").await;
+            let _guard = lock.lock().await;
+            let _ = started_tx.send(());
+        });
+
+        tokio::task::yield_now().await;
+        assert!(started_rx.try_recv().is_err());
+        drop(guard);
+        tokio::time::timeout(std::time::Duration::from_secs(1), shutdown)
+            .await
+            .expect("shutdown should acquire lifecycle lock")
             .unwrap();
     }
 
@@ -3956,7 +4047,11 @@ pub async fn stop_codex_proxy(agent_state: State<'_, AgentState>) -> Result<(), 
 
     // Clean up the dedicated proxy sidecar
     if session_id == PROXY_SESSION_ID {
-        if let Some(mut handle) = agent_state.sidecars.lock().await.remove(PROXY_SESSION_ID) {
+        let sidecar = {
+            let mut sidecars = agent_state.sidecars.lock().await;
+            sidecars.remove(PROXY_SESSION_ID)
+        };
+        if let Some(mut handle) = sidecar {
             handle.shutdown().await;
             info!(target: "agent", "Dedicated proxy sidecar shut down");
         }

@@ -37,19 +37,16 @@ impl SidecarHandle {
         self.stdin_tx.clone()
     }
 
+    pub fn channel_handle(&self) -> Arc<AsyncMutex<tauri::ipc::Channel<String>>> {
+        self.channel.clone()
+    }
+
     /// Send a command string to the sidecar's stdin.
     pub async fn send_command(&self, cmd: &str) -> Result<(), String> {
         self.stdin_tx
             .send(cmd.to_string())
             .await
             .map_err(|_| "Failed to send command to sidecar".to_string())
-    }
-
-    /// Update the Tauri channel that the forwarding task sends events to.
-    /// Called when the sidecar is reused for a new `start` command.
-    pub async fn update_channel(&self, new_channel: tauri::ipc::Channel<String>) {
-        let mut ch = self.channel.lock().await;
-        *ch = new_channel;
     }
 
     /// Kill the sidecar process.
