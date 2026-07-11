@@ -143,7 +143,15 @@ export class OpenCodePermissionRegistry {
     }
     if (tombstone) this.clearExpiredTombstone(request.requestId);
     let existing = this.entries.get(request.requestId);
-    if (existing?.state === 'cancelled' && hasNewNativeIdentity(existing.nativeRequestIdentity, request.nativeRequestIdentity)) {
+    if (
+      existing?.state === 'cancelled'
+      && hasNewNativeRequest(
+        existing.nativeRequestIdentity,
+        existing.nativePayloadFingerprint,
+        request.nativeRequestIdentity,
+        request.nativePayloadFingerprint,
+      )
+    ) {
       this.removeEntry(existing);
       existing = undefined;
     }
@@ -452,11 +460,27 @@ export class OpenCodePermissionRegistry {
 }
 
 function isNewNativeRequest(tombstone: ExpiredTombstone, request: OpenCodePermissionRequest): boolean {
-  return hasNewNativeIdentity(tombstone.nativeRequestIdentity, request.nativeRequestIdentity);
+  return hasNewNativeRequest(
+    tombstone.nativeRequestIdentity,
+    tombstone.nativePayloadFingerprint,
+    request.nativeRequestIdentity,
+    request.nativePayloadFingerprint,
+  );
 }
 
-function hasNewNativeIdentity(previousIdentity: string | undefined, nextIdentity: string | undefined): boolean {
-  return Boolean(nextIdentity && nextIdentity !== previousIdentity);
+function hasNewNativeRequest(
+  previousIdentity: string | undefined,
+  previousFingerprint: string | undefined,
+  nextIdentity: string | undefined,
+  nextFingerprint: string | undefined,
+): boolean {
+  if (previousIdentity && nextIdentity) {
+    return previousIdentity !== nextIdentity;
+  }
+  if (!nextIdentity) {
+    return Boolean(nextFingerprint && nextFingerprint !== previousFingerprint);
+  }
+  return true;
 }
 
 function toNativeResponse(response: OpenCodePermissionResponse): OpenCodeNativePermissionResponse {

@@ -160,6 +160,44 @@ describe('OpenCodeRuntime', () => {
     await runtime.shutdown();
   });
 
+  it('re-registers a changed payload without native identity after timeout while suppressing the old replay', async () => {
+    vi.useFakeTimers();
+    try {
+      const { port, client } = createPort();
+      const emitted: unknown[] = [];
+      let onEvent!: (event: unknown) => void;
+      client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+        onEvent = input.onEvent;
+        return { close: vi.fn() };
+      });
+      const runtime = new OpenCodeRuntime(createConfig(), port, {
+        emitEvent: (event) => emitted.push(event),
+        permissionTimeoutMs: 25,
+      });
+      await runtime.start();
+
+      const payloadA = { id: 'permission-1', sessionID: 'opencode-new', type: 'read', title: 'Read', metadata: { path: 'a.txt' } };
+      const payloadB = { id: 'permission-1', sessionID: 'opencode-new', type: 'write', title: 'Write', metadata: { path: 'b.txt' } };
+      onEvent({ type: 'permission.updated', properties: payloadA });
+      await vi.advanceTimersByTimeAsync(25);
+      expect(runtime.permissions.size).toBe(0);
+
+      onEvent({ type: 'permission.updated', properties: payloadA });
+      expect(emitted.filter((event) => (event as { type?: string }).type === 'permission')).toHaveLength(1);
+      expect(runtime.permissions.size).toBe(0);
+
+      onEvent({ type: 'permission.updated', properties: payloadB });
+      expect(emitted.filter((event) => (event as { type?: string }).type === 'permission')).toHaveLength(2);
+      expect(runtime.permissions.get('permission-1')).toMatchObject({
+        permissionType: 'write',
+        raw: payloadB,
+      });
+      await runtime.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps permission registration closed until reset cleanup completes', async () => {
     const { port, client } = createPort();
     let onEvent!: (event: unknown) => void;
