@@ -37,6 +37,8 @@ export interface OpenCodePermissionCancelResult {
 
 export interface OpenCodePermissionRegistryOptions {
   timeoutMs?: number;
+  expiredTombstoneTtlMs?: number;
+  maxExpiredTombstones?: number;
 }
 
 export interface OpenCodePermissionUpsertResult {
@@ -52,6 +54,11 @@ interface PermissionEntry extends OpenCodePermissionRecord {
   responseGeneration?: number;
 }
 
+interface ExpiredTombstone {
+  expiresAt: number;
+  timeoutHandle: ReturnType<typeof setTimeout>;
+}
+
 export class OpenCodePermissionError extends Error {
   readonly code: 'not_found' | 'session_mismatch' | 'invalid_response' | 'expired' | 'native_response_failed';
 
@@ -64,14 +71,25 @@ export class OpenCodePermissionError extends Error {
 
 export class OpenCodePermissionRegistry {
   private readonly timeoutMs: number;
+  private readonly expiredTombstoneTtlMs: number;
+  private readonly maxExpiredTombstones: number;
   private readonly entries = new Map<string, PermissionEntry>();
   private readonly sessionGenerations = new Map<string, number>();
+  private readonly expiredTombstones = new Map<string, ExpiredTombstone>();
   private nextResponseToken = 0;
 
   constructor(options: OpenCodePermissionRegistryOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 5 * 60_000;
+    this.expiredTombstoneTtlMs = options.expiredTombstoneTtlMs ?? Math.max(this.timeoutMs, 60_000);
+    this.maxExpiredTombstones = options.maxExpiredTombstones ?? 1_024;
     if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) {
       throw new RangeError('OpenCode permission timeout must be a positive finite number');
+    }
+    if (!Number.isFinite(this.expiredTombstoneTtlMs) || this.expiredTombstoneTtlMs <= 0) {
+      throw new RangeError('OpenCode expired permission tombstone TTL must be a positive finite number');
+    }
+    if (!Number.isInteger(this.maxExpiredTombstones) || this.maxExpiredTombstones <= 0) {
+      throw new RangeError('OpenCode expired permission tombstone limit must be a positive integer');
     }
   }
 
@@ -87,11 +105,17 @@ export class OpenCodePermissionRegistry {
     return this.sessionGenerations.size;
   }
 
+  get expiredTombstoneCount(): number {
+    this.pruneExpiredTombstones();
+    return this.expiredTombstones.size;
+  }
+
   add(request: OpenCodePermissionRequest): OpenCodePermissionRecord {
     return this.upsert(request).record;
   }
 
   upsert(request: OpenCodePermissionRequest): OpenCodePermissionUpsertResult {
+    this.clearExpiredTombstone(request.requestId);
     const existing = this.entries.get(request.requestId);
     if (existing) {
       this.clearTimeout(existing);
@@ -143,6 +167,9 @@ export class OpenCodePermissionRegistry {
   async respond(requestId: string, codeMuxSessionId: string, response: OpenCodePermissionResponse): Promise<void> {
     const nativeResponse = toNativeResponse(response);
     const entry = this.entries.get(requestId);
+    if (this.getExpiredTombstone(requestId)) {
+      throw new OpenCodePermissionError('expired', `OpenCode permission request ${requestId} has expired`);
+    }
     if (!entry || entry.state !== 'pending') {
       throw new OpenCodePermissionError('not_found', `OpenCode permission request ${requestId} is no longer pending`);
     }
@@ -150,7 +177,7 @@ export class OpenCodePermissionRegistry {
       throw new OpenCodePermissionError('session_mismatch', `OpenCode permission request ${requestId} does not belong to session ${codeMuxSessionId}`);
     }
     if (Date.now() >= entry.deadline) {
-      await this.expireEntry(entry);
+      await this.expireEntry(entry, 'expired');
       throw new OpenCodePermissionError('expired', `OpenCode permission request ${requestId} has expired`);
     }
 
@@ -172,6 +199,7 @@ export class OpenCodePermissionRegistry {
         if ((entry.state as PermissionEntry['state']) === 'cancelled' || this.getSessionGeneration(entry.codeMuxSessionId) !== (entry.responseGeneration ?? 0)) {
           this.removeEntry(entry);
         } else if (Date.now() >= entry.deadline) {
+          this.rememberExpiredTombstone(entry);
           this.removeEntry(entry);
           throw new OpenCodePermissionError('expired', `OpenCode permission request ${requestId} has expired`, { cause: error });
         } else {
@@ -210,10 +238,10 @@ export class OpenCodePermissionRegistry {
     if (entry.state === 'cancelled') {
       return this.awaitResponse(entry);
     }
-    return this.expireEntry(entry);
+    return this.expireEntry(entry, 'cancelled');
   }
 
-  private async expireEntry(entry: PermissionEntry): Promise<unknown> {
+  private async expireEntry(entry: PermissionEntry, reason: 'expired' | 'cancelled' = 'cancelled'): Promise<unknown> {
     if (this.entries.get(entry.requestId) !== entry) return undefined;
     if (entry.state === 'responding') {
       entry.state = 'cancelled';
@@ -225,6 +253,9 @@ export class OpenCodePermissionRegistry {
 
     this.clearTimeout(entry);
     entry.state = 'cancelled';
+    if (reason === 'expired') {
+      this.rememberExpiredTombstone(entry);
+    }
     const rejectPromise = Promise.resolve().then(() => entry.respond('reject'));
     entry.responsePromise = rejectPromise;
     try {
@@ -258,7 +289,7 @@ export class OpenCodePermissionRegistry {
       return;
     }
     entry.timeoutHandle = setTimeout(() => {
-      void this.expireEntry(entry);
+      void this.expireEntry(entry, 'expired');
     }, remainingMs);
     entry.timeoutHandle.unref?.();
   }
@@ -278,6 +309,50 @@ export class OpenCodePermissionRegistry {
       this.entries.delete(entry.requestId);
     }
     this.reclaimSessionGeneration(entry.codeMuxSessionId);
+  }
+
+  private rememberExpiredTombstone(entry: PermissionEntry): void {
+    this.clearExpiredTombstone(entry.requestId);
+    const tombstone: ExpiredTombstone = {
+      expiresAt: Date.now() + this.expiredTombstoneTtlMs,
+      timeoutHandle: setTimeout(() => {
+        if (this.expiredTombstones.get(entry.requestId) === tombstone) {
+          this.expiredTombstones.delete(entry.requestId);
+        }
+      }, this.expiredTombstoneTtlMs),
+    };
+    tombstone.timeoutHandle.unref?.();
+    this.expiredTombstones.set(entry.requestId, tombstone);
+    while (this.expiredTombstones.size > this.maxExpiredTombstones) {
+      const oldestRequestId = this.expiredTombstones.keys().next().value;
+      if (oldestRequestId === undefined) break;
+      this.clearExpiredTombstone(oldestRequestId);
+    }
+  }
+
+  private getExpiredTombstone(requestId: string): ExpiredTombstone | undefined {
+    const tombstone = this.expiredTombstones.get(requestId);
+    if (!tombstone) return undefined;
+    if (tombstone.expiresAt <= Date.now()) {
+      this.clearExpiredTombstone(requestId);
+      return undefined;
+    }
+    return tombstone;
+  }
+
+  private clearExpiredTombstone(requestId: string): void {
+    const tombstone = this.expiredTombstones.get(requestId);
+    if (!tombstone) return;
+    clearTimeout(tombstone.timeoutHandle);
+    this.expiredTombstones.delete(requestId);
+  }
+
+  private pruneExpiredTombstones(): void {
+    for (const [requestId, tombstone] of this.expiredTombstones) {
+      if (tombstone.expiresAt <= Date.now()) {
+        this.clearExpiredTombstone(requestId);
+      }
+    }
   }
 
   private ensureSessionGeneration(codeMuxSessionId: string): void {

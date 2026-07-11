@@ -58,7 +58,7 @@ describe('OpenCodePermissionRegistry', () => {
       await vi.advanceTimersByTimeAsync(25);
       expect(respond).toHaveBeenCalledWith('reject');
       expect(registry.get('permission-1')).toBeUndefined();
-      await expect(registry.respond('permission-1', 'codemux-session-1', { approved: true })).rejects.toThrow('no longer pending');
+      await expect(registry.respond('permission-1', 'codemux-session-1', { approved: true })).rejects.toMatchObject({ code: 'expired' });
     } finally {
       vi.useRealTimers();
     }
@@ -211,5 +211,34 @@ describe('OpenCodePermissionRegistry', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('preserves an expired tombstone when the timer wins before respond', async () => {
+    vi.useFakeTimers();
+    try {
+      const registry = new OpenCodePermissionRegistry({ timeoutMs: 25, expiredTombstoneTtlMs: 50 });
+      const respond = vi.fn().mockResolvedValue(true);
+      registry.add(request({ respond }));
+
+      await vi.advanceTimersByTimeAsync(25);
+      const error = await registry.respond('permission-1', 'codemux-session-1', { approved: true }).catch((cause) => cause);
+      expect(error).toMatchObject({ code: 'expired' });
+      expect(respond).toHaveBeenCalledWith('reject');
+      expect(registry.get('permission-1')).toBeUndefined();
+      expect(registry.expiredTombstoneCount).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(50);
+      expect(registry.expiredTombstoneCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not create an expired tombstone for active cancellation', async () => {
+    const registry = new OpenCodePermissionRegistry({ expiredTombstoneTtlMs: 50 });
+    registry.add(request());
+    await registry.cancelAll('codemux-session-1');
+    await expect(registry.respond('permission-1', 'codemux-session-1', { approved: true })).rejects.toMatchObject({ code: 'not_found' });
+    expect(registry.expiredTombstoneCount).toBe(0);
   });
 });
