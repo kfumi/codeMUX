@@ -50,6 +50,7 @@ export class OpenCodeRuntime {
   private eventSequence = 0;
   private usage: import('./runtimeEvents.js').OpenCodeTokenUsage = { input_tokens: 0, output_tokens: 0 };
   private turnStartedAt = 0;
+  private turnId = 0;
 
   constructor(
     config: OpenCodeSessionConfig,
@@ -283,7 +284,7 @@ export class OpenCodeRuntime {
     if (eventSessionId && eventSessionId !== activeSessionId) {
       return;
     }
-    const identity = getOpenCodeEventIdentity(event);
+    const identity = getOpenCodeEventIdentity(event, this.turnId);
     const type = typeof (event as { type?: unknown })?.type === 'string' ? (event as { type: string }).type : '';
     if (this.seenEventIds.has(identity)) {
       return;
@@ -312,6 +313,7 @@ export class OpenCodeRuntime {
       usage: this.usage,
       terminalSessionIds: this.terminalSessionIds,
       terminalToolIds: this.terminalToolIds,
+      turnId: this.turnId,
     });
     for (const normalizedEvent of events) {
       this.emitEvent(normalizedEvent);
@@ -328,6 +330,7 @@ export class OpenCodeRuntime {
   }
 
   private beginTurnEventState(): void {
+    this.turnId += 1;
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
     this.usage = { input_tokens: 0, output_tokens: 0 };

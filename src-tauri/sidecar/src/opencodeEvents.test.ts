@@ -66,5 +66,9 @@ describe('OpenCode event normalization', () => {
     expect(getOpenCodeEventIdentity({ type: 'session.idle', id: 'provider-1', properties: { sessionID: 'opencode-session-1', noise: 'first' } })).toBe(getOpenCodeEventIdentity({ type: 'session.idle', id: 'provider-1', properties: { sessionID: 'opencode-session-1', noise: 'replay' } }));
     expect(toCodeMuxEvent(first, context())).toHaveLength(1);
     expect(toCodeMuxEvent(second, context())).toHaveLength(1);
+    const idle = { type: 'session.idle', properties: { sessionID: 'opencode-session-1' } };
+    expect(getOpenCodeEventIdentity(idle, 1)).not.toBe(getOpenCodeEventIdentity(idle, 2));
+    expect(toCodeMuxEvent(idle, context({ turnId: 1 }))).toHaveLength(1);
+    expect(toCodeMuxEvent(idle, context({ turnId: 2 }))).toHaveLength(1);
   });
 });

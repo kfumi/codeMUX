@@ -469,7 +469,7 @@ describe('OpenCodeRuntime', () => {
 
     await runtime.sendInput('second turn');
     onEvent({ type: 'session.status', properties: { sessionID: 'opencode-new', status: { type: 'busy' } } });
-    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new', id: 'idle-2' } });
+    onEvent({ type: 'session.idle', id: 'idle-2', properties: { sessionID: 'opencode-new' } });
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(2));
 
     await runtime.shutdown();
@@ -498,7 +498,7 @@ describe('OpenCodeRuntime', () => {
     client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => { onEvent = input.onEvent; return { close: vi.fn() }; });
     const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
     await runtime.start();
-    const idle = { type: 'session.idle', properties: { sessionID: 'opencode-new' } };
+    const idle = { type: 'session.idle', id: 'idle-1', properties: { sessionID: 'opencode-new' } };
     onEvent(idle);
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
 
@@ -508,6 +508,28 @@ describe('OpenCodeRuntime', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1);
     onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new', id: 'idle-2' } });
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(2));
+    await runtime.shutdown();
+  });
+
+  it('allows the official ID-less session.idle fixture to complete two prompt turns', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+    const idle = { type: 'session.idle', properties: { sessionID: 'opencode-new' } };
+
+    await runtime.sendInput('first turn');
+    onEvent(idle);
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
+
+    await runtime.sendInput('second turn');
+    onEvent(idle);
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(2));
     await runtime.shutdown();
   });

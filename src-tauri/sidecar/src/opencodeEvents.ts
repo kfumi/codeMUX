@@ -16,13 +16,14 @@ export interface OpenCodeEventContext extends RuntimeEventContext {
   seenEventIds?: ReadonlySet<string>;
   terminalSessionIds?: ReadonlySet<string>;
   terminalToolIds?: ReadonlySet<string>;
+  turnId?: number;
 }
 
-export function getOpenCodeEventIdentity(event: unknown): string {
+export function getOpenCodeEventIdentity(event: unknown, turnId = 0): string {
   const record = asRecord(event);
   const properties = asRecord(record?.properties);
   const part = asRecord(properties?.part);
-  const candidates = [record?.id, properties?.id, part?.id, part?.callID, properties?.messageID];
+  const candidates = [record?.id, properties?.id, properties?.toolID, properties?.toolId, properties?.messageID, part?.id, part?.callID, part?.toolCallID, part?.messageID];
   const explicitId = candidates.find((value): value is string => typeof value === 'string' && value.length > 0);
   if (explicitId) {
     return `${String(record?.type ?? 'unknown')}:${getOpenCodeEventSessionId(event) ?? 'session'}:id:${explicitId}`;
@@ -31,6 +32,10 @@ export function getOpenCodeEventIdentity(event: unknown): string {
   const sessionId = getOpenCodeEventSessionId(event);
   if (turnKey && sessionId) {
     return `${String(record?.type ?? 'unknown')}:${sessionId}:turn:${turnKey}`;
+  }
+  // 官方 session.idle 可能只有 sessionID；无 provider ID 时只能绑定本地 turn，跨轮 replay 与合法终端无法可靠区分。
+  if (sessionId) {
+    return `${String(record?.type ?? 'unknown')}:${sessionId}:turn:${turnId}`;
   }
   return stableStringify(event);
 }
@@ -82,7 +87,7 @@ export function extractOpenCodeUsage(event: unknown): OpenCodeTokenUsage | undef
 }
 
 export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): CodeMuxEvent[] {
-  const identity = getOpenCodeEventIdentity(event);
+  const identity = getOpenCodeEventIdentity(event, context.turnId);
   if (context.seenEventIds?.has(identity)) return [];
 
   const record = asRecord(event);
