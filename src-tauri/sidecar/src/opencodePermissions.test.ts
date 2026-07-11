@@ -241,4 +241,69 @@ describe('OpenCodePermissionRegistry', () => {
     await expect(registry.respond('permission-1', 'codemux-session-1', { approved: true })).rejects.toMatchObject({ code: 'not_found' });
     expect(registry.expiredTombstoneCount).toBe(0);
   });
+
+  it('bounds cancelAll when native reject hangs and ignores the late native settle', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveNative!: (value: boolean) => void;
+      const respond = vi.fn().mockImplementation(() => new Promise<boolean>((resolve) => { resolveNative = resolve; }));
+      const registry = new OpenCodePermissionRegistry({ nativeResponseTimeoutMs: 25 });
+      registry.add(request({ respond }));
+
+      const cancellation = registry.cancelAll('codemux-session-1');
+      await vi.advanceTimersByTimeAsync(25);
+      const results = await cancellation;
+      expect(results[0]?.error).toMatchObject({ code: 'native_response_timeout' });
+      expect(registry.size).toBe(0);
+      expect(registry.trackedSessionCount).toBe(0);
+      resolveNative(true);
+      await Promise.resolve();
+      expect(registry.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not reactivate an expired request from same or changed replay payloads', async () => {
+    vi.useFakeTimers();
+    try {
+      const registry = new OpenCodePermissionRegistry({ timeoutMs: 10, expiredTombstoneTtlMs: 100 });
+      const respond = vi.fn().mockResolvedValue(true);
+      registry.add(request({ respond, nativeRequestIdentity: 'native-event-1', nativePayloadFingerprint: 'payload-1' }));
+      await vi.advanceTimersByTimeAsync(10);
+      expect(registry.expiredTombstoneCount).toBe(1);
+
+      const sameReplay = registry.upsert(request({ nativeRequestIdentity: 'native-event-1', nativePayloadFingerprint: 'payload-1', raw: { id: 'permission-1', type: 'read', replay: true } }));
+      const changedReplay = registry.upsert(request({ nativeRequestIdentity: 'native-event-1', nativePayloadFingerprint: 'payload-2', raw: { id: 'permission-1', type: 'write', replay: true } }));
+      expect(sameReplay.accepted).toBe(false);
+      expect(changedReplay.accepted).toBe(false);
+      expect(registry.size).toBe(0);
+
+      const newRequest = registry.upsert(request({ nativeRequestIdentity: 'native-event-2', nativePayloadFingerprint: 'payload-3', raw: { id: 'permission-1', type: 'write', fresh: true } }));
+      expect(newRequest.accepted).toBe(true);
+      expect(registry.size).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('allows a confirmed new native identity to replace an expired in-flight entry', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveOldNative!: (value: boolean) => void;
+      const respond = vi.fn().mockImplementation(() => new Promise<boolean>((resolve) => { resolveOldNative = resolve; }));
+      const registry = new OpenCodePermissionRegistry({ timeoutMs: 10, nativeResponseTimeoutMs: 1_000, expiredTombstoneTtlMs: 100 });
+      registry.add(request({ respond, nativeRequestIdentity: 'native-event-1' }));
+      await vi.advanceTimersByTimeAsync(10);
+
+      const replacement = registry.upsert(request({ nativeRequestIdentity: 'native-event-2', raw: { id: 'permission-1', fresh: true } }));
+      expect(replacement.accepted).toBe(true);
+      expect(registry.get('permission-1')).toMatchObject({ raw: { id: 'permission-1', fresh: true }, state: 'pending' });
+      resolveOldNative(true);
+      await Promise.resolve();
+      expect(registry.get('permission-1')).toMatchObject({ raw: { id: 'permission-1', fresh: true }, state: 'pending' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

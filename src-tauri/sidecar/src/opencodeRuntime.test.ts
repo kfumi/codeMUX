@@ -184,6 +184,23 @@ describe('OpenCodeRuntime', () => {
     await runtime.shutdown();
   });
 
+  it('bounds shutdown while native permission rejection hangs', async () => {
+    const { port, client } = createPort();
+    let onEvent!: (event: unknown) => void;
+    client.respondToPermission = vi.fn().mockImplementation(() => new Promise<boolean>(() => {}));
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { nativeResponseTimeoutMs: 20 });
+    await runtime.start();
+    onEvent({ type: 'permission.updated', properties: { id: 'permission-1', sessionID: 'opencode-new', type: 'read', title: 'Read', metadata: {} } });
+
+    await expect(runtime.shutdown()).resolves.toBeUndefined();
+    expect(runtime.permissions.size).toBe(0);
+    expect(client.respondToPermission).toHaveBeenCalledTimes(1);
+  });
+
   it('subscribes to SDK events, normalizes them, and deduplicates repeated events', async () => {
     const { port, client } = createPort();
     const emitted: unknown[] = [];

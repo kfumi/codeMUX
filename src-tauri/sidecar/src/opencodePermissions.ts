@@ -14,6 +14,8 @@ export interface OpenCodePermissionRequest {
   description?: string;
   metadata?: Record<string, unknown>;
   raw: unknown;
+  nativeRequestIdentity?: string;
+  nativePayloadFingerprint?: string;
   respond: (response: OpenCodeNativePermissionResponse) => Promise<unknown>;
 }
 
@@ -39,28 +41,39 @@ export interface OpenCodePermissionRegistryOptions {
   timeoutMs?: number;
   expiredTombstoneTtlMs?: number;
   maxExpiredTombstones?: number;
+  nativeResponseTimeoutMs?: number;
 }
 
 export interface OpenCodePermissionUpsertResult {
-  record: OpenCodePermissionRecord;
+  record?: OpenCodePermissionRecord;
   updated: boolean;
+  accepted: boolean;
 }
 
 interface PermissionEntry extends OpenCodePermissionRecord {
   respond: (response: OpenCodeNativePermissionResponse) => Promise<unknown>;
   timeoutHandle?: ReturnType<typeof setTimeout>;
-  responsePromise?: Promise<unknown>;
+  responsePromise?: Promise<NativeResponseOutcome>;
   responseToken?: number;
   responseGeneration?: number;
+  nativeRequestIdentity?: string;
+  nativePayloadFingerprint?: string;
 }
 
 interface ExpiredTombstone {
   expiresAt: number;
   timeoutHandle: ReturnType<typeof setTimeout>;
+  nativeRequestIdentity?: string;
+  nativePayloadFingerprint?: string;
 }
 
+type NativeResponseOutcome =
+  | { ok: true }
+  | { ok: false; timedOut: false; error: unknown }
+  | { ok: false; timedOut: true };
+
 export class OpenCodePermissionError extends Error {
-  readonly code: 'not_found' | 'session_mismatch' | 'invalid_response' | 'expired' | 'native_response_failed';
+  readonly code: 'not_found' | 'session_mismatch' | 'invalid_response' | 'expired' | 'native_response_failed' | 'native_response_timeout';
 
   constructor(code: OpenCodePermissionError['code'], message: string, options?: { cause?: unknown }) {
     super(message, options);
@@ -71,6 +84,7 @@ export class OpenCodePermissionError extends Error {
 
 export class OpenCodePermissionRegistry {
   private readonly timeoutMs: number;
+  private readonly nativeResponseTimeoutMs: number;
   private readonly expiredTombstoneTtlMs: number;
   private readonly maxExpiredTombstones: number;
   private readonly entries = new Map<string, PermissionEntry>();
@@ -80,6 +94,7 @@ export class OpenCodePermissionRegistry {
 
   constructor(options: OpenCodePermissionRegistryOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 5 * 60_000;
+    this.nativeResponseTimeoutMs = options.nativeResponseTimeoutMs ?? 30_000;
     this.expiredTombstoneTtlMs = options.expiredTombstoneTtlMs ?? Math.max(this.timeoutMs, 60_000);
     this.maxExpiredTombstones = options.maxExpiredTombstones ?? 1_024;
     if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) {
@@ -87,6 +102,9 @@ export class OpenCodePermissionRegistry {
     }
     if (!Number.isFinite(this.expiredTombstoneTtlMs) || this.expiredTombstoneTtlMs <= 0) {
       throw new RangeError('OpenCode expired permission tombstone TTL must be a positive finite number');
+    }
+    if (!Number.isFinite(this.nativeResponseTimeoutMs) || this.nativeResponseTimeoutMs <= 0) {
+      throw new RangeError('OpenCode native permission response timeout must be a positive finite number');
     }
     if (!Number.isInteger(this.maxExpiredTombstones) || this.maxExpiredTombstones <= 0) {
       throw new RangeError('OpenCode expired permission tombstone limit must be a positive integer');
@@ -111,18 +129,32 @@ export class OpenCodePermissionRegistry {
   }
 
   add(request: OpenCodePermissionRequest): OpenCodePermissionRecord {
-    return this.upsert(request).record;
+    const result = this.upsert(request);
+    if (!result.record) {
+      throw new OpenCodePermissionError('expired', `OpenCode permission request ${request.requestId} has expired`);
+    }
+    return result.record;
   }
 
   upsert(request: OpenCodePermissionRequest): OpenCodePermissionUpsertResult {
-    this.clearExpiredTombstone(request.requestId);
-    const existing = this.entries.get(request.requestId);
+    const tombstone = this.getExpiredTombstone(request.requestId);
+    if (tombstone && !isNewNativeRequest(tombstone, request)) {
+      return { updated: false, accepted: false };
+    }
+    if (tombstone) this.clearExpiredTombstone(request.requestId);
+    let existing = this.entries.get(request.requestId);
+    if (existing?.state === 'cancelled' && hasNewNativeIdentity(existing.nativeRequestIdentity, request.nativeRequestIdentity)) {
+      this.removeEntry(existing);
+      existing = undefined;
+    }
     if (existing) {
       this.clearTimeout(existing);
       existing.permissionType = request.permissionType;
       existing.description = request.description;
       existing.metadata = request.metadata;
       existing.raw = request.raw;
+      existing.nativeRequestIdentity = request.nativeRequestIdentity;
+      existing.nativePayloadFingerprint = request.nativePayloadFingerprint;
       if (existing.state === 'pending') {
         const previousSessionId = existing.codeMuxSessionId;
         existing.openCodeSessionId = request.openCodeSessionId;
@@ -136,7 +168,7 @@ export class OpenCodePermissionRegistry {
       } else {
         existing.respond = request.respond;
       }
-      return { record: this.toRecord(existing), updated: true };
+      return { record: this.toRecord(existing), updated: true, accepted: true };
     }
 
     const now = Date.now();
@@ -148,6 +180,8 @@ export class OpenCodePermissionRegistry {
       description: request.description,
       metadata: request.metadata,
       raw: request.raw,
+      nativeRequestIdentity: request.nativeRequestIdentity,
+      nativePayloadFingerprint: request.nativePayloadFingerprint,
       createdAt: now,
       deadline: now + this.timeoutMs,
       state: 'pending',
@@ -156,7 +190,7 @@ export class OpenCodePermissionRegistry {
     this.entries.set(request.requestId, entry);
     this.ensureSessionGeneration(entry.codeMuxSessionId);
     this.scheduleTimeout(entry);
-    return { record: this.toRecord(entry), updated: false };
+    return { record: this.toRecord(entry), updated: false, accepted: true };
   }
 
   get(requestId: string): OpenCodePermissionRecord | undefined {
@@ -187,32 +221,62 @@ export class OpenCodePermissionRegistry {
     entry.responseToken = responseToken;
     entry.responseGeneration = this.getSessionGeneration(entry.codeMuxSessionId);
     const responder = entry.respond;
-    const responsePromise = Promise.resolve().then(() => responder(nativeResponse));
+    const responsePromise = this.runNativeResponse(responder, nativeResponse);
     entry.responsePromise = responsePromise;
     try {
-      await responsePromise;
-      if (this.isCurrentResponse(entry, responseToken)) {
-        this.removeEntry(entry);
+      const outcome = await responsePromise;
+      if (outcome.ok) {
+        if (this.isCurrentResponse(entry, responseToken)) {
+          this.removeEntry(entry);
+        }
+        return;
       }
-    } catch (error) {
       if (this.isCurrentResponse(entry, responseToken)) {
         if ((entry.state as PermissionEntry['state']) === 'cancelled' || this.getSessionGeneration(entry.codeMuxSessionId) !== (entry.responseGeneration ?? 0)) {
           this.removeEntry(entry);
+        } else if (outcome.timedOut) {
+          this.removeEntry(entry);
+          throw this.nativeResponseTimeoutError(requestId);
         } else if (Date.now() >= entry.deadline) {
           this.rememberExpiredTombstone(entry);
           this.removeEntry(entry);
-          throw new OpenCodePermissionError('expired', `OpenCode permission request ${requestId} has expired`, { cause: error });
+          throw new OpenCodePermissionError('expired', `OpenCode permission request ${requestId} has expired`, { cause: outcome.error });
         } else {
           entry.state = 'pending';
           this.scheduleTimeout(entry);
         }
       }
-      throw new OpenCodePermissionError('native_response_failed', `OpenCode permission request ${requestId} response failed`, { cause: error });
+      if (outcome.timedOut) {
+        throw this.nativeResponseTimeoutError(requestId);
+      }
+      throw new OpenCodePermissionError('native_response_failed', `OpenCode permission request ${requestId} response failed`, { cause: outcome.error });
     } finally {
       if (entry.responsePromise === responsePromise) {
         entry.responsePromise = undefined;
       }
     }
+  }
+
+  private async runNativeResponse(responder: (response: OpenCodeNativePermissionResponse) => Promise<unknown>, response: OpenCodeNativePermissionResponse): Promise<NativeResponseOutcome> {
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    return new Promise<NativeResponseOutcome>((resolve) => {
+      const finish = (outcome: NativeResponseOutcome) => {
+        if (settled) return;
+        settled = true;
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        resolve(outcome);
+      };
+      void Promise.resolve()
+        .then(() => responder(response))
+        .then(() => finish({ ok: true }), (error) => finish({ ok: false, timedOut: false, error }));
+      timeoutHandle = setTimeout(() => finish({ ok: false, timedOut: true }), this.nativeResponseTimeoutMs);
+      timeoutHandle.unref?.();
+    });
+  }
+
+  private nativeResponseTimeoutError(requestId: string): OpenCodePermissionError {
+    return new OpenCodePermissionError('native_response_timeout', `OpenCode permission request ${requestId} native response timed out`);
   }
 
   async cancelAll(codeMuxSessionId?: string): Promise<OpenCodePermissionCancelResult[]> {
@@ -256,12 +320,13 @@ export class OpenCodePermissionRegistry {
     if (reason === 'expired') {
       this.rememberExpiredTombstone(entry);
     }
-    const rejectPromise = Promise.resolve().then(() => entry.respond('reject'));
+    const rejectPromise = this.runNativeResponse(entry.respond, 'reject');
     entry.responsePromise = rejectPromise;
     try {
-      return await rejectPromise;
-    } catch (error) {
-      return error;
+      const outcome = await rejectPromise;
+      if (outcome.ok) return undefined;
+      if (outcome.timedOut) return this.nativeResponseTimeoutError(entry.requestId);
+      return new OpenCodePermissionError('native_response_failed', `OpenCode permission request ${entry.requestId} rejection failed`, { cause: outcome.error });
     } finally {
       if (this.entries.get(entry.requestId) === entry) {
         this.removeEntry(entry);
@@ -275,8 +340,10 @@ export class OpenCodePermissionRegistry {
       return undefined;
     }
     try {
-      await entry.responsePromise;
-      return undefined;
+      const outcome = await entry.responsePromise;
+      if (outcome.ok) return undefined;
+      if (outcome.timedOut) return this.nativeResponseTimeoutError(entry.requestId);
+      return new OpenCodePermissionError('native_response_failed', `OpenCode permission request ${entry.requestId} response failed`, { cause: outcome.error });
     } catch (error) {
       return error;
     }
@@ -285,7 +352,7 @@ export class OpenCodePermissionRegistry {
   private scheduleTimeout(entry: PermissionEntry): void {
     const remainingMs = entry.deadline - Date.now();
     if (remainingMs <= 0) {
-      void this.expireEntry(entry);
+      void this.expireEntry(entry, 'expired');
       return;
     }
     entry.timeoutHandle = setTimeout(() => {
@@ -315,6 +382,8 @@ export class OpenCodePermissionRegistry {
     this.clearExpiredTombstone(entry.requestId);
     const tombstone: ExpiredTombstone = {
       expiresAt: Date.now() + this.expiredTombstoneTtlMs,
+      nativeRequestIdentity: entry.nativeRequestIdentity,
+      nativePayloadFingerprint: entry.nativePayloadFingerprint,
       timeoutHandle: setTimeout(() => {
         if (this.expiredTombstones.get(entry.requestId) === tombstone) {
           this.expiredTombstones.delete(entry.requestId);
@@ -377,9 +446,17 @@ export class OpenCodePermissionRegistry {
   }
 
   private toRecord(entry: PermissionEntry): OpenCodePermissionRecord {
-    const { respond: _respond, timeoutHandle: _timeoutHandle, responsePromise: _responsePromise, responseToken: _responseToken, responseGeneration: _responseGeneration, ...record } = entry;
+    const { respond: _respond, timeoutHandle: _timeoutHandle, responsePromise: _responsePromise, responseToken: _responseToken, responseGeneration: _responseGeneration, nativeRequestIdentity: _nativeRequestIdentity, nativePayloadFingerprint: _nativePayloadFingerprint, ...record } = entry;
     return record;
   }
+}
+
+function isNewNativeRequest(tombstone: ExpiredTombstone, request: OpenCodePermissionRequest): boolean {
+  return hasNewNativeIdentity(tombstone.nativeRequestIdentity, request.nativeRequestIdentity);
+}
+
+function hasNewNativeIdentity(previousIdentity: string | undefined, nextIdentity: string | undefined): boolean {
+  return Boolean(nextIdentity && nextIdentity !== previousIdentity);
 }
 
 function toNativeResponse(response: OpenCodePermissionResponse): OpenCodeNativePermissionResponse {

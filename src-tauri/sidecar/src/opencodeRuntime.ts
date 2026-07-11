@@ -31,6 +31,7 @@ export interface OpenCodeRuntimeOptions {
   emitEvent?: (event: unknown) => void;
   eventIdFactory?: () => string;
   permissionTimeoutMs?: number;
+  nativeResponseTimeoutMs?: number;
 }
 
 export class OpenCodeRuntime {
@@ -75,7 +76,7 @@ export class OpenCodeRuntime {
     this.agentId = options.agentId ?? config.sessionId;
     this.emitEvent = options.emitEvent ?? emit;
     this.eventIdFactory = options.eventIdFactory ?? (() => crypto.randomUUID());
-    this.permissions = new OpenCodePermissionRegistry({ timeoutMs: options.permissionTimeoutMs });
+    this.permissions = new OpenCodePermissionRegistry({ timeoutMs: options.permissionTimeoutMs, nativeResponseTimeoutMs: options.nativeResponseTimeoutMs });
     if (!Number.isFinite(this.activeTaskTimeoutMs) || this.activeTaskTimeoutMs <= 0) {
       throw new RangeError('OpenCode active task timeout must be a positive finite number');
     }
@@ -341,7 +342,7 @@ export class OpenCodeRuntime {
       return;
     }
     if (type === 'permission.updated') {
-      this.handlePermissionEvent(event, eventSessionId);
+      this.handlePermissionEvent(event, eventSessionId, identity, payloadKey);
       if (identity) {
         this.rememberSeenEventId(identity);
       } else if (payloadKey) {
@@ -433,7 +434,7 @@ export class OpenCodeRuntime {
     this.turnStartedAt = 0;
   }
 
-  private handlePermissionEvent(event: unknown, eventSessionId: string | undefined): void {
+  private handlePermissionEvent(event: unknown, eventSessionId: string | undefined, nativeRequestIdentity: string | undefined, nativePayloadFingerprint: string | undefined): void {
     const properties = asRecord(asRecord(event)?.properties);
     const requestId = readString(properties?.id);
     if (!requestId) {
@@ -444,7 +445,7 @@ export class OpenCodeRuntime {
     const metadata = asRecord(properties?.metadata);
     const openCodeSessionId = eventSessionId ?? readString(properties?.sessionID);
     const rawPermission = properties ?? event;
-    this.permissions.upsert({
+    const registration = this.permissions.upsert({
       requestId,
       openCodeSessionId,
       codeMuxSessionId: this.config.sessionId,
@@ -452,6 +453,8 @@ export class OpenCodeRuntime {
       description,
       metadata,
       raw: rawPermission,
+      nativeRequestIdentity,
+      nativePayloadFingerprint,
       respond: async (response) => {
         const client = this.client;
         if (!client || !openCodeSessionId) {
@@ -460,6 +463,9 @@ export class OpenCodeRuntime {
         await client.respondToPermission({ sessionId: openCodeSessionId, requestId, response });
       },
     });
+    if (!registration.accepted) {
+      return;
+    }
     this.emitEvent({
       type: 'permission',
       subtype: 'request',
