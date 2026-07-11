@@ -54,9 +54,22 @@ function readResponse<T>(operation: string, response: { data?: T; error?: unknow
   if (response.data !== undefined) {
     return response.data;
   }
-  throw new Error(`${operation} failed${response.error ? `: ${String(response.error)}` : ''}`);
+  throw new Error(`${operation} failed${response.error ? `: ${formatSdkError(response.error)}` : ''}`);
 }
 
+function formatSdkError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
 function toOpenCodeImage(image: AgentInputImage): OpenCodeImageInput {
   return {
     name: image.name,

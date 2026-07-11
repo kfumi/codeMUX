@@ -1,4 +1,4 @@
-import type { AgentInputPayload } from './agentInputPayload.js';
+import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInputPayload.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
 import {
   mapOpenCodeImages,
@@ -14,20 +14,25 @@ import {
 type RuntimeState = 'idle' | 'starting' | 'started' | 'disposing' | 'cleanup_failed' | 'disposed';
 
 export const DEFAULT_ACTIVE_TASK_TIMEOUT_MS = 30_000;
+export const DEFAULT_SERVER_CLOSE_TIMEOUT_MS = 10_000;
 
 export interface OpenCodeRuntimeOptions {
   activeTaskTimeoutMs?: number;
+  serverCloseTimeoutMs?: number;
 }
 
 export class OpenCodeRuntime {
   private readonly config: OpenCodeSessionConfig;
   private readonly sdk: OpenCodeSdkPort;
   private readonly activeTaskTimeoutMs: number;
+  private readonly serverCloseTimeoutMs: number;
   private server: OpenCodeServerHandle | undefined;
   private client: OpenCodeClientPort | undefined;
   private agentSessionId: string | undefined;
   private activeTask: Promise<void> | undefined;
-  private cleanupPromise: Promise<void> | undefined;
+  private lifecycleTail: Promise<void> = Promise.resolve();
+  private startPromise: Promise<OpenCodeSessionMapping> | undefined;
+  private shutdownPromise: Promise<void> | undefined;
   private state: RuntimeState = 'idle';
 
   constructor(
@@ -38,13 +43,124 @@ export class OpenCodeRuntime {
     this.config = config;
     this.sdk = sdk;
     this.activeTaskTimeoutMs = options.activeTaskTimeoutMs ?? DEFAULT_ACTIVE_TASK_TIMEOUT_MS;
+    this.serverCloseTimeoutMs = options.serverCloseTimeoutMs ?? DEFAULT_SERVER_CLOSE_TIMEOUT_MS;
     if (!Number.isFinite(this.activeTaskTimeoutMs) || this.activeTaskTimeoutMs <= 0) {
       throw new RangeError('OpenCode active task timeout must be a positive finite number');
+    }
+    if (!Number.isFinite(this.serverCloseTimeoutMs) || this.serverCloseTimeoutMs <= 0) {
+      throw new RangeError('OpenCode server close timeout must be a positive finite number');
     }
     this.agentSessionId = config.agentSessionId;
   }
 
-  async start(): Promise<OpenCodeSessionMapping> {
+  start(): Promise<OpenCodeSessionMapping> {
+    if (this.startPromise) {
+      return this.startPromise;
+    }
+    if (this.shutdownPromise || this.state === 'disposed' || this.state === 'disposing' || this.state === 'cleanup_failed') {
+      return Promise.reject(new Error(`OpenCode runtime cannot start in state ${this.state}`));
+    }
+
+    const startPromise = this.enqueueLifecycle(() => this.startInternal());
+    this.startPromise = startPromise;
+    void startPromise.then(
+      () => this.clearStartPromise(startPromise),
+      () => this.clearStartPromise(startPromise),
+    );
+    return startPromise;
+  }
+
+  async sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void> {
+    const client = this.client;
+    const sessionId = this.agentSessionId;
+    if (this.state !== 'started' || !client || !sessionId) {
+      throw new Error('OpenCode runtime is not started');
+    }
+    if (this.activeTask) {
+      throw new Error('OpenCode runtime already has an active task');
+    }
+
+    const normalizedPayload = normalizeAgentInputPayload(prompt, inputPayload);
+    const normalizedPrompt = normalizedPayload.text;
+    const task = client.prompt({
+      sessionId,
+      prompt: normalizedPrompt,
+      inputPayload: normalizedPayload,
+      images: mapOpenCodeImages(normalizedPayload),
+      provider: this.config.provider,
+      model: this.config.model,
+    });
+    const handledTask = task.catch((error) => {
+      if (isAbortError(error)) {
+        return;
+      }
+      throw error;
+    });
+    this.activeTask = handledTask;
+    try {
+      await handledTask;
+    } finally {
+      if (this.activeTask === handledTask) {
+        this.activeTask = undefined;
+      }
+    }
+  }
+
+  interrupt(): Promise<void> {
+    return this.enqueueLifecycle(() => this.interruptInternal());
+  }
+
+  resetSession(): Promise<void> {
+    return this.enqueueLifecycle(async () => {
+      await this.interruptInternal();
+      await this.waitForActiveTaskIfPresent();
+      this.agentSessionId = undefined;
+    });
+  }
+
+  shutdown(): Promise<void> {
+    if (this.shutdownPromise) {
+      return this.shutdownPromise;
+    }
+    if (this.state === 'disposed') {
+      return Promise.resolve();
+    }
+
+    const shutdownPromise = this.enqueueLifecycle(() => this.disposeResources());
+    this.shutdownPromise = shutdownPromise;
+    void shutdownPromise.then(
+      () => this.clearShutdownPromise(shutdownPromise),
+      () => this.clearShutdownPromise(shutdownPromise),
+    );
+    return shutdownPromise;
+  }
+
+  dispose(): Promise<void> {
+    return this.shutdown();
+  }
+
+  private enqueueLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.lifecycleTail.then(operation, operation);
+    this.lifecycleTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private clearStartPromise(startPromise: Promise<OpenCodeSessionMapping>): void {
+    if (this.startPromise === startPromise) {
+      this.startPromise = undefined;
+    }
+  }
+
+  private clearShutdownPromise(shutdownPromise: Promise<void>): void {
+    if (this.shutdownPromise === shutdownPromise) {
+      this.shutdownPromise = undefined;
+    }
+  }
+
+  private async startInternal(): Promise<OpenCodeSessionMapping> {
     if (this.state === 'disposed' || this.state === 'disposing' || this.state === 'cleanup_failed') {
       throw new Error(`OpenCode runtime cannot start in state ${this.state}`);
     }
@@ -97,89 +213,6 @@ export class OpenCodeRuntime {
     }
   }
 
-  async sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void> {
-    const client = this.client;
-    const sessionId = this.agentSessionId;
-    if (this.state !== 'started' || !client || !sessionId) {
-      throw new Error('OpenCode runtime is not started');
-    }
-    if (this.activeTask) {
-      throw new Error('OpenCode runtime already has an active task');
-    }
-
-    const task = client.prompt({
-      sessionId,
-      prompt,
-      inputPayload,
-      images: mapOpenCodeImages(inputPayload),
-      provider: this.config.provider,
-      model: this.config.model,
-    });
-    const handledTask = task.catch((error) => {
-      if (isAbortError(error)) {
-        return;
-      }
-      throw error;
-    });
-    this.activeTask = handledTask;
-    try {
-      await handledTask;
-    } finally {
-      if (this.activeTask === handledTask) {
-        this.activeTask = undefined;
-      }
-    }
-  }
-
-  async interrupt(): Promise<void> {
-    const client = this.client;
-    const sessionId = this.agentSessionId;
-    if (!client || !sessionId || !this.activeTask) {
-      return;
-    }
-
-    try {
-      await client.abort(sessionId);
-    } catch (error) {
-      if (!isAbortError(error)) {
-        throw error;
-      }
-    }
-  }
-
-  async resetSession(): Promise<void> {
-    await this.interrupt();
-    await this.activeTask;
-    this.agentSessionId = undefined;
-  }
-
-  async shutdown(): Promise<void> {
-    if (this.state === 'disposed') {
-      return;
-    }
-    if (this.cleanupPromise) {
-      return this.cleanupPromise;
-    }
-
-    this.state = 'disposing';
-    const cleanupPromise = this.disposeResources();
-    this.cleanupPromise = cleanupPromise;
-    try {
-      await cleanupPromise;
-    } catch (error) {
-      this.state = 'cleanup_failed';
-      throw error;
-    } finally {
-      if (this.cleanupPromise === cleanupPromise) {
-        this.cleanupPromise = undefined;
-      }
-    }
-  }
-
-  async dispose(): Promise<void> {
-    await this.shutdown();
-  }
-
   private mapping(): OpenCodeSessionMapping {
     if (!this.agentSessionId) {
       throw new Error('OpenCode session mapping is unavailable');
@@ -199,22 +232,36 @@ export class OpenCodeRuntime {
     }
   }
 
+  private async interruptInternal(): Promise<void> {
+    const client = this.client;
+    const sessionId = this.agentSessionId;
+    if (!client || !sessionId || !this.activeTask) {
+      return;
+    }
+
+    try {
+      await client.abort(sessionId);
+    } catch (error) {
+      if (!isAbortError(error)) {
+        throw error;
+      }
+    }
+  }
+
   private async disposeResources(): Promise<void> {
+    this.state = 'disposing';
     const errors: unknown[] = [];
     try {
       try {
-        await this.interrupt();
+        await this.interruptInternal();
       } catch (error) {
         errors.push(error);
       }
 
-      const activeTask = this.activeTask;
-      if (activeTask) {
-        try {
-          await this.waitForActiveTask(activeTask);
-        } catch (error) {
-          errors.push(error);
-        }
+      try {
+        await this.waitForActiveTaskIfPresent();
+      } catch (error) {
+        errors.push(error);
       }
       this.activeTask = undefined;
 
@@ -224,7 +271,7 @@ export class OpenCodeRuntime {
       const server = this.server;
       if (server) {
         try {
-          await server.close();
+          await this.closeServerWithTimeout(server);
           this.server = undefined;
         } catch (error) {
           errors.push(error);
@@ -239,6 +286,14 @@ export class OpenCodeRuntime {
       this.state = 'cleanup_failed';
       throw error;
     }
+  }
+
+  private async waitForActiveTaskIfPresent(): Promise<void> {
+    const activeTask = this.activeTask;
+    if (!activeTask) {
+      return;
+    }
+    await this.waitForActiveTask(activeTask);
   }
 
   private async waitForActiveTask(activeTask: Promise<void>): Promise<void> {
@@ -257,6 +312,7 @@ export class OpenCodeRuntime {
       }
     }
   }
+
   private async closeServerAfterStartFailure(): Promise<unknown | undefined> {
     this.client = undefined;
     const server = this.server;
@@ -264,11 +320,31 @@ export class OpenCodeRuntime {
       return undefined;
     }
     try {
-      await server.close();
+      await this.closeServerWithTimeout(server);
       this.server = undefined;
       return undefined;
     } catch (error) {
       return error;
+    }
+  }
+
+  private async closeServerWithTimeout(server: OpenCodeServerHandle): Promise<void> {
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`OpenCode server close timed out after ${this.serverCloseTimeoutMs}ms`));
+      }, this.serverCloseTimeoutMs);
+    });
+
+    try {
+      await Promise.race([
+        Promise.resolve().then(() => server.close()),
+        timeout,
+      ]);
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
     }
   }
 }
@@ -289,7 +365,17 @@ function aggregateErrors(message: string, errors: unknown[]): Error {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
 }
 
 function isAbortError(error: unknown): boolean {
