@@ -451,4 +451,26 @@ describe('OpenCodeRuntime', () => {
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'assistant')).toHaveLength(2));
     await runtime.shutdown();
   });
+
+  it('allows two prompt turns in one OpenCode session to emit separate terminal results', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+
+    await runtime.sendInput('first turn');
+    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
+
+    await runtime.sendInput('second turn');
+    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(2));
+
+    await runtime.shutdown();
+  });
 });

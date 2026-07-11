@@ -100,7 +100,7 @@ export class OpenCodeRuntime {
       throw new Error('OpenCode runtime already has an active task');
     }
 
-    this.turnStartedAt = Date.now();
+    this.beginTurnEventState();
     const normalizedPayload = normalizeAgentInputPayload(prompt, inputPayload);
     const normalizedPrompt = normalizedPayload.text;
     const task = client.prompt({
@@ -322,6 +322,14 @@ export class OpenCodeRuntime {
     if (toolId && (toolStatus === 'completed' || toolStatus === 'error')) {
       this.terminalToolIds.add(toolId);
     }
+  }
+
+  private beginTurnEventState(): void {
+    this.seenEventIds.clear();
+    this.terminalSessionIds.clear();
+    this.terminalToolIds.clear();
+    this.usage = { input_tokens: 0, output_tokens: 0 };
+    this.turnStartedAt = Date.now();
   }
 
   private clearEventState(): void {
