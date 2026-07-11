@@ -150,9 +150,14 @@ export class OpenCodeRuntime {
     return this.enqueueLifecycle(() => this.interruptInternal());
   }
 
+  /** Stores CodeMUX compatibility settings; OpenCode server remains authoritative for native permission decisions. */
   updatePermissions(input: OpenCodePermissionUpdate): void {
-    this.permissionConfig = input.permissionConfig;
-    this.planMode = input.planMode ?? 'off';
+    if (input.permissionConfig !== undefined) {
+      this.permissionConfig = input.permissionConfig;
+    }
+    if (input.planMode !== undefined) {
+      this.planMode = input.planMode;
+    }
   }
 
   respondToPermission(requestId: string, response: OpenCodePermissionResponse, codeMuxSessionId = this.config.sessionId): Promise<void> {

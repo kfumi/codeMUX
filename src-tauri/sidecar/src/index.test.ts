@@ -154,6 +154,58 @@ describe('sidecar command dispatcher', () => {
     expect(exit).toHaveBeenCalledWith(0);
   });
 
+  it('continues cleanup when proxy shutdown fails', async () => {
+    const opencode = createRuntime();
+    const claude = createRuntime();
+    const emit = vi.fn();
+    const exit = vi.fn();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: claude,
+      codexRuntime: createRuntime(),
+      createOpenCodeRuntime: vi.fn(() => opencode),
+      emit,
+      stopProxy: vi.fn().mockRejectedValue(new Error('proxy stop failed')),
+      exit,
+    });
+
+    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'opencode', cwd: 'D:\\workspace', sessionId: 'session-1' });
+    await dispatcher.dispatch({ type: 'shutdown' });
+
+    expect(opencode.shutdown).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith({
+      type: 'sidecar_error',
+      error: expect.stringContaining('Failed to stop proxy: Error: proxy stop failed'),
+    });
+    expect(exit).toHaveBeenCalledWith(0);
+  });
+
+  it('keeps the command loop responsive while permission response is pending and deduplicates it', async () => {
+    const opencode = createRuntime();
+    let resolvePermission!: () => void;
+    opencode.respondToPermission.mockReturnValue(new Promise<void>((resolve) => { resolvePermission = resolve; }));
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: createRuntime(),
+      codexRuntime: createRuntime(),
+      createOpenCodeRuntime: vi.fn(() => opencode),
+      emit: vi.fn(),
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'opencode', cwd: 'D:\\workspace', sessionId: 'session-1' });
+    const firstResponse = dispatcher.dispatch({ type: 'respond_to_permission', requestId: 'permission-1', sessionId: 'session-1', response: 'always' });
+    await vi.waitFor(() => expect(opencode.respondToPermission).toHaveBeenCalledTimes(1));
+    const duplicateResponse = dispatcher.dispatch({ type: 'respond_to_permission', requestId: 'permission-1', sessionId: 'session-1', response: 'always' });
+    await dispatcher.dispatch({ type: 'interrupt' });
+    await dispatcher.dispatch({ type: 'shutdown' });
+
+    expect(opencode.interrupt).toHaveBeenCalledTimes(1);
+    expect(opencode.shutdown).toHaveBeenCalledTimes(1);
+    expect(opencode.respondToPermission).toHaveBeenCalledTimes(1);
+    resolvePermission();
+    await Promise.all([firstResponse, duplicateResponse]);
+  });
+
   it('accepts the formal permission response command shape', () => {
     const command: SidecarCommand = {
       type: 'respond_to_permission',

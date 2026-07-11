@@ -1049,6 +1049,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
   let activeAgentKind: string | undefined;
   let activeOpenCodeRuntime: SidecarRuntime | undefined;
   let ensureTail: Promise<void> = Promise.resolve();
+  const pendingPermissionResponses = new Map<string, Promise<void>>();
 
   const emitError = (error: unknown): void => {
     options.emit({ type: 'sidecar_error', error: String(error) });
@@ -1167,27 +1168,48 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           resolveInteractiveToolResponse(cmd.toolUseId, cmd.response);
         }
         return;
-      case 'respond_to_permission':
-        try {
-          const current = getRuntimeFlavor(activeAgentKind) === 'opencode' ? activeOpenCodeRuntime : undefined;
-          if (!current?.respondToPermission) throw new Error('OpenCode runtime is not initialized');
-          await current.respondToPermission(cmd.requestId, cmd.response as OpenCodePermissionResponse, cmd.sessionId);
-        } catch (error) {
-          emitError(error);
+      case 'respond_to_permission': {
+        const current = getRuntimeFlavor(activeAgentKind) === 'opencode' ? activeOpenCodeRuntime : undefined;
+        if (!current?.respondToPermission) {
+          emitError('OpenCode runtime is not initialized');
+          return;
         }
+        if (pendingPermissionResponses.has(cmd.requestId)) return;
+        const responseTask = Promise.resolve()
+          .then(() => current.respondToPermission!(cmd.requestId, cmd.response as OpenCodePermissionResponse, cmd.sessionId))
+          .catch((error) => {
+            emitError(error);
+          })
+          .finally(() => {
+            if (pendingPermissionResponses.get(cmd.requestId) === responseTask) {
+              pendingPermissionResponses.delete(cmd.requestId);
+            }
+          });
+        pendingPermissionResponses.set(cmd.requestId, responseTask);
         return;
-      case 'shutdown':
-        try {
-          await options.stopProxy();
-          await shutdownOpenCodeRuntime();
-          if (getRuntimeFlavor(activeAgentKind) !== 'opencode') {
-            await (getRuntimeFlavor(activeAgentKind) === 'codex' ? options.codexRuntime : options.claudeRuntime).shutdown();
+      }
+      case 'shutdown': {
+        const cleanupErrors: unknown[] = [];
+        const attemptCleanup = async (label: string, cleanup: () => Promise<void>): Promise<void> => {
+          try {
+            await cleanup();
+          } catch (error) {
+            cleanupErrors.push(new Error(`${label}: ${String(error)}`));
           }
-          options.exit(0);
-        } catch (error) {
-          emitError(error);
+        };
+        await attemptCleanup('Failed to stop proxy', options.stopProxy);
+        await attemptCleanup('Failed to shutdown OpenCode runtime', shutdownOpenCodeRuntime);
+        if (getRuntimeFlavor(activeAgentKind) !== 'opencode') {
+          const currentRuntime = getRuntimeFlavor(activeAgentKind) === 'codex' ? options.codexRuntime : options.claudeRuntime;
+          await attemptCleanup('Failed to shutdown active runtime', () => currentRuntime.shutdown());
         }
+        if (cleanupErrors.length > 0) {
+          const aggregateError = new AggregateError(cleanupErrors, 'Sidecar shutdown cleanup failed');
+          options.emit({ type: 'sidecar_error', error: `${aggregateError.message}: ${cleanupErrors.map(String).join('; ')}` });
+        }
+        options.exit(0);
         return;
+      }
       case 'start_proxy':
         try {
           await options.startProxy?.(cmd);

@@ -69,6 +69,17 @@ function deferred<T>() {
 }
 
 describe('OpenCodeRuntime', () => {
+  it('merges partial compatibility permission updates without changing omitted fields', () => {
+    const { port } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+
+    runtime.updatePermissions({ permissionConfig: { kind: 'codex', approvalPolicy: 'never' }, planMode: 'on' });
+    runtime.updatePermissions({ planMode: 'off' });
+
+    expect((runtime as unknown as { permissionConfig: unknown }).permissionConfig).toEqual({ kind: 'codex', approvalPolicy: 'never' });
+    expect((runtime as unknown as { planMode: string }).planMode).toBe('off');
+  });
+
   it('registers native permission requests before emitting a unified permission event', async () => {
     const { port, client } = createPort();
     const emitted: unknown[] = [];
