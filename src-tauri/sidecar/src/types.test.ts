@@ -41,6 +41,18 @@ describe('OpenCode runtime contract', () => {
     });
   });
 
+  it('allows startup configuration without an existing OpenCode session', () => {
+    const config = {
+      cwd: 'D:\\workspace',
+      sessionId: 'codemux-session-2',
+      provider: 'openai-compatible',
+      model: 'gpt-5',
+      credentialSource: 'codemux',
+    } satisfies OpenCodeSessionConfig;
+
+    expect(config.agentSessionId).toBeUndefined();
+  });
+
   it('keeps unified OpenCode result metadata independent from SDK types', () => {
     const context: RuntimeEventContext = {
       agentId: 'opencode',
