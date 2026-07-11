@@ -34,7 +34,7 @@ describe('OpenCode event normalization', () => {
     expect(permission[0]).toMatchObject({ type: 'diagnostic', subtype: 'permission_request' });
   });
   it('returns a diagnostic for unknown events and exposes a stable identity for deduplication', () => {
-    const event = { type: 'future.event', properties: { id: 'event-1', value: 1 } };
+    const event = { type: 'future.event', id: 'event-1', properties: { value: 1 } };
     const first = toCodeMuxEvent(event, context());
     const second = toCodeMuxEvent(event, context({ seenEventIds: new Set([getOpenCodeEventIdentity(event)]) }));
     expect(first[0]).toMatchObject({ type: 'diagnostic', subtype: 'unknown_event' });
@@ -61,8 +61,8 @@ describe('OpenCode event normalization', () => {
     const first = { type: 'session.idle', properties: { sessionID: 'opencode-session-1', turnID: 'turn-1', noise: 'first' } };
     const replay = { type: 'session.idle', properties: { sessionID: 'opencode-session-1', turnID: 'turn-1', noise: 'replay' } };
     const second = { type: 'session.idle', properties: { sessionID: 'opencode-session-1', turnID: 'turn-2' } };
-    expect(getOpenCodeEventIdentity(first)).toBe(getOpenCodeEventIdentity(replay));
-    expect(getOpenCodeEventIdentity(first)).not.toBe(getOpenCodeEventIdentity(second));
+    expect(getOpenCodeEventIdentity(first, 1)).toBe(getOpenCodeEventIdentity(replay, 1));
+    expect(getOpenCodeEventIdentity(first, 1)).not.toBe(getOpenCodeEventIdentity(second, 2));
     expect(getOpenCodeEventIdentity({ type: 'session.idle', id: 'provider-1', properties: { sessionID: 'opencode-session-1', noise: 'first' } })).toBe(getOpenCodeEventIdentity({ type: 'session.idle', id: 'provider-1', properties: { sessionID: 'opencode-session-1', noise: 'replay' } }));
     expect(toCodeMuxEvent(first, context())).toHaveLength(1);
     expect(toCodeMuxEvent(second, context())).toHaveLength(1);

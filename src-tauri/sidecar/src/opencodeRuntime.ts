@@ -286,7 +286,7 @@ export class OpenCodeRuntime {
     }
     const identity = getOpenCodeEventIdentity(event, this.turnId);
     const type = typeof (event as { type?: unknown })?.type === 'string' ? (event as { type: string }).type : '';
-    if (this.seenEventIds.has(identity)) {
+    if (identity && this.seenEventIds.has(identity)) {
       return;
     }
     const terminalSessionId = eventSessionId ?? activeSessionId;
@@ -299,7 +299,9 @@ export class OpenCodeRuntime {
       return;
     }
 
-    this.rememberSeenEventId(identity);
+    if (identity) {
+      this.rememberSeenEventId(identity);
+    }
     const nextUsage = extractOpenCodeUsage(event);
     if (nextUsage) {
       this.usage = { ...this.usage, ...nextUsage };

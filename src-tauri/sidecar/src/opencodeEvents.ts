@@ -19,25 +19,23 @@ export interface OpenCodeEventContext extends RuntimeEventContext {
   turnId?: number;
 }
 
-export function getOpenCodeEventIdentity(event: unknown, turnId = 0): string {
+export function getOpenCodeEventIdentity(event: unknown, turnId = 0): string | undefined {
   const record = asRecord(event);
   const properties = asRecord(record?.properties);
-  const part = asRecord(properties?.part);
-  const candidates = [record?.id, properties?.id, properties?.toolID, properties?.toolId, properties?.messageID, part?.id, part?.callID, part?.toolCallID, part?.messageID];
-  const explicitId = candidates.find((value): value is string => typeof value === 'string' && value.length > 0);
-  if (explicitId) {
-    return `${String(record?.type ?? 'unknown')}:${getOpenCodeEventSessionId(event) ?? 'session'}:id:${explicitId}`;
-  }
-  const turnKey = readString(properties?.turnID) ?? readString(properties?.turnId) ?? readString(properties?.turn_id);
+  const explicitId = [
+    record?.id,
+    record?.eventId,
+    record?.event_id,
+  ].find((value): value is string => typeof value === 'string' && value.length > 0);
+  const type = typeof record?.type === 'string' ? record.type : 'unknown';
   const sessionId = getOpenCodeEventSessionId(event);
-  if (turnKey && sessionId) {
-    return `${String(record?.type ?? 'unknown')}:${sessionId}:turn:${turnKey}`;
+  if (explicitId) {
+    return `${type}:${sessionId ?? 'session'}:id:${explicitId}`;
   }
-  // 官方 session.idle 可能只有 sessionID；无 provider ID 时只能绑定本地 turn，跨轮 replay 与合法终端无法可靠区分。
-  if (sessionId) {
-    return `${String(record?.type ?? 'unknown')}:${sessionId}:turn:${turnId}`;
+  if (sessionId && isTerminalSessionEvent(type)) {
+    return `${type}:${sessionId}:turn:${turnId}`;
   }
-  return stableStringify(event);
+  return undefined;
 }
 
 export function getOpenCodeEventSessionId(event: unknown): string | undefined {
@@ -88,7 +86,7 @@ export function extractOpenCodeUsage(event: unknown): OpenCodeTokenUsage | undef
 
 export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): CodeMuxEvent[] {
   const identity = getOpenCodeEventIdentity(event, context.turnId);
-  if (context.seenEventIds?.has(identity)) return [];
+  if (identity && context.seenEventIds?.has(identity)) return [];
 
   const record = asRecord(event);
   const type = typeof record?.type === 'string' ? record.type : 'unknown';
