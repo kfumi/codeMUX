@@ -1032,7 +1032,6 @@ type SidecarRuntime = {
   interrupt(): Promise<void>;
   shutdown(): Promise<void>;
   respondToPermission?(requestId: string, response: OpenCodePermissionResponse, sessionId: string): Promise<void>;
-  respondToTool?(toolUseId: string, response: unknown): Promise<void>;
 };
 
 type SidecarCommandDispatcherOptions = {
@@ -1163,13 +1162,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         return;
       case 'tool_response':
         if (getRuntimeFlavor(activeAgentKind) === 'opencode') {
-          try {
-            const current = activeOpenCodeRuntime;
-            if (!current?.respondToTool) throw new Error('OpenCode runtime is not initialized');
-            await current.respondToTool(cmd.toolUseId, cmd.response);
-          } catch (error) {
-            emitError(error);
-          }
+          options.emit({ type: 'sidecar_error', error: 'OpenCode tool responses are server-managed/not supported' });
         } else if (!resolveClaudeToolResponse(cmd.toolUseId, cmd.response)) {
           resolveInteractiveToolResponse(cmd.toolUseId, cmd.response);
         }
@@ -1238,7 +1231,6 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
     interrupt: () => openCodeRuntime.interrupt(),
     shutdown: () => openCodeRuntime.shutdown(),
     respondToPermission: (requestId, response, sessionId) => openCodeRuntime.respondToPermission(requestId, response, sessionId),
-    respondToTool: (toolUseId, response) => openCodeRuntime.respondToTool(toolUseId, response),
   };
 }
 

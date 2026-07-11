@@ -23,12 +23,6 @@ export interface OpenCodePermissionUpdate {
   planMode?: AgentPlanMode;
 }
 
-export interface OpenCodeToolResponseInput {
-  sessionId: string;
-  toolUseId: string;
-  response: unknown;
-}
-
 export interface OpenCodePromptInput {
   sessionId: string;
   prompt: string;
@@ -48,7 +42,6 @@ export interface OpenCodeClientPort {
   prompt(input: OpenCodePromptInput): Promise<void>;
   abort(sessionId: string): Promise<boolean | void>;
   respondToPermission(input: { sessionId: string; requestId: string; response: OpenCodeNativePermissionResponse }): Promise<boolean | void>;
-  respondToTool?(input: OpenCodeToolResponseInput): Promise<void>;
   subscribe?(input: { cwd: string; onEvent: (event: unknown) => void; onError: (error: unknown) => void; onRetry?: (error: unknown) => void; onDisconnect?: (error: unknown) => void }): Promise<OpenCodeEventSubscription>;
 }
 

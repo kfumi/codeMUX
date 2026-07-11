@@ -34,6 +34,7 @@ describe('official OpenCode SDK adapter', () => {
     const retries: unknown[] = [];
     const received: unknown[] = [];
     const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo' });
+    expect(resources.client.respondToTool).toBeUndefined();
     const subscription = await resources.client.subscribe!({ cwd: 'D:/workspace/demo', onEvent: (event) => received.push(event), onError: vi.fn(), onRetry: (error) => retries.push(error), onDisconnect: (error) => disconnects.push(error) });
 
     expect(sdkMocks.eventSubscribe).toHaveBeenCalledTimes(1);

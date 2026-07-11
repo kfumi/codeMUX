@@ -11,7 +11,6 @@ function createRuntime() {
     interrupt: vi.fn().mockResolvedValue(undefined),
     shutdown: vi.fn().mockResolvedValue(undefined),
     respondToPermission: vi.fn().mockResolvedValue(undefined),
-    respondToTool: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -45,9 +44,13 @@ describe('sidecar command dispatcher', () => {
     expect(opencode.sendInput).toHaveBeenCalledWith('hello', undefined);
     expect(opencode.resetSession).toHaveBeenCalledWith('session-1');
     expect(opencode.interrupt).toHaveBeenCalledTimes(1);
-    expect(opencode.respondToTool).toHaveBeenCalledWith('tool-1', { approved: true });
+    expect(emit).toHaveBeenCalledWith({
+      type: 'sidecar_error',
+      error: 'OpenCode tool responses are server-managed/not supported',
+    });
+    await dispatcher.dispatch({ type: 'update_permissions', agentKind: 'opencode', sessionId: 'session-1', planMode: 'on' });
+    expect(opencode.updatePermissions).toHaveBeenCalledTimes(2);
     expect(opencode.respondToPermission).toHaveBeenCalledWith('permission-1', { approved: true }, 'session-1');
-    expect(emit).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'sidecar_error' }));
   });
 
   it('keeps Codex and Claude commands on their existing runtime paths', async () => {
@@ -161,4 +164,3 @@ describe('sidecar command dispatcher', () => {
     expect(command.type).toBe('respond_to_permission');
   });
 });
-
