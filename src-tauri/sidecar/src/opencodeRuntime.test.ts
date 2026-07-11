@@ -114,6 +114,26 @@ describe('OpenCodeRuntime', () => {
     expect(server.close).toHaveBeenCalledTimes(2);
   });
 
+  it('bounds cleanup when the active task never settles and abort fails', async () => {
+    const { port, server, client } = createPort();
+    client.prompt.mockReturnValueOnce(new Promise<void>(() => undefined));
+    client.abort.mockRejectedValueOnce(new Error('abort failed'));
+    const runtime = new OpenCodeRuntime(createConfig(), port, { activeTaskTimeoutMs: 10 });
+    await runtime.start();
+    void runtime.sendInput('never ending task');
+    await vi.waitFor(() => expect(client.prompt).toHaveBeenCalled());
+
+    const startedAt = Date.now();
+    const cleanupError = await runtime.shutdown().catch((error: unknown) => error);
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(elapsedMs).toBeLessThan(500);
+    expect(cleanupError).toBeInstanceOf(AggregateError);
+    const cleanupMessages = (cleanupError as AggregateError).errors.map((error) => String(error)).join('\n');
+    expect(cleanupMessages).toContain('OpenCode active task cleanup timed out after 10ms');
+    expect(cleanupMessages).toContain('abort failed');
+    expect(server.close).toHaveBeenCalledTimes(1);
+  });
   it('does not start a new server after dispose and remains idempotent', async () => {
     const { port, server, client } = createPort();
     const runtime = new OpenCodeRuntime(createConfig(), port);

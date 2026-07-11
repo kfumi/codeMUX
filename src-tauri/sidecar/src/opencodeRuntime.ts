@@ -13,9 +13,16 @@ import {
 
 type RuntimeState = 'idle' | 'starting' | 'started' | 'disposing' | 'cleanup_failed' | 'disposed';
 
+export const DEFAULT_ACTIVE_TASK_TIMEOUT_MS = 30_000;
+
+export interface OpenCodeRuntimeOptions {
+  activeTaskTimeoutMs?: number;
+}
+
 export class OpenCodeRuntime {
   private readonly config: OpenCodeSessionConfig;
   private readonly sdk: OpenCodeSdkPort;
+  private readonly activeTaskTimeoutMs: number;
   private server: OpenCodeServerHandle | undefined;
   private client: OpenCodeClientPort | undefined;
   private agentSessionId: string | undefined;
@@ -23,9 +30,17 @@ export class OpenCodeRuntime {
   private cleanupPromise: Promise<void> | undefined;
   private state: RuntimeState = 'idle';
 
-  constructor(config: OpenCodeSessionConfig, sdk: OpenCodeSdkPort = officialOpenCodeSdkPort) {
+  constructor(
+    config: OpenCodeSessionConfig,
+    sdk: OpenCodeSdkPort = officialOpenCodeSdkPort,
+    options: OpenCodeRuntimeOptions = {},
+  ) {
     this.config = config;
     this.sdk = sdk;
+    this.activeTaskTimeoutMs = options.activeTaskTimeoutMs ?? DEFAULT_ACTIVE_TASK_TIMEOUT_MS;
+    if (!Number.isFinite(this.activeTaskTimeoutMs) || this.activeTaskTimeoutMs <= 0) {
+      throw new RangeError('OpenCode active task timeout must be a positive finite number');
+    }
     this.agentSessionId = config.agentSessionId;
   }
 
@@ -196,7 +211,7 @@ export class OpenCodeRuntime {
       const activeTask = this.activeTask;
       if (activeTask) {
         try {
-          await activeTask;
+          await this.waitForActiveTask(activeTask);
         } catch (error) {
           errors.push(error);
         }
@@ -226,6 +241,22 @@ export class OpenCodeRuntime {
     }
   }
 
+  private async waitForActiveTask(activeTask: Promise<void>): Promise<void> {
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`OpenCode active task cleanup timed out after ${this.activeTaskTimeoutMs}ms`));
+      }, this.activeTaskTimeoutMs);
+    });
+
+    try {
+      await Promise.race([activeTask, timeout]);
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    }
+  }
   private async closeServerAfterStartFailure(): Promise<unknown | undefined> {
     this.client = undefined;
     const server = this.server;
@@ -266,5 +297,11 @@ function isAbortError(error: unknown): boolean {
     return true;
   }
   const message = errorMessage(error).toLowerCase();
-  return message.includes('abort') || message.includes('cancel');
+  return (
+    message.includes('aborterror') ||
+    message.includes('operation was aborted') ||
+    message.includes('aborted') ||
+    message.includes('cancelled') ||
+    message.includes('canceled')
+  );
 }
