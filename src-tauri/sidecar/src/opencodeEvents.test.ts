@@ -79,6 +79,15 @@ describe('OpenCode event normalization', () => {
     expect(toCodeMuxEvent(second, context({ seenPayloadKeys: new Set([replayKey!]) }))).toHaveLength(1);
   });
 
+  it('distinguishes oversized payloads that differ only in their tail', () => {
+    const prefix = 'x'.repeat(70_000);
+    const first = { type: 'future.event', properties: { sessionID: 'opencode-session-1', value: `${prefix}a` } };
+    const second = { type: 'future.event', properties: { sessionID: 'opencode-session-1', value: `${prefix}b` } };
+    const firstKey = getOpenCodePayloadKey(first);
+    expect(getOpenCodePayloadKey(second)).not.toBe(firstKey);
+    expect(toCodeMuxEvent(second, context({ seenPayloadKeys: new Set([firstKey]) }))).toHaveLength(1);
+    expect(toCodeMuxEvent(first, context({ seenPayloadKeys: new Set([firstKey]) }))).toEqual([]);
+  });
   it('bounds payload replay keys for oversized events', () => {
     const event = { type: 'future.event', properties: { sessionID: 'opencode-session-1', value: 'x'.repeat(200_000) } };
     const key = getOpenCodePayloadKey(event);

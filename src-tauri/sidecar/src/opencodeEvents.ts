@@ -54,8 +54,7 @@ export function getOpenCodePayloadKey(event: unknown): string {
     readString(properties?.toolId),
   ].filter((value): value is string => value !== undefined);
   const canonical = Buffer.from(stableStringify(event), 'utf8');
-  const boundedCanonical = canonical.subarray(0, 64 * 1024);
-  const fingerprint = createHash('sha256').update(boundedCanonical).update(`length:${canonical.length}`).digest('hex');
+  const fingerprint = createHash('sha256').update(canonical).digest('hex');
   return `${type}:session:${sessionId}:ids:${identifiers.join('|')}:payload_sha256:${fingerprint}`;
 }
 
