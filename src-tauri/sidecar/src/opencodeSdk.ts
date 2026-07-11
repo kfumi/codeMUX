@@ -2,6 +2,7 @@ import { createOpencodeClient } from '@opencode-ai/sdk/client';
 import { createOpencodeServer } from '@opencode-ai/sdk/server';
 import type { AgentInputImage, AgentInputPayload } from './agentInputPayload.js';
 import type { OpenCodeNativePermissionResponse } from './opencodePermissions.js';
+import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
 
 export interface OpenCodeServerHandle {
   close(): void | Promise<void>;
@@ -15,6 +16,17 @@ export interface OpenCodeImageInput {
   name: string;
   mediaType: string;
   dataUrl: string;
+}
+
+export interface OpenCodePermissionUpdate {
+  permissionConfig?: SidecarPermissionConfig;
+  planMode?: AgentPlanMode;
+}
+
+export interface OpenCodeToolResponseInput {
+  sessionId: string;
+  toolUseId: string;
+  response: unknown;
 }
 
 export interface OpenCodePromptInput {
@@ -36,6 +48,7 @@ export interface OpenCodeClientPort {
   prompt(input: OpenCodePromptInput): Promise<void>;
   abort(sessionId: string): Promise<boolean | void>;
   respondToPermission(input: { sessionId: string; requestId: string; response: OpenCodeNativePermissionResponse }): Promise<boolean | void>;
+  respondToTool?(input: OpenCodeToolResponseInput): Promise<void>;
   subscribe?(input: { cwd: string; onEvent: (event: unknown) => void; onError: (error: unknown) => void; onRetry?: (error: unknown) => void; onDisconnect?: (error: unknown) => void }): Promise<OpenCodeEventSubscription>;
 }
 

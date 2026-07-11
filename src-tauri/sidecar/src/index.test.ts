@@ -11,6 +11,7 @@ function createRuntime() {
     interrupt: vi.fn().mockResolvedValue(undefined),
     shutdown: vi.fn().mockResolvedValue(undefined),
     respondToPermission: vi.fn().mockResolvedValue(undefined),
+    respondToTool: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -36,12 +37,44 @@ describe('sidecar command dispatcher', () => {
     await dispatcher.dispatch({ type: 'respond_to_permission', requestId: 'permission-1', sessionId: 'session-1', response: { approved: true } });
 
     expect(opencode.ensure).toHaveBeenCalledTimes(1);
-    expect(opencode.updatePermissions).not.toHaveBeenCalled();
+    expect(opencode.updatePermissions).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'update_permissions',
+      agentKind: 'opencode',
+      sessionId: 'session-1',
+    }));
     expect(opencode.sendInput).toHaveBeenCalledWith('hello', undefined);
     expect(opencode.resetSession).toHaveBeenCalledWith('session-1');
     expect(opencode.interrupt).toHaveBeenCalledTimes(1);
+    expect(opencode.respondToTool).toHaveBeenCalledWith('tool-1', { approved: true });
     expect(opencode.respondToPermission).toHaveBeenCalledWith('permission-1', { approved: true }, 'session-1');
     expect(emit).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'sidecar_error' }));
+  });
+
+  it('keeps Codex and Claude commands on their existing runtime paths', async () => {
+    const claude = createRuntime();
+    const codex = createRuntime();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: claude,
+      codexRuntime: codex,
+      createOpenCodeRuntime: vi.fn(() => createRuntime()),
+      emit: vi.fn(),
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'codex', cwd: 'D:\\workspace', sessionId: 'codex-session' });
+    await dispatcher.dispatch({ type: 'update_permissions', agentKind: 'codex', sessionId: 'codex-session', permissionConfig: { kind: 'codex', approvalPolicy: 'never' } });
+    await dispatcher.dispatch({ type: 'send_input', prompt: 'codex' });
+    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'claude_code', cwd: 'D:\\workspace', sessionId: 'claude-session' });
+    await dispatcher.dispatch({ type: 'update_permissions', agentKind: 'claude_code', sessionId: 'claude-session', permissionConfig: { kind: 'claude_code', permissionMode: 'default' } });
+    await dispatcher.dispatch({ type: 'send_input', prompt: 'claude' });
+
+    expect(codex.ensure).toHaveBeenCalledTimes(1);
+    expect(codex.updatePermissions).toHaveBeenCalledTimes(1);
+    expect(codex.sendInput).toHaveBeenCalledWith('codex', undefined);
+    expect(claude.ensure).toHaveBeenCalledTimes(1);
+    expect(claude.updatePermissions).toHaveBeenCalledTimes(1);
+    expect(claude.sendInput).toHaveBeenCalledWith('claude', undefined);
   });
 
   it('cleans the previous OpenCode runtime before replacing it', async () => {

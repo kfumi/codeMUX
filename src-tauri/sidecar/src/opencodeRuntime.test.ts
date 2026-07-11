@@ -51,6 +51,7 @@ function createPort() {
     prompt: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(true),
     respondToPermission: vi.fn().mockResolvedValue(true),
+    respondToTool: vi.fn().mockResolvedValue(undefined),
   };
   const port: OpenCodeSdkPort = {
     start: vi.fn().mockResolvedValue({ server, client }),
@@ -69,6 +70,27 @@ function deferred<T>() {
 }
 
 describe('OpenCodeRuntime', () => {
+  it('routes independent tool responses through the SDK adapter, including queued responses', async () => {
+    const { port, client } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+
+    await runtime.respondToTool('tool-before-start', { approved: true });
+    await runtime.start();
+    await runtime.respondToTool('tool-after-start', { value: 'done' });
+
+    expect(client.respondToTool).toHaveBeenNthCalledWith(1, {
+      sessionId: 'opencode-new',
+      toolUseId: 'tool-before-start',
+      response: { approved: true },
+    });
+    expect(client.respondToTool).toHaveBeenNthCalledWith(2, {
+      sessionId: 'opencode-new',
+      toolUseId: 'tool-after-start',
+      response: { value: 'done' },
+    });
+    await runtime.shutdown();
+  });
+
   it('registers native permission requests before emitting a unified permission event', async () => {
     const { port, client } = createPort();
     const emitted: unknown[] = [];

@@ -2,7 +2,8 @@ import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInput
 import { emit } from './streamEventBatcher.js';
 import { OpenCodePermissionRegistry, type OpenCodePermissionResponse } from './opencodePermissions.js';
 import { extractOpenCodeUsageUpdate, mergeOpenCodeUsage, getOpenCodeEventIdentity, isOpenCodeSessionScopedEvent, getOpenCodeEventSessionId, getOpenCodePayloadKey, getOpenCodeToolId, getOpenCodeToolStatus, toCodeMuxEvent } from './opencodeEvents.js';
-import type { OpenCodeEventSubscription } from './opencodeSdk.js';
+import type { OpenCodeEventSubscription, OpenCodePermissionUpdate } from './opencodeSdk.js';
+import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
 import {
   closeOpenCodeServerWithTimeout,
@@ -63,6 +64,9 @@ export class OpenCodeRuntime {
   private turnId = 0;
   private permissionCancellationEpoch = 0;
   private permissionClosing = false;
+  private permissionConfig: SidecarPermissionConfig | undefined;
+  private planMode: AgentPlanMode = 'off';
+  private readonly pendingToolResponses = new Map<string, unknown>();
 
   constructor(
     config: OpenCodeSessionConfig,
@@ -147,6 +151,24 @@ export class OpenCodeRuntime {
     return this.enqueueLifecycle(() => this.interruptInternal());
   }
 
+  updatePermissions(input: OpenCodePermissionUpdate): void {
+    this.permissionConfig = input.permissionConfig;
+    this.planMode = input.planMode ?? 'off';
+  }
+
+  respondToTool(toolUseId: string, response: unknown): Promise<void> {
+    const client = this.client;
+    const sessionId = this.agentSessionId;
+    if (!client || !sessionId) {
+      this.pendingToolResponses.set(toolUseId, response);
+      return Promise.resolve();
+    }
+    if (!client.respondToTool) {
+      return Promise.reject(new Error('OpenCode tool response adapter is unavailable'));
+    }
+    return client.respondToTool({ sessionId, toolUseId, response });
+  }
+
   respondToPermission(requestId: string, response: OpenCodePermissionResponse, codeMuxSessionId = this.config.sessionId): Promise<void> {
     return this.permissions.respond(requestId, codeMuxSessionId, response);
   }
@@ -159,6 +181,7 @@ export class OpenCodeRuntime {
         await this.waitForActiveTaskIfPresent();
         this.clearEventState();
         this.agentSessionId = undefined;
+        this.pendingToolResponses.clear();
         await this.permissions.cancelAll(this.config.sessionId);
       } finally {
         this.finishPermissionCancellation(cancellation);
@@ -250,6 +273,7 @@ export class OpenCodeRuntime {
       this.agentSessionId = session.id;
       this.state = 'started';
       await this.subscribeToEvents();
+      await this.flushPendingToolResponses();
       return this.mapping();
     } catch (error) {
       const requestedSessionId = this.config.agentSessionId;
@@ -424,6 +448,19 @@ export class OpenCodeRuntime {
     }
   }
 
+  private async flushPendingToolResponses(): Promise<void> {
+    const client = this.client;
+    const sessionId = this.agentSessionId;
+    if (!client?.respondToTool || !sessionId || this.pendingToolResponses.size === 0) {
+      return;
+    }
+    const pending = Array.from(this.pendingToolResponses.entries());
+    this.pendingToolResponses.clear();
+    for (const [toolUseId, response] of pending) {
+      await client.respondToTool({ sessionId, toolUseId, response });
+    }
+  }
+
   private clearEventState(): void {
     this.seenEventIds.clear();
     this.seenPayloadKeys.clear();
@@ -539,6 +576,7 @@ export class OpenCodeRuntime {
 
       await this.closeEventSubscription(errors);
       await this.permissions.cancelAll(this.config.sessionId);
+      this.pendingToolResponses.clear();
       this.agentSessionId = undefined;
       this.client = undefined;
 

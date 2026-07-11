@@ -1026,12 +1026,13 @@ const codexRuntime = new CodexSessionRuntime();
 
 type SidecarRuntime = {
   ensure(cmd: EnsureSessionCommand): Promise<void>;
-  updatePermissions?(cmd: UpdatePermissionsCommand): void | Promise<void>;
+  updatePermissions(cmd: UpdatePermissionsCommand): void | Promise<void>;
   sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void>;
   resetSession(sessionId: string): Promise<void>;
   interrupt(): Promise<void>;
   shutdown(): Promise<void>;
   respondToPermission?(requestId: string, response: OpenCodePermissionResponse, sessionId: string): Promise<void>;
+  respondToTool?(toolUseId: string, response: unknown): Promise<void>;
 };
 
 type SidecarCommandDispatcherOptions = {
@@ -1118,8 +1119,12 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         activeAgentKind = cmd.agentKind ?? activeAgentKind;
         const flavor = getRuntimeFlavor(activeAgentKind);
         try {
-          if (flavor !== 'opencode') {
-            await (flavor === 'codex' ? options.codexRuntime : options.claudeRuntime).updatePermissions?.(cmd);
+          if (flavor === 'opencode') {
+            const current = activeOpenCodeRuntime;
+            if (!current) throw new Error('OpenCode runtime is not initialized');
+            await current.updatePermissions(cmd);
+          } else {
+            await (flavor === 'codex' ? options.codexRuntime : options.claudeRuntime).updatePermissions(cmd);
           }
         } catch (error) {
           emitError(error);
@@ -1157,7 +1162,15 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         }
         return;
       case 'tool_response':
-        if (!resolveClaudeToolResponse(cmd.toolUseId, cmd.response)) {
+        if (getRuntimeFlavor(activeAgentKind) === 'opencode') {
+          try {
+            const current = activeOpenCodeRuntime;
+            if (!current?.respondToTool) throw new Error('OpenCode runtime is not initialized');
+            await current.respondToTool(cmd.toolUseId, cmd.response);
+          } catch (error) {
+            emitError(error);
+          }
+        } else if (!resolveClaudeToolResponse(cmd.toolUseId, cmd.response)) {
           resolveInteractiveToolResponse(cmd.toolUseId, cmd.response);
         }
         return;
@@ -1220,10 +1233,12 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
   return {
     ensure: async () => { await openCodeRuntime.start(); },
     sendInput: (prompt, inputPayload) => openCodeRuntime.sendInput(prompt, inputPayload),
+    updatePermissions: (update) => openCodeRuntime.updatePermissions(update),
     resetSession: () => openCodeRuntime.resetSession(),
     interrupt: () => openCodeRuntime.interrupt(),
     shutdown: () => openCodeRuntime.shutdown(),
     respondToPermission: (requestId, response, sessionId) => openCodeRuntime.respondToPermission(requestId, response, sessionId),
+    respondToTool: (toolUseId, response) => openCodeRuntime.respondToTool(toolUseId, response),
   };
 }
 
