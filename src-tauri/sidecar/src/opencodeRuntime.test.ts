@@ -464,12 +464,12 @@ describe('OpenCodeRuntime', () => {
     await runtime.start();
 
     await runtime.sendInput('first turn');
-    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
+    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new', id: 'idle-1' } });
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
 
     await runtime.sendInput('second turn');
     onEvent({ type: 'session.status', properties: { sessionID: 'opencode-new', status: { type: 'busy' } } });
-    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
+    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new', id: 'idle-2' } });
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(2));
 
     await runtime.shutdown();
@@ -503,12 +503,37 @@ describe('OpenCodeRuntime', () => {
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
 
     await runtime.sendInput('second turn');
+    onEvent({ type: 'session.status', properties: { sessionID: 'opencode-new', status: { type: 'busy' } } });
     onEvent(idle);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1);
-    onEvent({ type: 'session.status', properties: { sessionID: 'opencode-new', status: { type: 'busy' } } });
-    onEvent(idle);
+    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new', id: 'idle-2' } });
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(2));
+    await runtime.shutdown();
+  });
+
+  it('does not terminate on a recoverable SSE retry and resumes event handling', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onRetry!: (error: unknown) => void;
+    let onDisconnect!: (error: unknown) => void;
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void; onRetry: (error: unknown) => void; onDisconnect: (error: unknown) => void }) => {
+      onEvent = input.onEvent;
+      onRetry = input.onRetry;
+      onDisconnect = input.onDisconnect;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+
+    onRetry(new Error('temporary socket failure'));
+    onEvent({ type: 'message.part.updated', properties: { part: { id: 'after-retry', sessionID: 'opencode-new', messageID: 'm', type: 'text', text: 'resumed' }, delta: 'resumed' } });
+    await vi.waitFor(() => expect(emitted.some((event) => (event as { type?: string }).type === 'assistant')).toBe(true));
+    expect(emitted.some((event) => (event as { type?: string }).type === 'result')).toBe(false);
+
+    onDisconnect(new Error('stream ended'));
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
     await runtime.shutdown();
   });
 });

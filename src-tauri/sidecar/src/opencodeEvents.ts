@@ -152,6 +152,11 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
     case 'server.connected':
       events.push(buildEnvelope({ type: 'status', subtype: 'connected', status: 'connected' }, context, sessionId));
       break;
+    case 'server.retry': {
+      const retryError = properties.error;
+      events.push(buildEnvelope({ type: 'status', subtype: 'retrying', status: 'retrying', ...(retryError !== undefined ? { error: errorMessage(retryError) } : {}) }, context, sessionId));
+      break;
+    }
     case 'server.disconnected':
     case 'server.error':
     case 'disconnect':

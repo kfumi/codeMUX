@@ -44,13 +44,10 @@ export class OpenCodeRuntime {
   private shutdownPromise: Promise<void> | undefined;
   private state: RuntimeState = 'idle';
   private eventSubscription: OpenCodeEventSubscription | undefined;
-  private readonly seenEventIds = new Map<string, number>();
+  private readonly seenEventIds = new Map<string, true>();
   private readonly terminalSessionIds = new Set<string>();
   private readonly terminalToolIds = new Set<string>();
   private eventSequence = 0;
-  private turnId = 0;
-  private turnActivityObserved = false;
-  private turnTerminalEmitted = false;
   private usage: import('./runtimeEvents.js').OpenCodeTokenUsage = { input_tokens: 0, output_tokens: 0 };
   private turnStartedAt = 0;
 
@@ -272,6 +269,7 @@ export class OpenCodeRuntime {
         cwd: this.config.cwd,
         onEvent: (event) => this.handleSdkEvent(event),
         onError: (error) => this.handleSdkEvent({ type: 'server.error', properties: { error } }),
+        onRetry: (error) => this.handleSdkEvent({ type: 'server.retry', properties: { error } }),
         onDisconnect: (error) => this.handleSdkEvent({ type: 'server.error', properties: { error } }),
       });
     } catch (error) {
@@ -287,9 +285,7 @@ export class OpenCodeRuntime {
     }
     const identity = getOpenCodeEventIdentity(event);
     const type = typeof (event as { type?: unknown })?.type === 'string' ? (event as { type: string }).type : '';
-    const seenTurnId = this.seenEventIds.get(identity);
-    const duplicate = seenTurnId !== undefined;
-    if (duplicate && !(isTerminalEventType(type) && seenTurnId < this.turnId && this.turnActivityObserved && !this.turnTerminalEmitted)) {
+    if (this.seenEventIds.has(identity)) {
       return;
     }
     const terminalSessionId = eventSessionId ?? activeSessionId;
@@ -303,9 +299,6 @@ export class OpenCodeRuntime {
     }
 
     this.rememberSeenEventId(identity);
-    if (!isTerminalEventType(type)) {
-      this.turnActivityObserved = true;
-    }
     const nextUsage = extractOpenCodeUsage(event);
     if (nextUsage) {
       this.usage = { ...this.usage, ...nextUsage };
@@ -326,7 +319,6 @@ export class OpenCodeRuntime {
     this.eventSequence += events.length;
     if (terminalSessionId && isTerminalEventType(type) && events.some((eventItem) => eventItem.type === 'result' || eventItem.type === 'error')) {
       this.terminalSessionIds.add(terminalSessionId);
-      this.turnTerminalEmitted = true;
       this.turnStartedAt = 0;
       this.usage = { input_tokens: 0, output_tokens: 0 };
     }
@@ -336,9 +328,6 @@ export class OpenCodeRuntime {
   }
 
   private beginTurnEventState(): void {
-    this.turnId += 1;
-    this.turnActivityObserved = false;
-    this.turnTerminalEmitted = false;
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
     this.usage = { input_tokens: 0, output_tokens: 0 };
@@ -346,7 +335,7 @@ export class OpenCodeRuntime {
   }
 
   private rememberSeenEventId(identity: string): void {
-    this.seenEventIds.set(identity, this.turnId);
+    this.seenEventIds.set(identity, true);
     while (this.seenEventIds.size > MAX_SEEN_EVENT_IDS) {
       const oldest = this.seenEventIds.keys().next().value;
       if (oldest === undefined) break;

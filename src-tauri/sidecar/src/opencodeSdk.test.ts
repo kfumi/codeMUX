@@ -23,24 +23,30 @@ vi.mock('@opencode-ai/sdk/server', () => ({
 }));
 
 describe('official OpenCode SDK adapter', () => {
-  it('bridges the official onSseError callback into the adapter disconnect signal', async () => {
+  it('reports official onSseError as retry and only reports disconnect after stream end', async () => {
     let resolveStream!: () => void;
     const stream = (async function* () {
       await new Promise<void>((resolve) => { resolveStream = resolve; });
+      yield { type: 'server.connected', properties: {} };
     })();
     sdkMocks.eventSubscribe.mockResolvedValueOnce({ stream });
     const disconnects: unknown[] = [];
+    const retries: unknown[] = [];
+    const received: unknown[] = [];
     const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo' });
-    const subscription = await resources.client.subscribe!({ cwd: 'D:/workspace/demo', onEvent: vi.fn(), onError: vi.fn(), onDisconnect: (error) => disconnects.push(error) });
+    const subscription = await resources.client.subscribe!({ cwd: 'D:/workspace/demo', onEvent: (event) => received.push(event), onError: vi.fn(), onRetry: (error) => retries.push(error), onDisconnect: (error) => disconnects.push(error) });
 
     expect(sdkMocks.eventSubscribe).toHaveBeenCalledTimes(1);
     const options = sdkMocks.eventSubscribe.mock.calls[0][0] as { onSseError?: (error: unknown) => void };
     expect(typeof options.onSseError).toBe('function');
     options.onSseError!(new Error('socket lost'));
-    expect(disconnects).toHaveLength(1);
-    await vi.waitFor(() => expect(disconnects).toHaveLength(1));
-    expect(disconnects[0]).toMatchObject({ message: 'socket lost' });
+    expect(retries).toHaveLength(1);
+    expect(disconnects).toHaveLength(0);
     resolveStream();
+    await vi.waitFor(() => expect(received).toHaveLength(1));
+    expect(received[0]).toMatchObject({ type: 'server.connected' });
+    await vi.waitFor(() => expect(disconnects).toHaveLength(1));
+    expect(disconnects[0]).toMatchObject({ message: 'OpenCode SSE stream ended' });
     await subscription.close();
   });
 });
