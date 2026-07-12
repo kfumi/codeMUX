@@ -31,7 +31,8 @@ interface AgentPanelProps {
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, createSession, updateSessionPermissions } = useSessionStore();
   const { projects } = useProjectStore();
-  const { startQuery, interrupt, loadSessionMessages, clearEvents } = useAgentStore();
+  const { startQuery, interrupt, loadSessionMessages, clearEvents, respondToPermission } = useAgentStore();
+  const pendingPermission = useAgentStore((state) => state.pendingPermissions[sessionId] ?? null);
   const { config, getActiveProvider, setProxyRunning } = useSettingsStore();
   const { loadFileTree, setProjectPath } = usePreviewStore();
 
@@ -211,6 +212,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         latestProviderConfig.codexNeedsProxy,
         displayContent,
         { ...input, text: runtimeContent },
+        latestProviderConfig.providerName,
+        latestProviderConfig.credentialSource,
       );
     } catch (error) {
       useAgentStore.setState((state) => ({
@@ -393,11 +396,13 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                     onPlanModeChange={handlePlanModeChange}
                     onModeChange={handleModeChange}
                     onLegacyConfigMigrate={handleLegacyConfigMigrate}
+                    pendingPermission={pendingPermission}
+                    onPermissionResponse={(response) => { void respondToPermission(sessionId, response); }}
                     compact={compact}
                   />
                 )}
                 onStop={() => interrupt(sessionId)}
-                onActivatePlanMode={() => handleModeChange(mapExecutionModeToPermissionConfig(agentKind, 'plan'), 'on')}
+                onActivatePlanMode={agentKind === 'opencode' ? undefined : () => handleModeChange(mapExecutionModeToPermissionConfig(agentKind, 'plan'), 'on')}
               />
             </div>
           )}

@@ -1,61 +1,70 @@
 import type { AgentMessage } from '../../../stores/agentStore';
+import { isClaudeTaskNotificationUserEvent, isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
 
 export function buildAssistantResultTargetSet(events: AgentMessage[]): Set<number> {
   return new Set(buildAssistantResultTargetMap(events).keys());
 }
 
+export function isHiddenAssistantThreadUserEvent(
+  event: Extract<AgentMessage, { kind: 'user' }>,
+): boolean {
+  const text = event.data.content.trim();
+  const data = event.data as Record<string, unknown>;
+
+  return (
+    isClaudeTaskNotificationUserEvent(data) ||
+    data.isCompactSummary === true ||
+    data.isVisibleInTranscriptOnly === true ||
+    isCodexCompactSummaryText(text) ||
+    text === '/compact' ||
+    /^<local-command-stdout>\s*Compacted\s*<\/local-command-stdout>$/i.test(text)
+  );
+}
+
 export function buildAssistantResultTargetMap(events: AgentMessage[]): Map<number, number> {
   const targets = new Map<number, number>();
-  let fallbackAssistantIndex: number | undefined;
   let preferredAssistantIndex: number | undefined;
+  let pendingResultIndex: number | undefined;
+  let sawAssistantSinceBoundary = false;
+
+  const flushPendingResult = () => {
+    if (pendingResultIndex != null && preferredAssistantIndex != null) {
+      targets.set(preferredAssistantIndex, pendingResultIndex);
+    }
+    pendingResultIndex = undefined;
+    preferredAssistantIndex = undefined;
+    sawAssistantSinceBoundary = false;
+  };
 
   for (let index = 0; index < events.length; index++) {
     const event = events[index];
 
-    if (event.kind === 'assistant') {
-      const priority = getAssistantResultPriority(event);
-      if (priority > 0) {
-        fallbackAssistantIndex = index;
+    if (event.kind === 'user') {
+      if (!isHiddenAssistantThreadUserEvent(event)) {
+        flushPendingResult();
       }
-      if (priority >= 2) {
+      continue;
+    }
+
+    if (event.kind === 'assistant') {
+      sawAssistantSinceBoundary = true;
+      if (getAssistantResultPriority(event) >= 2) {
         preferredAssistantIndex = index;
       }
       continue;
     }
 
     if (event.kind === 'compact') {
-      fallbackAssistantIndex = undefined;
-      preferredAssistantIndex = undefined;
+      flushPendingResult();
       continue;
     }
 
-    if (event.kind !== 'result') {
-      continue;
+    if (event.kind === 'result' && sawAssistantSinceBoundary) {
+      pendingResultIndex = index;
     }
-
-    const targetIndex = preferredAssistantIndex ?? fallbackAssistantIndex;
-    if (targetIndex != null) {
-      targets.set(targetIndex, index);
-    }
-    fallbackAssistantIndex = undefined;
-    preferredAssistantIndex = undefined;
   }
 
-  const trailingTargetIndex = preferredAssistantIndex ?? fallbackAssistantIndex;
-  const lastTarget = getLastTarget(targets);
-  const lastResultIndex = lastTarget != null ? targets.get(lastTarget) : undefined;
-
-  if (
-    trailingTargetIndex != null &&
-    lastTarget != null &&
-    lastResultIndex != null &&
-    lastTarget < lastResultIndex &&
-    lastResultIndex < trailingTargetIndex &&
-    !hasUserMessageBetween(events, lastResultIndex, trailingTargetIndex)
-  ) {
-    targets.delete(lastTarget);
-    targets.set(trailingTargetIndex, lastResultIndex);
-  }
+  flushPendingResult();
 
   return targets;
 }
@@ -75,21 +84,4 @@ function getAssistantResultPriority(event: Extract<AgentMessage, { kind: 'assist
   }
 
   return hasTool ? 1 : 0;
-}
-
-function getLastTarget(targets: Map<number, number>): number | undefined {
-  let last: number | undefined;
-  for (const target of targets.keys()) {
-    last = target;
-  }
-  return last;
-}
-
-function hasUserMessageBetween(events: AgentMessage[], startExclusive: number, endInclusive: number): boolean {
-  for (let index = startExclusive + 1; index <= endInclusive; index++) {
-    if (events[index].kind === 'user') {
-      return true;
-    }
-  }
-  return false;
 }

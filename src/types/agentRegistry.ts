@@ -5,8 +5,6 @@ export type AgentCapability =
   | 'supports_tools'
   | 'supports_file_snapshots'
   | 'supports_cost'
-  | 'supports_context_window'
-  | 'supports_mcp'
   | 'supports_ask_user_question';
 
 export interface AgentDefinition {
@@ -28,8 +26,6 @@ export const AGENT_REGISTRY: AgentDefinition[] = [
       'supports_tools',
       'supports_file_snapshots',
       'supports_cost',
-      'supports_context_window',
-      'supports_mcp',
       'supports_ask_user_question',
     ],
   },
@@ -50,13 +46,11 @@ export const AGENT_REGISTRY: AgentDefinition[] = [
   {
     kind: 'opencode',
     label: 'OpenCode',
-    description: '基于 OpenCode SDK 的可恢复编码 Agent，复用 CodeMUX Provider、模型、工具和 MCP 配置。',
+    description: '基于 OpenCode SDK 的可恢复编码 Agent，复用 CodeMUX Provider、模型和工具。',
     icon: 'opencode',
     capabilities: [
       'supports_resume',
       'supports_tools',
-      'supports_context_window',
-      'supports_mcp',
     ],
   },
 ];

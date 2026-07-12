@@ -13,6 +13,8 @@ export interface OpenCodeSessionConfig {
   provider: string;
   model: string;
   credentialSource: OpenCodeCredentialSource;
+  apiKey?: string;
+  baseUrl?: string;
 }
 
 export interface OpenCodeSessionMapping {

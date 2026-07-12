@@ -41,7 +41,7 @@ describe('sidecar command dispatcher', () => {
       exit: vi.fn(),
     });
 
-    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'opencode', cwd: 'D:\\workspace', sessionId: 'session-1', provider: 'openai', model: 'gpt-5' });
+    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'opencode', cwd: 'D:\\workspace', sessionId: 'session-1', provider: 'codemux-openai', model: 'gpt-5' });
     await dispatcher.dispatch({ type: 'update_permissions', agentKind: 'opencode', sessionId: 'session-1', permissionConfig: { mode: 'default' } });
     await dispatcher.dispatch({ type: 'send_input', prompt: 'hello' });
     await dispatcher.dispatch({ type: 'reset_session', sessionId: 'session-1' });

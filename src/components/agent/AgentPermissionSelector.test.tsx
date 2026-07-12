@@ -199,6 +199,33 @@ describe('AgentPermissionSelector', () => {
     expect(onLegacyConfigMigrate).not.toHaveBeenCalled();
   });
 
+  it('shows only full access for OpenCode and never exposes Claude modes', () => {
+    const onPermissionConfigChange = vi.fn();
+    const onPlanModeChange = vi.fn();
+
+    render(
+      <AgentPermissionSelector
+        agentKind="opencode"
+        permissionConfig={{ kind: 'opencode', permissionMode: 'full_access' }}
+        planMode="off"
+        onPermissionConfigChange={onPermissionConfigChange}
+        onPlanModeChange={onPlanModeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle('完全访问'));
+
+    expect(screen.getAllByText('完全访问')).toHaveLength(2);
+    expect(screen.getAllByRole('menuitemradio')).toHaveLength(1);
+    expect(screen.queryByText('计划模式')).toBeNull();
+    expect(screen.queryByText('自动编辑')).toBeNull();
+    expect(screen.queryByText('变更前确认')).toBeNull();
+
+    fireEvent.click(screen.getAllByText('完全访问')[1]);
+    expect(onPermissionConfigChange).toHaveBeenCalledWith({ kind: 'opencode', permissionMode: 'full_access' });
+    expect(onPlanModeChange).not.toHaveBeenCalled();
+  });
+
   it('shows unknown native permission type and description without rewriting the raw values', () => {
     render(
       <AgentPermissionSelector

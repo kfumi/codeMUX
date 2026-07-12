@@ -44,6 +44,7 @@ export function ArchivedSessionsPanel() {
   const [projectId, setProjectId] = useState('all');
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [clearConfirm, setClearConfirm] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
 
   useEffect(() => {
     fetchArchivedSessions();
@@ -69,10 +70,15 @@ export function ArchivedSessionsPanel() {
   };
 
   const handleClearAll = async () => {
-    for (const session of filteredSessions) {
-      await deleteSession(session.id);
+    setIsClearing(true);
+    try {
+      for (const session of filteredSessions) {
+        await deleteSession(session.id);
+      }
+      setClearConfirm(false);
+    } finally {
+      setIsClearing(false);
     }
-    setClearConfirm(false);
   };
 
   return (
@@ -178,18 +184,19 @@ export function ArchivedSessionsPanel() {
         description={`确定要删除"${deleteTarget?.title ?? ''}"吗？此操作不可撤销。`}
         confirmLabel="删除"
         variant="destructive"
-        onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
+        onConfirm={() => deleteTarget ? handleDelete(deleteTarget) : undefined}
         overlayClassName="z-230"
       />
 
       <ConfirmDialog
         open={clearConfirm}
-        onOpenChange={setClearConfirm}
+        onOpenChange={(open) => !isClearing && setClearConfirm(open)}
         title="全部删除"
         description={`确定要删除当前筛选结果中的 ${filteredSessions.length} 个已归档对话吗？此操作不可撤销。`}
         confirmLabel="全部删除"
         variant="destructive"
         onConfirm={handleClearAll}
+        loading={isClearing}
         overlayClassName="z-230"
       />
     </div>

@@ -114,7 +114,7 @@ function createSessionAction(
   return createSession;
 }
 
-export const useSessionStore = create<SessionState>((set) => ({
+export const useSessionStore = create<SessionState>((set, get) => ({
   sessions: [],
   archivedSessions: [],
   activeSessionId: null,
@@ -144,6 +144,11 @@ export const useSessionStore = create<SessionState>((set) => ({
   deleteSession: async (sessionId: string) => {
     set({ isLoading: true, error: null });
     try {
+      const session = get().sessions.find((entry) => entry.id === sessionId)
+        ?? get().archivedSessions.find((entry) => entry.id === sessionId);
+      if (session?.agent_kind === 'opencode') {
+        await agentApi.deleteOpenCodeSession(sessionId);
+      }
       // Clean up agent session files (best-effort, don't block on failure)
       try {
         await agentApi.shutdown(sessionId);

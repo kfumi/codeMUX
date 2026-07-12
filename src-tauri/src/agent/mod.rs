@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod context_usage;
+mod opencode_history;
 
 use log::{debug, info, warn};
 use std::io;

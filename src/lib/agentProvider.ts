@@ -5,6 +5,9 @@ import { normalizeOpenAIBaseUrl } from './providerUrls';
 
 export type OpenCodeCredentialSource = 'codemux' | 'environment' | 'opencode' | 'none';
 
+export const OPENCODE_OPENAI_PROVIDER = 'codemux-openai';
+export const OPENCODE_ANTHROPIC_PROVIDER = 'codemux-anthropic';
+
 export interface AgentProviderConfig {
   provider: Provider | null;
   apiKey: string | undefined;
@@ -83,7 +86,13 @@ export function resolveAgentProviderConfig({
       ? provider?.openai_base_url || provider?.anthropic_base_url || undefined
       : provider?.anthropic_base_url || undefined;
   const apiKey = provider?.api_key || undefined;
-  const providerName = agentKind === 'opencode' ? provider?.id : undefined;
+  const providerName = agentKind === 'opencode'
+    ? provider?.openai_base_url
+      ? OPENCODE_OPENAI_PROVIDER
+      : provider?.anthropic_base_url
+        ? OPENCODE_ANTHROPIC_PROVIDER
+        : undefined
+    : undefined;
   const credentialSource = agentKind === 'opencode'
     ? apiKey
       ? 'codemux'

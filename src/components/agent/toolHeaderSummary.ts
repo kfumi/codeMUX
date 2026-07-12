@@ -30,7 +30,7 @@ const BUILT_IN_TOOL_DISPLAY_NAMES: Record<string, string> = {
   TaskCreate: '创建任务',
   TaskUpdate: '更新任务',
   TaskList: '任务列表',
-  TaskStop: '任务结束',
+  TaskStop: '子智能体结束',
   update_plan: '更新计划',
   AskUserQuestion: '询问用户',
   request_user_input: '询问用户',
@@ -42,13 +42,29 @@ const BUILT_IN_TOOL_DISPLAY_NAMES: Record<string, string> = {
   tool_search: '搜索工具',
 };
 
+const BUILT_IN_TOOL_ALIASES: Record<string, string> = {
+  bash: 'Bash',
+  read: 'Read',
+  write: 'Write',
+  edit: 'Edit',
+  ls: 'LS',
+  grep: 'Grep',
+  glob: 'Glob',
+};
+
+function normalizeToolName(toolName: string): string {
+  if (toolName.startsWith('mcp__')) return toolName;
+  return BUILT_IN_TOOL_ALIASES[toolName.toLowerCase()] ?? toolName;
+}
+
 export function getToolDisplayName(toolName: string): string {
   if (toolName.startsWith('mcp__')) {
     const parts = toolName.split('__');
     return parts[1] || toolName;
   }
 
-  return BUILT_IN_TOOL_DISPLAY_NAMES[toolName] ?? toolName;
+  const normalizedToolName = normalizeToolName(toolName);
+  return BUILT_IN_TOOL_DISPLAY_NAMES[normalizedToolName] ?? toolName;
 }
 
 export function getToolHeaderSummary(toolName: string, input: Record<string, unknown>): ToolHeaderSummary {
@@ -63,8 +79,9 @@ export function getToolHeaderSummary(toolName: string, input: Record<string, unk
     };
   }
 
+  const normalizedToolName = normalizeToolName(toolName);
   const summary = (() => {
-    switch (toolName) {
+    switch (normalizedToolName) {
       case 'Read':
       case 'Write':
       case 'Edit':
@@ -82,7 +99,7 @@ export function getToolHeaderSummary(toolName: string, input: Record<string, unk
 
       case 'Bash':
       case 'shell_command':
-        return shellCommandSummary(toolName, input);
+        return shellCommandSummary(normalizedToolName, input);
 
       case 'Agent':
       case 'Task':

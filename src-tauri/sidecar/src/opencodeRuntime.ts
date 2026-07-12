@@ -20,6 +20,7 @@ import {
 type RuntimeState = 'idle' | 'starting' | 'started' | 'disposing' | 'cleanup_failed' | 'disposed';
 
 export const DEFAULT_ACTIVE_TASK_TIMEOUT_MS = 30_000;
+export const DEFAULT_PROMPT_TIMEOUT_MS = 30_000;
 export const DEFAULT_SERVER_CLOSE_TIMEOUT_MS = 10_000;
 const MAX_SEEN_EVENT_IDS = 2_048;
 const MAX_SEEN_PAYLOAD_KEYS = 2_048;
@@ -27,6 +28,7 @@ const MAX_SEEN_PAYLOAD_CACHE_BYTES = 512 * 1024;
 
 export interface OpenCodeRuntimeOptions {
   activeTaskTimeoutMs?: number;
+  promptTimeoutMs?: number;
   serverCloseTimeoutMs?: number;
   agentId?: string;
   emitEvent?: (event: unknown) => void;
@@ -39,6 +41,7 @@ export class OpenCodeRuntime {
   private readonly config: OpenCodeSessionConfig;
   private readonly sdk: OpenCodeSdkPort;
   private readonly activeTaskTimeoutMs: number;
+  private readonly promptTimeoutMs: number;
   private readonly serverCloseTimeoutMs: number;
   private readonly agentId: string;
   private readonly emitEvent: (event: unknown) => void;
@@ -58,6 +61,8 @@ export class OpenCodeRuntime {
   private seenPayloadKeyBytes = 0;
   private readonly terminalSessionIds = new Set<string>();
   private readonly terminalToolIds = new Set<string>();
+  private readonly assistantMessageIds = new Set<string>();
+  private readonly userMessageIds = new Set<string>();
   private eventSequence = 0;
   private usage: import('./runtimeEvents.js').OpenCodeTokenUsage = { input_tokens: 0, output_tokens: 0 };
   private turnStartedAt = 0;
@@ -75,6 +80,7 @@ export class OpenCodeRuntime {
     this.config = config;
     this.sdk = sdk;
     this.activeTaskTimeoutMs = options.activeTaskTimeoutMs ?? DEFAULT_ACTIVE_TASK_TIMEOUT_MS;
+    this.promptTimeoutMs = options.promptTimeoutMs ?? DEFAULT_PROMPT_TIMEOUT_MS;
     this.serverCloseTimeoutMs = options.serverCloseTimeoutMs ?? DEFAULT_SERVER_CLOSE_TIMEOUT_MS;
     this.agentId = options.agentId ?? config.sessionId;
     this.emitEvent = options.emitEvent ?? emit;
@@ -82,6 +88,9 @@ export class OpenCodeRuntime {
     this.permissions = new OpenCodePermissionRegistry({ timeoutMs: options.permissionTimeoutMs, nativeResponseTimeoutMs: options.nativeResponseTimeoutMs });
     if (!Number.isFinite(this.activeTaskTimeoutMs) || this.activeTaskTimeoutMs <= 0) {
       throw new RangeError('OpenCode active task timeout must be a positive finite number');
+    }
+    if (!Number.isFinite(this.promptTimeoutMs) || this.promptTimeoutMs <= 0) {
+      throw new RangeError('OpenCode prompt timeout must be a positive finite number');
     }
     if (!Number.isFinite(this.serverCloseTimeoutMs) || this.serverCloseTimeoutMs <= 0) {
       throw new RangeError('OpenCode server close timeout must be a positive finite number');
@@ -130,7 +139,7 @@ export class OpenCodeRuntime {
       provider: this.config.provider,
       model: this.config.model,
     });
-    const handledTask = task.catch((error) => {
+    const handledTask = this.awaitPromptWithTimeout(task, sessionId).catch((error) => {
       if (isAbortError(error)) {
         return;
       }
@@ -235,6 +244,11 @@ export class OpenCodeRuntime {
       try {
         resources = await this.sdk.start({
           cwd: this.config.cwd,
+          provider: this.config.provider,
+          model: this.config.model,
+          apiKey: this.config.apiKey,
+          baseUrl: this.config.baseUrl,
+          credentialSource: this.config.credentialSource,
           serverCloseTimeoutMs: this.serverCloseTimeoutMs,
         });
       } catch (error) {
@@ -343,6 +357,8 @@ export class OpenCodeRuntime {
         usage: this.usage,
         terminalSessionIds: this.terminalSessionIds,
         terminalToolIds: this.terminalToolIds,
+        assistantMessageIds: this.assistantMessageIds,
+        userMessageIds: this.userMessageIds,
         turnId: this.turnId,
         eventIdFactory: this.eventIdFactory,
       });
@@ -368,6 +384,13 @@ export class OpenCodeRuntime {
     if (terminalSessionId && this.terminalSessionIds.has(terminalSessionId) && isTerminalEventType(type)) {
       return;
     }
+    if (type === 'message.updated') {
+      const properties = asRecord(asRecord(event)?.properties);
+      const info = asRecord(properties?.info);
+      const messageId = readString(info?.id);
+      if (messageId && readString(info?.role) === 'assistant') this.assistantMessageIds.add(messageId);
+      if (messageId && readString(info?.role) === 'user') this.userMessageIds.add(messageId);
+    }
     const toolId = getOpenCodeToolId(event);
     const toolStatus = getOpenCodeToolStatus(event);
     if (toolId && this.terminalToolIds.has(toolId)) {
@@ -392,6 +415,8 @@ export class OpenCodeRuntime {
       usage: this.usage,
       terminalSessionIds: this.terminalSessionIds,
       terminalToolIds: this.terminalToolIds,
+      assistantMessageIds: this.assistantMessageIds,
+      userMessageIds: this.userMessageIds,
       turnId: this.turnId,
       eventIdFactory: this.eventIdFactory,
     });
@@ -409,10 +434,32 @@ export class OpenCodeRuntime {
     }
   }
 
+  private async awaitPromptWithTimeout(task: Promise<void>, sessionId: string): Promise<void> {
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        const timeoutError = new Error(`OpenCode prompt timed out after ${this.promptTimeoutMs}ms`);
+        timeoutError.name = 'OpenCodePromptTimeoutError';
+        reject(timeoutError);
+      }, this.promptTimeoutMs);
+    });
+    try {
+      await Promise.race([task, timeout]);
+    } catch (error) {
+      if (!isPromptTimeoutError(error)) throw error;
+      void this.client?.abort(sessionId).catch(() => undefined);
+      this.handleSdkEvent({ type: 'session.error', properties: { sessionID: sessionId, error: { name: 'OpenCodePromptTimeoutError', data: { message: errorMessage(error) } } } });
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    }
+  }
+
   private beginTurnEventState(): void {
     this.turnId += 1;
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
+    this.assistantMessageIds.clear();
+    this.userMessageIds.clear();
     this.usage = { input_tokens: 0, output_tokens: 0 };
     this.turnStartedAt = Date.now();
   }
@@ -444,6 +491,8 @@ export class OpenCodeRuntime {
     this.seenPayloadKeyBytes = 0;
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
+    this.assistantMessageIds.clear();
+    this.userMessageIds.clear();
     this.usage = { input_tokens: 0, output_tokens: 0 };
     this.turnStartedAt = 0;
   }
@@ -665,6 +714,10 @@ function errorMessage(error: unknown): string {
   } catch {
     return String(error);
   }
+}
+
+function isPromptTimeoutError(error: unknown): boolean {
+  return readString(asRecord(error)?.name) === 'OpenCodePromptTimeoutError';
 }
 
 function isAbortError(error: unknown): boolean {

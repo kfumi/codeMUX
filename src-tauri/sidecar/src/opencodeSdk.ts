@@ -1,5 +1,9 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/client';
+import type { Config } from '@opencode-ai/sdk';
 import { createOpencodeServer } from '@opencode-ai/sdk/server';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { prepareOpenCodeExecutable } from './opencodeExecutable.js';
 import type { AgentInputImage, AgentInputPayload } from './agentInputPayload.js';
 import type { OpenCodeNativePermissionResponse } from './opencodePermissions.js';
 import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
@@ -61,6 +65,11 @@ export interface OpenCodeSdkReadyResources {
 
 export interface OpenCodeSdkStartInput {
   cwd: string;
+  provider: string;
+  model: string;
+  apiKey?: string;
+  baseUrl?: string;
+  credentialSource: 'codemux' | 'environment' | 'opencode' | 'none';
   serverCloseTimeoutMs?: number;
 }
 
@@ -69,7 +78,65 @@ export interface OpenCodeSdkPort {
 }
 
 export const DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS = 10_000;
+const SIDECAR_DIST_DIR = path.dirname(fileURLToPath(import.meta.url));
+export interface OpenCodeServerConfigInput {
+  provider: string;
+  model: string;
+  apiKey?: string;
+  baseUrl?: string;
+  credentialSource: 'codemux' | 'environment' | 'opencode' | 'none';
+}
 
+export function buildOpenCodeServerConfig(input: OpenCodeServerConfigInput): Config {
+  const options: NonNullable<NonNullable<Config['provider']>[string]['options']> = {};
+  const adapter = resolveOpenCodeAdapter(input);
+  const providerConfig: NonNullable<NonNullable<Config['provider']>[string]> = {
+    models: {
+      [input.model]: {
+        id: input.model,
+        name: input.model,
+      },
+    },
+    ...(adapter ? { npm: adapter, name: adapter === '@ai-sdk/openai-compatible' ? 'CodeMUX OpenAI-compatible' : 'CodeMUX Anthropic' } : {}),
+  };
+  if (input.credentialSource === 'codemux' && input.apiKey) {
+    options.apiKey = input.apiKey;
+  }
+  if (input.baseUrl) {
+    options.baseURL = normalizeOpenCodeBaseUrl(input.baseUrl);
+  }
+  if (Object.keys(options).length > 0) {
+    providerConfig.options = options;
+  }
+  return {
+    provider: {
+      [input.provider]: providerConfig,
+    },
+  };
+}
+
+function resolveOpenCodeAdapter(input: OpenCodeServerConfigInput): '@ai-sdk/openai-compatible' | '@ai-sdk/anthropic' | undefined {
+  if (!input.baseUrl) {
+    return undefined;
+  }
+  if (input.provider === 'codemux-anthropic') {
+    return '@ai-sdk/anthropic';
+  }
+  if (input.provider !== 'codemux-openai') {
+    return undefined;
+  }
+  return '@ai-sdk/openai-compatible';
+}
+function normalizeOpenCodeBaseUrl(baseUrl: string): string {
+  let normalized = baseUrl.trim().replace(/\/+$/, '');
+  for (const suffix of ['/chat/completions', '/responses', '/messages']) {
+    if (normalized.toLowerCase().endsWith(suffix)) {
+      normalized = normalized.slice(0, -suffix.length);
+      break;
+    }
+  }
+  return normalized.replace(/\/+$/, '');
+}
 const pendingServerClosePromises = new WeakMap<OpenCodeServerHandle, Promise<void>>();
 
 export function closeOpenCodeServerWithTimeout(
@@ -140,10 +207,12 @@ function toOpenCodeImage(image: AgentInputImage): OpenCodeImageInput {
 }
 
 export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
-  async start({ cwd, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS }) {
+  async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS }) {
+    prepareOpenCodeExecutable({ sidecarDir: SIDECAR_DIST_DIR });
     const server = await createOpencodeServer({
       hostname: '127.0.0.1',
       port: 0,
+      config: buildOpenCodeServerConfig({ provider, model, apiKey, baseUrl, credentialSource }),
     });
     try {
       const client = createOpencodeClient({

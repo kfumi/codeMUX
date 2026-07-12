@@ -1,8 +1,8 @@
 ﻿import type { AgentMessage } from '../../../stores/agentStore';
-import { isClaudeTaskNotificationUserEvent, isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
+import { isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
 import type { AgentUserMessageLocator, ContentBlock } from '../../../types/agent';
 import type { UserAttachmentPreview } from '../../../types/agentInput';
-import { buildAssistantResultTargetSet } from './assistantResultTargets';
+import { buildAssistantResultTargetSet, isHiddenAssistantThreadUserEvent } from './assistantResultTargets';
 
 type CodeMuxAssistantRole = 'user' | 'assistant' | 'system';
 
@@ -58,11 +58,7 @@ export function convertAgentEventsToAssistantMessages(
       const text = event.data.content.trim();
       const hasAttachments = (event.data.attachments?.length ?? 0) > 0;
 
-      if (isHiddenClaudeCompactUserEvent(event, text)) {
-        return;
-      }
-
-      if (isClaudeTaskNotificationUserEvent(event.data)) {
+      if (isHiddenAssistantThreadUserEvent(event)) {
         return;
       }
 
@@ -301,20 +297,6 @@ function updatePreviousApiRetryMessage(
   previous.metadata.sourceEventIndex = index;
   previous.metadata.sourceEventIndices = [...previous.metadata.sourceEventIndices, index];
   return true;
-}
-
-function isHiddenClaudeCompactUserEvent(
-  event: Extract<AgentMessage, { kind: 'user' }>,
-  text: string,
-): boolean {
-  const data = event.data as Record<string, unknown>;
-  return (
-    data.isCompactSummary === true ||
-    data.isVisibleInTranscriptOnly === true ||
-    isCodexCompactSummaryText(text) ||
-    text === '/compact' ||
-    /^<local-command-stdout>\s*Compacted\s*<\/local-command-stdout>$/i.test(text)
-  );
 }
 
 function isCodexCompactSummaryAssistantEvent(

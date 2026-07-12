@@ -2,6 +2,15 @@
 export type SessionMode = 'chat' | 'agent';
 
 /** Minimal representation of an SDKMessage from the sidecar */
+export type AgentPermissionResponse = 'once' | 'always' | 'reject';
+
+export interface AgentPermissionRequest {
+  request_id: string;
+  permission_id?: string;
+  permission_type: string;
+  description: string;
+  metadata?: Record<string, unknown>;
+}
 export interface AgentEvent {
   type: string;
   subtype?: string;

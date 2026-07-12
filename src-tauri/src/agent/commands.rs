@@ -603,6 +603,14 @@ fn load_latest_token_usage_for_agent_session(
     agent_session_id: &str,
     freshness: &str,
 ) -> Result<Option<ThreadTokenUsageSnapshot>, String> {
+    if agent_kind == AgentKind::Opencode {
+        return super::opencode_history::load_latest_opencode_token_usage(
+            home,
+            agent_session_id,
+            freshness,
+        );
+    }
+
     let history_path = match agent_kind {
         AgentKind::ClaudeCode => find_claude_session_jsonl(&home.join(".claude"), agent_session_id),
         AgentKind::Codex => {
@@ -1416,6 +1424,45 @@ fn sort_events_by_timestamp_stable(events: &mut Vec<serde_json::Value>) {
 }
 
 #[tauri::command]
+pub async fn load_opencode_session_events(
+    state: State<'_, crate::AppState>,
+    app_session_id: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    debug!(target: "agent", "Loading OpenCode SQLite session events for app_session_id={}", app_session_id);
+    let Some(opencode_session_id) =
+        get_agent_session_id(state.inner(), &app_session_id, AgentKind::Opencode)?
+    else {
+        info!(target: "agent", "No OpenCode mapping found for app_session_id={}", app_session_id);
+        return Ok(Vec::new());
+    };
+    let home = home_dir()?;
+    tokio::task::spawn_blocking(move || {
+        super::opencode_history::load_opencode_session_events(&home, &opencode_session_id)
+    })
+    .await
+    .map_err(|error| format!("Failed to join OpenCode history loader: {}", error))?
+}
+
+#[tauri::command]
+pub async fn delete_opencode_session(
+    state: State<'_, crate::AppState>,
+    app_session_id: String,
+) -> Result<(), String> {
+    debug!(target: "agent", "Deleting OpenCode SQLite session for app_session_id={}", app_session_id);
+    let Some(opencode_session_id) =
+        get_agent_session_id(state.inner(), &app_session_id, AgentKind::Opencode)?
+    else {
+        return Ok(());
+    };
+    let home = home_dir()?;
+    tokio::task::spawn_blocking(move || {
+        super::opencode_history::delete_opencode_session(&home, &opencode_session_id).map(|_| ())
+    })
+    .await
+    .map_err(|error| format!("Failed to join OpenCode history deletion: {}", error))?
+}
+
+#[tauri::command]
 pub async fn load_codex_session_events(
     state: State<'_, crate::AppState>,
     app_session_id: String,
@@ -1747,6 +1794,8 @@ fn build_ensure_session_command(
     model: Option<String>,
     reasoning_effort: Option<String>,
     codex_needs_proxy: Option<bool>,
+    provider: Option<String>,
+    credential_source: Option<String>,
     runtime_generation: Option<u64>,
 ) -> Result<serde_json::Value, String> {
     let resolved_cwd = if cwd == "." {
@@ -1765,6 +1814,12 @@ fn build_ensure_session_command(
     if agent_kind == "opencode" {
         if let Some(generation) = runtime_generation {
             cmd["runtimeGeneration"] = serde_json::json!(generation);
+        }
+        if let Some(provider) = provider {
+            cmd["provider"] = serde_json::Value::String(provider);
+        }
+        if let Some(credential_source) = credential_source {
+            cmd["credentialSource"] = serde_json::Value::String(credential_source);
         }
     }
 
@@ -1963,6 +2018,8 @@ pub async fn ensure_agent_session(
     model: Option<String>,
     reasoning_effort: Option<String>,
     codex_needs_proxy: Option<bool>,
+    provider: Option<String>,
+    credential_source: Option<String>,
 ) -> Result<(), String> {
     info!(
         target: "agent",
@@ -2002,6 +2059,8 @@ pub async fn ensure_agent_session(
         model,
         reasoning_effort,
         codex_needs_proxy,
+        provider,
+        credential_source,
         runtime_generation,
     )?;
 
@@ -2056,6 +2115,8 @@ pub async fn start_agent_session(
     model: Option<String>,
     reasoning_effort: Option<String>,
     codex_needs_proxy: Option<bool>,
+    provider: Option<String>,
+    credential_source: Option<String>,
     input_payload: Option<serde_json::Value>,
 ) -> Result<(), String> {
     info!(target: "agent", "Starting agent session wrapper for session_id={}", session_id);
@@ -2080,6 +2141,8 @@ pub async fn start_agent_session(
         model,
         reasoning_effort,
         codex_needs_proxy,
+        provider,
+        credential_source,
         runtime_generation,
     )?;
 
@@ -2541,14 +2604,14 @@ async fn get_live_proxy_port(agent_state: &State<'_, AgentState>) -> Option<u16>
 #[cfg(test)]
 mod tests {
     use super::{
-        begin_session_generation, build_update_permissions_command_from_snapshot,
-        convert_codex_history_values_to_events, convert_codex_item_to_claude_format,
-        find_codex_session_jsonl, handle_agent_session_mapping_event,
-        invalidate_session_generation, load_latest_token_usage_for_agent_session,
-        mapping_generation_is_current, parse_agent_session_mapping_event,
-        parse_proxy_port_from_stderr, persist_agent_session_mapping_event,
-        read_codex_interactive_events_from_dir, read_json_stream_values,
-        resolve_agent_session_info, rewind_jsonl_before_latest_turn,
+        begin_session_generation, build_ensure_session_command,
+        build_update_permissions_command_from_snapshot, convert_codex_history_values_to_events,
+        convert_codex_item_to_claude_format, find_codex_session_jsonl,
+        handle_agent_session_mapping_event, invalidate_session_generation,
+        load_latest_token_usage_for_agent_session, mapping_generation_is_current,
+        parse_agent_session_mapping_event, parse_proxy_port_from_stderr,
+        persist_agent_session_mapping_event, read_codex_interactive_events_from_dir,
+        read_json_stream_values, resolve_agent_session_info, rewind_jsonl_before_latest_turn,
         rewind_jsonl_before_target_turn, session_lifecycle_lock,
         should_include_claude_history_event, sort_events_by_timestamp_stable, AgentState,
         RewindTarget,
@@ -2685,6 +2748,72 @@ mod tests {
         assert_eq!(usage.last.total_tokens, 25);
         assert_eq!(usage.last.cached_input_tokens, 7);
         assert_eq!(usage.model_context_window, Some(258_400));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn loads_latest_opencode_token_usage_from_sqlite_message_history() {
+        let temp = std::env::temp_dir().join(format!(
+            "codemux-opencode-usage-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let db_dir = temp.join("AppData").join("Local").join("opencode");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        let db_path = db_dir.join("opencode.db");
+        let connection = rusqlite::Connection::open(&db_path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE message (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    time_created INTEGER NOT NULL,
+                    time_updated INTEGER NOT NULL,
+                    data TEXT NOT NULL
+                );",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?3, ?4)",
+                rusqlite::params![
+                    "assistant-1",
+                    "opencode-session-1",
+                    1000_i64,
+                    r#"{"role":"assistant","tokens":{"input":9,"output":3,"reasoning":1,"cache":{"read":2,"write":1}}}"#,
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?3, ?4)",
+                rusqlite::params![
+                    "assistant-2",
+                    "opencode-session-1",
+                    2000_i64,
+                    r#"{"role":"assistant","tokens":{"input":12,"output":5,"reasoning":2,"cache":{"read":7,"write":3}}}"#,
+                ],
+            )
+            .unwrap();
+        drop(connection);
+
+        let usage = load_latest_token_usage_for_agent_session(
+            &temp,
+            AgentKind::Opencode,
+            "opencode-session-1",
+            "restored",
+        )
+        .expect("load should not fail")
+        .expect("usage should exist");
+
+        assert_eq!(usage.last.total_tokens, 17);
+        assert_eq!(usage.last.input_tokens, 12);
+        assert_eq!(usage.last.cached_input_tokens, 7);
+        assert_eq!(usage.last.output_tokens, 5);
+        assert_eq!(usage.last.reasoning_output_tokens, 2);
+        assert_eq!(usage.total, usage.last);
+        assert_eq!(usage.context_usage_source, "history_database");
+        assert_eq!(usage.context_usage_freshness, "restored");
 
         let _ = std::fs::remove_dir_all(&temp);
     }
@@ -3189,6 +3318,61 @@ mod tests {
         assert_eq!(converted["__lineIndex"], 4);
     }
 
+    #[test]
+    fn builds_opencode_command_with_provider_credentials() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-opencode", "OpenCode", "opencode", "chat", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        let app_state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
+            app_data_dir: std::path::PathBuf::new(),
+        };
+
+        let command = build_ensure_session_command(
+            &app_state,
+            "session-opencode",
+            "opencode",
+            "D:/workspace/demo".to_string(),
+            Some("secret-key".to_string()),
+            Some("https://provider.example/v1".to_string()),
+            Some("glm-4.7-flash".to_string()),
+            None,
+            None,
+            Some("codemux-openai".to_string()),
+            Some("codemux".to_string()),
+            Some(1),
+        )
+        .unwrap();
+
+        assert_eq!(command["provider"], "codemux-openai");
+        assert_eq!(command["credentialSource"], "codemux");
+        assert_eq!(command["apiKey"], "secret-key");
+        assert_eq!(command["baseUrl"], "https://provider.example/v1");
+        assert_eq!(command["runtimeGeneration"], 1);
+
+        let claude_command = build_ensure_session_command(
+            &app_state,
+            "session-opencode",
+            "claude_code",
+            "D:/workspace/demo".to_string(),
+            Some("secret-key".to_string()),
+            Some("https://provider.example/v1".to_string()),
+            None,
+            None,
+            None,
+            Some("codemux-openai".to_string()),
+            Some("codemux".to_string()),
+            None,
+        )
+        .unwrap();
+        assert!(claude_command.get("provider").is_none());
+        assert!(claude_command.get("credentialSource").is_none());
+    }
     #[test]
     fn builds_runtime_permission_update_command_from_session_snapshot() {
         let cmd = build_update_permissions_command_from_snapshot(

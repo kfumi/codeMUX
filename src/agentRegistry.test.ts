@@ -27,8 +27,6 @@ describe('agent registry', () => {
     expect(getAgentDefinition('opencode')?.capabilities).toEqual([
       'supports_resume',
       'supports_tools',
-      'supports_context_window',
-      'supports_mcp',
     ]);
     expect(getAgentDefinition('opencode')?.capabilities).not.toContain('supports_cost');
     expect(getAgentDefinition('opencode')?.capabilities).not.toContain('supports_file_snapshots');

@@ -1265,9 +1265,11 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
     sessionId: cmd.sessionId ?? crypto.randomUUID(),
     ...(cmd.agentSessionId ? { agentSessionId: cmd.agentSessionId } : {}),
     runtimeGeneration: cmd.runtimeGeneration ?? 0,
-    provider: cmd.provider ?? 'opencode',
+    provider: cmd.provider ?? 'openai',
     model: cmd.model ?? 'default',
     credentialSource: cmd.credentialSource ?? 'none',
+    ...(cmd.credentialSource === 'codemux' && cmd.apiKey ? { apiKey: cmd.apiKey } : {}),
+    ...(cmd.baseUrl ? { baseUrl: cmd.baseUrl } : {}),
   };
   const openCodeRuntime = new OpenCodeRuntime(config);
   return {

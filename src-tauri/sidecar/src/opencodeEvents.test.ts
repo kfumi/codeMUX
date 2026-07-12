@@ -11,6 +11,26 @@ describe('OpenCode event normalization', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'assistant', agent_id: 'agent-1', session_id: 'codemux-session-1', agent_session_id: 'opencode-session-1', opencode_session_id: 'opencode-session-1', sequence: 7, message: { content: [{ type: 'text', text: 'Hello' }] } });
   });
+  it('does not expose text parts belonging to a user message as assistant output', () => {
+    const userMessageUpdated = {
+      type: 'message.updated',
+      properties: {
+        sessionID: 'opencode-session-1',
+        info: { id: 'user-message-1', role: 'user' },
+      },
+    };
+    const userPartUpdated = {
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-session-1',
+        part: { id: 'part-user-1', sessionID: 'opencode-session-1', messageID: 'user-message-1', type: 'text', text: 'the original prompt' },
+        delta: 'the original prompt',
+      },
+    };
+
+    expect(toCodeMuxEvent(userMessageUpdated, context())).toEqual([]);
+    expect(toCodeMuxEvent(userPartUpdated, context({ assistantMessageIds: new Set(), userMessageIds: new Set(['user-message-1']) }))).toEqual([]);
+  });
   it('converts tool running, completed, and error states', () => {
     const base = { id: 'tool-part-1', sessionID: 'opencode-session-1', messageID: 'message-1', type: 'tool', callID: 'call-1', tool: 'bash' };
     const started = toCodeMuxEvent({ type: 'message.part.updated', properties: { part: { ...base, state: { status: 'running', input: { command: 'pwd' } } } } }, context());

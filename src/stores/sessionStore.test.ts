@@ -8,11 +8,15 @@ const getArchivedMock = vi.fn<(...args: unknown[]) => Promise<Session[]>>();
 const archiveMock = vi.fn<(...args: unknown[]) => Promise<void>>();
 const unarchiveMock = vi.fn<(...args: unknown[]) => Promise<void>>();
 const updatePermissionsMock = vi.fn<(...args: unknown[]) => Promise<void>>();
+const deleteSessionMock = vi.fn<(...args: unknown[]) => Promise<void>>();
+const deleteOpenCodeSessionMock = vi.fn<(...args: unknown[]) => Promise<void>>();
 
 vi.mock('../lib/tauri', () => ({
   agentApi: {
     shutdown: vi.fn(),
     deleteClaudeSessionFiles: vi.fn(),
+    deleteCodexSessionFiles: vi.fn(),
+    deleteOpenCodeSession: deleteOpenCodeSessionMock,
     resetSession: vi.fn(),
   },
   configApi: {
@@ -30,7 +34,7 @@ vi.mock('../lib/tauri', () => ({
     create: createMock,
     getAll: vi.fn(),
     getArchived: getArchivedMock,
-    delete: vi.fn(),
+    delete: deleteSessionMock,
     archive: archiveMock,
     unarchive: unarchiveMock,
     updateTitle: vi.fn(),
@@ -204,6 +208,34 @@ describe('session store createSession', () => {
     vi.useRealTimers();
   });
 
+  it('deletes the matching OpenCode SQLite session before removing the app session', async () => {
+    const session: Session = {
+      id: 'session-opencode-delete',
+      title: 'OpenCode',
+      agent_kind: 'opencode',
+      provider_id: null,
+      model: null,
+      reasoning_effort: null,
+      mode: 'agent',
+      project_id: null,
+      created_at: '2026-06-20T00:00:00.000Z',
+      updated_at: '2026-06-20T00:00:00.000Z',
+    };
+    const { useSessionStore } = await import('./sessionStore');
+    useSessionStore.setState({
+      sessions: [session],
+      archivedSessions: [],
+      activeSessionId: session.id,
+      isLoading: false,
+      isArchivedLoading: false,
+      error: null,
+    });
+
+    await useSessionStore.getState().deleteSession(session.id);
+
+    expect(deleteOpenCodeSessionMock).toHaveBeenCalledWith(session.id);
+    expect(deleteSessionMock).toHaveBeenCalledWith(session.id);
+  });
   it('archives a session and removes it from the active sidebar list', async () => {
     archiveMock.mockResolvedValue(undefined);
     const activeSession: Session = {

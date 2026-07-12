@@ -19,6 +19,8 @@ export interface OpenCodeEventContext extends RuntimeEventContext {
   terminalSessionIds?: ReadonlySet<string>;
   terminalToolIds?: ReadonlySet<string>;
   turnId?: number;
+  assistantMessageIds?: ReadonlySet<string>;
+  userMessageIds?: ReadonlySet<string>;
   eventIdFactory: () => string;
 }
 
@@ -164,6 +166,8 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
     case 'message.part.updated': {
       const part = asRecord(properties.part);
       if (!part) break;
+      const messageId = readString(part.messageID);
+      if (messageId && context.userMessageIds?.has(messageId)) break;
       const partType = readString(part.type);
       if (partType === 'text' || partType === 'reasoning') {
         const text = readString(properties.delta) ?? readString(part.text);
@@ -214,7 +218,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
     case 'session.error': {
       const error = properties.error ?? properties;
       const status = isInterruptedError(error) ? 'interrupted' : 'error';
-      events.push(buildEnvelope({ type: 'error', subtype: status, error: errorMessage(error) }, context, sessionId));
+      events.push(buildEnvelope({ type: 'error', subtype: isTimeoutError(error) ? 'timeout' : status, error: errorMessage(error) }, context, sessionId));
       events.push(...buildResultEvents(context, status, sessionId));
       break;
     }
@@ -258,7 +262,7 @@ function buildResultEvents(context: OpenCodeEventContext, status: OpenCodeResult
 
 function buildFailureEvents(context: OpenCodeEventContext, error: unknown, sessionId?: string): CodeMuxEvent[] {
   const status = isInterruptedError(error) ? 'interrupted' : 'error';
-  return [buildEnvelope({ type: 'error', subtype: status, error: errorMessage(error) }, context, sessionId), ...buildResultEvents(context, status, sessionId)];
+  return [buildEnvelope({ type: 'error', subtype: isTimeoutError(error) ? 'timeout' : status, error: errorMessage(error) }, context, sessionId), ...buildResultEvents(context, status, sessionId)];
 }
 
 function buildAssistantEnvelope(context: OpenCodeEventContext, sessionId: string | undefined, content: Array<Record<string, unknown>>): CodeMuxEvent {
@@ -297,6 +301,11 @@ function serializeToolValue(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function isTimeoutError(error: unknown): boolean {
+  const text = `${readString(asRecord(error)?.name) ?? ''} ${errorMessage(error)}`.toLowerCase();
+  return text.includes('timeout') || text.includes('timed out');
 }
 
 function isInterruptedError(error: unknown): boolean {

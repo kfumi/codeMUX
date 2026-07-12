@@ -185,7 +185,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                   onPlanModeChange={setSelectedPlanMode}
                 />
               )}
-              onActivatePlanMode={() => {
+              onActivatePlanMode={selectedAgentKind === 'opencode' ? undefined : () => {
                 setSelectedPermissionConfig(mapExecutionModeToPermissionConfig(selectedAgentKind, 'plan'));
                 setSelectedPlanMode('on');
               }}

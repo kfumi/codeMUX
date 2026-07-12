@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { officialOpenCodeSdkPort } from './opencodeSdk.js';
+import { buildOpenCodeServerConfig, officialOpenCodeSdkPort } from './opencodeSdk.js';
+
 
 const sdkMocks = vi.hoisted(() => {
   const eventSubscribe = vi.fn();
@@ -18,11 +19,106 @@ const sdkMocks = vi.hoisted(() => {
 vi.mock('@opencode-ai/sdk/client', () => ({
   createOpencodeClient: vi.fn().mockReturnValue(sdkMocks.client),
 }));
+vi.mock('./opencodeExecutable.js', () => ({
+  prepareOpenCodeExecutable: vi.fn(),
+}));
+
 vi.mock('@opencode-ai/sdk/server', () => ({
   createOpencodeServer: vi.fn().mockResolvedValue({ url: 'http://127.0.0.1:4097', close: vi.fn() }),
 }));
 
 describe('official OpenCode SDK adapter', () => {
+  it('builds provider config with credentials using the official server config', () => {
+    expect(buildOpenCodeServerConfig({
+      provider: 'provider-1',
+      model: 'model-1',
+      baseUrl: 'https://provider.example/v1',
+      apiKey: 'secret-key',
+      credentialSource: 'codemux',
+    })).toEqual({
+      provider: {
+        'provider-1': {
+          options: {
+            apiKey: 'secret-key',
+            baseURL: 'https://provider.example/v1',
+          },
+          models: {
+            'model-1': { id: 'model-1', name: 'model-1' },
+          },
+        },
+      },
+    });
+  });
+
+  it('uses the OpenAI-compatible AI SDK adapter for a custom OpenAI endpoint', () => {
+    expect(buildOpenCodeServerConfig({
+      provider: 'codemux-openai',
+      model: 'glm-4.7-flash',
+      baseUrl: 'https://provider.example/v1',
+      apiKey: 'secret-key',
+      credentialSource: 'codemux',
+    })).toMatchObject({
+      provider: {
+        'codemux-openai': {
+          npm: '@ai-sdk/openai-compatible',
+          name: 'CodeMUX OpenAI-compatible',
+          options: { baseURL: 'https://provider.example/v1', apiKey: 'secret-key' },
+        },
+      },
+    });
+  });
+
+  it('strips a full chat completions endpoint before passing baseURL to OpenCode', () => {
+    expect(buildOpenCodeServerConfig({
+      provider: 'codemux-openai',
+      model: 'glm-4.7-flash',
+      baseUrl: 'https://provider.example/v1/chat/completions',
+      credentialSource: 'none',
+    })).toMatchObject({
+      provider: {
+        'codemux-openai': {
+          options: { baseURL: 'https://provider.example/v1' },
+        },
+      },
+    });
+  });
+
+  it('does not inject an API key when credentials come from the environment', () => {
+    expect(buildOpenCodeServerConfig({
+      provider: 'provider-1',
+      model: 'model-1',
+      baseUrl: 'https://provider.example/v1',
+      apiKey: 'secret-key',
+      credentialSource: 'environment',
+    })).toEqual({
+      provider: {
+        'provider-1': {
+          options: { baseURL: 'https://provider.example/v1' },
+          models: {
+            'model-1': { id: 'model-1', name: 'model-1' },
+          },
+        },
+      },
+    });
+  });
+  it('registers the selected CodeMUX model in the OpenCode provider config', () => {
+    expect(buildOpenCodeServerConfig({
+      provider: 'codemux-openai',
+      model: 'glm-4.7-flash',
+      credentialSource: 'codemux',
+      apiKey: 'secret-key',
+      baseUrl: 'https://provider.example/v1',
+    })).toMatchObject({
+      provider: {
+        'codemux-openai': {
+          models: {
+            'glm-4.7-flash': { id: 'glm-4.7-flash' },
+          },
+        },
+      },
+    });
+  });
+
   it('reports official onSseError as retry and only reports disconnect after stream end', async () => {
     let resolveStream!: () => void;
     const stream = (async function* () {
@@ -33,7 +129,7 @@ describe('official OpenCode SDK adapter', () => {
     const disconnects: unknown[] = [];
     const retries: unknown[] = [];
     const received: unknown[] = [];
-    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo' });
+    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'codemux-openai', model: 'model-1', credentialSource: 'none' });
     expect(resources.client.respondToTool).toBeUndefined();
     const subscription = await resources.client.subscribe!({ cwd: 'D:/workspace/demo', onEvent: (event) => received.push(event), onError: vi.fn(), onRetry: (error) => retries.push(error), onDisconnect: (error) => disconnects.push(error) });
 

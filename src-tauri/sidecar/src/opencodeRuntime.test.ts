@@ -38,9 +38,11 @@ function createConfig(agentSessionId?: string): OpenCodeSessionConfig {
     sessionId: 'codemux-session-1',
     runtimeGeneration: 1,
     ...(agentSessionId ? { agentSessionId } : {}),
-    provider: 'openai',
+    provider: 'codemux-openai',
     model: 'gpt-5',
     credentialSource: 'codemux',
+    apiKey: 'secret-key',
+    baseUrl: 'https://provider.example/v1',
   };
 }
 
@@ -79,6 +81,51 @@ describe('OpenCodeRuntime', () => {
 
     expect((runtime as unknown as { permissionConfig: unknown }).permissionConfig).toEqual({ kind: 'codex', approvalPolicy: 'never' });
     expect((runtime as unknown as { planMode: string }).planMode).toBe('off');
+  });
+
+  it('aborts and emits a terminal error when the provider prompt exceeds its timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const { port, client } = createPort();
+      const pendingPrompt = deferred<void>();
+      client.prompt.mockReturnValue(pendingPrompt.promise);
+      const emitted: unknown[] = [];
+      const runtime = new OpenCodeRuntime(createConfig(), port, {
+        promptTimeoutMs: 25,
+        emitEvent: (event) => emitted.push(event),
+        eventIdFactory: () => 'event-timeout',
+      } as any);
+
+      await runtime.start();
+      const sendPromise = runtime.sendInput('hello');
+      await vi.advanceTimersByTimeAsync(25);
+      await sendPromise;
+
+      expect(client.abort).toHaveBeenCalledWith('opencode-new');
+      expect(emitted).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'error', subtype: 'timeout' }),
+        expect.objectContaining({ type: 'result', subtype: 'error', is_error: true }),
+      ]));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('does not emit a user message part as assistant output in the live runtime path', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+
+    onEvent({ type: 'message.updated', properties: { sessionID: 'opencode-new', info: { id: 'user-message-1', role: 'user' } } });
+    onEvent({ type: 'message.part.updated', properties: { sessionID: 'opencode-new', part: { id: 'user-part-1', sessionID: 'opencode-new', messageID: 'user-message-1', type: 'text', text: 'hello' }, delta: 'hello' } });
+
+    expect(emitted.some((event) => (event as { type?: string }).type === 'assistant')).toBe(false);
+    await runtime.shutdown();
   });
 
   it('registers native permission requests before emitting a unified permission event', async () => {
@@ -277,7 +324,7 @@ describe('OpenCodeRuntime', () => {
 
     const mapping = await runtime.start();
 
-    expect(port.start).toHaveBeenCalledWith({ cwd: 'D:/workspace/demo', serverCloseTimeoutMs: 10_000 });
+    expect(port.start).toHaveBeenCalledWith({ cwd: 'D:/workspace/demo', provider: 'codemux-openai', model: 'gpt-5', apiKey: 'secret-key', baseUrl: 'https://provider.example/v1', credentialSource: 'codemux', serverCloseTimeoutMs: 10_000 });
     expect(client.createSession).toHaveBeenCalledWith({ cwd: 'D:/workspace/demo' });
     expect(mapping).toEqual<OpenCodeSessionMapping>({
       sessionId: 'codemux-session-1',
@@ -366,7 +413,7 @@ describe('OpenCodeRuntime', () => {
       prompt: 'payload text',
       inputPayload,
       images: [],
-      provider: 'openai',
+      provider: 'codemux-openai',
       model: 'gpt-5',
     });
   });
@@ -386,7 +433,7 @@ describe('OpenCodeRuntime', () => {
       prompt: 'hello',
       inputPayload,
       images: inputPayload.images,
-      provider: 'openai',
+      provider: 'codemux-openai',
       model: 'gpt-5',
     });
   });
@@ -416,14 +463,14 @@ describe('OpenCodeRuntime', () => {
   });
   it('maps the official adapter prompt body and images to OpenCode SDK parts', async () => {
     sdkMocks.prompt.mockClear();
-    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo' });
+    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'codemux-openai', model: 'model-1', credentialSource: 'none' });
 
     await resources.client.prompt({
       sessionId: 'opencode-new',
       prompt: 'fallback text',
       inputPayload: { text: 'payload text', images: [] },
       images: [{ name: 'diagram.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
-      provider: 'openai',
+      provider: 'codemux-openai',
       model: 'gpt-5',
     });
 
@@ -431,7 +478,7 @@ describe('OpenCodeRuntime', () => {
       path: { id: 'opencode-new' },
       query: { directory: 'D:/workspace/demo' },
       body: {
-        model: { providerID: 'openai', modelID: 'gpt-5' },
+        model: { providerID: 'codemux-openai', modelID: 'gpt-5' },
         parts: [
           { type: 'text', text: 'payload text' },
           { type: 'file', mime: 'image/png', filename: 'diagram.png', url: 'data:image/png;base64,abc' },
@@ -444,7 +491,7 @@ describe('OpenCodeRuntime', () => {
     sdkMocks.client.session.create.mockResolvedValueOnce({
       error: { code: 404, message: 'session unavailable' },
     });
-    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo' });
+    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'codemux-openai', model: 'model-1', credentialSource: 'none' });
 
     await expect(resources.client.createSession({ cwd: 'D:/workspace/demo' })).rejects.toThrow(
       'OpenCode session creation failed: {"code":404,"message":"session unavailable"}',
