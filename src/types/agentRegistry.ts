@@ -50,9 +50,14 @@ export const AGENT_REGISTRY: AgentDefinition[] = [
   {
     kind: 'opencode',
     label: 'OpenCode',
-    description: '为后续扩展预留的 OpenCode 接入入口。',
+    description: '基于 OpenCode SDK 的可恢复编码 Agent，复用 CodeMUX Provider、模型、工具和 MCP 配置。',
     icon: 'opencode',
-    capabilities: [],
+    capabilities: [
+      'supports_resume',
+      'supports_tools',
+      'supports_context_window',
+      'supports_mcp',
+    ],
   },
 ];
 

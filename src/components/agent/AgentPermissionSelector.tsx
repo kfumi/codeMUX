@@ -32,6 +32,8 @@ interface AgentPermissionSelectorProps {
   onLegacyConfigMigrate?: (migratedConfig: AgentPermissionConfig) => void;
   /** 紧凑模式：只显示图标，隐藏文字标签 */
   compact?: boolean;
+  rawPermissionType?: string;
+  rawPermissionDescription?: string;
 }
 
 type PermissionOption = {
@@ -64,6 +66,8 @@ export function AgentPermissionSelector({
   onModeChange,
   onLegacyConfigMigrate,
   compact,
+  rawPermissionType,
+  rawPermissionDescription,
 }: AgentPermissionSelectorProps) {
   const [open, setOpen] = useState(false);
   const normalized = permissionConfig ?? buildDefaultPermissionConfig(agentKind);
@@ -135,6 +139,16 @@ export function AgentPermissionSelector({
         {!compact && <span className="truncate">{selected.label}</span>}
         {!compact && <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />}
       </button>
+
+      {(rawPermissionType || rawPermissionDescription) && (
+        <div
+          data-testid="native-permission-details"
+          className="mt-2 rounded-md border border-border/50 bg-muted/30 px-2.5 py-2 text-xs"
+        >
+          {rawPermissionType && <div className="font-mono text-foreground/90">{rawPermissionType}</div>}
+          {rawPermissionDescription && <div className="mt-1 text-muted-foreground">{rawPermissionDescription}</div>}
+        </div>
+      )}
 
       {open && (
         <div

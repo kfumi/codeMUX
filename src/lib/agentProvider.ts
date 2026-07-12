@@ -3,12 +3,17 @@ import type { AgentKind } from '../types/session';
 import { getPrimaryProviderModel } from './providerModels';
 import { normalizeOpenAIBaseUrl } from './providerUrls';
 
+export type OpenCodeCredentialSource = 'codemux' | 'environment' | 'opencode' | 'none';
+
 export interface AgentProviderConfig {
   provider: Provider | null;
   apiKey: string | undefined;
   baseUrl: string | undefined;
   model: string | undefined;
   runtimeModel: string | undefined;
+  providerName: string | undefined;
+  credentialSource: OpenCodeCredentialSource | undefined;
+  configurationError: string | undefined;
   codexNeedsProxy: boolean | undefined;
 }
 
@@ -72,17 +77,39 @@ export function resolveAgentProviderConfig({
   const activeProvider = getProviderById(config, config?.active_provider_id);
   const provider = sessionProvider ?? activeProvider;
   const model = resolveDisplayModel(provider, sessionModel);
-  const baseUrl =
-    agentKind === 'codex'
-      ? (provider?.openai_base_url ? normalizeOpenAIBaseUrl(provider.openai_base_url) : undefined)
+  const baseUrl = agentKind === 'codex'
+    ? (provider?.openai_base_url ? normalizeOpenAIBaseUrl(provider.openai_base_url) : undefined)
+    : agentKind === 'opencode'
+      ? provider?.openai_base_url || provider?.anthropic_base_url || undefined
       : provider?.anthropic_base_url || undefined;
+  const apiKey = provider?.api_key || undefined;
+  const providerName = agentKind === 'opencode' ? provider?.id : undefined;
+  const credentialSource = agentKind === 'opencode'
+    ? apiKey
+      ? 'codemux'
+      : baseUrl
+        ? 'environment'
+        : 'none'
+    : undefined;
+  const configurationError = agentKind === 'opencode'
+    ? !provider
+      ? 'OpenCode 需要先选择一个 CodeMUX Provider。'
+      : !model
+        ? 'OpenCode 需要先在当前 Provider 中配置模型。'
+        : !baseUrl
+          ? 'OpenCode 需要当前 Provider 配置 base URL。'
+          : undefined
+    : undefined;
 
   return {
     provider,
-    apiKey: provider?.api_key || undefined,
+    apiKey,
     baseUrl,
     model,
     runtimeModel: resolveRuntimeModel(model, provider, agentKind),
+    providerName,
+    credentialSource,
+    configurationError,
     codexNeedsProxy:
       agentKind === 'codex'
         ? inferCodexNeedsProxy(baseUrl) && (provider?.codex_needs_proxy ?? true)

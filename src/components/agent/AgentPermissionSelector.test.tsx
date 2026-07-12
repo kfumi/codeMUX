@@ -198,4 +198,21 @@ describe('AgentPermissionSelector', () => {
 
     expect(onLegacyConfigMigrate).not.toHaveBeenCalled();
   });
+
+  it('shows unknown native permission type and description without rewriting the raw values', () => {
+    render(
+      <AgentPermissionSelector
+        agentKind="opencode"
+        permissionConfig={{ kind: 'claude_code', permissionMode: 'default' }}
+        planMode="off"
+        rawPermissionType="external_device_access"
+        rawPermissionDescription="OpenCode requests access to an external device."
+        onPermissionConfigChange={vi.fn()}
+        onPlanModeChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('external_device_access')).toBeTruthy();
+    expect(screen.getByText('OpenCode requests access to an external device.')).toBeTruthy();
+  });
 });

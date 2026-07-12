@@ -213,12 +213,14 @@ export const agentApi = {
     model?: string,
     reasoningEffort?: ReasoningEffort,
     codexNeedsProxy?: boolean,
+    provider?: string,
+    credentialSource?: 'codemux' | 'environment' | 'opencode' | 'none',
   ): Promise<void> => {
     if (onEvent) {
       agentEventListeners.set(sessionId, onEvent);
     }
     const channel = getAgentChannel(sessionId);
-    return invokeLogged('ensure_agent_session', { sessionId, cwd, channel, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy });
+    return invokeLogged('ensure_agent_session', { sessionId, cwd, channel, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy, provider, credentialSource });
   },
   sendInput: (
     sessionId: string,

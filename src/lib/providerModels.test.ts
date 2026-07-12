@@ -48,4 +48,10 @@ describe('provider model helpers', () => {
       'claude-opus-4-1\nclaude-sonnet-4-5',
     );
   });
+
+  it('uses the configured default model as the OpenCode-compatible fallback', () => {
+    expect(getProviderModelList({ ...baseProvider, models: [], default_model: 'openai/gpt-5' })).toEqual([
+      'openai/gpt-5',
+    ]);
+  });
 });

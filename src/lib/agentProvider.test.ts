@@ -165,4 +165,35 @@ describe('resolveAgentProviderConfig', () => {
       runtimeModel: 'claude-opus-4-1[1m]',
     });
   });
+
+  it('maps the selected CodeMUX provider into the OpenCode runtime configuration without exposing the credential', () => {
+    expect(
+      resolveAgentProviderConfig({
+        agentKind: 'opencode',
+        config,
+      }),
+    ).toMatchObject({
+      provider: expect.objectContaining({ id: 'codex-provider' }),
+      providerName: 'codex-provider',
+      apiKey: 'openai-key',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'o4-mini',
+      runtimeModel: 'o4-mini',
+      credentialSource: 'codemux',
+    });
+  });
+
+  it('returns an explicit OpenCode configuration error when no model is configured', () => {
+    const result = resolveAgentProviderConfig({
+      agentKind: 'opencode',
+      config: {
+        ...config,
+        providers: [{ ...config.providers[0], models: [], default_model: '' }],
+        active_provider_id: 'claude-provider',
+      },
+    });
+
+    expect(result.model).toBeUndefined();
+    expect(result.configurationError).toContain('OpenCode');
+  });
 });
