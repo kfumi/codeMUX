@@ -34,6 +34,14 @@ describe('toolHeaderSummary', () => {
     expect(getToolDisplayName('ExitWorktree')).toBe('退出工作树');
   });
 
+  it('maps Codex collaboration tools to Chinese display names', () => {
+    expect(getToolDisplayName('spawn_agent')).toBe('启动子智能体');
+    expect(getToolDisplayName('send_input')).toBe('发送子智能体输入');
+    expect(getToolDisplayName('wait_agent')).toBe('等待子智能体');
+    expect(getToolDisplayName('close_agent')).toBe('关闭子智能体');
+    expect(getToolDisplayName('resume_agent')).toBe('恢复子智能体');
+  });
+
 
   it('maps lowercase OpenCode tool names to the existing Chinese display names', () => {
     expect(getToolDisplayName('bash')).toBe('运行命令');

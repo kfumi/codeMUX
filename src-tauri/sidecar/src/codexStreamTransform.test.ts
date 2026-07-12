@@ -82,6 +82,53 @@ describe('convertChatStreamToResponsesEvents', () => {
     expect(functionCallDone[0].arguments).toBe('{"path":"/tmp"}');
   });
 
+  it('emits a tool output item before the upstream stream completes', async () => {
+    let releaseUpstream: (() => void) | undefined;
+    const upstreamFinished = new Promise<void>((resolve) => {
+      releaseUpstream = resolve;
+    });
+    async function* chunks(): AsyncGenerator<ChatCompletionChunk> {
+      yield {
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'call_spawn_agent',
+              type: 'function',
+              function: {
+                name: 'spawn_agent',
+                arguments: '{"description":"Inspect the repository"}',
+              },
+            }],
+          },
+          finish_reason: 'tool_calls',
+        }],
+      };
+      await upstreamFinished;
+    }
+
+    const iterator = convertChatStreamToResponsesEvents(chunks(), IDS);
+    const events: Array<Record<string, unknown>> = [];
+    let toolDoneSeen = false;
+    for (let index = 0; index < 20; index++) {
+      const next = await iterator.next();
+      if (next.done) break;
+      events.push(next.value);
+      if (next.value.type === 'response.output_item.done' && (next.value.item as Record<string, unknown> | undefined)?.type === 'function_call') {
+        toolDoneSeen = true;
+        break;
+      }
+    }
+
+    expect(toolDoneSeen).toBe(true);
+    expect(events.at(-1)?.item).toMatchObject({
+      type: 'function_call',
+      call_id: 'call_spawn_agent',
+      name: 'spawn_agent',
+    });
+    releaseUpstream?.();
+    await iterator.return(undefined);
+  });
   it('unwraps MCP function names and preserves namespace on streamed function calls', async () => {
     const events = await collectEvents(convertChatStreamToResponsesEvents(makeChunks([
       {

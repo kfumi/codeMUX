@@ -209,6 +209,7 @@ async function handleRequest(
 
       const events: Array<Record<string, unknown>> = [];
       const toolCalls: StreamingToolCall[] = [];
+      const emittedToolCallIds = new Set<string>();
       let eventCount = 0;
       for await (const event of responsesEvents) {
         eventCount++;
@@ -232,6 +233,10 @@ async function handleRequest(
                 namespace: call.namespace,
                 arguments: call.arguments,
               });
+              if (!isInteractiveUserInputToolCall(call)) {
+                await emitToolUseEvent(call, parseJsonObject(call.arguments));
+                emittedToolCallIds.add(call.id);
+              }
             }
           }
         }
@@ -255,7 +260,7 @@ async function handleRequest(
 
       forwardResponsesSseEvents(res, events);
       proxyLog(`stream completed: ${eventCount} events forwarded`);
-      await emitToolUseEventsFromStream(toolCalls);
+      await emitToolUseEventsFromStream(toolCalls, emittedToolCallIds);
     } catch (error) {
       proxyLog(`streaming error: ${error instanceof Error ? error.message : String(error)}`);
       if (!res.headersSent) {
@@ -509,7 +514,10 @@ function logStreamingEvent(event: Record<string, unknown>, eventCount: number): 
   }
 }
 
-async function emitToolUseEventsFromStream(toolCalls: StreamingToolCall[]): Promise<void> {
+async function emitToolUseEventsFromStream(
+  toolCalls: StreamingToolCall[],
+  emittedToolCallIds: ReadonlySet<string> = new Set(),
+): Promise<void> {
   if (toolCalls.length === 0) {
     return;
   }
@@ -517,6 +525,9 @@ async function emitToolUseEventsFromStream(toolCalls: StreamingToolCall[]): Prom
   const { activeSessionId } = await import('./codexRuntime.js');
   proxyLog(`emitting ${toolCalls.length} tool_use events from stream, sessionId=${activeSessionId || '(empty)'}`);
   for (const tc of toolCalls) {
+    if (tc.id && emittedToolCallIds.has(tc.id)) {
+      continue;
+    }
     await emitToolUseEvent(tc, parseJsonObject(tc.arguments));
   }
 }

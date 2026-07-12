@@ -1320,6 +1320,70 @@ describe('CodexSessionRuntime', () => {
     }
   });
 
+  it('emits native Codex JSONL tool events into the active session', () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      (runtime as unknown as {
+        handleNativeSessionTailEvent: (sessionId: string, event: unknown) => void;
+      }).handleNativeSessionTailEvent('session-1', {
+        type: 'tool_use',
+        id: 'call-spawn',
+        name: 'spawn_agent',
+        input: { description: 'Inspect tests' },
+      });
+      (runtime as unknown as {
+        handleNativeSessionTailEvent: (sessionId: string, event: unknown) => void;
+      }).handleNativeSessionTailEvent('session-1', {
+        type: 'tool_result',
+        toolUseId: 'call-spawn',
+        content: 'completed',
+        isError: false,
+      });
+
+      const events = writes
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      expect(events).toEqual([
+        expect.objectContaining({
+          type: 'assistant',
+          session_id: 'session-1',
+          message: expect.objectContaining({
+            content: [
+              expect.objectContaining({
+                type: 'tool_use',
+                id: 'call-spawn',
+                name: 'spawn_agent',
+              }),
+            ],
+          }),
+        }),
+        expect.objectContaining({
+          type: 'user',
+          session_id: 'session-1',
+          message: expect.objectContaining({
+            content: [
+              expect.objectContaining({
+                type: 'tool_result',
+                tool_use_id: 'call-spawn',
+                content: 'completed',
+              }),
+            ],
+          }),
+        }),
+      ]);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
   it('emits Codex todo lists as state events instead of chat tool messages', () => {
     const writes: string[] = [];
     const stdoutSpy = vi

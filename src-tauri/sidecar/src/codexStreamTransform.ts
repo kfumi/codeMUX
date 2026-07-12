@@ -298,6 +298,7 @@ export async function* convertChatStreamToResponsesEvents(
   const thinkState: ThinkState = { mode: 'detecting', buffer: '' };
 
   const toolCalls = new Map<number, ChatStreamToolCall>();
+  const emittedToolCallIndexes = new Set<number>();
   let finishReason: string | null = null;
   let lastUsage: ChatCompletionChunk['usage'] = null;
 
@@ -428,6 +429,58 @@ export async function* convertChatStreamToResponsesEvents(
     itemsClosed = true;
   }
 
+  function* emitToolCallItems(): EventGenerator {
+    const baseOutputIndex = startedText ? textContentIndex + 1 : startedReasoning ? 1 : 0;
+    for (const [idx, tc] of toolCalls) {
+      if (emittedToolCallIndexes.has(idx)) continue;
+      emittedToolCallIndexes.add(idx);
+      const outputIndex = baseOutputIndex + idx;
+      const spec = opts.toolContext?.get(tc.name);
+      const isCustom = spec?.kind === 'custom';
+      const isToolSearch = spec?.kind === 'tool_search';
+      const buildItem = (status: 'in_progress' | 'completed', argsValue: string): Record<string, unknown> => {
+        if (isCustom) {
+          return {
+            type: 'custom_tool_call',
+            id: `ctc_${tc.id}`,
+            status,
+            call_id: tc.id,
+            name: spec?.name ?? tc.name,
+            input: status === 'completed' ? argsValue : '',
+          };
+        }
+        if (isToolSearch) {
+          return {
+            type: 'tool_search_call',
+            id: `tsc_${tc.id}`,
+            status,
+            call_id: tc.id,
+            name: 'tool_search',
+            arguments: argsValue,
+          };
+        }
+        return buildFunctionCallItem(tc, status, argsValue);
+      };
+      const deltaEventType = isCustom ? 'response.custom_tool_call_input.delta' : 'response.function_call_arguments.delta';
+      const doneEventType = isCustom ? 'response.custom_tool_call_input.done' : 'response.function_call_arguments.done';
+      yield { type: 'response.output_item.added', output_index: outputIndex, item: buildItem('in_progress', '') };
+      yield {
+        type: deltaEventType,
+        item_id: isCustom ? `ctc_${tc.id}` : isToolSearch ? `tsc_${tc.id}` : tc.id,
+        output_index: outputIndex,
+        content_index: 0,
+        delta: tc.arguments,
+      };
+      yield {
+        type: doneEventType,
+        item_id: isCustom ? `ctc_${tc.id}` : isToolSearch ? `tsc_${tc.id}` : tc.id,
+        output_index: outputIndex,
+        content_index: 0,
+        ...(isCustom ? { input: tc.arguments } : { arguments: tc.arguments }),
+      };
+      yield { type: 'response.output_item.done', output_index: outputIndex, item: buildItem('completed', tc.arguments) };
+    }
+  }
   // --- Main chunk processing loop ---
 
   for await (const chunk of chunks) {
@@ -543,6 +596,7 @@ export async function* convertChatStreamToResponsesEvents(
     // --- Finish reason: close all open items immediately ---
     if (finishReason) {
       yield* closeAllItems();
+      yield* emitToolCallItems();
     }
   }
 
@@ -551,72 +605,8 @@ export async function* convertChatStreamToResponsesEvents(
     yield* closeAllItems();
   }
 
-  // Emit tool call items with proper type based on toolContext.
-  const baseOutputIndex = startedText ? textContentIndex + 1 : startedReasoning ? 1 : 0;
-  for (const [idx, tc] of toolCalls) {
-    const outputIndex = baseOutputIndex + idx;
-    const spec = opts.toolContext?.get(tc.name);
-    const isCustom = spec?.kind === 'custom';
-    const isToolSearch = spec?.kind === 'tool_search';
-
-    // Build the item based on tool type
-    const buildItem = (status: 'in_progress' | 'completed', argsValue: string): Record<string, unknown> => {
-      if (isCustom) {
-        return {
-          type: 'custom_tool_call',
-          id: `ctc_${tc.id}`,
-          status,
-          call_id: tc.id,
-          name: spec?.name ?? tc.name,
-          input: status === 'completed' ? argsValue : '',
-        };
-      }
-      if (isToolSearch) {
-        return {
-          type: 'tool_search_call',
-          id: `tsc_${tc.id}`,
-          status,
-          call_id: tc.id,
-          name: 'tool_search',
-          arguments: argsValue,
-        };
-      }
-      return buildFunctionCallItem(tc, status, argsValue);
-    };
-
-    // Determine the delta event type
-    const deltaEventType = isCustom
-      ? 'response.custom_tool_call_input.delta'
-      : 'response.function_call_arguments.delta';
-    const doneEventType = isCustom
-      ? 'response.custom_tool_call_input.done'
-      : 'response.function_call_arguments.done';
-
-    yield {
-      type: 'response.output_item.added',
-      output_index: outputIndex,
-      item: buildItem('in_progress', ''),
-    };
-    yield {
-      type: deltaEventType,
-      item_id: isCustom ? `ctc_${tc.id}` : isToolSearch ? `tsc_${tc.id}` : tc.id,
-      output_index: outputIndex,
-      content_index: 0,
-      delta: tc.arguments,
-    };
-    yield {
-      type: doneEventType,
-      item_id: isCustom ? `ctc_${tc.id}` : isToolSearch ? `tsc_${tc.id}` : tc.id,
-      output_index: outputIndex,
-      content_index: 0,
-      ...(isCustom ? { input: tc.arguments } : { arguments: tc.arguments }),
-    };
-    yield {
-      type: 'response.output_item.done',
-      output_index: outputIndex,
-      item: buildItem('completed', tc.arguments),
-    };
-  }
+  // Emit any tool calls whose finish reason was omitted by the provider.
+  yield* emitToolCallItems();
 
   // Final completed response.
   const output: unknown[] = [];

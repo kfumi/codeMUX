@@ -40,6 +40,11 @@ const BUILT_IN_TOOL_DISPLAY_NAMES: Record<string, string> = {
   ExitWorktree: '退出工作树',
   WaitForMcpServers: '等待 MCP 服务',
   tool_search: '搜索工具',
+  spawn_agent: '启动子智能体',
+  send_input: '发送子智能体输入',
+  wait_agent: '等待子智能体',
+  close_agent: '关闭子智能体',
+  resume_agent: '恢复子智能体',
 };
 
 const BUILT_IN_TOOL_ALIASES: Record<string, string> = {

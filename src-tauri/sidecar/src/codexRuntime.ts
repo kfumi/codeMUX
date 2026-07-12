@@ -8,6 +8,7 @@ import {
 
 import type { SidecarCommand } from './types.js';
 import { readLatestCodexTotalTokenUsage } from './codexSessionUsage.js';
+import { CodexSessionEventTailer, type CodexSessionTailEvent } from './codexSessionEventTailer.js';
 import {
   buildAssistantEvent,
   buildCodexResultEvent,
@@ -61,6 +62,7 @@ type CodexSessionBootstrap = {
   apiKey?: string;
   upstreamBaseUrl?: string;
   runtimeBaseUrl?: string;
+  usesCompatProxy?: boolean;
   model?: string;
   reasoningEffort?: string;
   codexNeedsProxy?: boolean;
@@ -158,6 +160,10 @@ export class CodexSessionRuntime {
   private streamingItemState = new Map<string, { kind: 'text' | 'thinking'; text: string }>();
   private todoListState = new Map<string, string>();
   private emittedToolUseIds = new Set<string>();
+  private emittedToolResultIds = new Set<string>();
+  private nativeSessionEventTailer: CodexSessionEventTailer | null = null;
+  private nativeSessionEventTailerTimer: ReturnType<typeof setInterval> | null = null;
+  private nativeSessionEventTailerThreadId: string | null = null;
   private blockedPlanMutationItemIds = new Set<string>();
   private activeCompactItemIds = new Set<string>();
   private emittedCompactItemIds = new Set<string>();
@@ -208,6 +214,7 @@ export class CodexSessionRuntime {
     this.configFingerprint = nextFingerprint;
 
     let runtimeBaseUrl = requestedConfig.upstreamBaseUrl;
+    let usesCompatProxy = false;
     // Always go through proxyManager — it checks fingerprint and restarts
     // the proxy when the upstream config (apiKey/baseUrl) changes.
     if (
@@ -227,6 +234,7 @@ export class CodexSessionRuntime {
       );
       if (result) {
         runtimeBaseUrl = proxyManager.getBaseUrl() ?? runtimeBaseUrl;
+        usesCompatProxy = true;
         process.stderr.write(
           `[codex] Using chat-compat proxy upstream=${requestedConfig.upstreamBaseUrl} local=${runtimeBaseUrl}\n`,
         );
@@ -236,6 +244,7 @@ export class CodexSessionRuntime {
     this.config = {
       ...requestedConfig,
       runtimeBaseUrl,
+      usesCompatProxy,
       collaborationPolicy,
     };
     this.applyActivePermissionState({
@@ -364,6 +373,10 @@ export class CodexSessionRuntime {
     this.abortController = new AbortController();
     activeAbortController = this.abortController;
 
+    if (this.config.agentSessionId && !this.config.usesCompatProxy) {
+      await this.startNativeSessionEventTailer(sessionId, this.config.agentSessionId, true);
+    }
+
     const collaborationPolicy = this.config.collaborationPolicy
       ?? resolveCodexCollaborationPolicy({
         planMode: this.config.planMode,
@@ -490,7 +503,7 @@ export class CodexSessionRuntime {
       this.abortController = null;
       await cleanupTempImageFiles(imagePaths);
       if (!retryingWithoutImages) {
-        this.finishTurn();
+        await this.finishTurn();
       }
     }
   }
@@ -500,7 +513,7 @@ export class CodexSessionRuntime {
     // Abort the signal first for immediate effect on in-flight requests.
     this.abortController?.abort();
     // Emit done so the frontend clears isRunning.
-    this.finishTurn();
+    await this.finishTurn();
     // Destroy the SDK client and thread to stop the agentic loop.
     // The session will be re-established on the next ensure_session call.
     await this.teardownClient();
@@ -611,6 +624,7 @@ export class CodexSessionRuntime {
           agent_kind: 'codex',
           agent_session_id: event.thread_id,
         });
+        await this.startNativeSessionEventTailer(sessionId, event.thread_id, false);
         return;
       }
       case 'item.started':
@@ -776,6 +790,9 @@ export class CodexSessionRuntime {
     });
     if (eventType === 'item.started') {
       if (toolUse) {
+        if (this.emittedToolUseIds.has(item.id)) {
+          return;
+        }
         this.emittedToolUseIds.add(item.id);
         emit(buildAssistantEvent({
           sessionId,
@@ -801,6 +818,10 @@ export class CodexSessionRuntime {
         const result = buildCodexToolResultContent(item);
         if (result) {
           const isError = isCodexToolResultError(item);
+          if (this.emittedToolResultIds.has(item.id)) {
+            return;
+          }
+          this.emittedToolResultIds.add(item.id);
           emit(buildToolResultEvent({
             sessionId,
             toolUseId: item.id,
@@ -817,9 +838,82 @@ export class CodexSessionRuntime {
     }
   }
 
-  private finishTurn(): void {
+  private async startNativeSessionEventTailer(
+    sessionId: string,
+    threadId: string,
+    skipExisting: boolean,
+  ): Promise<void> {
+    if (this.config?.usesCompatProxy || this.nativeSessionEventTailerThreadId === threadId) {
+      return;
+    }
+
+    this.stopNativeSessionEventTailer();
+    const tailer = new CodexSessionEventTailer({
+      threadId,
+      skipExisting,
+      onEvent: (event) => this.handleNativeSessionTailEvent(sessionId, event),
+    });
+    this.nativeSessionEventTailer = tailer;
+    this.nativeSessionEventTailerThreadId = threadId;
+    await tailer.start();
+    this.nativeSessionEventTailerTimer = setInterval(() => {
+      void tailer.pollOnce().catch((error) => {
+        process.stderr.write(`[codex] Failed to tail native session events: ${String(error)}\n`);
+      });
+    }, 100);
+    this.nativeSessionEventTailerTimer.unref?.();
+  }
+
+  private stopNativeSessionEventTailer(): void {
+    if (this.nativeSessionEventTailerTimer) {
+      clearInterval(this.nativeSessionEventTailerTimer);
+    }
+    this.nativeSessionEventTailer = null;
+    this.nativeSessionEventTailerTimer = null;
+    this.nativeSessionEventTailerThreadId = null;
+  }
+
+  private async flushAndStopNativeSessionEventTailer(): Promise<void> {
+    const tailer = this.nativeSessionEventTailer;
+    if (tailer) {
+      try {
+        await tailer.pollOnce();
+      } catch (error) {
+        process.stderr.write(`[codex] Failed to flush native session events: ${String(error)}\n`);
+      }
+    }
+    this.stopNativeSessionEventTailer();
+  }
+
+  private handleNativeSessionTailEvent(sessionId: string, event: CodexSessionTailEvent): void {
+    if (event.type === 'tool_use') {
+      if (this.emittedToolUseIds.has(event.id)) {
+        return;
+      }
+      this.emittedToolUseIds.add(event.id);
+      emit(buildAssistantEvent({
+        sessionId,
+        content: [{ type: 'tool_use', id: event.id, name: event.name, input: event.input }],
+      }));
+      return;
+    }
+
+    if (this.emittedToolResultIds.has(event.toolUseId)) {
+      return;
+    }
+    this.emittedToolResultIds.add(event.toolUseId);
+    emit(buildToolResultEvent({
+      sessionId,
+      toolUseId: event.toolUseId,
+      content: event.content,
+      isError: event.isError,
+    }));
+  }
+  private async finishTurn(): Promise<void> {
+    await this.flushAndStopNativeSessionEventTailer();
     this.streamingItemState.clear();
     this.emittedToolUseIds.clear();
+    this.emittedToolResultIds.clear();
     this.blockedPlanMutationItemIds.clear();
     this.activeCompactItemIds.clear();
     emit({ type: 'sidecar_query_done' });
@@ -831,6 +925,8 @@ export class CodexSessionRuntime {
     this.streamingItemState.clear();
     this.todoListState.clear();
     this.emittedToolUseIds.clear();
+    this.emittedToolResultIds.clear();
+    await this.flushAndStopNativeSessionEventTailer();
     this.blockedPlanMutationItemIds.clear();
     this.activeCompactItemIds.clear();
     this.emittedCompactItemIds.clear();
