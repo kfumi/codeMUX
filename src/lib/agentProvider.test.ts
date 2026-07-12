@@ -165,4 +165,63 @@ describe('resolveAgentProviderConfig', () => {
       runtimeModel: 'claude-opus-4-1[1m]',
     });
   });
+
+  it('maps the selected CodeMUX provider into the OpenCode runtime configuration without exposing the credential', () => {
+    expect(
+      resolveAgentProviderConfig({
+        agentKind: 'opencode',
+        config,
+      }),
+    ).toMatchObject({
+      provider: expect.objectContaining({ id: 'codex-provider' }),
+      providerName: 'codemux-openai',
+      apiKey: 'openai-key',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'o4-mini',
+      runtimeModel: 'o4-mini',
+      credentialSource: 'codemux',
+    });
+  });
+
+  it('maps an Anthropic-only CodeMUX provider to the stable OpenCode anthropic key', () => {
+    const result = resolveAgentProviderConfig({
+      agentKind: 'opencode',
+      config: {
+        ...config,
+        providers: [{ ...config.providers[0], openai_base_url: '' }],
+        active_provider_id: 'claude-provider',
+      },
+    });
+
+    expect(result.providerName).toBe('codemux-anthropic');
+    expect(result.baseUrl).toBe('https://api.anthropic.com');
+  });
+
+  it('does not use the CodeMUX provider UUID as an OpenCode key when no endpoint is configured', () => {
+    const result = resolveAgentProviderConfig({
+      agentKind: 'opencode',
+      config: {
+        ...config,
+        providers: [{ ...config.providers[0], openai_base_url: '', anthropic_base_url: '' }],
+        active_provider_id: 'claude-provider',
+      },
+    });
+
+    expect(result.providerName).toBeUndefined();
+    expect(result.configurationError).toContain('base URL');
+  });
+
+  it('returns an explicit OpenCode configuration error when no model is configured', () => {
+    const result = resolveAgentProviderConfig({
+      agentKind: 'opencode',
+      config: {
+        ...config,
+        providers: [{ ...config.providers[0], models: [], default_model: '' }],
+        active_provider_id: 'claude-provider',
+      },
+    });
+
+    expect(result.model).toBeUndefined();
+    expect(result.configurationError).toContain('OpenCode');
+  });
 });

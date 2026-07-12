@@ -213,12 +213,14 @@ export const agentApi = {
     model?: string,
     reasoningEffort?: ReasoningEffort,
     codexNeedsProxy?: boolean,
+    provider?: string,
+    credentialSource?: 'codemux' | 'environment' | 'opencode' | 'none',
   ): Promise<void> => {
     if (onEvent) {
       agentEventListeners.set(sessionId, onEvent);
     }
     const channel = getAgentChannel(sessionId);
-    return invokeLogged('ensure_agent_session', { sessionId, cwd, channel, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy });
+    return invokeLogged('ensure_agent_session', { sessionId, cwd, channel, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy, provider, credentialSource });
   },
   sendInput: (
     sessionId: string,
@@ -235,16 +237,23 @@ export const agentApi = {
     model?: string,
     reasoningEffort?: ReasoningEffort,
     codexNeedsProxy?: boolean,
+    provider?: string | AgentInputPayload,
+    credentialSource?: 'codemux' | 'environment' | 'opencode' | 'none',
     inputPayload?: AgentInputPayload,
   ): Promise<void> => {
+    const resolvedProvider = typeof provider === 'string' ? provider : undefined;
+    const resolvedInputPayload = typeof provider === 'object' ? provider : inputPayload;
     const channel = createAgentChannel(sessionId, onEvent);
-    return invokeLogged('start_agent_session', { sessionId, prompt, cwd, channel, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy, inputPayload });
+    return invokeLogged('start_agent_session', { sessionId, prompt, cwd, channel, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy, provider: resolvedProvider, credentialSource, inputPayload: resolvedInputPayload });
   },
   interrupt: (sessionId: string): Promise<void> => invokeLogged('interrupt_agent_session', { sessionId }),
   shutdown: (sessionId: string): Promise<void> => invokeLogged('shutdown_agent', { sessionId }),
   resetSession: (sessionId: string): Promise<void> => invokeLogged('reset_agent_session', { sessionId }),
   sendToolResponse: (sessionId: string, toolUseId: string, response: unknown): Promise<void> =>
     invokeLogged('send_tool_response', { sessionId, toolUseId, response }),
+
+  respondToAgentPermission: (sessionId: string, requestId: string, response: 'once' | 'always' | 'reject'): Promise<void> =>
+    invokeLogged('respond_to_agent_permission', { sessionId, requestId, response }),
   /** Delete all Claude Code session files (history, file-history, etc.) for an app session. */
   deleteClaudeSessionFiles: (appSessionId: string): Promise<string[]> =>
     invokeLogged('delete_claude_session_files', { appSessionId }),
@@ -257,6 +266,10 @@ export const agentApi = {
   /** Load session events from Codex's JSONL session file. */
   loadCodexSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_codex_session_events', { appSessionId }),
+  loadOpenCodeSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
+    invokeLogged('load_opencode_session_events', { appSessionId }),
+  deleteOpenCodeSession: (appSessionId: string): Promise<void> =>
+    invokeLogged('delete_opencode_session', { appSessionId }),
   /** Load latest token usage snapshot directly from the agent history file. */
   loadLatestTokenUsage: (
     appSessionId: string,

@@ -42,6 +42,7 @@ import { buildAssistantResultTargetMap } from './assistantResultTargets';
 import { RunningElapsedTimer, formatElapsed } from './running-elapsed';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 import { CODEMUX_FORMATTER, DIRECTIVE_CHIP } from './CodeMuxComposer';
+import { type ThreadTokenUsage } from '../contextUsage';
 
 type CodeMuxThreadProps = {
   sessionId: string;
@@ -70,6 +71,8 @@ type CodeMuxThreadRenderContextValue = {
   onToggleExpandedTurn: (turnKey: string) => void;
   toolDurations: Record<string, number>;
   resultStatsByAssistantIndex: Record<number, MessageFooterStats>;
+  latestFinalAssistantIndex: number | null;
+  latestFinalAssistantFooterStats?: MessageFooterStats;
 };
 
 const EMPTY_EVENTS: AgentMessage[] = [];
@@ -96,6 +99,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
+  const tokenUsage = useAgentStore((state) => state.tokenUsageBySession[sessionId] ?? null);
   const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
@@ -182,6 +186,22 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
 
   const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
   const latestRewindableUserIndex = useMemo(() => findLatestRewindableUserIndex(events), [events]);
+  const latestFinalAssistantIndex = useMemo(() => {
+    let latestIndex: number | null = null;
+    for (const assistantIndex of buildAssistantResultTargetMap(events).keys()) {
+      if (latestIndex == null || assistantIndex > latestIndex) {
+        latestIndex = assistantIndex;
+      }
+    }
+    return latestIndex;
+  }, [events]);
+  const latestFinalAssistantFooterStats = useMemo(
+    () => buildLatestFinalAssistantFooterStats(
+      latestFinalAssistantIndex != null ? resultStatsByAssistantIndex[latestFinalAssistantIndex] : undefined,
+      tokenUsage,
+    ),
+    [latestFinalAssistantIndex, resultStatsByAssistantIndex, tokenUsage],
+  );
 
   const collapseInfoByEventIndex = useMemo(
     () => buildAssistantCollapseInfoMap(events, eventTimestamps),
@@ -197,6 +217,8 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     onToggleExpandedTurn: toggleExpandedTurn,
     toolDurations,
     resultStatsByAssistantIndex,
+    latestFinalAssistantIndex,
+    latestFinalAssistantFooterStats,
   }), [
     sessionId,
     compactAiOutput,
@@ -207,6 +229,8 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     toggleExpandedTurn,
     toolDurations,
     resultStatsByAssistantIndex,
+    latestFinalAssistantIndex,
+    latestFinalAssistantFooterStats,
   ]);
 
   return (
@@ -302,6 +326,8 @@ function CodeMuxAssistantMessage() {
     onToggleExpandedTurn,
     toolDurations,
     resultStatsByAssistantIndex,
+    latestFinalAssistantIndex,
+    latestFinalAssistantFooterStats,
   } = useCodeMuxThreadRenderContext();
   return (
     <AssistantLikeMessage
@@ -313,6 +339,8 @@ function CodeMuxAssistantMessage() {
       onToggleExpandedTurn={onToggleExpandedTurn}
       toolDurations={toolDurations}
       resultStatsByAssistantIndex={resultStatsByAssistantIndex}
+      latestFinalAssistantIndex={latestFinalAssistantIndex}
+      latestFinalAssistantFooterStats={latestFinalAssistantFooterStats}
     />
   );
 }
@@ -864,6 +892,8 @@ function AssistantLikeMessage({
   onToggleExpandedTurn,
   toolDurations,
   resultStatsByAssistantIndex,
+  latestFinalAssistantIndex,
+  latestFinalAssistantFooterStats,
 }: {
   message: MessageState;
   sessionId: string;
@@ -873,6 +903,8 @@ function AssistantLikeMessage({
   onToggleExpandedTurn: (turnKey: string) => void;
   toolDurations: Record<string, number>;
   resultStatsByAssistantIndex: Record<number, MessageFooterStats>;
+  latestFinalAssistantIndex: number | null;
+  latestFinalAssistantFooterStats?: MessageFooterStats;
 }) {
   if (message.content.length === 0) {
     return null;
@@ -888,8 +920,12 @@ function AssistantLikeMessage({
   }
 
   const sourceTimestamp = getSourceTimestamp(message);
-  const footerStats = sourceEventIndex != null ? resultStatsByAssistantIndex[sourceEventIndex] : undefined;
   const isFinal = message.metadata.custom?.isFinalAssistantMessage === true;
+  const resultFooterStats = sourceEventIndex != null ? resultStatsByAssistantIndex[sourceEventIndex] : undefined;
+  const isLatestFinalMessage = latestFinalAssistantIndex != null && getSourceEventIndices(message).includes(latestFinalAssistantIndex);
+  const footerStats = isFinal && isLatestFinalMessage
+    ? (latestFinalAssistantFooterStats ?? resultFooterStats)
+    : resultFooterStats;
   const shouldRenderFooter =
     isFinal && message.metadata.custom?.sourceRole !== 'system' && (footerStats !== undefined || sourceTimestamp !== undefined);
 
@@ -1340,16 +1376,32 @@ function incrementAssistantResultStatsMap(
   events: AgentMessage[],
   fromIndex: number,
 ): Record<number, MessageFooterStats> {
-  const statsMap = { ...prevStats };
   const resultIndexByAssistantIndex = buildAssistantResultTargetMap(events);
+  const nextAssistantIndices = new Set<number>();
 
   for (const [assistantIndex, resultIndex] of resultIndexByAssistantIndex) {
-    if (resultIndex < fromIndex) {
+    if (events[resultIndex]?.kind === 'result') {
+      nextAssistantIndices.add(assistantIndex);
+    }
+  }
+
+  const prevAssistantIndices = Object.keys(prevStats).map((key) => Number(key));
+  if (
+    prevAssistantIndices.length !== nextAssistantIndices.size ||
+    prevAssistantIndices.some((assistantIndex) => !nextAssistantIndices.has(assistantIndex))
+  ) {
+    return buildAssistantResultStatsMap(events);
+  }
+
+  const statsMap = { ...prevStats };
+
+  for (const [assistantIndex, resultIndex] of resultIndexByAssistantIndex) {
+    const event = events[resultIndex];
+    if (event?.kind !== 'result') {
       continue;
     }
 
-    const event = events[resultIndex];
-    if (event?.kind !== 'result') {
+    if (resultIndex < fromIndex && statsMap[assistantIndex] !== undefined) {
       continue;
     }
 
@@ -1375,6 +1427,27 @@ export function buildAssistantResultStatsMap(
   }
 
   return statsMap;
+}
+
+function buildLatestFinalAssistantFooterStats(
+  resultStats: MessageFooterStats | undefined,
+  tokenUsage: ThreadTokenUsage | null,
+): MessageFooterStats | undefined {
+  if (!resultStats && !tokenUsage) {
+    return undefined;
+  }
+
+  if (!tokenUsage) {
+    return resultStats;
+  }
+
+  return {
+    ...resultStats,
+    inputTokens: Math.max(tokenUsage.last.inputTokens, 0),
+    outputTokens: Math.max(tokenUsage.last.outputTokens, 0),
+    cacheReadTokens: Math.max(tokenUsage.last.cachedInputTokens, 0),
+    cacheCreationTokens: 0,
+  };
 }
 
 function buildFooterStatsFromResultEvent(

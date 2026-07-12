@@ -245,5 +245,5 @@ function isClaudePlanFile(filePath: string): boolean {
 function isSidecarPermissionConfig(value: unknown): value is SidecarPermissionConfig {
   if (!value || typeof value !== 'object') return false;
   const raw = value as Record<string, unknown>;
-  return raw.kind === 'claude_code' || raw.kind === 'codex';
+  return raw.kind === 'claude_code' || raw.kind === 'codex' || raw.kind === 'opencode';
 }

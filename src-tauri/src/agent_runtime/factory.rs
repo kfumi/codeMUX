@@ -1,5 +1,6 @@
 use super::claude_code::ClaudeCodeRuntime;
 use super::codex::CodexRuntime;
+use super::opencode::OpenCodeRuntime;
 use super::types::AgentRuntime;
 
 /// Resolve a runtime instance for the given agent_kind string.
@@ -7,6 +8,7 @@ use super::types::AgentRuntime;
 pub fn runtime_for_agent_kind(agent_kind: &str) -> Box<dyn AgentRuntime> {
     match agent_kind {
         "codex" => Box::new(CodexRuntime),
+        "opencode" => Box::new(OpenCodeRuntime),
         _ => Box::new(ClaudeCodeRuntime),
     }
 }
@@ -55,6 +57,9 @@ mod tests {
 
         let codex = runtime_for_agent_kind("codex");
         assert_eq!(codex.kind_name(), "codex");
+
+        let opencode = runtime_for_agent_kind("opencode");
+        assert_eq!(opencode.kind_name(), "opencode");
     }
 
     #[test]
@@ -64,5 +69,12 @@ mod tests {
 
         let runtime = runtime_for_agent_kind("");
         assert_eq!(runtime.kind_name(), "claude_code");
+    }
+
+    #[test]
+    fn reports_missing_session_instead_of_returning_a_claude_runtime() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        let error = session_runtime_kind_name(&db, "missing-session").unwrap_err();
+        assert!(error.contains("Session not found missing-session"));
     }
 }

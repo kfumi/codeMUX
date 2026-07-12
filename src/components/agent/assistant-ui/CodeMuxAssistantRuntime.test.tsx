@@ -252,6 +252,75 @@ const completedTurnEvents: AgentMessage[] = [
   },
 ];
 
+const mixedFooterStatsEvents: AgentMessage[] = [
+  { kind: 'user', data: { content: 'first request' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-history-final',
+      session_id: 'session-footer-snapshot',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Earlier answer.' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'result',
+    data: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      uuid: 'result-history-final',
+      session_id: 'session-footer-snapshot',
+      duration_ms: 1_000,
+      duration_api_ms: 0,
+      num_turns: 1,
+      result: '',
+      usage: {
+        input_tokens: 10,
+        output_tokens: 20,
+        cache_read_input_tokens: 0,
+      },
+    },
+  },
+  { kind: 'user', data: { content: 'latest request' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-latest-final',
+      session_id: 'session-footer-snapshot',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Latest answer.' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'result',
+    data: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      uuid: 'result-latest-final',
+      session_id: 'session-footer-snapshot',
+      duration_ms: 2_000,
+      duration_api_ms: 0,
+      num_turns: 1,
+      result: '',
+      usage: {
+        input_tokens: 30,
+        output_tokens: 40,
+        cache_read_input_tokens: 10,
+      },
+    },
+  },
+];
+
 const proposedPlanFinalEvents: AgentMessage[] = [
   { kind: 'user', data: { content: '实现一个贪吃蛇程序' } },
   {
@@ -566,6 +635,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-image-only': imageOnlyUserEvents,
         'session-image-text': imageAndTextUserEvents,
         'session-completed-turn': completedTurnEvents,
+        'session-footer-snapshot': mixedFooterStatsEvents,
         'session-plan-final': proposedPlanFinalEvents,
         'session-plan-non-final': proposedPlanNonFinalEvents,
         'session-nav': navigationTurnEvents,
@@ -581,6 +651,35 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
           Date.parse('2026-06-28T10:01:13Z'),
           Date.parse('2026-06-28T10:01:13Z'),
         ],
+        'session-footer-snapshot': [
+          Date.parse('2026-06-29T10:00:00Z'),
+          Date.parse('2026-06-29T10:00:05Z'),
+          Date.parse('2026-06-29T10:00:05Z'),
+          Date.parse('2026-06-29T10:02:00Z'),
+          Date.parse('2026-06-29T10:02:08Z'),
+          Date.parse('2026-06-29T10:02:08Z'),
+        ],
+      },
+      tokenUsageBySession: {
+        'session-footer-snapshot': {
+          total: {
+            totalTokens: 205,
+            inputTokens: 80,
+            cachedInputTokens: 120,
+            outputTokens: 5,
+            reasoningOutputTokens: 0,
+          },
+          last: {
+            totalTokens: 205,
+            inputTokens: 80,
+            cachedInputTokens: 120,
+            outputTokens: 5,
+            reasoningOutputTokens: 0,
+          },
+          modelContextWindow: 258_400,
+          contextUsageSource: 'history_file',
+          contextUsageFreshness: 'live_synced',
+        },
       },
       isRunning: {},
       error: {},
@@ -677,6 +776,151 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(row?.className).toContain('group/message-row');
     expect(footer?.className).toContain('opacity-0');
     expect(footer?.className).toContain('group-hover/message-row:opacity-100');
+  });
+
+  it('uses the refreshed session token snapshot only for the latest final assistant footer', () => {
+    render(<Harness sessionId="session-footer-snapshot" />);
+
+    const earlierRow = screen.getByText('Earlier answer.').closest('[data-message-row]');
+    const latestRow = screen.getByText('Latest answer.').closest('[data-message-row]');
+
+    expect(earlierRow?.textContent).toContain('10+20 token');
+    expect(earlierRow?.textContent).not.toContain('缓存命中');
+
+    expect(latestRow?.textContent).toContain('80+5 token');
+    expect(latestRow?.textContent).toContain('缓存命中 60%');
+    expect(latestRow?.textContent).not.toContain('30+40 token');
+    expect(latestRow?.textContent).not.toContain('缓存命中 25%');
+  });
+
+  it('binds final footer stats to trailing text after a same-turn tool-only replay', async () => {
+    const sessionId = 'session-footer-rebound';
+    const initialEvents: AgentMessage[] = [
+      { kind: 'user', data: { content: 'check latest version' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-initial',
+          session_id: sessionId,
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'package.json' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-initial',
+          session_id: sessionId,
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: '1.0.0' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'result-footer-rebound',
+          session_id: sessionId,
+          duration_ms: 1_000,
+          duration_api_ms: 0,
+          num_turns: 1,
+          result: '',
+          usage: {
+            input_tokens: 1,
+            output_tokens: 2,
+          },
+        },
+      },
+    ];
+
+    useAgentStore.setState((state) => ({
+      events: {
+        ...state.events,
+        [sessionId]: initialEvents,
+      },
+      eventTimestamps: {
+        ...state.eventTimestamps,
+        [sessionId]: [1, 2, 3, 4],
+      },
+    }));
+
+    const { container } = render(<Harness sessionId={sessionId} />);
+
+    act(() => {
+      useAgentStore.setState((state) => ({
+        events: {
+          ...state.events,
+          [sessionId]: [
+            ...initialEvents,
+            {
+              kind: 'assistant',
+              data: {
+                type: 'assistant',
+                uuid: 'assistant-tool-replay',
+                session_id: sessionId,
+                message: {
+                  role: 'assistant',
+                  content: [{ type: 'tool_use', id: 'tool-2', name: 'Read', input: { file_path: 'README.md' } }],
+                },
+                parent_tool_use_id: null,
+              },
+            },
+            {
+              kind: 'tool_result',
+              data: {
+                type: 'user',
+                uuid: 'tool-result-replay',
+                session_id: sessionId,
+                message: {
+                  role: 'user',
+                  content: [{ type: 'tool_result', tool_use_id: 'tool-2', content: 'docs' }],
+                },
+                parent_tool_use_id: null,
+              },
+            },
+            {
+              kind: 'assistant',
+              data: {
+                type: 'assistant',
+                uuid: 'assistant-final-text',
+                session_id: sessionId,
+                message: {
+                  role: 'assistant',
+                  content: [{ type: 'text', text: 'Latest version is 1.0.0.' }],
+                },
+                parent_tool_use_id: null,
+              },
+            },
+          ],
+        },
+        eventTimestamps: {
+          ...state.eventTimestamps,
+          [sessionId]: [1, 2, 3, 4, 5, 6, 7],
+        },
+      }));
+    });
+
+    const finalMessageText = await screen.findByText('Latest version is 1.0.0.');
+    const finalMessageRow = finalMessageText.closest('[data-message-row]');
+    const toolGroupRow = container.querySelector('[data-slot="tool-group-root"]')?.closest('[data-message-row]');
+
+    await waitFor(() => {
+      expect(within(finalMessageRow as HTMLElement).getByText(/1\.0s/)).toBeTruthy();
+    });
+    expect(within(finalMessageRow as HTMLElement).getByText(/1\+2 token/)).toBeTruthy();
+    expect(toolGroupRow).toBeTruthy();
+    expect(within(toolGroupRow as HTMLElement).queryByText(/1\.0s/)).toBeNull();
+    expect(within(toolGroupRow as HTMLElement).queryByText(/1\+2 token/)).toBeNull();
   });
 
   it('renders the reasoning trigger like the native assistant-ui component', () => {

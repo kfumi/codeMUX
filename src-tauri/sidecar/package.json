@@ -10,7 +10,9 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.169",
     "@openai/codex-sdk": "^0.139.0",
-    "codemux": "file:../.."
+    "@opencode-ai/sdk": "1.17.18",
+    "codemux": "file:../..",
+    "opencode-ai": "1.17.18"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

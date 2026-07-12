@@ -34,6 +34,30 @@ describe('toolHeaderSummary', () => {
     expect(getToolDisplayName('ExitWorktree')).toBe('退出工作树');
   });
 
+
+  it('maps lowercase OpenCode tool names to the existing Chinese display names', () => {
+    expect(getToolDisplayName('bash')).toBe('运行命令');
+    expect(getToolDisplayName('read')).toBe('读取文件');
+    expect(getToolDisplayName('write')).toBe('写入文件');
+    expect(getToolDisplayName('edit')).toBe('编辑文件');
+    expect(getToolDisplayName('ls')).toBe('列目录');
+    expect(getToolDisplayName('grep')).toBe('搜索文本');
+    expect(getToolDisplayName('glob')).toBe('匹配文件');
+  });
+
+  it('uses lowercase OpenCode aliases for header summaries', () => {
+    const bashSummary = getToolHeaderSummary('bash', { command: 'pwd', cwd: 'D:/project/ai-code/codeMUX' });
+    expect(bashSummary.displayName).toBe('运行命令');
+    expect(bashSummary.text).toBe('pwd');
+    expect(getDisplayableArgs({ command: 'pwd', cwd: 'D:/project/ai-code/codeMUX' }, bashSummary.consumedKeys)).toBeNull();
+
+    const readInput = { file_path: 'src/components/agent/toolHeaderSummary.ts', offset: 0 };
+    const readSummary = getToolHeaderSummary('read', readInput);
+    expect(readSummary.displayName).toBe('读取文件');
+    expect(readSummary.text).toBe('toolHeaderSummary.ts');
+    expect(getDisplayableArgs(readInput, readSummary.consumedKeys)).toEqual({ offset: 0 });
+  });
+
   it('uses the MCP server name as the display name without the mcp prefix or method name', () => {
     const summary = getToolHeaderSummary('mcp__context7__query_docs', {
       libraryId: '/reactjs/react.dev',

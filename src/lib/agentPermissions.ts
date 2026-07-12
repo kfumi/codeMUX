@@ -5,6 +5,7 @@ export type AgentPlanMode = 'off' | 'on';
 export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk' | 'bypassPermissions';
 export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 export type CodexApprovalPolicy = 'untrusted' | 'on-request' | 'never';
+export type OpenCodePermissionMode = 'full_access';
 
 export type ClaudePermissionConfig = {
   kind: 'claude_code';
@@ -18,7 +19,12 @@ export type CodexPermissionConfig = {
   networkAccessEnabled: boolean;
 };
 
-export type AgentPermissionConfig = ClaudePermissionConfig | CodexPermissionConfig;
+export type OpenCodePermissionConfig = {
+  kind: 'opencode';
+  permissionMode: OpenCodePermissionMode;
+};
+
+export type AgentPermissionConfig = ClaudePermissionConfig | CodexPermissionConfig | OpenCodePermissionConfig;
 
 const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = [
   'default',
@@ -46,6 +52,10 @@ const CODEX_PLAN_MODE_PERMISSIONS: Omit<CodexPermissionConfig, 'kind'> = {
 };
 
 export function buildDefaultPermissionConfig(agentKind: AgentKind): AgentPermissionConfig {
+  if (agentKind === 'opencode') {
+    return { kind: 'opencode', permissionMode: 'full_access' };
+  }
+
   if (agentKind === 'codex') {
     return { kind: 'codex', ...CODEX_DEFAULT_PERMISSIONS };
   }
@@ -60,6 +70,10 @@ export function mapExecutionModeToPermissionConfig(
   agentKind: AgentKind,
   executionMode: AgentExecutionMode,
 ): AgentPermissionConfig {
+  if (agentKind === 'opencode') {
+    return { kind: 'opencode', permissionMode: 'full_access' };
+  }
+
   if (agentKind === 'codex') {
     switch (executionMode) {
       case 'plan':
@@ -92,6 +106,9 @@ export function resolveEffectivePermissionConfig(
   planMode: AgentPlanMode,
 ): AgentPermissionConfig {
   const normalized = serializePermissionConfig(agentKind, config);
+  if (agentKind === 'opencode') {
+    return { kind: 'opencode', permissionMode: 'full_access' };
+  }
   if (agentKind === 'codex' && planMode === 'on') {
     return { kind: 'codex', ...CODEX_PLAN_MODE_PERMISSIONS };
   }
@@ -111,6 +128,9 @@ export function serializePermissionConfig(agentKind: AgentKind, value: unknown):
   }
 
   const raw = value as Record<string, unknown>;
+  if (agentKind === 'opencode') {
+    return { kind: 'opencode', permissionMode: 'full_access' };
+  }
   if (agentKind === 'codex') {
     return {
       kind: 'codex',

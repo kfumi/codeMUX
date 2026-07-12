@@ -1,4 +1,5 @@
-import { AlertTriangle } from 'lucide-react';
+import { useState } from 'react';
+import { AlertTriangle, Loader2 } from 'lucide-react';
 
 import { Button } from './button';
 import {
@@ -18,7 +19,8 @@ interface ConfirmDialogProps {
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: 'default' | 'destructive';
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
+  loading?: boolean;
   overlayClassName?: string;
 }
 
@@ -31,11 +33,21 @@ export function ConfirmDialog({
   cancelLabel = '取消',
   variant = 'default',
   onConfirm,
+  loading = false,
   overlayClassName,
 }: ConfirmDialogProps) {
-  const handleConfirm = () => {
-    onConfirm();
-    onOpenChange(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isLoading = loading || isSubmitting;
+
+  const handleConfirm = async () => {
+    if (isLoading) return;
+    setIsSubmitting(true);
+    try {
+      await onConfirm();
+      onOpenChange(false);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -61,6 +73,7 @@ export function ConfirmDialog({
             variant="ghost"
             size="sm"
             onClick={() => onOpenChange(false)}
+            disabled={isLoading}
             className="h-8 px-3.5 text-[13px]"
           >
             {cancelLabel}
@@ -68,10 +81,12 @@ export function ConfirmDialog({
           <Button
             variant={variant === 'destructive' ? 'destructive' : 'default'}
             size="sm"
-            onClick={handleConfirm}
-            className="h-8 px-3.5 text-[13px]"
+            onClick={() => void handleConfirm()}
+            disabled={isLoading}
+            className="h-8 gap-1.5 px-3.5 text-[13px]"
           >
-            {confirmLabel}
+            {isLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {isLoading ? '正在删除…' : confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -26,6 +26,8 @@ import type {
   AgentToolResult,
   AgentSystemMessage,
   AgentResultMessage,
+  AgentPermissionRequest,
+  AgentPermissionResponse,
   AgentUserMessageLocator,
   SidecarReadyEvent,
   SidecarErrorEvent,
@@ -52,6 +54,7 @@ export type AgentMessage =
   | { kind: 'api_retry'; data: { attempt: number; max_retries: number; retry_delay_ms: number; error_status: number; error: string } }
   | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; allowOther?: boolean }> } }
   | { kind: 'ask_user_question_timeout'; data: { tool_use_id: string; timeout_ms: number; message: string } }
+  | { kind: 'permission'; data: AgentPermissionRequest }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
   | { kind: 'mcp_status'; data: { servers: Record<string, string>; status?: string } }
   | { kind: 'proxy_status'; data: { running: boolean; port: number | null; upstreamBaseUrl: string | null } }
@@ -105,8 +108,10 @@ interface AgentState {
   acknowledgedFiles: Record<string, Set<string>>;
   /** Draft text for each session's composer input (preserved across session switches) */
   composerDrafts: Record<string, string>;
+  pendingPermissions: Record<string, AgentPermissionRequest | null>;
+  respondToPermission: (sessionId: string, response: AgentPermissionResponse) => Promise<void>;
   /** Start a new agent query */
-  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string, inputPayload?: AgentInputPayload) => Promise<void>;
+  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string, inputPayload?: AgentInputPayload, provider?: string, credentialSource?: 'codemux' | 'environment' | 'opencode' | 'none') => Promise<void>;
   /** Interrupt the current query for a specific session */
   interrupt: (sessionId: string) => Promise<void>;
   /** Clear events for a session */
@@ -534,6 +539,9 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'result', data };
       case 'ask_user_question':
         return { kind: 'ask_user_question', data };
+      case 'permission':
+        if (typeof data.request_id !== 'string' || typeof data.permission_type !== 'string') return { kind: 'raw', data };
+        return { kind: 'permission', data: { request_id: data.request_id, permission_id: typeof data.permission_id === 'string' ? data.permission_id : undefined, permission_type: data.permission_type, description: typeof data.description === 'string' ? data.description : data.permission_type, metadata: data.metadata && typeof data.metadata === 'object' ? data.metadata as Record<string, unknown> : undefined } };
       case 'ask_user_question_timeout':
         return { kind: 'ask_user_question_timeout', data };
       case 'file_snapshot':
@@ -1072,10 +1080,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   fileOriginals: {},
   acknowledgedFiles: {},
   composerDrafts: {},
+  pendingPermissions: {},
 
-  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string, inputPayload?: AgentInputPayload) => {
+  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string, inputPayload?: AgentInputPayload, provider?: string, credentialSource?: 'codemux' | 'environment' | 'opencode' | 'none') => {
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
+    set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: null } }));
     logger.info('MODEL_TRACE startQuery dispatching to Tauri', {
       sessionId,
       cwd,
@@ -1150,7 +1160,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         });
       }
 
-      await agentApi.startSession(sessionId, payloadForModel.text, cwd, (raw: string) => {
+      const handleEvent = (raw: string) => {
         let event = parseAgentEvent(raw);
         const now = Date.now();
 
@@ -1398,6 +1408,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                     eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
                     todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
                     changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
+            ...(event.kind === 'permission' ? { pendingPermissions: { ...s.pendingPermissions, [sessionId]: event.data } } : {}),
                     streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
                     streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
                     streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
@@ -1605,6 +1616,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
             todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
             changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
+            ...(event.kind === 'permission' ? { pendingPermissions: { ...s.pendingPermissions, [sessionId]: event.data } } : {}),
             ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
           };
         });
@@ -1654,7 +1666,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             void get().refreshLatestTokenUsage(sessionId, 'live_synced');
           }
         }
-      }, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy, payloadForModel);
+      };
+      if (provider || credentialSource) {
+        await agentApi.startSession(sessionId, payloadForModel.text, cwd, handleEvent, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy, provider, credentialSource, payloadForModel);
+      } else {
+        await agentApi.startSession(sessionId, payloadForModel.text, cwd, handleEvent, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy, payloadForModel);
+      }
     } catch (err) {
       logger.error('Agent query failed to start or stream', { sessionId, cwd, model }, serializeError(err));
       set((s) => {
@@ -1669,9 +1686,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
+  respondToPermission: async (sessionId: string, response: AgentPermissionResponse) => {
+    const request = get().pendingPermissions[sessionId];
+    if (!request) return;
+    try {
+      await agentApi.respondToAgentPermission(sessionId, request.request_id, response);
+      set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: null } }));
+    } catch (error) {
+      set((state) => ({ error: { ...state.error, [sessionId]: String(error) } }));
+    }
+  },
   interrupt: async (sessionId: string) => {
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
+    set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: null } }));
     clearSimulatedStream(sessionId);
     const state = get();
     const isRunning = state.isRunning[sessionId] ?? false;
@@ -1748,6 +1776,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         streamingThinking: newStreaming,
         streamingText: newStreamingText,
         forceStopped: newForceStopped,
+        pendingPermissions: { ...state.pendingPermissions, [sessionId]: null },
       };
     });
   },
@@ -1826,12 +1855,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const agentKind = getSessionAgentKind(sessionId);
 
     try {
-      const jsonlMessages = agentKind === 'codex'
+      const historyMessages = agentKind === 'codex'
         ? await agentApi.loadCodexSessionEvents(sessionId)
-        : await agentApi.loadClaudeSessionEvents(sessionId);
+        : agentKind === 'opencode'
+          ? await agentApi.loadOpenCodeSessionEvents(sessionId)
+          : await agentApi.loadClaudeSessionEvents(sessionId);
 
-      if (!jsonlMessages || jsonlMessages.length === 0) {
-        logger.info('No agent JSONL history found for session', {
+      if (!historyMessages || historyMessages.length === 0) {
+        logger.info('No agent history found for session', {
           sessionId,
           agentKind: agentKind ?? 'claude_code',
         });
@@ -1841,7 +1872,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const events: AgentMessage[] = [];
       const timestamps: number[] = [];
 
-      for (const raw of jsonlMessages) {
+      for (const raw of historyMessages) {
         const rawMsg = raw as Record<string, unknown>;
         const ts = typeof rawMsg.timestamp === 'string'
           ? new Date(rawMsg.timestamp).getTime() || 0
@@ -2017,6 +2048,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
+    set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: null } }));
     clearSimulatedStream(sessionId);
 
     set((s) => ({

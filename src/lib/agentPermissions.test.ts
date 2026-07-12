@@ -20,6 +20,10 @@ describe('agentPermissions', () => {
       approvalPolicy: 'never',
       networkAccessEnabled: true,
     });
+    expect(buildDefaultPermissionConfig('opencode')).toEqual({
+      kind: 'opencode',
+      permissionMode: 'full_access',
+    });
   });
 
   it('maps unified execution presets to native Claude permissions', () => {
@@ -38,6 +42,21 @@ describe('agentPermissions', () => {
     expect(mapExecutionModeToPermissionConfig('claude_code', 'full_access')).toEqual({
       kind: 'claude_code',
       permissionMode: 'bypassPermissions',
+    });
+  });
+
+  it('keeps OpenCode on its single full-access compatibility mode', () => {
+    expect(mapExecutionModeToPermissionConfig('opencode', 'confirm_before_edit')).toEqual({
+      kind: 'opencode',
+      permissionMode: 'full_access',
+    });
+    expect(mapExecutionModeToPermissionConfig('opencode', 'plan')).toEqual({
+      kind: 'opencode',
+      permissionMode: 'full_access',
+    });
+    expect(serializePermissionConfig('opencode', { kind: 'claude_code', permissionMode: 'default' })).toEqual({
+      kind: 'opencode',
+      permissionMode: 'full_access',
     });
   });
 

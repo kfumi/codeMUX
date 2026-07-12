@@ -18,6 +18,8 @@ import {
 } from '../../lib/agentPermissions';
 import { cn } from '../../lib/utils';
 import type { AgentKind } from '../../types/session';
+import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
+import { Button } from '../ui/button';
 
 interface AgentPermissionSelectorProps {
   agentKind: AgentKind;
@@ -32,6 +34,11 @@ interface AgentPermissionSelectorProps {
   onLegacyConfigMigrate?: (migratedConfig: AgentPermissionConfig) => void;
   /** 紧凑模式：只显示图标，隐藏文字标签 */
   compact?: boolean;
+  rawPermissionType?: string;
+  rawPermissionDescription?: string;
+  pendingPermission?: AgentPermissionRequest | null;
+  onPermissionResponse?: (response: AgentPermissionResponse) => void;
+  permissionResponsePending?: boolean;
 }
 
 type PermissionOption = {
@@ -49,6 +56,10 @@ const claudeOptions: PermissionOption[] = [
   { mode: 'full_access', label: '完全访问', description: '跳过权限确认，风险更高。', icon: Shield, tone: 'warning' },
 ];
 
+const opencodeOptions: PermissionOption[] = [
+  { mode: 'full_access', label: '完全访问', description: 'OpenCode 使用服务端按工具配置的权限规则。', icon: Shield, tone: 'warning' },
+];
+
 const codexOptions: PermissionOption[] = [
   { mode: 'plan', label: '计划模式', description: '先分析和规划，不直接写入文件。', icon: ClipboardList },
   { mode: 'full_access', label: '完全访问', description: '允许不受限访问文件和网络，风险更高。', icon: Shield, tone: 'warning' },
@@ -64,6 +75,11 @@ export function AgentPermissionSelector({
   onModeChange,
   onLegacyConfigMigrate,
   compact,
+  rawPermissionType,
+  rawPermissionDescription,
+  pendingPermission,
+  onPermissionResponse,
+  permissionResponsePending,
 }: AgentPermissionSelectorProps) {
   const [open, setOpen] = useState(false);
   const normalized = permissionConfig ?? buildDefaultPermissionConfig(agentKind);
@@ -90,7 +106,7 @@ export function AgentPermissionSelector({
       });
     }
   }, [agentKind, normalized, planMode, onLegacyConfigMigrate]);
-  const options = agentKind === 'codex' ? codexOptions : claudeOptions;
+  const options = agentKind === 'opencode' ? opencodeOptions : agentKind === 'codex' ? codexOptions : claudeOptions;
   const selected = useMemo(
     () => options.find((option) => option.mode === selectedMode) ?? options[0],
     [options, selectedMode],
@@ -136,6 +152,28 @@ export function AgentPermissionSelector({
         {!compact && <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />}
       </button>
 
+      {pendingPermission && (
+        <div data-testid="pending-agent-permission" className="mt-2 rounded-md border border-orange-500/40 bg-orange-500/10 px-2.5 py-2 text-xs">
+          <div className="font-medium text-foreground">需要权限确认</div>
+          <div className="mt-1 font-mono text-foreground/90">{pendingPermission.permission_type}</div>
+          <div className="mt-1 text-muted-foreground">{pendingPermission.description}</div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <Button type="button" size="sm" variant="outline" disabled={permissionResponsePending} onClick={() => onPermissionResponse?.('once')}>允许一次</Button>
+            <Button type="button" size="sm" variant="outline" disabled={permissionResponsePending} onClick={() => onPermissionResponse?.('always')}>始终允许</Button>
+            <Button type="button" size="sm" variant="ghost" disabled={permissionResponsePending} onClick={() => onPermissionResponse?.('reject')}>拒绝</Button>
+          </div>
+        </div>
+      )}
+      {(rawPermissionType || rawPermissionDescription) && (
+        <div
+          data-testid="native-permission-details"
+          className="mt-2 rounded-md border border-border/50 bg-muted/30 px-2.5 py-2 text-xs"
+        >
+          {rawPermissionType && <div className="font-mono text-foreground/90">{rawPermissionType}</div>}
+          {rawPermissionDescription && <div className="mt-1 text-muted-foreground">{rawPermissionDescription}</div>}
+        </div>
+      )}
+
       {open && (
         <div
           role="menu"
@@ -177,6 +215,10 @@ function inferExecutionMode(
   permissionConfig: AgentPermissionConfig,
   planMode: AgentPlanMode,
 ): AgentExecutionMode {
+  if (agentKind === 'opencode' && permissionConfig.kind === 'opencode') {
+    return 'full_access';
+  }
+
   if (agentKind === 'codex' && permissionConfig.kind === 'codex') {
     if (planMode === 'on' || permissionConfig.sandboxMode === 'read-only') return 'plan';
     // workspace-write is a legacy mode that maps to full_access in the simplified UI.

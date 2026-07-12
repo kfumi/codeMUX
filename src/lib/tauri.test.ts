@@ -12,6 +12,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('./logger', () => ({
   createLogger: () => ({
     error: vi.fn(),
+    debug: vi.fn(),
   }),
   serializeError: (error: unknown) => error,
 }));
@@ -145,6 +146,44 @@ describe('terminalApi', () => {
 describe('agentApi', () => {
   beforeEach(() => {
     invokeMock.mockReset();
+  });
+
+  it('passes OpenCode provider and credential source through ensure_session', async () => {
+    invokeMock.mockResolvedValue(undefined);
+    const { agentApi } = await import('./tauri');
+
+    await agentApi.ensureSession('session-1', 'D:/workspace', undefined, 'secret-key', 'https://provider.example/v1', 'model-1', 'medium', undefined, 'provider-1', 'codemux');
+
+    expect(invokeMock).toHaveBeenCalledWith('ensure_agent_session', expect.objectContaining({
+      provider: 'provider-1',
+      credentialSource: 'codemux',
+      apiKey: 'secret-key',
+      baseUrl: 'https://provider.example/v1',
+    }));
+  });
+
+  it('passes OpenCode provider and credential source through start_session', async () => {
+    invokeMock.mockResolvedValue(undefined);
+    const { agentApi } = await import('./tauri');
+
+    await agentApi.startSession('session-1', 'hello', 'D:/workspace', () => {}, 'secret-key', 'https://provider.example/v1', 'model-1', 'medium', undefined, 'provider-1', 'codemux');
+
+    expect(invokeMock).toHaveBeenCalledWith('start_agent_session', expect.objectContaining({
+      provider: 'provider-1',
+      credentialSource: 'codemux',
+    }));
+  });
+  it('responds to an OpenCode permission with session and request identifiers', async () => {
+    invokeMock.mockResolvedValue(undefined);
+    const { agentApi } = await import('./tauri');
+
+    await agentApi.respondToAgentPermission('session-1', 'permission-7', 'always');
+
+    expect(invokeMock).toHaveBeenCalledWith('respond_to_agent_permission', {
+      sessionId: 'session-1',
+      requestId: 'permission-7',
+      response: 'always',
+    });
   });
 
   it('rewinds an agent session with app session id and agent kind', async () => {

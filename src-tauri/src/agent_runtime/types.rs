@@ -8,6 +8,7 @@ use serde_json::Value;
 pub enum AgentRuntimeKind {
     ClaudeCode,
     Codex,
+    OpenCode,
 }
 
 impl AgentRuntimeKind {
@@ -15,12 +16,14 @@ impl AgentRuntimeKind {
         match self {
             Self::ClaudeCode => "claude_code",
             Self::Codex => "codex",
+            Self::OpenCode => "opencode",
         }
     }
 
     pub fn from_agent_kind(agent_kind: &str) -> Self {
         match agent_kind {
             "codex" => Self::Codex,
+            "opencode" => Self::OpenCode,
             _ => Self::ClaudeCode,
         }
     }
@@ -107,6 +110,10 @@ mod tests {
             AgentRuntimeKind::Codex
         );
         assert_eq!(
+            AgentRuntimeKind::from_agent_kind("opencode"),
+            AgentRuntimeKind::OpenCode
+        );
+        assert_eq!(
             AgentRuntimeKind::from_agent_kind("unknown"),
             AgentRuntimeKind::ClaudeCode
         );
@@ -116,5 +123,6 @@ mod tests {
     fn kind_name_round_trips() {
         assert_eq!(AgentRuntimeKind::ClaudeCode.as_str(), "claude_code");
         assert_eq!(AgentRuntimeKind::Codex.as_str(), "codex");
+        assert_eq!(AgentRuntimeKind::OpenCode.as_str(), "opencode");
     }
 }

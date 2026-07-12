@@ -7,8 +7,8 @@ import type {
   Usage,
   WebSearchItem,
 } from '@openai/codex-sdk';
-
-export type RuntimeFlavor = 'claude' | 'codex';
+import type { RuntimeEventContext, RuntimeFlavor } from './types.js';
+export type { RuntimeFlavor } from './types.js';
 
 export type CodexTokenUsage = {
   input_tokens: number;
@@ -25,7 +25,18 @@ export type ClaudeTokenUsage = {
   cache_creation_input_tokens: number;
 };
 
-type AssistantContentBlock =
+export type OpenCodeTokenUsage = {
+  input_tokens: number;
+  output_tokens: number;
+  cached_input_tokens?: number;
+  cache_write_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  reasoning_output_tokens?: number;
+};
+
+export type OpenCodeResultStatus = 'success' | 'error' | 'interrupted';
+
+export type AssistantContentBlock =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> };
@@ -35,20 +46,84 @@ type ToolUseContext = {
   timeoutMs?: number;
 };
 
+function createEventId(factory?: () => string): string {
+  return factory?.() ?? crypto.randomUUID();
+}
+
 export function getRuntimeFlavor(agentKind?: string): RuntimeFlavor {
-  return agentKind === 'codex' ? 'codex' : 'claude';
+  if (agentKind === 'codex') {
+    return 'codex';
+  }
+  if (agentKind === 'opencode') {
+    return 'opencode';
+  }
+  return 'claude';
+}
+
+export function buildOpenCodeResultEvent({
+  context,
+  usage,
+  durationMs,
+  status = 'success',
+}: {
+  context: RuntimeEventContext;
+  usage: OpenCodeTokenUsage;
+  durationMs: number;
+  status?: OpenCodeResultStatus;
+}) {
+  const cachedInputTokens = usage.cached_input_tokens ?? 0;
+  const cacheWriteInputTokens = usage.cache_write_input_tokens ?? usage.cache_creation_input_tokens ?? 0;
+  const reasoningOutputTokens = usage.reasoning_output_tokens;
+
+  return {
+    type: 'result',
+    subtype: status,
+    is_error: status === 'error',
+    agent_id: context.agentId,
+    session_id: context.sessionId,
+    ...(context.agentSessionId ? { agent_session_id: context.agentSessionId } : {}),
+    sequence: context.sequence,
+    uuid: createEventId(context.eventIdFactory),
+    duration_ms: durationMs,
+    duration_api_ms: durationMs,
+    num_turns: 1,
+    result: status === 'success' ? 'ok' : status,
+    usage: {
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      cache_read_input_tokens: cachedInputTokens,
+      cache_write_input_tokens: cacheWriteInputTokens,
+      ...(usage.cache_creation_input_tokens !== undefined
+        ? { cache_creation_input_tokens: usage.cache_creation_input_tokens }
+        : {}),
+      ...(reasoningOutputTokens !== undefined ? { reasoning_output_tokens: reasoningOutputTokens } : {}),
+    },
+    last_token_usage: {
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      cached_input_tokens: cachedInputTokens,
+      cache_write_input_tokens: cacheWriteInputTokens,
+      ...(usage.cache_creation_input_tokens !== undefined
+        ? { cache_creation_input_tokens: usage.cache_creation_input_tokens }
+        : {}),
+      ...(reasoningOutputTokens !== undefined ? { reasoning_output_tokens: reasoningOutputTokens } : {}),
+      total_tokens: usage.input_tokens + usage.output_tokens,
+    },
+  };
 }
 
 export function buildAssistantEvent({
   sessionId,
   content,
+  eventIdFactory,
 }: {
   sessionId: string;
   content: AssistantContentBlock[];
+  eventIdFactory?: () => string;
 }) {
   return {
     type: 'assistant',
-    uuid: crypto.randomUUID(),
+    uuid: createEventId(eventIdFactory),
     session_id: sessionId,
     message: {
       role: 'assistant' as const,
@@ -63,15 +138,17 @@ export function buildToolResultEvent({
   toolUseId,
   content,
   isError = false,
+  eventIdFactory,
 }: {
   sessionId: string;
   toolUseId: string;
+  eventIdFactory?: () => string;
   content: string;
   isError?: boolean;
 }) {
   return {
     type: 'user',
-    uuid: crypto.randomUUID(),
+    uuid: createEventId(eventIdFactory),
     session_id: sessionId,
     message: {
       role: 'user' as const,
