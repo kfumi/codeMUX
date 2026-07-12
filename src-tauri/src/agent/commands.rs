@@ -1540,8 +1540,9 @@ async fn ensure_sidecar_for_session(
     let app_handle = app.clone();
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
+            let app_state = app_handle.state::<crate::AppState>();
             match handle_agent_session_mapping_event(
-                &app_handle,
+                app_state.inner(),
                 &session_startup_locks,
                 &session_generations,
                 &event,
@@ -1664,7 +1665,7 @@ fn persist_agent_session_mapping_event(
 }
 
 async fn handle_agent_session_mapping_event(
-    app: &AppHandle,
+    state: &crate::AppState,
     session_startup_locks: &SessionLifecycleLocks,
     session_generations: &SessionGenerations,
     event: &str,
@@ -1681,6 +1682,27 @@ async fn handle_agent_session_mapping_event(
             .clone()
     };
     let _lifecycle_guard = session_lock.lock().await;
+
+    let session_exists = {
+        let db = state.db.lock().unwrap();
+        db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?1)",
+            [&mapping.app_session_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| {
+            format!(
+                "Failed to verify app session for agent session mapping app_session_id={}: {}",
+                mapping.app_session_id, error
+            )
+        })?
+    };
+    if !session_exists {
+        return Err(format!(
+            "Session not found for agent session mapping app_session_id={}",
+            mapping.app_session_id
+        ));
+    }
 
     if mapping.agent_kind == AgentKind::Opencode
         && !mapping_generation_is_current(
@@ -1700,7 +1722,6 @@ async fn handle_agent_session_mapping_event(
         return Ok(true);
     }
 
-    let state = app.state::<crate::AppState>();
     let db = state.db.lock().unwrap();
     let persisted = persist_agent_session_mapping_event(&db, event)?;
     if persisted {
@@ -2522,11 +2543,12 @@ mod tests {
     use super::{
         begin_session_generation, build_update_permissions_command_from_snapshot,
         convert_codex_history_values_to_events, convert_codex_item_to_claude_format,
-        find_codex_session_jsonl, invalidate_session_generation,
-        load_latest_token_usage_for_agent_session, mapping_generation_is_current,
-        parse_agent_session_mapping_event, parse_proxy_port_from_stderr,
-        persist_agent_session_mapping_event, read_codex_interactive_events_from_dir,
-        read_json_stream_values, resolve_agent_session_info, rewind_jsonl_before_latest_turn,
+        find_codex_session_jsonl, handle_agent_session_mapping_event,
+        invalidate_session_generation, load_latest_token_usage_for_agent_session,
+        mapping_generation_is_current, parse_agent_session_mapping_event,
+        parse_proxy_port_from_stderr, persist_agent_session_mapping_event,
+        read_codex_interactive_events_from_dir, read_json_stream_values,
+        resolve_agent_session_info, rewind_jsonl_before_latest_turn,
         rewind_jsonl_before_target_turn, session_lifecycle_lock,
         should_include_claude_history_event, sort_events_by_timestamp_stable, AgentState,
         RewindTarget,
@@ -3352,6 +3374,72 @@ mod tests {
         }
         assert!(crate::db::operations::get_agent_session_mapping(
             &conn,
+            "session-opencode",
+            AgentKind::Opencode,
+        )
+        .unwrap()
+        .is_none());
+    }
+
+    #[tokio::test]
+    async fn unknown_session_mapping_returns_session_not_found_error() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        let app_state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
+            app_data_dir: std::path::PathBuf::new(),
+        };
+        let state = AgentState::default();
+        let event = r#"{"type":"agent_session_mapping","app_session_id":"missing-session","agent_kind":"opencode","agent_session_id":"opencode-session","runtime_generation":1}"#;
+
+        let error = handle_agent_session_mapping_event(
+            &app_state,
+            &state.session_startup_locks,
+            &state.session_generations,
+            event,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("Session not found"));
+    }
+
+    #[tokio::test]
+    async fn known_session_with_stale_generation_is_dropped_by_real_handler() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-opencode", "OpenCode", "opencode", "chat", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        let app_state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
+            app_data_dir: std::path::PathBuf::new(),
+        };
+        let state = AgentState::default();
+        begin_session_generation(&state, "session-opencode").await;
+        let current_generation = begin_session_generation(&state, "session-opencode").await;
+        let stale_generation = current_generation - 1;
+        let event = format!(
+            r#"{{"type":"agent_session_mapping","app_session_id":"session-opencode","agent_kind":"opencode","agent_session_id":"stale-session","runtime_generation":{stale_generation}}}"#
+        );
+
+        let handled = handle_agent_session_mapping_event(
+            &app_state,
+            &state.session_startup_locks,
+            &state.session_generations,
+            &event,
+        )
+        .await
+        .unwrap();
+
+        assert!(handled);
+        let db = app_state.db.lock().unwrap();
+        assert!(crate::db::operations::get_agent_session_mapping(
+            &db,
             "session-opencode",
             AgentKind::Opencode,
         )
