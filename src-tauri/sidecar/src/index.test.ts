@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import * as path from 'node:path';
 import type { SidecarCommand } from './types.js';
 import { buildOpenCodeSessionMappingEvent, createSidecarCommandDispatcher } from './index.js';
 
@@ -15,6 +17,17 @@ function createRuntime() {
 }
 
 describe('sidecar command dispatcher', () => {
+  it.skipIf(process.platform !== 'win32')('emits readiness when Node receives a Windows verbatim script path', () => {
+    const entrypoint = path.resolve('dist/index.js');
+    const verbatimEntrypoint = `\\\\?\\${entrypoint}`;
+    const output = execFileSync(process.execPath, [verbatimEntrypoint], {
+      encoding: 'utf8',
+      input: '',
+    });
+
+    expect(output).toContain('{"type":"sidecar_ready"}');
+  });
+
   it('builds the OpenCode agent session mapping event from the runtime mapping', () => {
     expect(buildOpenCodeSessionMappingEvent({
       sessionId: 'app-session',

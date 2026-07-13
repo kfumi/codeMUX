@@ -117,6 +117,17 @@ const pendingToolResponses = new Map<string, {
 }>();
 const SIDECAR_DIST_DIR = path.dirname(fileURLToPath(import.meta.url));
 
+function isSidecarEntrypoint(scriptPath: string | undefined): boolean {
+  if (!scriptPath) return false;
+
+  const entrypoint = path.join(SIDECAR_DIST_DIR, 'index.js');
+  try {
+    return fs.realpathSync.native(scriptPath) === fs.realpathSync.native(entrypoint);
+  } catch {
+    return path.resolve(scriptPath) === entrypoint;
+  }
+}
+
 function waitForClaudeToolResponse(
   toolUseId: string,
   sessionId?: string,
@@ -1319,7 +1330,7 @@ async function main(): Promise<void> {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.join(SIDECAR_DIST_DIR, 'index.js')) {
+if (isSidecarEntrypoint(process.argv[1])) {
   main().catch((err) => {
     emit({ type: 'sidecar_error', error: `Fatal: ${String(err)}` });
     process.exit(1);
