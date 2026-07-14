@@ -121,6 +121,7 @@ fn migrate_legacy_config(mut config: AppConfig) -> AppConfig {
                 error
             );
             config.agent_profile_registry = AgentProfileRegistry::default();
+            config.profile_registry_validation_error = Some(error);
         } else {
             return config;
         }
@@ -578,6 +579,55 @@ mod tests {
                 }],
                 "active_profile_ids": { "claude_code": "invalid-profile" }
             },
+            "theme": "System"
+        });
+        std::fs::write(&config_path, serde_json::to_vec(&raw).unwrap()).unwrap();
+
+        let mut config = load_config_from_path(&config_path);
+        config.compact_ai_output = true;
+        let error = save_config_to_path(&config_path, &config).unwrap_err();
+
+        assert!(error.contains("智能体供应商档案无效"));
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(&config_path).unwrap())
+                .unwrap(),
+            raw
+        );
+
+        let _ = std::fs::remove_file(&config_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn invalid_registry_with_unmappable_legacy_providers_cannot_be_overwritten() {
+        let temp_dir = temp_config_dir();
+        let config_path = temp_dir.join("config.json");
+        let raw = serde_json::json!({
+            "agent_profile_registry": {
+                "profiles": [{
+                    "id": "invalid-profile",
+                    "agent_kind": "claude_code",
+                    "name": "无效档案",
+                    "models": [],
+                    "default_model": "invalid-model",
+                    "native_config": {
+                        "type": "codex",
+                        "api_key": "secret",
+                        "openai_base_url": "https://invalid.example/v1"
+                    }
+                }],
+                "active_profile_ids": { "claude_code": "invalid-profile" }
+            },
+            "providers": [{
+                "id": "unmappable",
+                "name": "待人工处理供应商",
+                "api_key": "legacy-key",
+                "anthropic_base_url": "",
+                "openai_base_url": "",
+                "default_model": "unknown-model",
+                "models": ["unknown-model"]
+            }],
+            "active_provider_id": "unmappable",
             "theme": "System"
         });
         std::fs::write(&config_path, serde_json::to_vec(&raw).unwrap()).unwrap();
