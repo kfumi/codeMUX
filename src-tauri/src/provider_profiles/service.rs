@@ -74,6 +74,10 @@ pub trait FileOps {
     fn replace(&self, source: &Path, destination: &Path) -> io::Result<()>;
     fn remove_file(&self, path: &Path) -> io::Result<()>;
 
+    fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+        fs::remove_dir_all(path)
+    }
+
     fn replace_if_current_hash(
         &self,
         source: &Path,
@@ -616,6 +620,43 @@ impl<O: FileOps> NativeConfigWriteService<O> {
             Some(backup_session_dir.to_path_buf()),
             status,
         ))
+    }
+
+    /// 在应用配置已成功保存、无需再补偿时删除原生配置事务备份。
+    ///
+    /// 仅允许删除当前备份根目录下、清单已标记为已提交的单个会话目录。
+    pub fn discard_committed_backup_session(
+        &self,
+        backup_session_dir: &Path,
+    ) -> Result<(), NativeConfigWriteError> {
+        if !self.is_owned_session_directory(backup_session_dir) {
+            return Err(self.error("原生配置备份记录无效", None, RollbackStatus::NotAttempted));
+        }
+
+        let _lock = self.acquire_lock()?;
+        self.create_secure_directory(&self.backup_root)
+            .map_err(|_| self.error("原生配置备份清理失败", None, RollbackStatus::NotAttempted))?;
+        self.recover_unfinished_transactions()?;
+        let manifest = self.read_valid_manifest(backup_session_dir)?;
+        if !matches!(manifest.state, TransactionState::Committed) {
+            return Err(self.error(
+                "原生配置备份记录无效",
+                Some(backup_session_dir.to_path_buf()),
+                RollbackStatus::NotAttempted,
+            ));
+        }
+        self.file_ops
+            .remove_dir_all(backup_session_dir)
+            .map_err(|_| {
+                self.error(
+                    "原生配置备份清理失败",
+                    Some(backup_session_dir.to_path_buf()),
+                    RollbackStatus::NotAttempted,
+                )
+            })?;
+        self.file_ops
+            .sync_dir(&self.backup_root)
+            .map_err(|_| self.error("原生配置备份清理失败", None, RollbackStatus::NotAttempted))
     }
 
     fn acquire_lock(&self) -> Result<File, NativeConfigWriteError> {
@@ -1825,6 +1866,29 @@ mod tests {
             .unwrap();
 
         assert_eq!(fs::read(paths.codex_auth_path()).unwrap(), b"new auth");
+    }
+
+    #[test]
+    fn 成功事务可安全删除已提交备份会话() {
+        let temp = TestDirectory::new();
+        let paths = test_paths(temp.path());
+        let backup_root = temp.path().join("backups");
+        let service = NativeConfigWriteService::new(paths.clone(), backup_root.clone());
+
+        let result = service
+            .write(&[RenderedNativeConfig {
+                path: paths.codex_auth_path(),
+                content: "new auth".to_string(),
+            }])
+            .unwrap();
+        assert!(result.backup_session_dir.exists());
+
+        service
+            .discard_committed_backup_session(&result.backup_session_dir)
+            .unwrap();
+
+        assert!(!result.backup_session_dir.exists());
+        assert_eq!(fs::read_dir(&backup_root).unwrap().count(), 0);
     }
 
     #[test]

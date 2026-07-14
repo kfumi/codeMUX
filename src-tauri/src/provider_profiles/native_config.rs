@@ -119,6 +119,8 @@ pub fn render_agent_profile_config(
     existing: &NativeConfigContents,
 ) -> Result<Vec<RenderedNativeConfig>, String> {
     profile.validate()?;
+    let default_model =
+        (!profile.default_model.trim().is_empty()).then_some(profile.default_model.as_str());
 
     match &profile.native_config {
         NativeProfileConfig::ClaudeCode { .. } => {
@@ -126,11 +128,8 @@ pub fn render_agent_profile_config(
                 existing.claude_settings.as_deref(),
                 "Claude Code settings.json",
             )?;
-            let settings = merge_claude_settings_with_model(
-                settings,
-                &profile.native_config,
-                Some(&profile.default_model),
-            )?;
+            let settings =
+                merge_claude_settings_with_model(settings, &profile.native_config, default_model)?;
             Ok(vec![render_json_file(
                 paths.claude_settings_path(),
                 settings,
@@ -145,7 +144,7 @@ pub fn render_agent_profile_config(
             let config = merge_codex_config_with_model(
                 parse_toml_document(existing.codex_config.as_deref(), "Codex config.toml")?,
                 &profile.native_config,
-                Some(&profile.default_model),
+                default_model,
             )?;
             Ok(vec![
                 render_json_file(paths.codex_auth_path(), auth, "Codex auth.json")?,
@@ -159,7 +158,7 @@ pub fn render_agent_profile_config(
                     "OpenCode opencode.json",
                 )?,
                 &profile.native_config,
-                Some(&profile.default_model),
+                default_model,
             )?;
             Ok(vec![render_json_file(
                 paths.opencode_config_path(),
@@ -651,6 +650,78 @@ mod tests {
             .contains("model = \"codex-model\""));
         let opencode_config: Value = serde_json::from_str(&opencode_rendered[0].content).unwrap();
         assert_eq!(opencode_config["model"], "codemux-openai/opencode-model");
+    }
+
+    #[test]
+    fn 空默认模型不会渲染模型字段() {
+        let paths = test_paths();
+        let empty_models = Vec::new();
+        let claude = AgentProviderProfile {
+            id: "claude-empty".to_string(),
+            agent_kind: AgentKind::ClaudeCode,
+            name: "空模型 Claude 档案".to_string(),
+            note: String::new(),
+            models: empty_models.clone(),
+            default_model: String::new(),
+            native_config: NativeProfileConfig::ClaudeCode {
+                api_key: "key".to_string(),
+                anthropic_base_url: "https://claude.example".to_string(),
+                context_1m: None,
+                advanced_config: None,
+                requires_review: false,
+            },
+        };
+        let codex = AgentProviderProfile {
+            id: "codex-empty".to_string(),
+            agent_kind: AgentKind::Codex,
+            name: "空模型 Codex 档案".to_string(),
+            note: String::new(),
+            models: empty_models.clone(),
+            default_model: String::new(),
+            native_config: NativeProfileConfig::Codex {
+                api_key: "key".to_string(),
+                openai_base_url: "https://codex.example".to_string(),
+                codex_needs_proxy: None,
+                advanced_config: None,
+                requires_review: false,
+            },
+        };
+        let opencode = AgentProviderProfile {
+            id: "opencode-empty".to_string(),
+            agent_kind: AgentKind::Opencode,
+            name: "空模型 OpenCode 档案".to_string(),
+            note: String::new(),
+            models: empty_models,
+            default_model: String::new(),
+            native_config: NativeProfileConfig::OpenCode {
+                api_key: "key".to_string(),
+                openai_base_url: "https://opencode.example".to_string(),
+                advanced_config: None,
+                requires_review: false,
+            },
+        };
+        let existing = NativeConfigContents {
+            claude_settings: Some(
+                serde_json::json!({ "env": { "ANTHROPIC_MODEL": "existing-claude" } }).to_string(),
+            ),
+            codex_config: Some("model = \"existing-codex\"".to_string()),
+            opencode_config: Some(serde_json::json!({ "model": "existing-opencode" }).to_string()),
+            ..NativeConfigContents::default()
+        };
+
+        let claude_rendered = render_agent_profile_config(&paths, &claude, &existing).unwrap();
+        let codex_rendered = render_agent_profile_config(&paths, &codex, &existing).unwrap();
+        let opencode_rendered = render_agent_profile_config(&paths, &opencode, &existing).unwrap();
+
+        let claude_settings: Value = serde_json::from_str(&claude_rendered[0].content).unwrap();
+        assert_eq!(claude_settings["env"]["ANTHROPIC_MODEL"], "existing-claude");
+        let codex_config = codex_rendered[1]
+            .content
+            .parse::<toml_edit::DocumentMut>()
+            .unwrap();
+        assert_eq!(codex_config["model"].as_str(), Some("existing-codex"));
+        let opencode_config: Value = serde_json::from_str(&opencode_rendered[0].content).unwrap();
+        assert_eq!(opencode_config["model"], "existing-opencode");
     }
 
     #[test]

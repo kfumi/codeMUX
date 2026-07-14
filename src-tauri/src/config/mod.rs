@@ -3,8 +3,99 @@ pub mod types;
 use crate::config::types::AppConfig;
 use crate::provider_profiles::{migrate_legacy_providers, AgentProfileRegistry};
 use log::warn;
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::fs::File;
+use std::{
+    fs::{self, OpenOptions},
+    io::{self, Write},
+    path::{Path, PathBuf},
+};
 use tauri::{AppHandle, Manager};
+
+trait ConfigFileOps {
+    fn write_file_sync(&self, path: &Path, content: &[u8]) -> io::Result<()>;
+    fn replace(&self, source: &Path, destination: &Path) -> io::Result<()>;
+    fn remove_file(&self, path: &Path) -> io::Result<()>;
+    fn sync_dir(&self, path: &Path) -> io::Result<()>;
+}
+
+struct StdConfigFileOps;
+
+impl ConfigFileOps for StdConfigFileOps {
+    fn write_file_sync(&self, path: &Path, content: &[u8]) -> io::Result<()> {
+        let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+        file.write_all(content)?;
+        file.flush()?;
+        file.sync_all()
+    }
+
+    fn replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
+        #[cfg(windows)]
+        {
+            replace_windows_file(source, destination)
+        }
+        #[cfg(not(windows))]
+        {
+            fs::rename(source, destination)
+        }
+    }
+
+    fn remove_file(&self, path: &Path) -> io::Result<()> {
+        fs::remove_file(path)
+    }
+
+    fn sync_dir(&self, path: &Path) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            File::open(path)?.sync_all()
+        }
+        #[cfg(windows)]
+        {
+            // MoveFileExW 的 WRITE_THROUGH 标志负责持久化替换操作。
+            let _ = path;
+            Ok(())
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "当前平台不支持目录持久化同步",
+            ))
+        }
+    }
+}
+
+#[cfg(windows)]
+fn replace_windows_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    // SAFETY: 路径均以 NUL 结尾，且 Windows API 不会保留指针。
+    unsafe {
+        if MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        ) == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
 
 fn get_config_path(app: &AppHandle) -> PathBuf {
     let app_dir = app
@@ -79,6 +170,14 @@ pub fn save_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
 }
 
 fn save_config_to_path(config_path: &Path, config: &AppConfig) -> Result<(), String> {
+    save_config_to_path_with_file_ops(config_path, config, &StdConfigFileOps)
+}
+
+fn save_config_to_path_with_file_ops<O: ConfigFileOps>(
+    config_path: &Path,
+    config: &AppConfig,
+    file_ops: &O,
+) -> Result<(), String> {
     if !config.profile_registry_is_derived {
         if let Some(error) = &config.profile_registry_validation_error {
             return Err(format!("智能体供应商档案无效，拒绝覆盖原配置: {}", error));
@@ -98,7 +197,26 @@ fn save_config_to_path(config_path: &Path, config: &AppConfig) -> Result<(), Str
 
     let content = serde_json::to_string_pretty(&persisted)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
-    std::fs::write(config_path, content).map_err(|e| format!("Failed to write config: {}", e))?;
+    let parent = config_path
+        .parent()
+        .ok_or_else(|| "Failed to write config: missing parent directory".to_string())?;
+    let file_name = config_path
+        .file_name()
+        .ok_or_else(|| "Failed to write config: missing file name".to_string())?
+        .to_string_lossy();
+    let temporary_path = parent.join(format!(".{file_name}.{}.tmp", uuid::Uuid::new_v4()));
+
+    if let Err(error) = file_ops.write_file_sync(&temporary_path, content.as_bytes()) {
+        let _ = file_ops.remove_file(&temporary_path);
+        return Err(format!("Failed to write config: {}", error));
+    }
+    if let Err(error) = file_ops.replace(&temporary_path, config_path) {
+        let _ = file_ops.remove_file(&temporary_path);
+        return Err(format!("Failed to replace config: {}", error));
+    }
+    file_ops
+        .sync_dir(parent)
+        .map_err(|error| format!("Failed to sync config directory: {}", error))?;
     Ok(())
 }
 
@@ -158,14 +276,72 @@ fn migrate_legacy_config(mut config: AppConfig) -> AppConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_config_from_path, save_config_to_path};
+    use super::{
+        load_config_from_path, save_config_to_path, save_config_to_path_with_file_ops,
+        ConfigFileOps,
+    };
     use crate::config::types::AppConfig;
+    use std::{io, path::Path};
 
     fn temp_config_dir() -> std::path::PathBuf {
         let temp_dir =
             std::env::temp_dir().join(format!("codemux-config-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&temp_dir).unwrap();
         temp_dir
+    }
+
+    struct ReplaceFailsFileOps;
+
+    impl ConfigFileOps for ReplaceFailsFileOps {
+        fn write_file_sync(&self, path: &Path, content: &[u8]) -> io::Result<()> {
+            use std::io::Write;
+
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)?;
+            file.write_all(content)?;
+            file.flush()?;
+            file.sync_all()
+        }
+
+        fn replace(&self, _source: &Path, _destination: &Path) -> io::Result<()> {
+            Err(io::Error::other("注入的替换失败"))
+        }
+
+        fn remove_file(&self, path: &Path) -> io::Result<()> {
+            std::fs::remove_file(path)
+        }
+
+        fn sync_dir(&self, _path: &Path) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn 配置保存替换失败时保留原文件() {
+        let temp_dir = temp_config_dir();
+        let config_path = temp_dir.join("config.json");
+        let original = b"{\"preserved\":\"old-config\"}";
+        std::fs::write(&config_path, original).unwrap();
+
+        let error = save_config_to_path_with_file_ops(
+            &config_path,
+            &AppConfig::default(),
+            &ReplaceFailsFileOps,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("Failed to replace config"));
+        assert_eq!(std::fs::read(&config_path).unwrap(), original);
+        assert_eq!(
+            std::fs::read_dir(&temp_dir).unwrap().count(),
+            1,
+            "替换失败时应删除临时文件"
+        );
+
+        let _ = std::fs::remove_file(&config_path);
+        let _ = std::fs::remove_dir(&temp_dir);
     }
 
     #[test]

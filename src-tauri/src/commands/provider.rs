@@ -11,6 +11,7 @@ use crate::provider_profiles::{
 use crate::AppState;
 use futures::StreamExt;
 use log::{debug, info};
+use serde::Deserialize;
 use std::{
     path::Path,
     str::FromStr,
@@ -102,9 +103,233 @@ fn cleanup_provider_references(config: &mut AppConfig, provider_id: &str) {
     }
 }
 
+#[derive(Deserialize)]
+pub struct AgentProviderProfileUpsert {
+    id: String,
+    agent_kind: AgentKind,
+    name: String,
+    #[serde(default)]
+    note: String,
+    #[serde(default)]
+    models: Vec<ProfileModel>,
+    default_model: String,
+    native_config: NativeProfileConfigUpsert,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum NativeProfileConfigUpsert {
+    ClaudeCode {
+        #[serde(default)]
+        api_key: Option<String>,
+        #[serde(default)]
+        clear_api_key: bool,
+        anthropic_base_url: String,
+        #[serde(default)]
+        context_1m: Option<bool>,
+        #[serde(default)]
+        advanced_config: Option<serde_json::Value>,
+        #[serde(default)]
+        clear_advanced_config: bool,
+        #[serde(default)]
+        requires_review: bool,
+    },
+    Codex {
+        #[serde(default)]
+        api_key: Option<String>,
+        #[serde(default)]
+        clear_api_key: bool,
+        openai_base_url: String,
+        #[serde(default)]
+        codex_needs_proxy: Option<bool>,
+        #[serde(default)]
+        advanced_config: Option<serde_json::Value>,
+        #[serde(default)]
+        clear_advanced_config: bool,
+        #[serde(default)]
+        requires_review: bool,
+    },
+    #[serde(rename = "opencode")]
+    OpenCode {
+        #[serde(default)]
+        api_key: Option<String>,
+        #[serde(default)]
+        clear_api_key: bool,
+        openai_base_url: String,
+        #[serde(default)]
+        advanced_config: Option<serde_json::Value>,
+        #[serde(default)]
+        clear_advanced_config: bool,
+        #[serde(default)]
+        requires_review: bool,
+    },
+}
+
+impl AgentProviderProfileUpsert {
+    fn into_profile(
+        self,
+        existing: Option<&AgentProviderProfile>,
+    ) -> Result<AgentProviderProfile, String> {
+        if existing.is_some_and(|profile| profile.agent_kind != self.agent_kind) {
+            return Err("同一档案 ID 不允许更改智能体类型".to_string());
+        }
+
+        let native_config = match (self.agent_kind, self.native_config) {
+            (
+                AgentKind::ClaudeCode,
+                NativeProfileConfigUpsert::ClaudeCode {
+                    api_key,
+                    clear_api_key,
+                    anthropic_base_url,
+                    context_1m,
+                    advanced_config,
+                    clear_advanced_config,
+                    requires_review,
+                },
+            ) => {
+                let previous = existing.and_then(|profile| match &profile.native_config {
+                    NativeProfileConfig::ClaudeCode {
+                        api_key,
+                        advanced_config,
+                        ..
+                    } => Some((api_key.as_str(), advanced_config.clone())),
+                    _ => None,
+                });
+                NativeProfileConfig::ClaudeCode {
+                    api_key: resolve_api_key(
+                        previous.as_ref().map(|(api_key, _)| *api_key),
+                        api_key,
+                        clear_api_key,
+                    )?,
+                    anthropic_base_url,
+                    context_1m,
+                    advanced_config: resolve_advanced_config(
+                        previous.and_then(|(_, advanced_config)| advanced_config),
+                        advanced_config,
+                        clear_advanced_config,
+                    )?,
+                    requires_review,
+                }
+            }
+            (
+                AgentKind::Codex,
+                NativeProfileConfigUpsert::Codex {
+                    api_key,
+                    clear_api_key,
+                    openai_base_url,
+                    codex_needs_proxy,
+                    advanced_config,
+                    clear_advanced_config,
+                    requires_review,
+                },
+            ) => {
+                let previous = existing.and_then(|profile| match &profile.native_config {
+                    NativeProfileConfig::Codex {
+                        api_key,
+                        advanced_config,
+                        ..
+                    } => Some((api_key.as_str(), advanced_config.clone())),
+                    _ => None,
+                });
+                NativeProfileConfig::Codex {
+                    api_key: resolve_api_key(
+                        previous.as_ref().map(|(api_key, _)| *api_key),
+                        api_key,
+                        clear_api_key,
+                    )?,
+                    openai_base_url,
+                    codex_needs_proxy,
+                    advanced_config: resolve_advanced_config(
+                        previous.and_then(|(_, advanced_config)| advanced_config),
+                        advanced_config,
+                        clear_advanced_config,
+                    )?,
+                    requires_review,
+                }
+            }
+            (
+                AgentKind::Opencode,
+                NativeProfileConfigUpsert::OpenCode {
+                    api_key,
+                    clear_api_key,
+                    openai_base_url,
+                    advanced_config,
+                    clear_advanced_config,
+                    requires_review,
+                },
+            ) => {
+                let previous = existing.and_then(|profile| match &profile.native_config {
+                    NativeProfileConfig::OpenCode {
+                        api_key,
+                        advanced_config,
+                        ..
+                    } => Some((api_key.as_str(), advanced_config.clone())),
+                    _ => None,
+                });
+                NativeProfileConfig::OpenCode {
+                    api_key: resolve_api_key(
+                        previous.as_ref().map(|(api_key, _)| *api_key),
+                        api_key,
+                        clear_api_key,
+                    )?,
+                    openai_base_url,
+                    advanced_config: resolve_advanced_config(
+                        previous.and_then(|(_, advanced_config)| advanced_config),
+                        advanced_config,
+                        clear_advanced_config,
+                    )?,
+                    requires_review,
+                }
+            }
+            _ => return Err("档案智能体类型与原生配置类型不一致".to_string()),
+        };
+
+        Ok(AgentProviderProfile {
+            id: self.id,
+            agent_kind: self.agent_kind,
+            name: self.name,
+            note: self.note,
+            models: self.models,
+            default_model: self.default_model,
+            native_config,
+        })
+    }
+}
+
+fn resolve_api_key(
+    existing: Option<&str>,
+    incoming: Option<String>,
+    clear: bool,
+) -> Result<String, String> {
+    if clear {
+        if incoming.is_some() {
+            return Err("API Key 不能同时设置和清除".to_string());
+        }
+        return Ok(String::new());
+    }
+    Ok(incoming
+        .filter(|api_key| !api_key.is_empty())
+        .or_else(|| existing.map(ToOwned::to_owned))
+        .unwrap_or_default())
+}
+
+fn resolve_advanced_config(
+    existing: Option<serde_json::Value>,
+    incoming: Option<serde_json::Value>,
+    clear: bool,
+) -> Result<Option<serde_json::Value>, String> {
+    if clear {
+        if incoming.is_some() {
+            return Err("高级配置不能同时设置和清除".to_string());
+        }
+        return Ok(None);
+    }
+    Ok(incoming.or(existing))
+}
+
 fn upsert_agent_profile_in_config(
     app_config: &mut AppConfig,
-    mut profile: AgentProviderProfile,
+    profile: AgentProviderProfile,
 ) -> Result<(), String> {
     profile.validate()?;
 
@@ -117,7 +342,6 @@ fn upsert_agent_profile_in_config(
         if existing.agent_kind != profile.agent_kind {
             return Err("同一档案 ID 不允许更改智能体类型".to_string());
         }
-        preserve_unsubmitted_profile_secrets(existing, &mut profile);
         *existing = profile;
     } else {
         registry.profiles.push(profile);
@@ -128,58 +352,6 @@ fn upsert_agent_profile_in_config(
     app_config.profile_registry_is_derived = false;
     app_config.profile_registry_validation_error = None;
     Ok(())
-}
-
-fn preserve_unsubmitted_profile_secrets(
-    existing: &AgentProviderProfile,
-    updated: &mut AgentProviderProfile,
-) {
-    match (&existing.native_config, &mut updated.native_config) {
-        (
-            NativeProfileConfig::ClaudeCode {
-                api_key: existing_key,
-                advanced_config: existing_advanced,
-                ..
-            },
-            NativeProfileConfig::ClaudeCode {
-                api_key,
-                advanced_config,
-                ..
-            },
-        )
-        | (
-            NativeProfileConfig::Codex {
-                api_key: existing_key,
-                advanced_config: existing_advanced,
-                ..
-            },
-            NativeProfileConfig::Codex {
-                api_key,
-                advanced_config,
-                ..
-            },
-        )
-        | (
-            NativeProfileConfig::OpenCode {
-                api_key: existing_key,
-                advanced_config: existing_advanced,
-                ..
-            },
-            NativeProfileConfig::OpenCode {
-                api_key,
-                advanced_config,
-                ..
-            },
-        ) => {
-            if api_key.is_empty() {
-                *api_key = existing_key.clone();
-            }
-            if advanced_config.is_none() {
-                *advanced_config = existing_advanced.clone();
-            }
-        }
-        _ => {}
-    }
 }
 
 fn redact_config_for_frontend(app_config: &AppConfig) -> AppConfig {
@@ -214,13 +386,14 @@ fn set_active_profile_in_config(
     agent_kind: AgentKind,
     profile_id: &str,
 ) -> Result<(), String> {
-    let profile_exists = app_config
+    let profile = app_config
         .agent_profile_registry
         .profiles
         .iter()
-        .any(|profile| profile.id == profile_id && profile.agent_kind == agent_kind);
-    if !profile_exists {
-        return Err("档案不存在或不属于当前智能体".to_string());
+        .find(|profile| profile.id == profile_id && profile.agent_kind == agent_kind)
+        .ok_or_else(|| "档案不存在或不属于当前智能体".to_string())?;
+    if profile.default_model.trim().is_empty() {
+        return Err("请先为档案配置默认模型".to_string());
     }
 
     app_config
@@ -268,7 +441,7 @@ fn commit_profile_config_after_native_write<C, R, S>(
     compensation: C,
     compensate_native: R,
     save_config: S,
-) -> Result<(), String>
+) -> Result<C, String>
 where
     R: FnOnce(&C) -> Result<(), String>,
     S: FnOnce(&AppConfig) -> Result<(), String>,
@@ -282,7 +455,7 @@ where
         };
     }
     *app_config = updated_config;
-    Ok(())
+    Ok(compensation)
 }
 
 fn activate_agent_profile_transaction<W, C, R, S>(
@@ -292,7 +465,7 @@ fn activate_agent_profile_transaction<W, C, R, S>(
     write_native: W,
     compensate_native: R,
     save_config: S,
-) -> Result<(), String>
+) -> Result<C, String>
 where
     W: FnOnce(&AgentProviderProfile) -> Result<C, String>,
     R: FnOnce(&C) -> Result<(), String>,
@@ -318,7 +491,7 @@ fn set_active_profile_model_transaction<W, C, R, S>(
     write_native: W,
     compensate_native: R,
     save_config: S,
-) -> Result<(), String>
+) -> Result<C, String>
 where
     W: FnOnce(&AgentProviderProfile) -> Result<C, String>,
     R: FnOnce(&C) -> Result<(), String>,
@@ -356,7 +529,7 @@ fn upsert_agent_profile_transaction<W, C, R, S>(
     write_native: W,
     compensate_native: R,
     save_config: S,
-) -> Result<(), String>
+) -> Result<Option<C>, String>
 where
     W: FnOnce(&AgentProviderProfile) -> Result<C, String>,
     R: FnOnce(&C) -> Result<(), String>,
@@ -372,7 +545,8 @@ where
         .get(&agent_kind)
         .is_some_and(|active_profile_id| active_profile_id == &profile_id);
     if !is_active {
-        return save_profile_config_candidate(app_config, updated_config, save_config);
+        save_profile_config_candidate(app_config, updated_config, save_config)?;
+        return Ok(None);
     }
 
     let updated_profile = agent_profile_from_config(&updated_config, agent_kind, &profile_id)?;
@@ -384,6 +558,7 @@ where
         compensate_native,
         save_config,
     )
+    .map(Some)
 }
 
 fn delete_agent_profile_transaction<W, C, R, S>(
@@ -392,7 +567,7 @@ fn delete_agent_profile_transaction<W, C, R, S>(
     write_native: W,
     compensate_native: R,
     save_config: S,
-) -> Result<(), String>
+) -> Result<Option<C>, String>
 where
     W: FnOnce(&AgentProviderProfile) -> Result<C, String>,
     R: FnOnce(&C) -> Result<(), String>,
@@ -413,7 +588,8 @@ where
     let mut updated_config = app_config.clone();
     delete_agent_profile_from_config(&mut updated_config, profile_id)?;
     if !is_active {
-        return save_profile_config_candidate(app_config, updated_config, save_config);
+        save_profile_config_candidate(app_config, updated_config, save_config)?;
+        return Ok(None);
     }
 
     let compensation = write_native(&deleted_profile)?;
@@ -424,6 +600,7 @@ where
         compensate_native,
         save_config,
     )
+    .map(Some)
 }
 
 fn delete_agent_profile_from_config(
@@ -665,14 +842,46 @@ fn restore_native_profile_config_for_app(
     })
 }
 
+fn discard_native_profile_backup_after_success(
+    state: &AppState,
+    app: &AppHandle,
+    compensation: &NativeConfigWriteResult,
+) {
+    let Ok(paths) = native_config_paths(app) else {
+        debug!(
+            target: "provider",
+            "Native profile backup cleanup skipped because configuration paths could not be resolved"
+        );
+        return;
+    };
+    if let Err(error) =
+        NativeConfigWriteService::new(paths, state.app_data_dir.join("provider-profile-backups"))
+            .discard_committed_backup_session(&compensation.backup_session_dir)
+    {
+        debug!(
+            target: "provider",
+            "Native profile backup cleanup failed category={} rollback={:?}",
+            error.failure_category,
+            error.rollback_status,
+        );
+    }
+}
+
 #[tauri::command]
 pub fn upsert_agent_provider_profile(
     state: State<'_, AppState>,
     app: AppHandle,
-    profile: AgentProviderProfile,
+    profile: AgentProviderProfileUpsert,
 ) -> Result<(), String> {
-    profile.validate()?;
     let _operation_lock = acquire_profile_operation_lock(&state.provider_profile_operation_lock)?;
+    let mut app_config = state.config.lock().unwrap();
+    let existing = app_config
+        .agent_profile_registry
+        .profiles
+        .iter()
+        .find(|existing| existing.id == profile.id);
+    let profile = profile.into_profile(existing)?;
+    profile.validate()?;
     info!(
         target: "provider",
         "Upserting agent provider profile profile_id={} agent_kind={}",
@@ -680,9 +889,8 @@ pub fn upsert_agent_provider_profile(
         profile.agent_kind.as_str()
     );
 
-    let mut app_config = state.config.lock().unwrap();
     let profile_for_redaction = profile.clone();
-    upsert_agent_profile_transaction(
+    let compensation = upsert_agent_profile_transaction(
         &mut app_config,
         profile,
         |updated_profile| apply_native_profile_config_for_app(state.inner(), &app, updated_profile),
@@ -696,7 +904,11 @@ pub fn upsert_agent_provider_profile(
         },
         |config| config::save_config(&app, config),
     )
-    .map_err(|error| redact_profile_error(&error, &profile_for_redaction))
+    .map_err(|error| redact_profile_error(&error, &profile_for_redaction))?;
+    if let Some(compensation) = compensation {
+        discard_native_profile_backup_after_success(state.inner(), &app, &compensation);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -716,7 +928,7 @@ pub fn activate_agent_provider_profile(
     );
     let mut app_config = state.config.lock().unwrap();
     let profile_for_redaction = agent_profile_from_config(&app_config, agent_kind, &profile_id)?;
-    activate_agent_profile_transaction(
+    let compensation = activate_agent_profile_transaction(
         &mut app_config,
         agent_kind,
         &profile_id,
@@ -731,7 +943,9 @@ pub fn activate_agent_provider_profile(
         },
         |config| config::save_config(&app, config),
     )
-    .map_err(|error| redact_profile_error(&error, &profile_for_redaction))
+    .map_err(|error| redact_profile_error(&error, &profile_for_redaction))?;
+    discard_native_profile_backup_after_success(state.inner(), &app, &compensation);
+    Ok(())
 }
 
 #[tauri::command]
@@ -751,7 +965,7 @@ pub fn set_active_agent_profile_model(
     );
     let mut app_config = state.config.lock().unwrap();
     let profile_for_redaction = active_agent_profile_from_config(&app_config, agent_kind)?;
-    set_active_profile_model_transaction(
+    let compensation = set_active_profile_model_transaction(
         &mut app_config,
         agent_kind,
         &default_model,
@@ -766,7 +980,9 @@ pub fn set_active_agent_profile_model(
         },
         |config| config::save_config(&app, config),
     )
-    .map_err(|error| redact_profile_error(&error, &profile_for_redaction))
+    .map_err(|error| redact_profile_error(&error, &profile_for_redaction))?;
+    discard_native_profile_backup_after_success(state.inner(), &app, &compensation);
+    Ok(())
 }
 
 #[tauri::command]
@@ -785,7 +1001,7 @@ pub fn delete_agent_provider_profile(
         .find(|profile| profile.id == profile_id)
         .cloned()
         .ok_or("档案不存在")?;
-    delete_agent_profile_transaction(
+    let compensation = delete_agent_profile_transaction(
         &mut app_config,
         &profile_id,
         |deleted_profile| apply_native_profile_config_for_app(state.inner(), &app, deleted_profile),
@@ -799,7 +1015,11 @@ pub fn delete_agent_provider_profile(
         },
         |config| config::save_config(&app, config),
     )
-    .map_err(|error| redact_profile_error(&error, &profile_for_redaction))
+    .map_err(|error| redact_profile_error(&error, &profile_for_redaction))?;
+    if let Some(compensation) = compensation {
+        discard_native_profile_backup_after_success(state.inner(), &app, &compensation);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -954,7 +1174,7 @@ mod tests {
         profile_models_from_config, redact_config_for_frontend, redact_profile_error,
         set_active_profile_default_model_in_config, set_active_profile_in_config,
         set_active_profile_model_transaction, upsert_agent_profile_in_config,
-        upsert_agent_profile_transaction, ProfileApiProtocol,
+        upsert_agent_profile_transaction, AgentProviderProfileUpsert, ProfileApiProtocol,
     };
     use crate::config::types::{AgentKind, AppConfig, Provider};
     use crate::provider_profiles::native_config::NativeConfigPaths;
@@ -1017,22 +1237,79 @@ mod tests {
     }
 
     #[test]
-    fn upserting_profile_with_empty_api_key_preserves_existing_secret() {
-        let mut app_config = AppConfig::default();
-        upsert_agent_profile_in_config(&mut app_config, codex_profile("codex", "model-a")).unwrap();
-        let mut update = codex_profile("codex", "model-a");
-        if let NativeProfileConfig::Codex { api_key, .. } = &mut update.native_config {
-            *api_key = String::new();
+    #[allow(non_snake_case)]
+    fn 档案更新DTO区分保留与清除机密字段() {
+        let mut existing = codex_profile("codex", "model-a");
+        if let NativeProfileConfig::Codex {
+            advanced_config, ..
+        } = &mut existing.native_config
+        {
+            *advanced_config = Some(serde_json::json!({ "auth": { "token": "secret" } }));
         }
+        let base = serde_json::json!({
+            "id": "codex",
+            "agent_kind": "codex",
+            "name": "测试 Codex 档案",
+            "models": [{ "id": "model-a" }],
+            "default_model": "model-a",
+            "native_config": {
+                "type": "codex",
+                "openai_base_url": "https://api.example.test/v1"
+            }
+        });
 
-        upsert_agent_profile_in_config(&mut app_config, update).unwrap();
+        let omitted: AgentProviderProfileUpsert = serde_json::from_value(base.clone()).unwrap();
+        let omitted = omitted.into_profile(Some(&existing)).unwrap();
+        let mut redacted_value = base;
+        redacted_value["native_config"] = serde_json::json!({
+            "type": "codex",
+            "api_key": "",
+            "advanced_config": null,
+            "openai_base_url": "https://api.example.test/v1"
+        });
+        let redacted: AgentProviderProfileUpsert = serde_json::from_value(redacted_value).unwrap();
+        let redacted = redacted.into_profile(Some(&existing)).unwrap();
+        let clear: AgentProviderProfileUpsert = serde_json::from_value(serde_json::json!({
+            "id": "codex",
+            "agent_kind": "codex",
+            "name": "测试 Codex 档案",
+            "models": [{ "id": "model-a" }],
+            "default_model": "model-a",
+            "native_config": {
+                "type": "codex",
+                "clear_api_key": true,
+                "clear_advanced_config": true,
+                "openai_base_url": "https://api.example.test/v1"
+            }
+        }))
+        .unwrap();
+        let clear = clear.into_profile(Some(&existing)).unwrap();
 
-        let NativeProfileConfig::Codex { api_key, .. } =
-            &app_config.agent_profile_registry.profiles[0].native_config
+        for profile in [omitted, redacted] {
+            let NativeProfileConfig::Codex {
+                api_key,
+                advanced_config,
+                ..
+            } = profile.native_config
+            else {
+                panic!("应为 Codex 档案");
+            };
+            assert_eq!(api_key, "test-key");
+            assert_eq!(
+                advanced_config,
+                Some(serde_json::json!({ "auth": { "token": "secret" } }))
+            );
+        }
+        let NativeProfileConfig::Codex {
+            api_key,
+            advanced_config,
+            ..
+        } = clear.native_config
         else {
             panic!("应为 Codex 档案");
         };
-        assert_eq!(api_key, "test-key");
+        assert!(api_key.is_empty());
+        assert!(advanced_config.is_none());
     }
 
     #[test]
@@ -1125,6 +1402,24 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error, "档案不存在或不属于当前智能体");
+        assert!(app_config
+            .agent_profile_registry
+            .active_profile_ids
+            .is_empty());
+    }
+
+    #[test]
+    fn 空默认模型档案不可激活() {
+        let mut app_config = AppConfig::default();
+        let mut profile = codex_profile("empty-model", "model-a");
+        profile.models.clear();
+        profile.default_model.clear();
+        upsert_agent_profile_in_config(&mut app_config, profile).unwrap();
+
+        let error = set_active_profile_in_config(&mut app_config, AgentKind::Codex, "empty-model")
+            .unwrap_err();
+
+        assert_eq!(error, "请先为档案配置默认模型");
         assert!(app_config
             .agent_profile_registry
             .active_profile_ids
@@ -1229,6 +1524,24 @@ mod tests {
         .unwrap();
 
         assert!(saved.get());
+    }
+
+    #[test]
+    fn 保存成功后返回原生配置补偿句柄以便清理备份() {
+        let mut app_config = AppConfig::default();
+        upsert_agent_profile_in_config(&mut app_config, codex_profile("codex", "model-a")).unwrap();
+
+        let compensation = activate_agent_profile_transaction(
+            &mut app_config,
+            AgentKind::Codex,
+            "codex",
+            |_| Ok::<_, String>("backup-session".to_string()),
+            |_| Ok(()),
+            |_| Ok(()),
+        )
+        .unwrap();
+
+        assert_eq!(compensation, "backup-session");
     }
 
     #[test]
