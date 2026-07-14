@@ -417,6 +417,7 @@ impl NativeConfigWriteService<StdFileOps> {
 }
 
 impl<O: FileOps> NativeConfigWriteService<O> {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn with_file_ops(paths: NativeConfigPaths, backup_root: PathBuf, file_ops: O) -> Self {
         let lock_root = default_lock_root(&paths);
         Self::with_file_ops_and_lock_root(paths, backup_root, lock_root, file_ops)
