@@ -76,6 +76,26 @@ function run(command, args, options = {}) {
   });
 }
 
+function stopProjectOpenCodeProcesses() {
+  if (dryRun) {
+    console.log("[dry-run] 清理本项目路径下残留的 opencode.exe 进程");
+    return;
+  }
+
+  const script = `
+$root = [Environment]::GetEnvironmentVariable('CODEMUX_ROOT')
+Get-CimInstance Win32_Process |
+  Where-Object { $_.Name -eq 'opencode.exe' -and $_.CommandLine -like "*$root*" } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+`;
+
+  execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    cwd: rootDir,
+    stdio: "inherit",
+    env: { ...process.env, CODEMUX_ROOT: rootDir },
+  });
+}
+
 function ensureFileExists(filePath, label) {
   if (!existsSync(filePath)) {
     console.error(`缺少${label}：${filePath}`);
@@ -124,6 +144,7 @@ if (dryRun) {
 run("node", prepareArgs);
 
 if (!skipBuild) {
+  stopProjectOpenCodeProcesses();
   run("npm", ["run", "build"]);
   run("npm", ["run", "build"], { cwd: path.join(tauriDir, "sidecar") });
   run("npx", ["tauri", "build"], {
