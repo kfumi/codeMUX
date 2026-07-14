@@ -214,9 +214,15 @@ fn save_config_to_path_with_file_ops<O: ConfigFileOps>(
         let _ = file_ops.remove_file(&temporary_path);
         return Err(format!("Failed to replace config: {}", error));
     }
-    file_ops
-        .sync_dir(parent)
-        .map_err(|error| format!("Failed to sync config directory: {}", error))?;
+    // The replace above is the logical commit point. Returning an error here
+    // would make callers compensate already-committed native configuration.
+    if let Err(error) = file_ops.sync_dir(parent) {
+        warn!(
+            target: "config",
+            "Config replaced but parent directory sync failed: {}",
+            error
+        );
+    }
     Ok(())
 }
 
@@ -292,6 +298,8 @@ mod tests {
 
     struct ReplaceFailsFileOps;
 
+    struct SyncDirFailsFileOps;
+
     impl ConfigFileOps for ReplaceFailsFileOps {
         fn write_file_sync(&self, path: &Path, content: &[u8]) -> io::Result<()> {
             use std::io::Write;
@@ -318,6 +326,28 @@ mod tests {
         }
     }
 
+    impl ConfigFileOps for SyncDirFailsFileOps {
+        fn write_file_sync(&self, path: &Path, content: &[u8]) -> io::Result<()> {
+            ReplaceFailsFileOps.write_file_sync(path, content)
+        }
+
+        fn replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
+            #[cfg(windows)]
+            {
+                std::fs::remove_file(destination)?;
+            }
+            std::fs::rename(source, destination)
+        }
+
+        fn remove_file(&self, path: &Path) -> io::Result<()> {
+            std::fs::remove_file(path)
+        }
+
+        fn sync_dir(&self, _path: &Path) -> io::Result<()> {
+            Err(io::Error::other("注入的目录同步失败"))
+        }
+    }
+
     #[test]
     fn 配置保存替换失败时保留原文件() {
         let temp_dir = temp_config_dir();
@@ -338,6 +368,30 @@ mod tests {
             std::fs::read_dir(&temp_dir).unwrap().count(),
             1,
             "替换失败时应删除临时文件"
+        );
+
+        let _ = std::fs::remove_file(&config_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn 配置替换成功后目录同步失败仍视为已提交() {
+        let temp_dir = temp_config_dir();
+        let config_path = temp_dir.join("config.json");
+        std::fs::write(&config_path, b"{\"previous\":true}").unwrap();
+
+        save_config_to_path_with_file_ops(
+            &config_path,
+            &AppConfig::default(),
+            &SyncDirFailsFileOps,
+        )
+        .expect("替换完成后不能将目录同步告警误报为未提交");
+
+        let saved: AppConfig =
+            serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+        assert_eq!(
+            saved.agent_profile_registry,
+            AppConfig::default().agent_profile_registry
         );
 
         let _ = std::fs::remove_file(&config_path);
