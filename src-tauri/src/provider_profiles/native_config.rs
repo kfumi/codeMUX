@@ -242,6 +242,14 @@ fn merge_opencode_config(
         .ok_or_else(|| {
             "OpenCode opencode.json 的 provider.codemux-openai 必须为对象".to_string()
         })?;
+    codemux.insert(
+        "npm".to_string(),
+        Value::String("@ai-sdk/openai-compatible".to_string()),
+    );
+    codemux.insert(
+        "name".to_string(),
+        Value::String("CodeMUX OpenAI-compatible".to_string()),
+    );
     let options = codemux
         .entry("options")
         .or_insert_with(|| Value::Object(Map::new()))
@@ -400,6 +408,14 @@ name = "Other"
         assert_eq!(
             config["provider"]["other"]["options"]["apiKey"],
             "other-key"
+        );
+        assert_eq!(
+            config["provider"]["codemux-openai"]["npm"],
+            "@ai-sdk/openai-compatible"
+        );
+        assert_eq!(
+            config["provider"]["codemux-openai"]["name"],
+            "CodeMUX OpenAI-compatible"
         );
         assert_eq!(
             config["provider"]["codemux-openai"]["options"]["baseURL"],
