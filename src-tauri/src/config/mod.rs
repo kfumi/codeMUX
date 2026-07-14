@@ -363,9 +363,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(profiles.len(), 2);
-        assert!(profiles
-            .iter()
-            .all(|profile| profile["models"] == serde_json::json!([
+        assert!(profiles.iter().all(|profile| profile["models"]
+            == serde_json::json!([
                 { "id": "model-a", "name": "model-a", "context_window": null }
             ])));
         assert!(profiles

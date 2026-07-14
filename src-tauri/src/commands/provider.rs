@@ -96,7 +96,7 @@ fn cleanup_provider_references(config: &mut AppConfig, provider_id: &str) {
 
 fn upsert_agent_profile_in_config(
     app_config: &mut AppConfig,
-    profile: AgentProviderProfile,
+    mut profile: AgentProviderProfile,
 ) -> Result<(), String> {
     profile.validate()?;
 
@@ -109,6 +109,7 @@ fn upsert_agent_profile_in_config(
         if existing.agent_kind != profile.agent_kind {
             return Err("同一档案 ID 不允许更改智能体类型".to_string());
         }
+        preserve_unsubmitted_profile_secrets(existing, &mut profile);
         *existing = profile;
     } else {
         registry.profiles.push(profile);
@@ -119,6 +120,85 @@ fn upsert_agent_profile_in_config(
     app_config.profile_registry_is_derived = false;
     app_config.profile_registry_validation_error = None;
     Ok(())
+}
+
+fn preserve_unsubmitted_profile_secrets(
+    existing: &AgentProviderProfile,
+    updated: &mut AgentProviderProfile,
+) {
+    match (&existing.native_config, &mut updated.native_config) {
+        (
+            NativeProfileConfig::ClaudeCode {
+                api_key: existing_key,
+                advanced_config: existing_advanced,
+                ..
+            },
+            NativeProfileConfig::ClaudeCode {
+                api_key,
+                advanced_config,
+                ..
+            },
+        )
+        | (
+            NativeProfileConfig::Codex {
+                api_key: existing_key,
+                advanced_config: existing_advanced,
+                ..
+            },
+            NativeProfileConfig::Codex {
+                api_key,
+                advanced_config,
+                ..
+            },
+        )
+        | (
+            NativeProfileConfig::OpenCode {
+                api_key: existing_key,
+                advanced_config: existing_advanced,
+                ..
+            },
+            NativeProfileConfig::OpenCode {
+                api_key,
+                advanced_config,
+                ..
+            },
+        ) => {
+            if api_key.is_empty() {
+                *api_key = existing_key.clone();
+            }
+            if advanced_config.is_none() {
+                *advanced_config = existing_advanced.clone();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn redact_config_for_frontend(app_config: &AppConfig) -> AppConfig {
+    let mut redacted = app_config.clone();
+    for profile in &mut redacted.agent_profile_registry.profiles {
+        match &mut profile.native_config {
+            NativeProfileConfig::ClaudeCode {
+                api_key,
+                advanced_config,
+                ..
+            }
+            | NativeProfileConfig::Codex {
+                api_key,
+                advanced_config,
+                ..
+            }
+            | NativeProfileConfig::OpenCode {
+                api_key,
+                advanced_config,
+                ..
+            } => {
+                api_key.clear();
+                *advanced_config = None;
+            }
+        }
+    }
+    redacted
 }
 
 fn set_active_profile_in_config(
@@ -578,7 +658,7 @@ pub async fn test_agent_provider_profile(
 #[tauri::command]
 pub fn get_config(state: State<'_, AppState>) -> AppConfig {
     debug!(target: "provider", "Loading app config");
-    state.config.lock().unwrap().clone()
+    redact_config_for_frontend(&state.config.lock().unwrap())
 }
 
 #[tauri::command]
@@ -661,7 +741,7 @@ mod tests {
     use super::{
         activate_agent_profile_transaction, apply_agent_config_update, apply_native_profile_config,
         cleanup_provider_references, delete_agent_profile_from_config, profile_api_connection,
-        profile_models_from_config, redact_profile_error,
+        profile_models_from_config, redact_config_for_frontend, redact_profile_error,
         set_active_profile_default_model_in_config, set_active_profile_in_config,
         set_active_profile_model_transaction, upsert_agent_profile_in_config, ProfileApiProtocol,
     };
@@ -705,6 +785,54 @@ mod tests {
             app_config.agent_profile_registry.profiles[0].default_model,
             "model-b"
         );
+    }
+
+    #[test]
+    fn upserting_profile_with_empty_api_key_preserves_existing_secret() {
+        let mut app_config = AppConfig::default();
+        upsert_agent_profile_in_config(&mut app_config, codex_profile("codex", "model-a")).unwrap();
+        let mut update = codex_profile("codex", "model-a");
+        if let NativeProfileConfig::Codex { api_key, .. } = &mut update.native_config {
+            *api_key = String::new();
+        }
+
+        upsert_agent_profile_in_config(&mut app_config, update).unwrap();
+
+        let NativeProfileConfig::Codex { api_key, .. } =
+            &app_config.agent_profile_registry.profiles[0].native_config
+        else {
+            panic!("应为 Codex 档案");
+        };
+        assert_eq!(api_key, "test-key");
+    }
+
+    #[test]
+    fn get_config_view_redacts_profile_secrets_and_advanced_config() {
+        let mut app_config = AppConfig::default();
+        let mut profile = codex_profile("codex", "model-a");
+        if let NativeProfileConfig::Codex {
+            api_key,
+            advanced_config,
+            ..
+        } = &mut profile.native_config
+        {
+            *api_key = "secret-key".to_string();
+            *advanced_config = Some(serde_json::json!({ "auth": { "token": "secret" } }));
+        }
+        upsert_agent_profile_in_config(&mut app_config, profile).unwrap();
+
+        let view = redact_config_for_frontend(&app_config);
+        let NativeProfileConfig::Codex {
+            api_key,
+            advanced_config,
+            ..
+        } = &view.agent_profile_registry.profiles[0].native_config
+        else {
+            panic!("应为 Codex 档案");
+        };
+
+        assert!(api_key.is_empty());
+        assert!(advanced_config.is_none());
     }
 
     #[test]
