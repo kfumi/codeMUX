@@ -587,6 +587,14 @@ impl<O: FileOps> NativeConfigWriteService<O> {
         Ok(lock_file)
     }
 
+    fn acquire_target_lock(&self, target: &Path) -> io::Result<File> {
+        let lock_path = target_lock_path(&self.lock_root, target);
+        let lock_file = self.file_ops.open_lock_file(&lock_path)?;
+        self.file_ops.restrict_file_permissions(&lock_path)?;
+        self.file_ops.try_lock_exclusive(&lock_file)?;
+        Ok(lock_file)
+    }
+
     fn create_secure_directory(&self, path: &Path) -> io::Result<()> {
         self.file_ops.create_dir_all(path)?;
         self.file_ops.restrict_directory_permissions(path)?;
@@ -725,6 +733,10 @@ impl<O: FileOps> NativeConfigWriteService<O> {
         }
         let mut partial = false;
         for file in files.iter().rev() {
+            let Ok(_target_lock) = self.acquire_target_lock(&file.target) else {
+                partial = true;
+                continue;
+            };
             let Some(expected_new_content_hash) = file.new_content_hash.as_deref() else {
                 partial = true;
                 continue;
@@ -745,6 +757,8 @@ impl<O: FileOps> NativeConfigWriteService<O> {
                         Ok(true)
                     ) {
                         partial = true;
+                    } else if !self.target_matches_original_content(session_dir, file) {
+                        partial = true;
                     }
                 }
                 None => {
@@ -757,6 +771,9 @@ impl<O: FileOps> NativeConfigWriteService<O> {
                                 if self.file_ops.sync_dir(parent).is_err() {
                                     partial = true;
                                 }
+                            }
+                            if !self.target_matches_original_content(session_dir, file) {
+                                partial = true;
                             }
                         }
                         Ok(false) | Err(_) => {
@@ -1017,21 +1034,23 @@ fn default_lock_root(paths: &NativeConfigPaths) -> PathBuf {
 }
 
 fn canonical_target_path(path: &Path) -> PathBuf {
+    let absolute_path = absolute_path(path);
     let mut unresolved_components = Vec::new();
-    let mut current = path;
+    let mut current = absolute_path.as_path();
     loop {
         if let Ok(canonical) = fs::canonicalize(current) {
-            return unresolved_components
+            let resolved = unresolved_components
                 .iter()
                 .rev()
                 .fold(canonical, |resolved, component| resolved.join(component));
+            return normalize_lock_namespace_path(&resolved);
         }
         let Some(file_name) = current.file_name() else {
-            return absolute_path(path);
+            return normalize_lock_namespace_path(&absolute_path);
         };
         unresolved_components.push(file_name.to_os_string());
         let Some(parent) = current.parent() else {
-            return absolute_path(path);
+            return normalize_lock_namespace_path(&absolute_path);
         };
         current = parent;
     }
@@ -1045,6 +1064,42 @@ fn absolute_path(path: &Path) -> PathBuf {
             .map(|current_dir| current_dir.join(path))
             .unwrap_or_else(|_| path.to_path_buf())
     }
+}
+
+#[cfg(windows)]
+fn normalize_lock_namespace_path(path: &Path) -> PathBuf {
+    PathBuf::from(
+        lexical_normalize_path(path)
+            .to_string_lossy()
+            .to_lowercase(),
+    )
+}
+
+#[cfg(not(windows))]
+fn normalize_lock_namespace_path(path: &Path) -> PathBuf {
+    lexical_normalize_path(path)
+}
+
+fn lexical_normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                let _ = normalized.pop();
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn target_lock_path(lock_root: &Path, target: &Path) -> PathBuf {
+    let target_namespace = canonical_target_path(target);
+    lock_root.join(format!(
+        ".target-{}.lock",
+        content_hash(target_namespace.to_string_lossy().as_bytes())
+    ))
 }
 
 fn is_session_directory(path: &Path) -> bool {
@@ -1066,7 +1121,7 @@ mod tests {
     use crate::provider_profiles::native_config::{NativeConfigPaths, RenderedNativeConfig};
     use std::{
         cell::Cell,
-        fs,
+        fs::{self, File},
         io::{self, Write as _},
         path::{Path, PathBuf},
     };
@@ -1193,6 +1248,31 @@ mod tests {
         );
         let second = NativeConfigWriteService::with_file_ops(
             paths,
+            temp.path().join("second-backups"),
+            TestFileOps,
+        );
+
+        assert_eq!(first.lock_root, second.lock_root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn 默认锁命名空间将等价路径的大小写视为同一目标集合() {
+        let temp = TestDirectory::new();
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(&paths.codex_dir).unwrap();
+        let differently_cased_paths = NativeConfigPaths::new(
+            PathBuf::from(paths.claude_dir.to_string_lossy().to_uppercase()),
+            PathBuf::from(paths.codex_dir.to_string_lossy().to_uppercase()),
+            PathBuf::from(paths.opencode_dir.to_string_lossy().to_uppercase()),
+        );
+        let first = NativeConfigWriteService::with_file_ops(
+            paths,
+            temp.path().join("first-backups"),
+            TestFileOps,
+        );
+        let second = NativeConfigWriteService::with_file_ops(
+            differently_cased_paths,
             temp.path().join("second-backups"),
             TestFileOps,
         );
@@ -1474,6 +1554,84 @@ mod tests {
             fs::read(paths.codex_auth_path()).unwrap(),
             b"externally modified"
         );
+    }
+
+    #[test]
+    fn 恢复替换后发生外部修改时保留外部内容并返回部分回滚() {
+        let temp = TestDirectory::new();
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(&paths.codex_dir).unwrap();
+        fs::write(paths.codex_auth_path(), b"new auth").unwrap();
+        let backup_root = temp.path().join("backups");
+        let session_dir = backup_root.join(Uuid::new_v4().to_string());
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(session_dir.join("000-auth.json"), b"old auth").unwrap();
+        fs::write(
+            session_dir.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "state": "applying",
+                "files": [{
+                    "target": paths.codex_auth_path(),
+                    "backup_file": "000-auth.json",
+                    "original_mode": null,
+                    "replaced": true,
+                    "new_content_hash": "5b1fc98f7cf4cd1e8ad29d73f726eb1f8dac778c675e5b9639f858151b948957"
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let service = NativeConfigWriteService::with_file_ops(
+            paths.clone(),
+            backup_root,
+            ExternalWriteAfterRestoreOps::default(),
+        );
+
+        let error = service.write(&[]).unwrap_err();
+
+        assert_eq!(error.rollback_status, RollbackStatus::Partial);
+        assert_eq!(
+            fs::read(paths.codex_auth_path()).unwrap(),
+            b"externally modified"
+        );
+    }
+
+    #[test]
+    fn 恢复目标锁不可用时保留目标并返回部分回滚() {
+        let temp = TestDirectory::new();
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(&paths.codex_dir).unwrap();
+        fs::write(paths.codex_auth_path(), b"new auth").unwrap();
+        let backup_root = temp.path().join("backups");
+        let session_dir = backup_root.join(Uuid::new_v4().to_string());
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(session_dir.join("000-auth.json"), b"old auth").unwrap();
+        fs::write(
+            session_dir.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "state": "applying",
+                "files": [{
+                    "target": paths.codex_auth_path(),
+                    "backup_file": "000-auth.json",
+                    "original_mode": null,
+                    "replaced": true,
+                    "new_content_hash": "5b1fc98f7cf4cd1e8ad29d73f726eb1f8dac778c675e5b9639f858151b948957"
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let service = NativeConfigWriteService::with_file_ops_and_lock_root(
+            paths.clone(),
+            backup_root,
+            temp.path().join("locks"),
+            FailTargetLockOps::default(),
+        );
+
+        let error = service.write(&[]).unwrap_err();
+
+        assert_eq!(error.rollback_status, RollbackStatus::Partial);
+        assert_eq!(fs::read(paths.codex_auth_path()).unwrap(), b"new auth");
     }
 
     #[cfg(unix)]
@@ -1843,6 +2001,74 @@ mod tests {
 
         fn remove_file(&self, path: &Path) -> io::Result<()> {
             self.inner.remove_file(path)
+        }
+    }
+
+    #[derive(Default)]
+    struct ExternalWriteAfterRestoreOps {
+        inner: TestFileOps,
+    }
+
+    impl FileOps for ExternalWriteAfterRestoreOps {
+        fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+            self.inner.create_dir_all(path)
+        }
+
+        fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+            self.inner.read(path)
+        }
+
+        fn write_file_sync(&self, path: &Path, content: &[u8]) -> io::Result<()> {
+            self.inner.write_file_sync(path, content)
+        }
+
+        fn replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
+            self.inner.replace(source, destination)?;
+            if destination.file_name() == Some(std::ffi::OsStr::new("auth.json")) {
+                fs::write(destination, b"externally modified")?;
+            }
+            Ok(())
+        }
+
+        fn remove_file(&self, path: &Path) -> io::Result<()> {
+            self.inner.remove_file(path)
+        }
+    }
+
+    #[derive(Default)]
+    struct FailTargetLockOps {
+        inner: TestFileOps,
+    }
+
+    impl FileOps for FailTargetLockOps {
+        fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+            self.inner.create_dir_all(path)
+        }
+
+        fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+            self.inner.read(path)
+        }
+
+        fn write_file_sync(&self, path: &Path, content: &[u8]) -> io::Result<()> {
+            self.inner.write_file_sync(path, content)
+        }
+
+        fn replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
+            self.inner.replace(source, destination)
+        }
+
+        fn remove_file(&self, path: &Path) -> io::Result<()> {
+            self.inner.remove_file(path)
+        }
+
+        fn open_lock_file(&self, path: &Path) -> io::Result<File> {
+            if path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with(".target-"))
+            {
+                return Err(io::Error::other("simulated target lock failure"));
+            }
+            self.inner.open_lock_file(path)
         }
     }
 
