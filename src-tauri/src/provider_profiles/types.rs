@@ -70,6 +70,25 @@ pub struct AgentProviderProfile {
     pub native_config: NativeProfileConfig,
 }
 
+impl AgentProviderProfile {
+    pub fn validate(&self) -> Result<(), String> {
+        let is_matching_config = matches!(
+            (&self.agent_kind, &self.native_config),
+            (
+                AgentKind::ClaudeCode,
+                NativeProfileConfig::ClaudeCode { .. }
+            ) | (AgentKind::Codex, NativeProfileConfig::Codex { .. })
+                | (AgentKind::Opencode, NativeProfileConfig::OpenCode { .. })
+        );
+
+        if is_matching_config {
+            Ok(())
+        } else {
+            Err("档案智能体类型与原生配置类型不一致".to_string())
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct AgentProfileRegistry {
     #[serde(default)]
@@ -81,6 +100,24 @@ pub struct AgentProfileRegistry {
 impl AgentProfileRegistry {
     pub fn is_empty(&self) -> bool {
         self.profiles.is_empty()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        for profile in &self.profiles {
+            profile.validate()?;
+        }
+
+        for (agent_kind, profile_id) in &self.active_profile_ids {
+            let is_matching_profile = self
+                .profiles
+                .iter()
+                .any(|profile| profile.agent_kind == *agent_kind && profile.id == *profile_id);
+            if !is_matching_profile {
+                return Err("启用档案与智能体类型不匹配".to_string());
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -95,7 +132,7 @@ pub fn migrate_legacy_providers(
 
         if !provider.anthropic_base_url.trim().is_empty() {
             let profile = AgentProviderProfile {
-                id: uuid::Uuid::new_v4().to_string(),
+                id: legacy_profile_id(provider, AgentKind::ClaudeCode),
                 agent_kind: AgentKind::ClaudeCode,
                 name: provider.name.clone(),
                 note: MIGRATION_REVIEW_NOTE.to_string(),
@@ -109,13 +146,12 @@ pub fn migrate_legacy_providers(
                     requires_review: true,
                 },
             };
-            set_active_profile_if_needed(&mut registry, profile.agent_kind, &profile.id, is_active);
-            registry.profiles.push(profile);
+            add_migrated_profile(&mut registry, profile, is_active);
         }
 
         if !provider.openai_base_url.trim().is_empty() {
             let codex_profile = AgentProviderProfile {
-                id: uuid::Uuid::new_v4().to_string(),
+                id: legacy_profile_id(provider, AgentKind::Codex),
                 agent_kind: AgentKind::Codex,
                 name: provider.name.clone(),
                 note: MIGRATION_REVIEW_NOTE.to_string(),
@@ -129,16 +165,10 @@ pub fn migrate_legacy_providers(
                     requires_review: true,
                 },
             };
-            set_active_profile_if_needed(
-                &mut registry,
-                codex_profile.agent_kind,
-                &codex_profile.id,
-                is_active,
-            );
-            registry.profiles.push(codex_profile);
+            add_migrated_profile(&mut registry, codex_profile, is_active);
 
             let opencode_profile = AgentProviderProfile {
-                id: uuid::Uuid::new_v4().to_string(),
+                id: legacy_profile_id(provider, AgentKind::Opencode),
                 agent_kind: AgentKind::Opencode,
                 name: provider.name.clone(),
                 note: MIGRATION_REVIEW_NOTE.to_string(),
@@ -151,13 +181,7 @@ pub fn migrate_legacy_providers(
                     requires_review: true,
                 },
             };
-            set_active_profile_if_needed(
-                &mut registry,
-                opencode_profile.agent_kind,
-                &opencode_profile.id,
-                is_active,
-            );
-            registry.profiles.push(opencode_profile);
+            add_migrated_profile(&mut registry, opencode_profile, is_active);
         }
     }
 
@@ -172,7 +196,12 @@ pub fn migrate_legacy_providers(
             .or_insert_with(|| profile.id.clone());
     }
 
+    registry.validate().ok()?;
     Some(registry)
+}
+
+fn legacy_profile_id(provider: &Provider, agent_kind: AgentKind) -> String {
+    format!("{}-{}", provider.id, agent_kind.as_str())
 }
 
 fn legacy_profile_models(provider: &Provider) -> Vec<ProfileModel> {
@@ -193,5 +222,48 @@ fn set_active_profile_if_needed(
         registry
             .active_profile_ids
             .insert(agent_kind, profile_id.to_string());
+    }
+}
+
+fn add_migrated_profile(
+    registry: &mut AgentProfileRegistry,
+    profile: AgentProviderProfile,
+    is_active: bool,
+) {
+    if profile.validate().is_err() {
+        return;
+    }
+
+    set_active_profile_if_needed(registry, profile.agent_kind, &profile.id, is_active);
+    registry.profiles.push(profile);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AgentProviderProfile, NativeProfileConfig, ProfileModel};
+    use crate::config::types::AgentKind;
+
+    #[test]
+    fn rejects_native_config_for_a_different_agent_kind() {
+        let profile = AgentProviderProfile {
+            id: "profile".to_string(),
+            agent_kind: AgentKind::ClaudeCode,
+            name: "不匹配档案".to_string(),
+            note: String::new(),
+            models: Vec::<ProfileModel>::new(),
+            default_model: String::new(),
+            native_config: NativeProfileConfig::Codex {
+                api_key: String::new(),
+                openai_base_url: String::new(),
+                codex_needs_proxy: None,
+                advanced_config: None,
+                requires_review: true,
+            },
+        };
+
+        assert_eq!(
+            profile.validate().unwrap_err(),
+            "档案智能体类型与原生配置类型不一致"
+        );
     }
 }

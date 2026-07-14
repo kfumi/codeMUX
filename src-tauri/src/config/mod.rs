@@ -38,7 +38,7 @@ fn load_config_from_path(config_path: &Path) -> AppConfig {
     if config_path.exists() {
         match std::fs::read(config_path) {
             Ok(content) => match serde_json::from_slice::<AppConfig>(&content) {
-                Ok(config) => migrate_legacy_config(config_path, config),
+                Ok(config) => migrate_legacy_config(config),
                 Err(error) => {
                     let backup_path = backup_unreadable_config(config_path).ok();
                     warn!(
@@ -85,7 +85,7 @@ fn save_config_to_path(config_path: &Path, config: &AppConfig) -> Result<(), Str
     Ok(())
 }
 
-fn migrate_legacy_config(config_path: &Path, config: AppConfig) -> AppConfig {
+fn migrate_legacy_config(mut config: AppConfig) -> AppConfig {
     if !config.agent_profile_registry.is_empty() || config.providers.is_empty() {
         return config;
     }
@@ -96,23 +96,8 @@ fn migrate_legacy_config(config_path: &Path, config: AppConfig) -> AppConfig {
         return config;
     };
 
-    let mut migrated = config.clone();
-    migrated.agent_profile_registry = registry;
-    migrated.providers.clear();
-    migrated.active_provider_id = None;
-
-    match save_config_to_path(config_path, &migrated) {
-        Ok(()) => migrated,
-        Err(error) => {
-            warn!(
-                target: "config",
-                "Failed to persist migrated provider profiles at {}: {}. Keeping legacy provider fields for a later retry.",
-                config_path.display(),
-                error
-            );
-            config
-        }
-    }
+    config.agent_profile_registry = registry;
+    config
 }
 
 #[cfg(test)]
@@ -269,6 +254,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(profiles.len(), 3);
+        assert!(config
+            .agent_profile_registry
+            .profiles
+            .iter()
+            .all(|profile| profile.validate().is_ok()));
         assert_eq!(registry["active_profile_ids"]["codex"], codex["id"].clone());
         assert_eq!(
             codex["native_config"]["codex_needs_proxy"],
@@ -282,8 +272,11 @@ mod tests {
                 { "id": "model-b", "name": "model-b", "context_window": null }
             ])
         );
-        assert_eq!(raw.get("providers"), None);
-        assert_eq!(raw.get("active_provider_id"), None);
+        assert_eq!(raw["providers"], legacy["providers"]);
+        assert_eq!(raw["active_provider_id"], legacy["active_provider_id"]);
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+        assert_eq!(persisted, legacy);
 
         let _ = std::fs::remove_file(&config_path);
         let _ = std::fs::remove_dir(&temp_dir);
@@ -317,6 +310,87 @@ mod tests {
         assert!(profiles
             .iter()
             .all(|profile| profile["models"] == serde_json::json!([])));
+
+        let _ = std::fs::remove_file(&config_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn preserves_unmappable_legacy_provider_while_migrating_other_entries() {
+        let temp_dir = temp_config_dir();
+        let config_path = temp_dir.join("config.json");
+        let legacy = serde_json::json!({
+            "providers": [
+                {
+                    "id": "migratable",
+                    "name": "可迁移供应商",
+                    "api_key": "migratable-key",
+                    "anthropic_base_url": "https://anthropic.example",
+                    "openai_base_url": "",
+                    "default_model": "claude-model",
+                    "models": ["claude-model"]
+                },
+                {
+                    "id": "unmappable",
+                    "name": "待人工处理供应商",
+                    "api_key": "unmappable-key",
+                    "anthropic_base_url": "",
+                    "openai_base_url": "",
+                    "default_model": "unknown-model",
+                    "models": ["unknown-model"]
+                }
+            ],
+            "active_provider_id": "unmappable",
+            "theme": "System"
+        });
+        std::fs::write(&config_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+        let config = load_config_from_path(&config_path);
+
+        assert_eq!(config.agent_profile_registry.profiles.len(), 1);
+        assert_eq!(config.providers.len(), 2);
+        assert_eq!(config.providers[1].id, "unmappable");
+        assert_eq!(config.providers[1].name, "待人工处理供应商");
+        assert_eq!(config.providers[1].api_key, "unmappable-key");
+        assert_eq!(config.providers[1].models, vec!["unknown-model"]);
+        assert_eq!(config.active_provider_id.as_deref(), Some("unmappable"));
+
+        let _ = std::fs::remove_file(&config_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn legacy_migration_is_idempotent_across_repeated_loads() {
+        let temp_dir = temp_config_dir();
+        let config_path = temp_dir.join("config.json");
+        let legacy = serde_json::json!({
+            "providers": [{
+                "id": "legacy-provider",
+                "name": "旧供应商",
+                "api_key": "secret",
+                "anthropic_base_url": "https://anthropic.example/v1",
+                "openai_base_url": "https://openai.example/v1",
+                "default_model": "model-a",
+                "models": ["model-a"]
+            }],
+            "active_provider_id": "legacy-provider",
+            "theme": "System"
+        });
+        std::fs::write(&config_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+        let first = load_config_from_path(&config_path);
+        let second = load_config_from_path(&config_path);
+
+        assert_eq!(first.agent_profile_registry, second.agent_profile_registry);
+        assert_eq!(
+            serde_json::to_value(&second.providers).unwrap(),
+            serde_json::to_value(&first.providers).unwrap()
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(&config_path).unwrap())
+                .unwrap(),
+            legacy
+        );
 
         let _ = std::fs::remove_file(&config_path);
         let _ = std::fs::remove_dir(&temp_dir);
