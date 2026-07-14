@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod db;
 mod mcp;
+mod provider_profiles;
 mod skills;
 
 use log::info;

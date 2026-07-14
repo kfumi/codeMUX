@@ -1,6 +1,7 @@
 pub mod types;
 
 use crate::config::types::AppConfig;
+use crate::provider_profiles::migrate_legacy_providers;
 use log::warn;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
@@ -37,7 +38,7 @@ fn load_config_from_path(config_path: &Path) -> AppConfig {
     if config_path.exists() {
         match std::fs::read(config_path) {
             Ok(content) => match serde_json::from_slice::<AppConfig>(&content) {
-                Ok(config) => config,
+                Ok(config) => migrate_legacy_config(config_path, config),
                 Err(error) => {
                     let backup_path = backup_unreadable_config(config_path).ok();
                     warn!(
@@ -82,6 +83,36 @@ fn save_config_to_path(config_path: &Path, config: &AppConfig) -> Result<(), Str
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
     std::fs::write(config_path, content).map_err(|e| format!("Failed to write config: {}", e))?;
     Ok(())
+}
+
+fn migrate_legacy_config(config_path: &Path, config: AppConfig) -> AppConfig {
+    if !config.agent_profile_registry.is_empty() || config.providers.is_empty() {
+        return config;
+    }
+
+    let Some(registry) =
+        migrate_legacy_providers(&config.providers, config.active_provider_id.as_deref())
+    else {
+        return config;
+    };
+
+    let mut migrated = config.clone();
+    migrated.agent_profile_registry = registry;
+    migrated.providers.clear();
+    migrated.active_provider_id = None;
+
+    match save_config_to_path(config_path, &migrated) {
+        Ok(()) => migrated,
+        Err(error) => {
+            warn!(
+                target: "config",
+                "Failed to persist migrated provider profiles at {}: {}. Keeping legacy provider fields for a later retry.",
+                config_path.display(),
+                error
+            );
+            config
+        }
+    }
 }
 
 #[cfg(test)]
@@ -200,6 +231,142 @@ mod tests {
 
         let _ = std::fs::remove_file(&config_path);
         let _ = std::fs::remove_file(&backup_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn migrates_legacy_provider_with_two_urls_into_three_agent_profiles() {
+        let temp_dir = temp_config_dir();
+        let config_path = temp_dir.join("config.json");
+        let legacy = serde_json::json!({
+            "providers": [{
+                "id": "legacy-provider",
+                "name": "旧供应商",
+                "api_key": "secret",
+                "anthropic_base_url": "https://anthropic.example/v1",
+                "openai_base_url": "https://openai.example/v1",
+                "default_model": "model-a",
+                "models": ["model-a", "model-b"],
+                "context_1m": true,
+                "codex_needs_proxy": true
+            }],
+            "active_provider_id": "legacy-provider",
+            "theme": "System"
+        });
+        std::fs::write(&config_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+        let config = load_config_from_path(&config_path);
+        let raw = serde_json::to_value(&config).unwrap();
+        let registry = &raw["agent_profile_registry"];
+        let profiles = registry["profiles"].as_array().unwrap();
+        let codex = profiles
+            .iter()
+            .find(|profile| profile["agent_kind"] == "codex")
+            .unwrap();
+        let opencode = profiles
+            .iter()
+            .find(|profile| profile["agent_kind"] == "opencode")
+            .unwrap();
+
+        assert_eq!(profiles.len(), 3);
+        assert_eq!(registry["active_profile_ids"]["codex"], codex["id"].clone());
+        assert_eq!(
+            codex["native_config"]["codex_needs_proxy"],
+            serde_json::json!(true)
+        );
+        assert_eq!(opencode["native_config"]["type"], "opencode");
+        assert_eq!(
+            codex["models"],
+            serde_json::json!([
+                { "id": "model-a", "name": "model-a", "context_window": null },
+                { "id": "model-b", "name": "model-b", "context_window": null }
+            ])
+        );
+        assert_eq!(raw.get("providers"), None);
+        assert_eq!(raw.get("active_provider_id"), None);
+
+        let _ = std::fs::remove_file(&config_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn migrates_legacy_provider_without_models_as_an_empty_profile_model_list() {
+        let temp_dir = temp_config_dir();
+        let config_path = temp_dir.join("config.json");
+        let legacy = serde_json::json!({
+            "providers": [{
+                "id": "legacy-provider",
+                "name": "旧供应商",
+                "api_key": "secret",
+                "anthropic_base_url": "",
+                "openai_base_url": "https://openai.example/v1",
+                "default_model": "model-a"
+            }],
+            "active_provider_id": "legacy-provider",
+            "theme": "System"
+        });
+        std::fs::write(&config_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+        let config = load_config_from_path(&config_path);
+        let raw = serde_json::to_value(&config).unwrap();
+        let profiles = raw["agent_profile_registry"]["profiles"]
+            .as_array()
+            .unwrap();
+
+        assert_eq!(profiles.len(), 2);
+        assert!(profiles
+            .iter()
+            .all(|profile| profile["models"] == serde_json::json!([])));
+
+        let _ = std::fs::remove_file(&config_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn round_trips_new_agent_profile_registry_without_legacy_fields() {
+        let temp_dir = temp_config_dir();
+        let config_path = temp_dir.join("config.json");
+        let new_config = serde_json::json!({
+            "agent_profile_registry": {
+                "profiles": [{
+                    "id": "codex-profile",
+                    "agent_kind": "codex",
+                    "name": "Codex",
+                    "note": "需要检查原生高级配置",
+                    "models": [{
+                        "id": "gpt-5",
+                        "name": "GPT-5",
+                        "context_window": 400000
+                    }],
+                    "default_model": "gpt-5",
+                    "native_config": {
+                        "type": "codex",
+                        "api_key": "secret",
+                        "openai_base_url": "https://openai.example/v1",
+                        "codex_needs_proxy": true,
+                        "advanced_config": null,
+                        "requires_review": true
+                    }
+                }],
+                "active_profile_ids": { "codex": "codex-profile" }
+            },
+            "theme": "System"
+        });
+        std::fs::write(&config_path, serde_json::to_vec(&new_config).unwrap()).unwrap();
+
+        let config = load_config_from_path(&config_path);
+        save_config_to_path(&config_path, &config).unwrap();
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+
+        assert_eq!(
+            persisted["agent_profile_registry"],
+            new_config["agent_profile_registry"]
+        );
+        assert_eq!(persisted.get("providers"), None);
+        assert_eq!(persisted.get("active_provider_id"), None);
+
+        let _ = std::fs::remove_file(&config_path);
         let _ = std::fs::remove_dir(&temp_dir);
     }
 }

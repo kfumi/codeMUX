@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentKind {
     #[default]
@@ -226,8 +226,12 @@ pub struct AgentConfigs {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
+    pub agent_profile_registry: crate::provider_profiles::AgentProfileRegistry,
+    /// 仅用于读取尚未迁移的旧版统一供应商配置。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub providers: Vec<Provider>,
-    #[serde(default)]
+    /// 仅用于读取尚未迁移的旧版统一供应商配置。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_provider_id: Option<String>,
     #[serde(default)]
     pub agent_defaults: AgentDefaults,
@@ -251,20 +255,10 @@ pub enum Theme {
 
 impl Default for AppConfig {
     fn default() -> Self {
-        let id = uuid::Uuid::new_v4().to_string();
         Self {
-            providers: vec![Provider {
-                id: id.clone(),
-                name: "默认".to_string(),
-                api_key: String::new(),
-                anthropic_base_url: "https://api.anthropic.com".to_string(),
-                openai_base_url: String::new(),
-                default_model: "claude-sonnet-4-20250514".to_string(),
-                models: vec!["claude-sonnet-4-20250514".to_string()],
-                context_1m: None,
-                codex_needs_proxy: None,
-            }],
-            active_provider_id: Some(id),
+            agent_profile_registry: crate::provider_profiles::AgentProfileRegistry::default(),
+            providers: Vec::new(),
+            active_provider_id: None,
             agent_defaults: AgentDefaults::default(),
             agent_configs: AgentConfigs::default(),
             compact_ai_output: false,
@@ -345,9 +339,6 @@ mod tests {
         let config: AppConfig = serde_json::from_value(raw).unwrap();
 
         assert_eq!(config.providers[0].models, Vec::<String>::new());
-        assert_eq!(
-            AppConfig::default().providers[0].models,
-            vec!["claude-sonnet-4-20250514"]
-        );
+        assert!(AppConfig::default().providers.is_empty());
     }
 }
