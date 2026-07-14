@@ -351,15 +351,27 @@ fn merge_json_object_into_toml(
             continue;
         }
 
-        if target
-            .get(key)
-            .is_some_and(|item| item.is_table() || item.is_array_of_tables())
-        {
-            return Err("Codex advanced_config.config 节点类型冲突".to_string());
+        if let Some(current) = target.get(key) {
+            if !toml_item_matches_json_value(current, advanced_value) {
+                return Err("Codex advanced_config.config 节点类型冲突".to_string());
+            }
         }
         target.insert(key, json_to_toml_item(advanced_value)?);
     }
     Ok(())
+}
+
+fn toml_item_matches_json_value(item: &Item, json_value: &Value) -> bool {
+    match (item.as_value(), json_value) {
+        (Some(TomlValue::String(_)), Value::String(_)) => true,
+        (Some(TomlValue::Boolean(_)), Value::Bool(_)) => true,
+        (Some(TomlValue::Integer(_)), Value::Number(number)) => number.as_i64().is_some(),
+        (Some(TomlValue::Float(_)), Value::Number(number)) => {
+            number.as_i64().is_none() && number.as_u64().is_none() && number.as_f64().is_some()
+        }
+        (Some(TomlValue::Array(_)), Value::Array(_)) => true,
+        _ => false,
+    }
 }
 
 fn json_to_toml_item(json_value: &Value) -> Result<Item, String> {
@@ -823,6 +835,56 @@ custom_existing = true
         };
 
         let debug = format!("{profile:?}");
+
+        assert!(!debug.contains("super-secret-key"));
+        assert!(debug.contains("[已脱敏]"));
+    }
+
+    #[test]
+    fn codex_toml_advanced_merge_rejects_scalar_and_inline_table_type_conflicts() {
+        let mut scalar_document = "sandbox_mode = \"workspace-write\""
+            .parse::<toml_edit::DocumentMut>()
+            .unwrap();
+        let scalar_advanced = serde_json::json!({ "sandbox_mode": true });
+
+        let error = super::merge_json_object_into_toml(
+            scalar_document.as_table_mut(),
+            scalar_advanced.as_object().unwrap(),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "Codex advanced_config.config 节点类型冲突");
+        assert_eq!(
+            scalar_document["sandbox_mode"].as_str(),
+            Some("workspace-write")
+        );
+
+        let mut inline_table_document = "limits = { retries = 3 }"
+            .parse::<toml_edit::DocumentMut>()
+            .unwrap();
+        let inline_table_advanced = serde_json::json!({ "limits": "must-not-replace" });
+
+        let error = super::merge_json_object_into_toml(
+            inline_table_document.as_table_mut(),
+            inline_table_advanced.as_object().unwrap(),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "Codex advanced_config.config 节点类型冲突");
+        assert_eq!(
+            inline_table_document["limits"]["retries"].as_integer(),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn rendered_native_config_debug_output_redacts_content() {
+        let rendered = super::RenderedNativeConfig {
+            path: PathBuf::from("C:/test-home/.codex/auth.json"),
+            content: "{\"OPENAI_API_KEY\":\"super-secret-key\"}".to_string(),
+        };
+
+        let debug = format!("{rendered:?}");
 
         assert!(!debug.contains("super-secret-key"));
         assert!(debug.contains("[已脱敏]"));
