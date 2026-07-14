@@ -5,7 +5,7 @@ use crate::config::types::{
 };
 use crate::provider_profiles::types::{AgentProviderProfile, NativeProfileConfig, ProfileModel};
 use crate::provider_profiles::{
-    native_config::{render_native_config, NativeConfigContents, NativeConfigPaths},
+    native_config::{render_agent_profile_config, NativeConfigContents, NativeConfigPaths},
     service::NativeConfigWriteService,
 };
 use crate::AppState;
@@ -388,7 +388,7 @@ fn apply_native_profile_config(
 ) -> Result<(), String> {
     profile.validate()?;
     let contents = read_native_config_contents(paths)?;
-    let rendered_files = render_native_config(paths, &profile.native_config, &contents)?;
+    let rendered_files = render_agent_profile_config(paths, profile, &contents)?;
     NativeConfigWriteService::new(paths.clone(), backup_root)
         .write(&rendered_files)
         .map(|result| {

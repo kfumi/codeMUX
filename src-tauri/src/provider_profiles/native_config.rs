@@ -1,4 +1,4 @@
-use crate::provider_profiles::types::NativeProfileConfig;
+use crate::provider_profiles::types::{AgentProviderProfile, NativeProfileConfig};
 use serde_json::{Map, Value};
 use std::path::PathBuf;
 use toml_edit::{value, Array, DocumentMut, Item, Table, Value as TomlValue};
@@ -63,6 +63,7 @@ impl std::fmt::Debug for RenderedNativeConfig {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn render_native_config(
     paths: &NativeConfigPaths,
     profile: &NativeProfileConfig,
@@ -102,6 +103,63 @@ pub fn render_native_config(
                     "OpenCode opencode.json",
                 )?,
                 profile,
+            )?;
+            Ok(vec![render_json_file(
+                paths.opencode_config_path(),
+                config,
+                "OpenCode opencode.json",
+            )?])
+        }
+    }
+}
+
+pub fn render_agent_profile_config(
+    paths: &NativeConfigPaths,
+    profile: &AgentProviderProfile,
+    existing: &NativeConfigContents,
+) -> Result<Vec<RenderedNativeConfig>, String> {
+    profile.validate()?;
+
+    match &profile.native_config {
+        NativeProfileConfig::ClaudeCode { .. } => {
+            let settings = parse_json_object(
+                existing.claude_settings.as_deref(),
+                "Claude Code settings.json",
+            )?;
+            let settings = merge_claude_settings_with_model(
+                settings,
+                &profile.native_config,
+                Some(&profile.default_model),
+            )?;
+            Ok(vec![render_json_file(
+                paths.claude_settings_path(),
+                settings,
+                "Claude Code settings.json",
+            )?])
+        }
+        NativeProfileConfig::Codex { .. } => {
+            let auth = merge_codex_auth(
+                parse_json_object(existing.codex_auth.as_deref(), "Codex auth.json")?,
+                &profile.native_config,
+            )?;
+            let config = merge_codex_config_with_model(
+                parse_toml_document(existing.codex_config.as_deref(), "Codex config.toml")?,
+                &profile.native_config,
+                Some(&profile.default_model),
+            )?;
+            Ok(vec![
+                render_json_file(paths.codex_auth_path(), auth, "Codex auth.json")?,
+                render_toml_file(paths.codex_config_path(), config, "Codex config.toml")?,
+            ])
+        }
+        NativeProfileConfig::OpenCode { .. } => {
+            let config = merge_opencode_config_with_model(
+                parse_json_object(
+                    existing.opencode_config.as_deref(),
+                    "OpenCode opencode.json",
+                )?,
+                &profile.native_config,
+                Some(&profile.default_model),
             )?;
             Ok(vec![render_json_file(
                 paths.opencode_config_path(),
@@ -220,9 +278,18 @@ fn json_value_kind(value: &Value) -> &'static str {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn merge_claude_settings(
     existing: Value,
     profile: &NativeProfileConfig,
+) -> Result<Value, String> {
+    merge_claude_settings_with_model(existing, profile, None)
+}
+
+fn merge_claude_settings_with_model(
+    existing: Value,
+    profile: &NativeProfileConfig,
+    default_model: Option<&str>,
 ) -> Result<Value, String> {
     let NativeProfileConfig::ClaudeCode {
         api_key,
@@ -253,6 +320,16 @@ pub fn merge_claude_settings(
         "ANTHROPIC_API_KEY".to_string(),
         Value::String(api_key.clone()),
     );
+    if let Some(default_model) = default_model {
+        for key in [
+            "ANTHROPIC_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        ] {
+            env.insert(key.to_string(), Value::String(default_model.to_string()));
+        }
+    }
     Ok(existing)
 }
 
@@ -269,9 +346,18 @@ fn merge_codex_auth(mut existing: Value, profile: &NativeProfileConfig) -> Resul
     Ok(existing)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn merge_codex_config(
+    existing: DocumentMut,
+    profile: &NativeProfileConfig,
+) -> Result<DocumentMut, String> {
+    merge_codex_config_with_model(existing, profile, None)
+}
+
+fn merge_codex_config_with_model(
     mut existing: DocumentMut,
     profile: &NativeProfileConfig,
+    default_model: Option<&str>,
 ) -> Result<DocumentMut, String> {
     let NativeProfileConfig::Codex {
         openai_base_url, ..
@@ -285,6 +371,9 @@ fn merge_codex_config(
     }
     let root = existing.as_table_mut();
     root["model_provider"] = value("codemux");
+    if let Some(default_model) = default_model {
+        root["model"] = value(default_model);
+    }
     let providers = root
         .entry("model_providers")
         .or_insert(Item::Table(Table::new()))
@@ -406,7 +495,16 @@ fn json_to_toml_item(json_value: &Value) -> Result<Item, String> {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn merge_opencode_config(existing: Value, profile: &NativeProfileConfig) -> Result<Value, String> {
+    merge_opencode_config_with_model(existing, profile, None)
+}
+
+fn merge_opencode_config_with_model(
+    existing: Value,
+    profile: &NativeProfileConfig,
+    default_model: Option<&str>,
+) -> Result<Value, String> {
     let NativeProfileConfig::OpenCode {
         api_key,
         openai_base_url,
@@ -420,6 +518,12 @@ fn merge_opencode_config(existing: Value, profile: &NativeProfileConfig) -> Resu
     let root = existing
         .as_object_mut()
         .ok_or_else(|| "OpenCode opencode.json 顶层必须为对象".to_string())?;
+    if let Some(default_model) = default_model {
+        root.insert(
+            "model".to_string(),
+            Value::String(format!("codemux-openai/{default_model}")),
+        );
+    }
     let providers = root
         .entry("provider")
         .or_insert_with(|| Value::Object(Map::new()))
@@ -458,9 +562,14 @@ fn merge_opencode_config(existing: Value, profile: &NativeProfileConfig) -> Resu
 #[cfg(test)]
 mod tests {
     use super::{
-        merge_claude_settings, render_native_config, NativeConfigContents, NativeConfigPaths,
+        merge_claude_settings, render_agent_profile_config, render_native_config,
+        NativeConfigContents, NativeConfigPaths,
     };
-    use crate::provider_profiles::types::NativeProfileConfig;
+    use crate::{
+        config::types::AgentKind,
+        provider_profiles::types::{AgentProviderProfile, NativeProfileConfig, ProfileModel},
+    };
+    use serde_json::Value;
     use std::path::PathBuf;
 
     fn test_paths() -> NativeConfigPaths {
@@ -469,6 +578,106 @@ mod tests {
             PathBuf::from("C:/test-home/.codex"),
             PathBuf::from("C:/test-home/.config/opencode"),
         )
+    }
+
+    fn profile(
+        agent_kind: AgentKind,
+        default_model: &str,
+        native_config: NativeProfileConfig,
+    ) -> AgentProviderProfile {
+        AgentProviderProfile {
+            id: format!("{}-profile", agent_kind.as_str()),
+            agent_kind,
+            name: "测试档案".to_string(),
+            note: String::new(),
+            models: vec![ProfileModel {
+                id: default_model.to_string(),
+                name: None,
+                context_window: None,
+            }],
+            default_model: default_model.to_string(),
+            native_config,
+        }
+    }
+
+    #[test]
+    fn profile_default_model_is_rendered_for_each_agent_native_config() {
+        let paths = test_paths();
+        let claude = profile(
+            AgentKind::ClaudeCode,
+            "claude-model",
+            NativeProfileConfig::ClaudeCode {
+                api_key: "key".to_string(),
+                anthropic_base_url: "https://claude.example".to_string(),
+                context_1m: None,
+                advanced_config: None,
+                requires_review: false,
+            },
+        );
+        let codex = profile(
+            AgentKind::Codex,
+            "codex-model",
+            NativeProfileConfig::Codex {
+                api_key: "key".to_string(),
+                openai_base_url: "https://codex.example/v1".to_string(),
+                codex_needs_proxy: None,
+                advanced_config: None,
+                requires_review: false,
+            },
+        );
+        let opencode = profile(
+            AgentKind::Opencode,
+            "opencode-model",
+            NativeProfileConfig::OpenCode {
+                api_key: "key".to_string(),
+                openai_base_url: "https://opencode.example/v1".to_string(),
+                advanced_config: None,
+                requires_review: false,
+            },
+        );
+
+        let claude_rendered =
+            render_agent_profile_config(&paths, &claude, &NativeConfigContents::default()).unwrap();
+        let codex_rendered =
+            render_agent_profile_config(&paths, &codex, &NativeConfigContents::default()).unwrap();
+        let opencode_rendered =
+            render_agent_profile_config(&paths, &opencode, &NativeConfigContents::default())
+                .unwrap();
+
+        let claude_settings: Value = serde_json::from_str(&claude_rendered[0].content).unwrap();
+        assert_eq!(claude_settings["env"]["ANTHROPIC_MODEL"], "claude-model");
+        assert!(codex_rendered[1]
+            .content
+            .contains("model = \"codex-model\""));
+        let opencode_config: Value = serde_json::from_str(&opencode_rendered[0].content).unwrap();
+        assert_eq!(opencode_config["model"], "codemux-openai/opencode-model");
+    }
+
+    #[test]
+    fn changing_profile_default_model_changes_rendered_codex_config() {
+        let paths = test_paths();
+        let mut profile = profile(
+            AgentKind::Codex,
+            "model-a",
+            NativeProfileConfig::Codex {
+                api_key: "key".to_string(),
+                openai_base_url: "https://codex.example/v1".to_string(),
+                codex_needs_proxy: None,
+                advanced_config: None,
+                requires_review: false,
+            },
+        );
+        let before =
+            render_agent_profile_config(&paths, &profile, &NativeConfigContents::default())
+                .unwrap();
+        profile.models[0].id = "model-b".to_string();
+        profile.default_model = "model-b".to_string();
+
+        let after = render_agent_profile_config(&paths, &profile, &NativeConfigContents::default())
+            .unwrap();
+
+        assert_ne!(before[1].content, after[1].content);
+        assert!(after[1].content.contains("model = \"model-b\""));
     }
 
     #[test]
