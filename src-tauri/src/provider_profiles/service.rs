@@ -74,6 +74,39 @@ pub trait FileOps {
     fn replace(&self, source: &Path, destination: &Path) -> io::Result<()>;
     fn remove_file(&self, path: &Path) -> io::Result<()>;
 
+    fn replace_if_current_hash(
+        &self,
+        source: &Path,
+        destination: &Path,
+        expected_current_hash: &str,
+    ) -> io::Result<bool> {
+        match self.read(destination) {
+            Ok(content) if content_hash(&content) == expected_current_hash => {
+                self.replace(source, destination)?;
+                Ok(true)
+            }
+            Ok(_) => Ok(false),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn remove_file_if_current_hash(
+        &self,
+        path: &Path,
+        expected_current_hash: &str,
+    ) -> io::Result<bool> {
+        match self.read(path) {
+            Ok(content) if content_hash(&content) == expected_current_hash => {
+                self.remove_file(path)?;
+                Ok(true)
+            }
+            Ok(_) => Ok(false),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
     fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
         fs::read_dir(path)?
             .map(|entry| entry.map(|entry| entry.path()))
@@ -370,7 +403,7 @@ struct ManifestFile {
 
 impl NativeConfigWriteService<StdFileOps> {
     pub fn new(paths: NativeConfigPaths, backup_root: PathBuf) -> Self {
-        let lock_root = default_lock_root(&backup_root);
+        let lock_root = default_lock_root(&paths);
         Self::with_lock_root(paths, backup_root, lock_root)
     }
 
@@ -385,7 +418,7 @@ impl NativeConfigWriteService<StdFileOps> {
 
 impl<O: FileOps> NativeConfigWriteService<O> {
     pub fn with_file_ops(paths: NativeConfigPaths, backup_root: PathBuf, file_ops: O) -> Self {
-        let lock_root = default_lock_root(&backup_root);
+        let lock_root = default_lock_root(&paths);
         Self::with_file_ops_and_lock_root(paths, backup_root, lock_root, file_ops)
     }
 
@@ -692,6 +725,10 @@ impl<O: FileOps> NativeConfigWriteService<O> {
         }
         let mut partial = false;
         for file in files.iter().rev() {
+            let Some(expected_new_content_hash) = file.new_content_hash.as_deref() else {
+                partial = true;
+                continue;
+            };
             match &file.backup_file {
                 Some(backup_file) => {
                     let backup_path = session_dir.join(backup_file);
@@ -699,20 +736,30 @@ impl<O: FileOps> NativeConfigWriteService<O> {
                         partial = true;
                         continue;
                     };
-                    if self
-                        .replace_target_without_hook(&file.target, &content)
-                        .is_err()
-                    {
+                    if !matches!(
+                        self.restore_target_if_current_hash(
+                            &file.target,
+                            &content,
+                            expected_new_content_hash,
+                        ),
+                        Ok(true)
+                    ) {
                         partial = true;
                     }
                 }
                 None => {
-                    if let Err(error) = self.file_ops.remove_file(&file.target) {
-                        if error.kind() != io::ErrorKind::NotFound {
-                            partial = true;
+                    match self
+                        .file_ops
+                        .remove_file_if_current_hash(&file.target, expected_new_content_hash)
+                    {
+                        Ok(true) => {
+                            if let Some(parent) = file.target.parent() {
+                                if self.file_ops.sync_dir(parent).is_err() {
+                                    partial = true;
+                                }
+                            }
                         }
-                    } else if let Some(parent) = file.target.parent() {
-                        if self.file_ops.sync_dir(parent).is_err() {
+                        Ok(false) | Err(_) => {
                             partial = true;
                         }
                     }
@@ -753,7 +800,12 @@ impl<O: FileOps> NativeConfigWriteService<O> {
         }
     }
 
-    fn replace_target_without_hook(&self, target: &Path, content: &[u8]) -> io::Result<()> {
+    fn restore_target_if_current_hash(
+        &self,
+        target: &Path,
+        content: &[u8],
+        expected_current_hash: &str,
+    ) -> io::Result<bool> {
         let parent = target
             .parent()
             .ok_or_else(|| io::Error::other("missing parent"))?;
@@ -763,12 +815,24 @@ impl<O: FileOps> NativeConfigWriteService<O> {
             let _ = self.file_ops.remove_file(&temporary_path);
             return Err(error);
         }
-        if let Err(error) = self.file_ops.replace(&temporary_path, target) {
+        let replaced = match self.file_ops.replace_if_current_hash(
+            &temporary_path,
+            target,
+            expected_current_hash,
+        ) {
+            Ok(replaced) => replaced,
+            Err(error) => {
+                let _ = self.file_ops.remove_file(&temporary_path);
+                return Err(error);
+            }
+        };
+        if !replaced {
             let _ = self.file_ops.remove_file(&temporary_path);
-            return Err(error);
+            return Ok(false);
         }
         self.file_ops.restrict_file_permissions(target)?;
-        self.file_ops.sync_dir(parent)
+        self.file_ops.sync_dir(parent)?;
+        Ok(true)
     }
 
     fn recover_unfinished_transactions(&self) -> Result<(), NativeConfigWriteError> {
@@ -931,12 +995,56 @@ fn backup_file_name(index: usize, target: &Path) -> String {
     format!("{index:03}-{file_name}")
 }
 
-fn default_lock_root(backup_root: &Path) -> PathBuf {
-    let parent = backup_root.parent().unwrap_or_else(|| Path::new("."));
-    let root_name = backup_root
-        .file_name()
-        .unwrap_or_else(|| std::ffi::OsStr::new("native-config-backups"));
-    parent.join(format!(".{}-locks", root_name.to_string_lossy()))
+fn default_lock_root(paths: &NativeConfigPaths) -> PathBuf {
+    let mut targets = [
+        paths.claude_settings_path(),
+        paths.codex_auth_path(),
+        paths.codex_config_path(),
+        paths.opencode_config_path(),
+    ]
+    .into_iter()
+    .map(|path| canonical_target_path(&path))
+    .collect::<Vec<_>>();
+    targets.sort();
+    let target_namespace = targets
+        .iter()
+        .map(|path| path.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("\0");
+    std::env::temp_dir()
+        .join("codemux-native-config-locks")
+        .join(content_hash(target_namespace.as_bytes()))
+}
+
+fn canonical_target_path(path: &Path) -> PathBuf {
+    let mut unresolved_components = Vec::new();
+    let mut current = path;
+    loop {
+        if let Ok(canonical) = fs::canonicalize(current) {
+            return unresolved_components
+                .iter()
+                .rev()
+                .fold(canonical, |resolved, component| resolved.join(component));
+        }
+        let Some(file_name) = current.file_name() else {
+            return absolute_path(path);
+        };
+        unresolved_components.push(file_name.to_os_string());
+        let Some(parent) = current.parent() else {
+            return absolute_path(path);
+        };
+        current = parent;
+    }
+}
+
+fn absolute_path(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|current_dir| current_dir.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    }
 }
 
 fn is_session_directory(path: &Path) -> bool {
@@ -1072,6 +1180,24 @@ mod tests {
             }])
             .unwrap();
         assert_eq!(fs::read(paths.codex_auth_path()).unwrap(), b"new auth");
+    }
+
+    #[test]
+    fn 相同原生配置路径使用不同备份目录时共享默认锁命名空间() {
+        let temp = TestDirectory::new();
+        let paths = test_paths(temp.path());
+        let first = NativeConfigWriteService::with_file_ops(
+            paths.clone(),
+            temp.path().join("first-backups"),
+            TestFileOps,
+        );
+        let second = NativeConfigWriteService::with_file_ops(
+            paths,
+            temp.path().join("second-backups"),
+            TestFileOps,
+        );
+
+        assert_eq!(first.lock_root, second.lock_root);
     }
 
     #[test]
@@ -1308,6 +1434,46 @@ mod tests {
         let manifest: TransactionManifest =
             serde_json::from_slice(&fs::read(session_dir.join("manifest.json")).unwrap()).unwrap();
         assert!(matches!(manifest.state, TransactionState::Applying));
+    }
+
+    #[test]
+    fn 恢复最终替换前发生外部修改时保留外部内容并返回部分回滚() {
+        let temp = TestDirectory::new();
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(&paths.codex_dir).unwrap();
+        fs::write(paths.codex_auth_path(), b"new auth").unwrap();
+        let backup_root = temp.path().join("backups");
+        let session_dir = backup_root.join(Uuid::new_v4().to_string());
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(session_dir.join("000-auth.json"), b"old auth").unwrap();
+        fs::write(
+            session_dir.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "state": "applying",
+                "files": [{
+                    "target": paths.codex_auth_path(),
+                    "backup_file": "000-auth.json",
+                    "original_mode": null,
+                    "replaced": true,
+                    "new_content_hash": "5b1fc98f7cf4cd1e8ad29d73f726eb1f8dac778c675e5b9639f858151b948957"
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let service = NativeConfigWriteService::with_file_ops(
+            paths.clone(),
+            backup_root,
+            ExternalWriteBeforeRestoreOps::default(),
+        );
+
+        let error = service.write(&[]).unwrap_err();
+
+        assert_eq!(error.rollback_status, RollbackStatus::Partial);
+        assert_eq!(
+            fs::read(paths.codex_auth_path()).unwrap(),
+            b"externally modified"
+        );
     }
 
     #[cfg(unix)]
@@ -1636,6 +1802,42 @@ mod tests {
                     return Err(io::Error::other("simulated rollback replace failure"));
                 }
             }
+            self.inner.replace(source, destination)
+        }
+
+        fn remove_file(&self, path: &Path) -> io::Result<()> {
+            self.inner.remove_file(path)
+        }
+    }
+
+    #[derive(Default)]
+    struct ExternalWriteBeforeRestoreOps {
+        target_read_count: Cell<usize>,
+        inner: TestFileOps,
+    }
+
+    impl FileOps for ExternalWriteBeforeRestoreOps {
+        fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+            self.inner.create_dir_all(path)
+        }
+
+        fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+            let content = self.inner.read(path)?;
+            if path.file_name() == Some(std::ffi::OsStr::new("auth.json")) {
+                let count = self.target_read_count.get() + 1;
+                self.target_read_count.set(count);
+                if count == 2 {
+                    fs::write(path, b"externally modified")?;
+                }
+            }
+            Ok(content)
+        }
+
+        fn write_file_sync(&self, path: &Path, content: &[u8]) -> io::Result<()> {
+            self.inner.write_file_sync(path, content)
+        }
+
+        fn replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
             self.inner.replace(source, destination)
         }
 
