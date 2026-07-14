@@ -34,6 +34,7 @@ log = "0.4"
 async-trait = "0.1"
 portable-pty = "0.8"
 encoding_rs = "0.8"
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 junction = "1"

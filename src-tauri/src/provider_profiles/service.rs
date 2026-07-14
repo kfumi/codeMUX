@@ -1,5 +1,6 @@
 use crate::provider_profiles::native_config::{NativeConfigPaths, RenderedNativeConfig};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     fmt,
     fs::{self, File, OpenOptions},
@@ -88,14 +89,6 @@ pub trait FileOps {
     }
 
     fn restrict_file_permissions(&self, _path: &Path) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn file_mode(&self, _path: &Path) -> io::Result<Option<u32>> {
-        Ok(None)
-    }
-
-    fn set_file_mode(&self, _path: &Path, _mode: u32) -> io::Result<()> {
         Ok(())
     }
 
@@ -195,32 +188,6 @@ impl FileOps for StdFileOps {
 
     fn restrict_file_permissions(&self, path: &Path) -> io::Result<()> {
         set_restricted_permissions(path, false)
-    }
-
-    fn file_mode(&self, path: &Path) -> io::Result<Option<u32>> {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            return Ok(Some(fs::metadata(path)?.permissions().mode()));
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = path;
-            Ok(None)
-        }
-    }
-
-    fn set_file_mode(&self, path: &Path, mode: u32) -> io::Result<()> {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            return fs::set_permissions(path, fs::Permissions::from_mode(mode));
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = (path, mode);
-            Ok(())
-        }
     }
 }
 
@@ -393,6 +360,10 @@ struct ManifestFile {
     target: PathBuf,
     backup_file: Option<String>,
     original_mode: Option<u32>,
+    #[serde(default)]
+    replaced: bool,
+    #[serde(default)]
+    new_content_hash: Option<String>,
 }
 
 impl NativeConfigWriteService<StdFileOps> {
@@ -476,20 +447,6 @@ impl<O: FileOps> NativeConfigWriteService<O> {
                     ));
                 }
             };
-            let original_mode = if original.is_some() {
-                match self.file_ops.file_mode(&rendered.path) {
-                    Ok(mode) => mode,
-                    Err(_) => {
-                        return Err(self.error(
-                            "原生配置读取失败",
-                            Some(session_dir),
-                            RollbackStatus::NotAttempted,
-                        ));
-                    }
-                }
-            } else {
-                None
-            };
             let backup_file = original.as_ref().map(|content| {
                 let file_name = backup_file_name(index, &rendered.path);
                 let backup_path = session_dir.join(&file_name);
@@ -509,7 +466,9 @@ impl<O: FileOps> NativeConfigWriteService<O> {
             manifest.files.push(ManifestFile {
                 target: rendered.path.clone(),
                 backup_file: backup_file.map(|(file_name, _, _)| file_name),
-                original_mode,
+                original_mode: None,
+                replaced: false,
+                new_content_hash: Some(content_hash(rendered.content.as_bytes())),
             });
         }
         if self.write_manifest(&session_dir, &manifest).is_err() {
@@ -528,29 +487,46 @@ impl<O: FileOps> NativeConfigWriteService<O> {
             ));
         }
 
-        for (index, (rendered, file)) in rendered_files.iter().zip(&manifest.files).enumerate() {
-            match self.replace_target(
-                &rendered.path,
-                rendered.content.as_bytes(),
-                file.original_mode,
-            ) {
-                Ok(result) => {
-                    debug_assert!(result.replaced);
+        for (index, rendered) in rendered_files.iter().enumerate() {
+            match self.replace_target(&rendered.path, rendered.content.as_bytes()) {
+                Ok(()) => {
+                    manifest.files[index].replaced = true;
+                    if self.write_manifest(&session_dir, &manifest).is_err() {
+                        return self.abort_manifest(&session_dir, &manifest, None, None);
+                    }
+                    if self.file_ops.after_target_replace(&rendered.path).is_err() {
+                        return self.abort_manifest(
+                            &session_dir,
+                            &manifest,
+                            Some(&ApplyFailure::after_replace("写入后钩子")),
+                            Some(&rendered.path),
+                        );
+                    }
                 }
                 Err(failure) => {
+                    if failure.replaced {
+                        manifest.files[index].replaced = true;
+                        if self.write_manifest(&session_dir, &manifest).is_err() {
+                            return self.abort_manifest(
+                                &session_dir,
+                                &manifest,
+                                Some(&failure),
+                                Some(&rendered.path),
+                            );
+                        }
+                    }
                     return self.abort_manifest(
                         &session_dir,
                         &manifest,
-                        index + usize::from(failure.replaced),
                         Some(&failure),
                         Some(&rendered.path),
-                    )
+                    );
                 }
             }
         }
         manifest.state = TransactionState::Committed;
         if self.write_manifest(&session_dir, &manifest).is_err() {
-            return self.abort_manifest(&session_dir, &manifest, manifest.files.len(), None, None);
+            return self.abort_manifest(&session_dir, &manifest, None, None);
         }
         Ok(NativeConfigWriteResult {
             backup_session_dir: session_dir,
@@ -559,6 +535,10 @@ impl<O: FileOps> NativeConfigWriteService<O> {
 
     fn acquire_lock(&self) -> Result<File, NativeConfigWriteError> {
         if self.file_ops.create_dir_all(&self.lock_root).is_err()
+            || self
+                .file_ops
+                .restrict_directory_permissions(&self.lock_root)
+                .is_err()
             || self.file_ops.sync_dir(&self.lock_root).is_err()
         {
             return Err(self.error("原生配置锁不可用", None, RollbackStatus::NotAttempted));
@@ -611,12 +591,7 @@ impl<O: FileOps> NativeConfigWriteService<O> {
         self.file_ops.sync_dir(parent)
     }
 
-    fn replace_target(
-        &self,
-        target: &Path,
-        content: &[u8],
-        original_mode: Option<u32>,
-    ) -> Result<ReplaceTargetResult, ApplyFailure> {
+    fn replace_target(&self, target: &Path, content: &[u8]) -> Result<(), ApplyFailure> {
         let parent = target
             .parent()
             .ok_or_else(|| ApplyFailure::before_replace("目标目录"))?;
@@ -635,31 +610,23 @@ impl<O: FileOps> NativeConfigWriteService<O> {
             let _ = self.file_ops.remove_file(&temporary_path);
             return Err(ApplyFailure::before_replace("原子替换"));
         }
-        let permissions = match original_mode {
-            Some(mode) => self.file_ops.set_file_mode(target, mode),
-            None => self.file_ops.restrict_file_permissions(target),
-        };
-        if permissions.is_err() {
+        if self.file_ops.restrict_file_permissions(target).is_err() {
             return Err(ApplyFailure::after_replace("权限设置"));
         }
         if self.file_ops.sync_dir(parent).is_err() {
             return Err(ApplyFailure::after_replace("目录同步"));
         }
-        match self.file_ops.after_target_replace(target) {
-            Ok(()) => Ok(ReplaceTargetResult { replaced: true }),
-            Err(_) => Err(ApplyFailure::after_replace("写入后钩子")),
-        }
+        Ok(())
     }
 
     fn abort_manifest(
         &self,
         session_dir: &Path,
         manifest: &TransactionManifest,
-        applied_count: usize,
         failure: Option<&ApplyFailure>,
         failure_target: Option<&Path>,
     ) -> Result<NativeConfigWriteResult, NativeConfigWriteError> {
-        let rollback_status = self.rollback_files(session_dir, &manifest.files[..applied_count]);
+        let rollback_status = self.rollback_manifest(session_dir, manifest);
         let message = match rollback_status {
             RollbackStatus::Partial => "原生配置写入失败，回滚不完整",
             RollbackStatus::Complete => "原生配置写入失败，已回滚",
@@ -699,7 +666,19 @@ impl<O: FileOps> NativeConfigWriteService<O> {
         session_dir: &Path,
         manifest: &TransactionManifest,
     ) -> RollbackStatus {
-        self.rollback_files(session_dir, &manifest.files)
+        let replaced_files = manifest
+            .files
+            .iter()
+            .filter(|file| file.replaced)
+            .cloned()
+            .collect::<Vec<_>>();
+        if replaced_files
+            .iter()
+            .any(|file| !self.target_matches_new_content(file))
+        {
+            return RollbackStatus::Partial;
+        }
+        self.rollback_files(session_dir, &replaced_files)
     }
 
     fn rollback_files(&self, session_dir: &Path, files: &[ManifestFile]) -> RollbackStatus {
@@ -716,7 +695,7 @@ impl<O: FileOps> NativeConfigWriteService<O> {
                         continue;
                     };
                     if self
-                        .replace_target_without_hook(&file.target, &content, file.original_mode)
+                        .replace_target_without_hook(&file.target, &content)
                         .is_err()
                     {
                         partial = true;
@@ -742,12 +721,17 @@ impl<O: FileOps> NativeConfigWriteService<O> {
         }
     }
 
-    fn replace_target_without_hook(
-        &self,
-        target: &Path,
-        content: &[u8],
-        original_mode: Option<u32>,
-    ) -> io::Result<()> {
+    fn target_matches_new_content(&self, file: &ManifestFile) -> bool {
+        file.new_content_hash
+            .as_deref()
+            .is_some_and(|expected_hash| {
+                self.file_ops
+                    .read(&file.target)
+                    .is_ok_and(|content| content_hash(&content) == expected_hash)
+            })
+    }
+
+    fn replace_target_without_hook(&self, target: &Path, content: &[u8]) -> io::Result<()> {
         let parent = target
             .parent()
             .ok_or_else(|| io::Error::other("missing parent"))?;
@@ -761,10 +745,7 @@ impl<O: FileOps> NativeConfigWriteService<O> {
             let _ = self.file_ops.remove_file(&temporary_path);
             return Err(error);
         }
-        match original_mode {
-            Some(mode) => self.file_ops.set_file_mode(target, mode)?,
-            None => self.file_ops.restrict_file_permissions(target)?,
-        }
+        self.file_ops.restrict_file_permissions(target)?;
         self.file_ops.sync_dir(parent)
     }
 
@@ -804,6 +785,7 @@ impl<O: FileOps> NativeConfigWriteService<O> {
                             .file_name()
                             .is_none_or(|file_name| file_name != std::ffi::OsStr::new(name))
                     })
+                    || (file.replaced && file.new_content_hash.is_none())
             }) {
                 return Err(self.error(
                     "原生配置恢复记录无效",
@@ -824,6 +806,20 @@ impl<O: FileOps> NativeConfigWriteService<O> {
                     })?;
                 }
                 TransactionState::Applying => {
+                    if let Some(file) = manifest
+                        .files
+                        .iter()
+                        .filter(|file| file.replaced)
+                        .find(|file| !self.target_matches_new_content(file))
+                    {
+                        return Err(NativeConfigWriteError::for_target(
+                            "原生配置恢复不完整",
+                            "外部修改",
+                            self.target_identifier(&file.target),
+                            Some(session_dir),
+                            RollbackStatus::Partial,
+                        ));
+                    }
                     let status = self.rollback_manifest(&session_dir, &manifest);
                     if status != RollbackStatus::Complete {
                         return Err(self.error("原生配置恢复不完整", Some(session_dir), status));
@@ -874,11 +870,6 @@ impl<O: FileOps> NativeConfigWriteService<O> {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ReplaceTargetResult {
-    replaced: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
 struct ApplyFailure {
     replaced: bool,
     failure_category: &'static str,
@@ -906,6 +897,10 @@ fn has_duplicate_paths(rendered_files: &[RenderedNativeConfig]) -> bool {
             .iter()
             .any(|prior| prior.path == file.path)
     })
+}
+
+fn content_hash(content: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(content))
 }
 
 fn temporary_path(target: &Path) -> PathBuf {
@@ -937,6 +932,8 @@ fn is_session_directory(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use super::StdFileOps;
     use super::{
         FileOps, NativeConfigWriteService, RollbackStatus, TransactionManifest, TransactionState,
     };
@@ -1131,6 +1128,140 @@ mod tests {
         let manifest: TransactionManifest =
             serde_json::from_slice(&fs::read(session_dir.join("manifest.json")).unwrap()).unwrap();
         assert!(matches!(manifest.state, TransactionState::Committed));
+    }
+
+    #[test]
+    fn 恢复_applying_事务只回滚已替换文件() {
+        let temp = TestDirectory::new();
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(&paths.codex_dir).unwrap();
+        fs::write(paths.codex_auth_path(), b"new auth").unwrap();
+        fs::write(paths.codex_config_path(), b"external config").unwrap();
+        let backup_root = temp.path().join("backups");
+        let session_dir = backup_root.join(Uuid::new_v4().to_string());
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(session_dir.join("000-auth.json"), b"old auth").unwrap();
+        fs::write(session_dir.join("001-config.toml"), b"old config").unwrap();
+        fs::write(
+            session_dir.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "state": "applying",
+                "files": [
+                    {
+                        "target": paths.codex_auth_path(),
+                        "backup_file": "000-auth.json",
+                        "original_mode": null,
+                        "replaced": true,
+                        "new_content_hash": "5b1fc98f7cf4cd1e8ad29d73f726eb1f8dac778c675e5b9639f858151b948957"
+                    },
+                    {
+                        "target": paths.codex_config_path(),
+                        "backup_file": "001-config.toml",
+                        "original_mode": null,
+                        "replaced": false,
+                        "new_content_hash": "unused"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let service = NativeConfigWriteService::with_file_ops(
+            paths.clone(),
+            backup_root.clone(),
+            TestFileOps,
+        );
+
+        service.write(&[]).unwrap();
+
+        assert_eq!(fs::read(paths.codex_auth_path()).unwrap(), b"old auth");
+        assert_eq!(
+            fs::read(paths.codex_config_path()).unwrap(),
+            b"external config"
+        );
+        let manifest: TransactionManifest =
+            serde_json::from_slice(&fs::read(session_dir.join("manifest.json")).unwrap()).unwrap();
+        assert!(matches!(manifest.state, TransactionState::Committed));
+    }
+
+    #[test]
+    fn 恢复_applying_事务遇到外部修改会保留目标并返回部分回滚() {
+        let temp = TestDirectory::new();
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(&paths.codex_dir).unwrap();
+        fs::write(paths.codex_auth_path(), b"externally modified").unwrap();
+        let backup_root = temp.path().join("backups");
+        let session_dir = backup_root.join(Uuid::new_v4().to_string());
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(session_dir.join("000-auth.json"), b"old auth").unwrap();
+        fs::write(
+            session_dir.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "state": "applying",
+                "files": [{
+                    "target": paths.codex_auth_path(),
+                    "backup_file": "000-auth.json",
+                    "original_mode": null,
+                    "replaced": true,
+                    "new_content_hash": "5b1fc98f7cf4cd1e8ad29d73f726eb1f8dac778c675e5b9639f858151b948957"
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let service =
+            NativeConfigWriteService::with_file_ops(paths.clone(), backup_root, TestFileOps);
+
+        let error = service.write(&[]).unwrap_err();
+
+        assert_eq!(error.rollback_status, RollbackStatus::Partial);
+        assert_eq!(error.failure_category, "外部修改");
+        assert_eq!(error.target_identifier, Some("codex-auth"));
+        assert_eq!(
+            fs::read(paths.codex_auth_path()).unwrap(),
+            b"externally modified"
+        );
+        let manifest: TransactionManifest =
+            serde_json::from_slice(&fs::read(session_dir.join("manifest.json")).unwrap()).unwrap();
+        assert!(matches!(manifest.state, TransactionState::Applying));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 更新既有宽松权限目标后强制收紧为_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TestDirectory::new();
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(&paths.codex_dir).unwrap();
+        fs::write(paths.codex_auth_path(), b"old auth").unwrap();
+        fs::set_permissions(paths.codex_auth_path(), fs::Permissions::from_mode(0o644)).unwrap();
+        let backup_root = temp.path().join("backups");
+        let service = NativeConfigWriteService::new(paths.clone(), backup_root);
+
+        let result = service
+            .write(&[RenderedNativeConfig {
+                path: paths.codex_auth_path(),
+                content: "new auth".to_string(),
+            }])
+            .unwrap();
+
+        assert_eq!(
+            fs::metadata(paths.codex_auth_path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(result.backup_session_dir.join("000-auth.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
     }
 
     #[cfg(windows)]
