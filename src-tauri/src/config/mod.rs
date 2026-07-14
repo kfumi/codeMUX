@@ -1,7 +1,7 @@
 pub mod types;
 
 use crate::config::types::AppConfig;
-use crate::provider_profiles::migrate_legacy_providers;
+use crate::provider_profiles::{migrate_legacy_providers, AgentProfileRegistry};
 use log::warn;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
@@ -79,24 +79,79 @@ pub fn save_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
 }
 
 fn save_config_to_path(config_path: &Path, config: &AppConfig) -> Result<(), String> {
-    let content = serde_json::to_string_pretty(config)
+    if !config.profile_registry_is_derived {
+        if let Some(error) = &config.profile_registry_validation_error {
+            return Err(format!("智能体供应商档案无效，拒绝覆盖原配置: {}", error));
+        }
+        config
+            .agent_profile_registry
+            .validate()
+            .map_err(|error| format!("智能体供应商档案无效，拒绝覆盖原配置: {}", error))?;
+    }
+
+    let mut persisted = config.clone();
+    if persisted.profile_registry_is_derived {
+        persisted.agent_profile_registry = AgentProfileRegistry::default();
+        persisted.profile_registry_is_derived = false;
+    }
+    persisted.profile_registry_validation_error = None;
+
+    let content = serde_json::to_string_pretty(&persisted)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
     std::fs::write(config_path, content).map_err(|e| format!("Failed to write config: {}", e))?;
     Ok(())
 }
 
 fn migrate_legacy_config(mut config: AppConfig) -> AppConfig {
-    if !config.agent_profile_registry.is_empty() || config.providers.is_empty() {
+    if !config.agent_profile_registry.is_empty() {
+        if let Err(error) = config.agent_profile_registry.validate() {
+            if config.providers.is_empty() {
+                warn!(
+                    target: "config",
+                    "Persisted agent profile registry is invalid and no legacy providers are available: {}. Keeping the original registry and refusing later saves.",
+                    error
+                );
+                config.profile_registry_validation_error = Some(error);
+                return config;
+            }
+
+            warn!(
+                target: "config",
+                "Persisted agent profile registry is invalid: {}. Re-deriving it from legacy providers.",
+                error
+            );
+            config.agent_profile_registry = AgentProfileRegistry::default();
+        } else {
+            return config;
+        }
+    }
+
+    if config.providers.is_empty() {
         return config;
     }
 
-    let Some(registry) =
-        migrate_legacy_providers(&config.providers, config.active_provider_id.as_deref())
-    else {
-        return config;
-    };
+    match migrate_legacy_providers(&config.providers, config.active_provider_id.as_deref()) {
+        Ok(Some(registry)) => {
+            config.agent_profile_registry = registry;
+            config.profile_registry_is_derived = true;
+            config.profile_registry_validation_error = None;
+        }
+        Ok(None) => {
+            warn!(
+                target: "config",
+                "Legacy providers contain no usable URL; no agent profile registry was derived."
+            );
+        }
+        Err(error) => {
+            warn!(
+                target: "config",
+                "Failed to derive agent profile registry from legacy providers: {}. Keeping legacy providers unchanged.",
+                error
+            );
+            config.profile_registry_validation_error = Some(error);
+        }
+    }
 
-    config.agent_profile_registry = registry;
     config
 }
 
@@ -390,6 +445,152 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(&std::fs::read(&config_path).unwrap())
                 .unwrap(),
             legacy
+        );
+
+        let _ = std::fs::remove_file(&config_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn saving_a_derived_registry_keeps_legacy_providers_authoritative_on_disk() {
+        let temp_dir = temp_config_dir();
+        let config_path = temp_dir.join("config.json");
+        let legacy = serde_json::json!({
+            "providers": [{
+                "id": "legacy-provider",
+                "name": "旧供应商",
+                "api_key": "secret",
+                "anthropic_base_url": "https://anthropic.example/v1",
+                "openai_base_url": "",
+                "default_model": "model-a",
+                "models": ["model-a"]
+            }],
+            "active_provider_id": "legacy-provider",
+            "theme": "System"
+        });
+        std::fs::write(&config_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+        let mut config = load_config_from_path(&config_path);
+        config.compact_ai_output = true;
+        save_config_to_path(&config_path, &config).unwrap();
+
+        let after_first_save: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+        assert!(after_first_save["agent_profile_registry"]["profiles"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        let persisted_provider = &after_first_save["providers"][0];
+        let legacy_provider = &legacy["providers"][0];
+        for field in [
+            "id",
+            "name",
+            "api_key",
+            "anthropic_base_url",
+            "openai_base_url",
+            "default_model",
+            "models",
+        ] {
+            assert_eq!(persisted_provider[field], legacy_provider[field]);
+        }
+        assert_eq!(
+            after_first_save["active_provider_id"],
+            legacy["active_provider_id"]
+        );
+
+        config.providers[0].default_model = "model-b".to_string();
+        save_config_to_path(&config_path, &config).unwrap();
+        let reloaded = load_config_from_path(&config_path);
+
+        assert_eq!(
+            reloaded.agent_profile_registry.profiles[0].default_model,
+            "model-b"
+        );
+
+        let _ = std::fs::remove_file(&config_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn invalid_persisted_registry_is_rederived_from_legacy_providers() {
+        let temp_dir = temp_config_dir();
+        let config_path = temp_dir.join("config.json");
+        let raw = serde_json::json!({
+            "agent_profile_registry": {
+                "profiles": [{
+                    "id": "invalid-profile",
+                    "agent_kind": "claude_code",
+                    "name": "无效档案",
+                    "models": [],
+                    "default_model": "invalid-model",
+                    "native_config": {
+                        "type": "codex",
+                        "api_key": "secret",
+                        "openai_base_url": "https://invalid.example/v1"
+                    }
+                }],
+                "active_profile_ids": { "claude_code": "invalid-profile" }
+            },
+            "providers": [{
+                "id": "legacy-provider",
+                "name": "旧供应商",
+                "api_key": "legacy-key",
+                "anthropic_base_url": "https://anthropic.example/v1",
+                "openai_base_url": "",
+                "default_model": "legacy-model",
+                "models": ["legacy-model"]
+            }],
+            "active_provider_id": "legacy-provider",
+            "theme": "System"
+        });
+        std::fs::write(&config_path, serde_json::to_vec(&raw).unwrap()).unwrap();
+
+        let config = load_config_from_path(&config_path);
+
+        assert_eq!(config.agent_profile_registry.profiles.len(), 1);
+        assert_eq!(
+            config.agent_profile_registry.profiles[0].default_model,
+            "legacy-model"
+        );
+        assert!(config.agent_profile_registry.validate().is_ok());
+
+        let _ = std::fs::remove_file(&config_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn invalid_persisted_registry_without_legacy_providers_cannot_be_saved() {
+        let temp_dir = temp_config_dir();
+        let config_path = temp_dir.join("config.json");
+        let raw = serde_json::json!({
+            "agent_profile_registry": {
+                "profiles": [{
+                    "id": "invalid-profile",
+                    "agent_kind": "claude_code",
+                    "name": "无效档案",
+                    "models": [],
+                    "default_model": "invalid-model",
+                    "native_config": {
+                        "type": "codex",
+                        "api_key": "secret",
+                        "openai_base_url": "https://invalid.example/v1"
+                    }
+                }],
+                "active_profile_ids": { "claude_code": "invalid-profile" }
+            },
+            "theme": "System"
+        });
+        std::fs::write(&config_path, serde_json::to_vec(&raw).unwrap()).unwrap();
+
+        let mut config = load_config_from_path(&config_path);
+        config.compact_ai_output = true;
+        let error = save_config_to_path(&config_path, &config).unwrap_err();
+
+        assert!(error.contains("智能体供应商档案无效"));
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(&config_path).unwrap())
+                .unwrap(),
+            raw
         );
 
         let _ = std::fs::remove_file(&config_path);

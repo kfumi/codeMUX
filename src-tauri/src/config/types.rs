@@ -227,6 +227,12 @@ pub struct AgentConfigs {
 pub struct AppConfig {
     #[serde(default)]
     pub agent_profile_registry: crate::provider_profiles::AgentProfileRegistry,
+    /// 仅存在于内存中，表示当前档案注册表由旧版供应商配置临时派生。
+    #[serde(skip)]
+    pub profile_registry_is_derived: bool,
+    /// 仅存在于内存中，用于阻止无效的持久档案被无关设置覆盖。
+    #[serde(skip)]
+    pub profile_registry_validation_error: Option<String>,
     /// 仅用于读取尚未迁移的旧版统一供应商配置。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub providers: Vec<Provider>,
@@ -257,6 +263,8 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             agent_profile_registry: crate::provider_profiles::AgentProfileRegistry::default(),
+            profile_registry_is_derived: false,
+            profile_registry_validation_error: None,
             providers: Vec::new(),
             active_provider_id: None,
             agent_defaults: AgentDefaults::default(),

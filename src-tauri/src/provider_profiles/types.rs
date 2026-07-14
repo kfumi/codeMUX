@@ -124,7 +124,7 @@ impl AgentProfileRegistry {
 pub fn migrate_legacy_providers(
     providers: &[Provider],
     active_provider_id: Option<&str>,
-) -> Option<AgentProfileRegistry> {
+) -> Result<Option<AgentProfileRegistry>, String> {
     let mut registry = AgentProfileRegistry::default();
 
     for provider in providers {
@@ -146,7 +146,7 @@ pub fn migrate_legacy_providers(
                     requires_review: true,
                 },
             };
-            add_migrated_profile(&mut registry, profile, is_active);
+            add_migrated_profile(&mut registry, profile, is_active)?;
         }
 
         if !provider.openai_base_url.trim().is_empty() {
@@ -165,7 +165,7 @@ pub fn migrate_legacy_providers(
                     requires_review: true,
                 },
             };
-            add_migrated_profile(&mut registry, codex_profile, is_active);
+            add_migrated_profile(&mut registry, codex_profile, is_active)?;
 
             let opencode_profile = AgentProviderProfile {
                 id: legacy_profile_id(provider, AgentKind::Opencode),
@@ -181,12 +181,12 @@ pub fn migrate_legacy_providers(
                     requires_review: true,
                 },
             };
-            add_migrated_profile(&mut registry, opencode_profile, is_active);
+            add_migrated_profile(&mut registry, opencode_profile, is_active)?;
         }
     }
 
     if registry.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     for profile in &registry.profiles {
@@ -196,8 +196,10 @@ pub fn migrate_legacy_providers(
             .or_insert_with(|| profile.id.clone());
     }
 
-    registry.validate().ok()?;
-    Some(registry)
+    registry
+        .validate()
+        .map_err(|error| format!("迁移生成的智能体供应商档案无效: {}", error))?;
+    Ok(Some(registry))
 }
 
 fn legacy_profile_id(provider: &Provider, agent_kind: AgentKind) -> String {
@@ -229,13 +231,14 @@ fn add_migrated_profile(
     registry: &mut AgentProfileRegistry,
     profile: AgentProviderProfile,
     is_active: bool,
-) {
-    if profile.validate().is_err() {
-        return;
-    }
+) -> Result<(), String> {
+    profile
+        .validate()
+        .map_err(|error| format!("无法迁移供应商档案 {}: {}", profile.name, error))?;
 
     set_active_profile_if_needed(registry, profile.agent_kind, &profile.id, is_active);
     registry.profiles.push(profile);
+    Ok(())
 }
 
 #[cfg(test)]
