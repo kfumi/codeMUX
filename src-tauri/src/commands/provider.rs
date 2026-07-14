@@ -100,20 +100,25 @@ fn upsert_agent_profile_in_config(
 ) -> Result<(), String> {
     profile.validate()?;
 
-    if let Some(existing) = app_config
-        .agent_profile_registry
+    let mut registry = app_config.agent_profile_registry.clone();
+    if let Some(existing) = registry
         .profiles
         .iter_mut()
         .find(|existing| existing.id == profile.id)
     {
+        if existing.agent_kind != profile.agent_kind {
+            return Err("同一档案 ID 不允许更改智能体类型".to_string());
+        }
         *existing = profile;
     } else {
-        app_config.agent_profile_registry.profiles.push(profile);
+        registry.profiles.push(profile);
     }
 
+    registry.validate()?;
+    app_config.agent_profile_registry = registry;
     app_config.profile_registry_is_derived = false;
     app_config.profile_registry_validation_error = None;
-    app_config.agent_profile_registry.validate()
+    Ok(())
 }
 
 fn set_active_profile_in_config(
@@ -160,10 +165,49 @@ fn set_active_profile_default_model_in_config(
         .iter_mut()
         .find(|profile| profile.id == active_profile_id && profile.agent_kind == agent_kind)
         .ok_or("档案不存在或不属于当前智能体")?;
+    if !profile.models.iter().any(|model| model.id == default_model) {
+        return Err("默认模型必须属于当前启用档案的模型列表".to_string());
+    }
     profile.default_model = default_model.to_string();
     app_config.profile_registry_is_derived = false;
     app_config.profile_registry_validation_error = None;
     Ok(())
+}
+
+fn activate_agent_profile_transaction<W, S>(
+    app_config: &mut AppConfig,
+    agent_kind: AgentKind,
+    profile_id: &str,
+    write_native: W,
+    save_config: S,
+) -> Result<(), String>
+where
+    W: FnOnce(&AgentProviderProfile) -> Result<(), String>,
+    S: FnOnce(&AppConfig) -> Result<(), String>,
+{
+    let profile = agent_profile_from_config(app_config, agent_kind, profile_id)?;
+    write_native(&profile)?;
+    set_active_profile_in_config(app_config, agent_kind, profile_id)?;
+    save_config(app_config)
+}
+
+fn set_active_profile_model_transaction<W, S>(
+    app_config: &mut AppConfig,
+    agent_kind: AgentKind,
+    default_model: &str,
+    write_native: W,
+    save_config: S,
+) -> Result<(), String>
+where
+    W: FnOnce(&AgentProviderProfile) -> Result<(), String>,
+    S: FnOnce(&AppConfig) -> Result<(), String>,
+{
+    let mut updated_config = app_config.clone();
+    set_active_profile_default_model_in_config(&mut updated_config, agent_kind, default_model)?;
+    let updated_profile = active_agent_profile_from_config(&updated_config, agent_kind)?;
+    write_native(&updated_profile)?;
+    set_active_profile_default_model_in_config(app_config, agent_kind, default_model)?;
+    save_config(app_config)
 }
 
 fn delete_agent_profile_from_config(
@@ -426,16 +470,14 @@ pub fn activate_agent_provider_profile(
         profile_id,
         agent_kind.as_str()
     );
-    let profile = {
-        let app_config = state.config.lock().unwrap();
-        agent_profile_from_config(&app_config, agent_kind, &profile_id)?
-    };
-
-    apply_native_profile_config_for_app(state.inner(), &app, &profile)?;
-
     let mut app_config = state.config.lock().unwrap();
-    set_active_profile_in_config(&mut app_config, agent_kind, &profile_id)?;
-    config::save_config(&app, &app_config)
+    activate_agent_profile_transaction(
+        &mut app_config,
+        agent_kind,
+        &profile_id,
+        |profile| apply_native_profile_config_for_app(state.inner(), &app, profile),
+        |config| config::save_config(&app, config),
+    )
 }
 
 #[tauri::command]
@@ -452,22 +494,14 @@ pub fn set_active_agent_profile_model(
         agent_kind.as_str(),
         default_model
     );
-    let updated_profile = {
-        let app_config = state.config.lock().unwrap();
-        let mut updated_config = app_config.clone();
-        set_active_profile_default_model_in_config(
-            &mut updated_config,
-            agent_kind,
-            &default_model,
-        )?;
-        active_agent_profile_from_config(&updated_config, agent_kind)?
-    };
-
-    apply_native_profile_config_for_app(state.inner(), &app, &updated_profile)?;
-
     let mut app_config = state.config.lock().unwrap();
-    set_active_profile_default_model_in_config(&mut app_config, agent_kind, &default_model)?;
-    config::save_config(&app, &app_config)
+    set_active_profile_model_transaction(
+        &mut app_config,
+        agent_kind,
+        &default_model,
+        |profile| apply_native_profile_config_for_app(state.inner(), &app, profile),
+        |config| config::save_config(&app, config),
+    )
 }
 
 #[tauri::command]
@@ -625,10 +659,11 @@ pub fn update_agent_config(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_agent_config_update, apply_native_profile_config, cleanup_provider_references,
-        delete_agent_profile_from_config, profile_api_connection, profile_models_from_config,
-        redact_profile_error, set_active_profile_default_model_in_config,
-        set_active_profile_in_config, upsert_agent_profile_in_config, ProfileApiProtocol,
+        activate_agent_profile_transaction, apply_agent_config_update, apply_native_profile_config,
+        cleanup_provider_references, delete_agent_profile_from_config, profile_api_connection,
+        profile_models_from_config, redact_profile_error,
+        set_active_profile_default_model_in_config, set_active_profile_in_config,
+        set_active_profile_model_transaction, upsert_agent_profile_in_config, ProfileApiProtocol,
     };
     use crate::config::types::{AgentKind, AppConfig, Provider};
     use crate::provider_profiles::native_config::NativeConfigPaths;
@@ -642,7 +677,11 @@ mod tests {
             agent_kind: AgentKind::Codex,
             name: "测试 Codex 档案".to_string(),
             note: String::new(),
-            models: Vec::new(),
+            models: vec![ProfileModel {
+                id: default_model.to_string(),
+                name: None,
+                context_window: None,
+            }],
             default_model: default_model.to_string(),
             native_config: NativeProfileConfig::Codex {
                 api_key: "test-key".to_string(),
@@ -669,6 +708,58 @@ mod tests {
     }
 
     #[test]
+    fn profile_validation_rejects_default_model_not_in_models() {
+        let mut profile = codex_profile("codex", "model-a");
+        profile.default_model = "model-b".to_string();
+
+        let error = profile.validate().unwrap_err();
+
+        assert_eq!(error, "默认模型必须属于档案的模型列表");
+    }
+
+    #[test]
+    fn profile_validation_rejects_default_model_when_models_are_empty() {
+        let mut profile = codex_profile("codex", "model-a");
+        profile.models.clear();
+
+        let error = profile.validate().unwrap_err();
+
+        assert_eq!(error, "模型列表为空时默认模型必须为空");
+    }
+
+    #[test]
+    fn upserting_existing_profile_rejects_agent_kind_change_without_mutation() {
+        let mut app_config = AppConfig::default();
+        upsert_agent_profile_in_config(&mut app_config, codex_profile("shared", "model-a"))
+            .unwrap();
+        let before = serde_json::to_value(&app_config).unwrap();
+        let profile = AgentProviderProfile {
+            id: "shared".to_string(),
+            agent_kind: AgentKind::ClaudeCode,
+            name: "Claude 档案".to_string(),
+            note: String::new(),
+            models: vec![ProfileModel {
+                id: "claude-model".to_string(),
+                name: None,
+                context_window: None,
+            }],
+            default_model: "claude-model".to_string(),
+            native_config: NativeProfileConfig::ClaudeCode {
+                api_key: "test-key".to_string(),
+                anthropic_base_url: "https://api.example.test".to_string(),
+                context_1m: None,
+                advanced_config: None,
+                requires_review: false,
+            },
+        };
+
+        let error = upsert_agent_profile_in_config(&mut app_config, profile).unwrap_err();
+
+        assert_eq!(error, "同一档案 ID 不允许更改智能体类型");
+        assert_eq!(serde_json::to_value(&app_config).unwrap(), before);
+    }
+
+    #[test]
     fn activating_profile_rejects_profile_for_another_agent() {
         let mut app_config = AppConfig::default();
         upsert_agent_profile_in_config(&mut app_config, codex_profile("codex", "model-a")).unwrap();
@@ -686,7 +777,13 @@ mod tests {
     #[test]
     fn updating_active_profile_model_changes_only_the_active_profile() {
         let mut app_config = AppConfig::default();
-        upsert_agent_profile_in_config(&mut app_config, codex_profile("codex", "model-a")).unwrap();
+        let mut profile = codex_profile("codex", "model-a");
+        profile.models.push(ProfileModel {
+            id: "model-b".to_string(),
+            name: None,
+            context_window: None,
+        });
+        upsert_agent_profile_in_config(&mut app_config, profile).unwrap();
         set_active_profile_in_config(&mut app_config, AgentKind::Codex, "codex").unwrap();
 
         set_active_profile_default_model_in_config(&mut app_config, AgentKind::Codex, "model-b")
@@ -696,6 +793,114 @@ mod tests {
             app_config.agent_profile_registry.profiles[0].default_model,
             "model-b"
         );
+    }
+
+    #[test]
+    fn updating_active_profile_model_rejects_model_not_in_profile() {
+        let mut app_config = AppConfig::default();
+        upsert_agent_profile_in_config(&mut app_config, codex_profile("codex", "model-a")).unwrap();
+        set_active_profile_in_config(&mut app_config, AgentKind::Codex, "codex").unwrap();
+
+        let error = set_active_profile_default_model_in_config(
+            &mut app_config,
+            AgentKind::Codex,
+            "model-b",
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "默认模型必须属于当前启用档案的模型列表");
+        assert_eq!(
+            app_config.agent_profile_registry.profiles[0].default_model,
+            "model-a"
+        );
+    }
+
+    #[test]
+    fn activation_native_write_failure_keeps_config_and_skips_save() {
+        let mut app_config = AppConfig::default();
+        upsert_agent_profile_in_config(&mut app_config, codex_profile("codex", "model-a")).unwrap();
+        let before = serde_json::to_value(&app_config).unwrap();
+        let saved = std::cell::Cell::new(false);
+
+        let error = activate_agent_profile_transaction(
+            &mut app_config,
+            AgentKind::Codex,
+            "codex",
+            |_| Err("原生写入失败".to_string()),
+            |_| {
+                saved.set(true);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "原生写入失败");
+        assert_eq!(serde_json::to_value(&app_config).unwrap(), before);
+        assert!(!saved.get());
+    }
+
+    #[test]
+    fn activation_saves_only_after_native_write_and_active_id_update() {
+        let mut app_config = AppConfig::default();
+        upsert_agent_profile_in_config(&mut app_config, codex_profile("codex", "model-a")).unwrap();
+        let native_written = std::cell::Cell::new(false);
+        let saved = std::cell::Cell::new(false);
+
+        activate_agent_profile_transaction(
+            &mut app_config,
+            AgentKind::Codex,
+            "codex",
+            |_| {
+                native_written.set(true);
+                Ok(())
+            },
+            |config| {
+                assert!(native_written.get());
+                assert_eq!(
+                    config
+                        .agent_profile_registry
+                        .active_profile_ids
+                        .get(&AgentKind::Codex),
+                    Some(&"codex".to_string())
+                );
+                saved.set(true);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(saved.get());
+    }
+
+    #[test]
+    fn active_model_native_write_failure_keeps_config_and_skips_save() {
+        let mut app_config = AppConfig::default();
+        let mut profile = codex_profile("codex", "model-a");
+        profile.models.push(ProfileModel {
+            id: "model-b".to_string(),
+            name: None,
+            context_window: None,
+        });
+        upsert_agent_profile_in_config(&mut app_config, profile).unwrap();
+        set_active_profile_in_config(&mut app_config, AgentKind::Codex, "codex").unwrap();
+        let before = serde_json::to_value(&app_config).unwrap();
+        let saved = std::cell::Cell::new(false);
+
+        let error = set_active_profile_model_transaction(
+            &mut app_config,
+            AgentKind::Codex,
+            "model-b",
+            |_| Err("原生写入失败".to_string()),
+            |_| {
+                saved.set(true);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "原生写入失败");
+        assert_eq!(serde_json::to_value(&app_config).unwrap(), before);
+        assert!(!saved.get());
     }
 
     #[test]
@@ -720,7 +925,11 @@ mod tests {
             agent_kind: AgentKind::ClaudeCode,
             name: "Claude".to_string(),
             note: String::new(),
-            models: Vec::new(),
+            models: vec![ProfileModel {
+                id: "claude-model".to_string(),
+                name: None,
+                context_window: None,
+            }],
             default_model: "claude-model".to_string(),
             native_config: NativeProfileConfig::ClaudeCode {
                 api_key: "claude-secret".to_string(),
@@ -746,7 +955,11 @@ mod tests {
             agent_kind: AgentKind::Opencode,
             name: "OpenCode".to_string(),
             note: String::new(),
-            models: Vec::new(),
+            models: vec![ProfileModel {
+                id: "opencode-model".to_string(),
+                name: None,
+                context_window: None,
+            }],
             default_model: "opencode-model".to_string(),
             native_config: NativeProfileConfig::OpenCode {
                 api_key: "opencode-secret".to_string(),

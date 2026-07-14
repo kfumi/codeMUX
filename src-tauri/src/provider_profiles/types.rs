@@ -138,7 +138,22 @@ impl AgentProviderProfile {
         );
 
         if is_matching_config {
-            Ok(())
+            if self.models.is_empty() {
+                if self.default_model.is_empty() {
+                    Ok(())
+                } else {
+                    Err("模型列表为空时默认模型必须为空".to_string())
+                }
+            } else if self.default_model.is_empty()
+                || !self
+                    .models
+                    .iter()
+                    .any(|model| model.id == self.default_model)
+            {
+                Err("默认模型必须属于档案的模型列表".to_string())
+            } else {
+                Ok(())
+            }
         } else {
             Err("档案智能体类型与原生配置类型不一致".to_string())
         }
@@ -185,6 +200,8 @@ pub fn migrate_legacy_providers(
 
     for provider in providers {
         let is_active = active_provider_id == Some(provider.id.as_str());
+        let models = legacy_profile_models(provider);
+        let default_model = legacy_default_model(provider, &models);
 
         if !provider.anthropic_base_url.trim().is_empty() {
             let profile = AgentProviderProfile {
@@ -192,8 +209,8 @@ pub fn migrate_legacy_providers(
                 agent_kind: AgentKind::ClaudeCode,
                 name: provider.name.clone(),
                 note: MIGRATION_REVIEW_NOTE.to_string(),
-                models: legacy_profile_models(provider),
-                default_model: provider.default_model.clone(),
+                models: models.clone(),
+                default_model: default_model.clone(),
                 native_config: NativeProfileConfig::ClaudeCode {
                     api_key: provider.api_key.clone(),
                     anthropic_base_url: provider.anthropic_base_url.clone(),
@@ -211,8 +228,8 @@ pub fn migrate_legacy_providers(
                 agent_kind: AgentKind::Codex,
                 name: provider.name.clone(),
                 note: MIGRATION_REVIEW_NOTE.to_string(),
-                models: legacy_profile_models(provider),
-                default_model: provider.default_model.clone(),
+                models: models.clone(),
+                default_model: default_model.clone(),
                 native_config: NativeProfileConfig::Codex {
                     api_key: provider.api_key.clone(),
                     openai_base_url: provider.openai_base_url.clone(),
@@ -228,8 +245,8 @@ pub fn migrate_legacy_providers(
                 agent_kind: AgentKind::Opencode,
                 name: provider.name.clone(),
                 note: MIGRATION_REVIEW_NOTE.to_string(),
-                models: legacy_profile_models(provider),
-                default_model: provider.default_model.clone(),
+                models: models.clone(),
+                default_model: default_model.clone(),
                 native_config: NativeProfileConfig::OpenCode {
                     api_key: provider.api_key.clone(),
                     openai_base_url: provider.openai_base_url.clone(),
@@ -263,11 +280,32 @@ fn legacy_profile_id(provider: &Provider, agent_kind: AgentKind) -> String {
 }
 
 fn legacy_profile_models(provider: &Provider) -> Vec<ProfileModel> {
-    provider
+    let mut models: Vec<ProfileModel> = provider
         .models
         .iter()
         .map(|model| ProfileModel::from_legacy_model(model))
-        .collect()
+        .collect();
+
+    if !provider.default_model.is_empty()
+        && !models.is_empty()
+        && !models
+            .iter()
+            .any(|model| model.id == provider.default_model)
+    {
+        models.push(ProfileModel::from_legacy_model(&provider.default_model));
+    }
+
+    models
+}
+
+fn legacy_default_model(provider: &Provider, models: &[ProfileModel]) -> String {
+    if models.is_empty() {
+        String::new()
+    } else if provider.default_model.is_empty() {
+        models[0].id.clone()
+    } else {
+        provider.default_model.clone()
+    }
 }
 
 fn set_active_profile_if_needed(

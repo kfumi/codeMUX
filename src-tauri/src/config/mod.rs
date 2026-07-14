@@ -366,6 +366,9 @@ mod tests {
         assert!(profiles
             .iter()
             .all(|profile| profile["models"] == serde_json::json!([])));
+        assert!(profiles
+            .iter()
+            .all(|profile| profile["default_model"] == serde_json::json!("")));
 
         let _ = std::fs::remove_file(&config_path);
         let _ = std::fs::remove_dir(&temp_dir);
