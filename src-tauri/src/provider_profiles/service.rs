@@ -564,6 +564,64 @@ impl<O: FileOps> NativeConfigWriteService<O> {
         })
     }
 
+    /// 使用一次成功写入返回的备份会话补偿恢复原生配置。
+    ///
+    /// 该接口仅接受当前服务备份根目录下的会话目录，并在全局事务锁与每个目标锁的保护下，
+    /// 通过写入内容哈希确认目标尚未被外部修改后才执行恢复。
+    pub fn restore_from_backup_session(
+        &self,
+        backup_session_dir: &Path,
+    ) -> Result<(), NativeConfigWriteError> {
+        if !self.is_owned_session_directory(backup_session_dir) {
+            return Err(self.error(
+                "原生配置恢复记录无效",
+                None,
+                RollbackStatus::NotAttempted,
+            ));
+        }
+
+        let _lock = self.acquire_lock()?;
+        self.create_secure_directory(&self.backup_root)
+            .map_err(|_| self.error("原生配置恢复失败", None, RollbackStatus::NotAttempted))?;
+        self.recover_unfinished_transactions()?;
+
+        let manifest = self.read_valid_manifest(backup_session_dir)?;
+        if !matches!(manifest.state, TransactionState::Committed) {
+            return Err(self.error(
+                "原生配置恢复记录无效",
+                Some(backup_session_dir.to_path_buf()),
+                RollbackStatus::NotAttempted,
+            ));
+        }
+        if let Some(file) = manifest
+            .files
+            .iter()
+            .filter(|file| file.preparing || file.replaced)
+            .find(|file| {
+                !self.target_matches_new_content(file)
+                    && !self.target_matches_original_content(backup_session_dir, file)
+            })
+        {
+            return Err(NativeConfigWriteError::for_target(
+                "原生配置恢复不完整",
+                "外部修改",
+                self.target_identifier(&file.target),
+                Some(backup_session_dir.to_path_buf()),
+                RollbackStatus::Partial,
+            ));
+        }
+
+        let status = self.rollback_manifest(backup_session_dir, &manifest);
+        if status == RollbackStatus::Complete {
+            return Ok(());
+        }
+        Err(self.error(
+            "原生配置恢复不完整",
+            Some(backup_session_dir.to_path_buf()),
+            status,
+        ))
+    }
+
     fn acquire_lock(&self) -> Result<File, NativeConfigWriteError> {
         if self.file_ops.create_dir_all(&self.lock_root).is_err()
             || self
@@ -864,41 +922,13 @@ impl<O: FileOps> NativeConfigWriteService<O> {
             if !is_session_directory(&session_dir) {
                 continue;
             }
-            let manifest_path = session_dir.join("manifest.json");
-            let content = match self.file_ops.read(&manifest_path) {
-                Ok(content) => content,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-                Err(_) => {
-                    return Err(self.error(
-                        "原生配置恢复失败",
-                        Some(session_dir),
-                        RollbackStatus::NotAttempted,
-                    ));
-                }
-            };
-            let mut manifest: TransactionManifest =
-                serde_json::from_slice(&content).map_err(|_| {
-                    self.error(
-                        "原生配置恢复失败",
-                        Some(session_dir.clone()),
-                        RollbackStatus::NotAttempted,
-                    )
-                })?;
-            if manifest.files.iter().any(|file| {
-                !self.is_allowed_target(&file.target)
-                    || file.backup_file.as_ref().is_some_and(|name| {
-                        Path::new(name)
-                            .file_name()
-                            .is_none_or(|file_name| file_name != std::ffi::OsStr::new(name))
-                    })
-                    || ((file.preparing || file.replaced) && file.new_content_hash.is_none())
-            }) {
-                return Err(self.error(
-                    "原生配置恢复记录无效",
-                    Some(session_dir),
-                    RollbackStatus::NotAttempted,
-                ));
+            if matches!(
+                self.file_ops.read(&session_dir.join("manifest.json")),
+                Err(error) if error.kind() == io::ErrorKind::NotFound
+            ) {
+                continue;
             }
+            let mut manifest = self.read_valid_manifest(&session_dir)?;
             match manifest.state {
                 TransactionState::Committed => {}
                 TransactionState::Prepared => {
@@ -945,6 +975,53 @@ impl<O: FileOps> NativeConfigWriteService<O> {
             }
         }
         Ok(())
+    }
+
+    fn read_valid_manifest(
+        &self,
+        session_dir: &Path,
+    ) -> Result<TransactionManifest, NativeConfigWriteError> {
+        let content = self
+            .file_ops
+            .read(&session_dir.join("manifest.json"))
+            .map_err(|_| {
+                self.error(
+                    "原生配置恢复失败",
+                    Some(session_dir.to_path_buf()),
+                    RollbackStatus::NotAttempted,
+                )
+            })?;
+        let manifest: TransactionManifest = serde_json::from_slice(&content).map_err(|_| {
+            self.error(
+                "原生配置恢复失败",
+                Some(session_dir.to_path_buf()),
+                RollbackStatus::NotAttempted,
+            )
+        })?;
+        if manifest.files.iter().any(|file| {
+            !self.is_allowed_target(&file.target)
+                || file.backup_file.as_ref().is_some_and(|name| {
+                    Path::new(name)
+                        .file_name()
+                        .is_none_or(|file_name| file_name != std::ffi::OsStr::new(name))
+                })
+                || ((file.preparing || file.replaced) && file.new_content_hash.is_none())
+        }) {
+            return Err(self.error(
+                "原生配置恢复记录无效",
+                Some(session_dir.to_path_buf()),
+                RollbackStatus::NotAttempted,
+            ));
+        }
+        Ok(manifest)
+    }
+
+    fn is_owned_session_directory(&self, session_dir: &Path) -> bool {
+        session_dir
+            .strip_prefix(&self.backup_root)
+            .ok()
+            .is_some_and(|relative| relative.components().count() == 1)
+            && is_session_directory(session_dir)
     }
 
     fn error(
@@ -1221,6 +1298,64 @@ mod tests {
             .map(|entry| entry.unwrap().file_name())
             .collect::<Vec<_>>();
         assert_eq!(files, vec![std::ffi::OsString::from("manifest.json")]);
+    }
+
+    #[test]
+    fn 根据成功写入的备份会话可恢复原生配置() {
+        let temp = TestDirectory::new();
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(&paths.codex_dir).unwrap();
+        fs::write(paths.codex_auth_path(), b"old auth").unwrap();
+        let service = NativeConfigWriteService::with_file_ops(
+            paths.clone(),
+            temp.path().join("backups"),
+            TestFileOps,
+        );
+
+        let result = service
+            .write(&[RenderedNativeConfig {
+                path: paths.codex_auth_path(),
+                content: "new auth".to_string(),
+            }])
+            .unwrap();
+        service
+            .restore_from_backup_session(&result.backup_session_dir)
+            .unwrap();
+
+        assert_eq!(fs::read(paths.codex_auth_path()).unwrap(), b"old auth");
+    }
+
+    #[test]
+    fn 补偿恢复遇到外部修改时保留内容并返回部分回滚() {
+        let temp = TestDirectory::new();
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(&paths.codex_dir).unwrap();
+        fs::write(paths.codex_auth_path(), b"old auth").unwrap();
+        let service = NativeConfigWriteService::with_file_ops(
+            paths.clone(),
+            temp.path().join("backups"),
+            TestFileOps,
+        );
+
+        let result = service
+            .write(&[RenderedNativeConfig {
+                path: paths.codex_auth_path(),
+                content: "new auth".to_string(),
+            }])
+            .unwrap();
+        fs::write(paths.codex_auth_path(), b"externally modified").unwrap();
+
+        let error = service
+            .restore_from_backup_session(&result.backup_session_dir)
+            .unwrap_err();
+
+        assert_eq!(error.rollback_status, RollbackStatus::Partial);
+        assert_eq!(error.failure_category, "外部修改");
+        assert_eq!(error.target_identifier, Some("codex-auth"));
+        assert_eq!(
+            fs::read(paths.codex_auth_path()).unwrap(),
+            b"externally modified"
+        );
     }
 
     #[test]
