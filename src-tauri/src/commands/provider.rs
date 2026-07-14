@@ -356,6 +356,9 @@ fn upsert_agent_profile_in_config(
 
 fn redact_config_for_frontend(app_config: &AppConfig) -> AppConfig {
     let mut redacted = app_config.clone();
+    for provider in &mut redacted.providers {
+        provider.api_key.clear();
+    }
     for profile in &mut redacted.agent_profile_registry.profiles {
         match &mut profile.native_config {
             NativeProfileConfig::ClaudeCode {
@@ -1315,6 +1318,17 @@ mod tests {
     #[test]
     fn get_config_view_redacts_profile_secrets_and_advanced_config() {
         let mut app_config = AppConfig::default();
+        app_config.providers.push(Provider {
+            id: "legacy".to_string(),
+            name: "Legacy".to_string(),
+            api_key: "legacy-secret".to_string(),
+            anthropic_base_url: String::new(),
+            openai_base_url: String::new(),
+            default_model: String::new(),
+            models: Vec::new(),
+            context_1m: None,
+            codex_needs_proxy: None,
+        });
         let mut profile = codex_profile("codex", "model-a");
         if let NativeProfileConfig::Codex {
             api_key,
@@ -1339,6 +1353,13 @@ mod tests {
 
         assert!(api_key.is_empty());
         assert!(advanced_config.is_none());
+        assert!(view
+            .providers
+            .iter()
+            .find(|provider| provider.id == "legacy")
+            .unwrap()
+            .api_key
+            .is_empty());
     }
 
     #[test]
