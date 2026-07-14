@@ -14,6 +14,8 @@ const composerProps: Array<{
   agentKind?: AgentKind;
   placeholder?: string;
   projectPath?: string | null;
+  disabled?: boolean;
+  disabledMessage?: string;
   onSend?: (content: string) => Promise<void>;
 }> = [];
 
@@ -111,7 +113,20 @@ describe('NewSessionPanel', () => {
         theme: 'System',
         compact_ai_output: false,
         default_open_target: 'file_explorer',
+        agent_profile_registry: {
+          profiles: [{
+            id: 'profile-1', agent_kind: 'claude_code', name: 'Provider', note: '',
+            models: [{ id: 'claude-sonnet-4-20250514' }, { id: 'claude-opus-4-1' }], default_model: 'claude-sonnet-4-20250514',
+            native_config: { type: 'claude_code', api_key: '', anthropic_base_url: 'https://api.anthropic.com' },
+          }, {
+            id: 'profile-2', agent_kind: 'claude_code', name: 'Provider 2', note: '',
+            models: [{ id: 'gpt-5' }, { id: 'gpt-5-mini' }], default_model: 'gpt-5',
+            native_config: { type: 'claude_code', api_key: '', anthropic_base_url: 'https://provider-2.example' },
+          }],
+          active_profile_ids: { claude_code: 'profile-1' },
+        },
       },
+      activateAgentProfile: vi.fn(() => Promise.resolve()),
     }));
   });
 
@@ -164,15 +179,17 @@ describe('NewSessionPanel', () => {
     expect(useNewSessionStore.getState().selectedModel).toBe('claude-opus-4-1');
   });
 
-  it('lets the draft choose a provider and its default model', () => {
+  it('lets the draft choose a provider and its default model', async () => {
     render(<NewSessionPanel onSubmit={vi.fn()} />);
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Providers' }), {
-      target: { value: 'provider-2' },
+      target: { value: 'profile-2' },
     });
 
-    expect(useNewSessionStore.getState().selectedProviderId).toBe('provider-2');
-    expect(useNewSessionStore.getState().selectedModel).toBe('gpt-5');
+    await vi.waitFor(() => {
+      expect(useNewSessionStore.getState().selectedProviderId).toBe('profile-2');
+      expect(useNewSessionStore.getState().selectedModel).toBe('gpt-5');
+    });
   });
 
   it('submits through the shared runtime send handler', async () => {
@@ -185,9 +202,49 @@ describe('NewSessionPanel', () => {
     expect(onSubmit).toHaveBeenCalledWith({ text: 'Ship the feature' });
   });
 
+  it('blocks a new conversation until the selected agent has an active profile and model', async () => {
+    const onSubmit = vi.fn();
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config ? {
+        ...state.config,
+        agent_profile_registry: { profiles: [], active_profile_ids: {} },
+      } : null,
+    }));
+
+    render(<NewSessionPanel onSubmit={onSubmit} />);
+
+    expect(composerProps.at(-1)?.disabled).toBe(true);
+    expect(composerProps.at(-1)?.disabledMessage).toBe('请先在供应商配置中为 Claude Code 添加一个包含默认模型的档案。');
+
+    await composerProps[0]?.onSend?.('Ship the feature');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it('keeps normal Codex plan mode draft sends as the original user text', async () => {
     const onSubmit = vi.fn();
     useNewSessionStore.setState({ selectedAgentKind: 'codex' });
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config ? {
+        ...state.config,
+        agent_profile_registry: {
+          profiles: [
+            ...(state.config.agent_profile_registry?.profiles ?? []),
+            {
+              id: 'codex-profile-1', agent_kind: 'codex', name: 'Codex 档案', note: '',
+              models: [{ id: 'gpt-5' }], default_model: 'gpt-5',
+              native_config: { type: 'codex', api_key: '', base_url: 'https://api.openai.com/v1' },
+            },
+          ],
+          active_profile_ids: {
+            ...(state.config.agent_profile_registry?.active_profile_ids ?? {}),
+            codex: 'codex-profile-1',
+          },
+        },
+      } : null,
+    }));
 
     render(<NewSessionPanel onSubmit={onSubmit} />);
 

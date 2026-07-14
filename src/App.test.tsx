@@ -55,21 +55,11 @@ vi.mock('./hooks/useTheme', () => ({
   useTheme: () => {},
 }));
 
-vi.mock('./lib/agentProvider', () => ({
-  resolveAgentProviderConfig: () => ({
-    provider: null,
-    apiKey: null,
-    baseUrl: null,
-    model: null,
-    runtimeModel: null,
-    codexNeedsProxy: false,
-  }),
-}));
-
 vi.mock('./lib/logger', () => ({
   createLogger: () => ({
     error: vi.fn(),
     info: vi.fn(),
+    debug: vi.fn(),
   }),
   serializeError: (error: unknown) => error,
 }));

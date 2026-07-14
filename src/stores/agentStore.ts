@@ -111,7 +111,7 @@ interface AgentState {
   pendingPermissions: Record<string, AgentPermissionRequest | null>;
   respondToPermission: (sessionId: string, response: AgentPermissionResponse) => Promise<void>;
   /** Start a new agent query */
-  startQuery: (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string, inputPayload?: AgentInputPayload, provider?: string, credentialSource?: 'codemux' | 'environment' | 'opencode' | 'none') => Promise<void>;
+  startQuery: (sessionId: string, prompt: string, cwd: string, reasoningEffort?: ReasoningEffort, displayContent?: string, inputPayload?: AgentInputPayload, modelForVision?: string) => Promise<void>;
   /** Interrupt the current query for a specific session */
   interrupt: (sessionId: string) => Promise<void>;
   /** Clear events for a session */
@@ -1082,19 +1082,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   composerDrafts: {},
   pendingPermissions: {},
 
-  startQuery: async (sessionId: string, prompt: string, cwd: string, apiKey?: string, baseUrl?: string, model?: string, reasoningEffort?: ReasoningEffort, codexNeedsProxy?: boolean, displayContent?: string, inputPayload?: AgentInputPayload, provider?: string, credentialSource?: 'codemux' | 'environment' | 'opencode' | 'none') => {
+  startQuery: async (sessionId: string, prompt: string, cwd: string, reasoningEffort?: ReasoningEffort, displayContent?: string, inputPayload?: AgentInputPayload, modelForVision?: string) => {
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
     set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: null } }));
     logger.info('MODEL_TRACE startQuery dispatching to Tauri', {
       sessionId,
       cwd,
-      runtimeModel: model || 'default',
+      displayModel: modelForVision || 'default',
       reasoningEffort: reasoningEffort || 'medium',
       promptLength: prompt.length,
-      hasApiKey: Boolean(apiKey),
-      baseUrl: baseUrl || null,
-      codexNeedsProxy: codexNeedsProxy ?? null,
     });
     // Clear force-stopped flag when starting a new query
     set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
@@ -1102,7 +1099,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const state = get();
     const hasExistingUserMsg = (state.events[sessionId] || []).some(e => e.kind === 'user');
     const originalPayload = inputPayload ?? { text: prompt };
-    const shouldSendImages = (originalPayload.images?.length ?? 0) > 0 && inferModelSupportsVision(model);
+    const shouldSendImages = (originalPayload.images?.length ?? 0) > 0 && inferModelSupportsVision(modelForVision);
     const payloadForModel: AgentInputPayload = shouldSendImages
       ? originalPayload
       : { text: originalPayload.text };
@@ -1156,7 +1153,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       if (droppedImages) {
         logger.info('Skipping image payload for model without vision support', {
           sessionId,
-          model: model || 'default',
+          model: modelForVision || 'default',
         });
       }
 
@@ -1170,7 +1167,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
 
         if (event.kind === 'raw' && event.data?.type === 'vision_unsupported') {
-          markModelVisionUnsupported(typeof event.data.model === 'string' ? event.data.model : model);
+          markModelVisionUnsupported(typeof event.data.model === 'string' ? event.data.model : modelForVision);
           set((s) => ({
             events: {
               ...s.events,
@@ -1667,13 +1664,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           }
         }
       };
-      if (provider || credentialSource) {
-        await agentApi.startSession(sessionId, payloadForModel.text, cwd, handleEvent, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy, provider, credentialSource, payloadForModel);
-      } else {
-        await agentApi.startSession(sessionId, payloadForModel.text, cwd, handleEvent, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy, payloadForModel);
-      }
+      await agentApi.startSession(sessionId, payloadForModel.text, cwd, handleEvent, reasoningEffort, payloadForModel);
     } catch (err) {
-      logger.error('Agent query failed to start or stream', { sessionId, cwd, model }, serializeError(err));
+      logger.error('Agent query failed to start or stream', { sessionId, cwd, displayModel: modelForVision }, serializeError(err));
       set((s) => {
         const { [sessionId]: _removed, ...rest } = s.queryStartTime;
         return {

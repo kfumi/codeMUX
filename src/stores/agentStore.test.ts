@@ -11,9 +11,8 @@ const startSessionMock = vi.fn<
     prompt: string,
     cwd: string,
     onEvent: (event: string) => void,
-    apiKey?: string,
-    baseUrl?: string,
-    model?: string,
+    reasoningEffort?: string,
+    inputPayload?: { text: string },
   ) => Promise<void>
 >();
 const saveEventsMock = vi.fn<(sessionId: string, eventsJson: string) => Promise<void>>();
@@ -579,17 +578,13 @@ describe('agent store Codex history loading', () => {
 
     await useAgentStore
       .getState()
-      .startQuery(session.id, 'TEMPLATE: review current changes', 'D:\\project\\ai-code\\codeMUX', undefined, undefined, undefined, undefined, undefined, '/review');
+      .startQuery(session.id, 'TEMPLATE: review current changes', 'D:\\project\\ai-code\\codeMUX', undefined, '/review');
 
     expect(startSessionMock).toHaveBeenCalledWith(
       session.id,
       'TEMPLATE: review current changes',
       'D:\\project\\ai-code\\codeMUX',
       expect.any(Function),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
       undefined,
       { text: 'TEMPLATE: review current changes' },
     );
@@ -1507,17 +1502,13 @@ describe('agent store Codex history loading', () => {
 
     await useAgentStore
       .getState()
-      .startQuery(session.id, inputPayload.text, 'D:\\project\\ai-code\\codeMUX', undefined, undefined, 'future-model-7', undefined, undefined, undefined, inputPayload);
+      .startQuery(session.id, inputPayload.text, 'D:\\project\\ai-code\\codeMUX', undefined, undefined, inputPayload, 'future-model-7');
 
     expect(startSessionMock).toHaveBeenCalledWith(
       session.id,
       'inspect this',
       'D:\\project\\ai-code\\codeMUX',
       expect.any(Function),
-      undefined,
-      undefined,
-      'future-model-7',
-      undefined,
       undefined,
       inputPayload,
     );
@@ -1537,17 +1528,13 @@ describe('agent store Codex history loading', () => {
 
     await useAgentStore
       .getState()
-      .startQuery(session.id, inputPayload.text, 'D:\\project\\ai-code\\codeMUX', undefined, undefined, model, undefined, undefined, undefined, inputPayload);
+      .startQuery(session.id, inputPayload.text, 'D:\\project\\ai-code\\codeMUX', undefined, undefined, inputPayload, model);
 
     expect(startSessionMock).toHaveBeenCalledWith(
       session.id,
       'inspect this',
       'D:\\project\\ai-code\\codeMUX',
       expect.any(Function),
-      undefined,
-      undefined,
-      model,
-      undefined,
       undefined,
       { text: 'inspect this' },
     );

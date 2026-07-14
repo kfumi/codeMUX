@@ -1,8 +1,7 @@
 import { open } from '@tauri-apps/plugin-dialog';
-import { Loader2, MessageSquarePlus, Search, Settings } from 'lucide-react';
+import { MessageSquarePlus, Search, Settings } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { cn } from '../../lib/utils';
 import { createLogger, serializeError } from '../../lib/logger';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -26,12 +25,8 @@ export function Sidebar({
   onOpenSettings,
 }: SidebarProps) {
   const fetchProjects = useProjectStore((state) => state.fetchProjects);
-  const needsProxy = useSettingsStore((s) => s.getNeedsProxy());
   const proxyRunning = useSettingsStore((s) => s.proxyRunning);
   const proxyUrl = useSettingsStore((s) => s.proxyUrl);
-  const proxyToggling = useSettingsStore((s) => s.proxyToggling);
-  const startProxy = useSettingsStore((s) => s.startProxy);
-  const stopProxy = useSettingsStore((s) => s.stopProxy);
   const port = proxyUrl?.match(/:(\d+)$/)?.[1];
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
 
@@ -84,35 +79,14 @@ export function Sidebar({
       <div className="flex items-center gap-1 border-t border-[hsl(var(--sidebar-border))]/45 px-3 py-2.5">
         <Tooltip>
           <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={() => void (proxyRunning ? stopProxy() : startProxy())}
-              disabled={proxyToggling || (!needsProxy && !proxyRunning)}
-              className={cn(
-                'flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] text-[hsl(var(--sidebar-fg))]/50 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]/80',
-                (proxyToggling || (!needsProxy && !proxyRunning)) && 'opacity-50',
-              )}
-            >
-              {proxyToggling ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <span
-                  className={cn(
-                    'inline-block h-1.5 w-1.5 rounded-full',
-                    proxyRunning ? 'bg-[hsl(var(--success))]' : 'bg-[hsl(var(--sidebar-fg))]/30',
-                  )}
-                />
-              )}
+            <span className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] text-[hsl(var(--sidebar-fg))]/50">
+              <span className={proxyRunning ? 'inline-block h-1.5 w-1.5 rounded-full bg-[hsl(var(--success))]' : 'inline-block h-1.5 w-1.5 rounded-full bg-[hsl(var(--sidebar-fg))]/30'} />
               <span>{proxyRunning ? `Proxy :${port ?? '...'}` : 'Proxy'}</span>
-            </button>
+            </span>
           </TooltipTrigger>
           <TooltipContent side="top">
             <p>
-              {proxyRunning
-                ? `点击停止代理 (${proxyUrl})`
-                : needsProxy
-                  ? '点击启动代理'
-                  : '当前供应商配置不需要路由代理'}
+              {proxyRunning ? `由当前 Codex 会话自动运行 (${proxyUrl})` : '由 Codex 档案在会话启动时按需运行'}
             </p>
           </TooltipContent>
         </Tooltip>

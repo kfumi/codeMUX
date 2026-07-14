@@ -54,6 +54,59 @@ export interface Provider {
   codex_needs_proxy?: boolean;
 }
 
+export interface ProfileModel {
+  id: string;
+  name?: string | null;
+  context_window?: number | null;
+}
+
+export type NativeProfileConfig =
+  | {
+      type: 'claude_code';
+      api_key: string;
+      anthropic_base_url: string;
+      context_1m?: boolean | null;
+      advanced_config?: unknown | null;
+      requires_review?: boolean;
+    }
+  | {
+      type: 'codex';
+      api_key: string;
+      openai_base_url: string;
+      codex_needs_proxy?: boolean | null;
+      advanced_config?: unknown | null;
+      requires_review?: boolean;
+    }
+  | {
+      type: 'opencode';
+      api_key: string;
+      openai_base_url: string;
+      advanced_config?: unknown | null;
+      requires_review?: boolean;
+    };
+
+export interface AgentProviderProfile {
+  id: string;
+  agent_kind: Extract<AgentKind, 'claude_code' | 'codex' | 'opencode'>;
+  name: string;
+  note: string;
+  models: ProfileModel[];
+  default_model: string;
+  native_config: NativeProfileConfig;
+}
+
+export interface AgentProfileRegistry {
+  profiles: AgentProviderProfile[];
+  active_profile_ids: Partial<Record<AgentProviderProfile['agent_kind'], string>>;
+}
+
+export type AgentProviderProfileUpsert = Omit<AgentProviderProfile, 'native_config'> & {
+  native_config:
+    | { type: 'claude_code'; api_key?: string; clear_api_key?: boolean; anthropic_base_url: string; context_1m?: boolean | null; advanced_config?: unknown; clear_advanced_config?: boolean; requires_review?: boolean }
+    | { type: 'codex'; api_key?: string; clear_api_key?: boolean; openai_base_url: string; codex_needs_proxy?: boolean | null; advanced_config?: unknown; clear_advanced_config?: boolean; requires_review?: boolean }
+    | { type: 'opencode'; api_key?: string; clear_api_key?: boolean; openai_base_url: string; advanced_config?: unknown; clear_advanced_config?: boolean; requires_review?: boolean };
+};
+
 export interface AppConfig {
   providers: Provider[];
   active_provider_id: string | null;
@@ -63,4 +116,5 @@ export interface AppConfig {
   default_open_target: OpenTarget;
   notifications: NotificationSettings;
   theme: Theme;
+  agent_profile_registry?: AgentProfileRegistry;
 }

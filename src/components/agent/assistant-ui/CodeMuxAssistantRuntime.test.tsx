@@ -1162,14 +1162,13 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     });
   });
 
-  it('renders directive text in user messages as chips', () => {
+  it('renders command directives as chips while preserving legacy @file text', () => {
     const { container } = render(<Harness sessionId="session-directives" />);
 
     expect(screen.getByText('review').closest('[data-directive-type="command"]')).toBeTruthy();
-    expect(screen.getByText('App.tsx').closest('[data-directive-type="file"]')).toBeTruthy();
-    expect(screen.getByText('please check this')).toBeTruthy();
-    // Now file chips have a leading icon
-    expect(container.querySelector('[data-directive-value="@src/App.tsx"] svg')).toBeTruthy();
+    expect(container.querySelector('[data-directive-type="file"]')).toBeNull();
+    expect(container.querySelector('[data-user-message-bubble]')?.textContent).toContain('@src/App.tsx');
+    expect(container.querySelector('[data-user-message-bubble]')?.textContent).toContain('please check this');
   });
 
   it('shows rewind only on the latest user message and rewinds only after inline edit send', async () => {
@@ -1474,7 +1473,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     render(<Harness sessionId="session-nav" />);
 
     const shell = screen.getByTestId('thread-content-shell');
-    expect(shell.className).toContain('px-4');
+    expect(shell.className).toContain('px-10');
     expect(shell.className).not.toContain('pl-14');
     expect(shell.className).not.toContain('pr-4');
     expect((shell as HTMLElement).style.maxWidth).toBe('var(--content-width, 52rem)');

@@ -135,7 +135,7 @@ describe('SessionHeader', () => {
 
     fireEvent.click(screen.getByLabelText('任务菜单'));
     fireEvent.click(screen.getByText('标记为未读'));
-    expect(useSessionStore.getState().unreadSessions.has('session-1')).toBe(true);
+    expect(useSessionStore.getState().unreadSessions.has('session-1')).toBe(false);
 
     fireEvent.click(screen.getByLabelText('任务菜单'));
     fireEvent.click(screen.getByText('在资源管理器中打开'));

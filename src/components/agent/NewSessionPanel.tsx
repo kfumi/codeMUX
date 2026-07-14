@@ -3,6 +3,7 @@ import { useEffect, useMemo } from 'react';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { renderCommandPrompt } from '../../lib/slashCommands';
 import { getPrimaryProviderModel, getProviderModelList } from '../../lib/providerModels';
+import { profileToSelectorProvider } from '../../lib/agentProfileSelector';
 import { mapExecutionModeToPermissionConfig, serializePermissionConfig } from '../../lib/agentPermissions';
 import { agentApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
@@ -40,20 +41,41 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     draftProjectId,
   } = useNewSessionStore();
   const projects = useProjectStore((state) => state.projects);
-  const activeProvider = useSettingsStore((s) => s.getActiveProvider());
   const config = useSettingsStore((s) => s.config);
   const getActiveProvider = useSettingsStore((s) => s.getActiveProvider);
+  const activateAgentProfile = useSettingsStore((s) => s.activateAgentProfile);
   const { loadFileTree, setProjectPath } = usePreviewStore();
   const clearEvents = useAgentStore((state) => state.clearEvents);
 
   const selectedAgent = getAgentDefinition(selectedAgentKind);
-  const availableProviders = config?.providers ?? [];
+  const isProfileAgent = selectedAgentKind === 'claude_code' || selectedAgentKind === 'codex' || selectedAgentKind === 'opencode';
+  const profileRegistry = config?.agent_profile_registry;
+  const availableProfiles = useMemo(
+    () => isProfileAgent ? (profileRegistry?.profiles ?? []).filter((profile) => profile.agent_kind === selectedAgentKind) : [],
+    [isProfileAgent, profileRegistry?.profiles, selectedAgentKind],
+  );
+  const activeProfileId = isProfileAgent ? profileRegistry?.active_profile_ids?.[selectedAgentKind] ?? null : null;
+  const availableProviders = useMemo(
+    () => availableProfiles.map(profileToSelectorProvider),
+    [availableProfiles],
+  );
   const selectedProvider = useMemo(
-    () => availableProviders.find((provider) => provider.id === selectedProviderId) ?? activeProvider,
-    [activeProvider, availableProviders, selectedProviderId],
+    () => availableProviders.find((provider) => provider.id === selectedProviderId)
+      ?? availableProviders.find((provider) => provider.id === activeProfileId)
+      ?? null,
+    [activeProfileId, availableProviders, selectedProviderId],
   );
   const providerModels = useMemo(() => getProviderModelList(selectedProvider), [selectedProvider]);
   const effectiveModel = selectedModel || getPrimaryProviderModel(selectedProvider);
+  const hasUsableProfile = !isProfileAgent || Boolean(
+    activeProfileId
+      && selectedProvider?.id === activeProfileId
+      && effectiveModel
+      && providerModels.includes(effectiveModel),
+  );
+  const profileRequiredMessage = isProfileAgent && !hasUsableProfile
+    ? `请先在供应商配置中为 ${selectedAgent?.label ?? '当前智能体'} 添加一个包含默认模型的档案。`
+    : undefined;
   const formatSelectedProviderModel = useMemo(() => (
     (item: string) => formatModelDisplayName({
       model: item,
@@ -104,7 +126,22 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     setSelectedPlanMode,
   ]);
 
+  useEffect(() => {
+    if (!isProfileAgent) return;
+    const active = availableProfiles.find((profile) => profile.id === activeProfileId) ?? availableProfiles[0];
+    if (!active) {
+      setSelectedProviderId(null);
+      setSelectedModel(null);
+      return;
+    }
+    setSelectedProviderId(active.id);
+    setSelectedModel(active.default_model || null);
+  }, [activeProfileId, availableProfiles, isProfileAgent, selectedAgentKind, setSelectedModel, setSelectedProviderId]);
+
   const handleSend = async (input: AgentInputPayload | string) => {
+    if (!hasUsableProfile) {
+      return;
+    }
     const payload = typeof input === 'string' ? { text: input } : input;
     await onSubmit(payload);
   };
@@ -145,6 +182,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
         agentKind={selectedAgentKind}
         onSend={handleSend}
         onCommand={handleCommand}
+        sendDisabled={!hasUsableProfile}
       >
         <div className="mx-auto flex min-h-full w-full flex-col items-center justify-center px-6 py-10">
           <div className="w-full max-w-2xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[360ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
@@ -160,6 +198,8 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               agentKind={selectedAgentKind}
               projectPath={draftProject?.path}
               placeholder={placeholder}
+              disabled={!hasUsableProfile}
+              disabledMessage={profileRequiredMessage}
               modelSelector={(
                 <CodeMuxModelSelector
                   value={effectiveModel}
@@ -167,9 +207,18 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                   onChange={setSelectedModel}
                   providers={availableProviders}
                   providerId={selectedProvider?.id ?? null}
-                  onProviderChange={(providerId, model) => {
-                    setSelectedProviderId(providerId);
-                    setSelectedModel(model || null);
+                  onProviderChange={(profileId, nextModel) => {
+                    if (!isProfileAgent) return;
+                    void activateAgentProfile(selectedAgentKind, profileId)
+                      .then(() => {
+                        setSelectedProviderId(profileId);
+                        setSelectedModel(nextModel || null);
+                      })
+                      .catch((error) => {
+                        useAgentStore.setState((state) => ({
+                          error: { ...state.error, 'new-session-draft': String(error) },
+                        }));
+                      });
                   }}
                   reasoningEffort={selectedReasoningEffort}
                   onReasoningEffortChange={setSelectedReasoningEffort}

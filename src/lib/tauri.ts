@@ -2,7 +2,7 @@ import { invoke, Channel } from '@tauri-apps/api/core';
 import type { AgentKind, ReasoningEffort, Session, SessionMode } from '../types/session';
 import type { AgentUserMessageLocator } from '../types/agent';
 import type { AgentInputPayload } from '../types/agentInput';
-import type { AgentConfigUpdateMap, AppConfig, NotificationSettings, Provider, Theme } from '../types/provider';
+import type { AgentConfigUpdateMap, AgentProviderProfileUpsert, AppConfig, NotificationSettings, ProfileModel, Provider, Theme } from '../types/provider';
 import type { OpenTarget } from './openTargets';
 import type { AgentPermissionConfig, AgentPlanMode } from './agentPermissions';
 import type { Project } from '../types/project';
@@ -13,11 +13,6 @@ import { createLogger, serializeError } from './logger';
 const logger = createLogger('tauri');
 const agentChannels = new Map<string, Channel<string>>();
 const agentEventListeners = new Map<string, (event: string) => void>();
-
-export interface ModelInfo {
-  id: string;
-  owned_by: string;
-}
 
 export interface FileTreeNode {
   name: string;
@@ -111,7 +106,6 @@ function summarizeInvokeArgs(args?: Record<string, unknown>) {
   if (typeof args.path === 'string') summary.path = args.path;
   if (typeof args.basePath === 'string') summary.basePath = args.basePath;
   if (typeof args.cwd === 'string') summary.cwd = args.cwd;
-  if (typeof args.model === 'string') summary.model = args.model;
   if (typeof args.reasoningEffort === 'string') summary.reasoningEffort = args.reasoningEffort;
   if (typeof args.theme === 'string') summary.theme = args.theme;
   if (typeof args.mode === 'string') summary.mode = args.mode;
@@ -121,9 +115,6 @@ function summarizeInvokeArgs(args?: Record<string, unknown>) {
   if (typeof args.prompt === 'string') summary.promptLength = args.prompt.length;
   if (typeof args.content === 'string') summary.contentLength = args.content.length;
   if (typeof args.eventsJson === 'string') summary.eventsLength = args.eventsJson.length;
-  if (typeof args.apiKey === 'string') summary.hasApiKey = args.apiKey.length > 0;
-  if (typeof args.baseUrl === 'string') summary.hasBaseUrl = args.baseUrl.length > 0;
-  if (typeof args.codexNeedsProxy === 'boolean') summary.codexNeedsProxy = args.codexNeedsProxy;
 
   return Object.keys(summary).length > 0 ? summary : undefined;
 }
@@ -208,19 +199,13 @@ export const agentApi = {
     sessionId: string,
     cwd: string,
     onEvent?: (event: string) => void,
-    apiKey?: string,
-    baseUrl?: string,
-    model?: string,
     reasoningEffort?: ReasoningEffort,
-    codexNeedsProxy?: boolean,
-    provider?: string,
-    credentialSource?: 'codemux' | 'environment' | 'opencode' | 'none',
   ): Promise<void> => {
     if (onEvent) {
       agentEventListeners.set(sessionId, onEvent);
     }
     const channel = getAgentChannel(sessionId);
-    return invokeLogged('ensure_agent_session', { sessionId, cwd, channel, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy, provider, credentialSource });
+    return invokeLogged('ensure_agent_session', { sessionId, cwd, channel, reasoningEffort });
   },
   sendInput: (
     sessionId: string,
@@ -232,19 +217,11 @@ export const agentApi = {
     prompt: string,
     cwd: string,
     onEvent: (event: string) => void,
-    apiKey?: string,
-    baseUrl?: string,
-    model?: string,
     reasoningEffort?: ReasoningEffort,
-    codexNeedsProxy?: boolean,
-    provider?: string | AgentInputPayload,
-    credentialSource?: 'codemux' | 'environment' | 'opencode' | 'none',
     inputPayload?: AgentInputPayload,
   ): Promise<void> => {
-    const resolvedProvider = typeof provider === 'string' ? provider : undefined;
-    const resolvedInputPayload = typeof provider === 'object' ? provider : inputPayload;
     const channel = createAgentChannel(sessionId, onEvent);
-    return invokeLogged('start_agent_session', { sessionId, prompt, cwd, channel, apiKey, baseUrl, model, reasoningEffort, codexNeedsProxy, provider: resolvedProvider, credentialSource, inputPayload: resolvedInputPayload });
+    return invokeLogged('start_agent_session', { sessionId, prompt, cwd, channel, reasoningEffort, inputPayload });
   },
   interrupt: (sessionId: string): Promise<void> => invokeLogged('interrupt_agent_session', { sessionId }),
   shutdown: (sessionId: string): Promise<void> => invokeLogged('shutdown_agent', { sessionId }),
@@ -282,8 +259,6 @@ export const agentApi = {
     invokeLogged('rewind_agent_session', { appSessionId, agentKind, target }),
   getSessionInfo: (appSessionId: string, agentKind: AgentKind): Promise<{ agentSessionId: string | null; messagePath: string | null }> =>
     invokeLogged('get_agent_session_info', { appSessionId, agentKind }),
-  startProxy: (apiKey: string, baseUrl: string, providerName: string, codexNeedsProxy?: boolean): Promise<number> =>
-    invokeLogged('start_codex_proxy', { apiKey, baseUrl, providerName, codexNeedsProxy }),
   stopProxy: (): Promise<void> => invokeLogged('stop_codex_proxy'),
   getProxyPort: (): Promise<number | null> => invokeLogged('get_codex_proxy_port'),
 };
@@ -306,10 +281,20 @@ export const configApi = {
     invokeLogged('set_notification_settings', { settings }),
   setDefaultOpenTarget: (target: OpenTarget): Promise<void> =>
     invokeLogged('set_default_open_target', { target }),
-  fetchModels: (apiKey: string, baseUrl: string): Promise<ModelInfo[]> =>
-    invokeLogged('fetch_provider_models', { apiKey, baseUrl }),
   testProvider: (providerId: string): Promise<string> =>
     invokeLogged('test_provider', { providerId }),
+  upsertAgentProfile: (profile: AgentProviderProfileUpsert): Promise<void> =>
+    invokeLogged('upsert_agent_provider_profile', { profile }),
+  activateAgentProfile: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string): Promise<void> =>
+    invokeLogged('activate_agent_provider_profile', { agentKind, profileId }),
+  setActiveAgentProfileModel: (agentKind: 'claude_code' | 'codex' | 'opencode', defaultModel: string): Promise<void> =>
+    invokeLogged('set_active_agent_profile_model', { agentKind, defaultModel }),
+  deleteAgentProfile: (profileId: string): Promise<void> =>
+    invokeLogged('delete_agent_provider_profile', { profileId }),
+  fetchAgentProfileModels: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string): Promise<ProfileModel[]> =>
+    invokeLogged('fetch_agent_profile_models', { agentKind, profileId }),
+  testAgentProfile: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string): Promise<string> =>
+    invokeLogged('test_agent_provider_profile', { agentKind, profileId }),
 };
 
 export const fileApi = {

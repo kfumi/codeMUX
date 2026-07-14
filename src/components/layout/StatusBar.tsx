@@ -1,16 +1,9 @@
-import { Loader2 } from 'lucide-react';
-
-import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 export function StatusBar() {
-  const needsProxy = useSettingsStore((s) => s.getNeedsProxy());
   const proxyRunning = useSettingsStore((s) => s.proxyRunning);
   const proxyUrl = useSettingsStore((s) => s.proxyUrl);
-  const proxyToggling = useSettingsStore((s) => s.proxyToggling);
-  const startProxy = useSettingsStore((s) => s.startProxy);
-  const stopProxy = useSettingsStore((s) => s.stopProxy);
 
   const port = proxyUrl?.match(/:(\d+)$/)?.[1];
 
@@ -20,37 +13,16 @@ export function StatusBar() {
       <div className="flex items-center gap-3">
         <Tooltip>
           <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={() => void (proxyRunning ? stopProxy() : startProxy())}
-              disabled={proxyToggling || (!needsProxy && !proxyRunning)}
-              className={cn(
-                'flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 transition-colors hover:bg-muted/54 hover:text-foreground/80',
-                (proxyToggling || (!needsProxy && !proxyRunning)) && 'opacity-60',
-              )}
-            >
-              {proxyToggling ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <span
-                  className={cn(
-                    'inline-block h-2 w-2 rounded-full',
-                    proxyRunning ? 'bg-[hsl(var(--success))]' : 'bg-muted-foreground/50',
-                  )}
-                />
-              )}
+            <span className="flex items-center gap-1.5 rounded-sm px-1.5 py-0.5">
+              <span className={proxyRunning ? 'inline-block h-2 w-2 rounded-full bg-[hsl(var(--success))]' : 'inline-block h-2 w-2 rounded-full bg-muted-foreground/50'} />
               <span>
                 {proxyRunning ? `Proxy :${port ?? '...'}` : 'Proxy 未运行'}
               </span>
-            </button>
+            </span>
           </TooltipTrigger>
           <TooltipContent side="top">
             <p>
-              {proxyRunning
-                ? `点击停止代理 (${proxyUrl})`
-                : needsProxy
-                  ? '点击启动代理'
-                  : '当前供应商配置为不需要路由代理'}
+              {proxyRunning ? `由当前 Codex 会话自动运行 (${proxyUrl})` : '由 Codex 档案在会话启动时按需运行'}
             </p>
           </TooltipContent>
         </Tooltip>

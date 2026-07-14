@@ -3,111 +3,87 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Provider } from '../../types/provider';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { ProviderConfigPanel } from './ProviderConfig';
 
-const provider: Provider = {
-  id: 'provider-1',
-  name: 'OpenRouter',
-  api_key: 'key',
-  anthropic_base_url: 'https://anthropic.example.com',
-  openai_base_url: 'https://openrouter.ai/api/v1',
-  default_model: 'claude-sonnet-4-20250514',
-  models: ['claude-sonnet-4-20250514', 'claude-opus-4-1'],
-};
+const upsertAgentProfile = vi.fn(() => Promise.resolve());
+
+function createConfig() {
+  return {
+    providers: [], active_provider_id: null, agent_defaults: { default_agent_kind: 'claude_code' as const },
+    agent_configs: { claude_code: { executable_mode: 'auto' as const, resume_sessions: true }, codex: { sdk_mode: 'responses' as const }, gemini_cli: {}, opencode: {} },
+    theme: 'System' as const, compact_ai_output: false, default_open_target: 'file_explorer' as const,
+    agent_profile_registry: {
+      profiles: [{
+        id: 'codex-profile', agent_kind: 'codex' as const, name: 'OpenRouter', note: '代理档案',
+        models: [{ id: 'gpt-5' }, { id: 'gpt-5-mini' }], default_model: 'gpt-5',
+        native_config: { type: 'codex' as const, api_key: '', openai_base_url: 'https://openrouter.ai/api/v1', codex_needs_proxy: true },
+      }],
+      active_profile_ids: { codex: 'codex-profile' },
+    },
+  };
+}
 
 describe('ProviderConfigPanel', () => {
-  const updateProvider = vi.fn();
-  const fetchModels = vi.fn();
-
   beforeEach(() => {
-    updateProvider.mockResolvedValue(undefined);
-    fetchModels.mockResolvedValue([
-      { id: 'gpt-5', owned_by: 'openai' },
-      { id: 'claude-opus-4-1', owned_by: 'anthropic' },
-    ]);
+    upsertAgentProfile.mockClear();
     useSettingsStore.setState((state) => ({
-      ...state,
-      config: {
-        providers: [provider],
-        active_provider_id: 'provider-1',
-        agent_defaults: {
-          default_agent_kind: 'claude_code',
-        },
-        agent_configs: {
-          claude_code: {
-            executable_mode: 'auto',
-            resume_sessions: true,
-          },
-          codex: {
-            sdk_mode: 'responses',
-          },
-          gemini_cli: {},
-          opencode: {},
-        },
-        theme: 'System',
-        compact_ai_output: false,
-        default_open_target: 'file_explorer',
-      },
-      updateProvider,
-      fetchModels,
-      deleteProvider: vi.fn(),
-      setActiveProvider: vi.fn(),
-      testProvider: vi.fn(),
+      ...state, config: createConfig(), upsertAgentProfile, activateAgentProfile: vi.fn(() => Promise.resolve()),
+      deleteAgentProfile: vi.fn(() => Promise.resolve()), testAgentProfile: vi.fn(() => Promise.resolve()),
     }));
   });
 
-  afterEach(() => {
-    cleanup();
-    vi.clearAllMocks();
+  afterEach(() => cleanup());
+
+  it('uses agent tabs and only displays profiles for the selected agent', () => {
+    render(<ProviderConfigPanel />);
+    expect(screen.queryByText('OpenRouter')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Codex' }));
+    expect(screen.getByText('OpenRouter')).toBeTruthy();
   });
 
-  it('edits provider models as one model per line', async () => {
+  it('edits profile models as one model per line and sends the Codex native shape', async () => {
     render(<ProviderConfigPanel />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Codex' }));
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
 
-    fireEvent.click(screen.getByText('OpenRouter'));
+    const textarea = screen.getByLabelText(/模型列表/) as HTMLTextAreaElement;
+    expect(textarea.value).toBe('gpt-5\ngpt-5-mini');
+    fireEvent.change(textarea, { target: { value: 'gpt-5\ngpt-5-mini\n' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存档案' }));
 
-    const textarea = screen.getByLabelText('模型列表') as HTMLTextAreaElement;
-    expect(textarea.value).toBe('claude-sonnet-4-20250514\nclaude-opus-4-1');
-
-    fireEvent.change(textarea, {
-      target: {
-        value: 'gpt-5\nclaude-opus-4-1\n',
-      },
-    });
-    fireEvent.click(screen.getByText('保存'));
-
-    await waitFor(() => expect(updateProvider).toHaveBeenCalled());
-    expect(updateProvider).toHaveBeenCalledWith(
-      expect.objectContaining({
-        default_model: 'gpt-5',
-        models: ['gpt-5', 'claude-opus-4-1'],
-      }),
-    );
+    await waitFor(() => expect(upsertAgentProfile).toHaveBeenCalled());
+    expect(upsertAgentProfile).toHaveBeenCalledWith(expect.objectContaining({
+      agent_kind: 'codex', default_model: 'gpt-5', models: [{ id: 'gpt-5', name: 'gpt-5' }, { id: 'gpt-5-mini', name: 'gpt-5-mini' }],
+      native_config: expect.objectContaining({ type: 'codex', codex_needs_proxy: true }),
+    }));
   });
 
-  it('fills fetched models into the model textarea one per line', async () => {
+  it('does not prefill a saved API key when editing a profile', () => {
     render(<ProviderConfigPanel />);
-
-    fireEvent.click(screen.getByText('OpenRouter'));
-    fireEvent.click(screen.getByText('获取列表'));
-
-    await waitFor(() => expect(fetchModels).toHaveBeenCalled());
-    expect((screen.getByLabelText('模型列表') as HTMLTextAreaElement).value).toBe('gpt-5\nclaude-opus-4-1');
+    fireEvent.click(screen.getByRole('tab', { name: 'Codex' }));
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    expect((screen.getByPlaceholderText('输入新密钥以替换') as HTMLInputElement).value).toBe('');
   });
-  it('persists the Codex local route mapping toggle', async () => {
+
+  it('marks migrated profiles that require a native configuration review', () => {
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config ? {
+        ...state.config,
+        agent_profile_registry: {
+          ...state.config.agent_profile_registry!,
+          profiles: state.config.agent_profile_registry!.profiles.map((profile) => ({
+            ...profile,
+            native_config: { ...profile.native_config, requires_review: true },
+          })),
+        },
+      } : null,
+    }));
+
     render(<ProviderConfigPanel />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Codex' }));
 
-    fireEvent.click(screen.getByText('OpenRouter'));
-    fireEvent.click(screen.getByRole('switch', { name: '需要本地路由映射' }));
-    fireEvent.click(screen.getByRole('button', { name: '保存' }));
-
-    await waitFor(() => expect(updateProvider).toHaveBeenCalled());
-    expect(updateProvider).toHaveBeenCalledWith(
-      expect.objectContaining({
-        codex_needs_proxy: false,
-      }),
-    );
+    expect(screen.getByText('由旧供应商迁移而来，请核对高级原生配置。')).toBeTruthy();
   });
 });

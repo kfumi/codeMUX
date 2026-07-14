@@ -26,6 +26,6 @@ describe('Select', () => {
     const portalPanel = Array.from(document.body.querySelectorAll('div')).find((element) =>
       element.className.includes('max-h-96'),
     );
-    expect(portalPanel?.className).toContain('z-[240]');
+    expect(portalPanel?.className).toContain('z-240');
   });
 });

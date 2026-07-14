@@ -356,6 +356,9 @@ fn upsert_agent_profile_in_config(
 
 fn redact_config_for_frontend(app_config: &AppConfig) -> AppConfig {
     let mut redacted = app_config.clone();
+    for provider in &mut redacted.providers {
+        provider.api_key.clear();
+    }
     for profile in &mut redacted.agent_profile_registry.profiles {
         match &mut profile.native_config {
             NativeProfileConfig::ClaudeCode {
@@ -1350,14 +1353,13 @@ mod tests {
 
         assert!(api_key.is_empty());
         assert!(advanced_config.is_none());
-        assert_eq!(
-            view.providers
-                .iter()
-                .find(|provider| provider.id == "legacy")
-                .unwrap()
-                .api_key,
-            "legacy-secret"
-        );
+        assert!(view
+            .providers
+            .iter()
+            .find(|provider| provider.id == "legacy")
+            .unwrap()
+            .api_key
+            .is_empty());
     }
 
     #[test]

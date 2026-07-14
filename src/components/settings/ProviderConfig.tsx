@@ -1,460 +1,101 @@
-import { useState, type ReactNode } from 'react';
-import { useSettingsStore } from '../../stores/settingsStore';
-import type { Provider } from '../../types/provider';
-import { getProviderModelList, modelsFromText, modelsToText } from '../../lib/providerModels';
-import { normalizeOpenAIBaseUrl } from '../../lib/providerUrls';
+import { Eye, EyeOff, Loader2, Plus, Trash2, Zap } from 'lucide-react';
+import { useMemo, useState } from 'react';
+
+import { modelsFromText, modelsToText } from '../../lib/providerModels';
 import { cn } from '../../lib/utils';
+import { useSettingsStore } from '../../stores/settingsStore';
+import type { AgentProviderProfile, AgentProviderProfileUpsert } from '../../types/provider';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Switch } from '../ui/switch';
-import { ArrowLeft, Loader2, Eye, EyeOff, Zap, Plus } from 'lucide-react';
 
-function generateId(): string {
-  return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
+type ProfileAgentKind = 'claude_code' | 'codex' | 'opencode';
+type ProfileDraft = { id: string; name: string; note: string; models: string; apiKey: string; clearApiKey: boolean; baseUrl: string; context1m: boolean; codexNeedsProxy: boolean; advancedConfig: string; clearAdvancedConfig: boolean };
+
+const AGENTS: Array<{ id: ProfileAgentKind; label: string; description: string; baseUrlLabel: string; placeholder: string }> = [
+  { id: 'claude_code', label: 'Claude Code', description: '写入 Claude Code 的 settings.json 配置。', baseUrlLabel: 'Anthropic Base URL', placeholder: 'https://api.anthropic.com' },
+  { id: 'codex', label: 'Codex', description: '写入 Codex 的 auth.json 和 config.toml 配置。', baseUrlLabel: 'OpenAI Base URL', placeholder: 'https://api.openai.com/v1' },
+  { id: 'opencode', label: 'OpenCode', description: '写入 OpenCode 的 opencode.json 配置。', baseUrlLabel: 'OpenAI 兼容 Base URL', placeholder: 'https://api.openai.com/v1' },
+];
+
+function emptyDraft(): ProfileDraft {
+  return { id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2), name: '', note: '', models: '', apiKey: '', clearApiKey: false, baseUrl: '', context1m: false, codexNeedsProxy: false, advancedConfig: '', clearAdvancedConfig: false };
 }
 
-function inferCodexProxyDefault(baseUrl: string): boolean {
-  if (!baseUrl.trim()) return false;
-  try {
-    return new URL(normalizeOpenAIBaseUrl(baseUrl)).host.toLowerCase() !== 'api.openai.com';
-  } catch {
-    return true;
-  }
+function toDraft(profile: AgentProviderProfile): ProfileDraft {
+  const native = profile.native_config;
+  return {
+    id: profile.id, name: profile.name, note: profile.note, models: modelsToText(profile.models.map((model) => model.id)), apiKey: '', clearApiKey: false,
+    baseUrl: native.type === 'claude_code' ? native.anthropic_base_url : native.openai_base_url,
+    context1m: native.type === 'claude_code' && Boolean(native.context_1m),
+    codexNeedsProxy: native.type === 'codex' && Boolean(native.codex_needs_proxy),
+    advancedConfig: '', clearAdvancedConfig: false,
+  };
 }
 
-function FormSection({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <section className="space-y-3">
-      <div className="flex items-baseline gap-2">
-        <h4 className="text-[13px] font-medium text-foreground/70">{label}</h4>
-        {hint && <span className="text-xs text-foreground/38">{hint}</span>}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <label className="text-xs text-foreground/55">{label}</label>
-      {children}
-    </div>
-  );
+function profileToUpsert(agentKind: ProfileAgentKind, draft: ProfileDraft): AgentProviderProfileUpsert {
+  const models = modelsFromText(draft.models).map((id) => ({ id, name: id }));
+  const common = { id: draft.id, agent_kind: agentKind, name: draft.name.trim(), note: draft.note.trim(), models, default_model: models[0]?.id ?? '' };
+  const advanced = draft.advancedConfig.trim() ? JSON.parse(draft.advancedConfig) : undefined;
+  if (agentKind === 'claude_code') return { ...common, native_config: { type: 'claude_code', api_key: draft.apiKey || undefined, clear_api_key: draft.clearApiKey, anthropic_base_url: draft.baseUrl.trim(), context_1m: draft.context1m, advanced_config: advanced, clear_advanced_config: draft.clearAdvancedConfig } };
+  if (agentKind === 'codex') return { ...common, native_config: { type: 'codex', api_key: draft.apiKey || undefined, clear_api_key: draft.clearApiKey, openai_base_url: draft.baseUrl.trim(), codex_needs_proxy: draft.codexNeedsProxy, advanced_config: advanced, clear_advanced_config: draft.clearAdvancedConfig } };
+  return { ...common, native_config: { type: 'opencode', api_key: draft.apiKey || undefined, clear_api_key: draft.clearApiKey, openai_base_url: draft.baseUrl.trim(), advanced_config: advanced, clear_advanced_config: draft.clearAdvancedConfig } };
 }
 
 export function ProviderConfigPanel() {
-  const { config, updateProvider, deleteProvider, setActiveProvider, fetchModels, testProvider } = useSettingsStore();
-  const providers = config?.providers ?? [];
-  const activeId = config?.active_provider_id ?? null;
-
-  const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
-  const [modelText, setModelText] = useState('');
-  const [isNew, setIsNew] = useState(false);
+  const { config, upsertAgentProfile, activateAgentProfile, deleteAgentProfile, testAgentProfile } = useSettingsStore();
+  const [agentKind, setAgentKind] = useState<ProfileAgentKind>('claude_code');
+  const [editing, setEditing] = useState<ProfileDraft | null>(null);
   const [showKey, setShowKey] = useState(false);
-  const [isFetchingModels, setIsFetchingModels] = useState(false);
-  const [testingId, setTestingId] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [fetchStatus, setFetchStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [fetchMessage, setFetchMessage] = useState('');
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [saveError, setSaveError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const profiles = useMemo(() => (config?.agent_profile_registry?.profiles ?? []).filter((profile) => profile.agent_kind === agentKind), [agentKind, config?.agent_profile_registry?.profiles]);
+  const activeId = config?.agent_profile_registry?.active_profile_ids?.[agentKind] ?? null;
+  const agent = AGENTS.find((item) => item.id === agentKind)!;
 
-  const openEdit = (provider: Provider) => {
-    setEditingProvider({ ...provider });
-    setModelText(modelsToText(getProviderModelList(provider)));
-    setIsNew(false);
-    setShowKey(false);
-    setFetchStatus('idle');
-    setFetchMessage('');
-    setDeleteConfirm(false);
-    setSaveError('');
+  const run = async (action: () => Promise<void>, success: string) => {
+    setBusy(true); setMessage(null);
+    try { await action(); setMessage(success); } catch (error) { setMessage(String(error)); } finally { setBusy(false); }
   };
-
-  const openNew = () => {
-    setEditingProvider({
-      id: generateId(),
-      name: '',
-      api_key: '',
-      anthropic_base_url: '',
-      openai_base_url: '',
-      default_model: '',
-      models: [],
-      codex_needs_proxy: false,
-    });
-    setModelText('');
-    setIsNew(true);
-    setShowKey(false);
-    setFetchStatus('idle');
-    setFetchMessage('');
-    setDeleteConfirm(false);
-    setSaveError('');
+  const save = async () => {
+    if (!editing) return;
+    if (!editing.name.trim() || !editing.baseUrl.trim() || !modelsFromText(editing.models).length) { setMessage('请填写档案名称、Base URL 和至少一个模型。'); return; }
+    if (editing.clearApiKey && editing.apiKey) { setMessage('API Key 不能同时替换和清除。'); return; }
+    try { profileToUpsert(agentKind, editing); } catch { setMessage('高级配置必须是有效的 JSON。'); return; }
+    await run(async () => { await upsertAgentProfile(profileToUpsert(agentKind, editing)); setEditing(null); }, '档案已保存，并已写入本机原生配置。');
   };
-
-  const closeForm = () => {
-    setEditingProvider(null);
-    setFetchStatus('idle');
-    setFetchMessage('');
-    setSaveError('');
-    setDeleteConfirm(false);
+  const test = async (profile: AgentProviderProfile) => {
+    await run(async () => { await testAgentProfile(agentKind, profile.id); }, `“${profile.name}”连接正常。`);
   };
-
-  const handleSave = async () => {
-    if (!editingProvider) return;
-    setSaveError('');
-
-    const missing: string[] = [];
-    const models = modelsFromText(modelText);
-    if (!editingProvider.name?.trim()) missing.push('供应商名称');
-    if (!editingProvider.api_key?.trim()) missing.push('API Key');
-    if (!editingProvider.anthropic_base_url?.trim()) missing.push('Anthropic Base URL');
-    if (!editingProvider.openai_base_url?.trim()) missing.push('OpenAI Base URL');
-    if (models.length === 0) missing.push('模型列表');
-
-    if (missing.length > 0) {
-      setSaveError(`请填写 ${missing.join('、')}`);
-      return;
-    }
-
-    const normalizedProvider: Provider = {
-      ...editingProvider,
-      default_model: models[0] ?? '',
-      models,
-      openai_base_url: normalizeOpenAIBaseUrl(editingProvider.openai_base_url),
-      codex_needs_proxy: editingProvider.codex_needs_proxy ?? inferCodexProxyDefault(editingProvider.openai_base_url),
-    };
-
-    await updateProvider(normalizedProvider);
-    if (isNew) {
-      await setActiveProvider(normalizedProvider.id);
-    }
-    closeForm();
-  };
-
-  const handleActivate = async () => {
-    if (!editingProvider) return;
-    await setActiveProvider(editingProvider.id);
-    closeForm();
-  };
-
-  const handleDelete = async () => {
-    if (!editingProvider) return;
-    await deleteProvider(editingProvider.id);
-    closeForm();
-  };
-
-  const handleTest = async (providerId: string) => {
-    const provider = providers.find((p) => p.id === providerId);
-    const name = provider?.name || '未知';
-    setTestingId(providerId);
-    const start = Date.now();
-    try {
-      await testProvider(providerId);
-      const ms = Date.now() - start;
-      setToast({ message: `${name} 运行正常 (${ms}ms)`, type: 'success' });
-    } catch (err) {
-      const ms = Date.now() - start;
-      setToast({ message: `${name} 连接失败 (${ms}ms): ${err}`, type: 'error' });
-    } finally {
-      setTestingId(null);
-      setTimeout(() => setToast(null), 4000);
-    }
-  };
-
-  const handleFetchModels = async () => {
-    if (!editingProvider) return;
-    const url = editingProvider.anthropic_base_url || normalizeOpenAIBaseUrl(editingProvider.openai_base_url);
-
-    if (!url?.trim()) {
-      setFetchStatus('error');
-      setFetchMessage('请填写 Base URL');
-      return;
-    }
-    if (!editingProvider.api_key?.trim()) {
-      setFetchStatus('error');
-      setFetchMessage('请填写 API Key');
-      return;
-    }
-
-    setIsFetchingModels(true);
-    setFetchStatus('idle');
-    setFetchMessage('');
-    try {
-      const models = await fetchModels(editingProvider.api_key, url);
-      const fetchedModelIds = models.map((model) => model.id);
-      setModelText(modelsToText(fetchedModelIds));
-      setEditingProvider({
-        ...editingProvider,
-        default_model: fetchedModelIds[0] ?? editingProvider.default_model,
-        models: fetchedModelIds,
-      });
-      setFetchStatus('success');
-      setFetchMessage(`获取到 ${models.length} 个模型`);
-    } catch (err) {
-      const msg = String(err);
-      setFetchStatus('error');
-      if (msg.includes('认证失败')) {
-        setFetchMessage('认证失败，请检查 API Key');
-      } else if (msg.includes('未找到')) {
-        setFetchMessage('接口地址未找到');
-      } else if (msg.includes('超时')) {
-        setFetchMessage('请求超时');
-      } else if (msg.includes('不支持')) {
-        setFetchMessage('该接口不支持获取模型');
-      } else {
-        setFetchMessage(`获取失败: ${msg}`);
-      }
-    } finally {
-      setIsFetchingModels(false);
-    }
-  };
-
-  const updateField = (field: keyof Provider, value: string | number | boolean | undefined) => {
-    if (!editingProvider) return;
-    setEditingProvider({ ...editingProvider, [field]: value });
-  };
-
-  if (editingProvider) {
-    return (
-      <div className="animate-fade-in-up space-y-8">
-        <div className="space-y-3">
-          <button
-            type="button"
-            onClick={closeForm}
-            className="inline-flex items-center gap-1.5 text-[13px] font-medium text-foreground/60 transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            返回供应商列表
-          </button>
-          <h3 className="text-[22px] font-semibold tracking-tight text-foreground">
-            {isNew ? '添加供应商' : (editingProvider.name || '未命名供应商')}
-          </h3>
-        </div>
-
-        <FormSection label="基础信息">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="供应商名称">
-              <Input
-                value={editingProvider.name}
-                onChange={(e) => updateField('name', e.target.value)}
-                placeholder="如 OpenRouter"
-              />
-            </Field>
-            <Field label="API Key">
-              <div className="relative">
-                <Input
-                  type={showKey ? 'text' : 'password'}
-                  value={editingProvider.api_key}
-                  onChange={(e) => updateField('api_key', e.target.value)}
-                  placeholder="输入 API Key"
-                  className="pr-9"
-                />
-                <button
-                  type="button"
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
-                  onClick={() => setShowKey(!showKey)}
-                >
-                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </Field>
-          </div>
-        </FormSection>
-
-        <FormSection label="接口地址">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Anthropic Base URL">
-              <Input
-                value={editingProvider.anthropic_base_url}
-                onChange={(e) => updateField('anthropic_base_url', e.target.value)}
-                placeholder="https://api.anthropic.com"
-              />
-            </Field>
-            <Field label="OpenAI Base URL">
-              <Input
-                value={editingProvider.openai_base_url}
-                onChange={(e) => updateField('openai_base_url', e.target.value)}
-                placeholder="https://api.openai.com/v1"
-              />
-            </Field>
-          </div>
-        </FormSection>
-
-        <FormSection label="模型配置" hint="每行一个，首行作为默认模型">
-          <textarea
-            aria-label="模型列表"
-            value={modelText}
-            onChange={(e) => {
-              const nextModelText = e.target.value;
-              const models = modelsFromText(nextModelText);
-              setModelText(nextModelText);
-              setEditingProvider({
-                ...editingProvider,
-                default_model: models[0] ?? '',
-                models,
-              });
-            }}
-            placeholder="每行一个模型，第一行作为默认模型"
-            className="min-h-32 w-full resize-y rounded-xl border border-input/88 bg-background/92 px-3 py-2.5 font-mono text-sm leading-6 text-foreground shadow-[0_1px_0_0_hsl(var(--foreground)/0.018)] outline-none ring-offset-background transition-all duration-200 placeholder:font-sans placeholder:text-muted-foreground/74 focus:ring-2 focus:ring-ring/34 focus:ring-offset-2"
-          />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <label className="inline-flex items-center gap-2">
-              <Switch
-                aria-label="1M 上下文"
-                checked={!!editingProvider.context_1m}
-                onCheckedChange={(c) => updateField('context_1m', c || undefined)}
-              />
-              <span className="text-sm text-foreground/65">1M 上下文</span>
-            </label>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleFetchModels}
-              disabled={isFetchingModels || !editingProvider.api_key || !(editingProvider.anthropic_base_url || editingProvider.openai_base_url)}
-              className="gap-1.5"
-            >
-              {isFetchingModels ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-              获取列表
-            </Button>
-          </div>
-          {fetchMessage && (
-            <p className={cn('text-xs', fetchStatus === 'success' ? 'text-[hsl(var(--success))]' : 'text-[hsl(var(--destructive))]')}>
-              {fetchMessage}
-            </p>
-          )}
-        </FormSection>
-
-        <FormSection label="Codex 路由">
-          <div className="flex items-start justify-between gap-4 rounded-xl bg-muted/40 p-4">
-            <div className="min-w-0 space-y-1">
-              <div className="text-sm font-medium text-foreground/90">需要本地路由映射</div>
-              <p className="text-xs leading-relaxed text-foreground/55">
-                如果供应商不是原生 OpenAI Responses API，或模型名不是 Codex 默认的 GPT 系列，请打开此开关。
-              </p>
-            </div>
-            <Switch
-              aria-label="需要本地路由映射"
-              checked={editingProvider.codex_needs_proxy ?? inferCodexProxyDefault(editingProvider.openai_base_url)}
-              onCheckedChange={(c) => updateField('codex_needs_proxy', c)}
-            />
-          </div>
-        </FormSection>
-
-        {saveError && (
-          <p className="text-sm text-[hsl(var(--destructive))]">{saveError}</p>
-        )}
-
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/40 pt-5">
-          <div>
-            {!isNew && (
-              deleteConfirm ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[hsl(var(--destructive))]">确认删除？</span>
-                  <Button variant="destructive" size="sm" onClick={handleDelete}>确认</Button>
-                  <Button variant="outline" size="sm" onClick={() => setDeleteConfirm(false)}>取消</Button>
-                </div>
-              ) : (
-                <Button variant="ghost" size="sm" className="text-[hsl(var(--destructive))]" onClick={() => setDeleteConfirm(true)}>
-                  删除
-                </Button>
-              )
-            )}
-          </div>
-          <div className="flex gap-2">
-            {!isNew && editingProvider.id !== activeId && (
-              <Button variant="outline" onClick={handleActivate}>激活</Button>
-            )}
-            <Button variant="outline" onClick={closeForm}>取消</Button>
-            <Button onClick={handleSave}>保存</Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
-        {providers.map((p) => {
-          const active = p.id === activeId;
-          return (
-            <div
-              key={p.id}
-              className={cn(
-                'group flex flex-col gap-2 rounded-xl border p-4 transition-all duration-200 cursor-pointer',
-                active
-                  ? 'border-[hsl(var(--primary)/0.4)] bg-[hsl(var(--primary)/0.06)] shadow-[0_10px_28px_-20px_hsl(var(--primary)/0.5)]'
-                  : 'border-border/50 bg-muted/30 hover:border-primary/40 hover:bg-muted/50',
-              )}
-              onClick={() => openEdit(p)}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <span className="truncate text-sm font-medium text-foreground">
-                  {p.name || '未命名'}
-                </span>
-                <button
-                  title="测试连接"
-                  className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:opacity-50"
-                  disabled={testingId === p.id}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleTest(p.id);
-                  }}
-                >
-                  {testingId === p.id ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Zap className="h-3.5 w-3.5" />
-                  )}
-                </button>
-              </div>
-              <div className="truncate font-mono text-xs text-foreground/50">
-                {p.default_model || '未设置模型'}
-              </div>
-              <div className="flex items-center justify-between pt-1">
-                {active ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-[hsl(var(--primary)/0.12)] px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--primary))]">
-                    已激活
-                  </span>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-6 px-2 text-[11px]"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveProvider(p.id);
-                    }}
-                  >
-                    激活
-                  </Button>
-                )}
-                <span className="text-[11px] text-foreground/35 opacity-0 transition-opacity group-hover:opacity-100">
-                  点击编辑
-                </span>
-              </div>
-            </div>
-          );
-        })}
-
-        <button
-          type="button"
-          onClick={openNew}
-          className="flex min-h-22 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-border/50 text-sm text-muted-foreground/60 transition-all duration-200 hover:border-primary/40 hover:text-muted-foreground"
-        >
-          <Plus className="h-4 w-4" />
-          添加供应商
-        </button>
+    <div className="space-y-6">
+      <div role="tablist" aria-label="智能体档案" className="inline-flex h-11 w-full items-center justify-start gap-1 rounded-xl bg-muted/55 p-1">
+        {AGENTS.map((item) => <button key={item.id} type="button" role="tab" aria-selected={agentKind === item.id} onClick={() => { setAgentKind(item.id); setEditing(null); setMessage(null); }} className={cn('rounded-lg px-4 py-2 text-sm font-medium transition-colors', agentKind === item.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{item.label}</button>)}
       </div>
-
-      {toast && (
-        <div
-          className={cn(
-            'fixed bottom-6 right-6 z-50 rounded-lg px-4 py-2.5 text-sm font-medium shadow-lg transition-all duration-300',
-            toast.type === 'success' ? 'bg-[hsl(var(--success))] text-white' : 'bg-[hsl(var(--destructive))] text-white',
-          )}
-        >
-          {toast.message}
+      <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-foreground/65">{agent.description} 切换档案或模型会影响之后新建或重新启动的会话，不会热更新正在运行的会话。</div>
+      {message && <div className="rounded-lg border border-border/50 bg-muted/35 px-3 py-2 text-sm text-foreground/75">{message}</div>}
+      {editing ? (
+        <div className="space-y-5 rounded-2xl border border-border/55 bg-card/35 p-5">
+          <div className="flex items-center justify-between gap-3"><h3 className="text-lg font-semibold">{profiles.some((profile) => profile.id === editing.id) ? '编辑档案' : '新建档案'}</h3><Button variant="ghost" size="sm" onClick={() => setEditing(null)}>返回列表</Button></div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-1.5 text-xs text-foreground/60">档案名称<Input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} placeholder="如 公司代理" /></label>
+            <label className="space-y-1.5 text-xs text-foreground/60">{agent.baseUrlLabel}<Input value={editing.baseUrl} onChange={(event) => setEditing({ ...editing, baseUrl: event.target.value })} placeholder={agent.placeholder} /></label>
+          </div>
+          <label className="block space-y-1.5 text-xs text-foreground/60">说明（可选）<Input value={editing.note} onChange={(event) => setEditing({ ...editing, note: event.target.value })} placeholder="此档案的用途说明" /></label>
+          <label className="block space-y-1.5 text-xs text-foreground/60">API Key <span className="text-foreground/40">（已保存的密钥不会回传）</span><div className="relative"><Input aria-label="API Key" type={showKey ? 'text' : 'password'} value={editing.apiKey} onChange={(event) => setEditing({ ...editing, apiKey: event.target.value, clearApiKey: false })} placeholder="输入新密钥以替换" className="pr-10" /><button type="button" className="absolute right-2 top-2 text-muted-foreground" onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></label>
+          <label className="flex items-center gap-2 text-sm text-foreground/70"><Switch checked={editing.clearApiKey} onCheckedChange={(checked) => setEditing({ ...editing, clearApiKey: checked, apiKey: checked ? '' : editing.apiKey })} />清除已保存的 API Key</label>
+          <label className="block space-y-1.5 text-xs text-foreground/60">模型列表 <span className="text-foreground/40">（每行一个，第一行为默认模型）</span><textarea aria-label="模型列表" value={editing.models} onChange={(event) => setEditing({ ...editing, models: event.target.value })} className="min-h-28 w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-ring/40" placeholder="claude-sonnet-4" /></label>
+          {agentKind === 'claude_code' && <label className="flex items-center gap-2 text-sm text-foreground/70"><Switch checked={editing.context1m} onCheckedChange={(checked) => setEditing({ ...editing, context1m: checked })} />启用 1M 上下文</label>}
+          {agentKind === 'codex' && <label className="flex items-center gap-2 text-sm text-foreground/70"><Switch checked={editing.codexNeedsProxy} onCheckedChange={(checked) => setEditing({ ...editing, codexNeedsProxy: checked })} />通过本地兼容代理路由</label>}
+          <label className="block space-y-1.5 text-xs text-foreground/60">高级原生配置 JSON <span className="text-foreground/40">（可选；保存后只显示为已配置）</span><textarea value={editing.advancedConfig} onChange={(event) => setEditing({ ...editing, advancedConfig: event.target.value, clearAdvancedConfig: false })} className="min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-ring/40" placeholder='{"some_native_option": true}' /></label>
+          <label className="flex items-center gap-2 text-sm text-foreground/70"><Switch checked={editing.clearAdvancedConfig} onCheckedChange={(checked) => setEditing({ ...editing, clearAdvancedConfig: checked, advancedConfig: checked ? '' : editing.advancedConfig })} />清除已保存的高级配置</label>
+          <div className="flex justify-end gap-2 border-t border-border/45 pt-4"><Button variant="outline" onClick={() => setEditing(null)}>取消</Button><Button disabled={busy} onClick={save}>{busy && <Loader2 className="mr-2 size-4 animate-spin" />}保存档案</Button></div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(235px,1fr))] gap-3">
+          {profiles.map((profile) => { const active = profile.id === activeId; const requiresReview = Boolean(profile.native_config.requires_review); return <div key={profile.id} className={cn('flex min-h-42 flex-col gap-3 rounded-xl border p-4', active ? 'border-primary/45 bg-primary/5' : 'border-border/55 bg-muted/20')}><div className="flex items-start justify-between gap-2"><div className="min-w-0"><div className="truncate font-medium">{profile.name}</div><div className="mt-1 truncate font-mono text-xs text-muted-foreground">{profile.default_model || '未设置模型'}</div></div>{active && <span className="rounded-full bg-primary/12 px-2 py-0.5 text-[11px] text-primary">当前使用</span>}</div>{profile.note && <p className="line-clamp-2 text-xs text-muted-foreground">{profile.note}</p>}{requiresReview && <p className="text-xs text-amber-700 dark:text-amber-300">由旧供应商迁移而来，请核对高级原生配置。</p>}<div className="mt-auto flex flex-wrap gap-1.5"><Button size="sm" variant="outline" onClick={() => setEditing(toDraft(profile))}>编辑</Button><Button size="sm" variant="outline" disabled={busy || active} onClick={() => run(() => activateAgentProfile(agentKind, profile.id), `已切换到“${profile.name}”。`)}>切换</Button><Button size="sm" variant="ghost" title="测试连接" disabled={busy} onClick={() => test(profile)}><Zap className="size-3.5" /></Button><Button size="sm" variant="ghost" title="删除档案" disabled={busy} onClick={() => run(() => deleteAgentProfile(profile.id), '档案已删除。')}><Trash2 className="size-3.5 text-destructive" /></Button></div></div>; })}
+          <button type="button" onClick={() => setEditing(emptyDraft())} className="flex min-h-42 items-center justify-center gap-2 rounded-xl border border-dashed border-border/65 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"><Plus className="size-4" />新建 {agent.label} 档案</button>
         </div>
       )}
     </div>

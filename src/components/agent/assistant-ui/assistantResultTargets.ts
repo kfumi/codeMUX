@@ -8,7 +8,7 @@ export function buildAssistantResultTargetSet(events: AgentMessage[]): Set<numbe
 export function isHiddenAssistantThreadUserEvent(
   event: Extract<AgentMessage, { kind: 'user' }>,
 ): boolean {
-  const text = event.data.content.trim();
+  const text = typeof event.data.content === 'string' ? event.data.content.trim() : '';
   const data = event.data as Record<string, unknown>;
 
   return (

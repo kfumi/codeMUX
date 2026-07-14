@@ -148,30 +148,36 @@ describe('agentApi', () => {
     invokeMock.mockReset();
   });
 
-  it('passes OpenCode provider and credential source through ensure_session', async () => {
+  it('does not expose connection configuration through ensure_session', async () => {
     invokeMock.mockResolvedValue(undefined);
     const { agentApi } = await import('./tauri');
 
-    await agentApi.ensureSession('session-1', 'D:/workspace', undefined, 'secret-key', 'https://provider.example/v1', 'model-1', 'medium', undefined, 'provider-1', 'codemux');
+    await agentApi.ensureSession('session-1', 'D:/workspace', undefined, 'medium');
 
-    expect(invokeMock).toHaveBeenCalledWith('ensure_agent_session', expect.objectContaining({
-      provider: 'provider-1',
-      credentialSource: 'codemux',
-      apiKey: 'secret-key',
-      baseUrl: 'https://provider.example/v1',
-    }));
+    const [, payload] = invokeMock.mock.calls[0];
+    expect(payload).toMatchObject({ sessionId: 'session-1', cwd: 'D:/workspace', reasoningEffort: 'medium' });
+    expect(payload).not.toHaveProperty('apiKey');
+    expect(payload).not.toHaveProperty('baseUrl');
+    expect(payload).not.toHaveProperty('model');
+    expect(payload).not.toHaveProperty('provider');
+    expect(payload).not.toHaveProperty('credentialSource');
+    expect(payload).not.toHaveProperty('codexNeedsProxy');
   });
 
-  it('passes OpenCode provider and credential source through start_session', async () => {
+  it('does not expose connection configuration through start_session', async () => {
     invokeMock.mockResolvedValue(undefined);
     const { agentApi } = await import('./tauri');
 
-    await agentApi.startSession('session-1', 'hello', 'D:/workspace', () => {}, 'secret-key', 'https://provider.example/v1', 'model-1', 'medium', undefined, 'provider-1', 'codemux');
+    await agentApi.startSession('session-1', 'hello', 'D:/workspace', () => {}, 'medium', { text: 'hello' });
 
-    expect(invokeMock).toHaveBeenCalledWith('start_agent_session', expect.objectContaining({
-      provider: 'provider-1',
-      credentialSource: 'codemux',
-    }));
+    const [, payload] = invokeMock.mock.calls[0];
+    expect(payload).toMatchObject({ sessionId: 'session-1', prompt: 'hello', cwd: 'D:/workspace', reasoningEffort: 'medium' });
+    expect(payload).not.toHaveProperty('apiKey');
+    expect(payload).not.toHaveProperty('baseUrl');
+    expect(payload).not.toHaveProperty('model');
+    expect(payload).not.toHaveProperty('provider');
+    expect(payload).not.toHaveProperty('credentialSource');
+    expect(payload).not.toHaveProperty('codexNeedsProxy');
   });
   it('responds to an OpenCode permission with session and request identifiers', async () => {
     invokeMock.mockResolvedValue(undefined);

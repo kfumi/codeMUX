@@ -7,14 +7,12 @@ import { MainLayout } from './components/layout/MainLayout';
 import { Sidebar } from './components/layout/Sidebar';
 import { TodoList } from './components/agent/TodoList';
 import { TooltipProvider } from './components/ui/tooltip';
-import { resolveAgentProviderConfig } from './lib/agentProvider';
 import { useAgentNotifications } from './hooks/useAgentNotifications';
 import { useTheme } from './hooks/useTheme';
 import { createLogger, serializeError } from './lib/logger';
 import type { AgentInputPayload } from './types/agentInput';
 import { getStoredAgentCwd, resolveSessionCwd } from './lib/sessionCwd';
 import { registerSkillCommands } from './lib/slashCommands';
-import { sessionApi } from './lib/tauri';
 import { useAgentStore } from './stores/agentStore';
 import './stores/appearanceStore';
 import { useNewSessionStore } from './stores/newSessionStore';
@@ -46,7 +44,6 @@ function App() {
   const setActiveSession = useSessionStore((state) => state.setActiveSession);
   const startQuery = useAgentStore((state) => state.startQuery);
   const activeTodos = useAgentStore((state) => activeSessionId ? state.todos[activeSessionId] ?? EMPTY_TODOS : EMPTY_TODOS);
-  const config = useSettingsStore((state) => state.config);
   const fetchConfig = useSettingsStore((state) => state.fetchConfig);
   const projects = useProjectStore((state) => state.projects);
   const setActiveProject = useProjectStore((state) => state.setActiveProject);
@@ -110,7 +107,6 @@ function App() {
   const handleStartNewSession = async (input: AgentInputPayload) => {
     const {
       selectedAgentKind,
-      selectedProviderId,
       selectedModel,
       selectedReasoningEffort,
       selectedPermissionConfig,
@@ -118,12 +114,6 @@ function App() {
       draftProjectId,
     } = useNewSessionStore.getState();
     const cwd = resolveSessionCwd(projects, draftProjectId, getStoredAgentCwd());
-    const { provider, apiKey, baseUrl, model, runtimeModel, codexNeedsProxy } = resolveAgentProviderConfig({
-      agentKind: selectedAgentKind,
-      config,
-      sessionProviderId: selectedProviderId,
-      sessionModel: selectedModel,
-    });
 
     try {
       const session = await createSession(
@@ -135,18 +125,7 @@ function App() {
         selectedPlanMode,
       );
 
-      if (provider?.id && model) {
-        sessionApi.updateProvider(session.id, provider.id, model, selectedReasoningEffort).catch(() => {});
-        useSessionStore.setState((state) => ({
-          sessions: state.sessions.map((existingSession) =>
-            existingSession.id === session.id
-              ? { ...existingSession, provider_id: provider.id, model, reasoning_effort: selectedReasoningEffort }
-              : existingSession,
-          ),
-        }));
-      }
-
-      await startQuery(session.id, input.text, cwd, apiKey, baseUrl, runtimeModel, selectedReasoningEffort, codexNeedsProxy, undefined, input);
+      await startQuery(session.id, input.text, cwd, selectedReasoningEffort, undefined, input, selectedModel ?? undefined);
       closeDraft();
     } catch (error) {
       logger.error('Failed to start a new session from empty state', undefined, serializeError(error));
