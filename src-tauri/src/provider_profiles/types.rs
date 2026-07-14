@@ -287,7 +287,6 @@ fn legacy_profile_models(provider: &Provider) -> Vec<ProfileModel> {
         .collect();
 
     if !provider.default_model.is_empty()
-        && !models.is_empty()
         && !models
             .iter()
             .any(|model| model.id == provider.default_model)

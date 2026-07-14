@@ -339,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn migrates_legacy_provider_without_models_as_an_empty_profile_model_list() {
+    fn migrates_legacy_default_model_into_profile_model_list() {
         let temp_dir = temp_config_dir();
         let config_path = temp_dir.join("config.json");
         let legacy = serde_json::json!({
@@ -365,10 +365,12 @@ mod tests {
         assert_eq!(profiles.len(), 2);
         assert!(profiles
             .iter()
-            .all(|profile| profile["models"] == serde_json::json!([])));
+            .all(|profile| profile["models"] == serde_json::json!([
+                { "id": "model-a", "name": "model-a", "context_window": null }
+            ])));
         assert!(profiles
             .iter()
-            .all(|profile| profile["default_model"] == serde_json::json!("")));
+            .all(|profile| profile["default_model"] == serde_json::json!("model-a")));
 
         let _ = std::fs::remove_file(&config_path);
         let _ = std::fs::remove_dir(&temp_dir);
