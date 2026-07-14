@@ -356,9 +356,6 @@ fn upsert_agent_profile_in_config(
 
 fn redact_config_for_frontend(app_config: &AppConfig) -> AppConfig {
     let mut redacted = app_config.clone();
-    for provider in &mut redacted.providers {
-        provider.api_key.clear();
-    }
     for profile in &mut redacted.agent_profile_registry.profiles {
         match &mut profile.native_config {
             NativeProfileConfig::ClaudeCode {
@@ -475,9 +472,9 @@ where
     S: FnOnce(&AppConfig) -> Result<(), String>,
 {
     let mut updated_config = app_config.clone();
+    set_active_profile_in_config(&mut updated_config, agent_kind, profile_id)?;
     let profile = agent_profile_from_config(&updated_config, agent_kind, profile_id)?;
     let compensation = write_native(&profile)?;
-    set_active_profile_in_config(&mut updated_config, agent_kind, profile_id)?;
     commit_profile_config_after_native_write(
         app_config,
         updated_config,
@@ -1353,13 +1350,14 @@ mod tests {
 
         assert!(api_key.is_empty());
         assert!(advanced_config.is_none());
-        assert!(view
-            .providers
-            .iter()
-            .find(|provider| provider.id == "legacy")
-            .unwrap()
-            .api_key
-            .is_empty());
+        assert_eq!(
+            view.providers
+                .iter()
+                .find(|provider| provider.id == "legacy")
+                .unwrap()
+                .api_key,
+            "legacy-secret"
+        );
     }
 
     #[test]
@@ -1445,6 +1443,32 @@ mod tests {
             .agent_profile_registry
             .active_profile_ids
             .is_empty());
+    }
+
+    #[test]
+    fn 空默认模型档案不会触发原生写入() {
+        let mut app_config = AppConfig::default();
+        let mut profile = codex_profile("empty-model", "model-a");
+        profile.models.clear();
+        profile.default_model.clear();
+        upsert_agent_profile_in_config(&mut app_config, profile).unwrap();
+        let mut wrote_native = false;
+
+        let error = activate_agent_profile_transaction(
+            &mut app_config,
+            AgentKind::Codex,
+            "empty-model",
+            |_| {
+                wrote_native = true;
+                Ok::<(), String>(())
+            },
+            |_| Ok(()),
+            |_| Ok(()),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "请先为档案配置默认模型");
+        assert!(!wrote_native);
     }
 
     #[test]
