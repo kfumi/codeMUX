@@ -1,7 +1,10 @@
 use crate::provider_profiles::types::NativeProfileConfig;
 use serde_json::{Map, Value};
 use std::path::PathBuf;
-use toml_edit::{value, DocumentMut, Item, Table};
+use toml_edit::{value, Array, DocumentMut, Item, Table, Value as TomlValue};
+
+type JsonObject = Map<String, Value>;
+type CodexAdvancedConfig<'a> = (Option<&'a JsonObject>, Option<&'a JsonObject>);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeConfigPaths {
@@ -36,7 +39,7 @@ impl NativeConfigPaths {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct NativeConfigContents {
     pub claude_settings: Option<String>,
     pub codex_auth: Option<String>,
@@ -44,10 +47,20 @@ pub struct NativeConfigContents {
     pub opencode_config: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct RenderedNativeConfig {
     pub path: PathBuf,
     pub content: String,
+}
+
+impl std::fmt::Debug for RenderedNativeConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RenderedNativeConfig")
+            .field("path", &self.path)
+            .field("content", &"[已脱敏]")
+            .finish()
+    }
 }
 
 pub fn render_native_config(
@@ -143,19 +156,86 @@ fn render_toml_file(
     Ok(RenderedNativeConfig { path, content })
 }
 
-pub fn merge_claude_settings(
+fn merge_json_advanced_config(
+    existing: Value,
+    advanced_config: Option<&Value>,
+    name: &str,
+) -> Result<Value, String> {
+    let Some(advanced_config) = advanced_config else {
+        return Ok(existing);
+    };
+    let advanced = advanced_config
+        .as_object()
+        .ok_or_else(|| format!("{} advanced_config 必须为对象", name))?;
+    merge_json_advanced_object(existing, Some(advanced), name)
+}
+
+fn merge_json_advanced_object(
     mut existing: Value,
+    advanced_config: Option<&Map<String, Value>>,
+    name: &str,
+) -> Result<Value, String> {
+    let Some(advanced) = advanced_config else {
+        return Ok(existing);
+    };
+    let target = existing
+        .as_object_mut()
+        .ok_or_else(|| format!("{} 配置顶层必须为对象", name))?;
+    merge_json_objects(target, advanced, name)?;
+    Ok(existing)
+}
+
+fn merge_json_objects(
+    target: &mut Map<String, Value>,
+    advanced: &Map<String, Value>,
+    name: &str,
+) -> Result<(), String> {
+    for (key, advanced_value) in advanced {
+        let Some(existing_value) = target.get_mut(key) else {
+            target.insert(key.clone(), advanced_value.clone());
+            continue;
+        };
+
+        match (existing_value, advanced_value) {
+            (Value::Object(existing), Value::Object(advanced)) => {
+                merge_json_objects(existing, advanced, name)?;
+            }
+            (existing, advanced) if json_value_kind(existing) == json_value_kind(advanced) => {
+                *existing = advanced.clone();
+            }
+            _ => return Err(format!("{} advanced_config 节点类型冲突", name)),
+        }
+    }
+    Ok(())
+}
+
+fn json_value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+pub fn merge_claude_settings(
+    existing: Value,
     profile: &NativeProfileConfig,
 ) -> Result<Value, String> {
     let NativeProfileConfig::ClaudeCode {
         api_key,
         anthropic_base_url,
+        advanced_config,
         ..
     } = profile
     else {
         return Err("原生配置类型与 Claude Code 不匹配".to_string());
     };
 
+    let mut existing =
+        merge_json_advanced_config(existing, advanced_config.as_ref(), "Claude Code")?;
     let settings = existing
         .as_object_mut()
         .ok_or_else(|| "Claude Code settings.json 顶层必须为对象".to_string())?;
@@ -180,6 +260,8 @@ fn merge_codex_auth(mut existing: Value, profile: &NativeProfileConfig) -> Resul
     let NativeProfileConfig::Codex { api_key, .. } = profile else {
         return Err("原生配置类型与 Codex 不匹配".to_string());
     };
+    let (auth_advanced, _) = codex_advanced_config(profile)?;
+    existing = merge_json_advanced_object(existing, auth_advanced, "Codex auth.json")?;
     let auth = existing
         .as_object_mut()
         .ok_or_else(|| "Codex auth.json 顶层必须为对象".to_string())?;
@@ -197,6 +279,10 @@ fn merge_codex_config(
     else {
         return Err("原生配置类型与 Codex 不匹配".to_string());
     };
+    let (_, config_advanced) = codex_advanced_config(profile)?;
+    if let Some(config_advanced) = config_advanced {
+        merge_json_object_into_toml(existing.as_table_mut(), config_advanced)?;
+    }
     let root = existing.as_table_mut();
     root["model_provider"] = value("codemux");
     let providers = root
@@ -215,18 +301,110 @@ fn merge_codex_config(
     Ok(existing)
 }
 
-fn merge_opencode_config(
-    mut existing: Value,
-    profile: &NativeProfileConfig,
-) -> Result<Value, String> {
+fn codex_advanced_config(profile: &NativeProfileConfig) -> Result<CodexAdvancedConfig<'_>, String> {
+    let NativeProfileConfig::Codex {
+        advanced_config, ..
+    } = profile
+    else {
+        return Err("原生配置类型与 Codex 不匹配".to_string());
+    };
+    let Some(advanced_config) = advanced_config else {
+        return Ok((None, None));
+    };
+    let advanced = advanced_config
+        .as_object()
+        .ok_or_else(|| "Codex advanced_config 必须为对象".to_string())?;
+    if advanced.keys().any(|key| key != "auth" && key != "config") {
+        return Err("Codex advanced_config 仅支持 auth 和 config 字段".to_string());
+    }
+    let auth = match advanced.get("auth") {
+        Some(value) => Some(
+            value
+                .as_object()
+                .ok_or_else(|| "Codex advanced_config.auth 必须为对象".to_string())?,
+        ),
+        None => None,
+    };
+    let config = match advanced.get("config") {
+        Some(value) => Some(
+            value
+                .as_object()
+                .ok_or_else(|| "Codex advanced_config.config 必须为对象".to_string())?,
+        ),
+        None => None,
+    };
+    Ok((auth, config))
+}
+
+fn merge_json_object_into_toml(
+    target: &mut Table,
+    advanced: &Map<String, Value>,
+) -> Result<(), String> {
+    for (key, advanced_value) in advanced {
+        if let Value::Object(advanced_table) = advanced_value {
+            let target_table = target
+                .entry(key)
+                .or_insert(Item::Table(Table::new()))
+                .as_table_mut()
+                .ok_or_else(|| "Codex advanced_config.config 节点类型冲突".to_string())?;
+            merge_json_object_into_toml(target_table, advanced_table)?;
+            continue;
+        }
+
+        if target
+            .get(key)
+            .is_some_and(|item| item.is_table() || item.is_array_of_tables())
+        {
+            return Err("Codex advanced_config.config 节点类型冲突".to_string());
+        }
+        target.insert(key, json_to_toml_item(advanced_value)?);
+    }
+    Ok(())
+}
+
+fn json_to_toml_item(json_value: &Value) -> Result<Item, String> {
+    match json_value {
+        Value::Bool(bool_value) => Ok(value(*bool_value)),
+        Value::Number(number) => {
+            if let Some(integer_value) = number.as_i64() {
+                Ok(value(integer_value))
+            } else if number.as_u64().is_some() {
+                Err("Codex advanced_config.config 包含不支持的数值".to_string())
+            } else if let Some(float_value) = number.as_f64() {
+                Ok(value(float_value))
+            } else {
+                Err("Codex advanced_config.config 包含不支持的数值".to_string())
+            }
+        }
+        Value::String(string_value) => Ok(value(string_value.clone())),
+        Value::Array(values) => {
+            let mut array = Array::new();
+            for array_value in values {
+                let item = json_to_toml_item(array_value)?;
+                let value = item.into_value().map_err(|_| {
+                    "Codex advanced_config.config 数组不能包含对象或空值".to_string()
+                })?;
+                array.push(value);
+            }
+            Ok(Item::Value(TomlValue::Array(array)))
+        }
+        Value::Null | Value::Object(_) => {
+            Err("Codex advanced_config.config 包含 TOML 不支持的值".to_string())
+        }
+    }
+}
+
+fn merge_opencode_config(existing: Value, profile: &NativeProfileConfig) -> Result<Value, String> {
     let NativeProfileConfig::OpenCode {
         api_key,
         openai_base_url,
+        advanced_config,
         ..
     } = profile
     else {
         return Err("原生配置类型与 OpenCode 不匹配".to_string());
     };
+    let mut existing = merge_json_advanced_config(existing, advanced_config.as_ref(), "OpenCode")?;
     let root = existing
         .as_object_mut()
         .ok_or_else(|| "OpenCode opencode.json 顶层必须为对象".to_string())?;
@@ -451,5 +629,202 @@ name = "Other"
         let toml_error = render_native_config(&test_paths(), &profile, &invalid_toml).unwrap_err();
         assert_eq!(toml_error, "Codex config.toml 配置无效");
         assert!(!toml_error.contains("super-secret-key"));
+    }
+
+    #[test]
+    fn claude_advanced_config_is_deep_merged_before_managed_env_fields() {
+        let profile = NativeProfileConfig::ClaudeCode {
+            api_key: "new-key".to_string(),
+            anthropic_base_url: "https://new.example/v1".to_string(),
+            context_1m: None,
+            advanced_config: Some(serde_json::json!({
+                "env": {
+                    "KEEP": "advanced-value",
+                    "ANTHROPIC_API_KEY": "must-not-win"
+                },
+                "mcpServers": { "advanced": { "command": "uvx" } },
+                "customSetting": true
+            })),
+            requires_review: false,
+        };
+        let existing = serde_json::json!({
+            "env": { "KEEP": "old-value" },
+            "mcpServers": { "existing": { "command": "npx" } }
+        });
+
+        let merged = merge_claude_settings(existing, &profile).unwrap();
+
+        assert_eq!(merged["env"]["KEEP"], "advanced-value");
+        assert_eq!(merged["env"]["ANTHROPIC_API_KEY"], "new-key");
+        assert_eq!(merged["mcpServers"]["existing"]["command"], "npx");
+        assert_eq!(merged["mcpServers"]["advanced"]["command"], "uvx");
+        assert_eq!(merged["customSetting"], true);
+    }
+
+    #[test]
+    fn codex_advanced_config_merges_auth_and_toml_before_managed_fields() {
+        let profile = NativeProfileConfig::Codex {
+            api_key: "new-key".to_string(),
+            openai_base_url: "https://new.example/v1".to_string(),
+            codex_needs_proxy: None,
+            advanced_config: Some(serde_json::json!({
+                "auth": {
+                    "refresh_token": "preserve-me",
+                    "OPENAI_API_KEY": "must-not-win"
+                },
+                "config": {
+                    "sandbox_mode": "workspace-write",
+                    "mcp_servers": { "advanced": { "command": "npx" } },
+                    "model_providers": { "codemux": { "request_max_retries": 3 } }
+                }
+            })),
+            requires_review: false,
+        };
+        let existing = NativeConfigContents {
+            codex_auth: Some(r#"{"account_id":"account-1"}"#.to_string()),
+            codex_config: Some(
+                r#"
+[model_providers.codemux]
+custom_existing = true
+"#
+                .to_string(),
+            ),
+            ..NativeConfigContents::default()
+        };
+
+        let files = render_native_config(&test_paths(), &profile, &existing).unwrap();
+
+        let auth: serde_json::Value = serde_json::from_str(&files[0].content).unwrap();
+        assert_eq!(auth["account_id"], "account-1");
+        assert_eq!(auth["refresh_token"], "preserve-me");
+        assert_eq!(auth["OPENAI_API_KEY"], "new-key");
+        let config = files[1].content.parse::<toml_edit::DocumentMut>().unwrap();
+        assert_eq!(config["sandbox_mode"].as_str(), Some("workspace-write"));
+        assert_eq!(
+            config["mcp_servers"]["advanced"]["command"].as_str(),
+            Some("npx")
+        );
+        assert_eq!(
+            config["model_providers"]["codemux"]["custom_existing"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            config["model_providers"]["codemux"]["request_max_retries"].as_integer(),
+            Some(3)
+        );
+        assert_eq!(
+            config["model_providers"]["codemux"]["base_url"].as_str(),
+            Some("https://new.example/v1")
+        );
+    }
+
+    #[test]
+    fn opencode_advanced_config_preserves_managed_provider_unknown_fields() {
+        let profile = NativeProfileConfig::OpenCode {
+            api_key: "new-key".to_string(),
+            openai_base_url: "https://new.example/v1".to_string(),
+            advanced_config: Some(serde_json::json!({
+                "provider": {
+                    "codemux-openai": {
+                        "custom_advanced": true,
+                        "options": { "timeout": 2000, "apiKey": "must-not-win" }
+                    }
+                },
+                "mcp": { "advanced": { "type": "local" } }
+            })),
+            requires_review: false,
+        };
+        let existing = NativeConfigContents {
+            opencode_config: Some(
+                serde_json::json!({
+                    "provider": {
+                        "codemux-openai": {
+                            "custom_existing": true,
+                            "options": { "timeout": 1000 }
+                        }
+                    }
+                })
+                .to_string(),
+            ),
+            ..NativeConfigContents::default()
+        };
+
+        let files = render_native_config(&test_paths(), &profile, &existing).unwrap();
+        let config: serde_json::Value = serde_json::from_str(&files[0].content).unwrap();
+
+        assert_eq!(config["mcp"]["advanced"]["type"], "local");
+        assert_eq!(
+            config["provider"]["codemux-openai"]["custom_existing"],
+            true
+        );
+        assert_eq!(
+            config["provider"]["codemux-openai"]["custom_advanced"],
+            true
+        );
+        assert_eq!(
+            config["provider"]["codemux-openai"]["options"]["timeout"],
+            2000
+        );
+        assert_eq!(
+            config["provider"]["codemux-openai"]["options"]["apiKey"],
+            "new-key"
+        );
+    }
+
+    #[test]
+    fn advanced_config_rejects_invalid_shapes_and_node_type_conflicts() {
+        let invalid_claude = NativeProfileConfig::ClaudeCode {
+            api_key: "new-key".to_string(),
+            anthropic_base_url: "https://new.example/v1".to_string(),
+            context_1m: None,
+            advanced_config: Some(serde_json::json!(["not-an-object"])),
+            requires_review: false,
+        };
+        let error = merge_claude_settings(serde_json::json!({}), &invalid_claude).unwrap_err();
+        assert_eq!(error, "Claude Code advanced_config 必须为对象");
+
+        let conflicting_claude = NativeProfileConfig::ClaudeCode {
+            api_key: "new-key".to_string(),
+            anthropic_base_url: "https://new.example/v1".to_string(),
+            context_1m: None,
+            advanced_config: Some(serde_json::json!({ "mcpServers": [] })),
+            requires_review: false,
+        };
+        let error = merge_claude_settings(
+            serde_json::json!({ "mcpServers": { "filesystem": {} } }),
+            &conflicting_claude,
+        )
+        .unwrap_err();
+        assert_eq!(error, "Claude Code advanced_config 节点类型冲突");
+
+        let invalid_codex = NativeProfileConfig::Codex {
+            api_key: "new-key".to_string(),
+            openai_base_url: "https://new.example/v1".to_string(),
+            codex_needs_proxy: None,
+            advanced_config: Some(serde_json::json!({ "auth": [] })),
+            requires_review: false,
+        };
+        let error = render_native_config(
+            &test_paths(),
+            &invalid_codex,
+            &NativeConfigContents::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error, "Codex advanced_config.auth 必须为对象");
+    }
+
+    #[test]
+    fn native_profile_debug_output_redacts_api_keys() {
+        let profile = NativeProfileConfig::OpenCode {
+            api_key: "super-secret-key".to_string(),
+            openai_base_url: "https://new.example/v1".to_string(),
+            advanced_config: Some(serde_json::json!({ "nested_key": "super-secret-key" })),
+            requires_review: false,
+        };
+
+        let debug = format!("{profile:?}");
+
+        assert!(!debug.contains("super-secret-key"));
+        assert!(debug.contains("[已脱敏]"));
     }
 }

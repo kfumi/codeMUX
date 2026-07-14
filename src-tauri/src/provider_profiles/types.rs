@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 const MIGRATION_REVIEW_NOTE: &str = "需要检查原生高级配置";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NativeProfileConfig {
     ClaudeCode {
@@ -36,6 +36,62 @@ pub enum NativeProfileConfig {
         #[serde(default)]
         requires_review: bool,
     },
+}
+
+impl std::fmt::Debug for NativeProfileConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ClaudeCode {
+                anthropic_base_url,
+                context_1m,
+                advanced_config,
+                requires_review,
+                ..
+            } => formatter
+                .debug_struct("ClaudeCode")
+                .field("api_key", &"[已脱敏]")
+                .field("anthropic_base_url", anthropic_base_url)
+                .field("context_1m", context_1m)
+                .field(
+                    "advanced_config",
+                    &advanced_config.as_ref().map(|_| "[已脱敏]"),
+                )
+                .field("requires_review", requires_review)
+                .finish(),
+            Self::Codex {
+                openai_base_url,
+                codex_needs_proxy,
+                advanced_config,
+                requires_review,
+                ..
+            } => formatter
+                .debug_struct("Codex")
+                .field("api_key", &"[已脱敏]")
+                .field("openai_base_url", openai_base_url)
+                .field("codex_needs_proxy", codex_needs_proxy)
+                .field(
+                    "advanced_config",
+                    &advanced_config.as_ref().map(|_| "[已脱敏]"),
+                )
+                .field("requires_review", requires_review)
+                .finish(),
+            Self::OpenCode {
+                openai_base_url,
+                advanced_config,
+                requires_review,
+                ..
+            } => formatter
+                .debug_struct("OpenCode")
+                .field("api_key", &"[已脱敏]")
+                .field("openai_base_url", openai_base_url)
+                .field(
+                    "advanced_config",
+                    &advanced_config.as_ref().map(|_| "[已脱敏]"),
+                )
+                .field("requires_review", requires_review)
+                .finish(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
