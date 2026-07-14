@@ -179,12 +179,15 @@ impl AgentProfileRegistry {
         }
 
         for (agent_kind, profile_id) in &self.active_profile_ids {
-            let is_matching_profile = self
+            let matching_profile = self
                 .profiles
                 .iter()
-                .any(|profile| profile.agent_kind == *agent_kind && profile.id == *profile_id);
-            if !is_matching_profile {
+                .find(|profile| profile.agent_kind == *agent_kind && profile.id == *profile_id);
+            let Some(profile) = matching_profile else {
                 return Err("启用档案与智能体类型不匹配".to_string());
+            };
+            if profile.default_model.trim().is_empty() {
+                return Err("启用档案必须配置默认模型".to_string());
             }
         }
 
@@ -263,10 +266,12 @@ pub fn migrate_legacy_providers(
     }
 
     for profile in &registry.profiles {
-        registry
-            .active_profile_ids
-            .entry(profile.agent_kind)
-            .or_insert_with(|| profile.id.clone());
+        if !profile.default_model.trim().is_empty() {
+            registry
+                .active_profile_ids
+                .entry(profile.agent_kind)
+                .or_insert_with(|| profile.id.clone());
+        }
     }
 
     registry
@@ -312,8 +317,9 @@ fn set_active_profile_if_needed(
     agent_kind: AgentKind,
     profile_id: &str,
     is_active: bool,
+    has_default_model: bool,
 ) {
-    if is_active {
+    if is_active && has_default_model {
         registry
             .active_profile_ids
             .insert(agent_kind, profile_id.to_string());
@@ -329,14 +335,22 @@ fn add_migrated_profile(
         .validate()
         .map_err(|error| format!("无法迁移供应商档案 {}: {}", profile.name, error))?;
 
-    set_active_profile_if_needed(registry, profile.agent_kind, &profile.id, is_active);
+    set_active_profile_if_needed(
+        registry,
+        profile.agent_kind,
+        &profile.id,
+        is_active,
+        !profile.default_model.trim().is_empty(),
+    );
     registry.profiles.push(profile);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentProviderProfile, NativeProfileConfig, ProfileModel};
+    use std::collections::BTreeMap;
+
+    use super::{AgentProfileRegistry, AgentProviderProfile, NativeProfileConfig, ProfileModel};
     use crate::config::types::AgentKind;
 
     #[test]
@@ -361,5 +375,30 @@ mod tests {
             profile.validate().unwrap_err(),
             "档案智能体类型与原生配置类型不一致"
         );
+    }
+
+    #[test]
+    fn rejects_an_active_profile_without_a_default_model() {
+        let profile = AgentProviderProfile {
+            id: "empty-model".to_string(),
+            agent_kind: AgentKind::Codex,
+            name: "空模型档案".to_string(),
+            note: String::new(),
+            models: Vec::new(),
+            default_model: String::new(),
+            native_config: NativeProfileConfig::Codex {
+                api_key: String::new(),
+                openai_base_url: String::new(),
+                codex_needs_proxy: None,
+                advanced_config: None,
+                requires_review: true,
+            },
+        };
+        let registry = AgentProfileRegistry {
+            profiles: vec![profile],
+            active_profile_ids: BTreeMap::from([(AgentKind::Codex, "empty-model".to_string())]),
+        };
+
+        assert_eq!(registry.validate().unwrap_err(), "启用档案必须配置默认模型");
     }
 }
