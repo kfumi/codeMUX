@@ -588,7 +588,9 @@ impl<O: FileOps> NativeConfigWriteService<O> {
     }
 
     fn acquire_target_lock(&self, target: &Path) -> io::Result<File> {
-        let lock_path = target_lock_path(&self.lock_root, target);
+        let lock_root = target_lock_root();
+        self.create_secure_directory(&lock_root)?;
+        let lock_path = target_lock_path(&lock_root, target);
         let lock_file = self.file_ops.open_lock_file(&lock_path)?;
         self.file_ops.restrict_file_permissions(&lock_path)?;
         self.file_ops.try_lock_exclusive(&lock_file)?;
@@ -1092,6 +1094,10 @@ fn lexical_normalize_path(path: &Path) -> PathBuf {
         }
     }
     normalized
+}
+
+fn target_lock_root() -> PathBuf {
+    std::env::temp_dir().join("codemux-native-config-target-locks")
 }
 
 fn target_lock_path(lock_root: &Path, target: &Path) -> PathBuf {
