@@ -573,11 +573,7 @@ impl<O: FileOps> NativeConfigWriteService<O> {
         backup_session_dir: &Path,
     ) -> Result<(), NativeConfigWriteError> {
         if !self.is_owned_session_directory(backup_session_dir) {
-            return Err(self.error(
-                "原生配置恢复记录无效",
-                None,
-                RollbackStatus::NotAttempted,
-            ));
+            return Err(self.error("原生配置恢复记录无效", None, RollbackStatus::NotAttempted));
         }
 
         let _lock = self.acquire_lock()?;

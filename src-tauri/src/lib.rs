@@ -31,6 +31,7 @@ struct AgentNotificationClickPayload {
 pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
     pub config: Mutex<config::types::AppConfig>,
+    pub provider_profile_operation_lock: Mutex<()>,
     pub app_data_dir: std::path::PathBuf,
 }
 
@@ -416,6 +417,7 @@ pub fn run() {
             app.manage(AppState {
                 db: Mutex::new(conn),
                 config: Mutex::new(config),
+                provider_profile_operation_lock: Mutex::new(()),
                 app_data_dir: app.path().app_data_dir()?,
             });
             app.manage(agent::commands::AgentState::default());

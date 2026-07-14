@@ -3330,6 +3330,7 @@ mod tests {
         let app_state = crate::AppState {
             db: std::sync::Mutex::new(conn),
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
+            provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
         };
 
@@ -3572,6 +3573,7 @@ mod tests {
         let app_state = crate::AppState {
             db: std::sync::Mutex::new(conn),
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
+            provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
         };
         let state = AgentState::default();
@@ -3601,6 +3603,7 @@ mod tests {
         let app_state = crate::AppState {
             db: std::sync::Mutex::new(conn),
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
+            provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
         };
         let state = AgentState::default();

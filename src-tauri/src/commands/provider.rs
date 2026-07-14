@@ -6,13 +6,21 @@ use crate::config::types::{
 use crate::provider_profiles::types::{AgentProviderProfile, NativeProfileConfig, ProfileModel};
 use crate::provider_profiles::{
     native_config::{render_agent_profile_config, NativeConfigContents, NativeConfigPaths},
-    service::NativeConfigWriteService,
+    service::{NativeConfigWriteResult, NativeConfigWriteService},
 };
 use crate::AppState;
 use futures::StreamExt;
 use log::{debug, info};
-use std::{path::Path, str::FromStr};
+use std::{
+    path::Path,
+    str::FromStr,
+    sync::{Mutex, MutexGuard},
+};
 use tauri::{path::BaseDirectory, AppHandle, Manager, State};
+
+fn acquire_profile_operation_lock(lock: &Mutex<()>) -> Result<MutexGuard<'_, ()>, String> {
+    lock.lock().map_err(|_| "档案操作锁不可用".to_string())
+}
 
 fn apply_agent_config_update(
     app_config: &mut AppConfig,
@@ -254,40 +262,168 @@ fn set_active_profile_default_model_in_config(
     Ok(())
 }
 
-fn activate_agent_profile_transaction<W, S>(
+fn commit_profile_config_after_native_write<C, R, S>(
+    app_config: &mut AppConfig,
+    updated_config: AppConfig,
+    compensation: C,
+    compensate_native: R,
+    save_config: S,
+) -> Result<(), String>
+where
+    R: FnOnce(&C) -> Result<(), String>,
+    S: FnOnce(&AppConfig) -> Result<(), String>,
+{
+    if let Err(save_error) = save_config(&updated_config) {
+        return match compensate_native(&compensation) {
+            Ok(()) => Err(save_error),
+            Err(compensation_error) => Err(format!(
+                "保存应用配置失败: {save_error}；原生配置补偿恢复失败: {compensation_error}。请保留恢复记录并稍后重试"
+            )),
+        };
+    }
+    *app_config = updated_config;
+    Ok(())
+}
+
+fn activate_agent_profile_transaction<W, C, R, S>(
     app_config: &mut AppConfig,
     agent_kind: AgentKind,
     profile_id: &str,
     write_native: W,
+    compensate_native: R,
     save_config: S,
 ) -> Result<(), String>
 where
-    W: FnOnce(&AgentProviderProfile) -> Result<(), String>,
+    W: FnOnce(&AgentProviderProfile) -> Result<C, String>,
+    R: FnOnce(&C) -> Result<(), String>,
     S: FnOnce(&AppConfig) -> Result<(), String>,
 {
-    let profile = agent_profile_from_config(app_config, agent_kind, profile_id)?;
-    write_native(&profile)?;
-    set_active_profile_in_config(app_config, agent_kind, profile_id)?;
-    save_config(app_config)
+    let mut updated_config = app_config.clone();
+    let profile = agent_profile_from_config(&updated_config, agent_kind, profile_id)?;
+    let compensation = write_native(&profile)?;
+    set_active_profile_in_config(&mut updated_config, agent_kind, profile_id)?;
+    commit_profile_config_after_native_write(
+        app_config,
+        updated_config,
+        compensation,
+        compensate_native,
+        save_config,
+    )
 }
 
-fn set_active_profile_model_transaction<W, S>(
+fn set_active_profile_model_transaction<W, C, R, S>(
     app_config: &mut AppConfig,
     agent_kind: AgentKind,
     default_model: &str,
     write_native: W,
+    compensate_native: R,
     save_config: S,
 ) -> Result<(), String>
 where
-    W: FnOnce(&AgentProviderProfile) -> Result<(), String>,
+    W: FnOnce(&AgentProviderProfile) -> Result<C, String>,
+    R: FnOnce(&C) -> Result<(), String>,
     S: FnOnce(&AppConfig) -> Result<(), String>,
 {
     let mut updated_config = app_config.clone();
     set_active_profile_default_model_in_config(&mut updated_config, agent_kind, default_model)?;
     let updated_profile = active_agent_profile_from_config(&updated_config, agent_kind)?;
-    write_native(&updated_profile)?;
-    set_active_profile_default_model_in_config(app_config, agent_kind, default_model)?;
-    save_config(app_config)
+    let compensation = write_native(&updated_profile)?;
+    commit_profile_config_after_native_write(
+        app_config,
+        updated_config,
+        compensation,
+        compensate_native,
+        save_config,
+    )
+}
+
+fn save_profile_config_candidate<S>(
+    app_config: &mut AppConfig,
+    updated_config: AppConfig,
+    save_config: S,
+) -> Result<(), String>
+where
+    S: FnOnce(&AppConfig) -> Result<(), String>,
+{
+    save_config(&updated_config)?;
+    *app_config = updated_config;
+    Ok(())
+}
+
+fn upsert_agent_profile_transaction<W, C, R, S>(
+    app_config: &mut AppConfig,
+    profile: AgentProviderProfile,
+    write_native: W,
+    compensate_native: R,
+    save_config: S,
+) -> Result<(), String>
+where
+    W: FnOnce(&AgentProviderProfile) -> Result<C, String>,
+    R: FnOnce(&C) -> Result<(), String>,
+    S: FnOnce(&AppConfig) -> Result<(), String>,
+{
+    let profile_id = profile.id.clone();
+    let agent_kind = profile.agent_kind;
+    let mut updated_config = app_config.clone();
+    upsert_agent_profile_in_config(&mut updated_config, profile)?;
+    let is_active = updated_config
+        .agent_profile_registry
+        .active_profile_ids
+        .get(&agent_kind)
+        .is_some_and(|active_profile_id| active_profile_id == &profile_id);
+    if !is_active {
+        return save_profile_config_candidate(app_config, updated_config, save_config);
+    }
+
+    let updated_profile = agent_profile_from_config(&updated_config, agent_kind, &profile_id)?;
+    let compensation = write_native(&updated_profile)?;
+    commit_profile_config_after_native_write(
+        app_config,
+        updated_config,
+        compensation,
+        compensate_native,
+        save_config,
+    )
+}
+
+fn delete_agent_profile_transaction<W, C, R, S>(
+    app_config: &mut AppConfig,
+    profile_id: &str,
+    write_native: W,
+    compensate_native: R,
+    save_config: S,
+) -> Result<(), String>
+where
+    W: FnOnce(&AgentProviderProfile) -> Result<C, String>,
+    R: FnOnce(&C) -> Result<(), String>,
+    S: FnOnce(&AppConfig) -> Result<(), String>,
+{
+    let deleted_profile = app_config
+        .agent_profile_registry
+        .profiles
+        .iter()
+        .find(|profile| profile.id == profile_id)
+        .cloned()
+        .ok_or("档案不存在")?;
+    let is_active = app_config
+        .agent_profile_registry
+        .active_profile_ids
+        .get(&deleted_profile.agent_kind)
+        .is_some_and(|active_profile_id| active_profile_id == profile_id);
+    let mut updated_config = app_config.clone();
+    delete_agent_profile_from_config(&mut updated_config, profile_id)?;
+    if !is_active {
+        return save_profile_config_candidate(app_config, updated_config, save_config);
+    }
+
+    let compensation = write_native(&deleted_profile)?;
+    commit_profile_config_after_native_write(
+        app_config,
+        updated_config,
+        compensation,
+        compensate_native,
+        save_config,
+    )
 }
 
 fn delete_agent_profile_from_config(
@@ -465,19 +601,12 @@ fn apply_native_profile_config(
     paths: &NativeConfigPaths,
     backup_root: std::path::PathBuf,
     profile: &AgentProviderProfile,
-) -> Result<(), String> {
+) -> Result<NativeConfigWriteResult, String> {
     profile.validate()?;
     let contents = read_native_config_contents(paths)?;
     let rendered_files = render_agent_profile_config(paths, profile, &contents)?;
-    NativeConfigWriteService::new(paths.clone(), backup_root)
+    let result = NativeConfigWriteService::new(paths.clone(), backup_root)
         .write(&rendered_files)
-        .map(|result| {
-            debug!(
-                target: "provider",
-                "Native profile configuration written backup_session_dir={}",
-                result.backup_session_dir.display()
-            );
-        })
         .map_err(|error| {
             debug!(
                 target: "provider",
@@ -488,14 +617,20 @@ fn apply_native_profile_config(
                 error.backup_session_dir,
             );
             format!("原生配置写入失败: {}", error)
-        })
+        })?;
+    debug!(
+        target: "provider",
+        "Native profile configuration written backup_session_dir={}",
+        result.backup_session_dir.display()
+    );
+    Ok(result)
 }
 
 fn apply_native_profile_config_for_app(
     state: &AppState,
     app: &AppHandle,
     profile: &AgentProviderProfile,
-) -> Result<(), String> {
+) -> Result<NativeConfigWriteResult, String> {
     let paths = native_config_paths(app)?;
     apply_native_profile_config(
         &paths,
@@ -505,6 +640,31 @@ fn apply_native_profile_config_for_app(
     .map_err(|error| redact_profile_error(&error, profile))
 }
 
+fn restore_native_profile_config_for_app(
+    state: &AppState,
+    app: &AppHandle,
+    profile: &AgentProviderProfile,
+    compensation: &NativeConfigWriteResult,
+) -> Result<(), String> {
+    let paths = native_config_paths(app)?;
+    NativeConfigWriteService::new(
+        paths,
+        state.app_data_dir.join("provider-profile-backups"),
+    )
+    .restore_from_backup_session(&compensation.backup_session_dir)
+    .map_err(|error| {
+        debug!(
+            target: "provider",
+            "Native profile configuration compensation failed category={} target={:?} rollback={:?} backup_session_dir={}",
+            error.failure_category,
+            error.target_identifier,
+            error.rollback_status,
+            compensation.backup_session_dir.display()
+        );
+        redact_profile_error(&format!("原生配置恢复失败: {}", error), profile)
+    })
+}
+
 #[tauri::command]
 pub fn upsert_agent_provider_profile(
     state: State<'_, AppState>,
@@ -512,6 +672,7 @@ pub fn upsert_agent_provider_profile(
     profile: AgentProviderProfile,
 ) -> Result<(), String> {
     profile.validate()?;
+    let _operation_lock = acquire_profile_operation_lock(&state.provider_profile_operation_lock)?;
     info!(
         target: "provider",
         "Upserting agent provider profile profile_id={} agent_kind={}",
@@ -519,21 +680,23 @@ pub fn upsert_agent_provider_profile(
         profile.agent_kind.as_str()
     );
 
-    let is_active = {
-        let app_config = state.config.lock().unwrap();
-        app_config
-            .agent_profile_registry
-            .active_profile_ids
-            .get(&profile.agent_kind)
-            .is_some_and(|active_profile_id| active_profile_id == &profile.id)
-    };
-    if is_active {
-        apply_native_profile_config_for_app(state.inner(), &app, &profile)?;
-    }
-
     let mut app_config = state.config.lock().unwrap();
-    upsert_agent_profile_in_config(&mut app_config, profile)?;
-    config::save_config(&app, &app_config)
+    let profile_for_redaction = profile.clone();
+    upsert_agent_profile_transaction(
+        &mut app_config,
+        profile,
+        |updated_profile| apply_native_profile_config_for_app(state.inner(), &app, updated_profile),
+        |compensation| {
+            restore_native_profile_config_for_app(
+                state.inner(),
+                &app,
+                &profile_for_redaction,
+                compensation,
+            )
+        },
+        |config| config::save_config(&app, config),
+    )
+    .map_err(|error| redact_profile_error(&error, &profile_for_redaction))
 }
 
 #[tauri::command]
@@ -544,6 +707,7 @@ pub fn activate_agent_provider_profile(
     profile_id: String,
 ) -> Result<(), String> {
     let agent_kind = AgentKind::from_str(&agent_kind)?;
+    let _operation_lock = acquire_profile_operation_lock(&state.provider_profile_operation_lock)?;
     info!(
         target: "provider",
         "Activating agent provider profile profile_id={} agent_kind={}",
@@ -551,13 +715,23 @@ pub fn activate_agent_provider_profile(
         agent_kind.as_str()
     );
     let mut app_config = state.config.lock().unwrap();
+    let profile_for_redaction = agent_profile_from_config(&app_config, agent_kind, &profile_id)?;
     activate_agent_profile_transaction(
         &mut app_config,
         agent_kind,
         &profile_id,
         |profile| apply_native_profile_config_for_app(state.inner(), &app, profile),
+        |compensation| {
+            restore_native_profile_config_for_app(
+                state.inner(),
+                &app,
+                &profile_for_redaction,
+                compensation,
+            )
+        },
         |config| config::save_config(&app, config),
     )
+    .map_err(|error| redact_profile_error(&error, &profile_for_redaction))
 }
 
 #[tauri::command]
@@ -568,6 +742,7 @@ pub fn set_active_agent_profile_model(
     default_model: String,
 ) -> Result<(), String> {
     let agent_kind = AgentKind::from_str(&agent_kind)?;
+    let _operation_lock = acquire_profile_operation_lock(&state.provider_profile_operation_lock)?;
     info!(
         target: "provider",
         "Setting active agent profile model agent_kind={} model={}",
@@ -575,13 +750,23 @@ pub fn set_active_agent_profile_model(
         default_model
     );
     let mut app_config = state.config.lock().unwrap();
+    let profile_for_redaction = active_agent_profile_from_config(&app_config, agent_kind)?;
     set_active_profile_model_transaction(
         &mut app_config,
         agent_kind,
         &default_model,
         |profile| apply_native_profile_config_for_app(state.inner(), &app, profile),
+        |compensation| {
+            restore_native_profile_config_for_app(
+                state.inner(),
+                &app,
+                &profile_for_redaction,
+                compensation,
+            )
+        },
         |config| config::save_config(&app, config),
     )
+    .map_err(|error| redact_profile_error(&error, &profile_for_redaction))
 }
 
 #[tauri::command]
@@ -590,10 +775,31 @@ pub fn delete_agent_provider_profile(
     app: AppHandle,
     profile_id: String,
 ) -> Result<(), String> {
+    let _operation_lock = acquire_profile_operation_lock(&state.provider_profile_operation_lock)?;
     info!(target: "provider", "Deleting agent provider profile profile_id={}", profile_id);
     let mut app_config = state.config.lock().unwrap();
-    delete_agent_profile_from_config(&mut app_config, &profile_id)?;
-    config::save_config(&app, &app_config)
+    let profile_for_redaction = app_config
+        .agent_profile_registry
+        .profiles
+        .iter()
+        .find(|profile| profile.id == profile_id)
+        .cloned()
+        .ok_or("档案不存在")?;
+    delete_agent_profile_transaction(
+        &mut app_config,
+        &profile_id,
+        |deleted_profile| apply_native_profile_config_for_app(state.inner(), &app, deleted_profile),
+        |compensation| {
+            restore_native_profile_config_for_app(
+                state.inner(),
+                &app,
+                &profile_for_redaction,
+                compensation,
+            )
+        },
+        |config| config::save_config(&app, config),
+    )
+    .map_err(|error| redact_profile_error(&error, &profile_for_redaction))
 }
 
 #[tauri::command]
@@ -603,6 +809,7 @@ pub fn fetch_agent_profile_models(
     profile_id: String,
 ) -> Result<Vec<ProfileModel>, String> {
     let agent_kind = AgentKind::from_str(&agent_kind)?;
+    let _operation_lock = acquire_profile_operation_lock(&state.provider_profile_operation_lock)?;
     info!(
         target: "provider",
         "Fetching agent profile models profile_id={} agent_kind={}",
@@ -627,6 +834,8 @@ pub async fn test_agent_provider_profile(
         agent_kind.as_str()
     );
     let profile = {
+        let _operation_lock =
+            acquire_profile_operation_lock(&state.provider_profile_operation_lock)?;
         let app_config = state.config.lock().unwrap();
         agent_profile_from_config(&app_config, agent_kind, &profile_id)?
     };
@@ -739,17 +948,20 @@ pub fn update_agent_config(
 #[cfg(test)]
 mod tests {
     use super::{
-        activate_agent_profile_transaction, apply_agent_config_update, apply_native_profile_config,
-        cleanup_provider_references, delete_agent_profile_from_config, profile_api_connection,
+        acquire_profile_operation_lock, activate_agent_profile_transaction,
+        apply_agent_config_update, apply_native_profile_config, cleanup_provider_references,
+        delete_agent_profile_from_config, delete_agent_profile_transaction, profile_api_connection,
         profile_models_from_config, redact_config_for_frontend, redact_profile_error,
         set_active_profile_default_model_in_config, set_active_profile_in_config,
-        set_active_profile_model_transaction, upsert_agent_profile_in_config, ProfileApiProtocol,
+        set_active_profile_model_transaction, upsert_agent_profile_in_config,
+        upsert_agent_profile_transaction, ProfileApiProtocol,
     };
     use crate::config::types::{AgentKind, AppConfig, Provider};
     use crate::provider_profiles::native_config::NativeConfigPaths;
     use crate::provider_profiles::types::{
         AgentProviderProfile, NativeProfileConfig, ProfileModel,
     };
+    use std::{sync::mpsc, sync::Arc, sync::Mutex, thread, time::Duration};
 
     fn codex_profile(id: &str, default_model: &str) -> AgentProviderProfile {
         AgentProviderProfile {
@@ -771,6 +983,23 @@ mod tests {
                 requires_review: false,
             },
         }
+    }
+
+    #[test]
+    fn 档案操作锁会串行化并发操作() {
+        let operation_lock = Arc::new(Mutex::new(()));
+        let first_operation = acquire_profile_operation_lock(&operation_lock).unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let second_lock = Arc::clone(&operation_lock);
+        let second_operation = thread::spawn(move || {
+            let _guard = acquire_profile_operation_lock(&second_lock).unwrap();
+            sender.send(()).unwrap();
+        });
+
+        assert!(receiver.recv_timeout(Duration::from_millis(50)).is_err());
+        drop(first_operation);
+        receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+        second_operation.join().unwrap();
     }
 
     #[test]
@@ -954,7 +1183,8 @@ mod tests {
             &mut app_config,
             AgentKind::Codex,
             "codex",
-            |_| Err("原生写入失败".to_string()),
+            |_| Err::<(), _>("原生写入失败".to_string()),
+            |_| Ok(()),
             |_| {
                 saved.set(true);
                 Ok(())
@@ -982,6 +1212,7 @@ mod tests {
                 native_written.set(true);
                 Ok(())
             },
+            |_| Ok(()),
             |config| {
                 assert!(native_written.get());
                 assert_eq!(
@@ -998,6 +1229,106 @@ mod tests {
         .unwrap();
 
         assert!(saved.get());
+    }
+
+    #[test]
+    fn 激活档案保存失败时补偿原生配置且不更新内存() {
+        let mut app_config = AppConfig::default();
+        upsert_agent_profile_in_config(&mut app_config, codex_profile("codex", "model-a")).unwrap();
+        let before = serde_json::to_value(&app_config).unwrap();
+        let compensated = std::cell::Cell::new(false);
+
+        let error = activate_agent_profile_transaction(
+            &mut app_config,
+            AgentKind::Codex,
+            "codex",
+            |_| Ok("backup-session"),
+            |_| {
+                compensated.set(true);
+                Ok(())
+            },
+            |_| Err("保存配置失败".to_string()),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "保存配置失败");
+        assert!(compensated.get());
+        assert_eq!(serde_json::to_value(&app_config).unwrap(), before);
+    }
+
+    #[test]
+    fn 激活档案保存和补偿均失败时返回双重错误并保留内存() {
+        let mut app_config = AppConfig::default();
+        let mut profile = codex_profile("codex", "model-a");
+        if let NativeProfileConfig::Codex { api_key, .. } = &mut profile.native_config {
+            *api_key = "secret-key".to_string();
+        }
+        upsert_agent_profile_in_config(&mut app_config, profile).unwrap();
+        let before = serde_json::to_value(&app_config).unwrap();
+
+        let error = activate_agent_profile_transaction(
+            &mut app_config,
+            AgentKind::Codex,
+            "codex",
+            |_| Ok("backup-session"),
+            |_| Err("恢复失败: secret-key".to_string()),
+            |_| Err("保存失败: secret-key".to_string()),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("保存失败: secret-key"));
+        assert!(error.contains("恢复失败: secret-key"));
+        assert_eq!(serde_json::to_value(&app_config).unwrap(), before);
+    }
+
+    #[test]
+    fn 更新活动档案保存失败时补偿原生配置且不更新内存() {
+        let mut app_config = AppConfig::default();
+        upsert_agent_profile_in_config(&mut app_config, codex_profile("codex", "model-a")).unwrap();
+        set_active_profile_in_config(&mut app_config, AgentKind::Codex, "codex").unwrap();
+        let before = serde_json::to_value(&app_config).unwrap();
+        let compensated = std::cell::Cell::new(false);
+
+        let error = upsert_agent_profile_transaction(
+            &mut app_config,
+            codex_profile("codex", "model-a"),
+            |_| Ok("backup-session"),
+            |_| {
+                compensated.set(true);
+                Ok(())
+            },
+            |_| Err("保存配置失败".to_string()),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "保存配置失败");
+        assert!(compensated.get());
+        assert_eq!(serde_json::to_value(&app_config).unwrap(), before);
+    }
+
+    #[test]
+    fn 删除活动档案保存失败时补偿原生配置且不更新内存() {
+        let mut app_config = AppConfig::default();
+        upsert_agent_profile_in_config(&mut app_config, codex_profile("codex", "model-a")).unwrap();
+        set_active_profile_in_config(&mut app_config, AgentKind::Codex, "codex").unwrap();
+        let before = serde_json::to_value(&app_config).unwrap();
+        let compensated = std::cell::Cell::new(false);
+
+        let error = delete_agent_profile_transaction(
+            &mut app_config,
+            "codex",
+            |_| Ok("backup-session"),
+            |_| {
+                compensated.set(true);
+                Ok(())
+            },
+            |_| Err("保存配置失败".to_string()),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "保存配置失败");
+        assert!(compensated.get());
+        assert_eq!(serde_json::to_value(&app_config).unwrap(), before);
     }
 
     #[test]
@@ -1018,7 +1349,8 @@ mod tests {
             &mut app_config,
             AgentKind::Codex,
             "model-b",
-            |_| Err("原生写入失败".to_string()),
+            |_| Err::<(), _>("原生写入失败".to_string()),
+            |_| Ok(()),
             |_| {
                 saved.set(true);
                 Ok(())
@@ -1029,6 +1361,38 @@ mod tests {
         assert_eq!(error, "原生写入失败");
         assert_eq!(serde_json::to_value(&app_config).unwrap(), before);
         assert!(!saved.get());
+    }
+
+    #[test]
+    fn 切换活动档案模型保存失败时补偿原生配置且不更新内存() {
+        let mut app_config = AppConfig::default();
+        let mut profile = codex_profile("codex", "model-a");
+        profile.models.push(ProfileModel {
+            id: "model-b".to_string(),
+            name: None,
+            context_window: None,
+        });
+        upsert_agent_profile_in_config(&mut app_config, profile).unwrap();
+        set_active_profile_in_config(&mut app_config, AgentKind::Codex, "codex").unwrap();
+        let before = serde_json::to_value(&app_config).unwrap();
+        let compensated = std::cell::Cell::new(false);
+
+        let error = set_active_profile_model_transaction(
+            &mut app_config,
+            AgentKind::Codex,
+            "model-b",
+            |_| Ok("backup-session"),
+            |_| {
+                compensated.set(true);
+                Ok(())
+            },
+            |_| Err("保存配置失败".to_string()),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "保存配置失败");
+        assert!(compensated.get());
+        assert_eq!(serde_json::to_value(&app_config).unwrap(), before);
     }
 
     #[test]
