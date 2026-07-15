@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
+use crate::commands::provider::CLAUDE_DEFAULT_SUPPLIER_ID;
 use crate::config::types::AgentKind;
 use crate::db::operations;
 use crate::provider_profiles::types::NativeProfileConfig;
@@ -45,7 +46,7 @@ struct ResolvedRuntimeConfig {
     profile_id: String,
     api_key: Option<String>,
     base_url: Option<String>,
-    model: String,
+    model: Option<String>,
     codex_needs_proxy: Option<bool>,
     provider: Option<String>,
     credential_source: Option<String>,
@@ -68,16 +69,26 @@ fn resolve_active_runtime_config(
         )
         .map_err(|error| format!("无法读取会话档案快照: {}", error))?
     };
-    let profile_id = persisted_profile_id
-        .as_deref()
-        .or_else(|| {
-            config
-                .agent_profile_registry
-                .active_profile_ids
-                .get(&agent_kind)
-                .map(String::as_str)
-        })
-        .ok_or_else(|| format!("{} 尚未启用供应商档案", agent_kind.as_str()))?;
+    let profile_id = persisted_profile_id.as_deref().or_else(|| {
+        config
+            .agent_profile_registry
+            .active_profile_ids
+            .get(&agent_kind)
+            .map(String::as_str)
+    });
+    if profile_id.is_none() && agent_kind == AgentKind::ClaudeCode {
+        let resolved = resolve_default_claude_runtime_config();
+        drop(config);
+        let db = state.db.lock().unwrap();
+        operations::update_session_provider(&db, session_id, &resolved.profile_id, "", None)
+            .map_err(|error| format!("无法保存会话默认供应商快照: {}", error))?;
+        return Ok(resolved);
+    }
+    let profile_id =
+        profile_id.ok_or_else(|| format!("{} 尚未启用供应商档案", agent_kind.as_str()))?;
+    if agent_kind == AgentKind::ClaudeCode && profile_id == CLAUDE_DEFAULT_SUPPLIER_ID {
+        return Ok(resolve_default_claude_runtime_config());
+    }
     let profile = config
         .agent_profile_registry
         .profiles
@@ -135,7 +146,7 @@ fn resolve_active_runtime_config(
         profile_id: profile.id.clone(),
         api_key,
         base_url,
-        model: profile.default_model.clone(),
+        model: Some(profile.default_model.clone()),
         codex_needs_proxy,
         provider,
         credential_source,
@@ -148,13 +159,25 @@ fn resolve_active_runtime_config(
             &db,
             session_id,
             &resolved.profile_id,
-            &resolved.model,
+            resolved.model.as_deref().unwrap_or_default(),
             None,
         )
         .map_err(|error| format!("无法保存会话供应商档案快照: {}", error))?;
     }
 
     Ok(resolved)
+}
+
+fn resolve_default_claude_runtime_config() -> ResolvedRuntimeConfig {
+    ResolvedRuntimeConfig {
+        profile_id: CLAUDE_DEFAULT_SUPPLIER_ID.to_string(),
+        api_key: None,
+        base_url: None,
+        model: None,
+        codex_needs_proxy: None,
+        provider: None,
+        credential_source: None,
+    }
 }
 
 fn find_claude_session_jsonl(claude_dir: &Path, claude_session_id: &str) -> Option<PathBuf> {
@@ -2159,7 +2182,7 @@ pub async fn ensure_agent_session(
         cwd,
         runtime_config.api_key,
         runtime_config.base_url,
-        Some(runtime_config.model),
+        runtime_config.model,
         reasoning_effort,
         runtime_config.codex_needs_proxy,
         runtime_config.provider,
@@ -2235,7 +2258,7 @@ pub async fn start_agent_session(
         cwd,
         runtime_config.api_key,
         runtime_config.base_url,
-        Some(runtime_config.model),
+        runtime_config.model,
         reasoning_effort,
         runtime_config.codex_needs_proxy,
         runtime_config.provider,
@@ -3464,7 +3487,7 @@ mod tests {
             resolved.base_url.as_deref(),
             Some("https://provider.example/v1")
         );
-        assert_eq!(resolved.model, "gpt-test");
+        assert_eq!(resolved.model.as_deref(), Some("gpt-test"));
         assert_eq!(resolved.codex_needs_proxy, Some(true));
         let snapshot: String = state
             .db

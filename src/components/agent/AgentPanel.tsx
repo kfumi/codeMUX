@@ -84,9 +84,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     usesLargeContext: runtimeProvider?.context_1m,
   }), [agentKind, runtimeProvider?.context_1m]);
   const modelNameWithSuffix = useMemo(() => model ? formatSelectedProviderModel(model) : undefined, [model, formatSelectedProviderModel]);
-  const hasUsableProfile = !isProfileAgent || Boolean(runtimeProfile && model);
+  const usesClaudeDefault = agentKind === 'claude_code' && !runtimeProfile && !activeProfileId;
+  const hasUsableProfile = usesClaudeDefault || !isProfileAgent || Boolean(runtimeProfile && model);
   const profileRequiredMessage = isProfileAgent && !hasUsableProfile
-    ? `请先在供应商配置中为 ${agentKind === 'codex' ? 'Codex' : agentKind === 'opencode' ? 'OpenCode' : 'Claude Code'} 添加一个包含默认模型的档案。`
+    ? `请先在供应商配置中为 ${agentKind === 'codex' ? 'Codex' : agentKind === 'opencode' ? 'OpenCode' : 'Claude Code'} 添加一个包含默认模型的供应商。`
     : undefined;
   const snapshotDiffersFromGlobal = Boolean(
     isProfileAgent

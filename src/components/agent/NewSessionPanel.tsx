@@ -67,14 +67,15 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   );
   const providerModels = useMemo(() => getProviderModelList(selectedProvider), [selectedProvider]);
   const effectiveModel = selectedModel || getPrimaryProviderModel(selectedProvider);
-  const hasUsableProfile = !isProfileAgent || Boolean(
+  const usesClaudeDefault = selectedAgentKind === 'claude_code' && !activeProfileId;
+  const hasUsableProfile = usesClaudeDefault || !isProfileAgent || Boolean(
     activeProfileId
       && selectedProvider?.id === activeProfileId
       && effectiveModel
       && providerModels.includes(effectiveModel),
   );
   const profileRequiredMessage = isProfileAgent && !hasUsableProfile
-    ? `请先在供应商配置中为 ${selectedAgent?.label ?? '当前智能体'} 添加一个包含默认模型的档案。`
+    ? `请先在供应商配置中为 ${selectedAgent?.label ?? '当前智能体'} 添加一个包含默认模型的供应商。`
     : undefined;
   const formatSelectedProviderModel = useMemo(() => (
     (item: string) => formatModelDisplayName({
@@ -128,7 +129,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
 
   useEffect(() => {
     if (!isProfileAgent) return;
-    const active = availableProfiles.find((profile) => profile.id === activeProfileId) ?? availableProfiles[0];
+    const active = availableProfiles.find((profile) => profile.id === activeProfileId);
     if (!active) {
       setSelectedProviderId(null);
       setSelectedModel(null);

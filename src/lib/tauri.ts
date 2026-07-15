@@ -287,6 +287,8 @@ export const configApi = {
     invokeLogged('upsert_agent_provider_profile', { profile }),
   activateAgentProfile: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string): Promise<void> =>
     invokeLogged('activate_agent_provider_profile', { agentKind, profileId }),
+  activateDefaultClaudeSupplier: (): Promise<void> =>
+    invokeLogged('activate_default_claude_supplier'),
   setActiveAgentProfileModel: (agentKind: 'claude_code' | 'codex' | 'opencode', defaultModel: string): Promise<void> =>
     invokeLogged('set_active_agent_profile_model', { agentKind, defaultModel }),
   deleteAgentProfile: (profileId: string): Promise<void> =>

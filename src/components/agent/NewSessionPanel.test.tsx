@@ -202,7 +202,7 @@ describe('NewSessionPanel', () => {
     expect(onSubmit).toHaveBeenCalledWith({ text: 'Ship the feature' });
   });
 
-  it('blocks a new conversation until the selected agent has an active profile and model', async () => {
+  it('allows a Claude conversation with the default local supplier', async () => {
     const onSubmit = vi.fn();
     useSettingsStore.setState((state) => ({
       ...state,
@@ -214,12 +214,11 @@ describe('NewSessionPanel', () => {
 
     render(<NewSessionPanel onSubmit={onSubmit} />);
 
-    expect(composerProps.at(-1)?.disabled).toBe(true);
-    expect(composerProps.at(-1)?.disabledMessage).toBe('请先在供应商配置中为 Claude Code 添加一个包含默认模型的档案。');
+    expect(composerProps.at(-1)?.disabled).toBe(false);
 
     await composerProps[0]?.onSend?.('Ship the feature');
 
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledWith({ text: 'Ship the feature' });
   });
 
   it('keeps normal Codex plan mode draft sends as the original user text', async () => {

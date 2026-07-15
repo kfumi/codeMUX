@@ -50,7 +50,7 @@ describe('ProviderConfigPanel', () => {
     const textarea = screen.getByLabelText(/模型列表/) as HTMLTextAreaElement;
     expect(textarea.value).toBe('gpt-5\ngpt-5-mini');
     fireEvent.change(textarea, { target: { value: 'gpt-5\ngpt-5-mini\n' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存档案' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存供应商' }));
 
     await waitFor(() => expect(upsertAgentProfile).toHaveBeenCalled());
     expect(upsertAgentProfile).toHaveBeenCalledWith(expect.objectContaining({

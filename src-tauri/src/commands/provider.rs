@@ -19,6 +19,8 @@ use std::{
 };
 use tauri::{path::BaseDirectory, AppHandle, Manager, State};
 
+pub const CLAUDE_DEFAULT_SUPPLIER_ID: &str = "__claude_default__";
+
 fn acquire_profile_operation_lock(lock: &Mutex<()>) -> Result<MutexGuard<'_, ()>, String> {
     lock.lock().map_err(|_| "档案操作锁不可用".to_string())
 }
@@ -858,6 +860,15 @@ pub fn upsert_agent_provider_profile(
     );
 
     let profile_for_redaction = profile.clone();
+    if profile.agent_kind == AgentKind::ClaudeCode {
+        let mut updated_config = app_config.clone();
+        upsert_agent_profile_in_config(&mut updated_config, profile)
+            .map_err(|error| redact_profile_error(&error, &profile_for_redaction))?;
+        config::save_config(&app, &updated_config)
+            .map_err(|error| redact_profile_error(&error, &profile_for_redaction))?;
+        *app_config = updated_config;
+        return Ok(());
+    }
     let compensation = upsert_agent_profile_transaction(
         &mut app_config,
         profile,
@@ -895,7 +906,21 @@ pub fn activate_agent_provider_profile(
         agent_kind.as_str()
     );
     let mut app_config = state.config.lock().unwrap();
+    if profile_id == CLAUDE_DEFAULT_SUPPLIER_ID {
+        return Err("默认供应商必须通过专用切换命令激活".to_string());
+    }
     let profile_for_redaction = agent_profile_from_config(&app_config, agent_kind, &profile_id)?;
+    if agent_kind == AgentKind::ClaudeCode
+        && !app_config
+            .agent_profile_registry
+            .active_profile_ids
+            .contains_key(&AgentKind::ClaudeCode)
+    {
+        let paths = native_config_paths(&app)?;
+        NativeConfigWriteService::new(paths, state.app_data_dir.join("provider-profile-backups"))
+            .backup_claude_settings()
+            .map_err(|error| format!("无法备份默认 Claude Code 配置: {error}"))?;
+    }
     let compensation = activate_agent_profile_transaction(
         &mut app_config,
         agent_kind,
@@ -913,6 +938,35 @@ pub fn activate_agent_provider_profile(
     )
     .map_err(|error| redact_profile_error(&error, &profile_for_redaction))?;
     discard_native_profile_backup_after_success(state.inner(), &app, &compensation);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn activate_default_claude_supplier(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let _operation_lock = acquire_profile_operation_lock(&state.provider_profile_operation_lock)?;
+    let mut app_config = state.config.lock().unwrap();
+    if !app_config
+        .agent_profile_registry
+        .active_profile_ids
+        .contains_key(&AgentKind::ClaudeCode)
+    {
+        return Ok(());
+    }
+    let paths = native_config_paths(&app)?;
+    NativeConfigWriteService::new(paths, state.app_data_dir.join("provider-profile-backups"))
+        .restore_claude_settings_backup()
+        .map_err(|error| format!("无法恢复默认 Claude Code 配置: {error}"))?;
+
+    let mut updated_config = app_config.clone();
+    updated_config
+        .agent_profile_registry
+        .active_profile_ids
+        .remove(&AgentKind::ClaudeCode);
+    config::save_config(&app, &updated_config)?;
+    *app_config = updated_config;
     Ok(())
 }
 

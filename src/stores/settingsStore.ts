@@ -48,6 +48,7 @@ interface SettingsState {
   testProvider: (providerId: string) => Promise<string>;
   upsertAgentProfile: (profile: AgentProviderProfileUpsert) => Promise<void>;
   activateAgentProfile: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string) => Promise<void>;
+  activateDefaultClaudeSupplier: () => Promise<void>;
   setActiveAgentProfileModel: (agentKind: 'claude_code' | 'codex' | 'opencode', model: string) => Promise<void>;
   deleteAgentProfile: (profileId: string) => Promise<void>;
   testAgentProfile: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string) => Promise<string>;
@@ -224,6 +225,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   activateAgentProfile: async (agentKind, profileId) => {
     try {
       await configApi.activateAgentProfile(agentKind, profileId);
+      await get().fetchConfig();
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
+    }
+  },
+  activateDefaultClaudeSupplier: async () => {
+    try {
+      await configApi.activateDefaultClaudeSupplier();
       await get().fetchConfig();
     } catch (error) {
       set({ error: String(error) });

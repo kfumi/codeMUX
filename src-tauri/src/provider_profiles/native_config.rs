@@ -26,6 +26,10 @@ impl NativeConfigPaths {
         self.claude_dir.join("settings.json")
     }
 
+    pub fn claude_settings_backup_path(&self) -> PathBuf {
+        self.claude_dir.join("settings.json.bak")
+    }
+
     pub fn codex_auth_path(&self) -> PathBuf {
         self.codex_dir.join("auth.json")
     }
@@ -266,6 +270,18 @@ fn merge_json_objects(
     Ok(())
 }
 
+pub fn merge_claude_settings_value(current: Value, supplier: Value) -> Result<Value, String> {
+    let mut current = current;
+    let supplier = supplier
+        .as_object()
+        .ok_or_else(|| "Claude Code settings 必须为对象".to_string())?;
+    let target = current
+        .as_object_mut()
+        .ok_or_else(|| "Claude Code settings 必须为对象".to_string())?;
+    merge_json_objects(target, supplier, "Claude Code")?;
+    Ok(current)
+}
+
 fn json_value_kind(value: &Value) -> &'static str {
     match value {
         Value::Null => "null",
@@ -288,51 +304,12 @@ pub fn merge_claude_settings(
 fn merge_claude_settings_with_model(
     existing: Value,
     profile: &NativeProfileConfig,
-    default_model: Option<&str>,
+    _default_model: Option<&str>,
 ) -> Result<Value, String> {
     let Some(profile_settings) = profile.claude_settings() else {
         return Err("原生配置类型与 Claude Code 不匹配".to_string());
     };
-
-    let mut existing = merge_json_advanced_config(existing, Some(profile_settings), "Claude Code")?;
-    let settings = existing
-        .as_object_mut()
-        .ok_or_else(|| "Claude Code settings.json 顶层必须为对象".to_string())?;
-    let env = settings
-        .entry("env")
-        .or_insert_with(|| Value::Object(Map::new()))
-        .as_object_mut()
-        .ok_or_else(|| "Claude Code settings.json 的 env 必须为对象".to_string())?;
-
-    let profile_env = profile_settings
-        .get("env")
-        .and_then(Value::as_object)
-        .ok_or_else(|| "Claude Code settings 的 env 必须为对象".to_string())?;
-    for key in [
-        "ANTHROPIC_AUTH_TOKEN",
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_MODEL",
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-        "ANTHROPIC_DEFAULT_SONNET_MODEL",
-        "ANTHROPIC_DEFAULT_OPUS_MODEL",
-        "ANTHROPIC_DEFAULT_FABLE_MODEL",
-    ] {
-        if let Some(value) = profile_env.get(key) {
-            env.insert(key.to_string(), value.clone());
-        }
-    }
-    if let Some(default_model) = default_model {
-        for key in [
-            "ANTHROPIC_MODEL",
-            "ANTHROPIC_DEFAULT_SONNET_MODEL",
-            "ANTHROPIC_DEFAULT_OPUS_MODEL",
-            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-            "ANTHROPIC_DEFAULT_FABLE_MODEL",
-        ] {
-            env.insert(key.to_string(), Value::String(default_model.to_string()));
-        }
-    }
-    Ok(existing)
+    merge_claude_settings_value(existing, profile_settings.clone())
 }
 
 fn merge_codex_auth(mut existing: Value, profile: &NativeProfileConfig) -> Result<Value, String> {
@@ -611,7 +588,8 @@ mod tests {
             NativeProfileConfig::ClaudeCode {
                 settings: serde_json::json!({ "env": {
                     "ANTHROPIC_AUTH_TOKEN": "key",
-                    "ANTHROPIC_BASE_URL": "https://claude.example"
+                    "ANTHROPIC_BASE_URL": "https://claude.example",
+                    "ANTHROPIC_MODEL": "claude-model"
                 }}),
                 requires_review: false,
             },
@@ -786,6 +764,26 @@ mod tests {
         assert_eq!(merged["env"]["KEEP"], "preserve-me");
         assert_eq!(merged["mcpServers"]["filesystem"]["command"], "npx");
         assert_eq!(merged["permissions"]["allow"], serde_json::json!(["Bash"]));
+    }
+
+    #[test]
+    fn claude_supplier_settings_deep_merge_preserves_current_unknown_keys() {
+        let merged = super::merge_claude_settings_value(
+            serde_json::json!({
+                "env": { "KEEP": "yes", "ANTHROPIC_MODEL": "old" },
+                "permissions": { "allow": ["Bash"] }
+            }),
+            serde_json::json!({
+                "env": { "ANTHROPIC_MODEL": "new" },
+                "theme": "auto"
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(merged["env"]["KEEP"], "yes");
+        assert_eq!(merged["env"]["ANTHROPIC_MODEL"], "new");
+        assert_eq!(merged["permissions"]["allow"], serde_json::json!(["Bash"]));
+        assert_eq!(merged["theme"], "auto");
     }
 
     #[test]
@@ -1072,7 +1070,7 @@ custom_existing = true
             requires_review: false,
         };
         let error = merge_claude_settings(serde_json::json!({}), &invalid_claude).unwrap_err();
-        assert_eq!(error, "Claude Code advanced_config 必须为对象");
+        assert_eq!(error, "Claude Code settings 必须为对象");
 
         let conflicting_claude = NativeProfileConfig::ClaudeCode {
             settings: serde_json::json!({ "mcpServers": [] }),

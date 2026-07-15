@@ -568,6 +568,50 @@ impl<O: FileOps> NativeConfigWriteService<O> {
         })
     }
 
+    pub fn backup_claude_settings(&self) -> Result<(), NativeConfigWriteError> {
+        let _lock = self.acquire_lock()?;
+        let settings = self
+            .file_ops
+            .read(&self.paths.claude_settings_path())
+            .map_err(|_| {
+                self.error(
+                    "无法读取 Claude Code settings.json",
+                    None,
+                    RollbackStatus::NotAttempted,
+                )
+            })?;
+        self.write_atomic_file(&self.paths.claude_settings_backup_path(), &settings)
+            .map_err(|_| {
+                self.error(
+                    "无法备份 Claude Code settings.json",
+                    None,
+                    RollbackStatus::NotAttempted,
+                )
+            })
+    }
+
+    pub fn restore_claude_settings_backup(&self) -> Result<(), NativeConfigWriteError> {
+        let _lock = self.acquire_lock()?;
+        let backup = self
+            .file_ops
+            .read(&self.paths.claude_settings_backup_path())
+            .map_err(|_| {
+                self.error(
+                    "Claude Code settings.json.bak 不存在或无法读取",
+                    None,
+                    RollbackStatus::NotAttempted,
+                )
+            })?;
+        self.write_atomic_file(&self.paths.claude_settings_path(), &backup)
+            .map_err(|_| {
+                self.error(
+                    "无法恢复 Claude Code settings.json",
+                    None,
+                    RollbackStatus::NotAttempted,
+                )
+            })
+    }
+
     /// 使用一次成功写入返回的备份会话补偿恢复原生配置。
     ///
     /// 该接口仅接受当前服务备份根目录下的会话目录，并在全局事务锁与每个目标锁的保护下，
@@ -1889,6 +1933,27 @@ mod tests {
 
         assert!(!result.backup_session_dir.exists());
         assert_eq!(fs::read_dir(&backup_root).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn claude默认配置备份覆盖旧备份并在恢复后保留备份() {
+        let temp = TestDirectory::new();
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(&paths.claude_dir).unwrap();
+        let service = NativeConfigWriteService::new(paths.clone(), temp.path().join("backups"));
+        fs::write(paths.claude_settings_path(), b"first").unwrap();
+        service.backup_claude_settings().unwrap();
+        fs::write(paths.claude_settings_path(), b"second").unwrap();
+        service.backup_claude_settings().unwrap();
+
+        fs::write(paths.claude_settings_path(), b"supplier").unwrap();
+        service.restore_claude_settings_backup().unwrap();
+
+        assert_eq!(fs::read(paths.claude_settings_path()).unwrap(), b"second");
+        assert_eq!(
+            fs::read(paths.claude_settings_backup_path()).unwrap(),
+            b"second"
+        );
     }
 
     #[test]

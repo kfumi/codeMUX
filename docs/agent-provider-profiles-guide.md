@@ -1,39 +1,39 @@
-# 智能体供应商档案使用说明
+# 智能体供应商使用说明
 
 ## 概览
 
-供应商配置按智能体分别管理。设置页提供 Claude Code、Codex 和 OpenCode 三个标签页；每个标签页只显示本智能体可用的档案和模型，避免不同运行时误用同一套连接配置。
+设置页按 Claude Code、Codex、OpenCode 分标签管理供应商。新建或编辑 Claude Code 供应商时，名称和备注位于同一行；配置由模型映射表和完整 JSON 共同维护。
 
-档案包含名称、Base URL、模型列表、默认模型、API Key 与该智能体专属选项。模型列表每行一个，第一行即默认模型。
+## Claude Code 默认供应商
 
-## 原生配置写入位置
+Claude Code 标签页的“默认供应商”不可编辑、不可删除，直接使用 `~/.claude/settings.json`。
 
-保存或激活档案时，CodeMUX 会以原子写入方式同步对应智能体的原生配置：
+- 从默认供应商切到已保存供应商时，会先将当前 `settings.json` 覆盖备份为 `settings.json.bak`。
+- 已保存供应商之间切换不会改写 `.bak`。
+- 切回默认供应商时，会用 `.bak` 恢复 `settings.json`，并保留 `.bak` 文件。
+- 已保存供应商配置会递归合并到当前 `settings.json`：对象按键合并，标量、数组和类型不同的同名节点以供应商配置为准，供应商未提供的当前键保持不变。
 
-- Claude Code：`settings.json`
-- Codex：`auth.json` 与 `config.toml`
-- OpenCode：`opencode.json`
+编辑 Claude Code 供应商只保存 CodeMUX 内部配置，不会立即改写 `settings.json`；只有切换供应商才会同步原生文件。
 
-写入失败时会保留或恢复原有配置，避免只更新一部分文件。
+## Claude 配置 JSON
 
-## 对话中的档案与模型
+新建 Claude Code 供应商的默认 JSON 是：
 
-新建对话时仍先选择智能体，之后的供应商与模型选择器仅加载该智能体的档案。切换供应商或模型会更新该智能体的全局默认值。
+```json
+{
+  "env": {},
+  "theme": "auto",
+  "includeCoAuthoredBy": false,
+  "autoUpdatesChannel": "latest"
+}
+```
 
-全局切换只影响之后新建或重新启动的会话：
+表单和 JSON 双向同步。API Key 写入 `ANTHROPIC_AUTH_TOKEN`，URL 写入 `ANTHROPIC_BASE_URL`，默认兜底模型写入 `ANTHROPIC_MODEL`。Sonnet、Opus、Fable 可以独立声明 1M，保存时会在对应模型值后加 `[1M]`；Haiku 没有 1M 声明项。
 
-- 正在运行的会话不会热更新。
-- 已有会话保留创建或首次启动时写入的档案 ID 与模型快照。
-- 当旧会话的快照与全局默认不同，对话页会明确提示，避免误以为当前会话已被切换。
+为便于直接维护原生配置，Claude Code JSON 会回显真实令牌。该令牌仅用于设置页配置读取与编辑；对话启动仍由 Rust 后端根据会话快照或默认本机配置解析，不由 Webview 传递给运行时。
 
-如果当前智能体没有活动档案，或活动档案没有默认模型，发送按钮会禁用，并提示先到供应商配置中补全档案。
+## 对话与会话
 
-## 密钥与高级配置
+新建对话先确定智能体。Claude Code 没有活动已保存供应商时可直接发送，CLI 会读取本机默认 `settings.json`，不会注入供应商 URL、模型或密钥。已保存供应商的切换只影响之后新建或重新启动的会话，运行中的会话不会热更新。
 
-已保存的 API Key 不会回显给前端。编辑档案时可以输入新密钥替换，或明确选择清除已保存密钥。对话启动时由 Rust 后端按会话快照和活动档案解析 API Key、Base URL、代理与 OpenCode 凭据；浏览器界面不会把这些连接机密传给 Tauri 或 sidecar。
-
-高级原生配置以 JSON 保存。保存后不会回填内容；如需替换，请输入新的 JSON；如需删除，请使用“清除已保存的高级配置”。
-
-## 旧供应商迁移
-
-旧版统一 Provider 会在读取配置时自动迁移为 Claude Code、Codex 和 OpenCode 档案。迁移的档案会显示“由旧供应商迁移而来，请核对高级原生配置”的提示。请在首次使用前检查 Base URL、模型、代理开关和高级原生配置是否符合目标智能体的要求。
+Codex 和 OpenCode 继续使用各自供应商的模型和密钥配置；这两类已保存密钥不会回显。
