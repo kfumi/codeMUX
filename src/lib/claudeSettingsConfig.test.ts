@@ -14,7 +14,7 @@ const completeForm: ClaudeSettingsForm = {
   sonnet: { displayName: 'sonnet-name', requestModel: 'sonnet', supports1m: true },
   opus: { displayName: 'opus-name', requestModel: 'opus', supports1m: false },
   fable: { displayName: 'fable-name', requestModel: 'fable', supports1m: true },
-  haiku: { displayName: 'haiku-name', requestModel: 'haiku' },
+  haiku: { requestModel: 'haiku' },
 };
 
 describe('Claude settings configuration', () => {
@@ -28,7 +28,7 @@ describe('Claude settings configuration', () => {
   });
 
   it('writes a complete form to every managed environment key', () => {
-    expect(applyClaudeFormToSettings(CLAUDE_SETTINGS_DEFAULT, completeForm).env).toMatchObject({
+    expect(applyClaudeFormToSettings(CLAUDE_SETTINGS_DEFAULT, completeForm).env).toEqual({
       ANTHROPIC_AUTH_TOKEN: 'token',
       ANTHROPIC_BASE_URL: 'https://api.example/anthropic',
       ANTHROPIC_MODEL: 'fallback',
@@ -54,6 +54,21 @@ describe('Claude settings configuration', () => {
     expect(settings.env.ANTHROPIC_DEFAULT_FABLE_MODEL).toBe('fable');
   });
 
+  it('removes an empty role model after stripping the 1M suffix', () => {
+    const existingSettings = { env: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'old-model' } };
+    const enabled = applyClaudeFormToSettings(existingSettings, {
+      ...completeForm,
+      sonnet: { ...completeForm.sonnet, requestModel: ' [1M] ', supports1m: true },
+    });
+    const disabled = applyClaudeFormToSettings(existingSettings, {
+      ...completeForm,
+      sonnet: { ...completeForm.sonnet, requestModel: ' [1M] ', supports1m: false },
+    });
+
+    expect(enabled.env).not.toHaveProperty('ANTHROPIC_DEFAULT_SONNET_MODEL');
+    expect(disabled.env).not.toHaveProperty('ANTHROPIC_DEFAULT_SONNET_MODEL');
+  });
+
   it('parses JSON back into a form while preserving unknown fields', () => {
     const parsed = parseClaudeSettingsDraft(JSON.stringify({
       env: {
@@ -74,7 +89,7 @@ describe('Claude settings configuration', () => {
 
     expect(parsed.form).toEqual({
       ...completeForm,
-      haiku: { displayName: '', requestModel: 'haiku' },
+      haiku: { requestModel: 'haiku' },
     });
     expect(parsed.settings).toMatchObject({
       env: { KEEP: 'preserved' },
@@ -97,7 +112,13 @@ describe('Claude settings configuration', () => {
   });
 
   it('rejects settings whose env value is not an object', () => {
-    expect(() => parseClaudeSettingsDraft('{"env":"invalid"}')).toThrow('配置 JSON 的 env 必须为对象。');
+    for (const source of ['{"env":"invalid"}', '{"env":null}', '{"env":[]}']) {
+      expect(() => parseClaudeSettingsDraft(source)).toThrow('配置 JSON 的 env 必须为对象。');
+    }
+  });
+
+  it('rejects an array as the top-level settings value', () => {
+    expect(() => parseClaudeSettingsDraft('[]')).toThrow('配置 JSON 必须为对象。');
   });
 
   it('removes managed environment keys for empty form values', () => {
@@ -122,19 +143,32 @@ describe('Claude settings configuration', () => {
       sonnet: { displayName: '', requestModel: '', supports1m: false },
       opus: { displayName: '', requestModel: '', supports1m: false },
       fable: { displayName: '', requestModel: '', supports1m: false },
-      haiku: { displayName: '', requestModel: '' },
+      haiku: { requestModel: '' },
     });
 
     expect(settings.env).toEqual({ KEEP: 'preserved' });
   });
 
-  it('does not expose a 1M flag for Haiku and leaves its model unchanged', () => {
+  it('does not expose a 1M flag or display name for Haiku and leaves its model unchanged', () => {
     const parsed = parseClaudeSettingsDraft('{"env":{"ANTHROPIC_DEFAULT_HAIKU_MODEL":"haiku[1M]"}}');
     const result = applyClaudeFormToSettings(CLAUDE_SETTINGS_DEFAULT, parsed.form);
 
-    expect(parsed.form.haiku).toEqual({ displayName: '', requestModel: 'haiku[1M]' });
+    expect(parsed.form.haiku).toEqual({ requestModel: 'haiku[1M]' });
     expect(result.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('haiku[1M]');
     expect('supports1m' in parsed.form.haiku).toBe(false);
+    expect('displayName' in parsed.form.haiku).toBe(false);
+  });
+
+  it('does not mutate the settings object supplied to the form writer', () => {
+    const settings = {
+      env: { KEEP: 'preserved', ANTHROPIC_DEFAULT_SONNET_MODEL: 'old-model' },
+      custom: { keep: true },
+    };
+    const original = structuredClone(settings);
+
+    applyClaudeFormToSettings(settings, completeForm);
+
+    expect(settings).toEqual(original);
   });
 
   it('strips only one trailing 1M suffix', () => {

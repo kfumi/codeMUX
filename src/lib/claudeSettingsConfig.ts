@@ -9,7 +9,6 @@ export type ClaudeRoleMapping = {
 };
 
 type ClaudeHaikuRoleMapping = {
-  displayName: string;
   requestModel: string;
 };
 
@@ -131,7 +130,6 @@ function formFromClaudeSettings(settings: ClaudeSettings): ClaudeSettingsForm {
       supports1m: fable.supports1m,
     },
     haiku: {
-      displayName: '',
       requestModel: envString(settings.env, 'ANTHROPIC_DEFAULT_HAIKU_MODEL'),
     },
   };
@@ -149,6 +147,11 @@ function writeRoleModel(
   }
 
   const normalizedModel = stripOneMillionSuffix(requestModel).value.trim();
+  if (!normalizedModel) {
+    delete env[key];
+    return;
+  }
+
   env[key] = role.supports1m ? `${normalizedModel}[1M]` : normalizedModel;
 }
 
