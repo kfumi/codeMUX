@@ -120,17 +120,7 @@ pub struct AgentProviderProfileUpsert {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum NativeProfileConfigUpsert {
     ClaudeCode {
-        #[serde(default)]
-        api_key: Option<String>,
-        #[serde(default)]
-        clear_api_key: bool,
-        anthropic_base_url: String,
-        #[serde(default)]
-        context_1m: Option<bool>,
-        #[serde(default)]
-        advanced_config: Option<serde_json::Value>,
-        #[serde(default)]
-        clear_advanced_config: bool,
+        settings: serde_json::Value,
         #[serde(default)]
         requires_review: bool,
     },
@@ -178,39 +168,13 @@ impl AgentProviderProfileUpsert {
             (
                 AgentKind::ClaudeCode,
                 NativeProfileConfigUpsert::ClaudeCode {
-                    api_key,
-                    clear_api_key,
-                    anthropic_base_url,
-                    context_1m,
-                    advanced_config,
-                    clear_advanced_config,
+                    settings,
                     requires_review,
                 },
-            ) => {
-                let previous = existing.and_then(|profile| match &profile.native_config {
-                    NativeProfileConfig::ClaudeCode {
-                        api_key,
-                        advanced_config,
-                        ..
-                    } => Some((api_key.as_str(), advanced_config.clone())),
-                    _ => None,
-                });
-                NativeProfileConfig::ClaudeCode {
-                    api_key: resolve_api_key(
-                        previous.as_ref().map(|(api_key, _)| *api_key),
-                        api_key,
-                        clear_api_key,
-                    )?,
-                    anthropic_base_url,
-                    context_1m,
-                    advanced_config: resolve_advanced_config(
-                        previous.and_then(|(_, advanced_config)| advanced_config),
-                        advanced_config,
-                        clear_advanced_config,
-                    )?,
-                    requires_review,
-                }
-            }
+            ) => NativeProfileConfig::ClaudeCode {
+                settings,
+                requires_review,
+            },
             (
                 AgentKind::Codex,
                 NativeProfileConfigUpsert::Codex {
@@ -361,12 +325,8 @@ fn redact_config_for_frontend(app_config: &AppConfig) -> AppConfig {
     }
     for profile in &mut redacted.agent_profile_registry.profiles {
         match &mut profile.native_config {
-            NativeProfileConfig::ClaudeCode {
-                api_key,
-                advanced_config,
-                ..
-            }
-            | NativeProfileConfig::Codex {
+            NativeProfileConfig::ClaudeCode { .. } => {}
+            NativeProfileConfig::Codex {
                 api_key,
                 advanced_config,
                 ..
@@ -695,14 +655,16 @@ fn profile_api_connection(
     profile.validate()?;
 
     let connection = match &profile.native_config {
-        NativeProfileConfig::ClaudeCode {
-            api_key,
-            anthropic_base_url,
-            ..
-        } => ProfileApiConnection {
+        NativeProfileConfig::ClaudeCode { .. } => ProfileApiConnection {
             protocol: ProfileApiProtocol::Anthropic,
-            api_key,
-            base_url: anthropic_base_url,
+            api_key: profile
+                .native_config
+                .claude_env_value("ANTHROPIC_AUTH_TOKEN")
+                .unwrap_or_default(),
+            base_url: profile
+                .native_config
+                .claude_env_value("ANTHROPIC_BASE_URL")
+                .unwrap_or_default(),
         },
         NativeProfileConfig::Codex {
             api_key,
@@ -728,8 +690,11 @@ fn profile_api_connection(
 
 fn redact_profile_error(error: &str, profile: &AgentProviderProfile) -> String {
     let api_key = match &profile.native_config {
-        NativeProfileConfig::ClaudeCode { api_key, .. }
-        | NativeProfileConfig::Codex { api_key, .. }
+        NativeProfileConfig::ClaudeCode { .. } => profile
+            .native_config
+            .claude_env_value("ANTHROPIC_AUTH_TOKEN")
+            .unwrap_or_default(),
+        NativeProfileConfig::Codex { api_key, .. }
         | NativeProfileConfig::OpenCode { api_key, .. } => api_key,
     };
     if api_key.is_empty() {
@@ -1363,6 +1328,56 @@ mod tests {
     }
 
     #[test]
+    fn get_config_view保留_claude_settings_中的认证令牌但继续脱敏其他档案() {
+        let mut app_config = AppConfig::default();
+        let claude: AgentProviderProfile = serde_json::from_value(serde_json::json!({
+            "id": "claude",
+            "agent_kind": "claude_code",
+            "name": "Claude",
+            "models": [{ "id": "claude-model" }],
+            "default_model": "claude-model",
+            "native_config": {
+                "type": "claude_code",
+                "api_key": "claude-secret",
+                "anthropic_base_url": "https://claude.example.test"
+            }
+        }))
+        .unwrap();
+        upsert_agent_profile_in_config(&mut app_config, claude).unwrap();
+        upsert_agent_profile_in_config(&mut app_config, codex_profile("codex", "model-a")).unwrap();
+
+        let view = redact_config_for_frontend(&app_config);
+        let claude = view
+            .agent_profile_registry
+            .profiles
+            .iter()
+            .find(|profile| profile.id == "claude")
+            .unwrap();
+        let claude_config = serde_json::to_value(&claude.native_config).unwrap();
+        let codex = view
+            .agent_profile_registry
+            .profiles
+            .iter()
+            .find(|profile| profile.id == "codex")
+            .unwrap();
+
+        assert_eq!(
+            claude_config["settings"]["env"]["ANTHROPIC_AUTH_TOKEN"],
+            "claude-secret"
+        );
+        let NativeProfileConfig::Codex {
+            api_key,
+            advanced_config,
+            ..
+        } = &codex.native_config
+        else {
+            panic!("应为 Codex 档案");
+        };
+        assert!(api_key.is_empty());
+        assert!(advanced_config.is_none());
+    }
+
+    #[test]
     fn profile_validation_rejects_default_model_not_in_models() {
         let mut profile = codex_profile("codex", "model-a");
         profile.default_model = "model-b".to_string();
@@ -1400,10 +1415,10 @@ mod tests {
             }],
             default_model: "claude-model".to_string(),
             native_config: NativeProfileConfig::ClaudeCode {
-                api_key: "test-key".to_string(),
-                anthropic_base_url: "https://api.example.test".to_string(),
-                context_1m: None,
-                advanced_config: None,
+                settings: serde_json::json!({ "env": {
+                    "ANTHROPIC_AUTH_TOKEN": "test-key",
+                    "ANTHROPIC_BASE_URL": "https://api.example.test"
+                }}),
                 requires_review: false,
             },
         };
@@ -1784,10 +1799,10 @@ mod tests {
             }],
             default_model: "claude-model".to_string(),
             native_config: NativeProfileConfig::ClaudeCode {
-                api_key: "claude-secret".to_string(),
-                anthropic_base_url: "https://claude.example.test".to_string(),
-                context_1m: None,
-                advanced_config: None,
+                settings: serde_json::json!({ "env": {
+                    "ANTHROPIC_AUTH_TOKEN": "claude-secret",
+                    "ANTHROPIC_BASE_URL": "https://claude.example.test"
+                }}),
                 requires_review: false,
             },
         };

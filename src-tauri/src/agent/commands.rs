@@ -91,13 +91,17 @@ fn resolve_active_runtime_config(
 
     let (api_key, base_url, codex_needs_proxy, provider, credential_source) =
         match &profile.native_config {
-            NativeProfileConfig::ClaudeCode {
-                api_key,
-                anthropic_base_url,
-                ..
-            } => (
-                (!api_key.trim().is_empty()).then(|| api_key.clone()),
-                (!anthropic_base_url.trim().is_empty()).then(|| anthropic_base_url.clone()),
+            NativeProfileConfig::ClaudeCode { .. } => (
+                profile
+                    .native_config
+                    .claude_env_value("ANTHROPIC_AUTH_TOKEN")
+                    .filter(|value| !value.trim().is_empty())
+                    .map(ToOwned::to_owned),
+                profile
+                    .native_config
+                    .claude_env_value("ANTHROPIC_BASE_URL")
+                    .filter(|value| !value.trim().is_empty())
+                    .map(ToOwned::to_owned),
                 None,
                 None,
                 None,

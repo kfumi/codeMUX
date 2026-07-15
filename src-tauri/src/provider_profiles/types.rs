@@ -1,19 +1,15 @@
 use crate::config::types::{AgentKind, Provider};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 const MIGRATION_REVIEW_NOTE: &str = "需要检查原生高级配置";
 
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NativeProfileConfig {
     ClaudeCode {
-        api_key: String,
-        anthropic_base_url: String,
-        #[serde(default)]
-        context_1m: Option<bool>,
-        #[serde(default)]
-        advanced_config: Option<serde_json::Value>,
+        settings: Value,
         #[serde(default)]
         requires_review: bool,
     },
@@ -42,20 +38,11 @@ impl std::fmt::Debug for NativeProfileConfig {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ClaudeCode {
-                anthropic_base_url,
-                context_1m,
-                advanced_config,
+                settings: _,
                 requires_review,
-                ..
             } => formatter
                 .debug_struct("ClaudeCode")
-                .field("api_key", &"[已脱敏]")
-                .field("anthropic_base_url", anthropic_base_url)
-                .field("context_1m", context_1m)
-                .field(
-                    "advanced_config",
-                    &advanced_config.as_ref().map(|_| "[已脱敏]"),
-                )
+                .field("settings", &"[已脱敏]")
                 .field("requires_review", requires_review)
                 .finish(),
             Self::Codex {
@@ -94,6 +81,206 @@ impl std::fmt::Debug for NativeProfileConfig {
     }
 }
 
+impl NativeProfileConfig {
+    pub fn claude_settings(&self) -> Option<&Value> {
+        match self {
+            Self::ClaudeCode { settings, .. } => Some(settings),
+            _ => None,
+        }
+    }
+
+    pub fn claude_env_value(&self, key: &str) -> Option<&str> {
+        self.claude_settings()?
+            .get("env")?
+            .as_object()?
+            .get(key)?
+            .as_str()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum NativeProfileConfigRaw {
+    ClaudeCode {
+        #[serde(default)]
+        settings: Option<Value>,
+        #[serde(default)]
+        api_key: String,
+        #[serde(default)]
+        anthropic_base_url: String,
+        #[serde(default)]
+        context_1m: Option<bool>,
+        #[serde(default)]
+        advanced_config: Option<Value>,
+        #[serde(default)]
+        requires_review: bool,
+    },
+    Codex {
+        api_key: String,
+        openai_base_url: String,
+        #[serde(default)]
+        codex_needs_proxy: Option<bool>,
+        #[serde(default)]
+        advanced_config: Option<Value>,
+        #[serde(default)]
+        requires_review: bool,
+    },
+    #[serde(rename = "opencode")]
+    OpenCode {
+        api_key: String,
+        openai_base_url: String,
+        #[serde(default)]
+        advanced_config: Option<Value>,
+        #[serde(default)]
+        requires_review: bool,
+    },
+}
+
+fn deserialize_native_profile_config(
+    value: Value,
+    default_model: &str,
+) -> Result<NativeProfileConfig, String> {
+    let raw: NativeProfileConfigRaw =
+        serde_json::from_value(value).map_err(|error| format!("原生档案配置无效: {}", error))?;
+
+    Ok(match raw {
+        NativeProfileConfigRaw::ClaudeCode {
+            settings: Some(settings),
+            requires_review,
+            ..
+        } => NativeProfileConfig::ClaudeCode {
+            settings,
+            requires_review,
+        },
+        NativeProfileConfigRaw::ClaudeCode {
+            api_key,
+            anthropic_base_url,
+            context_1m,
+            advanced_config,
+            requires_review,
+            ..
+        } => NativeProfileConfig::ClaudeCode {
+            settings: legacy_claude_settings(
+                &api_key,
+                &anthropic_base_url,
+                context_1m.unwrap_or(false),
+                advanced_config.as_ref(),
+                default_model,
+            ),
+            requires_review,
+        },
+        NativeProfileConfigRaw::Codex {
+            api_key,
+            openai_base_url,
+            codex_needs_proxy,
+            advanced_config,
+            requires_review,
+        } => NativeProfileConfig::Codex {
+            api_key,
+            openai_base_url,
+            codex_needs_proxy,
+            advanced_config,
+            requires_review,
+        },
+        NativeProfileConfigRaw::OpenCode {
+            api_key,
+            openai_base_url,
+            advanced_config,
+            requires_review,
+        } => NativeProfileConfig::OpenCode {
+            api_key,
+            openai_base_url,
+            advanced_config,
+            requires_review,
+        },
+    })
+}
+
+impl<'de> Deserialize<'de> for NativeProfileConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserialize_native_profile_config(Value::deserialize(deserializer)?, "")
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+fn legacy_claude_settings(
+    api_key: &str,
+    base_url: &str,
+    context_1m: bool,
+    advanced_config: Option<&Value>,
+    default_model: &str,
+) -> Value {
+    let mut settings = serde_json::json!({
+        "env": {},
+        "theme": "auto",
+        "includeCoAuthoredBy": false,
+        "autoUpdatesChannel": "latest",
+    });
+    if let Some(advanced) = advanced_config.and_then(Value::as_object) {
+        deep_merge_json_objects(
+            settings.as_object_mut().expect("默认设置必须为对象"),
+            advanced,
+        );
+    }
+
+    let env = settings
+        .as_object_mut()
+        .expect("默认设置必须为对象")
+        .entry("env")
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !env.is_object() {
+        *env = Value::Object(Map::new());
+    }
+    let env = env.as_object_mut().expect("env 已规范化为对象");
+    env.insert(
+        "ANTHROPIC_AUTH_TOKEN".to_string(),
+        Value::String(api_key.to_string()),
+    );
+    env.insert(
+        "ANTHROPIC_BASE_URL".to_string(),
+        Value::String(base_url.to_string()),
+    );
+    if !default_model.trim().is_empty() {
+        env.insert(
+            "ANTHROPIC_MODEL".to_string(),
+            Value::String(default_model.to_string()),
+        );
+        env.insert(
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+            Value::String(default_model.to_string()),
+        );
+        let role_model = if context_1m {
+            format!("{}[1M]", default_model)
+        } else {
+            default_model.to_string()
+        };
+        for key in [
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL",
+        ] {
+            env.insert(key.to_string(), Value::String(role_model.clone()));
+        }
+    }
+    settings
+}
+
+fn deep_merge_json_objects(target: &mut Map<String, Value>, source: &Map<String, Value>) {
+    for (key, source_value) in source {
+        match (target.get_mut(key), source_value) {
+            (Some(Value::Object(target_value)), Value::Object(source_value)) => {
+                deep_merge_json_objects(target_value, source_value);
+            }
+            _ => {
+                target.insert(key.clone(), source_value.clone());
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProfileModel {
     pub id: String,
@@ -113,7 +300,7 @@ impl ProfileModel {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct AgentProviderProfile {
     pub id: String,
     pub agent_kind: AgentKind,
@@ -124,6 +311,40 @@ pub struct AgentProviderProfile {
     pub models: Vec<ProfileModel>,
     pub default_model: String,
     pub native_config: NativeProfileConfig,
+}
+
+#[derive(Deserialize)]
+struct AgentProviderProfileRaw {
+    id: String,
+    agent_kind: AgentKind,
+    name: String,
+    #[serde(default)]
+    note: String,
+    #[serde(default)]
+    models: Vec<ProfileModel>,
+    default_model: String,
+    native_config: Value,
+}
+
+impl<'de> Deserialize<'de> for AgentProviderProfile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = AgentProviderProfileRaw::deserialize(deserializer)?;
+        let native_config =
+            deserialize_native_profile_config(raw.native_config, &raw.default_model)
+                .map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            id: raw.id,
+            agent_kind: raw.agent_kind,
+            name: raw.name,
+            note: raw.note,
+            models: raw.models,
+            default_model: raw.default_model,
+            native_config,
+        })
+    }
 }
 
 impl AgentProviderProfile {
@@ -215,14 +436,17 @@ pub fn migrate_legacy_providers(
                 models: models.clone(),
                 default_model: default_model.clone(),
                 native_config: NativeProfileConfig::ClaudeCode {
-                    api_key: provider.api_key.clone(),
-                    anthropic_base_url: provider.anthropic_base_url.clone(),
-                    context_1m: provider.context_1m,
-                    advanced_config: None,
+                    settings: legacy_claude_settings(
+                        &provider.api_key,
+                        &provider.anthropic_base_url,
+                        provider.context_1m.unwrap_or(false),
+                        None,
+                        &default_model,
+                    ),
                     requires_review: true,
                 },
             };
-            add_migrated_profile(&mut registry, profile, is_active)?;
+            add_migrated_profile(&mut registry, profile, false)?;
         }
 
         if !provider.openai_base_url.trim().is_empty() {
@@ -266,7 +490,7 @@ pub fn migrate_legacy_providers(
     }
 
     for profile in &registry.profiles {
-        if !profile.default_model.trim().is_empty() {
+        if profile.agent_kind != AgentKind::ClaudeCode && !profile.default_model.trim().is_empty() {
             registry
                 .active_profile_ids
                 .entry(profile.agent_kind)
@@ -350,8 +574,98 @@ fn add_migrated_profile(
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::{AgentProfileRegistry, AgentProviderProfile, NativeProfileConfig, ProfileModel};
-    use crate::config::types::AgentKind;
+    use super::{
+        migrate_legacy_providers, AgentProfileRegistry, AgentProviderProfile, NativeProfileConfig,
+        ProfileModel,
+    };
+    use crate::config::types::{AgentKind, Provider};
+
+    fn legacy_provider() -> Provider {
+        Provider {
+            id: "legacy".to_string(),
+            name: "旧供应商".to_string(),
+            api_key: "legacy-token".to_string(),
+            anthropic_base_url: "https://claude.example.test".to_string(),
+            openai_base_url: "https://openai.example.test/v1".to_string(),
+            default_model: "legacy-model".to_string(),
+            models: vec!["legacy-model".to_string()],
+            context_1m: Some(true),
+            codex_needs_proxy: None,
+        }
+    }
+
+    #[test]
+    fn 旧版_claude_档案会规范化为完整_settings_json() {
+        let profile: AgentProviderProfile = serde_json::from_value(serde_json::json!({
+            "id": "claude",
+            "agent_kind": "claude_code",
+            "name": "旧 Claude 档案",
+            "models": [{ "id": "legacy-model" }],
+            "default_model": "legacy-model",
+            "native_config": {
+                "type": "claude_code",
+                "api_key": "legacy-token",
+                "anthropic_base_url": "https://claude.example.test",
+                "context_1m": true,
+                "advanced_config": {
+                    "env": { "KEEP": "保留" },
+                    "permissions": { "allow": ["Bash"] }
+                }
+            }
+        }))
+        .unwrap();
+
+        let config = serde_json::to_value(profile.native_config).unwrap();
+
+        assert_eq!(
+            config["settings"]["env"]["ANTHROPIC_AUTH_TOKEN"],
+            "legacy-token"
+        );
+        assert_eq!(
+            config["settings"]["env"]["ANTHROPIC_BASE_URL"],
+            "https://claude.example.test"
+        );
+        assert_eq!(config["settings"]["env"]["ANTHROPIC_MODEL"], "legacy-model");
+        assert_eq!(
+            config["settings"]["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+            "legacy-model"
+        );
+        for key in [
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL",
+        ] {
+            assert_eq!(config["settings"]["env"][key], "legacy-model[1M]");
+        }
+        assert_eq!(config["settings"]["env"]["KEEP"], "保留");
+        assert_eq!(
+            config["settings"]["permissions"]["allow"],
+            serde_json::json!(["Bash"])
+        );
+        assert_eq!(config["settings"]["theme"], "auto");
+        assert_eq!(config["settings"]["includeCoAuthoredBy"], false);
+        assert_eq!(config["settings"]["autoUpdatesChannel"], "latest");
+        assert!(config.get("api_key").is_none());
+    }
+
+    #[test]
+    fn 旧供应商迁移不设置_claude_活动档案且保留其他智能体活动档案() {
+        let registry = migrate_legacy_providers(&[legacy_provider()], Some("legacy"))
+            .unwrap()
+            .unwrap();
+
+        assert!(!registry
+            .active_profile_ids
+            .contains_key(&AgentKind::ClaudeCode));
+        assert_eq!(
+            registry.active_profile_ids.get(&AgentKind::Codex),
+            Some(&"legacy-codex".to_string())
+        );
+        assert_eq!(
+            registry.active_profile_ids.get(&AgentKind::Opencode),
+            Some(&"legacy-opencode".to_string())
+        );
+    }
 
     #[test]
     fn rejects_native_config_for_a_different_agent_kind() {
