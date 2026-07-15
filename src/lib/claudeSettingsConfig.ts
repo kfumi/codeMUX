@@ -148,7 +148,7 @@ function writeRoleModel(
     return;
   }
 
-  const normalizedModel = stripOneMillionSuffix(requestModel).value;
+  const normalizedModel = stripOneMillionSuffix(requestModel).value.trim();
   env[key] = role.supports1m ? `${normalizedModel}[1M]` : normalizedModel;
 }
 

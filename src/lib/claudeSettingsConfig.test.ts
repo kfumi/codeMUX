@@ -45,11 +45,11 @@ describe('Claude settings configuration', () => {
   it('does not append the 1M suffix when an eligible role disables it', () => {
     const settings = applyClaudeFormToSettings(CLAUDE_SETTINGS_DEFAULT, {
       ...completeForm,
-      sonnet: { ...completeForm.sonnet, requestModel: ' sonnet[1M] ', supports1m: false },
+      sonnet: { ...completeForm.sonnet, requestModel: ' model [1M] ', supports1m: false },
       fable: { ...completeForm.fable, supports1m: false },
     });
 
-    expect(settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('sonnet');
+    expect(settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('model');
     expect(settings.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('opus');
     expect(settings.env.ANTHROPIC_DEFAULT_FABLE_MODEL).toBe('fable');
   });
