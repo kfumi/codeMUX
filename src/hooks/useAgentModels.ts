@@ -92,10 +92,6 @@ async function loadCodexModels(
 async function loadOpenCodeModels(
   activeProfile: AgentProviderProfile | null,
 ): Promise<ModelOption[]> {
-  const freeModels = [...OPENCODE_FREE_MODELS];
-
-  if (!activeProfile) return freeModels;
-
   let fileModels: ModelOption[] = [];
   try {
     const raw = await fileApi.readHomeFile('.config/opencode/opencode.json');
@@ -117,12 +113,15 @@ async function loadOpenCodeModels(
     console.warn('Failed to load OpenCode config models');
   }
 
+  const base = dedupById([...OPENCODE_FREE_MODELS, ...fileModels]);
+  if (!activeProfile) return base;
+
   const profileModels: ModelOption[] = activeProfile.models.map((m) => ({
     id: m.id,
     name: m.name ?? m.id,
   }));
 
-  return dedupById([...freeModels, ...fileModels, ...profileModels]);
+  return dedupById([...base, ...profileModels]);
 }
 
 export function useAgentModels(
