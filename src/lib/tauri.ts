@@ -313,6 +313,8 @@ export const fileApi = {
     invokeLogged('list_directory', { path, depth, basePath }),
   openProjectPath: (path: string, target: OpenTarget): Promise<void> =>
     invokeLogged('open_project_path', { path, target }),
+  readHomeFile: (relativePath: string): Promise<string> =>
+    invokeLogged('read_home_file', { relativePath }),
 };
 
 export const gitApi = {

@@ -493,6 +493,7 @@ pub fn run() {
             commands::file::open_in_explorer,
             commands::file::open_project_path,
             commands::file::list_directory,
+            commands::file::read_home_file,
             commands::git::get_git_changed_files,
             commands::git::get_git_changed_files_since_head,
             commands::git::get_git_repository_state,

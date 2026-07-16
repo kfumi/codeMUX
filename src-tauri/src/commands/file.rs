@@ -574,6 +574,15 @@ fn list_dir_recursive(
     Ok(entries)
 }
 
+/// Read a file from the user's home directory.
+/// `relative_path` is relative to ~ (e.g. ".codex/models_cache.json").
+#[tauri::command]
+pub fn read_home_file(relative_path: String) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("无法获取用户主目录")?;
+    let path = home.join(&relative_path);
+    std::fs::read_to_string(&path).map_err(|e| format!("文件读取失败: {}", e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{build_open_project_command, build_open_project_commands};
