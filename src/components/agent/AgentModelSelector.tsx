@@ -66,8 +66,13 @@ export function AgentModelSelector({
         variant="ghost"
         size="sm"
         disabled={disabled || isLoading}
-        className={compact ? 'min-w-0' : undefined}
-      />
+        className={compact ? 'min-w-0 max-w-32' : undefined}
+      >
+        <ModelSelector.Value
+          showEffort={!compact}
+          className={compact ? 'max-w-24' : undefined}
+        />
+      </ModelSelector.Trigger>
       <ModelSelector.Content searchable />
     </ModelSelector.Root>
   );
