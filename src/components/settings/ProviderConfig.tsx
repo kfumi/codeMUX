@@ -10,9 +10,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { extractCodexBaseUrl, extractCodexModelName, generateCodexDefaultConfigToml, setCodexBaseUrl, setCodexModelName } from '../../lib/codexTomlUtils';
 import { modelsFromText, modelsToText } from '../../lib/providerModels';
 import { applyClaudeFormToSettings, CLAUDE_SETTINGS_DEFAULT, parseClaudeSettingsDraft, type ClaudeRoleMapping, type ClaudeSettingsForm } from '../../lib/claudeSettingsConfig';
+import { OPENCODE_NPM_PACKAGES, OPENCODE_DEFAULT_NPM } from '../../lib/opencodePresets';
 import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../stores/settingsStore';
-import type { AgentProviderProfile, AgentProviderProfileUpsert, CodexCatalogModel } from '../../types/provider';
+import type { AgentProviderProfile, AgentProviderProfileUpsert, CodexCatalogModel, OpenCodeModel } from '../../types/provider';
 import { Button } from '../ui/button';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Input } from '../ui/input';
@@ -29,19 +30,20 @@ const baseTheme = EditorView.theme({
 });
 
 type ProfileAgentKind = 'claude_code' | 'codex' | 'opencode';
-type ProfileDraft = { id: string; name: string; note: string; models: string; apiKey: string; baseUrl: string; defaultModel: string; context1m: boolean; codexNeedsProxy: boolean; advancedConfig: string; authJson: string; configToml: string; modelCatalog: CodexCatalogModel[]; claudeForm: ClaudeSettingsForm };
+type ProfileDraft = { id: string; name: string; note: string; models: string; apiKey: string; baseUrl: string; defaultModel: string; context1m: boolean; codexNeedsProxy: boolean; advancedConfig: string; authJson: string; configToml: string; modelCatalog: CodexCatalogModel[]; claudeForm: ClaudeSettingsForm; providerKey: string; npmPackage: string; modelsConfig: Record<string, OpenCodeModel>; extraOptions: Record<string, string> };
 
 const AGENTS: Array<{ id: ProfileAgentKind; label: string; description: string; baseUrlLabel: string; placeholder: string }> = [
   { id: 'claude_code', label: 'Claude Code', description: '写入 Claude Code 的 settings.json 配置。', baseUrlLabel: 'Anthropic Base URL', placeholder: 'https://api.anthropic.com' },
   { id: 'codex', label: 'Codex', description: '写入 Codex 的 auth.json 和 config.toml 配置。', baseUrlLabel: 'OpenAI Base URL', placeholder: 'https://api.openai.com/v1' },
-  { id: 'opencode', label: 'OpenCode', description: '写入 OpenCode 的 opencode.json 配置。', baseUrlLabel: 'OpenAI 兼容 Base URL', placeholder: 'https://api.openai.com/v1' },
+  { id: 'opencode', label: 'OpenCode', description: '写入 OpenCode 的 opencode.json 配置。', baseUrlLabel: 'Base URL', placeholder: 'https://api.openai.com/v1' },
 ];
 
 function emptyDraft(): ProfileDraft {
   const settings = structuredClone(CLAUDE_SETTINGS_DEFAULT);
   const { form } = parseClaudeSettingsDraft(JSON.stringify(settings));
   const configToml = generateCodexDefaultConfigToml();
-  return { id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2), name: '', note: '', models: '', apiKey: '', baseUrl: '', defaultModel: extractCodexModelName(configToml) || 'gpt-5.6', context1m: false, codexNeedsProxy: false, advancedConfig: JSON.stringify(settings, null, 2), authJson: JSON.stringify({ OPENAI_API_KEY: '' }, null, 2), configToml, modelCatalog: [], claudeForm: form };
+  const opencodeConfig = JSON.stringify({ npm: OPENCODE_DEFAULT_NPM, options: { baseURL: '', apiKey: '', setCacheKey: true }, models: {} }, null, 2);
+  return { id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2), name: '', note: '', models: '', apiKey: '', baseUrl: '', defaultModel: extractCodexModelName(configToml) || 'gpt-5.6', context1m: false, codexNeedsProxy: false, advancedConfig: opencodeConfig, authJson: JSON.stringify({ OPENAI_API_KEY: '' }, null, 2), configToml, modelCatalog: [], claudeForm: form, providerKey: '', npmPackage: OPENCODE_DEFAULT_NPM, modelsConfig: {}, extraOptions: {} };
 }
 
 function toDraft(profile: AgentProviderProfile): ProfileDraft {
@@ -58,16 +60,20 @@ function toDraft(profile: AgentProviderProfile): ProfileDraft {
   const configToml = native.type === 'codex' ? (native.config_toml ?? '') : '';
   return {
     id: profile.id, name: profile.name, note: profile.note, models,
-    apiKey: native.type === 'codex' ? (native.api_key ?? '') : (typeof claudeEnv.ANTHROPIC_AUTH_TOKEN === 'string' ? claudeEnv.ANTHROPIC_AUTH_TOKEN : ''),
+    apiKey: native.type === 'codex' ? (native.api_key ?? '') : (native.type === 'opencode' ? (native.api_key ?? '') : (typeof claudeEnv.ANTHROPIC_AUTH_TOKEN === 'string' ? claudeEnv.ANTHROPIC_AUTH_TOKEN : '')),
     baseUrl: native.type === 'claude_code' ? (typeof claudeEnv.ANTHROPIC_BASE_URL === 'string' ? claudeEnv.ANTHROPIC_BASE_URL : '') : native.openai_base_url,
     defaultModel: native.type === 'codex' ? (extractCodexModelName(configToml) || '') : '',
     context1m: false,
     codexNeedsProxy: native.type === 'codex' && Boolean(native.codex_needs_proxy),
-    advancedConfig: JSON.stringify(parsedClaude.settings, null, 2),
+    advancedConfig: native.type === 'opencode' ? JSON.stringify({ npm: native.npm ?? OPENCODE_DEFAULT_NPM, options: { baseURL: native.openai_base_url, apiKey: native.api_key ?? '', ...Object.fromEntries(Object.entries(native.extra_options ?? {}).filter(([k]) => !['baseURL', 'apiKey'].includes(k))) }, models: native.models_config ?? {} }, null, 2) : JSON.stringify(parsedClaude.settings, null, 2),
     authJson: native.type === 'codex' ? (native.auth_json ?? '') : '',
     configToml,
     modelCatalog,
     claudeForm: parsedClaude.form,
+    providerKey: native.type === 'opencode' ? (native.provider_key ?? '') : '',
+    npmPackage: native.type === 'opencode' ? (native.npm ?? OPENCODE_DEFAULT_NPM) : OPENCODE_DEFAULT_NPM,
+    modelsConfig: native.type === 'opencode' ? (native.models_config ?? {}) : {},
+    extraOptions: native.type === 'opencode' ? (native.extra_options ?? {}) : {},
   };
 }
 
@@ -84,7 +90,9 @@ function profileModelsFromClaudeForm(form: ClaudeSettingsForm): string[] {
 function profileToUpsert(agentKind: ProfileAgentKind, draft: ProfileDraft): AgentProviderProfileUpsert {
   const models = agentKind === 'codex' && draft.modelCatalog.length > 0
     ? draft.modelCatalog.map((m) => ({ id: m.model, name: m.displayName || m.model }))
-    : modelsFromText(draft.models).map((id) => ({ id, name: id }));
+    : agentKind === 'opencode'
+      ? Object.entries(draft.modelsConfig).map(([id, m]) => ({ id, name: m.name || id }))
+      : modelsFromText(draft.models).map((id) => ({ id, name: id }));
   const common = { id: draft.id, agent_kind: agentKind, name: draft.name.trim(), note: draft.note.trim(), models, default_model: agentKind === 'codex' ? (draft.defaultModel.trim() || '') : '' };
   const advanced = draft.advancedConfig.trim() ? JSON.parse(draft.advancedConfig) : undefined;
   if (agentKind === 'claude_code') {
@@ -98,7 +106,7 @@ function profileToUpsert(agentKind: ProfileAgentKind, draft: ProfileDraft): Agen
     };
   }
   if (agentKind === 'codex') return { ...common, native_config: { type: 'codex', api_key: draft.apiKey || undefined, openai_base_url: draft.baseUrl.trim(), codex_needs_proxy: draft.codexNeedsProxy, advanced_config: advanced, auth_json: draft.authJson.trim() || undefined, config_toml: draft.configToml.trim() || undefined, model_catalog: draft.modelCatalog.length > 0 ? draft.modelCatalog : undefined } };
-  return { ...common, native_config: { type: 'opencode', api_key: draft.apiKey || undefined, openai_base_url: draft.baseUrl.trim(), advanced_config: advanced } };
+  return { ...common, native_config: { type: 'opencode', api_key: draft.apiKey || undefined, openai_base_url: draft.baseUrl.trim(), provider_key: draft.providerKey.trim() || undefined, npm: draft.npmPackage || undefined, models_config: Object.keys(draft.modelsConfig).length > 0 ? draft.modelsConfig : undefined, extra_options: Object.keys(draft.extraOptions).length > 0 ? draft.extraOptions : undefined, advanced_config: advanced } };
 }
 
 function ModelDropdown({ models, onSelect }: { models: string[]; onSelect: (model: string) => void }) {
@@ -347,8 +355,243 @@ function ClaudeAdvancedOptions({ editing, updateClaudeForm, fetchedModels, fetch
   );
 }
 
+type OpenCodeAdvancedOptionsProps = {
+  editing: ProfileDraft;
+  setEditing: React.Dispatch<React.SetStateAction<ProfileDraft | null>>;
+};
+
+function OpenCodeAdvancedOptions({ editing, setEditing }: OpenCodeAdvancedOptionsProps) {
+  const [fetching, setFetching] = useState(false);
+  const [fetchedModels, setFetchedModels] = useState<string[]>([]);
+
+  const handleFetchModels = useCallback(async () => {
+    if (!editing.baseUrl.trim() || !editing.apiKey.trim()) {
+      toast.error('请先填写 API Key 和 Base URL。');
+      return;
+    }
+    setFetching(true);
+    try {
+      const base = editing.baseUrl.replace(/\/$/, '');
+      let res = await fetch(`${base}/v1/models`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${editing.apiKey}` },
+      });
+      if (res.status === 404 || res.status === 405) {
+        res = await fetch(`${base}/models`, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${editing.apiKey}` },
+        });
+      }
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      const data = await res.json();
+      const models = (data.data ?? data.models ?? []).map((m: { id: string }) => m.id).filter(Boolean) as string[];
+      setFetchedModels(models);
+      toast.success(`已获取 ${models.length} 个模型。`);
+    } catch (e) {
+      toast.error(`获取模型列表失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setFetching(false);
+    }
+  }, [editing.baseUrl, editing.apiKey]);
+
+  const handleAddModelWithSync = useCallback(() => {
+    const newKey = `model-${Date.now()}`;
+    setEditing((prev) => {
+      if (!prev) return prev;
+      const newModelsConfig = { ...prev.modelsConfig, [newKey]: { name: '' } };
+      const config = JSON.parse(prev.advancedConfig || '{}');
+      config.models = newModelsConfig;
+      return { ...prev, modelsConfig: newModelsConfig, advancedConfig: JSON.stringify(config, null, 2) };
+    });
+  }, [setEditing]);
+
+  const handleRemoveModelWithSync = useCallback((key: string) => {
+    setEditing((prev) => {
+      if (!prev) return prev;
+      const newModelsConfig = { ...prev.modelsConfig };
+      delete newModelsConfig[key];
+      const config = JSON.parse(prev.advancedConfig || '{}');
+      config.models = newModelsConfig;
+      return { ...prev, modelsConfig: newModelsConfig, advancedConfig: JSON.stringify(config, null, 2) };
+    });
+  }, [setEditing]);
+
+  const handleModelIdChangeWithSync = useCallback((oldKey: string, newKey: string) => {
+    if (oldKey === newKey || !newKey.trim()) return;
+    setEditing((prev) => {
+      if (!prev) return prev;
+      const next: Record<string, OpenCodeModel> = {};
+      for (const [k, v] of Object.entries(prev.modelsConfig)) {
+        next[k === oldKey ? newKey : k] = v;
+      }
+      const config = JSON.parse(prev.advancedConfig || '{}');
+      config.models = next;
+      return { ...prev, modelsConfig: next, advancedConfig: JSON.stringify(config, null, 2) };
+    });
+  }, [setEditing]);
+
+  const handleModelNameChangeWithSync = useCallback((key: string, name: string) => {
+    setEditing((prev) => {
+      if (!prev) return prev;
+      const newModelsConfig = { ...prev.modelsConfig, [key]: { ...prev.modelsConfig[key], name } };
+      const config = JSON.parse(prev.advancedConfig || '{}');
+      config.models = newModelsConfig;
+      return { ...prev, modelsConfig: newModelsConfig, advancedConfig: JSON.stringify(config, null, 2) };
+    });
+  }, [setEditing]);
+
+  const handleSelectModelFromDropdownWithSync = useCallback((key: string, modelId: string) => {
+    setEditing((prev) => {
+      if (!prev) return prev;
+      const next: Record<string, OpenCodeModel> = {};
+      for (const [k, v] of Object.entries(prev.modelsConfig)) {
+        if (k === key) {
+          next[modelId] = { name: modelId };
+        } else {
+          next[k] = v;
+        }
+      }
+      const config = JSON.parse(prev.advancedConfig || '{}');
+      config.models = next;
+      return { ...prev, modelsConfig: next, advancedConfig: JSON.stringify(config, null, 2) };
+    });
+  }, [setEditing]);
+
+  const handleExtraOptionKeyChangeWithSync = useCallback((oldKey: string, newKey: string) => {
+    if (oldKey === newKey) return;
+    setEditing((prev) => {
+      if (!prev) return prev;
+      const next: Record<string, string> = {};
+      for (const [k, v] of Object.entries(prev.extraOptions)) {
+        next[k === oldKey ? (newKey.trim() || oldKey) : k] = v;
+      }
+      const config = JSON.parse(prev.advancedConfig || '{}');
+      if (!config.options) config.options = {};
+      for (const [k, v] of Object.entries(next)) {
+        const trimmedKey = k.trim();
+        if (trimmedKey && !trimmedKey.startsWith('option-')) {
+          try { config.options[trimmedKey] = JSON.parse(v); } catch { config.options[trimmedKey] = v; }
+        }
+      }
+      return { ...prev, extraOptions: next, advancedConfig: JSON.stringify(config, null, 2) };
+    });
+  }, [setEditing]);
+
+  const handleExtraOptionValueChangeWithSync = useCallback((key: string, value: string) => {
+    setEditing((prev) => {
+      if (!prev) return prev;
+      const newExtraOptions = { ...prev.extraOptions, [key]: value };
+      const config = JSON.parse(prev.advancedConfig || '{}');
+      if (!config.options) config.options = {};
+      const trimmedKey = key.trim();
+      if (trimmedKey && !trimmedKey.startsWith('option-')) {
+        try { config.options[trimmedKey] = JSON.parse(value); } catch { config.options[trimmedKey] = value; }
+      }
+      return { ...prev, extraOptions: newExtraOptions, advancedConfig: JSON.stringify(config, null, 2) };
+    });
+  }, [setEditing]);
+
+  const handleAddExtraOptionWithSync = useCallback(() => {
+    const newKey = `option-${Date.now()}`;
+    setEditing((prev) => {
+      if (!prev) return prev;
+      const newExtraOptions = { ...prev.extraOptions, [newKey]: '' };
+      return { ...prev, extraOptions: newExtraOptions };
+    });
+  }, [setEditing]);
+
+  const handleRemoveExtraOptionWithSync = useCallback((key: string) => {
+    setEditing((prev) => {
+      if (!prev) return prev;
+      const newExtraOptions = { ...prev.extraOptions };
+      delete newExtraOptions[key];
+      const config = JSON.parse(prev.advancedConfig || '{}');
+      if (config.options) {
+        const trimmedKey = key.trim();
+        if (trimmedKey && !trimmedKey.startsWith('option-')) {
+          delete config.options[trimmedKey];
+        }
+      }
+      return { ...prev, extraOptions: newExtraOptions, advancedConfig: JSON.stringify(config, null, 2) };
+    });
+  }, [setEditing]);
+
+  return (
+    <div className="space-y-4">
+      {/* Models Editor */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-foreground">模型配置 <span className="text-destructive">*</span></label>
+          <div className="flex gap-1">
+            <Button type="button" variant="outline" size="sm" onClick={handleFetchModels} disabled={fetching || !editing.baseUrl.trim() || !editing.apiKey.trim()} className="h-7 gap-1">
+              {fetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              获取模型
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={handleAddModelWithSync} className="h-7 gap-1">
+              <Plus className="h-3.5 w-3.5" />添加模型
+            </Button>
+          </div>
+        </div>
+        {Object.keys(editing.modelsConfig).length === 0 ? (
+          <p className="text-xs text-destructive py-2">至少需要配置一个模型。</p>
+        ) : (
+          <div className="space-y-2">
+            {Object.entries(editing.modelsConfig).map(([key, model]) => (
+              <div key={key} className="flex items-center gap-2">
+                <Input value={key} onChange={(e) => handleModelIdChangeWithSync(key, e.target.value)} placeholder="模型 ID" className="flex-1" />
+                <div className="flex gap-1 flex-1 items-center">
+                  <Input value={model.name ?? ''} onChange={(e) => handleModelNameChangeWithSync(key, e.target.value)} placeholder="显示名称" className="flex-1" />
+                  {fetchedModels.length > 0 && (
+                    <ModelDropdown models={fetchedModels} onSelect={(id) => handleSelectModelFromDropdownWithSync(key, id)} />
+                  )}
+                </div>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-destructive" onClick={() => handleRemoveModelWithSync(key)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">模型 ID 是 API 标识符，显示名称用于 UI 展示。</p>
+      </div>
+
+      {/* Extra Options */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-foreground">额外选项</label>
+          <Button type="button" variant="outline" size="sm" onClick={handleAddExtraOptionWithSync} className="h-7 gap-1">
+            <Plus className="h-3.5 w-3.5" />添加
+          </Button>
+        </div>
+        {Object.keys(editing.extraOptions).length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
+              <span className="flex-1">键名</span>
+              <span className="flex-1">值</span>
+              <span className="w-9" />
+            </div>
+            {Object.entries(editing.extraOptions).map(([key, value]) => (
+              <div key={key} className="flex items-center gap-2">
+                <Input value={key.startsWith('option-') ? '' : key} onChange={(e) => { const v = e.target.value.trim(); if (v && v !== key) handleExtraOptionKeyChangeWithSync(key, v); }} placeholder="timeout" className="flex-1" />
+                <Input value={value} onChange={(e) => handleExtraOptionValueChangeWithSync(key, e.target.value)} placeholder="600000" className="flex-1" />
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-destructive" onClick={() => handleRemoveExtraOptionWithSync(key)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">配置额外的 SDK 选项，如 timeout、setCacheKey 等。值会自动解析类型。</p>
+      </div>
+    </div>
+  );
+}
+
 export function ProviderConfigPanel() {
-  const { config, upsertAgentProfile, activateAgentProfile, activateDefaultClaudeSupplier, activateDefaultCodexSupplier, deleteAgentProfile, testAgentProfile } = useSettingsStore();
+  const { config, upsertAgentProfile, activateAgentProfile, activateDefaultClaudeSupplier, activateDefaultCodexSupplier, activateDefaultOpenCodeSupplier, deleteAgentProfile, testAgentProfile } = useSettingsStore();
   const [agentKind, setAgentKind] = useState<ProfileAgentKind>('claude_code');
   const [editing, setEditing] = useState<ProfileDraft | null>(null);
   const [showKey, setShowKey] = useState(false);
@@ -554,6 +797,25 @@ export function ProviderConfigPanel() {
       toast.error('请填写 Base URL。');
       return;
     }
+    if (agentKind === 'opencode') {
+      if (!editing.providerKey.trim()) {
+        toast.error('请填写供应商标识。');
+        return;
+      }
+      if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(editing.providerKey.trim())) {
+        toast.error('供应商标识只能包含小写字母、数字和连字符，且不能以连字符开头或结尾。');
+        return;
+      }
+      const isDuplicate = profiles.some((p) => p.id !== editing.id && p.native_config.type === 'opencode' && (p.native_config as { provider_key?: string }).provider_key === editing.providerKey.trim());
+      if (isDuplicate) {
+        toast.error('供应商标识已存在，请使用其他标识。');
+        return;
+      }
+    }
+    if (agentKind === 'opencode' && Object.keys(editing.modelsConfig).length === 0) {
+      toast.error('请至少配置一个模型。');
+      return;
+    }
     try {
       profileToUpsert(agentKind, editing);
     } catch {
@@ -625,9 +887,31 @@ export function ProviderConfigPanel() {
               </div>
             </div>
           </> : <>
+            <label className="block space-y-1.5 text-xs text-foreground">供应商标识<Input value={editing.providerKey} onChange={(event) => setEditing({ ...editing, providerKey: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })} placeholder="如：my-provider" disabled={!!editing.id && profiles.some((p) => p.id === editing.id)} /></label>
+            <div className="space-y-1.5">
+              <label className="text-xs text-foreground">接口格式</label>
+              <Select value={editing.npmPackage} onValueChange={(v) => setEditing({ ...editing, npmPackage: v })}>
+                <SelectTrigger className="w-full"><span className="text-sm">{OPENCODE_NPM_PACKAGES.find((p) => p.value === editing.npmPackage)?.label ?? editing.npmPackage}</span></SelectTrigger>
+                <SelectContent>
+                  {OPENCODE_NPM_PACKAGES.map((pkg) => <SelectItem key={pkg.value} value={pkg.value}>{pkg.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">选择与供应商匹配的 AI SDK 包。</p>
+            </div>
             <label className="block space-y-1.5 text-xs text-foreground">API Key<div className="relative"><Input aria-label="API Key" type={showKey ? 'text' : 'password'} value={editing.apiKey} onChange={(event) => setEditing({ ...editing, apiKey: event.target.value })} placeholder="输入 API Key" className="pr-10" /><button type="button" aria-label={showKey ? '隐藏 API Key' : '显示 API Key'} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></label>
             <label className="block space-y-1.5 text-xs text-foreground">{agent.baseUrlLabel}<Input value={editing.baseUrl} onChange={(event) => setEditing({ ...editing, baseUrl: event.target.value })} placeholder={agent.placeholder} /></label>
-            <label className="block space-y-1.5 text-xs text-foreground">高级原生配置 JSON<textarea value={editing.advancedConfig} onChange={(event) => setEditing({ ...editing, advancedConfig: event.target.value })} className="min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-ring/40" /></label>
+            <OpenCodeAdvancedOptions editing={editing} setEditing={setEditing} />
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-foreground">配置 JSON</label>
+                <Button type="button" variant="ghost" size="sm" onClick={() => { if (!editing) return; try { const formatted = JSON.stringify(JSON.parse(editing.advancedConfig), null, 2); setEditing({ ...editing, advancedConfig: formatted }); } catch { /* ignore */ } }}>
+                  <Wand className="h-4 w-4 mr-1" />格式化
+                </Button>
+              </div>
+              <div className="rounded-lg border overflow-hidden">
+                <CodeMirror value={editing.advancedConfig} minHeight="120px" extensions={[json(), EditorView.lineWrapping]} theme={baseTheme} onChange={(value) => setEditing({ ...editing, advancedConfig: value })} />
+              </div>
+            </div>
           </>}
           <div className="flex justify-end gap-2 border-t border-border/45 pt-4"><Button variant="outline" onClick={() => setEditing(null)}>取消</Button><Button disabled={busy} onClick={save}>{busy && <Loader2 className="mr-2 size-4 animate-spin" />}保存供应商</Button></div>
         </div>
@@ -635,6 +919,7 @@ export function ProviderConfigPanel() {
         <div className="grid grid-cols-[repeat(auto-fill,minmax(235px,1fr))] gap-3">
           {agentKind === 'claude_code' && <div className={cn('flex min-h-42 flex-col gap-3 rounded-xl border p-4', !activeId ? 'border-primary/45 bg-primary/5' : 'border-border/55 bg-muted/20')}><div><div className="font-medium">默认供应商</div><p className="mt-1 text-xs text-muted-foreground">直接使用 ~/.claude/settings.json</p></div>{!activeId && <span className="w-fit rounded-full bg-primary/12 px-2 py-0.5 text-[11px] text-primary">当前使用</span>}<div className="mt-auto"><Button size="sm" variant="outline" disabled={busy || !activeId} onClick={() => run(() => activateDefaultClaudeSupplier(), '已切换到默认供应商。')}>切换</Button></div></div>}
           {agentKind === 'codex' && <div className={cn('flex min-h-42 flex-col gap-3 rounded-xl border p-4', !activeId ? 'border-primary/45 bg-primary/5' : 'border-border/55 bg-muted/20')}><div><div className="font-medium">默认供应商</div><p className="mt-1 text-xs text-muted-foreground">直接使用 ~/.codex/ 配置</p></div>{!activeId && <span className="w-fit rounded-full bg-primary/12 px-2 py-0.5 text-[11px] text-primary">当前使用</span>}<div className="mt-auto"><Button size="sm" variant="outline" disabled={busy || !activeId} onClick={() => run(() => activateDefaultCodexSupplier(), '已切换到默认供应商。')}>切换</Button></div></div>}
+          {agentKind === 'opencode' && <div className={cn('flex min-h-42 flex-col gap-3 rounded-xl border p-4', !activeId ? 'border-primary/45 bg-primary/5' : 'border-border/55 bg-muted/20')}><div><div className="font-medium">默认供应商</div><p className="mt-1 text-xs text-muted-foreground">直接使用 ~/.config/opencode/opencode.json</p></div>{!activeId && <span className="w-fit rounded-full bg-primary/12 px-2 py-0.5 text-[11px] text-primary">当前使用</span>}<div className="mt-auto"><Button size="sm" variant="outline" disabled={busy || !activeId} onClick={() => run(() => activateDefaultOpenCodeSupplier(), '已切换到默认供应商。')}>切换</Button></div></div>}
           {profiles.map((profile) => { const active = profile.id === activeId; const requiresReview = Boolean(profile.native_config.requires_review); const nativeCfg = profile.native_config; const profileUrl = nativeCfg.type === 'claude_code' ? (typeof nativeCfg.settings?.env === 'object' && nativeCfg.settings.env !== null ? (nativeCfg.settings.env as Record<string, unknown>).ANTHROPIC_BASE_URL : undefined) : nativeCfg.openai_base_url; return <div key={profile.id} className={cn('flex min-h-42 flex-col gap-3 rounded-xl border p-4', active ? 'border-primary/45 bg-primary/5' : 'border-border/55 bg-muted/20')}><div className="flex items-start justify-between gap-2"><div className="min-w-0"><div className="truncate font-medium">{profile.name}</div><div className="mt-1 truncate font-mono text-xs text-muted-foreground">{(typeof profileUrl === 'string' ? profileUrl : '') || '未设置 URL'}</div></div>{active && <span className="shrink-0 whitespace-nowrap rounded-full bg-primary/12 px-2 py-0.5 text-[11px] text-primary">当前使用</span>}</div>{profile.note && <p className="line-clamp-2 text-xs text-muted-foreground">{profile.note}</p>}{requiresReview && <p className="text-xs text-amber-700 dark:text-amber-300">由旧供应商迁移而来，请核对高级原生配置。</p>}<div className="mt-auto flex flex-wrap gap-1.5"><Button size="sm" variant="outline" onClick={() => setEditing(toDraft(profile))}>编辑</Button><Button size="sm" variant="outline" disabled={busy || active} onClick={() => run(() => activateAgentProfile(agentKind, profile.id), `已切换到“${profile.name}”。`)}>切换</Button><Button size="sm" variant="ghost" title="测试连接" aria-label={`测试“${profile.name}”连接`} disabled={busy} onClick={() => test(profile)}><Zap className="size-3.5" /></Button><Button size="sm" variant="ghost" title="删除供应商" aria-label={`删除供应商“${profile.name}”`} disabled={busy} onClick={() => setDeleteTarget({ id: profile.id, name: profile.name })}><Trash2 className="size-3.5 text-destructive" /></Button></div></div>; })}
           <button type="button" onClick={() => setEditing(emptyDraft())} className="flex min-h-42 items-center justify-center gap-2 rounded-xl border border-dashed border-border/65 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"><Plus className="size-4" />新建 {agent.label} 供应商</button>
         </div>

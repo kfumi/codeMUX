@@ -149,6 +149,14 @@ enum NativeProfileConfigUpsert {
         api_key: Option<String>,
         openai_base_url: String,
         #[serde(default)]
+        provider_key: Option<String>,
+        #[serde(default)]
+        npm: Option<String>,
+        #[serde(default)]
+        models_config: Option<serde_json::Value>,
+        #[serde(default)]
+        extra_options: Option<serde_json::Value>,
+        #[serde(default)]
         advanced_config: Option<serde_json::Value>,
         #[serde(default)]
         requires_review: bool,
@@ -223,6 +231,10 @@ impl AgentProviderProfileUpsert {
                 NativeProfileConfigUpsert::OpenCode {
                     api_key,
                     openai_base_url,
+                    provider_key,
+                    npm,
+                    models_config,
+                    extra_options,
                     advanced_config,
                     requires_review,
                 },
@@ -241,6 +253,10 @@ impl AgentProviderProfileUpsert {
                         api_key,
                     )?,
                     openai_base_url,
+                    provider_key,
+                    npm,
+                    models_config,
+                    extra_options,
                     advanced_config: resolve_advanced_config(
                         previous.and_then(|(_, advanced_config)| advanced_config),
                         advanced_config,
@@ -930,6 +946,17 @@ pub fn activate_agent_provider_profile(
             .backup_codex_files()
             .map_err(|error| format!("无法备份默认 Codex 配置: {error}"))?;
     }
+    if agent_kind == AgentKind::Opencode
+        && !app_config
+            .agent_profile_registry
+            .active_profile_ids
+            .contains_key(&AgentKind::Opencode)
+    {
+        let paths = native_config_paths(&app)?;
+        NativeConfigWriteService::new(paths, state.app_data_dir.join("provider-profile-backups"))
+            .backup_opencode_config()
+            .map_err(|error| format!("无法备份默认 OpenCode 配置: {error}"))?;
+    }
     let compensation = activate_agent_profile_transaction(
         &mut app_config,
         agent_kind,
@@ -1003,6 +1030,35 @@ pub fn activate_default_codex_supplier(
         .agent_profile_registry
         .active_profile_ids
         .remove(&AgentKind::Codex);
+    config::save_config(&app, &updated_config)?;
+    *app_config = updated_config;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn activate_default_opencode_supplier(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let _operation_lock = acquire_profile_operation_lock(&state.provider_profile_operation_lock)?;
+    let mut app_config = state.config.lock().unwrap();
+    if !app_config
+        .agent_profile_registry
+        .active_profile_ids
+        .contains_key(&AgentKind::Opencode)
+    {
+        return Ok(());
+    }
+    let paths = native_config_paths(&app)?;
+    NativeConfigWriteService::new(paths, state.app_data_dir.join("provider-profile-backups"))
+        .restore_opencode_config_backup()
+        .map_err(|error| format!("无法恢复默认 OpenCode 配置: {error}"))?;
+
+    let mut updated_config = app_config.clone();
+    updated_config
+        .agent_profile_registry
+        .active_profile_ids
+        .remove(&AgentKind::Opencode);
     config::save_config(&app, &updated_config)?;
     *app_config = updated_config;
     Ok(())
@@ -1898,6 +1954,10 @@ mod tests {
             native_config: NativeProfileConfig::OpenCode {
                 api_key: "opencode-secret".to_string(),
                 openai_base_url: "https://opencode.example.test/v1".to_string(),
+                provider_key: None,
+                npm: None,
+                models_config: None,
+                extra_options: None,
                 advanced_config: None,
                 requires_review: false,
             },

@@ -56,6 +56,10 @@ impl NativeConfigPaths {
     pub fn opencode_config_path(&self) -> PathBuf {
         self.opencode_dir.join("opencode.json")
     }
+
+    pub fn opencode_config_backup_path(&self) -> PathBuf {
+        self.opencode_dir.join("opencode.json.codemux.bak")
+    }
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -655,54 +659,72 @@ fn merge_opencode_config_with_model(
     let NativeProfileConfig::OpenCode {
         api_key,
         openai_base_url,
+        provider_key,
+        npm,
+        models_config,
+        extra_options,
         advanced_config,
         ..
     } = profile
     else {
         return Err("原生配置类型与 OpenCode 不匹配".to_string());
     };
-    let mut existing = merge_json_advanced_config(existing, advanced_config.as_ref(), "OpenCode")?;
+    // Merge advanced_config but filter out npm/options/models (they belong under provider.{pk})
+    let filtered_advanced = advanced_config.as_ref().and_then(|ac| {
+        ac.as_object().map(|obj| {
+            let filtered: Map<String, Value> = obj
+                .iter()
+                .filter(|(k, _)| !matches!(k.as_str(), "npm" | "options" | "models"))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            Value::Object(filtered)
+        })
+    });
+    let mut existing = merge_json_advanced_config(existing, filtered_advanced.as_ref(), "OpenCode")?;
     let root = existing
         .as_object_mut()
         .ok_or_else(|| "OpenCode opencode.json 顶层必须为对象".to_string())?;
     if let Some(default_model) = default_model {
+        let pk = provider_key.as_deref().unwrap_or("codemux-openai");
         root.insert(
             "model".to_string(),
-            Value::String(format!("codemux-openai/{default_model}")),
+            Value::String(format!("{pk}/{default_model}")),
         );
     }
-    let providers = root
-        .entry("provider")
-        .or_insert_with(|| Value::Object(Map::new()))
-        .as_object_mut()
-        .ok_or_else(|| "OpenCode opencode.json 的 provider 必须为对象".to_string())?;
-    let codemux = providers
-        .entry("codemux-openai")
-        .or_insert_with(|| Value::Object(Map::new()))
-        .as_object_mut()
-        .ok_or_else(|| {
-            "OpenCode opencode.json 的 provider.codemux-openai 必须为对象".to_string()
-        })?;
-    codemux.insert(
-        "npm".to_string(),
-        Value::String("@ai-sdk/openai-compatible".to_string()),
-    );
+    let pk = provider_key.as_deref().unwrap_or("codemux-openai");
+    let npm_str = npm.as_deref().unwrap_or("@ai-sdk/openai-compatible");
+    let mut codemux = Map::new();
+    codemux.insert("npm".to_string(), Value::String(npm_str.to_string()));
     codemux.insert(
         "name".to_string(),
-        Value::String("CodeMUX OpenAI-compatible".to_string()),
+        Value::String(format!("CodeMUX {npm_str}")),
     );
-    let options = codemux
-        .entry("options")
-        .or_insert_with(|| Value::Object(Map::new()))
-        .as_object_mut()
-        .ok_or_else(|| {
-            "OpenCode opencode.json 的 provider.codemux-openai.options 必须为对象".to_string()
-        })?;
+    let mut options = Map::new();
     options.insert(
         "baseURL".to_string(),
         Value::String(openai_base_url.clone()),
     );
     options.insert("apiKey".to_string(), Value::String(api_key.clone()));
+    if let Some(extra) = extra_options.as_ref().and_then(Value::as_object) {
+        for (k, v) in extra {
+            let trimmed_key = k.trim();
+            if !trimmed_key.is_empty() {
+                let parsed = match v {
+                    Value::String(s) => serde_json::from_str::<Value>(s).unwrap_or_else(|_| v.clone()),
+                    other => other.clone(),
+                };
+                options.insert(trimmed_key.to_string(), parsed);
+            }
+        }
+    }
+    codemux.insert("options".to_string(), Value::Object(options));
+    if let Some(models) = models_config.as_ref() {
+        codemux.insert("models".to_string(), models.clone());
+    }
+    // 完全替换 provider，只保留当前供应商
+    let mut providers = Map::new();
+    providers.insert(pk.to_string(), Value::Object(codemux));
+    root.insert("provider".to_string(), Value::Object(providers));
     Ok(existing)
 }
 
@@ -782,6 +804,10 @@ mod tests {
             NativeProfileConfig::OpenCode {
                 api_key: "key".to_string(),
                 openai_base_url: "https://opencode.example/v1".to_string(),
+                provider_key: None,
+                npm: None,
+                models_config: None,
+                extra_options: None,
                 advanced_config: None,
                 requires_review: false,
             },
@@ -851,6 +877,10 @@ mod tests {
             native_config: NativeProfileConfig::OpenCode {
                 api_key: "key".to_string(),
                 openai_base_url: "https://opencode.example".to_string(),
+                provider_key: None,
+                npm: None,
+                models_config: None,
+                extra_options: None,
                 advanced_config: None,
                 requires_review: false,
             },
@@ -1023,6 +1053,10 @@ name = "Other"
         let profile = NativeProfileConfig::OpenCode {
             api_key: "new-key".to_string(),
             openai_base_url: "https://new.example/v1".to_string(),
+            provider_key: None,
+            npm: None,
+            models_config: None,
+            extra_options: None,
             advanced_config: None,
             requires_review: false,
         };
@@ -1049,16 +1083,12 @@ name = "Other"
         assert_eq!(config["mcp"]["filesystem"]["type"], "local");
         assert_eq!(config["plugin"], serde_json::json!(["opencode-skill"]));
         assert_eq!(
-            config["provider"]["other"]["options"]["apiKey"],
-            "other-key"
-        );
-        assert_eq!(
             config["provider"]["codemux-openai"]["npm"],
             "@ai-sdk/openai-compatible"
         );
         assert_eq!(
             config["provider"]["codemux-openai"]["name"],
-            "CodeMUX OpenAI-compatible"
+            "CodeMUX @ai-sdk/openai-compatible"
         );
         assert_eq!(
             config["provider"]["codemux-openai"]["options"]["baseURL"],
@@ -1068,6 +1098,7 @@ name = "Other"
             config["provider"]["codemux-openai"]["options"]["apiKey"],
             "new-key"
         );
+        assert!(config["provider"]["other"].is_null());
     }
 
     #[test]
@@ -1188,13 +1219,11 @@ custom_existing = true
         let profile = NativeProfileConfig::OpenCode {
             api_key: "new-key".to_string(),
             openai_base_url: "https://new.example/v1".to_string(),
+            provider_key: None,
+            npm: None,
+            models_config: None,
+            extra_options: None,
             advanced_config: Some(serde_json::json!({
-                "provider": {
-                    "codemux-openai": {
-                        "custom_advanced": true,
-                        "options": { "timeout": 2000, "apiKey": "must-not-win" }
-                    }
-                },
                 "mcp": { "advanced": { "type": "local" } }
             })),
             requires_review: false,
@@ -1219,21 +1248,19 @@ custom_existing = true
 
         assert_eq!(config["mcp"]["advanced"]["type"], "local");
         assert_eq!(
-            config["provider"]["codemux-openai"]["custom_existing"],
-            true
-        );
-        assert_eq!(
-            config["provider"]["codemux-openai"]["custom_advanced"],
-            true
-        );
-        assert_eq!(
-            config["provider"]["codemux-openai"]["options"]["timeout"],
-            2000
+            config["provider"]["codemux-openai"]["npm"],
+            "@ai-sdk/openai-compatible"
         );
         assert_eq!(
             config["provider"]["codemux-openai"]["options"]["apiKey"],
             "new-key"
         );
+        assert_eq!(
+            config["provider"]["codemux-openai"]["options"]["baseURL"],
+            "https://new.example/v1"
+        );
+        assert!(config["provider"]["codemux-openai"]["custom_existing"].is_null());
+        assert!(config["provider"]["codemux-openai"]["options"]["timeout"].is_null());
     }
 
     #[test]
@@ -1280,6 +1307,10 @@ custom_existing = true
         let profile = NativeProfileConfig::OpenCode {
             api_key: "super-secret-key".to_string(),
             openai_base_url: "https://new.example/v1".to_string(),
+            provider_key: None,
+            npm: None,
+            models_config: None,
+            extra_options: None,
             advanced_config: Some(serde_json::json!({ "nested_key": "super-secret-key" })),
             requires_review: false,
         };

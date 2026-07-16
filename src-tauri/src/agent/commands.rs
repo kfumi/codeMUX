@@ -135,14 +135,18 @@ fn resolve_active_runtime_config(
             NativeProfileConfig::OpenCode {
                 api_key,
                 openai_base_url,
+                provider_key,
                 ..
-            } => (
-                (!api_key.trim().is_empty()).then(|| api_key.clone()),
-                (!openai_base_url.trim().is_empty()).then(|| openai_base_url.clone()),
-                None,
-                Some("codemux-openai".to_string()),
-                Some("codemux".to_string()),
-            ),
+            } => {
+                let pk = provider_key.as_deref().unwrap_or("codemux-openai");
+                (
+                    (!api_key.trim().is_empty()).then(|| api_key.clone()),
+                    (!openai_base_url.trim().is_empty()).then(|| openai_base_url.clone()),
+                    None,
+                    Some(pk.to_string()),
+                    Some("codemux".to_string()),
+                )
+            }
         };
 
     let resolved = ResolvedRuntimeConfig {

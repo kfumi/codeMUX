@@ -675,6 +675,44 @@ impl<O: FileOps> NativeConfigWriteService<O> {
         Ok(())
     }
 
+    pub fn backup_opencode_config(&self) -> Result<(), NativeConfigWriteError> {
+        let _lock = self.acquire_lock()?;
+        let config = self
+            .file_ops
+            .read(&self.paths.opencode_config_path())
+            .map_err(|_| {
+                self.error(
+                    "无法读取 OpenCode opencode.json",
+                    None,
+                    RollbackStatus::NotAttempted,
+                )
+            })?;
+        self.write_atomic_file(&self.paths.opencode_config_backup_path(), &config)
+            .map_err(|_| {
+                self.error(
+                    "无法备份 OpenCode opencode.json",
+                    None,
+                    RollbackStatus::NotAttempted,
+                )
+            })
+    }
+
+    pub fn restore_opencode_config_backup(&self) -> Result<(), NativeConfigWriteError> {
+        let _lock = self.acquire_lock()?;
+        // 备份文件不存在时跳过恢复，允许无配置切换到默认供应商
+        if let Ok(config) = self.file_ops.read(&self.paths.opencode_config_backup_path()) {
+            self.write_atomic_file(&self.paths.opencode_config_path(), &config)
+                .map_err(|_| {
+                    self.error(
+                        "无法恢复 OpenCode opencode.json",
+                        None,
+                        RollbackStatus::NotAttempted,
+                    )
+                })?;
+        }
+        Ok(())
+    }
+
     /// 使用一次成功写入返回的备份会话补偿恢复原生配置。
     ///
     /// 该接口仅接受当前服务备份根目录下的会话目录，并在全局事务锁与每个目标锁的保护下，

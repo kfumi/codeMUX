@@ -34,6 +34,14 @@ pub enum NativeProfileConfig {
         api_key: String,
         openai_base_url: String,
         #[serde(default)]
+        provider_key: Option<String>,
+        #[serde(default)]
+        npm: Option<String>,
+        #[serde(default)]
+        models_config: Option<Value>,
+        #[serde(default)]
+        extra_options: Option<Value>,
+        #[serde(default)]
         advanced_config: Option<serde_json::Value>,
         #[serde(default)]
         requires_review: bool,
@@ -76,6 +84,10 @@ impl std::fmt::Debug for NativeProfileConfig {
                 .finish(),
             Self::OpenCode {
                 openai_base_url,
+                provider_key,
+                npm,
+                models_config,
+                extra_options,
                 advanced_config,
                 requires_review,
                 ..
@@ -83,6 +95,10 @@ impl std::fmt::Debug for NativeProfileConfig {
                 .debug_struct("OpenCode")
                 .field("api_key", &"[已脱敏]")
                 .field("openai_base_url", openai_base_url)
+                .field("provider_key", provider_key)
+                .field("npm", npm)
+                .field("models_config", &models_config.as_ref().map(|_| "[已脱敏]"))
+                .field("extra_options", extra_options)
                 .field(
                     "advanced_config",
                     &advanced_config.as_ref().map(|_| "[已脱敏]"),
@@ -148,6 +164,14 @@ enum NativeProfileConfigRaw {
         api_key: String,
         openai_base_url: String,
         #[serde(default)]
+        provider_key: Option<String>,
+        #[serde(default)]
+        npm: Option<String>,
+        #[serde(default)]
+        models_config: Option<Value>,
+        #[serde(default)]
+        extra_options: Option<Value>,
+        #[serde(default)]
         advanced_config: Option<Value>,
         #[serde(default)]
         requires_review: bool,
@@ -209,11 +233,19 @@ fn deserialize_native_profile_config(
         NativeProfileConfigRaw::OpenCode {
             api_key,
             openai_base_url,
+            provider_key,
+            npm,
+            models_config,
+            extra_options,
             advanced_config,
             requires_review,
         } => NativeProfileConfig::OpenCode {
             api_key,
             openai_base_url,
+            provider_key,
+            npm,
+            models_config,
+            extra_options,
             advanced_config,
             requires_review,
         },
@@ -505,6 +537,10 @@ pub fn migrate_legacy_providers(
                 native_config: NativeProfileConfig::OpenCode {
                     api_key: provider.api_key.clone(),
                     openai_base_url: provider.openai_base_url.clone(),
+                    provider_key: None,
+                    npm: None,
+                    models_config: None,
+                    extra_options: None,
                     advanced_config: None,
                     requires_review: true,
                 },

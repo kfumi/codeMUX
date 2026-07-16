@@ -66,6 +66,16 @@ export interface CodexCatalogModel {
   contextWindow?: number;
 }
 
+export interface OpenCodeModel {
+  name?: string;
+  limit?: {
+    context?: number;
+    output?: number;
+  };
+  options?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 export type NativeProfileConfig =
   | {
       type: 'claude_code';
@@ -87,6 +97,10 @@ export type NativeProfileConfig =
       type: 'opencode';
       api_key: string;
       openai_base_url: string;
+      provider_key?: string | null;
+      npm?: string | null;
+      models_config?: Record<string, OpenCodeModel> | null;
+      extra_options?: Record<string, string> | null;
       advanced_config?: unknown | null;
       requires_review?: boolean;
     };
@@ -110,7 +124,7 @@ export type AgentProviderProfileUpsert = Omit<AgentProviderProfile, 'native_conf
   native_config:
     | { type: 'claude_code'; settings: Record<string, unknown>; requires_review?: boolean }
     | { type: 'codex'; api_key?: string; openai_base_url: string; codex_needs_proxy?: boolean | null; advanced_config?: unknown; auth_json?: string | null; config_toml?: string | null; model_catalog?: CodexCatalogModel[] | null; requires_review?: boolean }
-    | { type: 'opencode'; api_key?: string; openai_base_url: string; advanced_config?: unknown; requires_review?: boolean };
+    | { type: 'opencode'; api_key?: string; openai_base_url: string; provider_key?: string; npm?: string; models_config?: Record<string, OpenCodeModel> | null; extra_options?: Record<string, string> | null; advanced_config?: unknown; requires_review?: boolean };
 };
 
 export interface AppConfig {

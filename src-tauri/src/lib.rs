@@ -458,6 +458,7 @@ pub fn run() {
             commands::provider::activate_agent_provider_profile,
             commands::provider::activate_default_claude_supplier,
             commands::provider::activate_default_codex_supplier,
+            commands::provider::activate_default_opencode_supplier,
             commands::provider::set_active_agent_profile_model,
             commands::provider::delete_agent_provider_profile,
             commands::provider::fetch_agent_profile_models,

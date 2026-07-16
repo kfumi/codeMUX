@@ -291,6 +291,8 @@ export const configApi = {
     invokeLogged('activate_default_claude_supplier'),
   activateDefaultCodexSupplier: (): Promise<void> =>
     invokeLogged('activate_default_codex_supplier'),
+  activateDefaultOpenCodeSupplier: (): Promise<void> =>
+    invokeLogged('activate_default_opencode_supplier'),
   setActiveAgentProfileModel: (agentKind: 'claude_code' | 'codex' | 'opencode', defaultModel: string): Promise<void> =>
     invokeLogged('set_active_agent_profile_model', { agentKind, defaultModel }),
   deleteAgentProfile: (profileId: string): Promise<void> =>
