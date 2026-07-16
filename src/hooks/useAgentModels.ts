@@ -1,0 +1,169 @@
+import { useState, useEffect } from 'react';
+import { fileApi } from '../lib/tauri';
+import { getProviderModelList } from '../lib/providerModels';
+import { profileToSelectorProvider } from '../lib/agentProfileSelector';
+import type { AgentKind } from '../types/session';
+import type { AgentProviderProfile, CodexCatalogModel, OpenCodeModel } from '../types/provider';
+
+export interface ModelOption {
+  id: string;
+  name: string;
+  description?: string;
+  efforts?: boolean;
+}
+
+const CLAUDE_CODE_BUILTINS: ModelOption[] = [
+  { id: 'sonnet', name: 'Sonnet 5', efforts: true },
+  { id: 'opus', name: 'Opus 4.8', efforts: true },
+  { id: 'fable', name: 'Fable 5', efforts: true },
+  { id: 'haiku', name: 'Haiku 4.5', efforts: true },
+];
+
+const OPENCODE_FREE_MODELS: ModelOption[] = [
+  { id: 'opencode/nemotron-3-ultra-free', name: 'Nemotron 3 Ultra' },
+  { id: 'opencode/north-mini-code-free', name: 'North Mini Code' },
+  { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash' },
+  { id: 'opencode/mimo-v2.5-free', name: 'Mimo V2.5' },
+  { id: 'opencode/big-pickle', name: 'Big Pickle' },
+];
+
+function dedupById(models: ModelOption[]): ModelOption[] {
+  const seen = new Set<string>();
+  return models.filter((m) => {
+    if (seen.has(m.id)) return false;
+    seen.add(m.id);
+    return true;
+  });
+}
+
+async function loadClaudeCodeModels(
+  activeProfile: AgentProviderProfile | null,
+): Promise<ModelOption[]> {
+  const builtins = [...CLAUDE_CODE_BUILTINS];
+  if (!activeProfile) return builtins;
+
+  try {
+    const selectorProvider = profileToSelectorProvider(activeProfile);
+    const providerModels = getProviderModelList(selectorProvider);
+    const profileModels: ModelOption[] = providerModels.map((id) => ({
+      id,
+      name: id,
+    }));
+    return dedupById([...builtins, ...profileModels]);
+  } catch {
+    return builtins;
+  }
+}
+
+async function loadCodexModels(
+  activeProfile: AgentProviderProfile | null,
+): Promise<ModelOption[]> {
+  if (!activeProfile) {
+    try {
+      const raw = await fileApi.readHomeFile('.codex/models_cache.json');
+      const catalog = JSON.parse(raw) as CodexCatalogModel[];
+      return catalog.map((m) => ({
+        id: m.model,
+        name: m.displayName ?? m.model,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  const profileModels: ModelOption[] = activeProfile.models.map((m) => ({
+    id: m.id,
+    name: m.name ?? m.id,
+  }));
+
+  try {
+    const raw = await fileApi.readHomeFile('.codex/codemux-model-catalog.json');
+    const catalog = JSON.parse(raw) as CodexCatalogModel[];
+    const catalogModels: ModelOption[] = catalog.map((m) => ({
+      id: m.model,
+      name: m.displayName ?? m.model,
+    }));
+    return dedupById([...profileModels, ...catalogModels]);
+  } catch {
+    return profileModels;
+  }
+}
+
+async function loadOpenCodeModels(
+  activeProfile: AgentProviderProfile | null,
+): Promise<ModelOption[]> {
+  const freeModels = [...OPENCODE_FREE_MODELS];
+
+  if (!activeProfile) return freeModels;
+
+  let fileModels: ModelOption[] = [];
+  try {
+    const raw = await fileApi.readHomeFile('.config/opencode/opencode.json');
+    const config = JSON.parse(raw) as { provider?: Record<string, { models?: Record<string, OpenCodeModel> }> };
+    if (config.provider) {
+      for (const providerKey of Object.keys(config.provider)) {
+        const providerConfig = config.provider[providerKey];
+        if (providerConfig.models) {
+          for (const [modelId, modelDef] of Object.entries(providerConfig.models)) {
+            fileModels.push({
+              id: modelId,
+              name: modelDef.name ?? modelId,
+            });
+          }
+        }
+      }
+    }
+  } catch {
+    console.warn('Failed to load OpenCode config models');
+  }
+
+  const profileModels: ModelOption[] = activeProfile.models.map((m) => ({
+    id: m.id,
+    name: m.name ?? m.id,
+  }));
+
+  return dedupById([...freeModels, ...fileModels, ...profileModels]);
+}
+
+export function useAgentModels(
+  agentKind: AgentKind,
+  activeProfile: AgentProviderProfile | null,
+  activeProfileId: string | null,
+): { models: ModelOption[]; isLoading: boolean } {
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+
+    async function load() {
+      let result: ModelOption[];
+      switch (agentKind) {
+        case 'claude_code':
+          result = await loadClaudeCodeModels(activeProfile);
+          break;
+        case 'codex':
+          result = await loadCodexModels(activeProfile);
+          break;
+        case 'opencode':
+          result = await loadOpenCodeModels(activeProfile);
+          break;
+        default:
+          result = [];
+      }
+      if (!cancelled) {
+        setModels(result);
+        setIsLoading(false);
+      }
+    }
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agentKind, activeProfileId]);
+
+  return { models, isLoading };
+}
