@@ -37,6 +37,20 @@ function dedupById(models: ModelOption[]): ModelOption[] {
   });
 }
 
+function getActiveProfileFingerprint(activeProfile: AgentProviderProfile | null): string {
+  if (!activeProfile) return 'none';
+
+  return JSON.stringify({
+    id: activeProfile.id,
+    agent_kind: activeProfile.agent_kind,
+    default_model: activeProfile.default_model,
+    models: activeProfile.models.map(({ id, name }) => ({ id, name })),
+    provider_key: activeProfile.native_config.type === 'opencode'
+      ? activeProfile.native_config.provider_key
+      : undefined,
+  });
+}
+
 async function loadClaudeCodeModels(
   activeProfile: AgentProviderProfile | null,
 ): Promise<ModelOption[]> {
@@ -143,6 +157,7 @@ export function useAgentModels(
 ): { models: ModelOption[]; isLoading: boolean } {
   const [models, setModels] = useState<ModelOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const activeProfileFingerprint = getActiveProfileFingerprint(activeProfile);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,7 +189,7 @@ export function useAgentModels(
     return () => {
       cancelled = true;
     };
-  }, [agentKind, activeProfileId]);
+  }, [agentKind, activeProfileId, activeProfileFingerprint]);
 
   return { models, isLoading };
 }

@@ -63,4 +63,34 @@ describe('useAgentModels OpenCode models', () => {
     ]));
     expect(result.current.models.find((model) => model.id === 'inactive/config-model')).toBeUndefined();
   });
+
+  it('refreshes when the active profile contents change in place', async () => {
+    const profile = openCodeProfile('active-provider');
+
+    const { result, rerender } = renderHook(() => useAgentModels(
+      'opencode',
+      profile,
+      'opencode-profile',
+    ));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.models).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'active/config-model' }),
+      expect.objectContaining({ id: 'active/profile-model' }),
+    ]));
+
+    profile.models = [{ id: 'updated/profile-model', name: 'Updated Profile Model' }];
+    profile.native_config = {
+      ...profile.native_config,
+      provider_key: 'inactive-provider',
+    };
+    rerender();
+
+    await waitFor(() => expect(result.current.models).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'inactive/config-model' }),
+      expect.objectContaining({ id: 'updated/profile-model', name: 'Updated Profile Model' }),
+    ])));
+    expect(result.current.models.find((model) => model.id === 'active/config-model')).toBeUndefined();
+    expect(result.current.models.find((model) => model.id === 'active/profile-model')).toBeUndefined();
+  });
 });
