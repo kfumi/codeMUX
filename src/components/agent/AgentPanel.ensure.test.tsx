@@ -61,8 +61,9 @@ vi.mock('./assistant-ui/CodeMuxComposer', () => ({
 }));
 
 vi.mock('./AgentModelSelector', () => ({
-  AgentModelSelector: ({ activeProfileId, value, onChange }: { activeProfileId: string | null; value: string; onChange: (model: string) => void }) => (
+  AgentModelSelector: ({ activeProfileId, value, contextModel, onChange }: { activeProfileId: string | null; value: string; contextModel?: string; onChange: (model: string) => void }) => (
     <div data-testid="model-selector" data-provider-id={activeProfileId ?? ''} data-model={value}>
+      <span data-testid="model-context">{contextModel}</span>
       <button type="button" onClick={() => onChange('claude-sonnet-4-20250514')}>change model</button>
     </div>
   ),
@@ -187,7 +188,7 @@ describe('AgentPanel session bootstrapping', () => {
     expect(screen.getByTitle('变更前确认')).toHaveProperty('disabled', false);
     expect(screen.getByTestId('model-selector').dataset.model).toBe('claude-opus-4-1');
   });
-  it('uses the saved session snapshot while model changes update the global active profile', async () => {
+  it('uses global model options while preserving the saved session model for context', async () => {
     useSessionStore.setState((state) => ({
       ...state,
       sessions: state.sessions.map((session) => ({
@@ -200,8 +201,9 @@ describe('AgentPanel session bootstrapping', () => {
 
     render(<AgentPanel sessionId="session-running" />);
 
-    expect(screen.getByTestId('model-selector').dataset.providerId).toBe('profile-2');
+    expect(screen.getByTestId('model-selector').dataset.providerId).toBe('profile-1');
     expect(screen.getByTestId('model-selector').dataset.model).toBe('claude-opus-4-1');
+    expect(screen.getByTestId('model-context').textContent).toBe('claude-opus-4-1');
     expect(screen.getByTestId('composer-model').textContent).toBe('claude-opus-4-1');
     expect(screen.getByText('当前会话固定使用 Provider 2 / claude-opus-4-1；这里的切换只会应用到后续新建或重启的会话。')).toBeTruthy();
 

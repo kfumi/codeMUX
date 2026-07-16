@@ -11,6 +11,7 @@ export interface AgentModelSelectorProps {
   activeProfile: AgentProviderProfile | null;
   activeProfileId: string | null;
   value: string;
+  contextModel?: string;
   onChange: (modelId: string) => void;
   reasoningEffort: ReasoningEffort;
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
@@ -23,6 +24,7 @@ export function AgentModelSelector({
   activeProfile,
   activeProfileId,
   value,
+  contextModel,
   onChange,
   reasoningEffort,
   onReasoningEffortChange,
@@ -31,18 +33,19 @@ export function AgentModelSelector({
 }: AgentModelSelectorProps) {
   const api = useAui();
   const { models, isLoading } = useAgentModels(agentKind, activeProfile, activeProfileId);
-  const selectedModelSupportsEfforts = models.find((model) => model.id === value)?.efforts;
+  const contextModelSupportsEfforts = models.find((model) => model.id === (contextModel ?? value))?.efforts;
 
   useEffect(() => {
-    if (!value) return;
+    const registeredModel = contextModel ?? value;
+    if (!registeredModel) return;
     const config = {
-      modelName: value,
-      ...(selectedModelSupportsEfforts ? { reasoningEffort } : undefined),
+      modelName: registeredModel,
+      ...(contextModelSupportsEfforts ? { reasoningEffort } : undefined),
     };
     return api.modelContext().register({
       getModelContext: () => ({ config }),
     });
-  }, [api, value, reasoningEffort, selectedModelSupportsEfforts]);
+  }, [api, value, contextModel, reasoningEffort, contextModelSupportsEfforts]);
 
   const modelOptions = models.map((m) => ({
     id: m.id,
@@ -58,7 +61,11 @@ export function AgentModelSelector({
     <ModelSelector.Root
       models={modelOptions}
       value={value}
-      onValueChange={onChange}
+      onValueChange={(nextModel) => {
+        if (models.some((model) => model.id === nextModel)) {
+          onChange(nextModel);
+        }
+      }}
       effort={reasoningEffort}
       onEffortChange={(effort) => onReasoningEffortChange(effort as ReasoningEffort)}
     >

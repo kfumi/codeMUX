@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useAui } from '@assistant-ui/react';
@@ -17,7 +17,12 @@ vi.mock('../../hooks/useAgentModels', () => ({
 
 vi.mock('@/components/model-selector', () => ({
   ModelSelector: {
-    Root: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    Root: ({ children, models, onValueChange }: { children: React.ReactNode; models: { id: string }[]; onValueChange?: (value: string) => void }) => (
+      <div data-models={models.map((model) => model.id).join(',')}>
+        {onValueChange ? <button type="button" data-testid="choose-snapshot" onClick={() => onValueChange?.('snapshot-only-model')} /> : null}
+        {children}
+      </div>
+    ),
     Trigger: ({
       children,
       className,
@@ -29,7 +34,7 @@ vi.mock('@/components/model-selector', () => ({
       disabled?: boolean;
       size?: string;
     }) => (
-      <button type="button" className={className} data-size={size} disabled={disabled}>
+      <button type="button" data-testid="selector-trigger" className={className} data-size={size} disabled={disabled}>
         {children ?? 'selector'}
       </button>
     ),
@@ -74,7 +79,7 @@ describe('AgentModelSelector', () => {
       />,
     );
 
-    expect(screen.getByRole('button')).toHaveProperty('disabled', true);
+    expect(screen.getByTestId('selector-trigger')).toHaveProperty('disabled', true);
   });
 
   it('registers reasoning effort only when the selected model supports efforts', () => {
@@ -145,10 +150,36 @@ describe('AgentModelSelector', () => {
       />,
     );
 
-    const trigger = screen.getByRole('button');
+    const trigger = screen.getByTestId('selector-trigger');
     expect(trigger.getAttribute('data-size')).toBe('sm');
     expect(trigger.className).toContain('min-w-0');
     expect(trigger.className).toContain('max-w-32');
     expect(screen.getByText('selector').getAttribute('data-show-effort')).toBe('false');
+  });
+
+  it('only offers models returned for the active profile and rejects snapshot-only changes', () => {
+    mockedUseAui.mockReturnValue({ modelContext: () => ({ register: vi.fn() }) } as never);
+    mockedUseAgentModels.mockReturnValue({
+      models: [{ id: 'global-model', name: 'Global Model' }],
+      isLoading: false,
+    });
+    const onChange = vi.fn();
+
+    render(
+      <AgentModelSelector
+        agentKind="claude_code"
+        activeProfile={{ id: 'global-profile' } as never}
+        activeProfileId="global-profile"
+        value="global-model"
+        contextModel="snapshot-only-model"
+        onChange={onChange}
+        reasoningEffort="medium"
+        onReasoningEffortChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('selector').parentElement?.parentElement?.dataset.models).toBe('global-model');
+    fireEvent.click(screen.getByTestId('choose-snapshot'));
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

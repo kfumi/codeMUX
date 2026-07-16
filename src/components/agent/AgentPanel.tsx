@@ -308,9 +308,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                 modelSelector={(
                   <AgentModelSelector
                     agentKind={agentKind}
-                    activeProfile={runtimeProfile}
-                    activeProfileId={runtimeProfile?.id ?? null}
-                    value={sessionProfile ? model : selectorModel}
+                    activeProfile={activeProfile}
+                    activeProfileId={activeProfileId}
+                    value={selectorModel}
+                    contextModel={sessionProfile ? model : undefined}
                     onChange={handleModelChange}
                     reasoningEffort={reasoningEffort}
                     onReasoningEffortChange={handleReasoningEffortChange}
