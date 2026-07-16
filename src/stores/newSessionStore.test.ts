@@ -6,7 +6,6 @@ describe('new session store', () => {
   beforeEach(() => {
     useNewSessionStore.setState({
       selectedAgentKind: 'claude_code',
-      selectedProviderId: null,
       selectedModel: null,
       selectedReasoningEffort: 'medium',
       draftProjectId: null,
@@ -25,16 +24,13 @@ describe('new session store', () => {
   });
 
   it('tracks and clears the draft model selection', () => {
-    useNewSessionStore.getState().setSelectedProviderId('provider-1');
     useNewSessionStore.getState().setSelectedModel('gpt-5');
     useNewSessionStore.getState().setSelectedReasoningEffort('high');
 
-    expect(useNewSessionStore.getState().selectedProviderId).toBe('provider-1');
     expect(useNewSessionStore.getState().selectedModel).toBe('gpt-5');
     expect(useNewSessionStore.getState().selectedReasoningEffort).toBe('high');
 
     useNewSessionStore.getState().openDraft();
-    expect(useNewSessionStore.getState().selectedProviderId).toBeNull();
     expect(useNewSessionStore.getState().selectedModel).toBeNull();
     expect(useNewSessionStore.getState().selectedReasoningEffort).toBe('medium');
   });

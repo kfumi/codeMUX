@@ -10,6 +10,15 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import type { AgentKind } from '../../types/session';
 import { NewSessionPanel } from './NewSessionPanel';
 
+vi.mock('../../hooks/useAgentModels', () => ({
+  useAgentModels: (agentKind: AgentKind, activeProfile: any) => ({
+    isLoading: false,
+    models: activeProfile
+      ? activeProfile.models.map((model: any) => ({ id: model.id, name: model.id, efforts: true }))
+      : [],
+  }),
+}));
+
 const composerProps: Array<{
   agentKind?: AgentKind;
   placeholder?: string;
@@ -70,7 +79,6 @@ describe('NewSessionPanel', () => {
     });
     useNewSessionStore.setState({
       selectedAgentKind: 'claude_code',
-      selectedProviderId: null,
       selectedModel: null,
       selectedReasoningEffort: 'medium',
       draftProjectId: null,
@@ -200,6 +208,30 @@ describe('NewSessionPanel', () => {
     await composerProps[0]?.onSend?.('Ship the feature');
 
     expect(onSubmit).toHaveBeenCalledWith({ text: 'Ship the feature' });
+  });
+
+  it('does not submit a model left over from a different active profile', async () => {
+    const onSubmit = vi.fn();
+    render(<NewSessionPanel onSubmit={onSubmit} />);
+    const runtimeSend = [...composerProps].reverse().find((props) => props.onSend)?.onSend;
+
+    act(() => {
+      useSettingsStore.setState((state) => ({
+        ...state,
+        config: state.config ? {
+          ...state.config,
+          agent_profile_registry: {
+            ...state.config.agent_profile_registry!,
+            active_profile_ids: { claude_code: 'profile-2' },
+          },
+      } : null,
+      }));
+      useNewSessionStore.setState({ selectedModel: 'claude-opus-4-1' });
+    });
+
+    await runtimeSend?.('Ship the feature');
+
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('allows a Claude conversation with the default local supplier', async () => {

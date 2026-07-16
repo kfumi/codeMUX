@@ -9,6 +9,7 @@ import { useNewSessionStore } from '../../stores/newSessionStore';
 import { usePreviewStore } from '../../stores/previewStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useAgentModels } from '../../hooks/useAgentModels';
 import { getAgentDefinition } from '../../types/agentRegistry';
 import type { AgentInputPayload } from '../../types/agentInput';
 import { AgentSelector } from './AgentSelector';
@@ -50,9 +51,21 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   );
   const activeProfileId = isProfileAgent ? profileRegistry?.active_profile_ids?.[selectedAgentKind] ?? null : null;
   const activeProfile = availableProfiles.find((profile) => profile.id === activeProfileId) ?? null;
+  const { models, isLoading: areModelsLoading } = useAgentModels(selectedAgentKind, activeProfile, activeProfileId);
   const effectiveModel = selectedModel || activeProfile?.models.find((model) => model.id.trim())?.id.trim() || '';
+  const selectedModelIsAvailable = !selectedModel || models.some((model) => model.id === selectedModel);
+  const selectedModelBelongsToActiveProfile = !selectedModel || activeProfile?.models.some((model) => model.id === selectedModel);
   const usesClaudeDefault = selectedAgentKind === 'claude_code' && !activeProfileId;
-  const hasUsableProfile = usesClaudeDefault || !isProfileAgent || Boolean(activeProfileId && effectiveModel);
+  const hasUsableProfile = !isProfileAgent
+    || (usesClaudeDefault
+      ? Boolean(!selectedModel || (!areModelsLoading && selectedModelIsAvailable))
+      : Boolean(
+        activeProfileId
+          && effectiveModel
+          && !areModelsLoading
+          && selectedModelIsAvailable
+          && (selectedModelBelongsToActiveProfile || (selectedAgentKind === 'codex' || selectedAgentKind === 'opencode')),
+      ));
   const profileRequiredMessage = isProfileAgent && !hasUsableProfile
     ? `请先在供应商配置中为 ${selectedAgent?.label ?? '当前智能体'} 添加至少一个模型。`
     : undefined;
@@ -110,8 +123,24 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   }, [activeProfileId, availableProfiles, isProfileAgent, setSelectedModel]);
 
   const handleSend = async (input: AgentInputPayload | string) => {
-    if (!hasUsableProfile) {
+    const currentStore = useNewSessionStore.getState();
+    const currentConfig = useSettingsStore.getState().config;
+    const currentAgentKind = currentStore.selectedAgentKind;
+    const currentProfileId = currentAgentKind === 'claude_code'
+      || currentAgentKind === 'codex'
+      || currentAgentKind === 'opencode'
+      ? currentConfig?.agent_profile_registry?.active_profile_ids?.[currentAgentKind] ?? null
+      : null;
+    if (
+      currentStore.selectedAgentKind !== selectedAgentKind
+      || currentProfileId !== activeProfileId
+      || !hasUsableProfile
+      || (isProfileAgent && currentStore.selectedModel && !selectedModelIsAvailable)
+    ) {
       return;
+    }
+    if (isProfileAgent && effectiveModel !== selectedModel) {
+      setSelectedModel(effectiveModel);
     }
     const payload = typeof input === 'string' ? { text: input } : input;
     await onSubmit(payload);
