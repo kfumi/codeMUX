@@ -30,19 +30,19 @@ export function AgentModelSelector({
   compact,
 }: AgentModelSelectorProps) {
   const api = useAui();
-  const { models } = useAgentModels(agentKind, activeProfile, activeProfileId);
+  const { models, isLoading } = useAgentModels(agentKind, activeProfile, activeProfileId);
+  const selectedModelSupportsEfforts = models.find((model) => model.id === value)?.efforts;
 
   useEffect(() => {
     if (!value) return;
+    const config = {
+      modelName: value,
+      ...(selectedModelSupportsEfforts ? { reasoningEffort } : undefined),
+    };
     return api.modelContext().register({
-      getModelContext: () => ({
-        config: {
-          modelName: value,
-          reasoningEffort,
-        },
-      }),
+      getModelContext: () => ({ config }),
     });
-  }, [api, value, reasoningEffort]);
+  }, [api, value, reasoningEffort, selectedModelSupportsEfforts]);
 
   const modelOptions = models.map((m) => ({
     id: m.id,
@@ -65,7 +65,7 @@ export function AgentModelSelector({
       <ModelSelector.Trigger
         variant="ghost"
         size="sm"
-        disabled={disabled}
+        disabled={disabled || isLoading}
         className={compact ? 'min-w-0' : undefined}
       />
       <ModelSelector.Content searchable />

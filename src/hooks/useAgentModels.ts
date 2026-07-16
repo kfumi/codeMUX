@@ -20,11 +20,11 @@ const CLAUDE_CODE_BUILTINS: ModelOption[] = [
 ];
 
 const OPENCODE_FREE_MODELS: ModelOption[] = [
-  { id: 'opencode/nemotron-3-ultra-free', name: 'Nemotron 3 Ultra' },
-  { id: 'opencode/north-mini-code-free', name: 'North Mini Code' },
-  { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash' },
-  { id: 'opencode/mimo-v2.5-free', name: 'Mimo V2.5' },
-  { id: 'opencode/big-pickle', name: 'Big Pickle' },
+  { id: 'opencode/nemotron-3-ultra-free', name: 'Nemotron 3 Ultra', efforts: true },
+  { id: 'opencode/north-mini-code-free', name: 'North Mini Code', efforts: true },
+  { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash', efforts: true },
+  { id: 'opencode/mimo-v2.5-free', name: 'Mimo V2.5', efforts: true },
+  { id: 'opencode/big-pickle', name: 'Big Pickle', efforts: true },
 ];
 
 function dedupById(models: ModelOption[]): ModelOption[] {
@@ -48,6 +48,7 @@ async function loadClaudeCodeModels(
     const profileModels: ModelOption[] = providerModels.map((id) => ({
       id,
       name: id,
+      efforts: true,
     }));
     return dedupById([...builtins, ...profileModels]);
   } catch {
@@ -65,6 +66,7 @@ async function loadCodexModels(
       return catalog.map((m) => ({
         id: m.model,
         name: m.displayName ?? m.model,
+        efforts: true,
       }));
     } catch {
       return [];
@@ -74,15 +76,17 @@ async function loadCodexModels(
   const profileModels: ModelOption[] = activeProfile.models.map((m) => ({
     id: m.id,
     name: m.name ?? m.id,
+    efforts: true,
   }));
 
   try {
     const raw = await fileApi.readHomeFile('.codex/codemux-model-catalog.json');
     const catalog = JSON.parse(raw) as CodexCatalogModel[];
-    const catalogModels: ModelOption[] = catalog.map((m) => ({
-      id: m.model,
-      name: m.displayName ?? m.model,
-    }));
+      const catalogModels: ModelOption[] = catalog.map((m) => ({
+        id: m.model,
+        name: m.displayName ?? m.model,
+        efforts: true,
+      }));
     return dedupById([...profileModels, ...catalogModels]);
   } catch {
     return profileModels;
@@ -104,6 +108,7 @@ async function loadOpenCodeModels(
             fileModels.push({
               id: modelId,
               name: modelDef.name ?? modelId,
+              efforts: true,
             });
           }
         }
@@ -119,6 +124,7 @@ async function loadOpenCodeModels(
   const profileModels: ModelOption[] = activeProfile.models.map((m) => ({
     id: m.id,
     name: m.name ?? m.id,
+    efforts: true,
   }));
 
   return dedupById([...base, ...profileModels]);
