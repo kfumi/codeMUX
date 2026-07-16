@@ -52,14 +52,27 @@ vi.mock('./assistant-ui/CodeMuxComposer', () => ({
 }));
 
 vi.mock('./AgentModelSelector', () => ({
-  AgentModelSelector: ({ activeProfile, value, onChange }: any) => (
+  AgentModelSelector: ({ activeProfile, activeProfileId, value, reasoningEffort, onChange, onReasoningEffortChange }: {
+    activeProfile: { id: string; models: Array<{ id: string }> } | null;
+    activeProfileId: string | null;
+    value: string;
+    reasoningEffort: string;
+    onChange: (model: string) => void;
+    onReasoningEffortChange: (effort: string) => void;
+  }) => (
     <div>
-      <select aria-label="Models" value={value ?? ''} onChange={(event) => onChange(event.target.value)}>
+      <span data-testid="active-profile-id">{activeProfileId}</span>
+      <select aria-label="Models" value={value} onChange={(event) => onChange(event.target.value)}>
         {activeProfile?.models.map((model: any) => (
           <option key={model.id} value={model.id}>
             {model.id}
           </option>
         ))}
+      </select>
+      <select aria-label="Reasoning effort" value={reasoningEffort} onChange={(event) => onReasoningEffortChange(event.target.value)}>
+        <option value="low">low</option>
+        <option value="medium">medium</option>
+        <option value="high">high</option>
       </select>
     </div>
   ),
@@ -185,6 +198,16 @@ describe('NewSessionPanel', () => {
     expect(useNewSessionStore.getState().selectedModel).toBe('claude-opus-4-1');
   });
 
+  it('lets the draft choose reasoning effort', () => {
+    render(<NewSessionPanel onSubmit={vi.fn()} />);
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Reasoning effort' }), {
+      target: { value: 'high' },
+    });
+
+    expect(useNewSessionStore.getState().selectedReasoningEffort).toBe('high');
+  });
+
   it('does not render provider switching and only exposes the active provider models', () => {
     useSettingsStore.setState((state) => ({
       ...state,
@@ -201,6 +224,7 @@ describe('NewSessionPanel', () => {
     render(<NewSessionPanel onSubmit={vi.fn()} />);
 
     expect(screen.queryByRole('combobox', { name: 'Providers' })).toBeNull();
+    expect(screen.getByTestId('active-profile-id').textContent).toBe('profile-1');
     expect(screen.getByRole('option', { name: 'claude-sonnet-4-20250514' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'claude-opus-4-1' })).toBeTruthy();
     expect(screen.queryByRole('option', { name: 'gpt-5' })).toBeNull();
