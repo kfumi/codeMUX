@@ -16,6 +16,7 @@ const completeForm: ClaudeSettingsForm = {
   opus: { displayName: 'opus-name', requestModel: 'opus', supports1m: false },
   fable: { displayName: 'fable-name', requestModel: 'fable', supports1m: true },
   haiku: { displayName: '', requestModel: 'haiku' },
+  customModels: [],
 };
 
 describe('Claude settings configuration', () => {
@@ -31,6 +32,7 @@ describe('Claude settings configuration', () => {
         ANTHROPIC_DEFAULT_FABLE_MODEL_NAME: 'Fable 5',
         ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME: 'Haiku 4.5',
       },
+      custom_models: [],
       theme: 'auto',
       includeCoAuthoredBy: false,
       autoUpdatesChannel: 'latest',
@@ -155,6 +157,7 @@ describe('Claude settings configuration', () => {
       opus: { displayName: '', requestModel: '', supports1m: false },
       fable: { displayName: '', requestModel: '', supports1m: false },
       haiku: { displayName: '', requestModel: '' },
+      customModels: [],
     });
 
     expect(settings.env).toEqual({ KEEP: 'preserved' });
@@ -203,5 +206,39 @@ describe('Claude settings configuration', () => {
       fallbackSupports1m: false,
     });
     expect(result.env.ANTHROPIC_MODEL).toBe('claude-sonnet-4-20250514');
+  });
+
+  it('persists and restores custom models through round trip', () => {
+    const formWithCustom: ClaudeSettingsForm = {
+      ...completeForm,
+      customModels: [
+        { displayName: 'DeepSeek V4', requestModel: 'deepseek-v4' },
+        { displayName: 'Qwen Max', requestModel: 'qwen-max' },
+      ],
+    };
+
+    const settings = applyClaudeFormToSettings(CLAUDE_SETTINGS_DEFAULT, formWithCustom);
+    expect(settings.custom_models).toEqual([
+      { displayName: 'DeepSeek V4', requestModel: 'deepseek-v4' },
+      { displayName: 'Qwen Max', requestModel: 'qwen-max' },
+    ]);
+
+    const parsed = parseClaudeSettingsDraft(JSON.stringify(settings));
+    expect(parsed.form.customModels).toEqual([
+      { displayName: 'DeepSeek V4', requestModel: 'deepseek-v4' },
+      { displayName: 'Qwen Max', requestModel: 'qwen-max' },
+    ]);
+  });
+
+  it('removes custom_models key when customModels is empty', () => {
+    const settingsWithCustom = {
+      env: {},
+      custom_models: [{ displayName: 'test', requestModel: 'test' }],
+    };
+    const result = applyClaudeFormToSettings(settingsWithCustom, {
+      ...completeForm,
+      customModels: [],
+    });
+    expect(result).not.toHaveProperty('custom_models');
   });
 });

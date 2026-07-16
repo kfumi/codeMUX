@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { extractCodexBaseUrl, extractCodexModelName, generateCodexDefaultConfigToml, setCodexBaseUrl, setCodexModelName } from '../../lib/codexTomlUtils';
 import { modelsFromText, modelsToText } from '../../lib/providerModels';
-import { applyClaudeFormToSettings, CLAUDE_SETTINGS_DEFAULT, parseClaudeSettingsDraft, type ClaudeRoleMapping, type ClaudeSettingsForm } from '../../lib/claudeSettingsConfig';
+import { applyClaudeFormToSettings, CLAUDE_SETTINGS_DEFAULT, parseClaudeSettingsDraft, type ClaudeCustomModel, type ClaudeRoleMapping, type ClaudeSettingsForm } from '../../lib/claudeSettingsConfig';
 import { OPENCODE_NPM_PACKAGES, OPENCODE_DEFAULT_NPM } from '../../lib/opencodePresets';
 import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -84,6 +84,7 @@ function profileModelsFromClaudeForm(form: ClaudeSettingsForm): string[] {
     form.opus.requestModel,
     form.fable.requestModel,
     form.haiku.requestModel,
+    ...form.customModels.map((m) => m.requestModel),
   ].join('\n'));
 }
 
@@ -264,6 +265,32 @@ type ClaudeAdvancedOptionsProps = {
 function ClaudeAdvancedOptions({ editing, updateClaudeForm, fetchedModels, fetchingModels, fetchModels }: ClaudeAdvancedOptionsProps) {
   const [expanded, setExpanded] = useState(false);
 
+  const handleAddCustomModel = useCallback(() => {
+    updateClaudeForm({
+      ...editing.claudeForm,
+      customModels: [
+        ...editing.claudeForm.customModels,
+        { displayName: '', requestModel: '' },
+      ],
+    });
+  }, [editing.claudeForm, updateClaudeForm]);
+
+  const handleUpdateCustomModel = useCallback((index: number, patch: Partial<ClaudeCustomModel>) => {
+    updateClaudeForm({
+      ...editing.claudeForm,
+      customModels: editing.claudeForm.customModels.map((m, i) =>
+        i === index ? { ...m, ...patch } : m
+      ),
+    });
+  }, [editing.claudeForm, updateClaudeForm]);
+
+  const handleRemoveCustomModel = useCallback((index: number) => {
+    updateClaudeForm({
+      ...editing.claudeForm,
+      customModels: editing.claudeForm.customModels.filter((_, i) => i !== index),
+    });
+  }, [editing.claudeForm, updateClaudeForm]);
+
   return (
     <div className="rounded-lg border border-border/55 bg-muted/20 p-4 space-y-4">
       <button type="button" onClick={() => setExpanded(!expanded)} className="flex items-center gap-1.5 text-sm font-medium text-foreground hover:opacity-70">
@@ -327,6 +354,61 @@ function ClaudeAdvancedOptions({ editing, updateClaudeForm, fetchedModels, fetch
                 );
               })}
             </div>
+          </div>
+          <div className="space-y-2 border-b border-border/55 pb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-semibold">自定义模型</h4>
+                <p className="mt-1 text-xs text-foreground/55">添加额外的模型用于对话框选择，不与配置文件联动。</p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={handleAddCustomModel} className="h-7 gap-1">
+                <Plus className="h-3.5 w-3.5" />添加模型
+              </Button>
+            </div>
+            {editing.claudeForm.customModels.length > 0 && (
+              <div className="space-y-2">
+                <div className={`grid gap-2 text-xs text-foreground ${fetchedModels.length > 0 ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px_36px]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_36px]'}`}>
+                  <span>显示名称</span>
+                  <span>实际请求模型</span>
+                  {fetchedModels.length > 0 && <span />}
+                  <span />
+                </div>
+                {editing.claudeForm.customModels.map((model, index) => (
+                  <div key={index} className={`grid gap-2 items-center ${fetchedModels.length > 0 ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px_36px]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_36px]'}`}>
+                    <Input
+                      aria-label={`自定义模型 ${index + 1} 显示名称`}
+                      value={model.displayName}
+                      onChange={(e) => handleUpdateCustomModel(index, { displayName: e.target.value })}
+                      placeholder="例如: DeepSeek V4 Flash"
+                    />
+                    <Input
+                      aria-label={`自定义模型 ${index + 1} 实际请求模型`}
+                      value={model.requestModel}
+                      onChange={(e) => handleUpdateCustomModel(index, { requestModel: e.target.value })}
+                      placeholder="例如: deepseek-v4-flash"
+                    />
+                    {fetchedModels.length > 0 && (
+                      <ModelDropdown
+                        models={fetchedModels}
+                        onSelect={(m) => handleUpdateCustomModel(index, {
+                          requestModel: m,
+                          displayName: model.displayName?.trim() ? model.displayName : m,
+                        })}
+                      />
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                      onClick={() => handleRemoveCustomModel(index)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="space-y-1.5">
             <div className={`grid gap-2 text-xs text-foreground items-center ${fetchedModels.length > 0 ? 'grid-cols-[90px_minmax(0,1fr)_40px_92px]' : 'grid-cols-[90px_minmax(0,1fr)_92px]'}`}>
@@ -719,7 +801,7 @@ export function ProviderConfigPanel() {
       ...editing,
       apiKey: nextForm.apiKey,
       baseUrl: nextForm.baseUrl,
-      models: [nextForm.fallbackModel, nextForm.sonnet.requestModel, nextForm.opus.requestModel, nextForm.fable.requestModel, nextForm.haiku.requestModel].filter(Boolean).join('\n'),
+      models: [nextForm.fallbackModel, nextForm.sonnet.requestModel, nextForm.opus.requestModel, nextForm.fable.requestModel, nextForm.haiku.requestModel, ...nextForm.customModels.map((m) => m.requestModel)].filter(Boolean).join('\n'),
       claudeForm: nextForm,
       advancedConfig: JSON.stringify(settings, null, 2),
     });

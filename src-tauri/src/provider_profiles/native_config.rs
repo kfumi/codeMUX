@@ -6,7 +6,6 @@ use toml_edit::{value, Array, DocumentMut, Item, Table, Value as TomlValue};
 type JsonObject = Map<String, Value>;
 type CodexAdvancedConfig<'a> = (Option<&'a JsonObject>, Option<&'a JsonObject>);
 
-const CODEX_MODEL_CATALOG_TEMPLATE_SLUG: &str = "gpt-5.5";
 const CODEX_MODEL_CATALOG_TEMPLATE_JSON: &str = include_str!("../resources/gpt5_5_template.json");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -513,7 +512,7 @@ fn merge_codex_config_with_model(
     default_model: Option<&str>,
 ) -> Result<DocumentMut, String> {
     let NativeProfileConfig::Codex {
-        openai_base_url,
+        openai_base_url: _,
         config_toml,
         ..
     } = profile

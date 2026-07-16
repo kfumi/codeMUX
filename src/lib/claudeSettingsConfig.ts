@@ -13,6 +13,11 @@ type ClaudeHaikuRoleMapping = {
   requestModel: string;
 };
 
+export type ClaudeCustomModel = {
+  displayName: string;
+  requestModel: string;
+};
+
 export type ClaudeSettingsForm = {
   apiKey: string;
   baseUrl: string;
@@ -22,6 +27,7 @@ export type ClaudeSettingsForm = {
   opus: ClaudeRoleMapping;
   fable: ClaudeRoleMapping;
   haiku: ClaudeHaikuRoleMapping;
+  customModels: ClaudeCustomModel[];
 };
 
 export const CLAUDE_SETTINGS_DEFAULT: ClaudeSettings = {
@@ -35,6 +41,7 @@ export const CLAUDE_SETTINGS_DEFAULT: ClaudeSettings = {
     ANTHROPIC_DEFAULT_FABLE_MODEL_NAME: 'Fable 5',
     ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME: 'Haiku 4.5',
   },
+  custom_models: [],
   theme: 'auto',
   includeCoAuthoredBy: false,
   autoUpdatesChannel: 'latest',
@@ -103,6 +110,15 @@ export function applyClaudeFormToSettings(
   writeManagedValue(env, 'ANTHROPIC_DEFAULT_OPUS_MODEL_NAME', form.opus.displayName);
   writeManagedValue(env, 'ANTHROPIC_DEFAULT_FABLE_MODEL_NAME', form.fable.displayName);
 
+  if (form.customModels.length > 0) {
+    settings.custom_models = form.customModels.map((m) => ({
+      displayName: m.displayName,
+      requestModel: m.requestModel,
+    }));
+  } else {
+    delete settings.custom_models;
+  }
+
   return { ...settings, env };
 }
 
@@ -123,6 +139,15 @@ function formFromClaudeSettings(settings: ClaudeSettings): ClaudeSettingsForm {
   const opus = stripOneMillionSuffix(envString(settings.env, 'ANTHROPIC_DEFAULT_OPUS_MODEL'));
   const fable = stripOneMillionSuffix(envString(settings.env, 'ANTHROPIC_DEFAULT_FABLE_MODEL'));
   const fallback = stripOneMillionSuffix(envString(settings.env, 'ANTHROPIC_MODEL'));
+
+  const customModels = Array.isArray(settings.custom_models)
+    ? (settings.custom_models as Array<Record<string, unknown>>)
+        .filter((m) => typeof m === 'object' && m !== null)
+        .map((m) => ({
+          displayName: typeof m.displayName === 'string' ? m.displayName : '',
+          requestModel: typeof m.requestModel === 'string' ? m.requestModel : '',
+        }))
+    : [];
 
   return {
     apiKey: envString(settings.env, 'ANTHROPIC_AUTH_TOKEN'),
@@ -148,6 +173,7 @@ function formFromClaudeSettings(settings: ClaudeSettings): ClaudeSettingsForm {
       displayName: envString(settings.env, 'ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME'),
       requestModel: envString(settings.env, 'ANTHROPIC_DEFAULT_HAIKU_MODEL'),
     },
+    customModels,
   };
 }
 
