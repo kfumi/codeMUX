@@ -10,6 +10,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import type { AgentKind } from '../../types/session';
 import type { SlashCommand } from '../../lib/slashCommands';
 import { NewSessionPanel } from './NewSessionPanel';
+import type { AgentModelSelectorProps } from './AgentModelSelector';
 
 vi.mock('../../hooks/useAgentModels', () => ({
   useAgentModels: (agentKind: AgentKind, activeProfile: any) => ({
@@ -52,24 +53,17 @@ vi.mock('./assistant-ui/CodeMuxComposer', () => ({
 }));
 
 vi.mock('./AgentModelSelector', () => ({
-  AgentModelSelector: ({ activeProfile, activeProfileId, value, reasoningEffort, onChange, onReasoningEffortChange }: {
-    activeProfile: { id: string; models: Array<{ id: string }> } | null;
-    activeProfileId: string | null;
-    value: string;
-    reasoningEffort: string;
-    onChange: (model: string) => void;
-    onReasoningEffortChange: (effort: string) => void;
-  }) => (
-    <div>
+  AgentModelSelector: ({ agentKind, activeProfile, activeProfileId, value, reasoningEffort, onChange, onReasoningEffortChange, disabled }: AgentModelSelectorProps) => (
+    <div data-agent-kind={agentKind}>
       <span data-testid="active-profile-id">{activeProfileId}</span>
-      <select aria-label="Models" value={value} onChange={(event) => onChange(event.target.value)}>
+      <select aria-label="Models" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
         {activeProfile?.models.map((model: any) => (
           <option key={model.id} value={model.id}>
             {model.id}
           </option>
         ))}
       </select>
-      <select aria-label="Reasoning effort" value={reasoningEffort} onChange={(event) => onReasoningEffortChange(event.target.value)}>
+      <select aria-label="Reasoning effort" value={reasoningEffort} disabled={disabled} onChange={(event) => onReasoningEffortChange(event.target.value)}>
         <option value="low">low</option>
         <option value="medium">medium</option>
         <option value="high">high</option>

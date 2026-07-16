@@ -8,6 +8,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { AgentPanel } from './AgentPanel';
+import type { AgentModelSelectorProps } from './AgentModelSelector';
 
 const { ensureSessionMock, setActiveAgentProfileModelMock, updateProviderMock } = vi.hoisted(() => ({
   ensureSessionMock: vi.fn(() => Promise.resolve()),
@@ -63,11 +64,11 @@ vi.mock('./assistant-ui/CodeMuxComposer', () => ({
 }));
 
 vi.mock('./AgentModelSelector', () => ({
-  AgentModelSelector: ({ activeProfileId, value, contextModel, reasoningEffort, onChange, onReasoningEffortChange }: { activeProfileId: string | null; value: string; contextModel?: string; reasoningEffort: string; onChange: (model: string) => void; onReasoningEffortChange: (effort: string) => void }) => (
-    <div data-testid="model-selector" data-provider-id={activeProfileId ?? ''} data-model={value}>
+  AgentModelSelector: ({ agentKind, activeProfile, activeProfileId, value, contextModel, reasoningEffort, onChange, onReasoningEffortChange, disabled }: AgentModelSelectorProps) => (
+    <div data-testid="model-selector" data-agent-kind={agentKind} data-has-profile={activeProfile ? 'true' : 'false'} data-provider-id={activeProfileId ?? ''} data-model={value}>
       <span data-testid="model-context">{contextModel}</span>
-      <button type="button" onClick={() => onChange('claude-sonnet-4-20250514')}>change model</button>
-      <button type="button" onClick={() => onReasoningEffortChange('high')}>change reasoning</button>
+      <button type="button" disabled={disabled} onClick={() => onChange('claude-sonnet-4-20250514')}>change model</button>
+      <button type="button" disabled={disabled} onClick={() => onReasoningEffortChange('high')}>change reasoning</button>
       <span data-testid="reasoning-effort">{reasoningEffort}</span>
     </div>
   ),
@@ -81,6 +82,7 @@ describe('AgentPanel session bootstrapping', () => {
     });
     ensureSessionMock.mockClear();
     setActiveAgentProfileModelMock.mockClear();
+    updateProviderMock.mockClear();
 
     useSessionStore.setState({
       sessions: [{
@@ -222,6 +224,7 @@ describe('AgentPanel session bootstrapping', () => {
       ...state,
       sessions: state.sessions.map((session) => ({ ...session, provider_id: 'profile-1' })),
     }));
+    useAgentStore.setState({ isRunning: { 'session-running': false } });
     render(<AgentPanel sessionId="session-running" />);
 
     fireEvent.click(screen.getByRole('button', { name: 'change reasoning' }));
