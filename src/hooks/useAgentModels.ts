@@ -105,19 +105,18 @@ async function loadOpenCodeModels(
   try {
     const raw = await fileApi.readHomeFile('.config/opencode/opencode.json');
     const config = JSON.parse(raw) as { provider?: Record<string, { models?: Record<string, OpenCodeModel> }> };
-    if (config.provider) {
-      for (const providerKey of Object.keys(config.provider)) {
-        const providerConfig = config.provider[providerKey];
-        if (providerConfig.models) {
-          for (const [modelId, modelDef] of Object.entries(providerConfig.models)) {
-            fileModels.push({
-              id: modelId,
-              name: modelDef.name ?? modelId,
-              efforts: true,
-              source: 'config',
-            });
-          }
-        }
+    const providerKey = activeProfile?.native_config.type === 'opencode'
+      ? activeProfile.native_config.provider_key
+      : undefined;
+    const providerConfig = config.provider?.[providerKey || 'codemux-openai'];
+    if (providerConfig?.models) {
+      for (const [modelId, modelDef] of Object.entries(providerConfig.models)) {
+        fileModels.push({
+          id: modelId,
+          name: modelDef.name ?? modelId,
+          efforts: true,
+          source: 'config',
+        });
       }
     }
   } catch {
@@ -131,6 +130,7 @@ async function loadOpenCodeModels(
     id: m.id,
     name: m.name ?? m.id,
     efforts: true,
+    source: 'profile',
   }));
 
   return dedupById([...base, ...profileModels]);

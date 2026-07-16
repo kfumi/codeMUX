@@ -125,8 +125,12 @@ describe('NewSessionPanel', () => {
             id: 'profile-2', agent_kind: 'claude_code', name: 'Provider 2', note: '',
             models: [{ id: 'gpt-5' }, { id: 'gpt-5-mini' }], default_model: 'gpt-5',
             native_config: { type: 'claude_code', api_key: '', anthropic_base_url: 'https://provider-2.example' },
+          }, {
+            id: 'opencode-profile-1', agent_kind: 'opencode', name: 'OpenCode', note: '',
+            models: [{ id: 'opencode/shared-model' }], default_model: 'opencode/shared-model',
+            native_config: { type: 'opencode', api_key: '', openai_base_url: '', provider_key: 'codemux-openai' },
           }],
-          active_profile_ids: { claude_code: 'profile-1' },
+          active_profile_ids: { claude_code: 'profile-1', opencode: 'opencode-profile-1' },
         },
       },
     }));
@@ -294,6 +298,40 @@ describe('NewSessionPanel', () => {
     await runtime?.onSend?.('Ship the feature');
     expect(onSubmit).not.toHaveBeenCalled();
 
+    await runtime?.onCommand?.({
+      name: 'review',
+      description: 'review',
+      category: 'builtin',
+      handler: 'prompt',
+      prompt: '/review',
+    }, '');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('rejects a same-ID OpenCode model removed during an active profile refresh', async () => {
+    const onSubmit = vi.fn();
+    useNewSessionStore.setState({ selectedAgentKind: 'opencode' });
+    render(<NewSessionPanel onSubmit={onSubmit} />);
+    const runtime = [...composerProps].reverse().find((props) => props.onSend && props.onCommand);
+
+    act(() => {
+      useSettingsStore.setState((state) => ({
+        ...state,
+        config: state.config ? {
+          ...state.config,
+          agent_profile_registry: {
+            ...state.config.agent_profile_registry!,
+            profiles: state.config.agent_profile_registry!.profiles.map((profile) =>
+              profile.id === 'opencode-profile-1' ? { ...profile, models: [] } : profile,
+            ),
+          },
+        } : null,
+      }));
+      useNewSessionStore.setState({ selectedModel: 'opencode/shared-model' });
+    });
+
+    await runtime?.onSend?.('Ship the feature');
     await runtime?.onCommand?.({
       name: 'review',
       description: 'review',
