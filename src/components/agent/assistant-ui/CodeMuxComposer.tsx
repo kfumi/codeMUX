@@ -56,6 +56,8 @@ interface CodeMuxComposerProps {
   placeholder?: string;
   modelSelector?: ReactNode;
   permissionSelector?: ReactNode;
+  disabled?: boolean;
+  disabledMessage?: string;
   onStop?: () => void | Promise<void>;
   onActivatePlanMode?: () => void;
 }
@@ -156,6 +158,8 @@ export function CodeMuxComposer({
   placeholder = '输入消息... (@ 引用文件, / 命令)',
   modelSelector,
   permissionSelector,
+  disabled = false,
+  disabledMessage,
   onStop,
   onActivatePlanMode,
 }: CodeMuxComposerProps) {
@@ -502,6 +506,7 @@ export function CodeMuxComposer({
                   <button
                     type="button"
                     onClick={() => setAddMenuOpen((value) => !value)}
+                    disabled={disabled}
                     className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/76 transition-all duration-200 hover:bg-muted/58 hover:text-foreground"
                     title="添加附件或功能"
                   >
@@ -546,17 +551,21 @@ export function CodeMuxComposer({
                   <ComposerPrimitive.Send
                     className={cn(
                       'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200 active:scale-95',
-                      hasInput
+                      hasInput && !disabled
                         ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-15px_hsl(var(--primary)/0.58)] hover:bg-primary/94'
                         : 'cursor-not-allowed bg-[hsl(var(--surface-3))] text-muted-foreground/42',
                     )}
                     title="发送"
+                    disabled={disabled || !hasInput}
                   >
                     <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
                   </ComposerPrimitive.Send>
                 )}
               </div>
             </div>}
+            {disabledMessage ? (
+              <p className="px-2 pb-0.5 text-xs text-muted-foreground">{disabledMessage}</p>
+            ) : null}
           </div>
         </ComposerPrimitive.AttachmentDropzone>
         </ComposerPrimitive.Root>

@@ -9,9 +9,10 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { AgentPanel } from './AgentPanel';
 
-const { ensureSessionMock, updateProviderMock } = vi.hoisted(() => ({
+const { ensureSessionMock, updateProviderMock, activateProfileMock } = vi.hoisted(() => ({
   ensureSessionMock: vi.fn(() => Promise.resolve()),
   updateProviderMock: vi.fn(() => Promise.resolve()),
+  activateProfileMock: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('../../lib/tauri', () => ({
@@ -52,8 +53,9 @@ vi.mock('./assistant-ui/CodeMuxThread', () => ({
 }));
 
 vi.mock('./assistant-ui/CodeMuxComposer', () => ({
-  CodeMuxComposer: ({ modelSelector, permissionSelector }: { modelSelector?: React.ReactNode; permissionSelector?: React.ReactNode }) => (
+  CodeMuxComposer: ({ modelName, modelSelector, permissionSelector }: { modelName?: string; modelSelector?: React.ReactNode; permissionSelector?: React.ReactNode }) => (
     <div data-testid="composer">
+      <span data-testid="composer-model">{modelName}</span>
       {modelSelector}
       {permissionSelector}
     </div>
@@ -67,7 +69,7 @@ vi.mock('./assistant-ui/CodeMuxModelSelector', () => ({
       data-testid="model-selector"
       data-provider-id={providerId}
       data-provider-count={providers?.length ?? 0}
-      onClick={() => onProviderChange?.('provider-2', 'claude-opus-4-1')}
+      onClick={() => onProviderChange?.('profile-2', 'claude-opus-4-1')}
     >
       切换供应商
     </button>
@@ -82,6 +84,7 @@ describe('AgentPanel session bootstrapping', () => {
     });
     ensureSessionMock.mockClear();
     updateProviderMock.mockClear();
+    activateProfileMock.mockClear();
 
     useSessionStore.setState({
       sessions: [{
@@ -138,7 +141,18 @@ describe('AgentPanel session bootstrapping', () => {
         theme: 'System',
         compact_ai_output: false,
         default_open_target: 'file_explorer',
+        agent_profile_registry: {
+          profiles: [{
+            id: 'profile-1', agent_kind: 'claude_code', name: 'Provider', note: '', models: [{ id: 'claude-sonnet-4-20250514' }], default_model: 'claude-sonnet-4-20250514',
+            native_config: { type: 'claude_code', api_key: '', anthropic_base_url: 'https://api.anthropic.com' },
+          }, {
+            id: 'profile-2', agent_kind: 'claude_code', name: 'Provider 2', note: '', models: [{ id: 'claude-opus-4-1' }], default_model: 'claude-opus-4-1',
+            native_config: { type: 'claude_code', api_key: '', anthropic_base_url: 'https://provider-2.example' },
+          }],
+          active_profile_ids: { claude_code: 'profile-1' },
+        },
       },
+      activateAgentProfile: activateProfileMock,
     }));
 
     useAgentStore.setState({
@@ -180,22 +194,37 @@ describe('AgentPanel session bootstrapping', () => {
 
     expect(screen.getByTitle('变更前确认')).toHaveProperty('disabled', false);
   });
-  it('persists provider and default model changes for the active session', async () => {
+  it('activates another profile globally without rewriting the existing session snapshot', async () => {
     useAgentStore.setState({ isRunning: { 'session-running': false } });
 
     render(<AgentPanel sessionId="session-running" />);
 
-    expect(screen.getByTestId('model-selector').dataset.providerId).toBe('provider-1');
+    expect(screen.getByTestId('model-selector').dataset.providerId).toBe('profile-1');
     expect(screen.getByTestId('model-selector').dataset.providerCount).toBe('2');
     screen.getByTestId('model-selector').click();
 
     await waitFor(() => {
-      expect(updateProviderMock).toHaveBeenCalledWith('session-running', 'provider-2', 'claude-opus-4-1', 'medium');
+      expect(activateProfileMock).toHaveBeenCalledWith('claude_code', 'profile-2');
     });
-    expect(useSessionStore.getState().sessions[0]).toMatchObject({
-      provider_id: 'provider-2',
-      model: 'claude-opus-4-1',
-      reasoning_effort: 'medium',
-    });
+    expect(updateProviderMock).not.toHaveBeenCalled();
+    expect(useSessionStore.getState().sessions[0].provider_id).toBeNull();
+  });
+
+  it('shows a saved session snapshot while the selector changes the global default', () => {
+    useSessionStore.setState((state) => ({
+      ...state,
+      sessions: state.sessions.map((session) => ({
+        ...session,
+        provider_id: 'profile-2',
+        model: 'claude-opus-4-1',
+      })),
+    }));
+    useAgentStore.setState({ isRunning: { 'session-running': false } });
+
+    render(<AgentPanel sessionId="session-running" />);
+
+    expect(screen.getByTestId('model-selector').dataset.providerId).toBe('profile-1');
+    expect(screen.getByTestId('composer-model').textContent).toBe('claude-opus-4-1');
+    expect(screen.getByText('当前会话固定使用 Provider 2 / claude-opus-4-1；这里的切换只会应用到后续新建或重启的会话。')).toBeTruthy();
   });
 });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getStoredAgentCwd } from '../../lib/sessionCwd';
-import { resolveAgentProviderConfig } from '../../lib/agentProvider';
+import { getProfilePrimaryModel, profileToSelectorProvider } from '../../lib/agentProfileSelector';
 import { getProviderModelList } from '../../lib/providerModels';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { formatCommandDisplay, renderCommandPrompt } from '../../lib/slashCommands';
@@ -33,7 +33,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { projects } = useProjectStore();
   const { startQuery, interrupt, loadSessionMessages, clearEvents, respondToPermission } = useAgentStore();
   const pendingPermission = useAgentStore((state) => state.pendingPermissions[sessionId] ?? null);
-  const { config, getActiveProvider, setProxyRunning } = useSettingsStore();
+  const { config, getActiveProvider, activateAgentProfile, setActiveAgentProfileModel } = useSettingsStore();
   const { loadFileTree, setProjectPath } = usePreviewStore();
 
   // 检测容器宽度，窄屏时启用紧凑模式
@@ -54,22 +54,46 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   const session = sessions.find((entry) => entry.id === sessionId);
   const project = session?.project_id ? projects.find((entry) => entry.id === session.project_id) : null;
-  const { provider: resolvedProvider, apiKey, baseUrl, model, runtimeModel, providerName, credentialSource, configurationError, codexNeedsProxy } = resolveAgentProviderConfig({
-    agentKind: session?.agent_kind ?? 'claude_code',
-    config,
-    sessionProviderId: session?.provider_id,
-    sessionModel: session?.model,
-  });
-  const providerModels = useMemo(() => getProviderModelList(resolvedProvider), [resolvedProvider]);
-  const availableProviders = config?.providers ?? [];
   const reasoningEffort = session?.reasoning_effort ?? 'medium';
   const agentKind = session?.agent_kind ?? 'claude_code';
+  const isProfileAgent = agentKind === 'claude_code' || agentKind === 'codex' || agentKind === 'opencode';
+  const profileRegistry = config?.agent_profile_registry;
+  const availableProfiles = useMemo(
+    () => isProfileAgent ? (profileRegistry?.profiles ?? []).filter((profile) => profile.agent_kind === agentKind) : [],
+    [agentKind, isProfileAgent, profileRegistry?.profiles],
+  );
+  const activeProfileId = isProfileAgent ? profileRegistry?.active_profile_ids?.[agentKind] ?? null : null;
+  const activeProfile = useMemo(
+    () => availableProfiles.find((profile) => profile.id === activeProfileId) ?? null,
+    [activeProfileId, availableProfiles],
+  );
+  const sessionProfile = useMemo(
+    () => availableProfiles.find((profile) => profile.id === session?.provider_id) ?? null,
+    [availableProfiles, session?.provider_id],
+  );
+  const runtimeProfile = sessionProfile ?? activeProfile;
+  const runtimeProvider = useMemo(() => runtimeProfile ? profileToSelectorProvider(runtimeProfile) : null, [runtimeProfile]);
+  const selectorProvider = useMemo(() => activeProfile ? profileToSelectorProvider(activeProfile) : null, [activeProfile]);
+  const model = session?.model || getProfilePrimaryModel(runtimeProfile);
+  const selectorModel = getProfilePrimaryModel(activeProfile);
+  const providerModels = useMemo(() => getProviderModelList(selectorProvider), [selectorProvider]);
+  const availableProviders = useMemo(() => availableProfiles.map(profileToSelectorProvider), [availableProfiles]);
   const formatSelectedProviderModel = useCallback((item: string) => formatModelDisplayName({
     model: item,
     agentKind,
-    usesLargeContext: resolvedProvider?.context_1m,
-  }), [agentKind, resolvedProvider?.context_1m]);
+    usesLargeContext: runtimeProvider?.context_1m,
+  }), [agentKind, runtimeProvider?.context_1m]);
   const modelNameWithSuffix = useMemo(() => model ? formatSelectedProviderModel(model) : undefined, [model, formatSelectedProviderModel]);
+  const usesClaudeDefault = agentKind === 'claude_code' && !runtimeProfile && !activeProfileId;
+  const hasUsableProfile = usesClaudeDefault || !isProfileAgent || Boolean(runtimeProfile && model);
+  const profileRequiredMessage = isProfileAgent && !hasUsableProfile
+    ? `请先在供应商配置中为 ${agentKind === 'codex' ? 'Codex' : agentKind === 'opencode' ? 'OpenCode' : 'Claude Code'} 添加至少一个模型。`
+    : undefined;
+  const snapshotDiffersFromGlobal = Boolean(
+    isProfileAgent
+      && sessionProfile
+      && (sessionProfile.id !== activeProfile?.id || model !== getProfilePrimaryModel(activeProfile)),
+  );
   const rawPermissionConfig = useMemo(() => {
     if (!session?.permission_config) return null;
     try {
@@ -121,24 +145,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
 
     const effectiveCwd = project?.path || cwd;
-    if (configurationError) {
-      useAgentStore.setState((state) => ({
-        error: { ...state.error, [sessionId]: configurationError },
-      }));
-      return;
-    }
-
     const ensureKey = JSON.stringify({
       sessionId,
       cwd: effectiveCwd,
-      providerId: resolvedProvider?.id || null,
-      model: runtimeModel || null,
       reasoningEffort,
-      hasApiKey: Boolean(apiKey),
-      baseUrl: baseUrl || null,
-      providerName: providerName || null,
-      credentialSource: credentialSource || null,
-      codexNeedsProxy: codexNeedsProxy ?? null,
       permissionConfig: session?.permission_config || null,
       planMode,
     });
@@ -148,72 +158,30 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
 
     ensuredSessionsRef.current.add(ensureKey);
-    agentApi.ensureSession(sessionId, effectiveCwd, undefined, apiKey, baseUrl, runtimeModel, reasoningEffort, codexNeedsProxy, providerName, credentialSource).then(async () => {
-      if (baseUrl && codexNeedsProxy) {
-        try {
-          await new Promise((resolve) => setTimeout(resolve, 600));
-          const port = await agentApi.getProxyPort().catch(() => null);
-          setProxyRunning(true, port && port > 0 ? `http://127.0.0.1:${port}` : null);
-        } catch {
-          // Ignore invalid base URLs and let the runtime surface the real error.
-        }
-      }
-    }).catch(() => {
+    agentApi.ensureSession(sessionId, effectiveCwd, undefined, reasoningEffort).catch(() => {
       ensuredSessionsRef.current.delete(ensureKey);
     });
-  }, [sessionId, cwd, project?.path, resolvedProvider?.id, apiKey, baseUrl, runtimeModel, providerName, credentialSource, configurationError, reasoningEffort, codexNeedsProxy, session?.permission_config, planMode, setProxyRunning, isRunning]);
+  }, [sessionId, cwd, project?.path, reasoningEffort, session?.permission_config, planMode, isRunning]);
 
   const handleSend = async (input: AgentInputPayload, displayContent = input.text) => {
+    if (!hasUsableProfile) {
+      return;
+    }
     const effectiveCwd = project?.path || cwd;
     const latestSession = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId) ?? session;
     const latestReasoningEffort = latestSession?.reasoning_effort ?? reasoningEffort;
-    const latestAgentKind = latestSession?.agent_kind ?? session?.agent_kind ?? 'claude_code';
     const content = input.text;
-    const latestProviderConfig = resolveAgentProviderConfig({
-      agentKind: latestAgentKind,
-      config,
-      sessionProviderId: latestSession?.provider_id ?? session?.provider_id,
-      sessionModel: latestSession?.model ?? session?.model ?? model,
-    });
     const runtimeContent = content;
-
-    if (latestProviderConfig.configurationError) {
-      useAgentStore.setState((state) => ({
-        error: { ...state.error, [sessionId]: latestProviderConfig.configurationError ?? 'OpenCode 配置无效。' },
-      }));
-      return;
-    }
-
-    if (latestSession && latestProviderConfig.provider?.id && latestProviderConfig.model) {
-      sessionApi.updateProvider(sessionId, latestProviderConfig.provider.id, latestProviderConfig.model, latestReasoningEffort).catch(() => {});
-      useSessionStore.setState((state) => ({
-        sessions: state.sessions.map((entry) =>
-          entry.id === sessionId
-            ? {
-                ...entry,
-                provider_id: latestProviderConfig.provider!.id,
-                model: latestProviderConfig.model!,
-                reasoning_effort: latestReasoningEffort,
-              }
-            : entry,
-        ),
-      }));
-    }
 
     try {
       await startQuery(
         sessionId,
         runtimeContent,
         effectiveCwd,
-        latestProviderConfig.apiKey,
-        latestProviderConfig.baseUrl,
-        latestProviderConfig.runtimeModel,
         latestReasoningEffort,
-        latestProviderConfig.codexNeedsProxy,
         displayContent,
         { ...input, text: runtimeContent },
-        latestProviderConfig.providerName,
-        latestProviderConfig.credentialSource,
+        latestSession?.model ?? model,
       );
     } catch (error) {
       useAgentStore.setState((state) => ({
@@ -223,44 +191,30 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   };
 
   const handleModelChange = useCallback(async (nextModel: string) => {
-    if (!session || !resolvedProvider?.id || !nextModel || nextModel === session.model) {
+    if (!isProfileAgent || !nextModel || nextModel === getProfilePrimaryModel(activeProfile)) {
       return;
     }
-
-    useSessionStore.setState((state) => ({
-      sessions: state.sessions.map((entry) =>
-        entry.id === sessionId ? { ...entry, provider_id: resolvedProvider.id, model: nextModel, reasoning_effort: reasoningEffort } : entry,
-      ),
-    }));
-
     try {
-      await sessionApi.updateProvider(sessionId, resolvedProvider.id, nextModel, reasoningEffort);
+      await setActiveAgentProfileModel(agentKind, nextModel);
     } catch (error) {
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
       }));
     }
-  }, [model, reasoningEffort, resolvedProvider?.id, session, sessionId]);
+  }, [activeProfile, agentKind, isProfileAgent, sessionId, setActiveAgentProfileModel]);
 
-  const handleProviderChange = useCallback(async (nextProviderId: string, nextModel: string) => {
-    if (!session || !nextProviderId || !nextModel || (nextProviderId === resolvedProvider?.id && nextModel === model)) {
+  const handleProviderChange = useCallback(async (nextProviderId: string) => {
+    if (!isProfileAgent || !nextProviderId || nextProviderId === activeProfileId) {
       return;
     }
-
-    useSessionStore.setState((state) => ({
-      sessions: state.sessions.map((entry) =>
-        entry.id === sessionId ? { ...entry, provider_id: nextProviderId, model: nextModel, reasoning_effort: reasoningEffort } : entry,
-      ),
-    }));
-
     try {
-      await sessionApi.updateProvider(sessionId, nextProviderId, nextModel, reasoningEffort);
+      await activateAgentProfile(agentKind, nextProviderId);
     } catch (error) {
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
       }));
     }
-  }, [model, reasoningEffort, resolvedProvider?.id, session, sessionId]);
+  }, [activateAgentProfile, activeProfileId, agentKind, isProfileAgent, sessionId]);
 
   const handleReasoningEffortChange = useCallback(async (nextEffort: ReasoningEffort) => {
     const latestSession = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
@@ -268,13 +222,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       return;
     }
 
-    const latestConfig = resolveAgentProviderConfig({
-      agentKind: latestSession.agent_kind ?? 'claude_code',
-      config,
-      sessionProviderId: latestSession.provider_id,
-      sessionModel: latestSession.model,
-    });
-    const nextModel = latestConfig.model || latestSession.model || '';
+    const nextModel = latestSession.model || model || '';
 
     useSessionStore.setState((state) => ({
       sessions: state.sessions.map((entry) =>
@@ -282,18 +230,18 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       ),
     }));
 
-    if (!latestConfig.provider?.id || !nextModel) {
+    if (!latestSession.provider_id || !nextModel) {
       return;
     }
 
     try {
-      await sessionApi.updateProvider(sessionId, latestConfig.provider.id, nextModel, nextEffort);
+      await sessionApi.updateProvider(sessionId, latestSession.provider_id, nextModel, nextEffort);
     } catch (error) {
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
       }));
     }
-  }, [config, sessionId]);
+  }, [model, sessionId]);
 
   const handlePermissionConfigChange = useCallback((nextPermissionConfig: AgentPermissionConfig) => {
     updateSessionPermissions(sessionId, nextPermissionConfig, planMode).catch((error) => {
@@ -362,7 +310,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   return (
     <div ref={containerRef} className="flex h-full flex-col">
-      <CodeMuxAssistantRuntimeProvider sessionId={sessionId} agentKind={agentKind} onSend={handleSend} onCommand={handleCommand}>
+      <CodeMuxAssistantRuntimeProvider sessionId={sessionId} agentKind={agentKind} onSend={handleSend} onCommand={handleCommand} sendDisabled={!hasUsableProfile}>
         <CodeMuxThread
           sessionId={sessionId}
           footer={(
@@ -372,13 +320,15 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                 agentKind={agentKind}
                 projectPath={project?.path}
                 modelName={modelNameWithSuffix}
+                disabled={!hasUsableProfile}
+                disabledMessage={profileRequiredMessage}
                 modelSelector={(
                   <CodeMuxModelSelector
-                    value={model || ''}
+                    value={selectorModel}
                     models={providerModels}
                     onChange={handleModelChange}
                     providers={availableProviders}
-                    providerId={resolvedProvider?.id ?? null}
+                    providerId={activeProfileId}
                     onProviderChange={handleProviderChange}
                     reasoningEffort={reasoningEffort}
                     onReasoningEffortChange={handleReasoningEffortChange}
@@ -404,6 +354,11 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                 onStop={() => interrupt(sessionId)}
                 onActivatePlanMode={agentKind === 'opencode' ? undefined : () => handleModeChange(mapExecutionModeToPermissionConfig(agentKind, 'plan'), 'on')}
               />
+              {snapshotDiffersFromGlobal ? (
+                <p className="px-1 text-xs text-muted-foreground">
+                  当前会话固定使用 {sessionProfile?.name} / {modelNameWithSuffix}；这里的切换只会应用到后续新建或重启的会话。
+                </p>
+              ) : null}
             </div>
           )}
         />

@@ -19,6 +19,8 @@
     "@assistant-ui/react-streamdown": "^0.3.4",
     "@assistant-ui/store": "^0.2.20",
     "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/legacy-modes": "^6.5.3",
     "@lexical/react": "^0.45.0",
     "@lobehub/icons-static-svg": "^1.91.0",
     "@radix-ui/react-collapsible": "^1.1.13",

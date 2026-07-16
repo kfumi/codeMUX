@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod db;
 mod mcp;
+mod provider_profiles;
 mod skills;
 
 use log::info;
@@ -30,6 +31,7 @@ struct AgentNotificationClickPayload {
 pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
     pub config: Mutex<config::types::AppConfig>,
+    pub provider_profile_operation_lock: Mutex<()>,
     pub app_data_dir: std::path::PathBuf,
 }
 
@@ -415,6 +417,7 @@ pub fn run() {
             app.manage(AppState {
                 db: Mutex::new(conn),
                 config: Mutex::new(config),
+                provider_profile_operation_lock: Mutex::new(()),
                 app_data_dir: app.path().app_data_dir()?,
             });
             app.manage(agent::commands::AgentState::default());
@@ -451,6 +454,14 @@ pub fn run() {
             commands::provider::set_compact_ai_output,
             commands::provider::set_notification_settings,
             commands::provider::set_default_open_target,
+            commands::provider::upsert_agent_provider_profile,
+            commands::provider::activate_agent_provider_profile,
+            commands::provider::activate_default_claude_supplier,
+            commands::provider::activate_default_codex_supplier,
+            commands::provider::set_active_agent_profile_model,
+            commands::provider::delete_agent_provider_profile,
+            commands::provider::fetch_agent_profile_models,
+            commands::provider::test_agent_provider_profile,
             commands::provider::fetch_provider_models,
             commands::provider::test_provider,
             commands::app::get_log_directory,

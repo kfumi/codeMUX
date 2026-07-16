@@ -89,9 +89,15 @@ describe('codexCollaborationPolicy', () => {
     )).toEqual([
       {
         type: 'text',
-        text: expect.stringContaining('Execution policy (plan mode): work in planning-only style.'),
+        text: expect.stringContaining('policy_version: codemux-codex-collaboration-policy/v1'),
       },
     ]);
+    const injected = applyCodexCollaborationPolicyToInput(
+      [{ type: 'text', text: 'Design the feature.' }],
+      policy,
+    )[0] as { text: string };
+    expect(injected.text).toContain('effective_mode: plan');
+    expect(injected.text).toContain('Design the feature.');
   });
 
   it('does not duplicate directives when applied twice', () => {

@@ -1,4 +1,4 @@
-import { Check, CircleDot, Play, Sparkles, Square } from 'lucide-react';
+import { Check, CircleDot, Sparkles } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -11,11 +11,8 @@ export function AgentSettingsPanel() {
   const config = useSettingsStore((state) => state.config);
   const getDefaultAgentKind = useSettingsStore((state) => state.getDefaultAgentKind);
   const setDefaultAgentKind = useSettingsStore((state) => state.setDefaultAgentKind);
-  const needsProxy = useSettingsStore((state) => state.getNeedsProxy());
   const proxyRunning = useSettingsStore((state) => state.proxyRunning);
   const proxyUrl = useSettingsStore((state) => state.proxyUrl);
-  const startProxy = useSettingsStore((state) => state.startProxy);
-  const stopProxy = useSettingsStore((state) => state.stopProxy);
 
   const selectedKind = config?.agent_defaults.default_agent_kind ?? getDefaultAgentKind();
 
@@ -85,32 +82,12 @@ export function AgentSettingsPanel() {
             <p className="text-xs leading-5 text-muted-foreground">
               {proxyRunning
                 ? <>运行中 · {proxyUrl || '等待地址...'}</>
-                : needsProxy
-                  ? '未运行 · Codex 需要代理将 Responses API 转换为 Chat Completions'
-                  : '未运行 · 当前供应商配置为不需要路由代理'}
+                : '由档案配置在启动 Codex 会话时自动管理。'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => void (proxyRunning ? stopProxy() : startProxy())}
-            disabled={!needsProxy && !proxyRunning}
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-              proxyRunning
-                ? 'border-[hsl(var(--destructive)/0.28)] bg-[hsl(var(--destructive)/0.08)] text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive)/0.14)]'
-                : needsProxy
-                  ? 'border-[hsl(var(--success)/0.28)] bg-[hsl(var(--success)/0.08)] text-[hsl(var(--success))] hover:bg-[hsl(var(--success)/0.14)]'
-                  : 'cursor-not-allowed border-border/55 bg-muted/35 text-muted-foreground',
-            )}
-          >
-            {proxyRunning ? (
-              <><Square className="h-3 w-3" /> 停止</>
-            ) : !needsProxy ? (
-              <>不需要</>
-            ) : (
-              <><Play className="h-3 w-3" /> 启动</>
-            )}
-          </button>
+          <span className={cn('rounded-full border px-3 py-1.5 text-xs font-medium', proxyRunning ? 'border-[hsl(var(--success)/0.28)] bg-[hsl(var(--success)/0.08)] text-[hsl(var(--success))]' : 'border-border/55 bg-muted/35 text-muted-foreground')}>
+            {proxyRunning ? '自动运行' : '按需启动'}
+          </span>
         </div>
       </div>
     </div>

@@ -3,8 +3,10 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
+use crate::commands::provider::CLAUDE_DEFAULT_SUPPLIER_ID;
 use crate::config::types::AgentKind;
 use crate::db::operations;
+use crate::provider_profiles::types::NativeProfileConfig;
 use log::{debug, info, warn};
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
@@ -37,6 +39,148 @@ fn get_agent_session_id(
 fn resolve_session_agent_kind(state: &crate::AppState, session_id: &str) -> Result<String, String> {
     let db = state.db.lock().unwrap();
     crate::agent_runtime::factory::session_runtime_kind_name(&db, session_id)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedRuntimeConfig {
+    profile_id: String,
+    api_key: Option<String>,
+    base_url: Option<String>,
+    model: Option<String>,
+    codex_needs_proxy: Option<bool>,
+    provider: Option<String>,
+    credential_source: Option<String>,
+}
+
+fn resolve_active_runtime_config(
+    state: &crate::AppState,
+    session_id: &str,
+) -> Result<ResolvedRuntimeConfig, String> {
+    let agent_kind = resolve_session_agent_kind(state, session_id)?
+        .parse::<AgentKind>()
+        .map_err(|error| format!("无法解析会话智能体类型: {}", error))?;
+    let config = state.config.lock().unwrap();
+    let persisted_profile_id = {
+        let db = state.db.lock().unwrap();
+        db.query_row(
+            "SELECT provider_id FROM sessions WHERE id = ?1 LIMIT 1",
+            [session_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .map_err(|error| format!("无法读取会话档案快照: {}", error))?
+    };
+    let profile_id = persisted_profile_id.as_deref().or_else(|| {
+        config
+            .agent_profile_registry
+            .active_profile_ids
+            .get(&agent_kind)
+            .map(String::as_str)
+    });
+    if profile_id.is_none() && agent_kind == AgentKind::ClaudeCode {
+        let resolved = resolve_default_claude_runtime_config();
+        drop(config);
+        let db = state.db.lock().unwrap();
+        operations::update_session_provider(&db, session_id, &resolved.profile_id, "", None)
+            .map_err(|error| format!("无法保存会话默认供应商快照: {}", error))?;
+        return Ok(resolved);
+    }
+    let profile_id =
+        profile_id.ok_or_else(|| format!("{} 尚未启用供应商档案", agent_kind.as_str()))?;
+    if agent_kind == AgentKind::ClaudeCode && profile_id == CLAUDE_DEFAULT_SUPPLIER_ID {
+        return Ok(resolve_default_claude_runtime_config());
+    }
+    let profile = config
+        .agent_profile_registry
+        .profiles
+        .iter()
+        .find(|profile| profile.id == profile_id && profile.agent_kind == agent_kind)
+        .ok_or_else(|| "已启用供应商档案不存在或智能体不匹配".to_string())?;
+
+    let model = profile
+        .models
+        .iter()
+        .map(|model| model.id.trim())
+        .find(|model| !model.is_empty())
+        .ok_or_else(|| "已启用供应商档案没有可用模型".to_string())?;
+
+    let (api_key, base_url, codex_needs_proxy, provider, credential_source) =
+        match &profile.native_config {
+            NativeProfileConfig::ClaudeCode { .. } => (
+                profile
+                    .native_config
+                    .claude_env_value("ANTHROPIC_AUTH_TOKEN")
+                    .filter(|value| !value.trim().is_empty())
+                    .map(ToOwned::to_owned),
+                profile
+                    .native_config
+                    .claude_env_value("ANTHROPIC_BASE_URL")
+                    .filter(|value| !value.trim().is_empty())
+                    .map(ToOwned::to_owned),
+                None,
+                None,
+                None,
+            ),
+            NativeProfileConfig::Codex {
+                api_key,
+                openai_base_url,
+                codex_needs_proxy,
+                ..
+            } => (
+                (!api_key.trim().is_empty()).then(|| api_key.clone()),
+                (!openai_base_url.trim().is_empty()).then(|| openai_base_url.clone()),
+                *codex_needs_proxy,
+                None,
+                None,
+            ),
+            NativeProfileConfig::OpenCode {
+                api_key,
+                openai_base_url,
+                ..
+            } => (
+                (!api_key.trim().is_empty()).then(|| api_key.clone()),
+                (!openai_base_url.trim().is_empty()).then(|| openai_base_url.clone()),
+                None,
+                Some("codemux-openai".to_string()),
+                Some("codemux".to_string()),
+            ),
+        };
+
+    let resolved = ResolvedRuntimeConfig {
+        profile_id: profile.id.clone(),
+        api_key,
+        base_url,
+        model: Some(model.to_string()),
+        codex_needs_proxy,
+        provider,
+        credential_source,
+    };
+    drop(config);
+
+    if persisted_profile_id.is_none() {
+        let db = state.db.lock().unwrap();
+        operations::update_session_provider(
+            &db,
+            session_id,
+            &resolved.profile_id,
+            resolved.model.as_deref().unwrap_or_default(),
+            None,
+        )
+        .map_err(|error| format!("无法保存会话供应商档案快照: {}", error))?;
+    }
+
+    Ok(resolved)
+}
+
+fn resolve_default_claude_runtime_config() -> ResolvedRuntimeConfig {
+    ResolvedRuntimeConfig {
+        profile_id: CLAUDE_DEFAULT_SUPPLIER_ID.to_string(),
+        api_key: None,
+        base_url: None,
+        model: None,
+        codex_needs_proxy: None,
+        provider: None,
+        credential_source: None,
+    }
 }
 
 fn find_claude_session_jsonl(claude_dir: &Path, claude_session_id: &str) -> Option<PathBuf> {
@@ -2005,7 +2149,6 @@ pub async fn send_permission_update_to_session(
 }
 
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn ensure_agent_session(
     app: AppHandle,
     state: State<'_, crate::AppState>,
@@ -2013,28 +2156,14 @@ pub async fn ensure_agent_session(
     session_id: String,
     cwd: String,
     channel: tauri::ipc::Channel<String>,
-    api_key: Option<String>,
-    base_url: Option<String>,
-    model: Option<String>,
     reasoning_effort: Option<String>,
-    codex_needs_proxy: Option<bool>,
-    provider: Option<String>,
-    credential_source: Option<String>,
 ) -> Result<(), String> {
-    info!(
-        target: "agent",
-        "Ensuring agent session session_id={} cwd={} model={} reasoning_effort={} has_api_key={} has_base_url={}",
-        session_id,
-        cwd,
-        model.as_deref().unwrap_or("default"),
-        reasoning_effort.as_deref().unwrap_or("medium"),
-        api_key.as_ref().map(|key| !key.is_empty()).unwrap_or(false),
-        base_url.as_ref().map(|url| !url.is_empty()).unwrap_or(false)
-    );
+    info!(target: "agent", "Ensuring agent session session_id={} cwd={}", session_id, cwd);
 
     let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
     let _lifecycle_guard = lifecycle_lock.lock().await;
     let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
+    let runtime_config = resolve_active_runtime_config(&state, &session_id)?;
     let runtime_generation = if agent_kind == "opencode" {
         Some(begin_session_generation(agent_state.inner(), &session_id).await)
     } else {
@@ -2054,13 +2183,13 @@ pub async fn ensure_agent_session(
         &session_id,
         &agent_kind,
         cwd,
-        api_key,
-        base_url,
-        model,
+        runtime_config.api_key,
+        runtime_config.base_url,
+        runtime_config.model,
         reasoning_effort,
-        codex_needs_proxy,
-        provider,
-        credential_source,
+        runtime_config.codex_needs_proxy,
+        runtime_config.provider,
+        runtime_config.credential_source,
         runtime_generation,
     )?;
 
@@ -2101,7 +2230,6 @@ pub async fn send_agent_input(
 }
 
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn start_agent_session(
     app: AppHandle,
     state: State<'_, crate::AppState>,
@@ -2110,13 +2238,7 @@ pub async fn start_agent_session(
     prompt: String,
     cwd: String,
     channel: tauri::ipc::Channel<String>,
-    api_key: Option<String>,
-    base_url: Option<String>,
-    model: Option<String>,
     reasoning_effort: Option<String>,
-    codex_needs_proxy: Option<bool>,
-    provider: Option<String>,
-    credential_source: Option<String>,
     input_payload: Option<serde_json::Value>,
 ) -> Result<(), String> {
     info!(target: "agent", "Starting agent session wrapper for session_id={}", session_id);
@@ -2124,6 +2246,7 @@ pub async fn start_agent_session(
     let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
     let _lifecycle_guard = lifecycle_lock.lock().await;
     let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
+    let runtime_config = resolve_active_runtime_config(&state, &session_id)?;
     let runtime_generation = if agent_kind == "opencode" {
         Some(begin_session_generation(agent_state.inner(), &session_id).await)
     } else {
@@ -2136,13 +2259,13 @@ pub async fn start_agent_session(
         &session_id,
         &agent_kind,
         cwd,
-        api_key,
-        base_url,
-        model,
+        runtime_config.api_key,
+        runtime_config.base_url,
+        runtime_config.model,
         reasoning_effort,
-        codex_needs_proxy,
-        provider,
-        credential_source,
+        runtime_config.codex_needs_proxy,
+        runtime_config.provider,
+        runtime_config.credential_source,
         runtime_generation,
     )?;
 
@@ -2611,8 +2734,8 @@ mod tests {
         load_latest_token_usage_for_agent_session, mapping_generation_is_current,
         parse_agent_session_mapping_event, parse_proxy_port_from_stderr,
         persist_agent_session_mapping_event, read_codex_interactive_events_from_dir,
-        read_json_stream_values, resolve_agent_session_info, rewind_jsonl_before_latest_turn,
-        rewind_jsonl_before_target_turn, session_lifecycle_lock,
+        read_json_stream_values, resolve_active_runtime_config, resolve_agent_session_info,
+        rewind_jsonl_before_latest_turn, rewind_jsonl_before_target_turn, session_lifecycle_lock,
         should_include_claude_history_event, sort_events_by_timestamp_stable, AgentState,
         RewindTarget,
     };
@@ -3319,6 +3442,80 @@ mod tests {
     }
 
     #[test]
+    fn resolves_codex_runtime_config_from_the_active_profile() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-codex", "Codex", "codex", "agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        let mut config = crate::config::types::AppConfig::default();
+        let profile = crate::provider_profiles::types::AgentProviderProfile {
+            id: "codex-profile".to_string(),
+            agent_kind: AgentKind::Codex,
+            name: "Codex 测试档案".to_string(),
+            note: String::new(),
+            models: vec![
+                crate::provider_profiles::types::ProfileModel {
+                    id: "gpt-first".to_string(),
+                    name: None,
+                    context_window: None,
+                },
+                crate::provider_profiles::types::ProfileModel {
+                    id: "gpt-test".to_string(),
+                    name: None,
+                    context_window: None,
+                },
+            ],
+            default_model: "gpt-test".to_string(),
+            native_config: crate::provider_profiles::types::NativeProfileConfig::Codex {
+                api_key: "internal-secret".to_string(),
+                openai_base_url: "https://provider.example/v1".to_string(),
+                codex_needs_proxy: Some(true),
+                advanced_config: None,
+                auth_json: None,
+                config_toml: None,
+                model_catalog: None,
+                requires_review: false,
+            },
+        };
+        config.agent_profile_registry.profiles.push(profile);
+        config
+            .agent_profile_registry
+            .active_profile_ids
+            .insert(AgentKind::Codex, "codex-profile".to_string());
+        let state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(config),
+            provider_profile_operation_lock: std::sync::Mutex::new(()),
+            app_data_dir: std::path::PathBuf::new(),
+        };
+
+        let resolved = resolve_active_runtime_config(&state, "session-codex").unwrap();
+
+        assert_eq!(resolved.profile_id, "codex-profile");
+        assert_eq!(resolved.api_key.as_deref(), Some("internal-secret"));
+        assert_eq!(
+            resolved.base_url.as_deref(),
+            Some("https://provider.example/v1")
+        );
+        assert_eq!(resolved.model.as_deref(), Some("gpt-first"));
+        assert_eq!(resolved.codex_needs_proxy, Some(true));
+        let snapshot: String = state
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT provider_id FROM sessions WHERE id = 'session-codex'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(snapshot, "codex-profile");
+    }
+
+    #[test]
     fn builds_opencode_command_with_provider_credentials() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::schema::initialize_database(&conn).unwrap();
@@ -3330,6 +3527,7 @@ mod tests {
         let app_state = crate::AppState {
             db: std::sync::Mutex::new(conn),
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
+            provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
         };
 
@@ -3572,6 +3770,7 @@ mod tests {
         let app_state = crate::AppState {
             db: std::sync::Mutex::new(conn),
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
+            provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
         };
         let state = AgentState::default();
@@ -3601,6 +3800,7 @@ mod tests {
         let app_state = crate::AppState {
             db: std::sync::Mutex::new(conn),
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
+            provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
         };
         let state = AgentState::default();

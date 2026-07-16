@@ -70,7 +70,8 @@ const baseTheme = EditorView.theme({
   '.cm-content': { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", padding: '8px 0' },
   '.cm-gutters': { backgroundColor: 'transparent', border: 'none' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent' },
-  '.cm-activeLine': { backgroundColor: 'hsl(var(--accent) / 0.3)' },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': { backgroundColor: 'rgba(99, 179, 237, 0.3) !important' },
+  '.cm-content ::selection': { backgroundColor: 'rgba(99, 179, 237, 0.3) !important' },
 });
 
 const APP_ORDER: Array<keyof McpApps> = ['claude', 'codex', 'gemini', 'opencode'];

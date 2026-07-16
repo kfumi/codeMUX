@@ -1619,7 +1619,7 @@ mod tests {
 
         let err = select_commit_message_provider(&config).unwrap_err();
 
-        assert!(err.contains("API Key"));
+        assert!(err.contains("供应商"));
     }
 
     #[test]

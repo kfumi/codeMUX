@@ -22,6 +22,7 @@ type CodeMuxAssistantRuntimeProviderProps = {
   agentKind?: AgentKind;
   onSend: (content: AgentInputPayload, displayContent?: string) => Promise<void>;
   onCommand: (command: SlashCommand, args: string) => void | Promise<void>;
+  sendDisabled?: boolean;
   children: ReactNode;
 };
 
@@ -35,6 +36,7 @@ export function CodeMuxAssistantRuntimeProvider({
   agentKind = 'claude_code',
   onSend,
   onCommand,
+  sendDisabled = false,
   children,
 }: CodeMuxAssistantRuntimeProviderProps) {
   return (
@@ -44,6 +46,7 @@ export function CodeMuxAssistantRuntimeProvider({
       agentKind={agentKind}
       onSend={onSend}
       onCommand={onCommand}
+      sendDisabled={sendDisabled}
     >
       {children}
     </SessionScopedAssistantRuntime>
@@ -55,6 +58,7 @@ function SessionScopedAssistantRuntime({
   agentKind = 'claude_code',
   onSend,
   onCommand,
+  sendDisabled = false,
   children,
 }: CodeMuxAssistantRuntimeProviderProps) {
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
@@ -78,6 +82,10 @@ function SessionScopedAssistantRuntime({
   const handleMessage = useCallback(
     async (message: AppendMessage) => {
       const payload = buildAgentInputPayloadFromAppendMessage(message);
+
+      if (sendDisabled) {
+        return;
+      }
 
       if (payload.text.length === 0 && (payload.images?.length ?? 0) === 0) {
         return;
@@ -108,7 +116,7 @@ function SessionScopedAssistantRuntime({
 
       await onSend(payload);
     },
-    [onCommand, onSend, agentKind],
+    [onCommand, onSend, agentKind, sendDisabled],
   );
 
   const handleNew = useCallback(

@@ -50,7 +50,6 @@ describe('StatusBar', () => {
       proxyRunning: false,
       proxyUrl: null,
       proxyToggling: false,
-      startProxy: vi.fn(),
       stopProxy: vi.fn(),
     }));
   });
@@ -59,9 +58,9 @@ describe('StatusBar', () => {
     cleanup();
   });
 
-  it('keeps proxy status visible when the active provider does not need proxy routing', () => {
+  it('keeps read-only proxy status visible when profiles manage the lifecycle', () => {
     render(<StatusBar />);
 
-    expect(screen.getByRole('button', { name: /Proxy/ })).toBeTruthy();
+    expect(screen.getByText('Proxy 未运行')).toBeTruthy();
   });
 });

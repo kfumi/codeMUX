@@ -64,7 +64,7 @@ describe('AgentSettingsPanel', () => {
     expect(screen.queryByRole('button', { name: 'Use Active Provider' })).toBeNull();
   });
 
-  it('keeps the local proxy controls visible when the active provider does not need proxy routing', () => {
+  it('shows proxy lifecycle as profile-managed instead of exposing manual controls', () => {
     useSettingsStore.setState((state) => ({
       config: state.config
         ? {
@@ -83,6 +83,7 @@ describe('AgentSettingsPanel', () => {
     render(<AgentSettingsPanel />);
 
     expect(screen.getByText('本地代理路由')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '不需要' })).toHaveProperty('disabled', true);
+    expect(screen.getByText('由档案配置在启动 Codex 会话时自动管理。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '不需要' })).toBeNull();
   });
 });

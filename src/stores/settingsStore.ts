@@ -1,6 +1,5 @@
 import { create } from 'zustand';
-import type { AgentConfigMap, AgentConfigUpdateMap, AppConfig, NotificationSettings, Provider, Theme } from '../types/provider';
-import type { ModelInfo } from '../lib/tauri';
+import type { AgentConfigMap, AgentConfigUpdateMap, AgentProviderProfileUpsert, AppConfig, NotificationSettings, Provider, Theme } from '../types/provider';
 import { configApi, agentApi } from '../lib/tauri';
 import { useNewSessionStore } from './newSessionStore';
 import { getDefaultAgentKind } from '../types/agentRegistry';
@@ -46,14 +45,19 @@ interface SettingsState {
   setActiveProvider: (providerId: string) => Promise<void>;
   updateProvider: (provider: Provider) => Promise<void>;
   deleteProvider: (providerId: string) => Promise<void>;
-  fetchModels: (apiKey: string, baseUrl: string) => Promise<ModelInfo[]>;
   testProvider: (providerId: string) => Promise<string>;
+  upsertAgentProfile: (profile: AgentProviderProfileUpsert) => Promise<void>;
+  activateAgentProfile: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string) => Promise<void>;
+  activateDefaultClaudeSupplier: () => Promise<void>;
+  activateDefaultCodexSupplier: () => Promise<void>;
+  setActiveAgentProfileModel: (agentKind: 'claude_code' | 'codex' | 'opencode', model: string) => Promise<void>;
+  deleteAgentProfile: (profileId: string) => Promise<void>;
+  testAgentProfile: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string) => Promise<string>;
   getActiveProvider: () => Provider | null;
   getNeedsProxy: () => boolean;
   getDefaultAgentKind: () => AgentKind;
   setDefaultAgentKind: (agentKind: AgentKind) => Promise<void>;
   updateAgentConfig: <T extends keyof AgentConfigMap>(agentKind: T, config: AgentConfigUpdateMap[T]) => Promise<void>;
-  startProxy: () => Promise<void>;
   stopProxy: () => Promise<void>;
   setProxyRunning: (running: boolean, url?: string | null) => void;
 }
@@ -205,12 +209,70 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
-  fetchModels: async (apiKey: string, baseUrl: string) => {
-    return configApi.fetchModels(apiKey, baseUrl);
-  },
-
   testProvider: async (providerId: string) => {
     return configApi.testProvider(providerId);
+  },
+
+  upsertAgentProfile: async (profile) => {
+    try {
+      await configApi.upsertAgentProfile(profile);
+      await get().fetchConfig();
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
+    }
+  },
+
+  activateAgentProfile: async (agentKind, profileId) => {
+    try {
+      await configApi.activateAgentProfile(agentKind, profileId);
+      await get().fetchConfig();
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
+    }
+  },
+  activateDefaultClaudeSupplier: async () => {
+    try {
+      await configApi.activateDefaultClaudeSupplier();
+      await get().fetchConfig();
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
+    }
+  },
+  activateDefaultCodexSupplier: async () => {
+    try {
+      await configApi.activateDefaultCodexSupplier();
+      await get().fetchConfig();
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
+    }
+  },
+
+  setActiveAgentProfileModel: async (agentKind, model) => {
+    try {
+      await configApi.setActiveAgentProfileModel(agentKind, model);
+      await get().fetchConfig();
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
+    }
+  },
+
+  deleteAgentProfile: async (profileId) => {
+    try {
+      await configApi.deleteAgentProfile(profileId);
+      await get().fetchConfig();
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
+    }
+  },
+
+  testAgentProfile: async (agentKind, profileId) => {
+    return configApi.testAgentProfile(agentKind, profileId);
   },
 
   getActiveProvider: () => {
@@ -220,16 +282,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   getNeedsProxy: () => {
-    const provider = get().getActiveProvider();
-    if (!provider?.openai_base_url) return false;
-    if (provider.codex_needs_proxy !== undefined) {
-      return provider.codex_needs_proxy;
-    }
-    try {
-      return new URL(provider.openai_base_url).host.toLowerCase() !== 'api.openai.com';
-    } catch {
-      return true;
-    }
+    const config = get().config;
+    const profileId = config?.agent_profile_registry?.active_profile_ids?.codex;
+    const profile = config?.agent_profile_registry?.profiles.find((entry) => entry.id === profileId);
+    return profile?.native_config.type === 'codex' && Boolean(profile.native_config.codex_needs_proxy);
   },
 
   getDefaultAgentKind: () => {
@@ -281,27 +337,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setProxyRunning: (running: boolean, url?: string | null) => {
     set({ proxyRunning: running, proxyUrl: running ? (url ?? get().proxyUrl) : null });
-  },
-
-  startProxy: async () => {
-    if (get().proxyToggling) return;
-    const provider = get().getActiveProvider();
-    if (!provider?.api_key || !provider?.openai_base_url) {
-      set({ error: 'No provider configured with api_key and openai_base_url' });
-      return;
-    }
-    set({ proxyToggling: true });
-    try {
-      const port = await agentApi.startProxy(provider.api_key, provider.openai_base_url, provider.name, get().getNeedsProxy());
-      set({
-        proxyRunning: true,
-        proxyUrl: port > 0 ? `http://127.0.0.1:${port}` : null,
-      });
-    } catch (error) {
-      set({ error: String(error) });
-    } finally {
-      set({ proxyToggling: false });
-    }
   },
 
   stopProxy: async () => {
