@@ -579,13 +579,94 @@ fn list_dir_recursive(
 #[tauri::command]
 pub fn read_home_file(relative_path: String) -> Result<String, String> {
     let home = dirs::home_dir().ok_or("无法获取用户主目录")?;
-    let path = home.join(&relative_path);
+    let path = resolve_secure_home_path(&relative_path, &home)?;
     std::fs::read_to_string(&path).map_err(|e| format!("文件读取失败: {}", e))
+}
+
+fn resolve_secure_home_path(
+    relative_path: &str,
+    home: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    let relative = std::path::Path::new(relative_path);
+    if relative.is_absolute() {
+        return Err("Invalid home file path: path must be relative".to_string());
+    }
+    if relative
+        .components()
+        .any(|component| component == std::path::Component::ParentDir)
+    {
+        return Err("Invalid home file path: '..' components are not allowed".to_string());
+    }
+
+    let canonical_home = home
+        .canonicalize()
+        .map_err(|e| format!("Invalid home directory: {}", e))?;
+    let canonical_path = home
+        .join(relative)
+        .canonicalize()
+        .map_err(|e| format!("Invalid home file path '{}': {}", relative_path, e))?;
+
+    if !canonical_path.starts_with(&canonical_home) {
+        return Err(format!(
+            "Access denied: home file path is outside home directory '{}', path '{}'",
+            canonical_home.display(),
+            relative_path
+        ));
+    }
+
+    Ok(canonical_path)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_open_project_command, build_open_project_commands};
+    use super::{
+        build_open_project_command, build_open_project_commands, resolve_secure_home_path,
+    };
+    fn temp_home() -> std::path::PathBuf {
+        let home = std::env::temp_dir().join(format!("codemux-home-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        home
+    }
+
+    #[test]
+    fn resolves_normal_relative_home_file_paths() {
+        let home = temp_home();
+        let file = home.join(".config/opencode/opencode.json");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "{}").unwrap();
+
+        assert_eq!(
+            resolve_secure_home_path(".config/opencode/opencode.json", &home).unwrap(),
+            file.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn rejects_absolute_and_parent_paths() {
+        let home = temp_home();
+        let absolute = home.join("secret.json");
+
+        let absolute_error =
+            resolve_secure_home_path(&absolute.to_string_lossy(), &home).unwrap_err();
+        assert!(absolute_error.contains("relative"));
+
+        let parent_error = resolve_secure_home_path("nested/../secret.json", &home).unwrap_err();
+        assert!(parent_error.contains(".."));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlink_escape_outside_home() {
+        use std::os::unix::fs::symlink;
+
+        let home = temp_home();
+        let outside = temp_home();
+        std::fs::write(outside.join("secret.json"), "secret").unwrap();
+        symlink(&outside, home.join("link")).unwrap();
+
+        let error = resolve_secure_home_path("link/secret.json", &home).unwrap_err();
+        assert!(error.contains("outside home"));
+    }
 
     #[test]
     fn builds_windows_terminal_open_project_command() {
