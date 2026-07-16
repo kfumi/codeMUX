@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useAui } from '@assistant-ui/react';
@@ -78,7 +78,8 @@ describe('AgentModelSelector', () => {
   });
 
   it('registers reasoning effort only when the selected model supports efforts', () => {
-    const register = vi.fn(() => vi.fn());
+    const cleanup = vi.fn();
+    const register = vi.fn(() => cleanup);
     mockedUseAui.mockReturnValue({ modelContext: () => ({ register }) } as never);
     mockedUseAgentModels.mockReturnValue({
       models: [
@@ -117,6 +118,7 @@ describe('AgentModelSelector', () => {
       />,
     );
 
+    expect(cleanup).toHaveBeenCalledTimes(1);
     const supportedRegistration = register.mock.calls.at(-1)?.[0];
     expect(supportedRegistration.getModelContext()).toEqual({
       config: { modelName: 'codex-model', reasoningEffort: 'high' },
