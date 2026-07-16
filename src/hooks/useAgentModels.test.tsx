@@ -70,6 +70,17 @@ describe('useAgentModels', () => {
     readHomeFile.mockRejectedValue(new Error('missing file'));
   });
 
+  it('returns Claude built-ins in the default order without a profile', async () => {
+    const { result } = await loadedModels('claude_code', null, null);
+
+    expect(result.current.models.map((model) => model.id)).toEqual([
+      'sonnet',
+      'opus',
+      'fable',
+      'haiku',
+    ]);
+  });
+
   it('always includes Claude built-ins and merges profile models without duplicates', async () => {
     const { result } = await loadedModels('claude_code', claudeProfile([
       { id: 'sonnet', name: 'Custom Sonnet' },
