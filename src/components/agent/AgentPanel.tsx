@@ -72,8 +72,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   );
   const runtimeProfile = sessionProfile ?? activeProfile;
   const runtimeProvider = useMemo(() => runtimeProfile ? profileToSelectorProvider(runtimeProfile) : null, [runtimeProfile]);
-  const model = session?.model || getProfilePrimaryModel(runtimeProfile);
-  const selectorModel = getProfilePrimaryModel(activeProfile);
+  const model = session?.model || runtimeProfile?.default_model.trim() || getProfilePrimaryModel(runtimeProfile);
+  const selectorModel = activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile);
   const formatSelectedProviderModel = useCallback((item: string) => formatModelDisplayName({
     model: item,
     agentKind,
@@ -88,7 +88,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const snapshotDiffersFromGlobal = Boolean(
     isProfileAgent
       && sessionProfile
-      && (sessionProfile.id !== activeProfile?.id || model !== getProfilePrimaryModel(activeProfile)),
+      && (sessionProfile.id !== activeProfile?.id || model !== (activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile))),
   );
   const rawPermissionConfig = useMemo(() => {
     if (!session?.permission_config) return null;
@@ -187,7 +187,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   };
 
   const handleModelChange = useCallback(async (nextModel: string) => {
-    if (!isProfileAgent || !nextModel || nextModel === getProfilePrimaryModel(activeProfile)) {
+    if (!isProfileAgent || !nextModel || nextModel === (activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile))) {
       return;
     }
     try {
@@ -308,9 +308,9 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                 modelSelector={(
                   <AgentModelSelector
                     agentKind={agentKind}
-                    activeProfile={activeProfile}
-                    activeProfileId={activeProfileId}
-                    value={selectorModel}
+                    activeProfile={runtimeProfile}
+                    activeProfileId={runtimeProfile?.id ?? null}
+                    value={sessionProfile ? model : selectorModel}
                     onChange={handleModelChange}
                     reasoningEffort={reasoningEffort}
                     onReasoningEffortChange={handleReasoningEffortChange}
