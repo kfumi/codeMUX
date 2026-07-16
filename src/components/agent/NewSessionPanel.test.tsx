@@ -179,7 +179,19 @@ describe('NewSessionPanel', () => {
     expect(useNewSessionStore.getState().selectedModel).toBe('claude-opus-4-1');
   });
 
-  it('lets the draft choose a provider and its default model', async () => {
+  it('lets the draft choose a provider and its first model', async () => {
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config ? {
+        ...state.config,
+        agent_profile_registry: {
+          ...state.config.agent_profile_registry!,
+          profiles: state.config.agent_profile_registry!.profiles.map((profile) =>
+            profile.id === 'profile-2' ? { ...profile, default_model: '' } : profile,
+          ),
+        },
+      } : null,
+    }));
     render(<NewSessionPanel onSubmit={vi.fn()} />);
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Providers' }), {

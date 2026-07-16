@@ -11,16 +11,26 @@ const completeForm: ClaudeSettingsForm = {
   apiKey: 'token',
   baseUrl: 'https://api.example/anthropic',
   fallbackModel: 'fallback',
+  fallbackSupports1m: false,
   sonnet: { displayName: 'sonnet-name', requestModel: 'sonnet', supports1m: true },
   opus: { displayName: 'opus-name', requestModel: 'opus', supports1m: false },
   fable: { displayName: 'fable-name', requestModel: 'fable', supports1m: true },
-  haiku: { requestModel: 'haiku' },
+  haiku: { displayName: '', requestModel: 'haiku' },
 };
 
 describe('Claude settings configuration', () => {
   it('provides the expected default settings JSON', () => {
     expect(CLAUDE_SETTINGS_DEFAULT).toEqual({
-      env: {},
+      env: {
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'sonnet',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'opus',
+        ANTHROPIC_DEFAULT_FABLE_MODEL: 'fable',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'haiku',
+        ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: 'Sonnet 5',
+        ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: 'Opus 4.8',
+        ANTHROPIC_DEFAULT_FABLE_MODEL_NAME: 'Fable 5',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME: 'Haiku 4.5',
+      },
       theme: 'auto',
       includeCoAuthoredBy: false,
       autoUpdatesChannel: 'latest',
@@ -89,7 +99,7 @@ describe('Claude settings configuration', () => {
 
     expect(parsed.form).toEqual({
       ...completeForm,
-      haiku: { requestModel: 'haiku' },
+      haiku: { displayName: '', requestModel: 'haiku' },
     });
     expect(parsed.settings).toMatchObject({
       env: { KEEP: 'preserved' },
@@ -140,10 +150,11 @@ describe('Claude settings configuration', () => {
       apiKey: '',
       baseUrl: '',
       fallbackModel: '',
+      fallbackSupports1m: false,
       sonnet: { displayName: '', requestModel: '', supports1m: false },
       opus: { displayName: '', requestModel: '', supports1m: false },
       fable: { displayName: '', requestModel: '', supports1m: false },
-      haiku: { requestModel: '' },
+      haiku: { displayName: '', requestModel: '' },
     });
 
     expect(settings.env).toEqual({ KEEP: 'preserved' });
@@ -153,10 +164,9 @@ describe('Claude settings configuration', () => {
     const parsed = parseClaudeSettingsDraft('{"env":{"ANTHROPIC_DEFAULT_HAIKU_MODEL":"haiku[1M]"}}');
     const result = applyClaudeFormToSettings(CLAUDE_SETTINGS_DEFAULT, parsed.form);
 
-    expect(parsed.form.haiku).toEqual({ requestModel: 'haiku[1M]' });
+    expect(parsed.form.haiku).toEqual({ displayName: '', requestModel: 'haiku[1M]' });
     expect(result.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('haiku[1M]');
     expect('supports1m' in parsed.form.haiku).toBe(false);
-    expect('displayName' in parsed.form.haiku).toBe(false);
   });
 
   it('does not mutate the settings object supplied to the form writer', () => {
@@ -175,5 +185,23 @@ describe('Claude settings configuration', () => {
     expect(stripOneMillionSuffix('model[1M][1M]')).toEqual({ value: 'model[1M]', supports1m: true });
     expect(stripOneMillionSuffix('model [1M]')).toEqual({ value: 'model ', supports1m: true });
     expect(stripOneMillionSuffix('model[1m]')).toEqual({ value: 'model[1m]', supports1m: false });
+  });
+
+  it('writes ANTHROPIC_MODEL with 1M suffix when fallbackSupports1m is true', () => {
+    const result = applyClaudeFormToSettings(CLAUDE_SETTINGS_DEFAULT, {
+      ...completeForm,
+      fallbackModel: 'claude-sonnet-4-20250514',
+      fallbackSupports1m: true,
+    });
+    expect(result.env.ANTHROPIC_MODEL).toBe('claude-sonnet-4-20250514[1M]');
+  });
+
+  it('writes ANTHROPIC_MODEL without 1M suffix when fallbackSupports1m is false', () => {
+    const result = applyClaudeFormToSettings(CLAUDE_SETTINGS_DEFAULT, {
+      ...completeForm,
+      fallbackModel: 'claude-sonnet-4-20250514',
+      fallbackSupports1m: false,
+    });
+    expect(result.env.ANTHROPIC_MODEL).toBe('claude-sonnet-4-20250514');
   });
 });

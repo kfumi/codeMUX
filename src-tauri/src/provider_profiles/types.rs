@@ -21,6 +21,12 @@ pub enum NativeProfileConfig {
         #[serde(default)]
         advanced_config: Option<serde_json::Value>,
         #[serde(default)]
+        auth_json: Option<String>,
+        #[serde(default)]
+        config_toml: Option<String>,
+        #[serde(default)]
+        model_catalog: Option<String>,
+        #[serde(default)]
         requires_review: bool,
     },
     #[serde(rename = "opencode")]
@@ -49,6 +55,9 @@ impl std::fmt::Debug for NativeProfileConfig {
                 openai_base_url,
                 codex_needs_proxy,
                 advanced_config,
+                auth_json,
+                config_toml,
+                model_catalog,
                 requires_review,
                 ..
             } => formatter
@@ -60,6 +69,9 @@ impl std::fmt::Debug for NativeProfileConfig {
                     "advanced_config",
                     &advanced_config.as_ref().map(|_| "[已脱敏]"),
                 )
+                .field("auth_json", &auth_json.as_ref().map(|_| "[已脱敏]"))
+                .field("config_toml", &config_toml.as_ref().map(|_| "[已脱敏]"))
+                .field("model_catalog", &model_catalog.as_ref().map(|_| "[已脱敏]"))
                 .field("requires_review", requires_review)
                 .finish(),
             Self::OpenCode {
@@ -123,6 +135,12 @@ enum NativeProfileConfigRaw {
         #[serde(default)]
         advanced_config: Option<Value>,
         #[serde(default)]
+        auth_json: Option<String>,
+        #[serde(default)]
+        config_toml: Option<String>,
+        #[serde(default)]
+        model_catalog: Option<String>,
+        #[serde(default)]
         requires_review: bool,
     },
     #[serde(rename = "opencode")]
@@ -174,12 +192,18 @@ fn deserialize_native_profile_config(
             openai_base_url,
             codex_needs_proxy,
             advanced_config,
+            auth_json,
+            config_toml,
+            model_catalog,
             requires_review,
         } => NativeProfileConfig::Codex {
             api_key,
             openai_base_url,
             codex_needs_proxy,
             advanced_config,
+            auth_json,
+            config_toml,
+            model_catalog,
             requires_review,
         },
         NativeProfileConfigRaw::OpenCode {
@@ -359,21 +383,18 @@ impl AgentProviderProfile {
         );
 
         if is_matching_config {
-            if self.models.is_empty() {
-                if self.default_model.is_empty() {
-                    Ok(())
-                } else {
-                    Err("模型列表为空时默认模型必须为空".to_string())
-                }
-            } else if self.default_model.is_empty()
-                || !self
-                    .models
-                    .iter()
-                    .any(|model| model.id == self.default_model)
+            if self.default_model.trim().is_empty() {
+                return Ok(());
+            }
+
+            if self
+                .models
+                .iter()
+                .any(|model| model.id == self.default_model)
             {
-                Err("默认模型必须属于档案的模型列表".to_string())
-            } else {
                 Ok(())
+            } else {
+                Err("默认模型必须属于档案的模型列表".to_string())
             }
         } else {
             Err("档案智能体类型与原生配置类型不一致".to_string())
@@ -407,8 +428,12 @@ impl AgentProfileRegistry {
             let Some(profile) = matching_profile else {
                 return Err("启用档案与智能体类型不匹配".to_string());
             };
-            if profile.default_model.trim().is_empty() {
-                return Err("启用档案必须配置默认模型".to_string());
+            if profile
+                .models
+                .iter()
+                .all(|model| model.id.trim().is_empty())
+            {
+                return Err("启用档案必须配置至少一个模型".to_string());
             }
         }
 
@@ -462,6 +487,9 @@ pub fn migrate_legacy_providers(
                     openai_base_url: provider.openai_base_url.clone(),
                     codex_needs_proxy: provider.codex_needs_proxy,
                     advanced_config: None,
+                    auth_json: None,
+                    config_toml: None,
+                    model_catalog: None,
                     requires_review: true,
                 },
             };
@@ -681,6 +709,9 @@ mod tests {
                 openai_base_url: String::new(),
                 codex_needs_proxy: None,
                 advanced_config: None,
+                auth_json: None,
+                config_toml: None,
+                model_catalog: None,
                 requires_review: true,
             },
         };
@@ -692,7 +723,35 @@ mod tests {
     }
 
     #[test]
-    fn rejects_an_active_profile_without_a_default_model() {
+    fn allows_an_unselected_profile_without_a_default_model() {
+        let profile = AgentProviderProfile {
+            id: "draft".to_string(),
+            agent_kind: AgentKind::Codex,
+            name: "未完成档案".to_string(),
+            note: String::new(),
+            models: vec![ProfileModel {
+                id: "model-a".to_string(),
+                name: None,
+                context_window: None,
+            }],
+            default_model: String::new(),
+            native_config: NativeProfileConfig::Codex {
+                api_key: String::new(),
+                openai_base_url: String::new(),
+                codex_needs_proxy: None,
+                advanced_config: None,
+                auth_json: None,
+                config_toml: None,
+                model_catalog: None,
+                requires_review: true,
+            },
+        };
+
+        assert!(profile.validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_an_active_profile_without_models() {
         let profile = AgentProviderProfile {
             id: "empty-model".to_string(),
             agent_kind: AgentKind::Codex,
@@ -705,6 +764,9 @@ mod tests {
                 openai_base_url: String::new(),
                 codex_needs_proxy: None,
                 advanced_config: None,
+                auth_json: None,
+                config_toml: None,
+                model_catalog: None,
                 requires_review: true,
             },
         };
@@ -713,6 +775,9 @@ mod tests {
             active_profile_ids: BTreeMap::from([(AgentKind::Codex, "empty-model".to_string())]),
         };
 
-        assert_eq!(registry.validate().unwrap_err(), "启用档案必须配置默认模型");
+        assert_eq!(
+            registry.validate().unwrap_err(),
+            "启用档案必须配置至少一个模型"
+        );
     }
 }

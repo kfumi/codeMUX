@@ -96,9 +96,12 @@ fn resolve_active_runtime_config(
         .find(|profile| profile.id == profile_id && profile.agent_kind == agent_kind)
         .ok_or_else(|| "已启用供应商档案不存在或智能体不匹配".to_string())?;
 
-    if profile.default_model.trim().is_empty() {
-        return Err("已启用供应商档案没有默认模型".to_string());
-    }
+    let model = profile
+        .models
+        .iter()
+        .map(|model| model.id.trim())
+        .find(|model| !model.is_empty())
+        .ok_or_else(|| "已启用供应商档案没有可用模型".to_string())?;
 
     let (api_key, base_url, codex_needs_proxy, provider, credential_source) =
         match &profile.native_config {
@@ -146,7 +149,7 @@ fn resolve_active_runtime_config(
         profile_id: profile.id.clone(),
         api_key,
         base_url,
-        model: Some(profile.default_model.clone()),
+        model: Some(model.to_string()),
         codex_needs_proxy,
         provider,
         credential_source,
@@ -3453,17 +3456,27 @@ mod tests {
             agent_kind: AgentKind::Codex,
             name: "Codex 测试档案".to_string(),
             note: String::new(),
-            models: vec![crate::provider_profiles::types::ProfileModel {
-                id: "gpt-test".to_string(),
-                name: None,
-                context_window: None,
-            }],
+            models: vec![
+                crate::provider_profiles::types::ProfileModel {
+                    id: "gpt-first".to_string(),
+                    name: None,
+                    context_window: None,
+                },
+                crate::provider_profiles::types::ProfileModel {
+                    id: "gpt-test".to_string(),
+                    name: None,
+                    context_window: None,
+                },
+            ],
             default_model: "gpt-test".to_string(),
             native_config: crate::provider_profiles::types::NativeProfileConfig::Codex {
                 api_key: "internal-secret".to_string(),
                 openai_base_url: "https://provider.example/v1".to_string(),
                 codex_needs_proxy: Some(true),
                 advanced_config: None,
+                auth_json: None,
+                config_toml: None,
+                model_catalog: None,
                 requires_review: false,
             },
         };
@@ -3487,7 +3500,7 @@ mod tests {
             resolved.base_url.as_deref(),
             Some("https://provider.example/v1")
         );
-        assert_eq!(resolved.model.as_deref(), Some("gpt-test"));
+        assert_eq!(resolved.model.as_deref(), Some("gpt-first"));
         assert_eq!(resolved.codex_needs_proxy, Some(true));
         let snapshot: String = state
             .db

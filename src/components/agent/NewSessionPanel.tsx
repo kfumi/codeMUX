@@ -3,7 +3,7 @@ import { useEffect, useMemo } from 'react';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { renderCommandPrompt } from '../../lib/slashCommands';
 import { getPrimaryProviderModel, getProviderModelList } from '../../lib/providerModels';
-import { profileToSelectorProvider } from '../../lib/agentProfileSelector';
+import { getProfilePrimaryModel, profileToSelectorProvider } from '../../lib/agentProfileSelector';
 import { mapExecutionModeToPermissionConfig, serializePermissionConfig } from '../../lib/agentPermissions';
 import { agentApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
@@ -75,7 +75,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
       && providerModels.includes(effectiveModel),
   );
   const profileRequiredMessage = isProfileAgent && !hasUsableProfile
-    ? `请先在供应商配置中为 ${selectedAgent?.label ?? '当前智能体'} 添加一个包含默认模型的供应商。`
+    ? `请先在供应商配置中为 ${selectedAgent?.label ?? '当前智能体'} 添加至少一个模型。`
     : undefined;
   const formatSelectedProviderModel = useMemo(() => (
     (item: string) => formatModelDisplayName({
@@ -136,7 +136,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
       return;
     }
     setSelectedProviderId(active.id);
-    setSelectedModel(active.default_model || null);
+    setSelectedModel(getProfilePrimaryModel(active) || null);
   }, [activeProfileId, availableProfiles, isProfileAgent, selectedAgentKind, setSelectedModel, setSelectedProviderId]);
 
   const handleSend = async (input: AgentInputPayload | string) => {
@@ -212,8 +212,9 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                     if (!isProfileAgent) return;
                     void activateAgentProfile(selectedAgentKind, profileId)
                       .then(() => {
+                        const selectedProfile = availableProfiles.find((profile) => profile.id === profileId);
                         setSelectedProviderId(profileId);
-                        setSelectedModel(nextModel || null);
+                        setSelectedModel(getProfilePrimaryModel(selectedProfile) || nextModel || null);
                       })
                       .catch((error) => {
                         useAgentStore.setState((state) => ({

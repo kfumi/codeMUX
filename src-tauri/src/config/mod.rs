@@ -1,6 +1,6 @@
 pub mod types;
 
-use crate::config::types::AppConfig;
+use crate::config::types::{AgentKind, AppConfig, Provider};
 use crate::provider_profiles::{migrate_legacy_providers, AgentProfileRegistry};
 use log::warn;
 #[cfg(unix)]
@@ -129,7 +129,20 @@ fn load_config_from_path(config_path: &Path) -> AppConfig {
     if config_path.exists() {
         match std::fs::read(config_path) {
             Ok(content) => match serde_json::from_slice::<AppConfig>(&content) {
-                Ok(config) => migrate_legacy_config(config),
+                Ok(config) => {
+                    let (config, cleaned) = remove_legacy_default_provider(config);
+                    let config = migrate_legacy_config(config);
+                    if cleaned {
+                        if let Err(error) = save_config_to_path(config_path, &config) {
+                            warn!(
+                                target: "config",
+                                "Failed to persist removal of the legacy default provider: {}",
+                                error
+                            );
+                        }
+                    }
+                    config
+                }
                 Err(error) => {
                     let backup_path = backup_unreadable_config(config_path).ok();
                     warn!(
@@ -224,6 +237,53 @@ fn save_config_to_path_with_file_ops<O: ConfigFileOps>(
         );
     }
     Ok(())
+}
+
+fn is_legacy_default_provider(provider: &Provider) -> bool {
+    provider.name == "默认"
+        && provider.api_key.is_empty()
+        && provider.anthropic_base_url == "https://api.anthropic.com"
+        && provider.openai_base_url.is_empty()
+        && provider.default_model == "claude-sonnet-4-20250514"
+        && provider.models == ["claude-sonnet-4-20250514"]
+        && provider.context_1m.is_none()
+        && provider.codex_needs_proxy.is_none()
+}
+
+fn remove_legacy_default_provider(mut config: AppConfig) -> (AppConfig, bool) {
+    let Some(provider_id) = config
+        .providers
+        .iter()
+        .find(|provider| is_legacy_default_provider(provider))
+        .map(|provider| provider.id.clone())
+    else {
+        return (config, false);
+    };
+
+    config
+        .providers
+        .retain(|provider| provider.id != provider_id);
+    if config.active_provider_id.as_deref() == Some(provider_id.as_str()) {
+        config.active_provider_id = config.providers.first().map(|provider| provider.id.clone());
+    }
+
+    let claude_profile_id = format!("{}-claude_code", provider_id);
+    config.agent_profile_registry.profiles.retain(|profile| {
+        !(profile.agent_kind == AgentKind::ClaudeCode && profile.id == claude_profile_id)
+    });
+    if config
+        .agent_profile_registry
+        .active_profile_ids
+        .get(&AgentKind::ClaudeCode)
+        == Some(&claude_profile_id)
+    {
+        config
+            .agent_profile_registry
+            .active_profile_ids
+            .remove(&AgentKind::ClaudeCode);
+    }
+
+    (config, true)
 }
 
 fn migrate_legacy_config(mut config: AppConfig) -> AppConfig {
@@ -505,6 +565,81 @@ mod tests {
         let _ = std::fs::remove_dir(&temp_dir);
     }
 
+    #[test]
+    fn removes_legacy_default_provider_and_persists_the_cleanup() {
+        let temp_dir = temp_config_dir();
+        let config_path = temp_dir.join("config.json");
+        let legacy = serde_json::json!({
+            "providers": [{
+                "id": "legacy-default",
+                "name": "默认",
+                "api_key": "",
+                "anthropic_base_url": "https://api.anthropic.com",
+                "openai_base_url": "",
+                "default_model": "claude-sonnet-4-20250514",
+                "models": ["claude-sonnet-4-20250514"]
+            }],
+            "active_provider_id": "legacy-default",
+            "theme": "System"
+        });
+        std::fs::write(&config_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+        let config = load_config_from_path(&config_path);
+        assert!(config.providers.is_empty());
+        assert!(config.agent_profile_registry.profiles.is_empty());
+        assert_eq!(config.active_provider_id, None);
+
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+        assert!(persisted
+            .get("providers")
+            .and_then(|providers| providers.as_array())
+            .map_or(true, |providers| providers.is_empty()));
+        assert_eq!(persisted["active_provider_id"], serde_json::Value::Null);
+        assert!(persisted["agent_profile_registry"]["profiles"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+
+        let reloaded = load_config_from_path(&config_path);
+        assert!(reloaded.providers.is_empty());
+        assert!(reloaded.agent_profile_registry.profiles.is_empty());
+
+        let _ = std::fs::remove_file(&config_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn keeps_a_custom_provider_with_the_same_name() {
+        let temp_dir = temp_config_dir();
+        let config_path = temp_dir.join("config.json");
+        let custom = serde_json::json!({
+            "providers": [{
+                "id": "custom-default",
+                "name": "默认",
+                "api_key": "custom-key",
+                "anthropic_base_url": "https://api.anthropic.com",
+                "openai_base_url": "",
+                "default_model": "custom-model",
+                "models": ["custom-model"]
+            }],
+            "active_provider_id": "custom-default",
+            "theme": "System"
+        });
+        std::fs::write(&config_path, serde_json::to_vec(&custom).unwrap()).unwrap();
+
+        let config = load_config_from_path(&config_path);
+        assert_eq!(config.providers.len(), 1);
+        assert_eq!(config.providers[0].id, "custom-default");
+        assert_eq!(config.agent_profile_registry.profiles.len(), 1);
+        assert_eq!(
+            config.agent_profile_registry.profiles[0].id,
+            "custom-default-claude_code"
+        );
+
+        let _ = std::fs::remove_file(&config_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
     #[test]
     fn migrates_legacy_provider_with_two_urls_into_three_agent_profiles() {
         let temp_dir = temp_config_dir();
@@ -904,6 +1039,9 @@ mod tests {
                         "openai_base_url": "https://openai.example/v1",
                         "codex_needs_proxy": true,
                         "advanced_config": null,
+                        "auth_json": null,
+                        "config_toml": null,
+                        "model_catalog": null,
                         "requires_review": true
                     }
                 }],

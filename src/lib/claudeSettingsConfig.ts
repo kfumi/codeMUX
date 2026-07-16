@@ -9,6 +9,7 @@ export type ClaudeRoleMapping = {
 };
 
 type ClaudeHaikuRoleMapping = {
+  displayName: string;
   requestModel: string;
 };
 
@@ -16,6 +17,7 @@ export type ClaudeSettingsForm = {
   apiKey: string;
   baseUrl: string;
   fallbackModel: string;
+  fallbackSupports1m: boolean;
   sonnet: ClaudeRoleMapping;
   opus: ClaudeRoleMapping;
   fable: ClaudeRoleMapping;
@@ -23,7 +25,16 @@ export type ClaudeSettingsForm = {
 };
 
 export const CLAUDE_SETTINGS_DEFAULT: ClaudeSettings = {
-  env: {},
+  env: {
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'sonnet',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'opus',
+    ANTHROPIC_DEFAULT_FABLE_MODEL: 'fable',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'haiku',
+    ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: 'Sonnet 5',
+    ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: 'Opus 4.8',
+    ANTHROPIC_DEFAULT_FABLE_MODEL_NAME: 'Fable 5',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME: 'Haiku 4.5',
+  },
   theme: 'auto',
   includeCoAuthoredBy: false,
   autoUpdatesChannel: 'latest',
@@ -37,6 +48,7 @@ const MANAGED_ENV_KEYS = [
   'ANTHROPIC_DEFAULT_SONNET_MODEL',
   'ANTHROPIC_DEFAULT_OPUS_MODEL',
   'ANTHROPIC_DEFAULT_FABLE_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME',
   'ANTHROPIC_DEFAULT_SONNET_MODEL_NAME',
   'ANTHROPIC_DEFAULT_OPUS_MODEL_NAME',
   'ANTHROPIC_DEFAULT_FABLE_MODEL_NAME',
@@ -81,8 +93,9 @@ export function applyClaudeFormToSettings(
 
   writeManagedValue(env, 'ANTHROPIC_AUTH_TOKEN', form.apiKey);
   writeManagedValue(env, 'ANTHROPIC_BASE_URL', form.baseUrl);
-  writeManagedValue(env, 'ANTHROPIC_MODEL', form.fallbackModel);
+  writeManagedValue(env, 'ANTHROPIC_MODEL', form.fallbackModel ? `${form.fallbackModel}${form.fallbackSupports1m ? '[1M]' : ''}` : '');
   writeManagedValue(env, 'ANTHROPIC_DEFAULT_HAIKU_MODEL', form.haiku.requestModel);
+  writeManagedValue(env, 'ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME', form.haiku.displayName);
   writeRoleModel(env, 'ANTHROPIC_DEFAULT_SONNET_MODEL', form.sonnet);
   writeRoleModel(env, 'ANTHROPIC_DEFAULT_OPUS_MODEL', form.opus);
   writeRoleModel(env, 'ANTHROPIC_DEFAULT_FABLE_MODEL', form.fable);
@@ -109,11 +122,13 @@ function formFromClaudeSettings(settings: ClaudeSettings): ClaudeSettingsForm {
   const sonnet = stripOneMillionSuffix(envString(settings.env, 'ANTHROPIC_DEFAULT_SONNET_MODEL'));
   const opus = stripOneMillionSuffix(envString(settings.env, 'ANTHROPIC_DEFAULT_OPUS_MODEL'));
   const fable = stripOneMillionSuffix(envString(settings.env, 'ANTHROPIC_DEFAULT_FABLE_MODEL'));
+  const fallback = stripOneMillionSuffix(envString(settings.env, 'ANTHROPIC_MODEL'));
 
   return {
     apiKey: envString(settings.env, 'ANTHROPIC_AUTH_TOKEN'),
     baseUrl: envString(settings.env, 'ANTHROPIC_BASE_URL'),
-    fallbackModel: envString(settings.env, 'ANTHROPIC_MODEL'),
+    fallbackModel: fallback.value,
+    fallbackSupports1m: fallback.supports1m,
     sonnet: {
       displayName: envString(settings.env, 'ANTHROPIC_DEFAULT_SONNET_MODEL_NAME'),
       requestModel: sonnet.value,
@@ -130,6 +145,7 @@ function formFromClaudeSettings(settings: ClaudeSettings): ClaudeSettingsForm {
       supports1m: fable.supports1m,
     },
     haiku: {
+      displayName: envString(settings.env, 'ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME'),
       requestModel: envString(settings.env, 'ANTHROPIC_DEFAULT_HAIKU_MODEL'),
     },
   };

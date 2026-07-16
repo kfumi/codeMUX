@@ -592,16 +592,13 @@ impl<O: FileOps> NativeConfigWriteService<O> {
 
     pub fn restore_claude_settings_backup(&self) -> Result<(), NativeConfigWriteError> {
         let _lock = self.acquire_lock()?;
-        let backup = self
+        let backup = match self
             .file_ops
             .read(&self.paths.claude_settings_backup_path())
-            .map_err(|_| {
-                self.error(
-                    "Claude Code settings.json.bak 不存在或无法读取",
-                    None,
-                    RollbackStatus::NotAttempted,
-                )
-            })?;
+        {
+            Ok(content) => content,
+            Err(_) => return Ok(()), // 备份文件不存在，跳过恢复
+        };
         self.write_atomic_file(&self.paths.claude_settings_path(), &backup)
             .map_err(|_| {
                 self.error(
@@ -610,6 +607,72 @@ impl<O: FileOps> NativeConfigWriteService<O> {
                     RollbackStatus::NotAttempted,
                 )
             })
+    }
+
+    pub fn backup_codex_files(&self) -> Result<(), NativeConfigWriteError> {
+        let _lock = self.acquire_lock()?;
+        let auth = self
+            .file_ops
+            .read(&self.paths.codex_auth_path())
+            .map_err(|_| {
+                self.error(
+                    "无法读取 Codex auth.json",
+                    None,
+                    RollbackStatus::NotAttempted,
+                )
+            })?;
+        self.write_atomic_file(&self.paths.codex_auth_backup_path(), &auth)
+            .map_err(|_| {
+                self.error(
+                    "无法备份 Codex auth.json",
+                    None,
+                    RollbackStatus::NotAttempted,
+                )
+            })?;
+        let config = self
+            .file_ops
+            .read(&self.paths.codex_config_path())
+            .map_err(|_| {
+                self.error(
+                    "无法读取 Codex config.toml",
+                    None,
+                    RollbackStatus::NotAttempted,
+                )
+            })?;
+        self.write_atomic_file(&self.paths.codex_config_backup_path(), &config)
+            .map_err(|_| {
+                self.error(
+                    "无法备份 Codex config.toml",
+                    None,
+                    RollbackStatus::NotAttempted,
+                )
+            })
+    }
+
+    pub fn restore_codex_files_backup(&self) -> Result<(), NativeConfigWriteError> {
+        let _lock = self.acquire_lock()?;
+        // 备份文件不存在时跳过恢复，允许无配置切换到默认供应商
+        if let Ok(auth) = self.file_ops.read(&self.paths.codex_auth_backup_path()) {
+            self.write_atomic_file(&self.paths.codex_auth_path(), &auth)
+                .map_err(|_| {
+                    self.error(
+                        "无法恢复 Codex auth.json",
+                        None,
+                        RollbackStatus::NotAttempted,
+                    )
+                })?;
+        }
+        if let Ok(config) = self.file_ops.read(&self.paths.codex_config_backup_path()) {
+            self.write_atomic_file(&self.paths.codex_config_path(), &config)
+                .map_err(|_| {
+                    self.error(
+                        "无法恢复 Codex config.toml",
+                        None,
+                        RollbackStatus::NotAttempted,
+                    )
+                })?;
+        }
+        Ok(())
     }
 
     /// 使用一次成功写入返回的备份会话补偿恢复原生配置。
@@ -1118,6 +1181,7 @@ impl<O: FileOps> NativeConfigWriteService<O> {
         path == self.paths.claude_settings_path()
             || path == self.paths.codex_auth_path()
             || path == self.paths.codex_config_path()
+            || path == self.paths.codex_model_catalog_path()
             || path == self.paths.opencode_config_path()
     }
 

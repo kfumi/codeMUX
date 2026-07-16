@@ -140,10 +140,10 @@ async function invokeLogged<T>(command: string, args?: Record<string, unknown>):
     }
     return result;
   } catch (error) {
-    logger.error('Tauri command failed', {
+    logger.error(`Tauri command failed: ${serializeError(error)}`, {
       command,
       ...summarizeInvokeArgs(args),
-    }, serializeError(error));
+    });
     throw error;
   }
 }
@@ -289,6 +289,8 @@ export const configApi = {
     invokeLogged('activate_agent_provider_profile', { agentKind, profileId }),
   activateDefaultClaudeSupplier: (): Promise<void> =>
     invokeLogged('activate_default_claude_supplier'),
+  activateDefaultCodexSupplier: (): Promise<void> =>
+    invokeLogged('activate_default_codex_supplier'),
   setActiveAgentProfileModel: (agentKind: 'claude_code' | 'codex' | 'opencode', defaultModel: string): Promise<void> =>
     invokeLogged('set_active_agent_profile_model', { agentKind, defaultModel }),
   deleteAgentProfile: (profileId: string): Promise<void> =>

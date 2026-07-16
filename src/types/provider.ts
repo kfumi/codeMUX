@@ -60,6 +60,12 @@ export interface ProfileModel {
   context_window?: number | null;
 }
 
+export interface CodexCatalogModel {
+  model: string;
+  displayName?: string;
+  contextWindow?: number;
+}
+
 export type NativeProfileConfig =
   | {
       type: 'claude_code';
@@ -72,6 +78,9 @@ export type NativeProfileConfig =
       openai_base_url: string;
       codex_needs_proxy?: boolean | null;
       advanced_config?: unknown | null;
+      auth_json?: string | null;
+      config_toml?: string | null;
+      model_catalog?: string | null;
       requires_review?: boolean;
     }
   | {
@@ -100,8 +109,8 @@ export interface AgentProfileRegistry {
 export type AgentProviderProfileUpsert = Omit<AgentProviderProfile, 'native_config'> & {
   native_config:
     | { type: 'claude_code'; settings: Record<string, unknown>; requires_review?: boolean }
-    | { type: 'codex'; api_key?: string; clear_api_key?: boolean; openai_base_url: string; codex_needs_proxy?: boolean | null; advanced_config?: unknown; clear_advanced_config?: boolean; requires_review?: boolean }
-    | { type: 'opencode'; api_key?: string; clear_api_key?: boolean; openai_base_url: string; advanced_config?: unknown; clear_advanced_config?: boolean; requires_review?: boolean };
+    | { type: 'codex'; api_key?: string; openai_base_url: string; codex_needs_proxy?: boolean | null; advanced_config?: unknown; auth_json?: string | null; config_toml?: string | null; model_catalog?: CodexCatalogModel[] | null; requires_review?: boolean }
+    | { type: 'opencode'; api_key?: string; openai_base_url: string; advanced_config?: unknown; requires_review?: boolean };
 };
 
 export interface AppConfig {

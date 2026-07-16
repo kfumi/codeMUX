@@ -6,6 +6,9 @@ use toml_edit::{value, Array, DocumentMut, Item, Table, Value as TomlValue};
 type JsonObject = Map<String, Value>;
 type CodexAdvancedConfig<'a> = (Option<&'a JsonObject>, Option<&'a JsonObject>);
 
+const CODEX_MODEL_CATALOG_TEMPLATE_SLUG: &str = "gpt-5.5";
+const CODEX_MODEL_CATALOG_TEMPLATE_JSON: &str = include_str!("../resources/gpt5_5_template.json");
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeConfigPaths {
     pub claude_dir: PathBuf,
@@ -27,7 +30,7 @@ impl NativeConfigPaths {
     }
 
     pub fn claude_settings_backup_path(&self) -> PathBuf {
-        self.claude_dir.join("settings.json.bak")
+        self.claude_dir.join("settings.json.codemux.bak")
     }
 
     pub fn codex_auth_path(&self) -> PathBuf {
@@ -36,6 +39,18 @@ impl NativeConfigPaths {
 
     pub fn codex_config_path(&self) -> PathBuf {
         self.codex_dir.join("config.toml")
+    }
+
+    pub fn codex_auth_backup_path(&self) -> PathBuf {
+        self.codex_dir.join("auth.json.codemux.bak")
+    }
+
+    pub fn codex_config_backup_path(&self) -> PathBuf {
+        self.codex_dir.join("config.toml.codemux.bak")
+    }
+
+    pub fn codex_model_catalog_path(&self) -> PathBuf {
+        self.codex_dir.join("codemux-model-catalog.json")
     }
 
     pub fn opencode_config_path(&self) -> PathBuf {
@@ -91,14 +106,42 @@ pub fn render_native_config(
                 parse_json_object(existing.codex_auth.as_deref(), "Codex auth.json")?,
                 profile,
             )?;
-            let config = merge_codex_config(
+            let mut config = merge_codex_config(
                 parse_toml_document(existing.codex_config.as_deref(), "Codex config.toml")?,
                 profile,
             )?;
-            Ok(vec![
-                render_json_file(paths.codex_auth_path(), auth, "Codex auth.json")?,
-                render_toml_file(paths.codex_config_path(), config, "Codex config.toml")?,
-            ])
+            let mut files = vec![render_json_file(
+                paths.codex_auth_path(),
+                auth,
+                "Codex auth.json",
+            )?];
+            // Write model_catalog.json and inject pointer into config.toml
+            if let NativeProfileConfig::Codex {
+                model_catalog: Some(model_catalog_str),
+                ..
+            } = profile
+            {
+                if !model_catalog_str.trim().is_empty() {
+                    let catalog_value = codex_model_catalog_from_specs(model_catalog_str)?;
+                    files.push(render_json_file(
+                        paths.codex_model_catalog_path(),
+                        catalog_value,
+                        "Codex model_catalog.json",
+                    )?);
+                    let catalog_filename = paths
+                        .codex_model_catalog_path()
+                        .file_name()
+                        .map(|f| f.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    config["model_catalog_json"] = value(catalog_filename);
+                }
+            }
+            files.push(render_toml_file(
+                paths.codex_config_path(),
+                config,
+                "Codex config.toml",
+            )?);
+            Ok(files)
         }
         NativeProfileConfig::OpenCode { .. } => {
             let config = merge_opencode_config(
@@ -145,15 +188,44 @@ pub fn render_agent_profile_config(
                 parse_json_object(existing.codex_auth.as_deref(), "Codex auth.json")?,
                 &profile.native_config,
             )?;
-            let config = merge_codex_config_with_model(
+            let mut config = merge_codex_config_with_model(
                 parse_toml_document(existing.codex_config.as_deref(), "Codex config.toml")?,
                 &profile.native_config,
                 default_model,
             )?;
-            Ok(vec![
-                render_json_file(paths.codex_auth_path(), auth, "Codex auth.json")?,
-                render_toml_file(paths.codex_config_path(), config, "Codex config.toml")?,
-            ])
+            let mut files = vec![render_json_file(
+                paths.codex_auth_path(),
+                auth,
+                "Codex auth.json",
+            )?];
+            // Write model_catalog.json and inject pointer into config.toml
+            if let NativeProfileConfig::Codex {
+                model_catalog: Some(model_catalog_str),
+                ..
+            } = &profile.native_config
+            {
+                if !model_catalog_str.trim().is_empty() {
+                    let catalog_value = codex_model_catalog_from_specs(model_catalog_str)?;
+                    files.push(render_json_file(
+                        paths.codex_model_catalog_path(),
+                        catalog_value,
+                        "Codex model_catalog.json",
+                    )?);
+                    // Inject model_catalog_json pointer into config.toml
+                    let catalog_filename = paths
+                        .codex_model_catalog_path()
+                        .file_name()
+                        .map(|f| f.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    config["model_catalog_json"] = value(catalog_filename);
+                }
+            }
+            files.push(render_toml_file(
+                paths.codex_config_path(),
+                config,
+                "Codex config.toml",
+            )?);
+            Ok(files)
         }
         NativeProfileConfig::OpenCode { .. } => {
             let config = merge_opencode_config_with_model(
@@ -313,9 +385,24 @@ fn merge_claude_settings_with_model(
 }
 
 fn merge_codex_auth(mut existing: Value, profile: &NativeProfileConfig) -> Result<Value, String> {
-    let NativeProfileConfig::Codex { api_key, .. } = profile else {
+    let NativeProfileConfig::Codex {
+        api_key, auth_json, ..
+    } = profile
+    else {
         return Err("原生配置类型与 Codex 不匹配".to_string());
     };
+
+    if let Some(auth_json_str) = auth_json {
+        if !auth_json_str.trim().is_empty() {
+            let mut auth: Value = serde_json::from_str(auth_json_str)
+                .map_err(|e| format!("Codex auth_json 无效: {}", e))?;
+            auth.as_object_mut()
+                .ok_or_else(|| "Codex auth_json 顶层必须为对象".to_string())?
+                .insert("OPENAI_API_KEY".to_string(), Value::String(api_key.clone()));
+            return Ok(auth);
+        }
+    }
+
     let (auth_advanced, _) = codex_advanced_config(profile)?;
     existing = merge_json_advanced_object(existing, auth_advanced, "Codex auth.json")?;
     let auth = existing
@@ -333,39 +420,105 @@ fn merge_codex_config(
     merge_codex_config_with_model(existing, profile, None)
 }
 
+fn load_codex_model_catalog_template() -> Result<Value, String> {
+    serde_json::from_str(CODEX_MODEL_CATALOG_TEMPLATE_JSON)
+        .map_err(|e| format!("Codex model catalog template 无效: {}", e))
+}
+
+fn codex_catalog_model_entry(
+    template: &Value,
+    model: &str,
+    display_name: &str,
+    context_window: u64,
+    priority: usize,
+) -> Value {
+    let mut entry = template.clone();
+    let Some(entry_obj) = entry.as_object_mut() else {
+        return Value::Object(Map::new());
+    };
+
+    entry_obj.insert("slug".to_string(), Value::String(model.to_string()));
+    entry_obj.insert("display_name".to_string(), Value::String(display_name.to_string()));
+    entry_obj.insert("description".to_string(), Value::String(display_name.to_string()));
+    entry_obj.insert("context_window".to_string(), Value::Number(context_window.into()));
+    entry_obj.insert("max_context_window".to_string(), Value::Number(context_window.into()));
+    entry_obj.insert("priority".to_string(), Value::Number((1000 + priority).into()));
+    entry_obj.insert("additional_speed_tiers".to_string(), Value::Array(vec![]));
+    entry_obj.insert("service_tiers".to_string(), Value::Array(vec![]));
+    entry_obj.insert("availability_nux".to_string(), Value::Null);
+    entry_obj.insert("upgrade".to_string(), Value::Null);
+
+    entry
+}
+
+fn codex_model_catalog_from_specs(model_catalog_str: &str) -> Result<Value, String> {
+    let specs: Vec<Value> = serde_json::from_str(model_catalog_str)
+        .map_err(|e| format!("Codex model_catalog JSON 无效: {}", e))?;
+    let template = load_codex_model_catalog_template()?;
+
+    let entries: Vec<Value> = specs
+        .iter()
+        .enumerate()
+        .filter_map(|(index, spec)| {
+            let model = spec.get("model")?.as_str()?;
+            if model.is_empty() {
+                return None;
+            }
+            let display_name = spec
+                .get("displayName")
+                .or_else(|| spec.get("display_name"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or(model);
+            let context_window = spec
+                .get("contextWindow")
+                .or_else(|| spec.get("context_window"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(128_000);
+            Some(codex_catalog_model_entry(
+                &template,
+                model,
+                display_name,
+                context_window,
+                index,
+            ))
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "models": entries }))
+}
+
 fn merge_codex_config_with_model(
     mut existing: DocumentMut,
     profile: &NativeProfileConfig,
     default_model: Option<&str>,
 ) -> Result<DocumentMut, String> {
     let NativeProfileConfig::Codex {
-        openai_base_url, ..
+        openai_base_url,
+        config_toml,
+        ..
     } = profile
     else {
         return Err("原生配置类型与 Codex 不匹配".to_string());
     };
-    let (_, config_advanced) = codex_advanced_config(profile)?;
-    if let Some(config_advanced) = config_advanced {
-        merge_json_object_into_toml(existing.as_table_mut(), config_advanced)?;
+
+    if let Some(config_toml_str) = config_toml {
+        if !config_toml_str.trim().is_empty() {
+            existing = config_toml_str
+                .parse::<DocumentMut>()
+                .map_err(|e| format!("Codex config_toml 无效: {}", e))?;
+        }
+    } else {
+        let (_, config_advanced) = codex_advanced_config(profile)?;
+        if let Some(config_advanced) = config_advanced {
+            merge_json_object_into_toml(existing.as_table_mut(), config_advanced)?;
+        }
     }
+
     let root = existing.as_table_mut();
-    root["model_provider"] = value("codemux");
     if let Some(default_model) = default_model {
         root["model"] = value(default_model);
     }
-    let providers = root
-        .entry("model_providers")
-        .or_insert(Item::Table(Table::new()))
-        .as_table_mut()
-        .ok_or_else(|| "Codex config.toml 的 model_providers 必须为表".to_string())?;
-    let codemux = providers
-        .entry("codemux")
-        .or_insert(Item::Table(Table::new()))
-        .as_table_mut()
-        .ok_or_else(|| "Codex config.toml 的 model_providers.codemux 必须为表".to_string())?;
-    codemux["name"] = value("CodeMUX");
-    codemux["base_url"] = value(openai_base_url.clone());
-    codemux["env_key"] = value("OPENAI_API_KEY");
     Ok(existing)
 }
 
@@ -602,6 +755,9 @@ mod tests {
                 openai_base_url: "https://codex.example/v1".to_string(),
                 codex_needs_proxy: None,
                 advanced_config: None,
+                auth_json: None,
+                config_toml: None,
+                model_catalog: None,
                 requires_review: false,
             },
         );
@@ -664,6 +820,9 @@ mod tests {
                 openai_base_url: "https://codex.example".to_string(),
                 codex_needs_proxy: None,
                 advanced_config: None,
+                auth_json: None,
+                config_toml: None,
+                model_catalog: None,
                 requires_review: false,
             },
         };
@@ -716,6 +875,9 @@ mod tests {
                 openai_base_url: "https://codex.example/v1".to_string(),
                 codex_needs_proxy: None,
                 advanced_config: None,
+                auth_json: None,
+                config_toml: None,
+                model_catalog: None,
                 requires_review: false,
             },
         );
@@ -793,6 +955,9 @@ mod tests {
             openai_base_url: "https://new.example/v1".to_string(),
             codex_needs_proxy: None,
             advanced_config: None,
+            auth_json: None,
+            config_toml: None,
+            model_catalog: None,
             requires_review: false,
         };
         let existing = NativeConfigContents {
@@ -835,15 +1000,6 @@ name = "Other"
         assert_eq!(
             config["model_providers"]["other"]["name"].as_str(),
             Some("Other")
-        );
-        assert_eq!(config["model_provider"].as_str(), Some("codemux"));
-        assert_eq!(
-            config["model_providers"]["codemux"]["base_url"].as_str(),
-            Some("https://new.example/v1")
-        );
-        assert_eq!(
-            config["model_providers"]["codemux"]["env_key"].as_str(),
-            Some("OPENAI_API_KEY")
         );
     }
 
@@ -906,6 +1062,9 @@ name = "Other"
             openai_base_url: "https://new.example/v1".to_string(),
             codex_needs_proxy: None,
             advanced_config: None,
+            auth_json: None,
+            config_toml: None,
+            model_catalog: None,
             requires_review: false,
         };
         let invalid_json = NativeConfigContents {
@@ -970,6 +1129,9 @@ name = "Other"
                     "model_providers": { "codemux": { "request_max_retries": 3 } }
                 }
             })),
+            auth_json: None,
+            config_toml: None,
+            model_catalog: None,
             requires_review: false,
         };
         let existing = NativeConfigContents {
@@ -1003,10 +1165,6 @@ custom_existing = true
         assert_eq!(
             config["model_providers"]["codemux"]["request_max_retries"].as_integer(),
             Some(3)
-        );
-        assert_eq!(
-            config["model_providers"]["codemux"]["base_url"].as_str(),
-            Some("https://new.example/v1")
         );
     }
 
@@ -1088,6 +1246,9 @@ custom_existing = true
             openai_base_url: "https://new.example/v1".to_string(),
             codex_needs_proxy: None,
             advanced_config: Some(serde_json::json!({ "auth": [] })),
+            auth_json: None,
+            config_toml: None,
+            model_catalog: None,
             requires_review: false,
         };
         let error = render_native_config(

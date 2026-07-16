@@ -129,15 +129,17 @@ enum NativeProfileConfigUpsert {
     Codex {
         #[serde(default)]
         api_key: Option<String>,
-        #[serde(default)]
-        clear_api_key: bool,
         openai_base_url: String,
         #[serde(default)]
         codex_needs_proxy: Option<bool>,
         #[serde(default)]
         advanced_config: Option<serde_json::Value>,
         #[serde(default)]
-        clear_advanced_config: bool,
+        auth_json: Option<String>,
+        #[serde(default)]
+        config_toml: Option<String>,
+        #[serde(default)]
+        model_catalog: Option<serde_json::Value>,
         #[serde(default)]
         requires_review: bool,
     },
@@ -145,13 +147,9 @@ enum NativeProfileConfigUpsert {
     OpenCode {
         #[serde(default)]
         api_key: Option<String>,
-        #[serde(default)]
-        clear_api_key: bool,
         openai_base_url: String,
         #[serde(default)]
         advanced_config: Option<serde_json::Value>,
-        #[serde(default)]
-        clear_advanced_config: bool,
         #[serde(default)]
         requires_review: bool,
     },
@@ -181,35 +179,42 @@ impl AgentProviderProfileUpsert {
                 AgentKind::Codex,
                 NativeProfileConfigUpsert::Codex {
                     api_key,
-                    clear_api_key,
                     openai_base_url,
                     codex_needs_proxy,
                     advanced_config,
-                    clear_advanced_config,
+                    auth_json,
+                    config_toml,
+                    model_catalog,
                     requires_review,
                 },
             ) => {
-                let previous = existing.and_then(|profile| match &profile.native_config {
-                    NativeProfileConfig::Codex {
-                        api_key,
-                        advanced_config,
-                        ..
-                    } => Some((api_key.as_str(), advanced_config.clone())),
-                    _ => None,
-                });
+                let (prev_api_key, prev_advanced, prev_auth_json, prev_config_toml) = match existing
+                    .and_then(|profile| match &profile.native_config {
+                        NativeProfileConfig::Codex {
+                            api_key,
+                            advanced_config,
+                            auth_json,
+                            config_toml,
+                            ..
+                        } => Some((
+                            api_key.as_str(),
+                            advanced_config.clone(),
+                            auth_json.clone(),
+                            config_toml.clone(),
+                        )),
+                        _ => None,
+                    }) {
+                    Some((a, b, c, d)) => (Some(a), b, c, d),
+                    None => (None, None, None, None),
+                };
                 NativeProfileConfig::Codex {
-                    api_key: resolve_api_key(
-                        previous.as_ref().map(|(api_key, _)| *api_key),
-                        api_key,
-                        clear_api_key,
-                    )?,
+                    api_key: resolve_api_key(prev_api_key, api_key)?,
                     openai_base_url,
                     codex_needs_proxy,
-                    advanced_config: resolve_advanced_config(
-                        previous.and_then(|(_, advanced_config)| advanced_config),
-                        advanced_config,
-                        clear_advanced_config,
-                    )?,
+                    advanced_config: resolve_advanced_config(prev_advanced, advanced_config)?,
+                    auth_json: auth_json.or(prev_auth_json),
+                    config_toml: config_toml.or(prev_config_toml),
+                    model_catalog: model_catalog.map(|v| v.to_string()),
                     requires_review,
                 }
             }
@@ -217,10 +222,8 @@ impl AgentProviderProfileUpsert {
                 AgentKind::Opencode,
                 NativeProfileConfigUpsert::OpenCode {
                     api_key,
-                    clear_api_key,
                     openai_base_url,
                     advanced_config,
-                    clear_advanced_config,
                     requires_review,
                 },
             ) => {
@@ -236,13 +239,11 @@ impl AgentProviderProfileUpsert {
                     api_key: resolve_api_key(
                         previous.as_ref().map(|(api_key, _)| *api_key),
                         api_key,
-                        clear_api_key,
                     )?,
                     openai_base_url,
                     advanced_config: resolve_advanced_config(
                         previous.and_then(|(_, advanced_config)| advanced_config),
                         advanced_config,
-                        clear_advanced_config,
                     )?,
                     requires_review,
                 }
@@ -262,17 +263,7 @@ impl AgentProviderProfileUpsert {
     }
 }
 
-fn resolve_api_key(
-    existing: Option<&str>,
-    incoming: Option<String>,
-    clear: bool,
-) -> Result<String, String> {
-    if clear {
-        if incoming.is_some() {
-            return Err("API Key 不能同时设置和清除".to_string());
-        }
-        return Ok(String::new());
-    }
+fn resolve_api_key(existing: Option<&str>, incoming: Option<String>) -> Result<String, String> {
     Ok(incoming
         .filter(|api_key| !api_key.is_empty())
         .or_else(|| existing.map(ToOwned::to_owned))
@@ -282,14 +273,7 @@ fn resolve_api_key(
 fn resolve_advanced_config(
     existing: Option<serde_json::Value>,
     incoming: Option<serde_json::Value>,
-    clear: bool,
 ) -> Result<Option<serde_json::Value>, String> {
-    if clear {
-        if incoming.is_some() {
-            return Err("高级配置不能同时设置和清除".to_string());
-        }
-        return Ok(None);
-    }
     Ok(incoming.or(existing))
 }
 
@@ -329,16 +313,13 @@ fn redact_config_for_frontend(app_config: &AppConfig) -> AppConfig {
         match &mut profile.native_config {
             NativeProfileConfig::ClaudeCode { .. } => {}
             NativeProfileConfig::Codex {
-                api_key,
                 advanced_config,
                 ..
             }
             | NativeProfileConfig::OpenCode {
-                api_key,
                 advanced_config,
                 ..
             } => {
-                api_key.clear();
                 *advanced_config = None;
             }
         }
@@ -357,8 +338,12 @@ fn set_active_profile_in_config(
         .iter()
         .find(|profile| profile.id == profile_id && profile.agent_kind == agent_kind)
         .ok_or_else(|| "档案不存在或不属于当前智能体".to_string())?;
-    if profile.default_model.trim().is_empty() {
-        return Err("请先为档案配置默认模型".to_string());
+    if profile
+        .models
+        .iter()
+        .all(|model| model.id.trim().is_empty())
+    {
+        return Err("请先为档案配置至少一个模型".to_string());
     }
 
     app_config
@@ -375,9 +360,7 @@ fn set_active_profile_default_model_in_config(
     agent_kind: AgentKind,
     default_model: &str,
 ) -> Result<(), String> {
-    if default_model.trim().is_empty() {
-        return Err("请填写默认模型".to_string());
-    }
+    let default_model = default_model.trim();
 
     let active_profile_id = app_config
         .agent_profile_registry
@@ -391,10 +374,13 @@ fn set_active_profile_default_model_in_config(
         .iter_mut()
         .find(|profile| profile.id == active_profile_id && profile.agent_kind == agent_kind)
         .ok_or("档案不存在或不属于当前智能体")?;
-    if !profile.models.iter().any(|model| model.id == default_model) {
+    if default_model.is_empty() {
+        profile.default_model.clear();
+    } else if !profile.models.iter().any(|model| model.id == default_model) {
         return Err("默认模型必须属于当前启用档案的模型列表".to_string());
+    } else {
+        profile.default_model = default_model.to_string();
     }
-    profile.default_model = default_model.to_string();
     app_config.profile_registry_is_derived = false;
     app_config.profile_registry_validation_error = None;
     Ok(())
@@ -862,11 +848,25 @@ pub fn upsert_agent_provider_profile(
     let profile_for_redaction = profile.clone();
     if profile.agent_kind == AgentKind::ClaudeCode {
         let mut updated_config = app_config.clone();
-        upsert_agent_profile_in_config(&mut updated_config, profile)
+        upsert_agent_profile_in_config(&mut updated_config, profile.clone())
             .map_err(|error| redact_profile_error(&error, &profile_for_redaction))?;
         config::save_config(&app, &updated_config)
             .map_err(|error| redact_profile_error(&error, &profile_for_redaction))?;
         *app_config = updated_config;
+
+        let is_active = app_config
+            .agent_profile_registry
+            .active_profile_ids
+            .get(&AgentKind::ClaudeCode)
+            .map(|id| id == &profile_for_redaction.id)
+            .unwrap_or(false);
+        if is_active {
+            let compensation =
+                apply_native_profile_config_for_app(state.inner(), &app, &profile_for_redaction)
+                    .map_err(|error| redact_profile_error(&error, &profile_for_redaction))?;
+            discard_native_profile_backup_after_success(state.inner(), &app, &compensation);
+        }
+
         return Ok(());
     }
     let compensation = upsert_agent_profile_transaction(
@@ -921,6 +921,17 @@ pub fn activate_agent_provider_profile(
             .backup_claude_settings()
             .map_err(|error| format!("无法备份默认 Claude Code 配置: {error}"))?;
     }
+    if agent_kind == AgentKind::Codex
+        && !app_config
+            .agent_profile_registry
+            .active_profile_ids
+            .contains_key(&AgentKind::Codex)
+    {
+        let paths = native_config_paths(&app)?;
+        NativeConfigWriteService::new(paths, state.app_data_dir.join("provider-profile-backups"))
+            .backup_codex_files()
+            .map_err(|error| format!("无法备份默认 Codex 配置: {error}"))?;
+    }
     let compensation = activate_agent_profile_transaction(
         &mut app_config,
         agent_kind,
@@ -965,6 +976,35 @@ pub fn activate_default_claude_supplier(
         .agent_profile_registry
         .active_profile_ids
         .remove(&AgentKind::ClaudeCode);
+    config::save_config(&app, &updated_config)?;
+    *app_config = updated_config;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn activate_default_codex_supplier(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let _operation_lock = acquire_profile_operation_lock(&state.provider_profile_operation_lock)?;
+    let mut app_config = state.config.lock().unwrap();
+    if !app_config
+        .agent_profile_registry
+        .active_profile_ids
+        .contains_key(&AgentKind::Codex)
+    {
+        return Ok(());
+    }
+    let paths = native_config_paths(&app)?;
+    NativeConfigWriteService::new(paths, state.app_data_dir.join("provider-profile-backups"))
+        .restore_codex_files_backup()
+        .map_err(|error| format!("无法恢复默认 Codex 配置: {error}"))?;
+
+    let mut updated_config = app_config.clone();
+    updated_config
+        .agent_profile_registry
+        .active_profile_ids
+        .remove(&AgentKind::Codex);
     config::save_config(&app, &updated_config)?;
     *app_config = updated_config;
     Ok(())
@@ -1083,25 +1123,24 @@ pub async fn test_agent_provider_profile(
     };
     let connection =
         profile_api_connection(&profile).map_err(|error| redact_profile_error(&error, &profile))?;
-    if profile.default_model.trim().is_empty() {
-        return Err("请配置默认模型".to_string());
-    }
+    let model = profile
+        .models
+        .iter()
+        .map(|model| model.id.trim())
+        .find(|model| !model.is_empty())
+        .ok_or_else(|| "请先配置至少一个模型".to_string())?;
 
     let result = match connection.protocol {
-        ProfileApiProtocol::Anthropic => test_anthropic_stream(
-            connection.base_url,
-            connection.api_key,
-            &profile.default_model,
-        )
-        .await
-        .map(|_| profile.default_model.clone()),
-        ProfileApiProtocol::OpenAiCompatible => test_openai_stream(
-            connection.base_url,
-            connection.api_key,
-            &profile.default_model,
-        )
-        .await
-        .map(|_| profile.default_model.clone()),
+        ProfileApiProtocol::Anthropic => {
+            test_anthropic_stream(connection.base_url, connection.api_key, model)
+                .await
+                .map(|_| model.to_string())
+        }
+        ProfileApiProtocol::OpenAiCompatible => {
+            test_openai_stream(connection.base_url, connection.api_key, model)
+                .await
+                .map(|_| model.to_string())
+        }
     };
     result.map_err(|error| redact_profile_error(&error, &profile))
 }
@@ -1222,6 +1261,9 @@ mod tests {
                 openai_base_url: "https://api.example.test/v1".to_string(),
                 codex_needs_proxy: None,
                 advanced_config: None,
+                auth_json: None,
+                config_toml: None,
+                model_catalog: None,
                 requires_review: false,
             },
         }
@@ -1291,21 +1333,6 @@ mod tests {
         });
         let redacted: AgentProviderProfileUpsert = serde_json::from_value(redacted_value).unwrap();
         let redacted = redacted.into_profile(Some(&existing)).unwrap();
-        let clear: AgentProviderProfileUpsert = serde_json::from_value(serde_json::json!({
-            "id": "codex",
-            "agent_kind": "codex",
-            "name": "测试 Codex 档案",
-            "models": [{ "id": "model-a" }],
-            "default_model": "model-a",
-            "native_config": {
-                "type": "codex",
-                "clear_api_key": true,
-                "clear_advanced_config": true,
-                "openai_base_url": "https://api.example.test/v1"
-            }
-        }))
-        .unwrap();
-        let clear = clear.into_profile(Some(&existing)).unwrap();
 
         for profile in [omitted, redacted] {
             let NativeProfileConfig::Codex {
@@ -1322,16 +1349,6 @@ mod tests {
                 Some(serde_json::json!({ "auth": { "token": "secret" } }))
             );
         }
-        let NativeProfileConfig::Codex {
-            api_key,
-            advanced_config,
-            ..
-        } = clear.native_config
-        else {
-            panic!("应为 Codex 档案");
-        };
-        assert!(api_key.is_empty());
-        assert!(advanced_config.is_none());
     }
 
     #[test]
@@ -1370,7 +1387,7 @@ mod tests {
             panic!("应为 Codex 档案");
         };
 
-        assert!(api_key.is_empty());
+        assert_eq!(api_key, "secret-key");
         assert!(advanced_config.is_none());
         assert!(view
             .providers
@@ -1427,7 +1444,7 @@ mod tests {
         else {
             panic!("应为 Codex 档案");
         };
-        assert!(api_key.is_empty());
+        assert_eq!(api_key, "test-key");
         assert!(advanced_config.is_none());
     }
 
@@ -1442,13 +1459,11 @@ mod tests {
     }
 
     #[test]
-    fn profile_validation_rejects_default_model_when_models_are_empty() {
+    fn profile_validation_allows_empty_default_model_with_models() {
         let mut profile = codex_profile("codex", "model-a");
-        profile.models.clear();
+        profile.default_model.clear();
 
-        let error = profile.validate().unwrap_err();
-
-        assert_eq!(error, "模型列表为空时默认模型必须为空");
+        assert!(profile.validate().is_ok());
     }
 
     #[test]
@@ -1509,7 +1524,7 @@ mod tests {
         let error = set_active_profile_in_config(&mut app_config, AgentKind::Codex, "empty-model")
             .unwrap_err();
 
-        assert_eq!(error, "请先为档案配置默认模型");
+        assert_eq!(error, "请先为档案配置至少一个模型");
         assert!(app_config
             .agent_profile_registry
             .active_profile_ids
@@ -1538,7 +1553,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(error, "请先为档案配置默认模型");
+        assert_eq!(error, "请先为档案配置至少一个模型");
         assert!(!wrote_native);
     }
 

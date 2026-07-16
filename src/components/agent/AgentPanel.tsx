@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getStoredAgentCwd } from '../../lib/sessionCwd';
-import { profileToSelectorProvider } from '../../lib/agentProfileSelector';
+import { getProfilePrimaryModel, profileToSelectorProvider } from '../../lib/agentProfileSelector';
 import { getProviderModelList } from '../../lib/providerModels';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { formatCommandDisplay, renderCommandPrompt } from '../../lib/slashCommands';
@@ -74,8 +74,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const runtimeProfile = sessionProfile ?? activeProfile;
   const runtimeProvider = useMemo(() => runtimeProfile ? profileToSelectorProvider(runtimeProfile) : null, [runtimeProfile]);
   const selectorProvider = useMemo(() => activeProfile ? profileToSelectorProvider(activeProfile) : null, [activeProfile]);
-  const model = session?.model || runtimeProfile?.default_model || '';
-  const selectorModel = activeProfile?.default_model || '';
+  const model = session?.model || getProfilePrimaryModel(runtimeProfile);
+  const selectorModel = getProfilePrimaryModel(activeProfile);
   const providerModels = useMemo(() => getProviderModelList(selectorProvider), [selectorProvider]);
   const availableProviders = useMemo(() => availableProfiles.map(profileToSelectorProvider), [availableProfiles]);
   const formatSelectedProviderModel = useCallback((item: string) => formatModelDisplayName({
@@ -87,12 +87,12 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const usesClaudeDefault = agentKind === 'claude_code' && !runtimeProfile && !activeProfileId;
   const hasUsableProfile = usesClaudeDefault || !isProfileAgent || Boolean(runtimeProfile && model);
   const profileRequiredMessage = isProfileAgent && !hasUsableProfile
-    ? `请先在供应商配置中为 ${agentKind === 'codex' ? 'Codex' : agentKind === 'opencode' ? 'OpenCode' : 'Claude Code'} 添加一个包含默认模型的供应商。`
+    ? `请先在供应商配置中为 ${agentKind === 'codex' ? 'Codex' : agentKind === 'opencode' ? 'OpenCode' : 'Claude Code'} 添加至少一个模型。`
     : undefined;
   const snapshotDiffersFromGlobal = Boolean(
     isProfileAgent
       && sessionProfile
-      && (sessionProfile.id !== activeProfile?.id || model !== activeProfile?.default_model),
+      && (sessionProfile.id !== activeProfile?.id || model !== getProfilePrimaryModel(activeProfile)),
   );
   const rawPermissionConfig = useMemo(() => {
     if (!session?.permission_config) return null;
@@ -191,7 +191,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   };
 
   const handleModelChange = useCallback(async (nextModel: string) => {
-    if (!isProfileAgent || !nextModel || nextModel === activeProfile?.default_model) {
+    if (!isProfileAgent || !nextModel || nextModel === getProfilePrimaryModel(activeProfile)) {
       return;
     }
     try {
@@ -201,7 +201,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         error: { ...state.error, [sessionId]: String(error) },
       }));
     }
-  }, [activeProfile?.default_model, agentKind, isProfileAgent, sessionId, setActiveAgentProfileModel]);
+  }, [activeProfile, agentKind, isProfileAgent, sessionId, setActiveAgentProfileModel]);
 
   const handleProviderChange = useCallback(async (nextProviderId: string) => {
     if (!isProfileAgent || !nextProviderId || nextProviderId === activeProfileId) {
