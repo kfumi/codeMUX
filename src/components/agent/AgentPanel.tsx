@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getStoredAgentCwd } from '../../lib/sessionCwd';
 import { getProfilePrimaryModel, profileToSelectorProvider } from '../../lib/agentProfileSelector';
-import { getProviderModelList } from '../../lib/providerModels';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { formatCommandDisplay, renderCommandPrompt } from '../../lib/slashCommands';
 import { mapExecutionModeToPermissionConfig, serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
@@ -18,9 +17,9 @@ import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
-import { CodeMuxModelSelector } from './assistant-ui/CodeMuxModelSelector';
 import { CodeMuxThread } from './assistant-ui/CodeMuxThread';
 import { AgentPermissionSelector } from './AgentPermissionSelector';
+import { AgentModelSelector } from './AgentModelSelector';
 import { formatModelDisplayName } from './modelDisplay';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
@@ -33,7 +32,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { projects } = useProjectStore();
   const { startQuery, interrupt, loadSessionMessages, clearEvents, respondToPermission } = useAgentStore();
   const pendingPermission = useAgentStore((state) => state.pendingPermissions[sessionId] ?? null);
-  const { config, getActiveProvider, activateAgentProfile, setActiveAgentProfileModel } = useSettingsStore();
+  const { config, getActiveProvider, setActiveAgentProfileModel } = useSettingsStore();
   const { loadFileTree, setProjectPath } = usePreviewStore();
 
   // 检测容器宽度，窄屏时启用紧凑模式
@@ -73,11 +72,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   );
   const runtimeProfile = sessionProfile ?? activeProfile;
   const runtimeProvider = useMemo(() => runtimeProfile ? profileToSelectorProvider(runtimeProfile) : null, [runtimeProfile]);
-  const selectorProvider = useMemo(() => activeProfile ? profileToSelectorProvider(activeProfile) : null, [activeProfile]);
   const model = session?.model || getProfilePrimaryModel(runtimeProfile);
   const selectorModel = getProfilePrimaryModel(activeProfile);
-  const providerModels = useMemo(() => getProviderModelList(selectorProvider), [selectorProvider]);
-  const availableProviders = useMemo(() => availableProfiles.map(profileToSelectorProvider), [availableProfiles]);
   const formatSelectedProviderModel = useCallback((item: string) => formatModelDisplayName({
     model: item,
     agentKind,
@@ -203,19 +199,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
   }, [activeProfile, agentKind, isProfileAgent, sessionId, setActiveAgentProfileModel]);
 
-  const handleProviderChange = useCallback(async (nextProviderId: string) => {
-    if (!isProfileAgent || !nextProviderId || nextProviderId === activeProfileId) {
-      return;
-    }
-    try {
-      await activateAgentProfile(agentKind, nextProviderId);
-    } catch (error) {
-      useAgentStore.setState((state) => ({
-        error: { ...state.error, [sessionId]: String(error) },
-      }));
-    }
-  }, [activateAgentProfile, activeProfileId, agentKind, isProfileAgent, sessionId]);
-
   const handleReasoningEffortChange = useCallback(async (nextEffort: ReasoningEffort) => {
     const latestSession = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
     if (!latestSession || latestSession.reasoning_effort === nextEffort) {
@@ -323,16 +306,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                 disabled={!hasUsableProfile}
                 disabledMessage={profileRequiredMessage}
                 modelSelector={(
-                  <CodeMuxModelSelector
+                  <AgentModelSelector
+                    agentKind={agentKind}
+                    activeProfile={activeProfile}
+                    activeProfileId={activeProfileId}
                     value={selectorModel}
-                    models={providerModels}
                     onChange={handleModelChange}
-                    providers={availableProviders}
-                    providerId={activeProfileId}
-                    onProviderChange={handleProviderChange}
                     reasoningEffort={reasoningEffort}
                     onReasoningEffortChange={handleReasoningEffortChange}
-                    getDisplayName={formatSelectedProviderModel}
                     disabled={isRunning}
                     compact={compact}
                   />
