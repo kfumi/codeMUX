@@ -438,11 +438,26 @@ fn codex_catalog_model_entry(
     };
 
     entry_obj.insert("slug".to_string(), Value::String(model.to_string()));
-    entry_obj.insert("display_name".to_string(), Value::String(display_name.to_string()));
-    entry_obj.insert("description".to_string(), Value::String(display_name.to_string()));
-    entry_obj.insert("context_window".to_string(), Value::Number(context_window.into()));
-    entry_obj.insert("max_context_window".to_string(), Value::Number(context_window.into()));
-    entry_obj.insert("priority".to_string(), Value::Number((1000 + priority).into()));
+    entry_obj.insert(
+        "display_name".to_string(),
+        Value::String(display_name.to_string()),
+    );
+    entry_obj.insert(
+        "description".to_string(),
+        Value::String(display_name.to_string()),
+    );
+    entry_obj.insert(
+        "context_window".to_string(),
+        Value::Number(context_window.into()),
+    );
+    entry_obj.insert(
+        "max_context_window".to_string(),
+        Value::Number(context_window.into()),
+    );
+    entry_obj.insert(
+        "priority".to_string(),
+        Value::Number((1000 + priority).into()),
+    );
     entry_obj.insert("additional_speed_tiers".to_string(), Value::Array(vec![]));
     entry_obj.insert("service_tiers".to_string(), Value::Array(vec![]));
     entry_obj.insert("availability_nux".to_string(), Value::Null);

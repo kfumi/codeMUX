@@ -313,12 +313,10 @@ fn redact_config_for_frontend(app_config: &AppConfig) -> AppConfig {
         match &mut profile.native_config {
             NativeProfileConfig::ClaudeCode { .. } => {}
             NativeProfileConfig::Codex {
-                advanced_config,
-                ..
+                advanced_config, ..
             }
             | NativeProfileConfig::OpenCode {
-                advanced_config,
-                ..
+                advanced_config, ..
             } => {
                 *advanced_config = None;
             }
