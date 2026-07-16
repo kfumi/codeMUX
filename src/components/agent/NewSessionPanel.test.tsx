@@ -8,6 +8,7 @@ import { usePreviewStore } from '../../stores/previewStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { AgentKind } from '../../types/session';
+import type { SlashCommand } from '../../lib/slashCommands';
 import { NewSessionPanel } from './NewSessionPanel';
 
 vi.mock('../../hooks/useAgentModels', () => ({
@@ -26,11 +27,12 @@ const composerProps: Array<{
   disabled?: boolean;
   disabledMessage?: string;
   onSend?: (content: string) => Promise<void>;
+  onCommand?: (command: SlashCommand, args: string) => Promise<void>;
 }> = [];
 
 vi.mock('./assistant-ui/CodeMuxAssistantRuntime', () => ({
-  CodeMuxAssistantRuntimeProvider: ({ children, agentKind, onSend }: any) => {
-    composerProps.push({ agentKind, onSend });
+  CodeMuxAssistantRuntimeProvider: ({ children, agentKind, onSend, onCommand }: any) => {
+    composerProps.push({ agentKind, onSend, onCommand });
     return <div>{children}</div>;
   },
 }));
@@ -232,6 +234,49 @@ describe('NewSessionPanel', () => {
     await runtimeSend?.('Ship the feature');
 
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('does not submit prompt commands with a model left over from a different active profile', async () => {
+    const onSubmit = vi.fn();
+    render(<NewSessionPanel onSubmit={onSubmit} />);
+    const runtime = [...composerProps].reverse().find((props) => props.onCommand);
+
+    act(() => {
+      useSettingsStore.setState((state) => ({
+        ...state,
+        config: state.config ? {
+          ...state.config,
+          agent_profile_registry: {
+            ...state.config.agent_profile_registry!,
+            active_profile_ids: { claude_code: 'profile-2' },
+          },
+        } : null,
+      }));
+      useNewSessionStore.setState({ selectedModel: 'claude-opus-4-1' });
+    });
+
+    await runtime?.onCommand?.({
+      name: 'review',
+      description: 'review',
+      category: 'builtin',
+      handler: 'prompt',
+      prompt: '/review',
+    }, '');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it.each(['sonnet', 'opus', 'fable', 'haiku'])('accepts Claude built-in model %s with an active profile', async (model) => {
+    const onSubmit = vi.fn();
+    render(<NewSessionPanel onSubmit={onSubmit} />);
+    act(() => {
+      useNewSessionStore.setState({ selectedModel: model });
+    });
+
+    const runtimeSend = [...composerProps].reverse().find((props) => props.onSend)?.onSend;
+    await runtimeSend?.('Ship the feature');
+
+    expect(onSubmit).toHaveBeenCalledWith({ text: 'Ship the feature' });
   });
 
   it('allows a Claude conversation with the default local supplier', async () => {

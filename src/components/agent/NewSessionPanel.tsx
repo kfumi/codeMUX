@@ -18,6 +18,43 @@ import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistant
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 import { AgentModelSelector } from './AgentModelSelector';
 
+const CLAUDE_CODE_BUILTIN_MODEL_IDS = new Set(['sonnet', 'opus', 'fable', 'haiku']);
+
+function isCurrentDraftSubmissionAvailable(
+  renderedProfileId: string | null,
+  renderedModels: Array<{ id: string }>,
+  areModelsLoading: boolean,
+): boolean {
+  const currentStore = useNewSessionStore.getState();
+  const currentConfig = useSettingsStore.getState().config;
+  const currentAgentKind = currentStore.selectedAgentKind;
+  const isProfileAgent = currentAgentKind === 'claude_code'
+    || currentAgentKind === 'codex'
+    || currentAgentKind === 'opencode';
+
+  if (!isProfileAgent) return true;
+
+  const activeProfileId = currentConfig?.agent_profile_registry?.active_profile_ids?.[currentAgentKind] ?? null;
+  if (activeProfileId !== renderedProfileId) return false;
+  const activeProfile = currentConfig?.agent_profile_registry?.profiles.find(
+    (profile) => profile.id === activeProfileId && profile.agent_kind === currentAgentKind,
+  ) ?? null;
+
+  if (currentAgentKind === 'claude_code' && !activeProfileId) {
+    return !currentStore.selectedModel || CLAUDE_CODE_BUILTIN_MODEL_IDS.has(currentStore.selectedModel);
+  }
+  if (!activeProfileId || !activeProfile || areModelsLoading) return false;
+
+  if (!currentStore.selectedModel) {
+    return activeProfile.models.some((model) => model.id.trim());
+  }
+
+  return activeProfile.models.some((model) => model.id === currentStore.selectedModel)
+    || (currentAgentKind === 'claude_code'
+      ? CLAUDE_CODE_BUILTIN_MODEL_IDS.has(currentStore.selectedModel)
+      : renderedModels.some((model) => model.id === currentStore.selectedModel));
+}
+
 interface NewSessionPanelProps {
   onSubmit: (input: AgentInputPayload) => Promise<void> | void;
 }
@@ -53,7 +90,9 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const activeProfile = availableProfiles.find((profile) => profile.id === activeProfileId) ?? null;
   const { models, isLoading: areModelsLoading } = useAgentModels(selectedAgentKind, activeProfile, activeProfileId);
   const effectiveModel = selectedModel || activeProfile?.models.find((model) => model.id.trim())?.id.trim() || '';
-  const selectedModelIsAvailable = !selectedModel || models.some((model) => model.id === selectedModel);
+  const selectedModelIsAvailable = !selectedModel
+    || models.some((model) => model.id === selectedModel)
+    || (selectedAgentKind === 'claude_code' && CLAUDE_CODE_BUILTIN_MODEL_IDS.has(selectedModel));
   const selectedModelBelongsToActiveProfile = !selectedModel || activeProfile?.models.some((model) => model.id === selectedModel);
   const usesClaudeDefault = selectedAgentKind === 'claude_code' && !activeProfileId;
   const hasUsableProfile = !isProfileAgent
@@ -64,7 +103,10 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
           && effectiveModel
           && !areModelsLoading
           && selectedModelIsAvailable
-          && (selectedModelBelongsToActiveProfile || (selectedAgentKind === 'codex' || selectedAgentKind === 'opencode')),
+          && (selectedModelBelongsToActiveProfile
+            || selectedAgentKind === 'claude_code' && CLAUDE_CODE_BUILTIN_MODEL_IDS.has(selectedModel ?? '')
+            || selectedAgentKind === 'codex'
+            || selectedAgentKind === 'opencode'),
       ));
   const profileRequiredMessage = isProfileAgent && !hasUsableProfile
     ? `请先在供应商配置中为 ${selectedAgent?.label ?? '当前智能体'} 添加至少一个模型。`
@@ -124,19 +166,8 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
 
   const handleSend = async (input: AgentInputPayload | string) => {
     const currentStore = useNewSessionStore.getState();
-    const currentConfig = useSettingsStore.getState().config;
-    const currentAgentKind = currentStore.selectedAgentKind;
-    const currentProfileId = currentAgentKind === 'claude_code'
-      || currentAgentKind === 'codex'
-      || currentAgentKind === 'opencode'
-      ? currentConfig?.agent_profile_registry?.active_profile_ids?.[currentAgentKind] ?? null
-      : null;
-    if (
-      currentStore.selectedAgentKind !== selectedAgentKind
-      || currentProfileId !== activeProfileId
-      || !hasUsableProfile
-      || (isProfileAgent && currentStore.selectedModel && !selectedModelIsAvailable)
-    ) {
+    if (currentStore.selectedAgentKind !== selectedAgentKind
+      || !isCurrentDraftSubmissionAvailable(activeProfileId, models, areModelsLoading)) {
       return;
     }
     if (isProfileAgent && effectiveModel !== selectedModel) {
@@ -171,7 +202,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
         }
       }
 
-      await onSubmit({ text: renderCommandPrompt(command, args) });
+      await handleSend({ text: renderCommandPrompt(command, args) });
     }
   };
 
