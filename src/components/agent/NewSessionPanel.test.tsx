@@ -40,20 +40,13 @@ vi.mock('./assistant-ui/CodeMuxComposer', () => ({
   },
 }));
 
-vi.mock('./assistant-ui/CodeMuxModelSelector', () => ({
-  CodeMuxModelSelector: ({ models, providers, providerId, onChange, onProviderChange }: any) => (
+vi.mock('./AgentModelSelector', () => ({
+  AgentModelSelector: ({ activeProfile, value, onChange }: any) => (
     <div>
-      <select aria-label="Providers" value={providerId ?? ''} onChange={(event) => onProviderChange?.(event.target.value, 'gpt-5')}>
-        {providers?.map((provider: any) => (
-          <option key={provider.id} value={provider.id}>
-            {provider.name}
-          </option>
-        ))}
-      </select>
-      <select aria-label="Models" onChange={(event) => onChange(event.target.value)}>
-        {models.map((model: string) => (
-          <option key={model} value={model}>
-            {model}
+      <select aria-label="Models" value={value ?? ''} onChange={(event) => onChange(event.target.value)}>
+        {activeProfile?.models.map((model: any) => (
+          <option key={model.id} value={model.id}>
+            {model.id}
           </option>
         ))}
       </select>
@@ -126,7 +119,6 @@ describe('NewSessionPanel', () => {
           active_profile_ids: { claude_code: 'profile-1' },
         },
       },
-      activateAgentProfile: vi.fn(() => Promise.resolve()),
     }));
   });
 
@@ -169,7 +161,7 @@ describe('NewSessionPanel', () => {
     expect(screen.queryByText('D:/project/ai-code/codeMUX')).toBeNull();
   });
 
-  it('lets the draft choose a provider model', () => {
+  it('lets the draft choose a model from the active provider', () => {
     render(<NewSessionPanel onSubmit={vi.fn()} />);
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Models' }), {
@@ -179,7 +171,7 @@ describe('NewSessionPanel', () => {
     expect(useNewSessionStore.getState().selectedModel).toBe('claude-opus-4-1');
   });
 
-  it('lets the draft choose a provider and its first model', async () => {
+  it('does not render provider switching and only exposes the active provider models', () => {
     useSettingsStore.setState((state) => ({
       ...state,
       config: state.config ? {
@@ -194,14 +186,10 @@ describe('NewSessionPanel', () => {
     }));
     render(<NewSessionPanel onSubmit={vi.fn()} />);
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Providers' }), {
-      target: { value: 'profile-2' },
-    });
-
-    await vi.waitFor(() => {
-      expect(useNewSessionStore.getState().selectedProviderId).toBe('profile-2');
-      expect(useNewSessionStore.getState().selectedModel).toBe('gpt-5');
-    });
+    expect(screen.queryByRole('combobox', { name: 'Providers' })).toBeNull();
+    expect(screen.getByRole('option', { name: 'claude-sonnet-4-20250514' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'claude-opus-4-1' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'gpt-5' })).toBeNull();
   });
 
   it('submits through the shared runtime send handler', async () => {

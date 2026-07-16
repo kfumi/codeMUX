@@ -2,8 +2,6 @@ import { useEffect, useMemo } from 'react';
 
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { renderCommandPrompt } from '../../lib/slashCommands';
-import { getPrimaryProviderModel, getProviderModelList } from '../../lib/providerModels';
-import { getProfilePrimaryModel, profileToSelectorProvider } from '../../lib/agentProfileSelector';
 import { mapExecutionModeToPermissionConfig, serializePermissionConfig } from '../../lib/agentPermissions';
 import { agentApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
@@ -17,8 +15,7 @@ import { AgentSelector } from './AgentSelector';
 import { AgentPermissionSelector } from './AgentPermissionSelector';
 import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
-import { CodeMuxModelSelector } from './assistant-ui/CodeMuxModelSelector';
-import { formatModelDisplayName } from './modelDisplay';
+import { AgentModelSelector } from './AgentModelSelector';
 
 interface NewSessionPanelProps {
   onSubmit: (input: AgentInputPayload) => Promise<void> | void;
@@ -27,13 +24,11 @@ interface NewSessionPanelProps {
 export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const {
     selectedAgentKind,
-    selectedProviderId,
     selectedModel,
     selectedReasoningEffort,
     selectedPermissionConfig,
     selectedPlanMode,
     setSelectedAgentKind,
-    setSelectedProviderId,
     setSelectedModel,
     setSelectedReasoningEffort,
     setSelectedPermissionConfig,
@@ -43,7 +38,6 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const projects = useProjectStore((state) => state.projects);
   const config = useSettingsStore((s) => s.config);
   const getActiveProvider = useSettingsStore((s) => s.getActiveProvider);
-  const activateAgentProfile = useSettingsStore((s) => s.activateAgentProfile);
   const { loadFileTree, setProjectPath } = usePreviewStore();
   const clearEvents = useAgentStore((state) => state.clearEvents);
 
@@ -55,35 +49,13 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     [isProfileAgent, profileRegistry?.profiles, selectedAgentKind],
   );
   const activeProfileId = isProfileAgent ? profileRegistry?.active_profile_ids?.[selectedAgentKind] ?? null : null;
-  const availableProviders = useMemo(
-    () => availableProfiles.map(profileToSelectorProvider),
-    [availableProfiles],
-  );
-  const selectedProvider = useMemo(
-    () => availableProviders.find((provider) => provider.id === selectedProviderId)
-      ?? availableProviders.find((provider) => provider.id === activeProfileId)
-      ?? null,
-    [activeProfileId, availableProviders, selectedProviderId],
-  );
-  const providerModels = useMemo(() => getProviderModelList(selectedProvider), [selectedProvider]);
-  const effectiveModel = selectedModel || getPrimaryProviderModel(selectedProvider);
+  const activeProfile = availableProfiles.find((profile) => profile.id === activeProfileId) ?? null;
+  const effectiveModel = selectedModel || activeProfile?.models.find((model) => model.id.trim())?.id.trim() || '';
   const usesClaudeDefault = selectedAgentKind === 'claude_code' && !activeProfileId;
-  const hasUsableProfile = usesClaudeDefault || !isProfileAgent || Boolean(
-    activeProfileId
-      && selectedProvider?.id === activeProfileId
-      && effectiveModel
-      && providerModels.includes(effectiveModel),
-  );
+  const hasUsableProfile = usesClaudeDefault || !isProfileAgent || Boolean(activeProfileId && effectiveModel);
   const profileRequiredMessage = isProfileAgent && !hasUsableProfile
     ? `请先在供应商配置中为 ${selectedAgent?.label ?? '当前智能体'} 添加至少一个模型。`
     : undefined;
-  const formatSelectedProviderModel = useMemo(() => (
-    (item: string) => formatModelDisplayName({
-      model: item,
-      agentKind: selectedAgentKind,
-      usesLargeContext: selectedProvider?.context_1m,
-    })
-  ), [selectedProvider?.context_1m, selectedAgentKind]);
   const draftProject = useMemo(
     () => projects.find((project) => project.id === draftProjectId) ?? null,
     [draftProjectId, projects],
@@ -131,13 +103,11 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     if (!isProfileAgent) return;
     const active = availableProfiles.find((profile) => profile.id === activeProfileId);
     if (!active) {
-      setSelectedProviderId(null);
       setSelectedModel(null);
       return;
     }
-    setSelectedProviderId(active.id);
-    setSelectedModel(getProfilePrimaryModel(active) || null);
-  }, [activeProfileId, availableProfiles, isProfileAgent, selectedAgentKind, setSelectedModel, setSelectedProviderId]);
+    setSelectedModel(active.models.find((model) => model.id.trim())?.id.trim() || null);
+  }, [activeProfileId, availableProfiles, isProfileAgent, setSelectedModel]);
 
   const handleSend = async (input: AgentInputPayload | string) => {
     if (!hasUsableProfile) {
@@ -202,29 +172,14 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               disabled={!hasUsableProfile}
               disabledMessage={profileRequiredMessage}
               modelSelector={(
-                <CodeMuxModelSelector
+                <AgentModelSelector
+                  agentKind={selectedAgentKind}
+                  activeProfile={activeProfile}
+                  activeProfileId={activeProfileId}
                   value={effectiveModel}
-                  models={providerModels}
                   onChange={setSelectedModel}
-                  providers={availableProviders}
-                  providerId={selectedProvider?.id ?? null}
-                  onProviderChange={(profileId, nextModel) => {
-                    if (!isProfileAgent) return;
-                    void activateAgentProfile(selectedAgentKind, profileId)
-                      .then(() => {
-                        const selectedProfile = availableProfiles.find((profile) => profile.id === profileId);
-                        setSelectedProviderId(profileId);
-                        setSelectedModel(getProfilePrimaryModel(selectedProfile) || nextModel || null);
-                      })
-                      .catch((error) => {
-                        useAgentStore.setState((state) => ({
-                          error: { ...state.error, 'new-session-draft': String(error) },
-                        }));
-                      });
-                  }}
                   reasoningEffort={selectedReasoningEffort}
                   onReasoningEffortChange={setSelectedReasoningEffort}
-                  getDisplayName={formatSelectedProviderModel}
                 />
               )}
               permissionSelector={(
