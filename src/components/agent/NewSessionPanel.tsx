@@ -10,6 +10,7 @@ import { usePreviewStore } from '../../stores/previewStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useAgentModels } from '../../hooks/useAgentModels';
+import type { ModelOption } from '../../hooks/useAgentModels';
 import { getAgentDefinition } from '../../types/agentRegistry';
 import type { AgentInputPayload } from '../../types/agentInput';
 import { AgentSelector } from './AgentSelector';
@@ -22,7 +23,7 @@ const CLAUDE_CODE_BUILTIN_MODEL_IDS = new Set(['sonnet', 'opus', 'fable', 'haiku
 
 function isCurrentDraftSubmissionAvailable(
   renderedProfileId: string | null,
-  renderedModels: Array<{ id: string }>,
+  renderedModels: ModelOption[],
   areModelsLoading: boolean,
 ): boolean {
   const currentStore = useNewSessionStore.getState();
@@ -52,7 +53,7 @@ function isCurrentDraftSubmissionAvailable(
   return activeProfile.models.some((model) => model.id === currentStore.selectedModel)
     || (currentAgentKind === 'claude_code'
       ? CLAUDE_CODE_BUILTIN_MODEL_IDS.has(currentStore.selectedModel)
-      : renderedModels.some((model) => model.id === currentStore.selectedModel));
+      : renderedModels.some((model) => model.id === currentStore.selectedModel && model.source !== 'profile'));
 }
 
 interface NewSessionPanelProps {

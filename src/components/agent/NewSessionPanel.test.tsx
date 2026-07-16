@@ -15,7 +15,7 @@ vi.mock('../../hooks/useAgentModels', () => ({
   useAgentModels: (agentKind: AgentKind, activeProfile: any) => ({
     isLoading: false,
     models: activeProfile
-      ? activeProfile.models.map((model: any) => ({ id: model.id, name: model.id, efforts: true }))
+      ? activeProfile.models.map((model: any) => ({ id: model.id, name: model.id, efforts: true, source: 'profile' }))
       : [],
   }),
 }));
@@ -254,6 +254,45 @@ describe('NewSessionPanel', () => {
       }));
       useNewSessionStore.setState({ selectedModel: 'claude-opus-4-1' });
     });
+
+    await runtime?.onCommand?.({
+      name: 'review',
+      description: 'review',
+      category: 'builtin',
+      handler: 'prompt',
+      prompt: '/review',
+    }, '');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('rejects a model removed during an active profile refresh for normal and prompt sends', async () => {
+    const onSubmit = vi.fn();
+    render(<NewSessionPanel onSubmit={onSubmit} />);
+    const runtime = [...composerProps].reverse().find((props) => props.onSend && props.onCommand);
+
+    act(() => {
+      useSettingsStore.setState((state) => ({
+        ...state,
+        config: state.config ? {
+          ...state.config,
+          agent_profile_registry: {
+            ...state.config.agent_profile_registry!,
+            profiles: state.config.agent_profile_registry!.profiles.map((profile) =>
+              profile.id === 'profile-1'
+                ? { ...profile, models: [{ id: 'claude-sonnet-4-20250514' }] }
+                : profile,
+            ),
+          },
+        } : null,
+      }));
+    });
+    act(() => {
+      useNewSessionStore.setState({ selectedModel: 'claude-opus-4-1' });
+    });
+
+    await runtime?.onSend?.('Ship the feature');
+    expect(onSubmit).not.toHaveBeenCalled();
 
     await runtime?.onCommand?.({
       name: 'review',

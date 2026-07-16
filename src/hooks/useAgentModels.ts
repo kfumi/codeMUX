@@ -10,6 +10,7 @@ export interface ModelOption {
   name: string;
   description?: string;
   efforts?: boolean;
+  source?: 'profile' | 'catalog' | 'config' | 'builtin';
 }
 
 const CLAUDE_CODE_BUILTINS: ModelOption[] = [
@@ -49,6 +50,7 @@ async function loadClaudeCodeModels(
       id,
       name: id,
       efforts: true,
+      source: 'profile',
     }));
     return dedupById([...builtins, ...profileModels]);
   } catch {
@@ -67,6 +69,7 @@ async function loadCodexModels(
         id: m.model,
         name: m.displayName ?? m.model,
         efforts: true,
+        source: 'catalog',
       }));
     } catch {
       return [];
@@ -77,6 +80,7 @@ async function loadCodexModels(
     id: m.id,
     name: m.name ?? m.id,
     efforts: true,
+    source: 'profile',
   }));
 
   try {
@@ -86,6 +90,7 @@ async function loadCodexModels(
         id: m.model,
         name: m.displayName ?? m.model,
         efforts: true,
+        source: 'catalog',
       }));
     return dedupById([...profileModels, ...catalogModels]);
   } catch {
@@ -109,6 +114,7 @@ async function loadOpenCodeModels(
               id: modelId,
               name: modelDef.name ?? modelId,
               efforts: true,
+              source: 'config',
             });
           }
         }
