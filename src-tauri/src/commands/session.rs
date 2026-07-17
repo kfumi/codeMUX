@@ -15,6 +15,7 @@ pub fn create_session(
     project_id: Option<String>,
     permission_config: Option<String>,
     plan_mode: Option<String>,
+    model: Option<String>,
 ) -> Result<operations::Session, String> {
     let agent_kind = AgentKind::from_str(agent_kind.as_deref().unwrap_or("claude_code"))?;
     info!(
@@ -36,6 +37,7 @@ pub fn create_session(
             pid,
             permission_config.as_deref(),
             plan_mode.as_deref(),
+            model.as_deref(),
         )
         .map_err(|e| e.to_string()),
         None => operations::create_session_with_mode_and_permissions(
@@ -45,6 +47,7 @@ pub fn create_session(
             mode_str,
             permission_config.as_deref(),
             plan_mode.as_deref(),
+            model.as_deref(),
         )
         .map_err(|e| e.to_string()),
     }
@@ -117,13 +120,13 @@ pub fn touch_session(state: State<'_, AppState>, session_id: String) -> Result<(
 pub fn update_session_provider(
     state: State<'_, AppState>,
     session_id: String,
-    provider_id: String,
+    provider_id: Option<String>,
     model: String,
     reasoning_effort: Option<String>,
 ) -> Result<(), String> {
     info!(
         target: "session",
-        "Updating session provider session_id={} provider_id={} model={} reasoning_effort={}",
+        "Updating session provider session_id={} provider_id={:?} model={} reasoning_effort={}",
         session_id,
         provider_id,
         model,
@@ -133,7 +136,7 @@ pub fn update_session_provider(
     operations::update_session_provider(
         &db,
         &session_id,
-        &provider_id,
+        provider_id.as_deref(),
         &model,
         reasoning_effort.as_deref(),
     )

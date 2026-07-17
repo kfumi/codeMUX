@@ -37,9 +37,10 @@ type CreateSessionAction = {
     agentKindOrMode?: AgentKind | SessionMode,
     modeOrProjectId?: SessionMode | string,
     projectIdOrPermissionConfig?: string | AgentPermissionConfig,
-    permissionConfigOrPlanMode?: AgentPermissionConfig | AgentPlanMode,
-    planMode?: AgentPlanMode,
-  ): Promise<Session>;
+  permissionConfigOrPlanMode?: AgentPermissionConfig | AgentPlanMode,
+  planMode?: AgentPlanMode,
+  model?: string,
+): Promise<Session>;
 };
 
 function resolveDefaultAgentKind(): AgentKind {
@@ -77,6 +78,7 @@ function createSessionAction(
     projectIdOrPermissionConfig?: string | AgentPermissionConfig,
     permissionConfigOrPlanMode?: AgentPermissionConfig | AgentPlanMode,
     planMode?: AgentPlanMode,
+    model?: string,
   ): Promise<Session> {
     set({ isLoading: true, error: null });
     try {
@@ -98,8 +100,10 @@ function createSessionAction(
         resolvedInputPlanMode,
       );
       const session = resolvedPermissionConfig || resolvedPlanMode
-        ? await sessionApi.create(title, agentKind, mode, resolvedProjectId, resolvedPermissionConfig, resolvedPlanMode)
-        : await sessionApi.create(title, agentKind, mode, resolvedProjectId);
+        ? await sessionApi.create(title, agentKind, mode, resolvedProjectId, resolvedPermissionConfig, resolvedPlanMode, model)
+        : model
+          ? await sessionApi.create(title, agentKind, mode, resolvedProjectId, undefined, undefined, model)
+          : await sessionApi.create(title, agentKind, mode, resolvedProjectId);
       set((state) => ({
         sessions: [session, ...state.sessions],
         activeSessionId: session.id,

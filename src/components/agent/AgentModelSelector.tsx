@@ -48,6 +48,12 @@ export function AgentModelSelector({
     });
   }, [api, effectiveValue, contextModel, reasoningEffort, contextModelSupportsEfforts]);
 
+  useEffect(() => {
+    if (!value && !isLoading && models.length > 0 && models[0]?.id) {
+      onChange(models[0].id);
+    }
+  }, [value, isLoading, models, onChange]);
+
   const modelOptions = models.map((m) => ({
     id: m.id,
     name: formatModelDisplayName({

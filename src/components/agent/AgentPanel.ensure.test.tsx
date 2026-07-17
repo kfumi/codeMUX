@@ -192,7 +192,7 @@ describe('AgentPanel session bootstrapping', () => {
     render(<AgentPanel sessionId="session-running" />);
 
     expect(screen.getByTitle('变更前确认')).toHaveProperty('disabled', false);
-    expect(screen.getByTestId('model-selector').dataset.model).toBe('claude-opus-4-1');
+    expect(screen.getByTestId('model-selector').dataset.model).toBe('claude-sonnet-4-20250514');
   });
   it('uses global model options while preserving the saved session model for context', async () => {
     useSessionStore.setState((state) => ({

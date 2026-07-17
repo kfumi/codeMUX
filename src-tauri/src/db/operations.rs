@@ -120,6 +120,7 @@ pub fn create_session_with_mode_and_permissions(
     mode: &str,
     permission_config: Option<&str>,
     plan_mode: Option<&str>,
+    model: Option<&str>,
 ) -> Result<Session> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
@@ -127,8 +128,8 @@ pub fn create_session_with_mode_and_permissions(
     let plan_mode = plan_mode.unwrap_or("off");
 
     conn.execute(
-        "INSERT INTO sessions (id, title, agent_kind, mode, permission_config, plan_mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![id, title, agent_kind.as_str(), mode, permission_config, plan_mode, now, now],
+        "INSERT INTO sessions (id, title, agent_kind, mode, model, permission_config, plan_mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![id, title, agent_kind.as_str(), mode, model, permission_config, plan_mode, now, now],
     )?;
 
     Ok(Session {
@@ -136,7 +137,7 @@ pub fn create_session_with_mode_and_permissions(
         title: title.to_string(),
         agent_kind,
         provider_id: None,
-        model: None,
+        model: model.map(str::to_string),
         reasoning_effort: Some("medium".to_string()),
         mode: Some(mode.to_string()),
         permission_config: Some(permission_config.to_string()),
@@ -157,6 +158,7 @@ pub fn create_session_for_project_with_permissions(
     project_id: &str,
     permission_config: Option<&str>,
     plan_mode: Option<&str>,
+    model: Option<&str>,
 ) -> Result<Session> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
@@ -164,8 +166,8 @@ pub fn create_session_for_project_with_permissions(
     let plan_mode = plan_mode.unwrap_or("off");
 
     conn.execute(
-        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, permission_config, plan_mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![id, title, agent_kind.as_str(), mode, project_id, permission_config, plan_mode, now, now],
+        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, model, permission_config, plan_mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![id, title, agent_kind.as_str(), mode, project_id, model, permission_config, plan_mode, now, now],
     )?;
 
     Ok(Session {
@@ -173,7 +175,7 @@ pub fn create_session_for_project_with_permissions(
         title: title.to_string(),
         agent_kind,
         provider_id: None,
-        model: None,
+        model: model.map(str::to_string),
         reasoning_effort: Some("medium".to_string()),
         mode: Some(mode.to_string()),
         permission_config: Some(permission_config.to_string()),
@@ -353,7 +355,7 @@ pub fn touch_session(conn: &Connection, session_id: &str) -> Result<()> {
 pub fn update_session_provider(
     conn: &Connection,
     session_id: &str,
-    provider_id: &str,
+    provider_id: Option<&str>,
     model: &str,
     reasoning_effort: Option<&str>,
 ) -> Result<()> {
@@ -544,7 +546,14 @@ mod tests {
         )
         .unwrap();
 
-        update_session_provider(&conn, "session-1", "provider-1", "gpt-5", Some("high")).unwrap();
+        update_session_provider(
+            &conn,
+            "session-1",
+            Some("provider-1"),
+            "gpt-5",
+            Some("high"),
+        )
+        .unwrap();
 
         let sessions = get_all_sessions(&conn).unwrap();
         assert_eq!(sessions[0].model.as_deref(), Some("gpt-5"));
@@ -564,6 +573,7 @@ mod tests {
             "agent",
             Some(permission_config),
             Some("on"),
+            None,
         )
         .unwrap();
 

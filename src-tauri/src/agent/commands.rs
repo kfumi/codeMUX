@@ -80,9 +80,30 @@ fn resolve_active_runtime_config(
         let resolved = resolve_default_claude_runtime_config();
         drop(config);
         let db = state.db.lock().unwrap();
-        operations::update_session_provider(&db, session_id, &resolved.profile_id, "", None)
+        operations::update_session_provider(&db, session_id, Some(&resolved.profile_id), "", None)
             .map_err(|error| format!("无法保存会话默认供应商快照: {}", error))?;
         return Ok(resolved);
+    }
+    if profile_id.is_none() && agent_kind == AgentKind::Opencode {
+        let model = {
+            let db = state.db.lock().unwrap();
+            db.query_row(
+                "SELECT model FROM sessions WHERE id = ?1 LIMIT 1",
+                [session_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .map_err(|error| format!("无法读取会话模型快照: {}", error))?
+        };
+        drop(config);
+        return Ok(ResolvedRuntimeConfig {
+            profile_id: String::new(),
+            api_key: None,
+            base_url: None,
+            model,
+            codex_needs_proxy: None,
+            provider: None,
+            credential_source: None,
+        });
     }
     let profile_id =
         profile_id.ok_or_else(|| format!("{} 尚未启用供应商档案", agent_kind.as_str()))?;
@@ -165,7 +186,7 @@ fn resolve_active_runtime_config(
         operations::update_session_provider(
             &db,
             session_id,
-            &resolved.profile_id,
+            Some(&resolved.profile_id),
             resolved.model.as_deref().unwrap_or_default(),
             None,
         )

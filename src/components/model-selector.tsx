@@ -38,9 +38,9 @@ export type ModelSelectorEffortOption = {
 };
 
 export const DEFAULT_EFFORT_OPTIONS: readonly ModelSelectorEffortOption[] = [
-  { id: "low", name: "Low" },
-  { id: "medium", name: "Med" },
-  { id: "high", name: "High" },
+  { id: "low", name: "低" },
+  { id: "medium", name: "中" },
+  { id: "high", name: "高" },
 ];
 
 export type ModelOption = {
@@ -245,8 +245,8 @@ export const modelSelectorTriggerVariants = cva(
     variants: {
       variant: {
         outline:
-          "border-input hover:bg-accent hover:text-accent-foreground border bg-transparent",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
+          "border-input hover:bg-neutral-100 hover:text-neutral-900 border bg-transparent dark:hover:bg-neutral-800 dark:hover:text-neutral-100",
+        ghost: "hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100",
         muted: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
       },
       size: {
@@ -330,7 +330,7 @@ function ModelIcon({
 }
 
 function ModelSelectorValue({
-  placeholder = "Select model",
+  placeholder = "选择模型",
   showEffort = true,
   className,
 }: ModelSelectorValueProps) {
@@ -433,7 +433,7 @@ export type ModelSelectorSearchProps = ComponentPropsWithoutRef<
 >;
 
 function ModelSelectorSearch({
-  placeholder = "Search models...",
+  placeholder = "搜索模型...",
   ...props
 }: ModelSelectorSearchProps) {
   return (
@@ -486,7 +486,7 @@ export type ModelSelectorEmptyProps = ComponentPropsWithoutRef<
 function ModelSelectorEmpty({ children, ...props }: ModelSelectorEmptyProps) {
   return (
     <CommandEmpty data-slot="model-selector-empty" {...props}>
-      {children ?? "No models found."}
+      {children ?? "未找到模型"}
     </CommandEmpty>
   );
 }
@@ -537,6 +537,7 @@ function ModelSelectorItem({
       }}
       className={cn(
         "relative items-start gap-2 rounded-lg py-2 ps-3 pe-9 [&_svg:not([class*='size-'])]:size-3.5",
+        "data-[selected=true]:!bg-neutral-200 data-[selected=true]:!text-neutral-800 dark:data-[selected=true]:!bg-neutral-700 dark:data-[selected=true]:!text-neutral-100",
         className,
       )}
       {...props}
@@ -570,7 +571,7 @@ export type ModelSelectorEffortProps = ComponentPropsWithoutRef<"div"> & {
 };
 
 function ModelSelectorEffort({
-  label = "Thinking",
+  label = "思考强度",
   className,
   onKeyDown,
   ...props
@@ -610,7 +611,7 @@ function ModelSelectorEffort({
         value={effort ?? ""}
         onValueChange={setEffort}
         orientation="horizontal"
-        aria-label={typeof label === "string" ? label : "Reasoning effort"}
+        aria-label={typeof label === "string" ? label : "思考强度"}
         className="flex items-center gap-0.5"
       >
         {efforts.map((option) => (
@@ -618,8 +619,8 @@ function ModelSelectorEffort({
             key={option.id}
             value={option.id}
             className={cn(
-              "focus-visible:ring-ring/50 text-muted-foreground hover:text-foreground rounded-md px-2 py-1 text-xs transition-colors outline-none focus-visible:ring-2",
-              "data-[state=checked]:bg-accent data-[state=checked]:text-accent-foreground data-[state=checked]:font-medium",
+              "focus-visible:ring-neutral-400/50 text-muted-foreground hover:text-foreground rounded-md px-2 py-1 text-xs transition-colors outline-none focus-visible:ring-2",
+              "data-[state=checked]:bg-neutral-200 data-[state=checked]:text-neutral-800 data-[state=checked]:font-medium dark:data-[state=checked]:bg-neutral-700 dark:data-[state=checked]:text-neutral-100",
             )}
           >
             {option.name}

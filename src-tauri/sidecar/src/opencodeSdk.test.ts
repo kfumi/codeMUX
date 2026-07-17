@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildOpenCodeServerConfig, officialOpenCodeSdkPort } from './opencodeSdk.js';
+import { buildOpenCodeServerConfig, normalizeOpenCodeModelReference, officialOpenCodeSdkPort } from './opencodeSdk.js';
 
 
 const sdkMocks = vi.hoisted(() => {
@@ -28,6 +28,24 @@ vi.mock('@opencode-ai/sdk/server', () => ({
 }));
 
 describe('official OpenCode SDK adapter', () => {
+  it('splits the default free model reference into provider and model id', () => {
+    expect(normalizeOpenCodeModelReference('opencode/north-mini-code-free')).toEqual({
+      provider: 'opencode',
+      model: 'north-mini-code-free',
+    });
+  });
+
+  it('does not shadow the built-in OpenCode provider for free models', () => {
+    const config = buildOpenCodeServerConfig({
+      provider: 'opencode',
+      model: 'north-mini-code-free',
+      credentialSource: 'opencode',
+    });
+
+    expect(config.model).toBe('opencode/north-mini-code-free');
+    expect(config.provider?.opencode).toBeUndefined();
+  });
+
   it('builds provider config with credentials using the official server config', () => {
     expect(buildOpenCodeServerConfig({
       provider: 'provider-1',
@@ -114,6 +132,31 @@ describe('official OpenCode SDK adapter', () => {
           models: {
             'glm-4.7-flash': { id: 'glm-4.7-flash' },
           },
+        },
+      },
+    });
+  });
+
+  it('preserves the native OpenCode config while selecting the built-in free model', () => {
+    expect(buildOpenCodeServerConfig({
+      provider: 'opencode',
+      model: 'north-mini-code-free',
+      credentialSource: 'opencode',
+      existingConfig: {
+        provider: {
+          opencode: {
+            npm: '@opencode-ai/provider',
+            options: { apiKey: 'native-secret' },
+            models: { 'north-mini-code-free': { name: 'North Mini Code Free' } },
+          },
+        },
+      },
+    })).toMatchObject({
+      model: 'opencode/north-mini-code-free',
+      provider: {
+        opencode: {
+          npm: '@opencode-ai/provider',
+          options: { apiKey: 'native-secret' },
         },
       },
     });

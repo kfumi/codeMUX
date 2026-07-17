@@ -7,6 +7,10 @@ import { EditorView } from '@codemirror/view';
 import { toast } from 'sonner';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import claudeSvg from '@lobehub/icons-static-svg/icons/claude-color.svg?raw';
+import openAiSvg from '@lobehub/icons-static-svg/icons/openai.svg?raw';
+import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
+
 import { extractCodexBaseUrl, extractCodexModelName, generateCodexDefaultConfigToml, setCodexBaseUrl, setCodexModelName } from '../../lib/codexTomlUtils';
 import { modelsFromText, modelsToText } from '../../lib/providerModels';
 import { applyClaudeFormToSettings, CLAUDE_SETTINGS_DEFAULT, parseClaudeSettingsDraft, type ClaudeCustomModel, type ClaudeRoleMapping, type ClaudeSettingsForm } from '../../lib/claudeSettingsConfig';
@@ -31,6 +35,22 @@ const baseTheme = EditorView.theme({
 
 type ProfileAgentKind = 'claude_code' | 'codex' | 'opencode';
 type ProfileDraft = { id: string; name: string; note: string; models: string; apiKey: string; baseUrl: string; defaultModel: string; context1m: boolean; codexNeedsProxy: boolean; advancedConfig: string; authJson: string; configToml: string; modelCatalog: CodexCatalogModel[]; claudeForm: ClaudeSettingsForm; providerKey: string; npmPackage: string; modelsConfig: Record<string, OpenCodeModel>; extraOptions: Record<string, string> };
+
+const AGENT_SVGS: Record<ProfileAgentKind, string> = {
+  claude_code: claudeSvg,
+  codex: openAiSvg,
+  opencode: opencodeSvg,
+};
+
+function AgentTabIcon({ kind, size = 16 }: { kind: ProfileAgentKind; size?: number }) {
+  const svg = AGENT_SVGS[kind];
+  const cleaned = svg
+    .replace(/(<svg\b[^>]*\bstyle=")[^"]*(")/, '$1display:block$2')
+    .replace(/(<svg\b[^>]*) width="[^"]*"/, '$1')
+    .replace(/(<svg\b[^>]*) height="[^"]*"/, '$1')
+    .replace(/<svg\b/, `<svg width="${size}" height="${size}"`);
+  return <span className="inline-flex shrink-0 items-center justify-center" aria-hidden="true" dangerouslySetInnerHTML={{ __html: cleaned }} />;
+}
 
 const AGENTS: Array<{ id: ProfileAgentKind; label: string; description: string; baseUrlLabel: string; placeholder: string }> = [
   { id: 'claude_code', label: 'Claude Code', description: '写入 Claude Code 的 settings.json 配置。', baseUrlLabel: 'Anthropic Base URL', placeholder: 'https://api.anthropic.com' },
@@ -86,6 +106,11 @@ function profileModelsFromClaudeForm(form: ClaudeSettingsForm): { id: string; na
       entries.push({ id, name });
     }
   };
+  add(form.fallbackModel, form.fallbackModel);
+  add(form.sonnet.requestModel, form.sonnet.displayName);
+  add(form.opus.requestModel, form.opus.displayName);
+  add(form.fable.requestModel, form.fable.displayName);
+  add(form.haiku.requestModel, form.haiku.displayName);
   for (const m of form.customModels) {
     add(m.requestModel, m.displayName);
   }
@@ -905,13 +930,33 @@ export function ProviderConfigPanel() {
       toast.error('请至少配置一个模型。');
       return;
     }
+    let draftToSave = editing;
+    if (agentKind === 'claude_code') {
+      const updatedCustomModels = draftToSave.claudeForm.customModels
+        .filter((m) => m.requestModel.trim())
+        .map((m) => ({ ...m, displayName: m.displayName.trim() || m.requestModel.trim() }));
+      if (JSON.stringify(updatedCustomModels) !== JSON.stringify(draftToSave.claudeForm.customModels)) {
+        const nextForm = { ...draftToSave.claudeForm, customModels: updatedCustomModels };
+        const currentSettings = parseClaudeSettingsDraft(draftToSave.advancedConfig).settings;
+        const updatedSettings = applyClaudeFormToSettings(currentSettings, nextForm);
+        draftToSave = { ...draftToSave, claudeForm: nextForm, advancedConfig: JSON.stringify(updatedSettings, null, 2) };
+        setEditing(draftToSave);
+      }
+    }
+    if (agentKind === 'codex') {
+      const filteredCatalog = draftToSave.modelCatalog.filter((m) => m.model.trim());
+      if (filteredCatalog.length !== draftToSave.modelCatalog.length) {
+        draftToSave = { ...draftToSave, modelCatalog: filteredCatalog };
+        setEditing(draftToSave);
+      }
+    }
     try {
-      profileToUpsert(agentKind, editing);
+      profileToUpsert(agentKind, draftToSave);
     } catch {
       toast.error(agentKind === 'claude_code' ? '配置 JSON 必须有效，且 env 必须是对象。' : '高级配置必须是有效的 JSON。');
       return;
     }
-    await run(async () => { await upsertAgentProfile(profileToUpsert(agentKind, editing)); setEditing(null); }, '供应商已保存。');
+    await run(async () => { await upsertAgentProfile(profileToUpsert(agentKind, draftToSave)); setEditing(null); }, '供应商已保存。');
   };
   const test = async (profile: AgentProviderProfile) => {
     await run(async () => { await testAgentProfile(agentKind, profile.id); }, `“${profile.name}”连接正常。`);
@@ -920,7 +965,7 @@ export function ProviderConfigPanel() {
   return (
     <div className="space-y-6">
       <div role="tablist" aria-label="智能体供应商" className="inline-flex h-11 w-full items-center justify-start gap-1 rounded-xl bg-muted/55 p-1">
-        {AGENTS.map((item) => <button key={item.id} type="button" role="tab" aria-selected={agentKind === item.id} onClick={() => { setAgentKind(item.id); setEditing(null); }} className={cn('rounded-lg px-4 py-2 text-sm font-medium transition-colors', agentKind === item.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{item.label}</button>)}
+        {AGENTS.map((item) => <button key={item.id} type="button" role="tab" aria-selected={agentKind === item.id} onClick={() => { setAgentKind(item.id); setEditing(null); }} className={cn('inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors', agentKind === item.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}><AgentTabIcon kind={item.id} />{item.label}</button>)}
       </div>
       <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-foreground/65">{agent.description} 切换供应商或模型会影响之后新建或重新启动的会话，不会热更新正在运行的会话。</div>
       {editing ? (

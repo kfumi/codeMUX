@@ -73,6 +73,14 @@ export interface OpenCodeSdkStartInput {
   serverCloseTimeoutMs?: number;
 }
 
+export function normalizeOpenCodeModelReference(model: string): { provider: string; model: string } {
+  const separator = model.indexOf('/');
+  if (separator <= 0 || separator === model.length - 1) {
+    return { provider: 'openai', model };
+  }
+  return { provider: model.slice(0, separator), model: model.slice(separator + 1) };
+}
+
 export interface OpenCodeSdkPort {
   start(input: OpenCodeSdkStartInput): Promise<OpenCodeSdkReadyResources>;
 }
@@ -85,13 +93,24 @@ export interface OpenCodeServerConfigInput {
   apiKey?: string;
   baseUrl?: string;
   credentialSource: 'codemux' | 'environment' | 'opencode' | 'none';
+  existingConfig?: Config;
 }
 
 export function buildOpenCodeServerConfig(input: OpenCodeServerConfigInput): Config {
+  if (input.provider === 'opencode') {
+    return {
+      ...input.existingConfig,
+      model: `opencode/${input.model}`,
+    };
+  }
+
   const options: NonNullable<NonNullable<Config['provider']>[string]['options']> = {};
   const adapter = resolveOpenCodeAdapter(input);
+  const existingProvider = input.existingConfig?.provider?.[input.provider];
   const providerConfig: NonNullable<NonNullable<Config['provider']>[string]> = {
+    ...(existingProvider ?? {}),
     models: {
+      ...(existingProvider?.models ?? {}),
       [input.model]: {
         id: input.model,
         name: input.model,
@@ -109,7 +128,9 @@ export function buildOpenCodeServerConfig(input: OpenCodeServerConfigInput): Con
     providerConfig.options = options;
   }
   return {
+    ...input.existingConfig,
     provider: {
+      ...input.existingConfig?.provider,
       [input.provider]: providerConfig,
     },
   };
@@ -209,10 +230,11 @@ function toOpenCodeImage(image: AgentInputImage): OpenCodeImageInput {
 export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
   async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS }) {
     prepareOpenCodeExecutable({ sidecarDir: SIDECAR_DIST_DIR });
+    const existingConfig = await readNativeOpenCodeConfig();
     const server = await createOpencodeServer({
       hostname: '127.0.0.1',
       port: 0,
-      config: buildOpenCodeServerConfig({ provider, model, apiKey, baseUrl, credentialSource }),
+      config: buildOpenCodeServerConfig({ provider, model, apiKey, baseUrl, credentialSource, existingConfig }),
     });
     try {
       const client = createOpencodeClient({
@@ -318,6 +340,17 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
     }
   },
 };
+
+async function readNativeOpenCodeConfig(): Promise<Config | undefined> {
+  const configPath = path.join(process.env.USERPROFILE ?? process.env.HOME ?? '', '.config', 'opencode', 'opencode.json');
+  if (!configPath || configPath.startsWith('.config')) return undefined;
+  try {
+    const fs = await import('node:fs/promises');
+    return JSON.parse(await fs.readFile(configPath, 'utf8')) as Config;
+  } catch {
+    return undefined;
+  }
+}
 
 export function mapOpenCodeImages(payload?: AgentInputPayload): OpenCodeImageInput[] {
   return (payload?.images ?? []).map(toOpenCodeImage);

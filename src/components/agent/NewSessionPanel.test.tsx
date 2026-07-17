@@ -63,7 +63,7 @@ vi.mock('./AgentModelSelector', () => ({
           </option>
         ))}
       </select>
-      <select aria-label="Reasoning effort" value={reasoningEffort} disabled={disabled} onChange={(event) => onReasoningEffortChange(event.target.value)}>
+      <select aria-label="思考强度" value={reasoningEffort} disabled={disabled} onChange={(event) => onReasoningEffortChange(event.target.value)}>
         <option value="low">low</option>
         <option value="medium">medium</option>
         <option value="high">high</option>
@@ -195,7 +195,7 @@ describe('NewSessionPanel', () => {
   it('lets the draft choose reasoning effort', () => {
     render(<NewSessionPanel onSubmit={vi.fn()} />);
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Reasoning effort' }), {
+    fireEvent.change(screen.getByRole('combobox', { name: '思考强度' }), {
       target: { value: 'high' },
     });
 
@@ -389,6 +389,28 @@ describe('NewSessionPanel', () => {
     expect(composerProps.at(-1)?.disabled).toBe(false);
 
     await composerProps[0]?.onSend?.('Ship the feature');
+
+    expect(onSubmit).toHaveBeenCalledWith({ text: 'Ship the feature' });
+  });
+
+  it('allows a default OpenCode conversation with a free model', async () => {
+    const onSubmit = vi.fn();
+    useNewSessionStore.setState({
+      selectedAgentKind: 'opencode',
+      selectedModel: 'opencode/north-mini-code-free',
+    });
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config ? {
+        ...state.config,
+        agent_profile_registry: { profiles: [], active_profile_ids: {} },
+      } : null,
+    }));
+
+    render(<NewSessionPanel onSubmit={onSubmit} />);
+
+    const runtimeSend = [...composerProps].reverse().find((props) => props.onSend)?.onSend;
+    await runtimeSend?.('Ship the feature');
 
     expect(onSubmit).toHaveBeenCalledWith({ text: 'Ship the feature' });
   });

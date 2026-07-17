@@ -123,6 +123,7 @@ function App() {
         draftProjectId ?? undefined,
         selectedPermissionConfig,
         selectedPlanMode,
+        selectedModel ?? undefined,
       );
 
       await startQuery(session.id, input.text, cwd, selectedReasoningEffort, undefined, input, selectedModel ?? undefined);

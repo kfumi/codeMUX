@@ -158,6 +158,47 @@ describe('session store createSession', () => {
     expect(createMock).toHaveBeenCalledWith('New', 'codex', 'agent', 'project-2');
   });
 
+  it('persists the selected model when creating a session', async () => {
+    const session: Session = {
+      id: 'session-opencode',
+      title: 'OpenCode',
+      agent_kind: 'opencode',
+      provider_id: null,
+      model: 'opencode/north-mini-code-free',
+      reasoning_effort: 'medium',
+      mode: 'agent',
+      project_id: null,
+      permission_config: null,
+      plan_mode: 'off',
+      created_at: '',
+      updated_at: '',
+      is_archived: false,
+      is_pinned: false,
+    };
+    createMock.mockResolvedValue(session);
+
+    const { useSessionStore } = await import('./sessionStore');
+    await useSessionStore.getState().createSession(
+      'OpenCode',
+      'opencode',
+      'agent',
+      undefined,
+      undefined,
+      'off',
+      'opencode/north-mini-code-free',
+    );
+
+    expect(createMock).toHaveBeenCalledWith(
+      'OpenCode',
+      'opencode',
+      'agent',
+      undefined,
+      undefined,
+      'off',
+      'opencode/north-mini-code-free',
+    );
+  });
+
   it('moves a touched historical session to the front of the local list', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-20T08:00:00.000Z'));

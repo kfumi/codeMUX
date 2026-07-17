@@ -4,6 +4,45 @@ import type { AgentMessage } from '../../../stores/agentStore';
 import { convertAgentEventsToAssistantMessages } from './convertAgentEvents';
 
 describe('convertAgentEventsToAssistantMessages', () => {
+  it('renders an OpenCode assistant text event before its terminal result', () => {
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: 'hello' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'opencode-assistant-1',
+          session_id: 'session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'OpenCode reply' }] },
+        },
+      },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'opencode-result-1',
+          session_id: 'session-1',
+          duration_ms: 10,
+          duration_api_ms: 10,
+          num_turns: 1,
+          result: 'ok',
+          usage: { input_tokens: 1, output_tokens: 1 },
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(2);
+    expect(messages[1]).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'OpenCode reply' }],
+      metadata: { isFinalAssistantMessage: true },
+    });
+  });
+
   it('collapses repeated api retry events into one visible status message', () => {
     const events: AgentMessage[] = [
       {

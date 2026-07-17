@@ -16,6 +16,7 @@ import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion.js';
 import { CodexSessionRuntime, interruptActiveTurn } from './codexRuntime.js';
 import { OpenCodeRuntime } from './opencodeRuntime.js';
+import { normalizeOpenCodeModelReference } from './opencodeSdk.js';
 import type { OpenCodePermissionResponse } from './opencodePermissions.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
 import {
@@ -1271,13 +1272,16 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
 }
 
 function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime {
+  const modelReference = cmd.provider
+    ? { provider: cmd.provider, model: cmd.model ?? 'default' }
+    : normalizeOpenCodeModelReference(cmd.model ?? 'default');
   const config: OpenCodeSessionConfig = {
     cwd: ensureWorkingDirectory(cmd.cwd),
     sessionId: cmd.sessionId ?? crypto.randomUUID(),
     ...(cmd.agentSessionId ? { agentSessionId: cmd.agentSessionId } : {}),
     runtimeGeneration: cmd.runtimeGeneration ?? 0,
-    provider: cmd.provider ?? 'openai',
-    model: cmd.model ?? 'default',
+    provider: modelReference.provider,
+    model: modelReference.model,
     credentialSource: cmd.credentialSource ?? 'none',
     ...(cmd.credentialSource === 'codemux' && cmd.apiKey ? { apiKey: cmd.apiKey } : {}),
     ...(cmd.baseUrl ? { baseUrl: cmd.baseUrl } : {}),

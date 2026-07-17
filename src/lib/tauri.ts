@@ -163,6 +163,7 @@ export const sessionApi = {
     projectId?: string,
     permissionConfig?: AgentPermissionConfig,
     planMode?: AgentPlanMode,
+    model?: string,
   ): Promise<Session> =>
     invokeLogged('create_session', {
       title,
@@ -171,6 +172,7 @@ export const sessionApi = {
       projectId: projectId ?? null,
       permissionConfig: permissionConfig ? JSON.stringify(permissionConfig) : null,
       planMode: planMode ?? null,
+      model: model ?? null,
     }),
   getAll: (): Promise<Session[]> => invokeLogged('get_all_sessions'),
   getArchived: (): Promise<Session[]> => invokeLogged('get_archived_sessions'),
@@ -180,7 +182,7 @@ export const sessionApi = {
   setPinned: (sessionId: string, pinned: boolean): Promise<void> => invokeLogged('set_session_pinned', { sessionId, pinned }),
   updateTitle: (sessionId: string, title: string): Promise<void> => invokeLogged('update_session_title', { sessionId, title }),
   touch: (sessionId: string): Promise<void> => invokeLogged('touch_session', { sessionId }),
-  updateProvider: (sessionId: string, providerId: string, model: string, reasoningEffort?: ReasoningEffort): Promise<void> =>
+  updateProvider: (sessionId: string, providerId: string | null, model: string, reasoningEffort?: ReasoningEffort): Promise<void> =>
     invokeLogged('update_session_provider', { sessionId, providerId, model, reasoningEffort }),
   updatePermissions: (
     sessionId: string,

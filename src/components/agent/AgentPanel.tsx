@@ -72,12 +72,22 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   );
   const runtimeProfile = sessionProfile ?? activeProfile;
   const runtimeProvider = useMemo(() => runtimeProfile ? profileToSelectorProvider(runtimeProfile) : null, [runtimeProfile]);
-  const model = session?.model || runtimeProfile?.default_model.trim() || getProfilePrimaryModel(runtimeProfile);
-  const [selectorModelState, setSelectorModelState] = useState(() => activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '');
+  const model = session?.model || runtimeProfile?.default_model.trim() || getProfilePrimaryModel(runtimeProfile) || activeProfile?.models[0]?.id.trim() || '';
+  const [selectorModelState, setSelectorModelState] = useState(() => session?.model?.trim() || activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '');
+  const prevSessionIdRef = useRef<string | null>(null);
+  const userModifiedRef = useRef(false);
   useEffect(() => {
-    const next = activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '';
-    setSelectorModelState((prev) => prev || next);
-  }, [activeProfile]);
+    if (prevSessionIdRef.current !== sessionId) {
+      prevSessionIdRef.current = sessionId;
+      userModifiedRef.current = false;
+      setSelectorModelState(session?.model?.trim() || activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '');
+    } else if (!userModifiedRef.current) {
+      const next = session?.model?.trim() || activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '';
+      if (next) {
+        setSelectorModelState((prev) => prev || next);
+      }
+    }
+  }, [sessionId, session?.model, activeProfile]);
   const formatSelectedProviderModel = useCallback((item: string) => formatModelDisplayName({
     model: item,
     agentKind,
@@ -85,7 +95,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   }), [agentKind, runtimeProvider?.context_1m]);
   const modelNameWithSuffix = useMemo(() => model ? formatSelectedProviderModel(model) : undefined, [model, formatSelectedProviderModel]);
   const usesClaudeDefault = agentKind === 'claude_code' && !runtimeProfile && !activeProfileId;
-  const hasUsableProfile = usesClaudeDefault || !isProfileAgent || Boolean(runtimeProfile && model);
+  const usesOpenCodeFree = agentKind === 'opencode' && !runtimeProfile && !activeProfileId;
+  const hasUsableProfile = usesClaudeDefault || usesOpenCodeFree || !isProfileAgent || Boolean(runtimeProfile && model);
   const rawPermissionConfig = useMemo(() => {
     if (!session?.permission_config) return null;
     try {
@@ -186,10 +197,15 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     if (!isProfileAgent || !nextModel || nextModel === selectorModelState) {
       return;
     }
+    userModifiedRef.current = true;
     setSelectorModelState(nextModel);
     updateSessionModel(sessionId, nextModel);
     try {
-      await setActiveAgentProfileModel(agentKind, nextModel);
+      if (activeProfile) {
+        await setActiveAgentProfileModel(agentKind, nextModel);
+      } else {
+        await sessionApi.updateProvider(sessionId, null, nextModel);
+      }
     } catch (error) {
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
