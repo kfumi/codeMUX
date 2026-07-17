@@ -18,6 +18,16 @@ const CLAUDE_CODE_BUILTINS: ModelOption[] = [
   { id: 'haiku', name: 'Haiku 4.5', efforts: true },
 ];
 
+const CODEX_DEFAULT_MODELS: ModelOption[] = [
+  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', efforts: true },
+  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', efforts: true },
+  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', efforts: true },
+  { id: 'gpt-5.5', name: 'GPT-5.5', efforts: true },
+  { id: 'gpt-5.4', name: 'GPT-5.4', efforts: true },
+  { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', efforts: true },
+  { id: 'gpt-5.2', name: 'GPT-5.2', efforts: true },
+];
+
 const OPENCODE_FREE_MODELS: ModelOption[] = [
   { id: 'opencode/nemotron-3-ultra-free', name: 'Nemotron 3 Ultra Free', efforts: true },
   { id: 'opencode/north-mini-code-free', name: 'North Mini Code Free', efforts: true },
@@ -86,9 +96,11 @@ function normalizeCatalogModels(entries: CodexCatalogEntry[]): ModelOption[] {
 async function loadCodexModels(
   activeProfile: AgentProviderProfile | null,
 ): Promise<ModelOption[]> {
+  if (!activeProfile) return [...CODEX_DEFAULT_MODELS];
+
   let models: ModelOption[] = [];
 
-  if (activeProfile?.native_config.type === 'codex' && activeProfile.native_config.model_catalog) {
+  if (activeProfile.native_config.type === 'codex' && activeProfile.native_config.model_catalog) {
     try {
       const raw = activeProfile.native_config.model_catalog;
       const entries: CodexCatalogEntry[] = typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -98,12 +110,12 @@ async function loadCodexModels(
     }
   }
 
-  const defaultModel = activeProfile?.default_model?.trim();
+  const defaultModel = activeProfile.default_model.trim();
   if (defaultModel && !models.some((m) => m.id === defaultModel)) {
     models.unshift({ id: defaultModel, name: defaultModel, efforts: true, source: 'profile' });
   }
 
-  return models;
+  return dedupById([...models, ...CODEX_DEFAULT_MODELS]);
 }
 
 async function loadOpenCodeModels(

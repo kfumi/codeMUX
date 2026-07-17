@@ -244,7 +244,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
         >
           <div
             data-testid="thread-content-shell"
-            className="mx-auto flex w-full flex-1 flex-col px-10 pt-5"
+            className="mx-auto flex w-full flex-1 flex-col px-14 pt-5"
             style={{ maxWidth: 'var(--content-width, 52rem)' }}
           >
             <CodeMuxThreadRenderContext.Provider value={threadRenderContextValue}>
@@ -1025,7 +1025,7 @@ function AssistantCollapseToggle({
       aria-expanded={expanded}
       aria-label={expanded ? '收起AI过程' : '展开AI过程'}
       onClick={onClick}
-      className="mb-2 h-8 gap-1.5 rounded-md pl-2 text-xs font-medium text-muted-foreground/80"
+      className="mb-2 h-8 gap-1.5 rounded-md pl-2 text-sm font-medium text-muted-foreground/80"
     >
       <span>已处理</span>
       {durationMs != null ? <span className="tabular-nums">{formatCompactDuration(durationMs)}</span> : null}
@@ -1099,7 +1099,7 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
 
   return (
     <div className="mb-5 flex w-full justify-start">
-      <div className="w-full min-w-0 space-y-2 text-sm leading-relaxed">
+      <div className="w-full min-w-0 space-y-2 text-lg leading-relaxed">
         {visibleText ? (
           <div
             data-streaming-text="markdown"

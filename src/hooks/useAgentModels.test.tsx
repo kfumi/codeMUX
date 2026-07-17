@@ -105,39 +105,62 @@ describe('useAgentModels', () => {
     expect(result.current.models.filter((model) => model.id === 'sonnet')).toHaveLength(1);
   });
 
-  it('returns empty list for Codex when no profile and no model_catalog', async () => {
+  it('returns Codex default models when no profile', async () => {
     const { result } = await loadedModels('codex', null);
-    expect(result.current.models).toEqual([]);
+    expect(result.current.models.map((m) => m.id)).toEqual(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2']);
   });
 
-  it('loads Codex models from model_catalog for non-default providers', async () => {
+  it('loads Codex models from model_catalog and includes built-ins', async () => {
     const catalog = [{ model: 'custom/model-a', displayName: 'Custom A' }, { model: 'custom/model-b', displayName: 'Custom B' }];
     const { result } = await loadedModels('codex', codexProfile([], { model_catalog: catalog }));
 
-    expect(result.current.models).toEqual([
-      { id: 'custom/model-a', name: 'Custom A', efforts: true, source: 'catalog' },
-      { id: 'custom/model-b', name: 'Custom B', efforts: true, source: 'catalog' },
+    expect(result.current.models.map((m) => m.id)).toEqual([
+      'custom/model-a',
+      'custom/model-b',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.2',
     ]);
   });
 
-  it('returns only default_model for Codex when model_catalog is empty but default_model is set', async () => {
+  it('prepends default_model and includes built-ins for Codex', async () => {
     const { result } = await loadedModels('codex', codexProfile([], { model_catalog: [], default_model: 'gpt-5.6' }));
-    expect(result.current.models).toEqual([
-      { id: 'gpt-5.6', name: 'gpt-5.6', efforts: true, source: 'profile' },
+    expect(result.current.models.map((m) => m.id)).toEqual([
+      'gpt-5.6',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.2',
     ]);
   });
 
-  it('returns empty list for Codex when model_catalog and default_model are both empty', async () => {
+  it('returns Codex built-ins when model_catalog and default_model are both empty', async () => {
     const { result } = await loadedModels('codex', codexProfile([], { model_catalog: [] }));
-    expect(result.current.models).toEqual([]);
+    expect(result.current.models.map((m) => m.id)).toEqual(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2']);
   });
 
-  it('prepends default_model to Codex list when it is not already present', async () => {
+  it('prepends default_model to Codex list and appends built-ins', async () => {
     const catalog = [{ model: 'custom-a', displayName: 'A' }];
     const { result } = await loadedModels('codex', codexProfile([], { model_catalog: catalog, default_model: 'my-custom-model' }));
 
-    expect(result.current.models[0]).toEqual({ id: 'my-custom-model', name: 'my-custom-model', efforts: true, source: 'profile' });
-    expect(result.current.models).toHaveLength(2);
+    expect(result.current.models.map((m) => m.id)).toEqual([
+      'my-custom-model',
+      'custom-a',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.2',
+    ]);
   });
 
   it('does not duplicate default_model if it already exists in catalog', async () => {
@@ -205,7 +228,7 @@ describe('useAgentModels', () => {
   it('falls back without throwing when model JSON is malformed', async () => {
     readHomeFile.mockResolvedValueOnce('{not valid json');
     const codex = await loadedModels('codex', null);
-    expect(codex.result.current.models).toEqual([]);
+    expect(codex.result.current.models.map((m) => m.id)).toEqual(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2']);
 
     readHomeFile.mockResolvedValueOnce('{not valid json');
     const opencode = await loadedModels('opencode', null);
