@@ -700,7 +700,10 @@ impl<O: FileOps> NativeConfigWriteService<O> {
     pub fn restore_opencode_config_backup(&self) -> Result<(), NativeConfigWriteError> {
         let _lock = self.acquire_lock()?;
         // 备份文件不存在时跳过恢复，允许无配置切换到默认供应商
-        if let Ok(config) = self.file_ops.read(&self.paths.opencode_config_backup_path()) {
+        if let Ok(config) = self
+            .file_ops
+            .read(&self.paths.opencode_config_backup_path())
+        {
             self.write_atomic_file(&self.paths.opencode_config_path(), &config)
                 .map_err(|_| {
                     self.error(

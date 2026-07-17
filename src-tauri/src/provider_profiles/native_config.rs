@@ -679,7 +679,8 @@ fn merge_opencode_config_with_model(
             Value::Object(filtered)
         })
     });
-    let mut existing = merge_json_advanced_config(existing, filtered_advanced.as_ref(), "OpenCode")?;
+    let mut existing =
+        merge_json_advanced_config(existing, filtered_advanced.as_ref(), "OpenCode")?;
     let root = existing
         .as_object_mut()
         .ok_or_else(|| "OpenCode opencode.json 顶层必须为对象".to_string())?;
@@ -709,7 +710,9 @@ fn merge_opencode_config_with_model(
             let trimmed_key = k.trim();
             if !trimmed_key.is_empty() {
                 let parsed = match v {
-                    Value::String(s) => serde_json::from_str::<Value>(s).unwrap_or_else(|_| v.clone()),
+                    Value::String(s) => {
+                        serde_json::from_str::<Value>(s).unwrap_or_else(|_| v.clone())
+                    }
                     other => other.clone(),
                 };
                 options.insert(trimmed_key.to_string(), parsed);

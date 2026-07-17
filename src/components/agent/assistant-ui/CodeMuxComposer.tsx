@@ -57,7 +57,6 @@ interface CodeMuxComposerProps {
   modelSelector?: ReactNode;
   permissionSelector?: ReactNode;
   disabled?: boolean;
-  disabledMessage?: string;
   onStop?: () => void | Promise<void>;
   onActivatePlanMode?: () => void;
 }
@@ -159,7 +158,6 @@ export function CodeMuxComposer({
   modelSelector,
   permissionSelector,
   disabled = false,
-  disabledMessage,
   onStop,
   onActivatePlanMode,
 }: CodeMuxComposerProps) {
@@ -563,9 +561,6 @@ export function CodeMuxComposer({
                 )}
               </div>
             </div>}
-            {disabledMessage ? (
-              <p className="px-2 pb-0.5 text-xs text-muted-foreground">{disabledMessage}</p>
-            ) : null}
           </div>
         </ComposerPrimitive.AttachmentDropzone>
         </ComposerPrimitive.Root>

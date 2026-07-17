@@ -90,7 +90,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const activeProfileId = isProfileAgent ? profileRegistry?.active_profile_ids?.[selectedAgentKind] ?? null : null;
   const activeProfile = availableProfiles.find((profile) => profile.id === activeProfileId) ?? null;
   const { models, isLoading: areModelsLoading } = useAgentModels(selectedAgentKind, activeProfile, activeProfileId);
-  const effectiveModel = selectedModel || activeProfile?.models.find((model) => model.id.trim())?.id.trim() || '';
+  const effectiveModel = selectedModel || activeProfile?.models.find((model) => model.id.trim())?.id.trim() || models[0]?.id || '';
   const selectedModelIsAvailable = !selectedModel
     || models.some((model) => model.id === selectedModel)
     || (selectedAgentKind === 'claude_code' && CLAUDE_CODE_BUILTIN_MODEL_IDS.has(selectedModel));
@@ -109,9 +109,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
             || selectedAgentKind === 'codex'
             || selectedAgentKind === 'opencode'),
       ));
-  const profileRequiredMessage = isProfileAgent && !hasUsableProfile
-    ? `请先在供应商配置中为 ${selectedAgent?.label ?? '当前智能体'} 添加至少一个模型。`
-    : undefined;
+
   const draftProject = useMemo(
     () => projects.find((project) => project.id === draftProjectId) ?? null,
     [draftProjectId, projects],
@@ -231,7 +229,6 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               projectPath={draftProject?.path}
               placeholder={placeholder}
               disabled={!hasUsableProfile}
-              disabledMessage={profileRequiredMessage}
               modelSelector={(
                 <AgentModelSelector
                   agentKind={selectedAgentKind}

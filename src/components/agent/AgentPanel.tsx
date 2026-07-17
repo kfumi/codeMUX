@@ -28,7 +28,7 @@ interface AgentPanelProps {
 }
 
 export function AgentPanel({ sessionId }: AgentPanelProps) {
-  const { sessions, createSession, updateSessionPermissions } = useSessionStore();
+  const { sessions, createSession, updateSessionPermissions, updateSessionModel } = useSessionStore();
   const { projects } = useProjectStore();
   const { startQuery, interrupt, loadSessionMessages, clearEvents, respondToPermission } = useAgentStore();
   const pendingPermission = useAgentStore((state) => state.pendingPermissions[sessionId] ?? null);
@@ -73,7 +73,11 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const runtimeProfile = sessionProfile ?? activeProfile;
   const runtimeProvider = useMemo(() => runtimeProfile ? profileToSelectorProvider(runtimeProfile) : null, [runtimeProfile]);
   const model = session?.model || runtimeProfile?.default_model.trim() || getProfilePrimaryModel(runtimeProfile);
-  const selectorModel = activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile);
+  const [selectorModelState, setSelectorModelState] = useState(() => activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '');
+  useEffect(() => {
+    const next = activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '';
+    setSelectorModelState((prev) => prev || next);
+  }, [activeProfile]);
   const formatSelectedProviderModel = useCallback((item: string) => formatModelDisplayName({
     model: item,
     agentKind,
@@ -82,14 +86,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const modelNameWithSuffix = useMemo(() => model ? formatSelectedProviderModel(model) : undefined, [model, formatSelectedProviderModel]);
   const usesClaudeDefault = agentKind === 'claude_code' && !runtimeProfile && !activeProfileId;
   const hasUsableProfile = usesClaudeDefault || !isProfileAgent || Boolean(runtimeProfile && model);
-  const profileRequiredMessage = isProfileAgent && !hasUsableProfile
-    ? `请先在供应商配置中为 ${agentKind === 'codex' ? 'Codex' : agentKind === 'opencode' ? 'OpenCode' : 'Claude Code'} 添加至少一个模型。`
-    : undefined;
-  const snapshotDiffersFromGlobal = Boolean(
-    isProfileAgent
-      && sessionProfile
-      && (sessionProfile.id !== activeProfile?.id || model !== (activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile))),
-  );
   const rawPermissionConfig = useMemo(() => {
     if (!session?.permission_config) return null;
     try {
@@ -187,9 +183,11 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   };
 
   const handleModelChange = useCallback(async (nextModel: string) => {
-    if (!isProfileAgent || !nextModel || nextModel === (activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile))) {
+    if (!isProfileAgent || !nextModel || nextModel === selectorModelState) {
       return;
     }
+    setSelectorModelState(nextModel);
+    updateSessionModel(sessionId, nextModel);
     try {
       await setActiveAgentProfileModel(agentKind, nextModel);
     } catch (error) {
@@ -197,7 +195,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         error: { ...state.error, [sessionId]: String(error) },
       }));
     }
-  }, [activeProfile, agentKind, isProfileAgent, sessionId, setActiveAgentProfileModel]);
+  }, [activeProfile, agentKind, isProfileAgent, sessionId, selectorModelState, setActiveAgentProfileModel, updateSessionModel]);
 
   const handleReasoningEffortChange = useCallback(async (nextEffort: ReasoningEffort) => {
     const latestSession = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
@@ -304,13 +302,12 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                 projectPath={project?.path}
                 modelName={modelNameWithSuffix}
                 disabled={!hasUsableProfile}
-                disabledMessage={profileRequiredMessage}
                 modelSelector={(
                   <AgentModelSelector
                     agentKind={agentKind}
                     activeProfile={activeProfile}
                     activeProfileId={activeProfileId}
-                    value={selectorModel}
+                    value={selectorModelState}
                     contextModel={sessionProfile ? model : undefined}
                     onChange={handleModelChange}
                     reasoningEffort={reasoningEffort}
@@ -336,11 +333,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                 onStop={() => interrupt(sessionId)}
                 onActivatePlanMode={agentKind === 'opencode' ? undefined : () => handleModeChange(mapExecutionModeToPermissionConfig(agentKind, 'plan'), 'on')}
               />
-              {snapshotDiffersFromGlobal ? (
-                <p className="px-1 text-xs text-muted-foreground">
-                  当前会话固定使用 {sessionProfile?.name} / {modelNameWithSuffix}；这里的切换只会应用到后续新建或重启的会话。
-                </p>
-              ) : null}
             </div>
           )}
         />

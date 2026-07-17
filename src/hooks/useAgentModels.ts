@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
 import { fileApi } from '../lib/tauri';
-import { getProviderModelList } from '../lib/providerModels';
-import { profileToSelectorProvider } from '../lib/agentProfileSelector';
 import type { AgentKind } from '../types/session';
-import type { AgentProviderProfile, CodexCatalogModel, OpenCodeModel } from '../types/provider';
+import type { AgentProviderProfile, OpenCodeModel } from '../types/provider';
 
 export interface ModelOption {
   id: string;
@@ -21,11 +19,11 @@ const CLAUDE_CODE_BUILTINS: ModelOption[] = [
 ];
 
 const OPENCODE_FREE_MODELS: ModelOption[] = [
-  { id: 'opencode/nemotron-3-ultra-free', name: 'Nemotron 3 Ultra', efforts: true },
-  { id: 'opencode/north-mini-code-free', name: 'North Mini Code', efforts: true },
-  { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash', efforts: true },
-  { id: 'opencode/mimo-v2.5-free', name: 'Mimo V2.5', efforts: true },
-  { id: 'opencode/big-pickle', name: 'Big Pickle', efforts: true },
+  { id: 'opencode/nemotron-3-ultra-free', name: 'Nemotron 3 Ultra Free', efforts: true },
+  { id: 'opencode/north-mini-code-free', name: 'North Mini Code Free', efforts: true },
+  { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash Free', efforts: true },
+  { id: 'opencode/mimo-v2.5-free', name: 'Mimo V2.5 Free', efforts: true },
+  { id: 'opencode/big-pickle', name: 'Big Pickle Free', efforts: true },
 ];
 
 function dedupById(models: ModelOption[]): ModelOption[] {
@@ -57,59 +55,55 @@ async function loadClaudeCodeModels(
   const builtins = [...CLAUDE_CODE_BUILTINS];
   if (!activeProfile) return builtins;
 
-  try {
-    const selectorProvider = profileToSelectorProvider(activeProfile);
-    const providerModels = getProviderModelList(selectorProvider);
-    const profileModels: ModelOption[] = providerModels.map((id) => ({
-      id,
-      name: id,
+  const profileModels: ModelOption[] = activeProfile.models
+    .filter((m) => m.id.trim())
+    .map((m) => ({
+      id: m.id.trim(),
+      name: m.name?.trim() || m.id.trim(),
       efforts: true,
-      source: 'profile',
+      source: 'profile' as const,
     }));
-    return dedupById([...builtins, ...profileModels]);
-  } catch {
-    return builtins;
-  }
+
+  return dedupById([...profileModels, ...builtins]);
+}
+
+interface CodexCatalogEntry {
+  model?: string;
+  displayName?: string;
+}
+
+function normalizeCatalogModels(entries: CodexCatalogEntry[]): ModelOption[] {
+  return entries
+    .filter((m) => m.model)
+    .map((m) => ({
+      id: m.model!,
+      name: m.displayName ?? m.model!,
+      efforts: true,
+      source: 'catalog' as const,
+    }));
 }
 
 async function loadCodexModels(
   activeProfile: AgentProviderProfile | null,
 ): Promise<ModelOption[]> {
-  if (!activeProfile) {
+  let models: ModelOption[] = [];
+
+  if (activeProfile?.native_config.type === 'codex' && activeProfile.native_config.model_catalog) {
     try {
-      const raw = await fileApi.readHomeFile('.codex/models_cache.json');
-      const catalog = JSON.parse(raw) as CodexCatalogModel[];
-      return catalog.map((m) => ({
-        id: m.model,
-        name: m.displayName ?? m.model,
-        efforts: true,
-        source: 'catalog',
-      }));
+      const raw = activeProfile.native_config.model_catalog;
+      const entries: CodexCatalogEntry[] = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      models = normalizeCatalogModels(entries);
     } catch {
-      return [];
+      // ignore parse errors
     }
   }
 
-  const profileModels: ModelOption[] = activeProfile.models.map((m) => ({
-    id: m.id,
-    name: m.name ?? m.id,
-    efforts: true,
-    source: 'profile',
-  }));
-
-  try {
-    const raw = await fileApi.readHomeFile('.codex/codemux-model-catalog.json');
-    const catalog = JSON.parse(raw) as CodexCatalogModel[];
-      const catalogModels: ModelOption[] = catalog.map((m) => ({
-        id: m.model,
-        name: m.displayName ?? m.model,
-        efforts: true,
-        source: 'catalog',
-      }));
-    return dedupById([...profileModels, ...catalogModels]);
-  } catch {
-    return profileModels;
+  const defaultModel = activeProfile?.default_model?.trim();
+  if (defaultModel && !models.some((m) => m.id === defaultModel)) {
+    models.unshift({ id: defaultModel, name: defaultModel, efforts: true, source: 'profile' });
   }
+
+  return models;
 }
 
 async function loadOpenCodeModels(
@@ -137,17 +131,18 @@ async function loadOpenCodeModels(
     console.warn('Failed to load OpenCode config models');
   }
 
-  const base = dedupById([...OPENCODE_FREE_MODELS, ...fileModels]);
-  if (!activeProfile) return base;
+  if (!activeProfile) return dedupById([...OPENCODE_FREE_MODELS, ...fileModels]);
 
-  const profileModels: ModelOption[] = activeProfile.models.map((m) => ({
-    id: m.id,
-    name: m.name ?? m.id,
-    efforts: true,
-    source: 'profile',
-  }));
+  const profileModels: ModelOption[] = activeProfile.models
+    .filter((m) => m.id.trim())
+    .map((m) => ({
+      id: m.id.trim(),
+      name: m.name?.trim() || m.id.trim(),
+      efforts: true,
+      source: 'profile' as const,
+    }));
 
-  return dedupById([...base, ...profileModels]);
+  return dedupById([...profileModels, ...OPENCODE_FREE_MODELS, ...fileModels]);
 }
 
 export function useAgentModels(

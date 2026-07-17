@@ -34,12 +34,20 @@ function claudeProfile(models: AgentProviderProfile['models']) {
   return profile('claude_code', models, { type: 'claude_code', settings: {} });
 }
 
-function codexProfile(models: AgentProviderProfile['models']) {
-  return profile('codex', models, {
-    type: 'codex',
-    api_key: '',
-    openai_base_url: '',
-  });
+function codexProfile(
+  models: AgentProviderProfile['models'],
+  nativeOverrides?: { model_catalog?: unknown[]; default_model?: string },
+) {
+  const { default_model, ...rest } = nativeOverrides ?? {};
+  return {
+    ...profile('codex', models, {
+      type: 'codex',
+      api_key: '',
+      openai_base_url: '',
+      ...rest,
+    }),
+    ...(default_model !== undefined ? { default_model } : {}),
+  };
 }
 
 function openCodeProfile(
@@ -88,7 +96,7 @@ describe('useAgentModels', () => {
     ]));
 
     expect(result.current.models).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'sonnet', name: 'Sonnet 5' }),
+      expect.objectContaining({ id: 'sonnet', name: 'Custom Sonnet', source: 'profile' }),
       expect.objectContaining({ id: 'opus' }),
       expect.objectContaining({ id: 'fable' }),
       expect.objectContaining({ id: 'haiku' }),
@@ -97,50 +105,46 @@ describe('useAgentModels', () => {
     expect(result.current.models.filter((model) => model.id === 'sonnet')).toHaveLength(1);
   });
 
-  it('loads Codex defaults from models_cache.json and falls back when it is missing', async () => {
-    readHomeFile.mockResolvedValueOnce(JSON.stringify([
-      { model: 'gpt-5-codex', displayName: 'GPT-5 Codex' },
-    ]));
-
-    const loaded = await loadedModels('codex', null);
-    expect(loaded.result.current.models).toEqual([
-      expect.objectContaining({ id: 'gpt-5-codex', name: 'GPT-5 Codex', source: 'catalog' }),
-    ]);
-    expect(readHomeFile).toHaveBeenCalledWith('.codex/models_cache.json');
-
-    readHomeFile.mockRejectedValueOnce(new Error('missing file'));
-    const fallback = await loadedModels('codex', null);
-    expect(fallback.result.current.models).toEqual([]);
+  it('returns empty list for Codex when no profile and no model_catalog', async () => {
+    const { result } = await loadedModels('codex', null);
+    expect(result.current.models).toEqual([]);
   });
 
-  it('loads Codex custom catalog, merges profile models, and deduplicates by id', async () => {
-    readHomeFile.mockResolvedValueOnce(JSON.stringify([
-      { model: 'profile/model', displayName: 'Catalog Duplicate' },
-      { model: 'catalog/model', displayName: 'Catalog Model' },
-    ]));
-
-    const { result } = await loadedModels('codex', codexProfile([
-      { id: 'profile/model', name: 'Profile Model' },
-      { id: 'custom/model', name: 'Custom Model' },
-    ]));
-
-    expect(readHomeFile).toHaveBeenCalledWith('.codex/codemux-model-catalog.json');
-    expect(result.current.models).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'profile/model', name: 'Profile Model', source: 'profile' }),
-      expect.objectContaining({ id: 'custom/model', source: 'profile' }),
-      expect.objectContaining({ id: 'catalog/model', source: 'catalog' }),
-    ]));
-    expect(result.current.models.filter((model) => model.id === 'profile/model')).toHaveLength(1);
-  });
-
-  it('keeps Codex profile models when the custom catalog is missing', async () => {
-    const { result } = await loadedModels('codex', codexProfile([
-      { id: 'profile/model', name: 'Profile Model' },
-    ]));
+  it('loads Codex models from model_catalog for non-default providers', async () => {
+    const catalog = [{ model: 'custom/model-a', displayName: 'Custom A' }, { model: 'custom/model-b', displayName: 'Custom B' }];
+    const { result } = await loadedModels('codex', codexProfile([], { model_catalog: catalog }));
 
     expect(result.current.models).toEqual([
-      expect.objectContaining({ id: 'profile/model', source: 'profile' }),
+      { id: 'custom/model-a', name: 'Custom A', efforts: true, source: 'catalog' },
+      { id: 'custom/model-b', name: 'Custom B', efforts: true, source: 'catalog' },
     ]);
+  });
+
+  it('returns only default_model for Codex when model_catalog is empty but default_model is set', async () => {
+    const { result } = await loadedModels('codex', codexProfile([], { model_catalog: [], default_model: 'gpt-5.6' }));
+    expect(result.current.models).toEqual([
+      { id: 'gpt-5.6', name: 'gpt-5.6', efforts: true, source: 'profile' },
+    ]);
+  });
+
+  it('returns empty list for Codex when model_catalog and default_model are both empty', async () => {
+    const { result } = await loadedModels('codex', codexProfile([], { model_catalog: [] }));
+    expect(result.current.models).toEqual([]);
+  });
+
+  it('prepends default_model to Codex list when it is not already present', async () => {
+    const catalog = [{ model: 'custom-a', displayName: 'A' }];
+    const { result } = await loadedModels('codex', codexProfile([], { model_catalog: catalog, default_model: 'my-custom-model' }));
+
+    expect(result.current.models[0]).toEqual({ id: 'my-custom-model', name: 'my-custom-model', efforts: true, source: 'profile' });
+    expect(result.current.models).toHaveLength(2);
+  });
+
+  it('does not duplicate default_model if it already exists in catalog', async () => {
+    const catalog = [{ model: '5.5', displayName: '5.5' }];
+    const { result } = await loadedModels('codex', codexProfile([], { model_catalog: catalog, default_model: '5.5' }));
+
+    expect(result.current.models.filter((m) => m.id === '5.5')).toHaveLength(1);
   });
 
   it('includes OpenCode free models, active provider config, and profile models only', async () => {

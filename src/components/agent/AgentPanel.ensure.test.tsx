@@ -211,7 +211,6 @@ describe('AgentPanel session bootstrapping', () => {
     expect(screen.getByTestId('model-selector').dataset.model).toBe('claude-opus-4-1');
     expect(screen.getByTestId('model-context').textContent).toBe('claude-opus-4-1');
     expect(screen.getByTestId('composer-model').textContent).toBe('claude-opus-4-1');
-    expect(screen.getByText('当前会话固定使用 Provider 2 / claude-opus-4-1；这里的切换只会应用到后续新建或重启的会话。')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'change model' }));
     await waitFor(() => {

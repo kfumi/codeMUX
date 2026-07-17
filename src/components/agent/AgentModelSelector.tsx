@@ -33,10 +33,11 @@ export function AgentModelSelector({
 }: AgentModelSelectorProps) {
   const api = useAui();
   const { models, isLoading } = useAgentModels(agentKind, activeProfile, activeProfileId);
-  const contextModelSupportsEfforts = models.find((model) => model.id === (contextModel ?? value))?.efforts;
+  const effectiveValue = value || models[0]?.id || '';
+  const contextModelSupportsEfforts = models.find((model) => model.id === (contextModel ?? effectiveValue))?.efforts;
 
   useEffect(() => {
-    const registeredModel = contextModel ?? value;
+    const registeredModel = contextModel ?? effectiveValue;
     if (!registeredModel) return;
     const config = {
       modelName: registeredModel,
@@ -45,7 +46,7 @@ export function AgentModelSelector({
     return api.modelContext().register({
       getModelContext: () => ({ config }),
     });
-  }, [api, value, contextModel, reasoningEffort, contextModelSupportsEfforts]);
+  }, [api, effectiveValue, contextModel, reasoningEffort, contextModelSupportsEfforts]);
 
   const modelOptions = models.map((m) => ({
     id: m.id,
@@ -60,7 +61,7 @@ export function AgentModelSelector({
   return (
     <ModelSelector.Root
       models={modelOptions}
-      value={value}
+      value={effectiveValue}
       onValueChange={(nextModel) => {
         if (models.some((model) => model.id === nextModel)) {
           onChange(nextModel);
@@ -80,7 +81,7 @@ export function AgentModelSelector({
           className={compact ? 'max-w-24' : undefined}
         />
       </ModelSelector.Trigger>
-      <ModelSelector.Content searchable />
+      <ModelSelector.Content />
     </ModelSelector.Root>
   );
 }

@@ -24,6 +24,7 @@ interface SessionState {
   setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
+  updateSessionModel: (sessionId: string, model: string) => void;
   updateSessionPermissions: (sessionId: string, permissionConfig?: AgentPermissionConfig, planMode?: AgentPlanMode) => Promise<void>;
   touchSession: (sessionId: string) => void;
   markSessionRead: (sessionId: string) => void;
@@ -243,6 +244,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     } catch (error) {
       set({ error: String(error) });
     }
+  },
+  updateSessionModel: (sessionId: string, model: string) => {
+    set((state) => ({
+      sessions: state.sessions.map((s) => s.id === sessionId ? { ...s, model } : s),
+    }));
   },
   updateSessionPermissions: async (sessionId: string, permissionConfig?: AgentPermissionConfig, planMode?: AgentPlanMode) => {
     try {

@@ -77,15 +77,20 @@ function toDraft(profile: AgentProviderProfile): ProfileDraft {
   };
 }
 
-function profileModelsFromClaudeForm(form: ClaudeSettingsForm): string[] {
-  return modelsFromText([
-    form.fallbackModel,
-    form.sonnet.requestModel,
-    form.opus.requestModel,
-    form.fable.requestModel,
-    form.haiku.requestModel,
-    ...form.customModels.map((m) => m.requestModel),
-  ].join('\n'));
+function profileModelsFromClaudeForm(form: ClaudeSettingsForm): { id: string; name: string }[] {
+  const entries: { id: string; name: string }[] = [];
+  const add = (requestModel: string, displayName: string) => {
+    const id = requestModel.trim();
+    if (id) {
+      const name = displayName.trim() || id;
+      entries.push({ id, name });
+    }
+  };
+  for (const m of form.customModels) {
+    add(m.requestModel, m.displayName);
+  }
+  const seen = new Set<string>();
+  return entries.filter((e) => { if (seen.has(e.id)) return false; seen.add(e.id); return true; });
 }
 
 function profileToUpsert(agentKind: ProfileAgentKind, draft: ProfileDraft): AgentProviderProfileUpsert {
@@ -101,7 +106,7 @@ function profileToUpsert(agentKind: ProfileAgentKind, draft: ProfileDraft): Agen
     const claudeModels = profileModelsFromClaudeForm(parsed.form);
     return {
       ...common,
-      models: claudeModels.map((id) => ({ id, name: id })),
+      models: claudeModels,
       default_model: parsed.form.fallbackModel,
       native_config: { type: 'claude_code', settings: parsed.settings },
     };
@@ -621,8 +626,8 @@ function OpenCodeAdvancedOptions({ editing, setEditing }: OpenCodeAdvancedOption
           <p className="text-xs text-destructive py-2">至少需要配置一个模型。</p>
         ) : (
           <div className="space-y-2">
-            {Object.entries(editing.modelsConfig).map(([key, model]) => (
-              <div key={key} className="flex items-center gap-2">
+            {Object.entries(editing.modelsConfig).map(([key, model], index) => (
+              <div key={index} className="flex items-center gap-2">
                 <Input value={key} onChange={(e) => handleModelIdChangeWithSync(key, e.target.value)} placeholder="模型 ID" className="flex-1" />
                 <div className="flex gap-1 flex-1 items-center">
                   <Input value={model.name ?? ''} onChange={(e) => handleModelNameChangeWithSync(key, e.target.value)} placeholder="显示名称" className="flex-1" />
@@ -818,15 +823,17 @@ export function ProviderConfigPanel() {
     }
   }, [editing, setEditing]);
   const handleJsonChange = useCallback((value: string) => {
-    if (!editing) return;
-    try {
-      const parsed = parseClaudeSettingsDraft(value);
-      setEditing({ ...editing, advancedConfig: value, claudeForm: parsed.form });
-      setJsonError('');
-    } catch {
-      setEditing({ ...editing, advancedConfig: value });
-    }
-  }, [editing, setEditing]);
+    setEditing((prev) => {
+      if (!prev) return prev;
+      try {
+        const parsed = parseClaudeSettingsDraft(value);
+        setJsonError('');
+        return { ...prev, advancedConfig: value, claudeForm: parsed.form };
+      } catch {
+        return { ...prev, advancedConfig: value };
+      }
+    });
+  }, [setEditing]);
   const fetchModels = useCallback(async () => {
     if (!editing) return;
     const baseUrl = editing.claudeForm.baseUrl || 'https://api.anthropic.com';
