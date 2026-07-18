@@ -81,7 +81,7 @@ function ToolGroupTrigger({
   // Generate label based on tool names if available
   const label = useMemo(() => {
     if (!toolNames || toolNames.length === 0) {
-      return `${count} 次工具调用`;
+      return `工具调用(${count})`;
     }
 
     // Count by tool name
@@ -94,24 +94,24 @@ function ToolGroupTrigger({
     // Build summary
     const parts: string[] = [];
     for (const [name, count] of counts) {
-      parts.push(`${count} 次 ${name}`);
+      parts.push(`${name}(${count})`);
     }
 
     if (parts.length === 1) {
-      return `已执行 ${parts[0]}`;
+      return `执行 ${parts[0]}`;
     }
     if (parts.length <= 3) {
-      return `已执行 ${parts.join('、')}`;
+      return `执行 ${parts.join('、')}`;
     }
     // Too many types, just show count
-    return `${count} 次工具调用`;
+    return `工具调用(${count})`;
   }, [count, toolNames]);
 
   return (
     <CollapsibleTrigger
       data-slot="tool-group-trigger"
       className={cn(
-        'aui-tool-group-trigger group/trigger flex items-center gap-2 text-sm text-muted-foreground/74 transition-colors hover:text-foreground/88',
+        'aui-tool-group-trigger group/trigger flex items-center gap-2 text-sm text-muted-foreground/74 transition-colors hover:text-foreground/88 pl-1',
         'group-data-[variant=outline]/tool-group-root:w-full group-data-[variant=outline]/tool-group-root:px-4',
         'group-data-[variant=muted]/tool-group-root:w-full group-data-[variant=muted]/tool-group-root:px-4',
         className,

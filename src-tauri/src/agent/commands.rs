@@ -1967,17 +1967,10 @@ fn build_ensure_session_command(
     credential_source: Option<String>,
     runtime_generation: Option<u64>,
 ) -> Result<serde_json::Value, String> {
-    let resolved_cwd = if cwd == "." {
-        std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .unwrap_or_else(|_| cwd.clone())
-    } else {
-        cwd
-    };
     let mut cmd = serde_json::json!({
         "type": "ensure_session",
         "agentKind": agent_kind,
-        "cwd": resolved_cwd,
+        "cwd": cwd,
         "sessionId": session_id,
     });
     if agent_kind == "opencode" {

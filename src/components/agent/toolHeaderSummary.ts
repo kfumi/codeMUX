@@ -7,10 +7,10 @@ export interface ToolHeaderSummary {
 }
 
 const BUILT_IN_TOOL_DISPLAY_NAMES: Record<string, string> = {
-  Read: '读取文件',
-  Write: '写入文件',
-  Edit: '编辑文件',
-  MultiEdit: '批量编辑文件',
+  Read: '读取',
+  Write: '写入',
+  Edit: '编辑',
+  MultiEdit: '批量编辑',
   NotebookRead: '读取 Notebook',
   NotebookEdit: '编辑 Notebook',
   LS: '列目录',

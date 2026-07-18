@@ -238,6 +238,7 @@ pub fn render_agent_profile_config(
                 )?,
                 &profile.native_config,
                 default_model,
+                Some(profile.name.as_str()),
             )?;
             Ok(vec![render_json_file(
                 paths.opencode_config_path(),
@@ -646,14 +647,18 @@ fn json_to_toml_item(json_value: &Value) -> Result<Item, String> {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn merge_opencode_config(existing: Value, profile: &NativeProfileConfig) -> Result<Value, String> {
-    merge_opencode_config_with_model(existing, profile, None)
+fn merge_opencode_config(
+    existing: Value,
+    profile: &NativeProfileConfig,
+) -> Result<Value, String> {
+    merge_opencode_config_with_model(existing, profile, None, None)
 }
 
 fn merge_opencode_config_with_model(
     existing: Value,
     profile: &NativeProfileConfig,
     default_model: Option<&str>,
+    profile_name: Option<&str>,
 ) -> Result<Value, String> {
     let NativeProfileConfig::OpenCode {
         api_key,
@@ -697,7 +702,12 @@ fn merge_opencode_config_with_model(
     codemux.insert("npm".to_string(), Value::String(npm_str.to_string()));
     codemux.insert(
         "name".to_string(),
-        Value::String(format!("CodeMUX {npm_str}")),
+        Value::String(
+            profile_name
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or(npm_str)
+                .to_string(),
+        ),
     );
     let mut options = Map::new();
     options.insert(
@@ -1090,7 +1100,7 @@ name = "Other"
         );
         assert_eq!(
             config["provider"]["codemux-openai"]["name"],
-            "CodeMUX @ai-sdk/openai-compatible"
+            "@ai-sdk/openai-compatible"
         );
         assert_eq!(
             config["provider"]["codemux-openai"]["options"]["baseURL"],

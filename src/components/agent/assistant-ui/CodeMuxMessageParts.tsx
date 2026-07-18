@@ -233,7 +233,7 @@ export function CodeMuxToolCallMessagePart({
   const headerSummary = getToolHeaderSummary(toolName, args);
   const codeFilePath = isCodeChangeTool(toolName, args) ? getCodeChangeFilePath(args) : undefined;
   const headerText = codeFilePath || headerSummary.text;
-  const displayableArgs = codeFilePath ? null : getToolDisplayableArgs(toolName, args, headerSummary.consumedKeys);
+  const displayableArgs = codeFilePath ? null : getToolDisplayableArgs(toolName, args, []);
   const subAgentPrompt = getSubAgentPrompt(toolName, args);
   const isSubAgentToolCall = isSubAgentTool(toolName);
   const resolvedArgsText = subAgentPrompt

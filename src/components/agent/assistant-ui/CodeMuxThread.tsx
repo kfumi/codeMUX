@@ -1018,19 +1018,22 @@ function AssistantCollapseToggle({
   onClick: () => void;
 }) {
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      aria-expanded={expanded}
-      aria-label={expanded ? '收起AI过程' : '展开AI过程'}
-      onClick={onClick}
-      className="mb-2 h-8 gap-1.5 rounded-md pl-2 text-sm font-medium text-muted-foreground/80"
-    >
-      <span>已处理</span>
-      {durationMs != null ? <span className="tabular-nums">{formatCompactDuration(durationMs)}</span> : null}
-      {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-    </Button>
+    <div className="pb-2">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-expanded={expanded}
+        aria-label={expanded ? '收起AI过程' : '展开AI过程'}
+        onClick={onClick}
+        className="h-auto gap-1.5 px-0 py-0 pl-1 text-sm font-medium text-muted-foreground/80 hover:bg-transparent hover:text-muted-foreground/80"
+      >
+        <span>已处理</span>
+        {durationMs != null ? <span className="tabular-nums">{formatCompactDuration(durationMs)}</span> : null}
+        {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+      </Button>
+      <div className="mt-1.5 border-b border-border/40" />
+    </div>
   );
 }
 
