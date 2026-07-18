@@ -46,7 +46,7 @@ export const AGENT_REGISTRY: AgentDefinition[] = [
   {
     kind: 'opencode',
     label: 'OpenCode',
-    description: '基于 OpenCode SDK 的可恢复编码 Agent，复用 CodeMUX Provider、模型和工具。',
+    description: '基于 OpenCode SDK 的可恢复编码 Agent。',
     icon: 'opencode',
     capabilities: [
       'supports_resume',

@@ -122,7 +122,7 @@ function profileToUpsert(agentKind: ProfileAgentKind, draft: ProfileDraft): Agen
   const models = agentKind === 'codex' && draft.modelCatalog.length > 0
     ? draft.modelCatalog.map((m) => ({ id: m.model, name: m.displayName || m.model }))
     : agentKind === 'opencode'
-      ? Object.entries(draft.modelsConfig).map(([id, m]) => ({ id, name: m.name || id }))
+      ? Object.entries(draft.modelsConfig).filter(([id]) => id.trim()).map(([id, m]) => ({ id, name: m.name || id }))
       : modelsFromText(draft.models).map((id) => ({ id, name: id }));
   const common = { id: draft.id, agent_kind: agentKind, name: draft.name.trim(), note: draft.note.trim(), models, default_model: agentKind === 'codex' ? (draft.defaultModel.trim() || '') : '' };
   const advanced = draft.advancedConfig.trim() ? JSON.parse(draft.advancedConfig) : undefined;
@@ -532,7 +532,7 @@ function OpenCodeAdvancedOptions({ editing, setEditing }: OpenCodeAdvancedOption
   }, [setEditing]);
 
   const handleModelIdChangeWithSync = useCallback((oldKey: string, newKey: string) => {
-    if (oldKey === newKey || !newKey.trim()) return;
+    if (oldKey === newKey) return;
     setEditing((prev) => {
       if (!prev) return prev;
       const next: Record<string, OpenCodeModel> = {};
@@ -651,14 +651,18 @@ function OpenCodeAdvancedOptions({ editing, setEditing }: OpenCodeAdvancedOption
           <p className="text-xs text-destructive py-2">至少需要配置一个模型。</p>
         ) : (
           <div className="space-y-2">
+            <div className={`grid gap-2 text-xs font-medium text-muted-foreground ${fetchedModels.length > 0 ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px_36px]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_36px]'}`}>
+              <span>显示名称</span>
+              <span>实际请求模型</span>
+              {fetchedModels.length > 0 && <span />}
+              <span />
+            </div>
             {Object.entries(editing.modelsConfig).map(([key, model], index) => (
-              <div key={index} className="flex items-center gap-2">
-                <Input value={key} onChange={(e) => handleModelIdChangeWithSync(key, e.target.value)} placeholder="模型 ID" className="flex-1" />
-                <div className="flex gap-1 flex-1 items-center">
-                  <Input value={model.name ?? ''} onChange={(e) => handleModelNameChangeWithSync(key, e.target.value)} placeholder="显示名称" className="flex-1" />
-                  {fetchedModels.length > 0 && (
-                    <ModelDropdown models={fetchedModels} onSelect={(id) => handleSelectModelFromDropdownWithSync(key, id)} />
-                  )}
+              <div key={index} className={`grid gap-2 items-center ${fetchedModels.length > 0 ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px_36px]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_36px]'}`}>
+                <Input value={model.name ?? ''} onChange={(e) => handleModelNameChangeWithSync(key, e.target.value)} placeholder="显示名称" />
+                <div className="flex gap-1">
+                  <Input value={key} onChange={(e) => handleModelIdChangeWithSync(key, e.target.value)} placeholder="模型 ID" className="flex-1" />
+                  {fetchedModels.length > 0 && <ModelDropdown models={fetchedModels} onSelect={(id) => handleSelectModelFromDropdownWithSync(key, id)} />}
                 </div>
                 <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-destructive" onClick={() => handleRemoveModelWithSync(key)}>
                   <Trash2 className="h-4 w-4" />
@@ -803,6 +807,61 @@ export function ProviderConfigPanel() {
     }
   }, [editing, setEditing]);
 
+  // OpenCode: API Key → advancedConfig.options.apiKey sync
+  const handleOpenCodeApiKeyChange = useCallback((key: string) => {
+    if (!editing) return;
+    try {
+      const config = JSON.parse(editing.advancedConfig || '{}');
+      if (!config.options) config.options = {};
+      config.options.apiKey = key;
+      setEditing({ ...editing, apiKey: key, advancedConfig: JSON.stringify(config, null, 2) });
+    } catch {
+      setEditing({ ...editing, apiKey: key });
+    }
+  }, [editing, setEditing]);
+
+  // OpenCode: Base URL → advancedConfig.options.baseURL sync
+  const handleOpenCodeBaseUrlChange = useCallback((url: string) => {
+    if (!editing) return;
+    try {
+      const config = JSON.parse(editing.advancedConfig || '{}');
+      if (!config.options) config.options = {};
+      config.options.baseURL = url;
+      setEditing({ ...editing, baseUrl: url, advancedConfig: JSON.stringify(config, null, 2) });
+    } catch {
+      setEditing({ ...editing, baseUrl: url });
+    }
+  }, [editing, setEditing]);
+
+  // OpenCode: advancedConfig JSON change → extract apiKey, baseUrl, modelsConfig, etc.
+  const handleOpenCodeJsonChange = useCallback((value: string) => {
+    if (!editing) return;
+    try {
+      const parsed = JSON.parse(value);
+      const options = parsed.options || {};
+      const models = parsed.models || {};
+      const extra: Record<string, string> = {};
+      for (const [k, v] of Object.entries(options)) {
+        if (k === 'apiKey' || k === 'baseURL') continue;
+        extra[k] = typeof v === 'string' ? v : JSON.stringify(v);
+      }
+      const npm = parsed.npm || OPENCODE_DEFAULT_NPM;
+      const apiKey = typeof options.apiKey === 'string' ? options.apiKey : '';
+      const baseUrl = typeof options.baseURL === 'string' ? options.baseURL : '';
+      setEditing((prev) => prev ? {
+        ...prev,
+        advancedConfig: value,
+        apiKey,
+        baseUrl,
+        npmPackage: npm,
+        modelsConfig: models,
+        extraOptions: extra,
+      } : prev);
+    } catch {
+      setEditing((prev) => prev ? { ...prev, advancedConfig: value } : prev);
+    }
+  }, [editing, setEditing]);
+
   // On load: extract Base URL from config.toml if editing an existing profile
   useEffect(() => {
     if (!editing || agentKind !== 'codex') return;
@@ -931,6 +990,15 @@ export function ProviderConfigPanel() {
       return;
     }
     let draftToSave = editing;
+    if (agentKind === 'opencode') {
+      const filtered = Object.fromEntries(
+        Object.entries(draftToSave.modelsConfig).filter(([id]) => id.trim())
+      );
+      if (Object.keys(filtered).length !== Object.keys(draftToSave.modelsConfig).length) {
+        draftToSave = { ...draftToSave, modelsConfig: filtered };
+        setEditing(draftToSave);
+      }
+    }
     if (agentKind === 'claude_code') {
       const updatedCustomModels = draftToSave.claudeForm.customModels
         .filter((m) => m.requestModel.trim())
@@ -1032,8 +1100,8 @@ export function ProviderConfigPanel() {
               </Select>
               <p className="text-xs text-muted-foreground">选择与供应商匹配的 AI SDK 包。</p>
             </div>
-            <label className="block space-y-1.5 text-xs text-foreground">API Key<div className="relative"><Input aria-label="API Key" type={showKey ? 'text' : 'password'} value={editing.apiKey} onChange={(event) => setEditing({ ...editing, apiKey: event.target.value })} placeholder="输入 API Key" className="pr-10" /><button type="button" aria-label={showKey ? '隐藏 API Key' : '显示 API Key'} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></label>
-            <label className="block space-y-1.5 text-xs text-foreground">{agent.baseUrlLabel}<Input value={editing.baseUrl} onChange={(event) => setEditing({ ...editing, baseUrl: event.target.value })} placeholder={agent.placeholder} /></label>
+            <label className="block space-y-1.5 text-xs text-foreground">API Key<div className="relative"><Input aria-label="API Key" type={showKey ? 'text' : 'password'} value={editing.apiKey} onChange={(event) => handleOpenCodeApiKeyChange(event.target.value)} placeholder="输入 API Key" className="pr-10" /><button type="button" aria-label={showKey ? '隐藏 API Key' : '显示 API Key'} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></label>
+            <label className="block space-y-1.5 text-xs text-foreground">{agent.baseUrlLabel}<Input value={editing.baseUrl} onChange={(event) => handleOpenCodeBaseUrlChange(event.target.value)} placeholder={agent.placeholder} /></label>
             <OpenCodeAdvancedOptions editing={editing} setEditing={setEditing} />
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
@@ -1043,7 +1111,7 @@ export function ProviderConfigPanel() {
                 </Button>
               </div>
               <div className="rounded-lg border overflow-hidden">
-                <CodeMirror value={editing.advancedConfig} minHeight="120px" extensions={[json(), EditorView.lineWrapping]} theme={baseTheme} onChange={(value) => setEditing({ ...editing, advancedConfig: value })} />
+                <CodeMirror value={editing.advancedConfig} minHeight="120px" extensions={[json(), EditorView.lineWrapping]} theme={baseTheme} onChange={handleOpenCodeJsonChange} />
               </div>
             </div>
           </>}
