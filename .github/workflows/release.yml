@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   ensure-release:
@@ -44,10 +44,10 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         with:
-          github-token: ${{ secrets.DESKTOP_RELEASE_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
             const owner = "kfumi";
-            const repo = "codeMUX-desktop";
+            const repo = "codeMUX";
             const tag = process.env.RELEASE_TAG;
             const version = process.env.RELEASE_VERSION;
             const repository = await github.rest.repos.get({ owner, repo });
@@ -164,12 +164,12 @@ jobs:
       - name: Build and publish Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.DESKTOP_RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           owner: kfumi
-          repo: codeMUX-desktop
+          repo: codeMUX
           tagName: ${{ needs.ensure-release.outputs.tag }}
           releaseName: "codeMUX v${{ needs.ensure-release.outputs.version }}"
           releaseBody: "桌面端安装包下载见下方 Assets。"

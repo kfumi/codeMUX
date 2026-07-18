@@ -2,7 +2,7 @@
 
 ## 背景
 
-codeMUX 是 Tauri 2 桌面应用，当前发布链路已将安装包发布到公开仓库 `kfumi/codeMUX-desktop` 的 GitHub Releases，但应用内尚未接入更新检测、下载和安装流程。参考项目已经验证了基于 Tauri Updater Plugin 的分层设计：Tauri 配置负责签名校验和更新端点，前端 Hook 负责状态机，UI 负责用户反馈。
+codeMUX 是 Tauri 2 桌面应用，当前发布链路已将安装包发布到本仓库 `kfumi/codeMUX` 的 GitHub Releases，但应用内尚未接入更新检测、下载和安装流程。参考项目已经验证了基于 Tauri Updater Plugin 的分层设计：Tauri 配置负责签名校验和更新端点，前端 Hook 负责状态机，UI 负责用户反馈。
 
 本设计将该机制适配到 CodeMUX 现有结构：React/Vite 前端、Tauri 2 后端、自定义标题栏、设置页中的“关于”页面，以及现有 `sonner` 全局通知体系。
 

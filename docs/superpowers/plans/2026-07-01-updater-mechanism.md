@@ -128,7 +128,7 @@ Expected:
   "updater": {
     "pubkey": "PLACEHOLDER_UPDATER_PUBLIC_KEY_REPLACE_BEFORE_RELEASE",
     "endpoints": [
-      "https://github.com/kfumi/codeMUX-desktop/releases/latest/download/latest.json"
+      "https://github.com/kfumi/codeMUX/releases/latest/download/latest.json"
     ]
   }
 }
@@ -1070,7 +1070,7 @@ TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWO
       - name: Build and publish Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.DESKTOP_RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 ```
@@ -1109,7 +1109,7 @@ npm run tauri signer generate -- -w ~/.tauri/codemux-updater.key -p "你的强�
   "updater": {
     "pubkey": "这里替换为真实公钥",
     "endpoints": [
-      "https://github.com/kfumi/codeMUX-desktop/releases/latest/download/latest.json"
+      "https://github.com/kfumi/codeMUX/releases/latest/download/latest.json"
     ]
   }
 }
@@ -1117,12 +1117,12 @@ npm run tauri signer generate -- -w ~/.tauri/codemux-updater.key -p "你的强�
 
 ### 配置 GitHub Secrets
 
-在私有源码仓库的 GitHub Secrets 中配置：
+在当前仓库的 GitHub Secrets 中配置：
 
 - `TAURI_SIGNING_PRIVATE_KEY`：`~/.tauri/codemux-updater.key` 文件内容。
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：生成密钥时设置的密码；如果没有设置密码，可以留空或不配置。
 
-发布 workflow 会把这些变量传给 Tauri 构建。`bundle.createUpdaterArtifacts` 开启后，构建会生成 updater 所需的 `latest.json` 和签名产物，并随 Release 上传到 `kfumi/codeMUX-desktop`。
+发布 workflow 会把这些变量传给 Tauri 构建。`bundle.createUpdaterArtifacts` 开启后，构建会生成 updater 所需的 `latest.json` 和签名产物，并随 Release 上传到 `kfumi/codeMUX`。
 ```
 
 - [ ] **Step 3: 验证文档和 workflow 格式**

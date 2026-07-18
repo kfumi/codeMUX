@@ -1,18 +1,17 @@
 # CodeMUX 桌面端发版指南
 
-本文档用于说明如何在私有源码仓库中构建 CodeMUX 安装包，并自动发布到公开下载仓库 `kfumi/codeMUX-desktop` 的 GitHub Releases。
+本文档用于说明如何在公开源码仓库 `kfumi/codeMUX` 中构建 CodeMUX 安装包，并发布到本仓库的 GitHub Releases。
 
 ## 当前发布链路
 
-- 私有源码仓库负责构建 Tauri 桌面端安装包。
+- 当前仓库负责构建 Tauri 桌面端安装包。
 - 推送版本标签后，GitHub Actions 会自动触发 [`.github/workflows/release.yml`](/D:/project/ai-code/codeMUX/.github/workflows/release.yml:1)。
-- 构建产物会自动上传到公开仓库 `kfumi/codeMUX-desktop` 的 Releases 页面。
+- 构建产物会自动上传到本仓库 `kfumi/codeMUX` 的 Releases 页面。
 - 正式发布当前仅包含 Windows 和 macOS，暂不发布 Ubuntu 安装包。
 
 ## 前置条件
 
-- 私有源码仓库已配置 GitHub Secret: `DESKTOP_RELEASE_TOKEN`
-- 该 Token 对公开仓库 `kfumi/codeMUX-desktop` 具有 `Contents: Read and write` 权限
+- GitHub Actions 已通过仓库自带的 `GITHUB_TOKEN` 获得 `Contents: Write` 权限
 
 ## Updater 签名配置
 
@@ -42,12 +41,12 @@ npm run tauri signer generate -- -w ~/.tauri/codemux-updater.key
 
 ### 4. 配置 GitHub Secrets
 
-在私有源码仓库的 GitHub Actions Secrets 中新增以下两个 Secret：
+在当前仓库的 GitHub Actions Secrets 中新增以下两个 Secret：
 
 - `TAURI_SIGNING_PRIVATE_KEY`：填写 `~/.tauri/codemux-updater.key` 文件中的完整私钥内容
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：填写生成私钥时设置的密码
 
-保留现有的 `DESKTOP_RELEASE_TOKEN`，它负责把构建产物发布到公开仓库；新增的这两个 Secret 负责让 Tauri 在 CI 中为 updater 产物签名。
+发布 workflow 使用仓库自带的 `GITHUB_TOKEN` 将构建产物发布到本仓库；`TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 负责让 Tauri 在 CI 中为 updater 产物签名。
 
 ### 5. 发布产物说明
 
@@ -58,7 +57,7 @@ npm run tauri signer generate -- -w ~/.tauri/codemux-updater.key
 
 这些产物会和安装包一起发布到公开仓库：
 
-- [kfumi/codeMUX-desktop Releases](https://github.com/kfumi/codeMUX-desktop/releases)
+- [kfumi/codeMUX Releases](https://github.com/kfumi/codeMUX/releases)
 
 ## 发版步骤
 
@@ -81,7 +80,7 @@ npm run release:local -- 0.1.5
 
 构建完成后，手动打开公开下载仓库上传即可：
 
-- [kfumi/codeMUX-desktop Releases](https://github.com/kfumi/codeMUX-desktop/releases)
+- [kfumi/codeMUX Releases](https://github.com/kfumi/codeMUX/releases)
 
 注意：
 
@@ -159,9 +158,9 @@ git push origin v0.0.7
 
 ### 4. 等待自动发布
 
-标签推送后，GitHub Actions 会在私有仓库中执行构建，并把安装包发布到：
+标签推送后，GitHub Actions 会在当前仓库中执行构建，并把安装包发布到：
 
-- [kfumi/codeMUX-desktop Releases](https://github.com/kfumi/codeMUX-desktop/releases)
+- [kfumi/codeMUX Releases](https://github.com/kfumi/codeMUX/releases)
 
 ## 工作流说明
 
@@ -176,8 +175,8 @@ git push origin v0.0.7
 
 优先检查：
 
-- `DESKTOP_RELEASE_TOKEN` 是否配置在私有源码仓库
-- Token 是否对 `kfumi/codeMUX-desktop` 具备写入权限
+- workflow 是否配置了 `permissions: contents: write`
+- `GITHUB_TOKEN` 是否获得了仓库内容写入权限
 - `release.yml` 中用于创建公开 Release 的目标分支是否正确，目前配置为 `master`
 
 ### 构建成功但没有看到附件

@@ -90,5 +90,5 @@ console.log(`已完成一键发版流程：${tagName}`);
 if (dryRun) {
   console.log("当前为 dry-run，仅输出了将执行的命令，没有改动文件、提交或推送。");
 } else {
-  console.log("GitHub Actions 将自动构建 Windows 和 macOS 安装包，并发布到 CodeMUX 桌面端发布仓库。");
+  console.log("GitHub Actions 将自动构建 Windows 和 macOS 安装包，并发布到当前 CodeMUX 仓库的 Releases。");
 }

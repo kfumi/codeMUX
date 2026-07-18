@@ -36,7 +36,7 @@ const updaterPasswordPath = path.join(
   "codemux-updater-password.txt",
 );
 const publicRepoOwner = "kfumi";
-const publicRepoName = "codeMUX-desktop";
+const publicRepoName = "codeMUX";
 
 function resolveCommand(command) {
   if (process.platform === "win32" && ["npm", "npx"].includes(command)) {
