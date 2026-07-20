@@ -13,12 +13,26 @@ export function isHiddenAssistantThreadUserEvent(
 
   return (
     isClaudeTaskNotificationUserEvent(data) ||
+    isToolResultOnlyUserEvent(data) ||
     data.isCompactSummary === true ||
     data.isVisibleInTranscriptOnly === true ||
     isCodexCompactSummaryText(text) ||
     text === '/compact' ||
     /^<local-command-stdout>\s*Compacted\s*<\/local-command-stdout>$/i.test(text)
   );
+}
+
+function isToolResultOnlyUserEvent(data: Record<string, unknown>): boolean {
+  const message = data.message;
+  if (!isRecord(message) || !Array.isArray(message.content) || message.content.length === 0) {
+    return false;
+  }
+
+  return message.content.every((block) => isRecord(block) && block.type === 'tool_result');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export function buildAssistantResultTargetMap(events: AgentMessage[]): Map<number, number> {
@@ -48,7 +62,7 @@ export function buildAssistantResultTargetMap(events: AgentMessage[]): Map<numbe
 
     if (event.kind === 'assistant') {
       sawAssistantSinceBoundary = true;
-      if (getAssistantResultPriority(event) >= 2) {
+      if (getAssistantResultPriority(event) >= 1) {
         preferredAssistantIndex = index;
       }
       continue;
@@ -83,5 +97,10 @@ function getAssistantResultPriority(event: Extract<AgentMessage, { kind: 'assist
     }
   }
 
-  return hasTool ? 1 : 0;
+  return hasTool && isOpenCodeAssistantEvent(event) ? 1 : 0;
+}
+
+function isOpenCodeAssistantEvent(event: Extract<AgentMessage, { kind: 'assistant' }>): boolean {
+  const data = event.data as unknown as Record<string, unknown>;
+  return typeof data.opencode_session_id === 'string' || typeof data.opencodeSessionId === 'string';
 }

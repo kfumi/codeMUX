@@ -62,19 +62,27 @@ function getActiveProfileFingerprint(activeProfile: AgentProviderProfile | null)
 async function loadClaudeCodeModels(
   activeProfile: AgentProviderProfile | null,
 ): Promise<ModelOption[]> {
-  const builtins = [...CLAUDE_CODE_BUILTINS];
-  if (!activeProfile) return builtins;
+  if (!activeProfile) return [...CLAUDE_CODE_BUILTINS];
 
-  const profileModels: ModelOption[] = activeProfile.models
-    .filter((m) => m.id.trim())
+  const builtins = [...CLAUDE_CODE_BUILTINS];
+
+  const settings = activeProfile.native_config.type === 'claude_code'
+    ? activeProfile.native_config.settings
+    : null;
+  const rawCustomModels = settings && Array.isArray(settings.custom_models)
+    ? settings.custom_models as Array<{ displayName: string; requestModel: string }>
+    : [];
+
+  const customModels: ModelOption[] = rawCustomModels
+    .filter((m) => m.requestModel?.trim())
     .map((m) => ({
-      id: m.id.trim(),
-      name: m.name?.trim() || m.id.trim(),
+      id: m.requestModel.trim(),
+      name: m.displayName?.trim() || m.requestModel.trim(),
       efforts: true,
       source: 'profile' as const,
     }));
 
-  return dedupById([...profileModels, ...builtins]);
+  return dedupById([...builtins, ...customModels]);
 }
 
 interface CodexCatalogEntry {

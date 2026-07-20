@@ -521,7 +521,7 @@ function getSubAgentPrompt(toolName: string, args: Record<string, unknown>): str
 }
 
 function isSubAgentTool(toolName: string): boolean {
-  return toolName === 'Agent' || toolName === 'Task' || toolName === 'subagent';
+  return toolName === 'Agent' || toolName === 'Task' || toolName === 'subagent' || toolName === 'task';
 }
 
 function getToolDisplayableArgs(

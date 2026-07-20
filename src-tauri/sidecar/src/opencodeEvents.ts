@@ -197,6 +197,22 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
             event_kind: 'tool_result',
           });
         }
+      } else if (partType === 'subtask') {
+        const prompt = readString(part.prompt) ?? '';
+        const description = readString(part.description) ?? '';
+        const agent = readString(part.agent) ?? '';
+        const callId = readString(part.id) ?? `subtask-${context.turnId}-${context.sequence}`;
+        if (prompt || description) {
+          events.push({
+            ...buildAssistantEnvelope(context, sessionId, [{
+              type: 'tool_use',
+              id: callId,
+              name: 'Task',
+              input: { prompt, description, agent },
+            }]),
+            event_kind: 'tool_call',
+          });
+        }
       }
       break;
     }
@@ -218,7 +234,9 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
     case 'session.error': {
       const error = properties.error ?? properties;
       const status = isInterruptedError(error) ? 'interrupted' : 'error';
-      events.push(buildEnvelope({ type: 'error', subtype: isTimeoutError(error) ? 'timeout' : status, error: errorMessage(error) }, context, sessionId));
+      const errorText = errorMessage(error);
+      process.stderr.write(`[opencode-task] toCodeMuxEvent session.error sessionId=${sessionId ?? 'null'} status=${status} error=${errorText} isInterrupted=${isInterruptedError(error)} isTimeout=${isTimeoutError(error)}\n`);
+      events.push(buildEnvelope({ type: 'error', subtype: isTimeoutError(error) ? 'timeout' : status, error: errorText }, context, sessionId));
       events.push(...buildResultEvents(context, status, sessionId));
       break;
     }
@@ -244,6 +262,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
     }
     case 'session.interrupted':
     case 'session.aborted':
+      process.stderr.write(`[opencode-task] toCodeMuxEvent ${type} sessionId=${sessionId ?? 'null'}\n`);
       events.push(buildEnvelope({ type: 'error', subtype: 'interrupted', error: 'OpenCode session interrupted by user' }, context, sessionId));
       events.push(...buildResultEvents(context, 'interrupted', sessionId));
       break;

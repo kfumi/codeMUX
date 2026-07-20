@@ -3,7 +3,7 @@ import type { AgentMessage } from '../../../stores/agentStore';
 import { buildAssistantResultTargetMap, buildAssistantResultTargetSet } from './assistantResultTargets';
 
 describe('assistant result targets', () => {
-  it('does not bind a result to a tool-only assistant', () => {
+  it('does not bind a result to a tool-only assistant without OpenCode routing metadata', () => {
     const events = [
       { kind: 'user', data: { content: 'request' } },
       { kind: 'assistant', data: { message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'bash', input: {} }] } } },
@@ -13,6 +13,18 @@ describe('assistant result targets', () => {
 
     expect(buildAssistantResultTargetMap(events)).toEqual(new Map());
     expect(buildAssistantResultTargetSet(events)).toEqual(new Set());
+  });
+
+  it('binds a result to an OpenCode tool-only assistant', () => {
+    const events = [
+      { kind: 'user', data: { content: 'request' } },
+      { kind: 'assistant', data: { opencode_session_id: 'opencode-1', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'bash', input: {} }] } } },
+      { kind: 'tool_result', data: { message: { content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'done' }] } } },
+      { kind: 'result', data: { type: 'result', duration_ms: 100 } },
+    ] as unknown as AgentMessage[];
+
+    expect(buildAssistantResultTargetMap(events)).toEqual(new Map([[1, 3]]));
+    expect(buildAssistantResultTargetSet(events)).toEqual(new Set([1]));
   });
 
   it('binds a result to a later text assistant in the same turn', () => {
@@ -61,5 +73,22 @@ describe('assistant result targets', () => {
 
     expect(buildAssistantResultTargetMap(events)).toEqual(new Map([[5, 3]]));
     expect(buildAssistantResultTargetSet(events)).toEqual(new Set([5]));
+  });
+
+  it('does not treat an OpenCode tool result shaped as a user event as a new turn', () => {
+    const events = [
+      { kind: 'user', data: { content: 'request' } },
+      { kind: 'assistant', data: { opencode_session_id: 'opencode-1', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'bash', input: {} }] } } },
+      {
+        kind: 'user',
+        data: {
+          content: '',
+          message: { content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'done' }] },
+        },
+      },
+      { kind: 'result', data: { type: 'result', duration_ms: 100 } },
+    ] as unknown as AgentMessage[];
+
+    expect(buildAssistantResultTargetMap(events)).toEqual(new Map([[1, 3]]));
   });
 });

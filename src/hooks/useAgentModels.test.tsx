@@ -30,8 +30,14 @@ function profile(
   };
 }
 
-function claudeProfile(models: AgentProviderProfile['models']) {
-  return profile('claude_code', models, { type: 'claude_code', settings: {} });
+function claudeProfile(
+  models: AgentProviderProfile['models'],
+  customModels?: Array<{ displayName: string; requestModel: string }>,
+) {
+  return profile('claude_code', models, {
+    type: 'claude_code',
+    settings: customModels ? { custom_models: customModels } : {},
+  });
 }
 
 function codexProfile(
@@ -89,18 +95,21 @@ describe('useAgentModels', () => {
     ]);
   });
 
-  it('always includes Claude built-ins and merges profile models without duplicates', async () => {
-    const { result } = await loadedModels('claude_code', claudeProfile([
-      { id: 'sonnet', name: 'Custom Sonnet' },
-      { id: 'provider/custom', name: 'Custom Model' },
-    ]));
+  it('includes Claude built-ins and custom models from settings without duplicates', async () => {
+    const { result } = await loadedModels('claude_code', claudeProfile(
+      [{ id: 'sonnet' }, { id: 'provider/custom' }],
+      [
+        { displayName: 'Custom Model', requestModel: 'provider/custom' },
+        { displayName: 'Custom Sonnet', requestModel: 'sonnet' },
+      ],
+    ));
 
     expect(result.current.models).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'sonnet', name: 'Custom Sonnet', source: 'profile' }),
+      expect.objectContaining({ id: 'sonnet', name: 'Sonnet 5' }),
       expect.objectContaining({ id: 'opus' }),
       expect.objectContaining({ id: 'fable' }),
       expect.objectContaining({ id: 'haiku' }),
-      expect.objectContaining({ id: 'provider/custom', source: 'profile' }),
+      expect.objectContaining({ id: 'provider/custom', name: 'Custom Model', source: 'profile' }),
     ]));
     expect(result.current.models.filter((model) => model.id === 'sonnet')).toHaveLength(1);
   });

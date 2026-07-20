@@ -211,6 +211,8 @@ pub async fn spawn_sidecar(
             }
             if line.contains("[codex][compact") {
                 info!(target: "sidecar_stderr", "{}", line);
+            } else if line.contains("[opencode-task]") {
+                info!(target: "sidecar_stderr", "{}", line);
             } else if line.to_ascii_lowercase().contains("error") {
                 warn!(target: "sidecar_stderr", "{}", line);
             } else {

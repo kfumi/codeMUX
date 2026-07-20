@@ -55,6 +55,9 @@ const BUILT_IN_TOOL_ALIASES: Record<string, string> = {
   ls: 'LS',
   grep: 'Grep',
   glob: 'Glob',
+  skill: 'Skill',
+  task: 'Task',
+  todowrite: 'TodoWrite',
 };
 
 function normalizeToolName(toolName: string): string {
@@ -134,6 +137,9 @@ export function getToolHeaderSummary(toolName: string, input: Record<string, unk
 
       case 'AskUserQuestion':
         return fromFirstKey(input, ['question', 'header']);
+
+      case 'TodoWrite':
+        return { consumedKeys: ['todos'] };
 
       case 'TaskList':
       case 'EnterPlanMode':

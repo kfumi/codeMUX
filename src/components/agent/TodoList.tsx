@@ -37,7 +37,6 @@ export function TodoList({ todos, className, dropdownSide = 'up', align = 'left'
   if (todos.length === 0) return null;
 
   const completed = todos.filter((t) => t.status === 'completed').length;
-  const inProgress = todos.filter((t) => t.status === 'in_progress').length;
   const total = todos.length;
   const progressPct = total > 0 ? (completed / total) * 100 : 0;
 
@@ -105,11 +104,6 @@ export function TodoList({ todos, className, dropdownSide = 'up', align = 'left'
         >
           {completed}/{total}
         </span>
-        {inProgress > 0 && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[hsl(var(--warning)/0.1)] text-[hsl(var(--warning))] font-medium">
-            {inProgress} 进行中
-          </span>
-        )}
       </button>
     </div>
   );

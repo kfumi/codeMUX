@@ -53,6 +53,7 @@ type AssistantCollapseInfo = {
   turnKey: string;
   isToggleMessage: boolean;
   durationMs?: number;
+  hideReasoningOnly?: boolean;
 };
 
 type UserNavItem = {
@@ -913,7 +914,8 @@ function AssistantLikeMessage({
   const sourceEventIndex = getSourceEventIndex(message);
   const collapseInfo = compactAiOutput ? getMessageCollapseInfo(message, collapseInfoByEventIndex) : undefined;
   const isCollapseExpanded = collapseInfo ? expandedTurnKeys.has(collapseInfo.turnKey) : false;
-  const shouldHideCollapsedContent = collapseInfo && !isCollapseExpanded;
+  const shouldHideCollapsedContent = collapseInfo && !isCollapseExpanded && !collapseInfo.hideReasoningOnly;
+  const shouldHideCollapsedReasoning = collapseInfo?.hideReasoningOnly && !isCollapseExpanded;
 
   if (shouldHideCollapsedContent && !collapseInfo.isToggleMessage) {
     return null;
@@ -930,7 +932,7 @@ function AssistantLikeMessage({
     isFinal && message.metadata.custom?.sourceRole !== 'system' && (footerStats !== undefined || sourceTimestamp !== undefined);
 
   return (
-    <MessagePrimitive.Root data-message-row className="group/message-row mb-5 flex w-full justify-start">
+    <MessagePrimitive.Root data-message-row className="group/message-row mb-2 flex w-full justify-start">
       <div
         className={cn(
           'w-full min-w-0 space-y-2 text-sm leading-relaxed',
@@ -949,6 +951,9 @@ function AssistantLikeMessage({
             {({ part, children }) => {
               switch (part.type) {
                 case 'group-thinking':
+                  if (shouldHideCollapsedReasoning) {
+                    return null;
+                  }
                   return <CodeMuxReasoningGroup>{children}</CodeMuxReasoningGroup>;
 
                 case 'group-tool-call':
@@ -1183,6 +1188,17 @@ function buildAssistantCollapseInfoMap(
       }
     }
 
+    // OpenCode can finish a turn with only a tool call and no narration.
+    // Treat that final tool message as the collapsed process in that case.
+    if (collapsibleEventIndices.length === 0 && isOpenCodeToolOnlyAssistantEvent(events[finalAssistantIndex])) {
+      collapsibleEventIndices.push(finalAssistantIndex);
+    }
+
+    const finalAssistantHasReasoningAndText = hasAssistantReasoningAndText(events[finalAssistantIndex]);
+    if (finalAssistantHasReasoningAndText) {
+      collapsibleEventIndices.push(finalAssistantIndex);
+    }
+
     if (collapsibleEventIndices.length === 0) {
       continue;
     }
@@ -1196,11 +1212,23 @@ function buildAssistantCollapseInfoMap(
         turnKey,
         isToggleMessage: eventIndex === firstCollapsibleIndex,
         durationMs,
+        hideReasoningOnly: eventIndex === finalAssistantIndex && finalAssistantHasReasoningAndText,
       });
     }
   }
 
   return collapseInfoByEventIndex;
+}
+
+function isToolResultOnlyUserEvent(event: AgentMessage): boolean {
+  if (event.kind !== 'user') return false;
+  const data = event.data as Record<string, unknown>;
+  const message = data.message;
+  if (!isRecord(message) || !Array.isArray(message.content) || message.content.length === 0) {
+    return false;
+  }
+
+  return message.content.every((block) => isRecord(block) && block.type === 'tool_result');
 }
 
 function findTurnUserIndex(
@@ -1212,10 +1240,8 @@ function findTurnUserIndex(
   for (let index = searchStartIndex; index >= 0; index--) {
     const event = events[index];
     if (event.kind === 'user') {
+      if (isToolResultOnlyUserEvent(event)) continue;
       return index;
-    }
-    if (event.kind === 'result') {
-      break;
     }
   }
 
@@ -1233,6 +1259,33 @@ function isCollapsibleProcessEvent(event: AgentMessage | undefined): boolean {
     || event.kind === 'compact'
     || event.kind === 'error'
     || event.kind === 'stream_status';
+}
+
+function isOpenCodeToolOnlyAssistantEvent(event: AgentMessage | undefined): boolean {
+  if (event?.kind !== 'assistant') {
+    return false;
+  }
+
+  const data = event.data as unknown as Record<string, unknown>;
+  if (typeof data.opencode_session_id !== 'string' && typeof data.opencodeSessionId !== 'string') {
+    return false;
+  }
+
+  const content = event.data.message?.content;
+  return Array.isArray(content)
+    && content.length > 0
+    && content.every((block) => block?.type === 'tool_use');
+}
+
+function hasAssistantReasoningAndText(event: AgentMessage | undefined): boolean {
+  if (event?.kind !== 'assistant') {
+    return false;
+  }
+
+  const content = event.data.message?.content;
+  return Array.isArray(content)
+    && content.some((block) => block?.type === 'thinking')
+    && content.some((block) => block?.type === 'text');
 }
 
 function getTurnDurationMs(

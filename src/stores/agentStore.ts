@@ -784,9 +784,9 @@ function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
         if (block?.type !== 'tool_use' || !block.name) continue;
 
         // TodoWrite / Codex update_plan: replaces the entire todo list
-        if (block.name === 'TodoWrite' || block.name === 'update_plan') {
+        if (block.name === 'TodoWrite' || block.name === 'todowrite' || block.name === 'update_plan') {
           const input = block.input as any;
-          const inputTodos = block.name === 'TodoWrite' ? input?.todos : input?.plan;
+          const inputTodos = block.name === 'update_plan' ? input?.plan : input?.todos;
           if (Array.isArray(inputTodos)) {
             const newTodos = inputTodos.map((t: any) => ({
               content: String(t.content || t.step || ''),
@@ -843,7 +843,7 @@ function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
         // Infer progress from tool calls: mark first pending task as in_progress
         // and record which task this tool call is associated with.
         // Skip task-management and read-only query tools — they don't represent work.
-        const skipInferenceTools = ['TodoWrite', 'update_plan', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'];
+        const skipInferenceTools = ['TodoWrite', 'todowrite', 'update_plan', 'TaskCreate', 'taskcreate', 'TaskUpdate', 'taskupdate', 'TaskList', 'tasklist', 'TaskGet', 'taskget'];
         if (!hasExplicitUpdates && todos.length > 0 && !skipInferenceTools.includes(block.name)) {
           const firstPending = todos.find((t) => t.status === 'pending');
           if (firstPending) {

@@ -1,6 +1,7 @@
 import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInputPayload.js';
 import { emit } from './streamEventBatcher.js';
 import { OpenCodePermissionRegistry, type OpenCodePermissionResponse } from './opencodePermissions.js';
+import { buildToolResultEvent } from './runtimeEvents.js';
 import { extractOpenCodeUsageUpdate, mergeOpenCodeUsage, getOpenCodeEventIdentity, isOpenCodeSessionScopedEvent, getOpenCodeEventSessionId, getOpenCodePayloadKey, getOpenCodeToolId, getOpenCodeToolStatus, toCodeMuxEvent } from './opencodeEvents.js';
 import type { OpenCodeEventSubscription, OpenCodePermissionUpdate } from './opencodeSdk.js';
 import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
@@ -20,7 +21,7 @@ import {
 type RuntimeState = 'idle' | 'starting' | 'started' | 'disposing' | 'cleanup_failed' | 'disposed';
 
 export const DEFAULT_ACTIVE_TASK_TIMEOUT_MS = 30_000;
-export const DEFAULT_PROMPT_TIMEOUT_MS = 30_000;
+export const DEFAULT_PROMPT_TIMEOUT_MS = 600_000;
 export const DEFAULT_SERVER_CLOSE_TIMEOUT_MS = 10_000;
 const MAX_SEEN_EVENT_IDS = 2_048;
 const MAX_SEEN_PAYLOAD_KEYS = 2_048;
@@ -61,6 +62,8 @@ export class OpenCodeRuntime {
   private seenPayloadKeyBytes = 0;
   private readonly terminalSessionIds = new Set<string>();
   private readonly terminalToolIds = new Set<string>();
+  private pendingTurnCompletion: { resolve: () => void; reject: (reason: unknown) => void; sessionId: string } | undefined;
+  private readonly pendingTaskToolCallIds = new Set<string>();
   private readonly assistantMessageIds = new Set<string>();
   private readonly userMessageIds = new Set<string>();
   private eventSequence = 0;
@@ -131,24 +134,53 @@ export class OpenCodeRuntime {
     this.beginTurnEventState();
     const normalizedPayload = normalizeAgentInputPayload(prompt, inputPayload);
     const normalizedPrompt = normalizedPayload.text;
-    const task = client.prompt({
-      sessionId,
-      prompt: normalizedPrompt,
-      inputPayload: normalizedPayload,
-      images: mapOpenCodeImages(normalizedPayload),
-      provider: this.config.provider,
-      model: this.config.model,
-    });
+    process.stderr.write(`[opencode-task] sendInput START sessionId=${sessionId} model=${this.config.provider}/${this.config.model} prompt_preview=${normalizedPrompt.slice(0, 120)}\n`);
+    const task = (async () => {
+      const turnCompletion = new Promise<void>((resolve, reject) => {
+        this.pendingTurnCompletion = { resolve, reject, sessionId };
+      });
+      try {
+        await client.prompt({
+          sessionId,
+          prompt: normalizedPrompt,
+          inputPayload: normalizedPayload,
+          images: mapOpenCodeImages(normalizedPayload),
+          provider: this.config.provider,
+          model: this.config.model,
+        });
+      } catch (error) {
+        this.pendingTurnCompletion = undefined;
+        process.stderr.write(`[opencode-task] sendInput promptAsync FAILED sessionId=${sessionId} error=${errorMessage(error)}\n`);
+        throw error;
+      }
+      if (!this.eventSubscription) {
+        if (this.pendingTurnCompletion?.sessionId === sessionId) {
+          this.pendingTurnCompletion.resolve();
+          this.pendingTurnCompletion = undefined;
+        }
+      }
+      try {
+        await turnCompletion;
+      } catch {
+        // turn completed externally (abort/timeout/error)
+      }
+    })();
     const handledTask = this.awaitPromptWithTimeout(task, sessionId).catch((error) => {
       if (isAbortError(error)) {
+        process.stderr.write(`[opencode-task] sendInput ABORT_ERROR swallowed: ${errorMessage(error)}\n`);
         return;
       }
+      process.stderr.write(`[opencode-task] sendInput ERROR propagating: ${errorMessage(error)}\n`);
       throw error;
     });
     this.activeTask = handledTask;
     try {
       await handledTask;
+      process.stderr.write(`[opencode-task] sendInput COMPLETE sessionId=${sessionId}\n`);
     } finally {
+      if (this.pendingTurnCompletion?.sessionId === sessionId) {
+        this.pendingTurnCompletion = undefined;
+      }
       if (this.activeTask === handledTask) {
         this.activeTask = undefined;
       }
@@ -334,6 +366,10 @@ export class OpenCodeRuntime {
     const eventSessionId = getOpenCodeEventSessionId(event);
     const activeSessionId = this.agentSessionId;
     const type = typeof (event as { type?: unknown })?.type === 'string' ? (event as { type: string }).type : '';
+    const eventLower = type.toLowerCase();
+    if (eventLower.includes('cancel') || eventLower.includes('abort') || eventLower.includes('interrupt') || type === 'session.error') {
+      process.stderr.write(`[opencode-task] handleSdkEvent type=${type} sessionId=${eventSessionId ?? 'null'} activeSessionId=${activeSessionId ?? 'null'} event=${JSON.stringify(event).slice(0, 500)}\n`);
+    }
     if (type === 'permission.updated' && this.permissionClosing) {
       return;
     }
@@ -420,14 +456,54 @@ export class OpenCodeRuntime {
       turnId: this.turnId,
       eventIdFactory: this.eventIdFactory,
     });
+    const serialized = JSON.stringify(event);
+    if (serialized.toLowerCase().includes('cancelled') || serialized.includes('Task cancelled') || serialized.includes('task was cancelled')) {
+      process.stderr.write(`[opencode-task][error] CANCELLED_DETECTED type=${type} sessionId=${eventSessionId ?? this.agentSessionId ?? 'null'} preview=${serialized.slice(0, 800)}\n`);
+    }
     for (const normalizedEvent of events) {
       this.emitEvent(normalizedEvent);
     }
     this.eventSequence += events.length;
-    if (terminalSessionId && isTerminalEventType(type) && events.some((eventItem) => eventItem.type === 'result' || eventItem.type === 'error')) {
-      this.terminalSessionIds.add(terminalSessionId);
-      this.turnStartedAt = 0;
-      this.usage = { input_tokens: 0, output_tokens: 0 };
+
+    const assistantMessage = asRecord(events.find((e) => e.type === 'assistant')?.message);
+    const content = Array.isArray(assistantMessage?.content) ? assistantMessage?.content : [];
+    for (const block of content) {
+      const recordBlock = asRecord(block);
+      if (recordBlock?.type === 'tool_use' && typeof recordBlock.id === 'string' && (recordBlock.name === 'Task' || recordBlock.name === 'Agent')) {
+        this.pendingTaskToolCallIds.add(recordBlock.id as string);
+      }
+    }
+
+    if (type === 'session.idle' && this.pendingTaskToolCallIds.size > 0 && activeSessionId) {
+      for (const taskId of this.pendingTaskToolCallIds) {
+        this.emitEvent({
+          ...buildToolResultEvent({ sessionId: this.config.sessionId, toolUseId: taskId, content: '', eventIdFactory: this.eventIdFactory }),
+          agent_id: this.agentId,
+          agent_session_id: activeSessionId,
+          opencode_session_id: activeSessionId,
+        });
+      }
+      this.pendingTaskToolCallIds.clear();
+    }
+
+    if (terminalSessionId && isTerminalEventType(type)) {
+      if (events.some((eventItem) => eventItem.type === 'result' || eventItem.type === 'error')) {
+        this.terminalSessionIds.add(terminalSessionId);
+        this.turnStartedAt = 0;
+        this.usage = { input_tokens: 0, output_tokens: 0 };
+      }
+      const pending = this.pendingTurnCompletion;
+      if (pending && pending.sessionId === terminalSessionId) {
+        process.stderr.write(`[opencode-task] handleSdkEvent RESOLVE_TURN sessionId=${terminalSessionId} type=${type}\n`);
+        this.pendingTurnCompletion = undefined;
+        if (type === 'session.error') {
+          const properties = asRecord(asRecord(event)?.properties);
+          const errorData = properties?.error;
+          pending.reject(errorData instanceof Error ? errorData : new Error(errorData ? String(errorData) : 'Session error'));
+        } else {
+          pending.resolve();
+        }
+      }
     }
     if (toolId && (toolStatus === 'completed' || toolStatus === 'error')) {
       this.terminalToolIds.add(toolId);
@@ -445,7 +521,9 @@ export class OpenCodeRuntime {
     });
     try {
       await Promise.race([task, timeout]);
+      process.stderr.write(`[opencode-task] awaitPromptWithTimeout RESOLVED sessionId=${sessionId}\n`);
     } catch (error) {
+      process.stderr.write(`[opencode-task] awaitPromptWithTimeout ERROR sessionId=${sessionId} error=${errorMessage(error)} isTimeout=${isPromptTimeoutError(error)}\n`);
       if (!isPromptTimeoutError(error)) throw error;
       void this.client?.abort(sessionId).catch(() => undefined);
       this.handleSdkEvent({ type: 'session.error', properties: { sessionID: sessionId, error: { name: 'OpenCodePromptTimeoutError', data: { message: errorMessage(error) } } } });
@@ -458,6 +536,7 @@ export class OpenCodeRuntime {
     this.turnId += 1;
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
+    this.pendingTaskToolCallIds.clear();
     this.assistantMessageIds.clear();
     this.userMessageIds.clear();
     this.usage = { input_tokens: 0, output_tokens: 0 };
@@ -560,6 +639,7 @@ export class OpenCodeRuntime {
     }
   }
   private async interruptInternal(): Promise<void> {
+    process.stderr.write(`[opencode-task] interruptInternal START state=${this.state} hasActiveTask=${!!this.activeTask} sessionId=${this.agentSessionId ?? 'null'}\n`);
     const cancellation = this.beginPermissionCancellation();
     try {
       await this.permissions.cancelAll(this.config.sessionId);
@@ -567,8 +647,11 @@ export class OpenCodeRuntime {
       const sessionId = this.agentSessionId;
       if (client && sessionId && this.activeTask) {
         try {
+          process.stderr.write(`[opencode-task] interruptInternal calling client.abort sessionId=${sessionId}\n`);
           await client.abort(sessionId);
+          process.stderr.write(`[opencode-task] interruptInternal client.abort DONE sessionId=${sessionId}\n`);
         } catch (error) {
+          process.stderr.write(`[opencode-task] interruptInternal client.abort ERROR sessionId=${sessionId} error=${errorMessage(error)} isAbort=${isAbortError(error)}\n`);
           if (!isAbortError(error)) {
             throw error;
           }
@@ -579,6 +662,7 @@ export class OpenCodeRuntime {
     } finally {
       this.finishPermissionCancellation(cancellation);
     }
+    process.stderr.write(`[opencode-task] interruptInternal END\n`);
   }
 
   private async disposeResources(): Promise<void> {
@@ -599,6 +683,9 @@ export class OpenCodeRuntime {
         errors.push(error);
       }
       this.activeTask = undefined;
+
+      this.pendingTurnCompletion = undefined;
+      this.pendingTaskToolCallIds.clear();
 
       await this.closeEventSubscription(errors);
       await this.permissions.cancelAll(this.config.sessionId);

@@ -52,7 +52,10 @@ export function ConfirmDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent overlayClassName={overlayClassName} className="sm:max-w-95 gap-0 overflow-hidden p-0">
+      <DialogContent
+        overlayClassName={overlayClassName}
+        className="z-[240] gap-0 overflow-hidden p-0 sm:max-w-95"
+      >
         <DialogHeader className="px-6 pb-4 pt-6">
           <div className="flex items-start gap-3">
             {variant === 'destructive' && (

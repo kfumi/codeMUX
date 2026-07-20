@@ -252,6 +252,156 @@ const completedTurnEvents: AgentMessage[] = [
   },
 ];
 
+const completedOpenCodeToolTurnEvents: AgentMessage[] = [
+  { kind: 'user', data: { content: 'inspect the project' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'opencode-assistant-tool',
+      session_id: 'session-opencode-tool-turn',
+      opencode_session_id: 'opencode-session-tool-turn',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'opencode-tool-1', name: 'bash', input: { command: 'pwd' } }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'tool_result',
+    data: {
+      type: 'user',
+      uuid: 'opencode-tool-result',
+      session_id: 'session-opencode-tool-turn',
+      opencode_session_id: 'opencode-session-tool-turn',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'opencode-tool-1', content: 'D:\\project\\ai-code\\codeMUX' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'result',
+    data: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      uuid: 'opencode-result',
+      session_id: 'session-opencode-tool-turn',
+      agent_session_id: 'opencode-session-tool-turn',
+      duration_ms: 1200,
+      duration_api_ms: 1200,
+      num_turns: 1,
+      result: 'ok',
+      usage: { input_tokens: 10, output_tokens: 5 },
+    },
+  },
+];
+
+const historicalOpenCodeTurnEvents: AgentMessage[] = [
+  { kind: 'user', data: { content: 'inspect the project history' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'opencode-history-process-1',
+      session_id: 'session-opencode-history-turn',
+      opencode_session_id: 'opencode-session-history-turn',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '历史思考一' },
+          { type: 'text', text: '历史过程一' },
+          { type: 'tool_use', id: 'opencode-history-tool-1', name: 'Read', input: { file_path: 'package.json' } },
+        ],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'result',
+    data: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      uuid: 'opencode-history-result-1',
+      session_id: 'session-opencode-history-turn',
+      duration_ms: 400,
+      duration_api_ms: 400,
+      num_turns: 1,
+      result: '',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'opencode-history-process-2',
+      session_id: 'session-opencode-history-turn',
+      opencode_session_id: 'opencode-session-history-turn',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '历史思考二' },
+          { type: 'text', text: '历史过程二' },
+          { type: 'tool_use', id: 'opencode-history-tool-2', name: 'Grep', input: { pattern: 'compact_ai_output' } },
+        ],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'result',
+    data: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      uuid: 'opencode-history-result-2',
+      session_id: 'session-opencode-history-turn',
+      duration_ms: 800,
+      duration_api_ms: 800,
+      num_turns: 1,
+      result: '',
+      usage: { input_tokens: 2, output_tokens: 2 },
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'opencode-history-final',
+      session_id: 'session-opencode-history-turn',
+      opencode_session_id: 'opencode-session-history-turn',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '最终思考泄漏' },
+          { type: 'text', text: '历史最终结果' },
+        ],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'result',
+    data: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      uuid: 'opencode-history-result-final',
+      session_id: 'session-opencode-history-turn',
+      duration_ms: 1_200,
+      duration_api_ms: 1_200,
+      num_turns: 1,
+      result: '',
+      usage: { input_tokens: 3, output_tokens: 3 },
+    },
+  },
+];
+
 const mixedFooterStatsEvents: AgentMessage[] = [
   { kind: 'user', data: { content: 'first request' } },
   {
@@ -635,6 +785,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-image-only': imageOnlyUserEvents,
         'session-image-text': imageAndTextUserEvents,
         'session-completed-turn': completedTurnEvents,
+        'session-opencode-tool-turn': completedOpenCodeToolTurnEvents,
+        'session-opencode-history-turn': historicalOpenCodeTurnEvents,
         'session-footer-snapshot': mixedFooterStatsEvents,
         'session-plan-final': proposedPlanFinalEvents,
         'session-plan-non-final': proposedPlanNonFinalEvents,
@@ -651,6 +803,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
           Date.parse('2026-06-28T10:01:13Z'),
           Date.parse('2026-06-28T10:01:13Z'),
         ],
+        'session-opencode-tool-turn': [1, 2, 3, 4],
+        'session-opencode-history-turn': [1, 2, 3, 4, 5, 6, 7],
         'session-footer-snapshot': [
           Date.parse('2026-06-29T10:00:00Z'),
           Date.parse('2026-06-29T10:00:05Z'),
@@ -1390,6 +1544,48 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByRole('button', { name: /鏀惰捣AI杩囩▼|收起AI过程/ })).toBeTruthy();
   });
 
+  it('collapses completed OpenCode tool-only turns when compact output is enabled', () => {
+    useSettingsStore.setState((state) => ({
+      config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
+    }));
+
+    render(<Harness sessionId="session-opencode-tool-turn" />);
+
+    expect(screen.getByRole('button', { name: /展开AI过程/ })).toBeTruthy();
+    expect(screen.queryByText('运行命令')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
+
+    expect(screen.getByText('运行命令')).toBeTruthy();
+  });
+
+  it('collapses OpenCode historical process messages across intermediate results', () => {
+    useSettingsStore.setState((state) => ({
+      config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
+    }));
+
+    render(<Harness sessionId="session-opencode-history-turn" />);
+
+    expect(screen.getByText('历史最终结果')).toBeTruthy();
+    expect(screen.queryByText('历史过程一')).toBeNull();
+    expect(screen.queryByText('历史过程二')).toBeNull();
+    expect(screen.queryByText('最终思考泄漏')).toBeNull();
+
+    const toggle = screen.getByRole('button', { name: /展开AI过程/ });
+    expect(toggle.textContent).toContain('已处理');
+
+    fireEvent.click(toggle);
+
+    expect(screen.getByText('历史过程一')).toBeTruthy();
+    expect(screen.getByText('历史过程二')).toBeTruthy();
+
+    const finalRow = screen.getByText('历史最终结果').closest('[data-message-row]');
+    const finalReasoningTrigger = finalRow?.querySelector('[data-slot="reasoning-trigger"]');
+    expect(finalReasoningTrigger).toBeTruthy();
+    fireEvent.click(finalReasoningTrigger!);
+    expect(screen.getByText('最终思考泄漏')).toBeTruthy();
+  });
+
   it('renders proposed_plan in final assistant messages as a plan preview card', () => {
     render(<Harness sessionId="session-plan-final" />);
 
@@ -1473,7 +1669,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     render(<Harness sessionId="session-nav" />);
 
     const shell = screen.getByTestId('thread-content-shell');
-    expect(shell.className).toContain('px-10');
+    expect(shell.className).toContain('px-14');
     expect(shell.className).not.toContain('pl-14');
     expect(shell.className).not.toContain('pr-4');
     expect((shell as HTMLElement).style.maxWidth).toBe('var(--content-width, 52rem)');

@@ -70,13 +70,7 @@ function SessionScopedAssistantRuntime({
   eventTimestampsRef.current = eventTimestamps;
 
   const messages = useMemo(() => {
-    const result = convertAgentEventsToAssistantMessages(events);
-    logger.debug('Converted events to assistant messages', {
-      sessionId,
-      eventCount: events.length,
-      messageCount: result.length,
-    });
-    return result;
+    return convertAgentEventsToAssistantMessages(events);
   }, [events, sessionId]);
 
   const handleMessage = useCallback(

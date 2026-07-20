@@ -241,6 +241,7 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
         baseUrl: server.url,
         directory: cwd,
       });
+      const serverBaseUrl = server.url;
       return {
         server,
         client: {
@@ -266,17 +267,36 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
                 url: image.dataUrl,
               })),
             ];
-            readResponse(
-              'OpenCode prompt',
-              await client.session.prompt({
+            process.stderr.write(`[opencode-task] SDK promptAsync CALL sessionId=${sessionId} model=${provider}/${model} prompt_len=${(inputPayload?.text ?? prompt).length} parts=${parts.length}\n`);
+            try {
+              const sdkResponse = await client.session.promptAsync({
                 path: { id: sessionId },
                 query: { directory: cwd },
                 body: {
                   model: { providerID: provider, modelID: model },
                   parts,
                 },
-              }),
-            );
+              });
+              if ('error' in sdkResponse && sdkResponse.error !== undefined) {
+                readResponse('OpenCode promptAsync', sdkResponse);
+              }
+            } catch (err) {
+              const errMsg = err instanceof TypeError ? err.message : String(err);
+              const errStack = err instanceof Error ? err.stack : '';
+              process.stderr.write(`[opencode-task] SDK promptAsync THREW sessionId=${sessionId} error=${errMsg}\n`);
+              process.stderr.write(`[opencode-task] SDK promptAsync STACK: ${errStack}\n`);
+              if (err instanceof TypeError) {
+                try {
+                  const pingUrl = serverBaseUrl ? serverBaseUrl.replace(/\/+$/, '') + '/config' : 'http://127.0.0.1:1';
+                  const ping = await fetch(pingUrl, { signal: AbortSignal.timeout(2000) });
+                  process.stderr.write(`[opencode-task] Server ALIVE (base=${serverBaseUrl} status=${ping.status})\n`);
+                } catch (pingErr) {
+                  process.stderr.write(`[opencode-task] Server DEAD (base=${serverBaseUrl}): ${pingErr instanceof Error ? pingErr.message : String(pingErr)}\n`);
+                }
+              }
+              throw new Error(`[opencode-task] SDK promptAsync failed: ${errMsg}${errStack ? `\n${errStack}` : ''}`);
+            }
+            process.stderr.write(`[opencode-task] SDK promptAsync ACCEPTED sessionId=${sessionId}\n`);
           },
           async subscribe({ cwd: sessionCwd, onEvent, onError, onRetry, onDisconnect }) {
             let closed = false;
