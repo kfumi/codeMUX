@@ -157,6 +157,9 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
   const sessionId = eventSessionId;
   if (isTerminalSessionEvent(type) && sessionId && context.terminalSessionIds?.has(sessionId)) return [];
 
+  const allProps = Object.keys(properties).length > 0 ? (() => { try { return JSON.stringify(properties).slice(0, 1500) } catch { return String(properties) } })() : '(no properties)';
+  process.stderr.write(`[opencode-debug] toCodeMuxEvent type=${type} sessionId=${sessionId ?? 'null'} properties=${allProps}\n`);
+
   const events: CodeMuxEvent[] = [];
   if (isOpenCodeSessionScopedEvent(type) && !eventSessionId) {
     events.push(buildEnvelope({ type: 'diagnostic', subtype: 'missing_session_id', event_type: type }, context, undefined));
@@ -227,7 +230,20 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
     case 'session.status': {
       const status = asRecord(properties.status);
       const statusType = readString(status?.type) ?? 'unknown';
-      events.push(buildEnvelope({ type: 'status', subtype: statusType, status: statusType }, context, sessionId));
+      if (statusType === 'retry') {
+        const retryDelayMs = status!.next ? Math.max(0, Number(status!.next) - Date.now()) : undefined;
+        events.push(buildEnvelope({
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: Number(status!.attempt) || 0,
+          max_retries: Number(status!.max_retries) || 5,
+          ...(retryDelayMs !== undefined ? { retry_delay_ms: retryDelayMs } : {}),
+          error_status: Number(status!.error_status) || 429,
+          error: String(status!.message ?? 'Rate limit exceeded'),
+        }, context, sessionId));
+      } else {
+        events.push(buildEnvelope({ type: 'status', subtype: statusType, status: statusType }, context, sessionId));
+      }
       break;
     }
     case 'session.idle':
@@ -268,7 +284,9 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       break;
     case 'server.retry': {
       const retryError = properties.error;
-      events.push(buildEnvelope({ type: 'status', subtype: 'retrying', status: 'retrying', ...(retryError !== undefined ? { error: errorMessage(retryError) } : {}) }, context, sessionId));
+      const errorStr = errorMessage(retryError);
+      process.stderr.write(`[opencode-debug] toCodeMuxEvent server.retry error=${errorStr} attempt=${properties.attempt} maxRetries=${properties.maxRetries} retryDelayMs=${properties.retryDelayMs}\n`);
+      events.push(buildEnvelope({ type: 'status', subtype: 'retrying', status: 'retrying', ...(retryError !== undefined ? { error: errorStr } : {}) }, context, sessionId));
       break;
     }
     case 'server.disconnected':

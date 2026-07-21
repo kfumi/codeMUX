@@ -366,6 +366,7 @@ export class OpenCodeRuntime {
     if (!client?.subscribe || this.eventSubscription) {
       return;
     }
+    process.stderr.write(`[opencode-debug] subscribeToEvents starting...\n`);
     try {
       this.eventSubscription = await client.subscribe({
         cwd: this.config.cwd,
@@ -384,6 +385,8 @@ export class OpenCodeRuntime {
     const activeSessionId = this.agentSessionId;
     const type = typeof (event as { type?: unknown })?.type === 'string' ? (event as { type: string }).type : '';
     const eventLower = type.toLowerCase();
+    const eventJson = (() => { try { return JSON.stringify(event).slice(0, 2000) } catch { return String(event).slice(0, 2000) } })();
+    process.stderr.write(`[opencode-debug] handleSdkEvent type=${type} sessionId=${eventSessionId ?? 'null'} activeSessionId=${activeSessionId ?? 'null'} event=${eventJson}\n`);
     if (eventLower.includes('cancel') || eventLower.includes('abort') || eventLower.includes('interrupt') || type === 'session.error') {
       process.stderr.write(`[opencode-task] handleSdkEvent type=${type} sessionId=${eventSessionId ?? 'null'} activeSessionId=${activeSessionId ?? 'null'} event=${JSON.stringify(event).slice(0, 500)}\n`);
     }
@@ -491,6 +494,8 @@ export class OpenCodeRuntime {
       process.stderr.write(`[opencode-task][error] CANCELLED_DETECTED type=${type} sessionId=${eventSessionId ?? this.agentSessionId ?? 'null'} preview=${serialized.slice(0, 800)}\n`);
     }
     for (const normalizedEvent of events) {
+      const emitJson = (() => { try { return JSON.stringify(normalizedEvent).slice(0, 1000) } catch { return String(normalizedEvent).slice(0, 1000) } })();
+      process.stderr.write(`[opencode-debug] EMIT to frontend type=${normalizedEvent.type ?? '(no type)'} preview=${emitJson}\n`);
       this.emitEvent(normalizedEvent);
     }
     this.eventSequence += events.length;

@@ -536,7 +536,7 @@ function ModelSelectorItem({
         onSelect?.(selectedValue);
       }}
       className={cn(
-        "relative items-start gap-2 rounded-lg py-2 ps-3 pe-9 [&_svg:not([class*='size-'])]:size-3.5",
+        "relative items-start gap-2 rounded-lg py-2 ps-3 pe-9 text-[13px] [&_svg:not([class*='size-'])]:size-3.5",
         "data-[selected=true]:!bg-neutral-200 data-[selected=true]:!text-neutral-800 dark:data-[selected=true]:!bg-neutral-700 dark:data-[selected=true]:!text-neutral-100",
         className,
       )}

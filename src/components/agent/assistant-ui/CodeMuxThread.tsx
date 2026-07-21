@@ -464,15 +464,22 @@ function UserEditComposer({ message, sourceEventIndex }: { message: MessageState
       return;
     }
 
+    const msgParentId = message.parentId;
+    const msgId = message.id;
+    const msgText = text;
+
     flushSync(() => {
       aui.message().composer().cancel();
     });
     window.setTimeout(() => {
-      void aui.thread().append({
-        parentId: message.id,
-        sourceId: message.id,
+      // Use the public API with parentId = message's own ID as fallback
+      // to prevent toAppendMessage from replacing null parentId with
+      // the last message's ID, which would break the isEdit check in the core.
+      aui.thread().append({
+        parentId: msgParentId ?? msgId,
+        sourceId: msgId,
         role: 'user',
-        content: text ? [{ type: 'text', text }] : [],
+        content: msgText ? [{ type: 'text', text: msgText }] : [],
         attachments: [],
         createdAt: new Date(),
       });

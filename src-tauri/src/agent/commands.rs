@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 use super::context_usage::{
     latest_claude_usage_from_values, latest_codex_usage_from_values, ThreadTokenUsageSnapshot,
 };
+use super::opencode_history;
 use super::{spawn_sidecar, SidecarHandle};
 use crate::agent_runtime::opencode::OpenCodeRuntime;
 
@@ -60,23 +61,34 @@ fn resolve_active_runtime_config(
         .parse::<AgentKind>()
         .map_err(|error| format!("无法解析会话智能体类型: {}", error))?;
     let config = state.config.lock().unwrap();
-    let persisted_profile_id = {
+    let (persisted_profile_id, persisted_model): (Option<String>, Option<String>) = {
         let db = state.db.lock().unwrap();
         db.query_row(
-            "SELECT provider_id FROM sessions WHERE id = ?1 LIMIT 1",
+            "SELECT provider_id, model FROM sessions WHERE id = ?1 LIMIT 1",
             [session_id],
-            |row| row.get::<_, Option<String>>(0),
+            |row| {
+                let pid: Option<String> = row.get(0)?;
+                let model: Option<String> = row.get(1)?;
+                Ok((pid, model))
+            },
         )
         .map_err(|error| format!("无法读取会话档案快照: {}", error))?
     };
+    let session_model = persisted_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|model| !model.is_empty());
     let profile_id = persisted_profile_id.as_deref().or_else(|| {
+        if session_model.is_some() && agent_kind == AgentKind::ClaudeCode {
+            return Some(CLAUDE_DEFAULT_SUPPLIER_ID);
+        }
         config
             .agent_profile_registry
             .active_profile_ids
             .get(&agent_kind)
             .map(String::as_str)
     });
-    if profile_id.is_none() && agent_kind == AgentKind::ClaudeCode {
+    if profile_id.is_none() && agent_kind == AgentKind::ClaudeCode && session_model.is_none() {
         let resolved = resolve_default_claude_runtime_config();
         drop(config);
         let db = state.db.lock().unwrap();
@@ -85,21 +97,12 @@ fn resolve_active_runtime_config(
         return Ok(resolved);
     }
     if profile_id.is_none() && agent_kind == AgentKind::Opencode {
-        let model = {
-            let db = state.db.lock().unwrap();
-            db.query_row(
-                "SELECT model FROM sessions WHERE id = ?1 LIMIT 1",
-                [session_id],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .map_err(|error| format!("无法读取会话模型快照: {}", error))?
-        };
         drop(config);
         return Ok(ResolvedRuntimeConfig {
             profile_id: String::new(),
             api_key: None,
             base_url: None,
-            model,
+            model: session_model.map(|model| model.to_string()),
             codex_needs_proxy: None,
             provider: None,
             credential_source: None,
@@ -108,7 +111,16 @@ fn resolve_active_runtime_config(
     let profile_id =
         profile_id.ok_or_else(|| format!("{} 尚未启用供应商档案", agent_kind.as_str()))?;
     if agent_kind == AgentKind::ClaudeCode && profile_id == CLAUDE_DEFAULT_SUPPLIER_ID {
-        return Ok(resolve_default_claude_runtime_config());
+        drop(config);
+        return Ok(ResolvedRuntimeConfig {
+            profile_id: CLAUDE_DEFAULT_SUPPLIER_ID.to_string(),
+            api_key: None,
+            base_url: None,
+            model: session_model.map(|model| model.to_string()),
+            codex_needs_proxy: None,
+            provider: None,
+            credential_source: None,
+        });
     }
     let profile = config
         .agent_profile_registry
@@ -117,11 +129,20 @@ fn resolve_active_runtime_config(
         .find(|profile| profile.id == profile_id && profile.agent_kind == agent_kind)
         .ok_or_else(|| "已启用供应商档案不存在或智能体不匹配".to_string())?;
 
-    let model = profile
-        .models
-        .iter()
-        .map(|model| model.id.trim())
-        .find(|model| !model.is_empty())
+    let model = session_model
+        .map(str::to_string)
+        .or_else(|| {
+            let default_model = profile.default_model.trim();
+            (!default_model.is_empty()).then(|| default_model.to_string())
+        })
+        .or_else(|| {
+            profile
+                .models
+                .iter()
+                .map(|model| model.id.trim())
+                .find(|model| !model.is_empty())
+                .map(str::to_string)
+        })
         .ok_or_else(|| "已启用供应商档案没有可用模型".to_string())?;
 
     let (api_key, base_url, codex_needs_proxy, provider, credential_source) =
@@ -174,14 +195,14 @@ fn resolve_active_runtime_config(
         profile_id: profile.id.clone(),
         api_key,
         base_url,
-        model: Some(model.to_string()),
+        model: Some(model),
         codex_needs_proxy,
         provider,
         credential_source,
     };
     drop(config);
 
-    if persisted_profile_id.is_none() {
+    if persisted_profile_id.is_none() && session_model.is_none() {
         let db = state.db.lock().unwrap();
         operations::update_session_provider(
             &db,
@@ -2439,32 +2460,41 @@ pub async fn rewind_agent_session(
     };
 
     let home = home_dir()?;
-    let history_path = match agent_kind {
-        AgentKind::ClaudeCode => {
-            find_claude_session_jsonl(&home.join(".claude"), &agent_session_id)
+    let (rewind_outcome, history_display): (RewindOutcome, String) = if agent_kind == AgentKind::Opencode {
+        let truncated_to_empty =
+            opencode_history::rewind_opencode_session_to_latest_turn(&home, &agent_session_id)?;
+        (RewindOutcome { truncated_to_empty }, agent_session_id.clone())
+    } else {
+        let history_path = match agent_kind {
+            AgentKind::ClaudeCode => {
+                find_claude_session_jsonl(&home.join(".claude"), &agent_session_id)
+            }
+            AgentKind::Codex => {
+                find_codex_session_jsonl(&home.join(".codex").join("sessions"), &agent_session_id)
+            }
+            AgentKind::GeminiCli => None,
+            AgentKind::Opencode => unreachable!(),
         }
-        AgentKind::Codex => {
-            find_codex_session_jsonl(&home.join(".codex").join("sessions"), &agent_session_id)
-        }
-        AgentKind::GeminiCli | AgentKind::Opencode => None,
-    }
-    .ok_or_else(|| {
-        format!(
-            "Session history file not found for session_id={} agent_session_id={}",
-            app_session_id, agent_session_id
-        )
-    })?;
+        .ok_or_else(|| {
+            format!(
+                "Session history file not found for session_id={} agent_session_id={}",
+                app_session_id, agent_session_id
+            )
+        })?;
 
-    let rewind_outcome =
-        rewind_jsonl_before_target_turn(&history_path, agent_kind, target.clone())?;
+        let outcome =
+            rewind_jsonl_before_target_turn(&history_path, agent_kind, target.clone())?;
 
-    if agent_kind == AgentKind::Codex {
-        let interactive_path = codex_interactive_events_dir(&home)
-            .join(format!("{}.jsonl", sanitize_file_segment(&app_session_id)));
-        if interactive_path.exists() {
-            let _ = rewind_jsonl_before_target_turn(&interactive_path, agent_kind, target.clone());
+        if agent_kind == AgentKind::Codex {
+            let interactive_path = codex_interactive_events_dir(&home)
+                .join(format!("{}.jsonl", sanitize_file_segment(&app_session_id)));
+            if interactive_path.exists() {
+                let _ = rewind_jsonl_before_target_turn(&interactive_path, agent_kind, target.clone());
+            }
         }
-    }
+
+        (outcome, history_path.display().to_string())
+    };
 
     if rewind_outcome.truncated_to_empty {
         {
@@ -2516,7 +2546,7 @@ pub async fn rewind_agent_session(
         "Rewound agent session app_session_id={} agent_kind={} history_path={}",
         app_session_id,
         agent_kind.as_str(),
-        history_path.display()
+        history_display,
     );
 
     Ok(())
@@ -3518,7 +3548,7 @@ mod tests {
             resolved.base_url.as_deref(),
             Some("https://provider.example/v1")
         );
-        assert_eq!(resolved.model.as_deref(), Some("gpt-first"));
+        assert_eq!(resolved.model.as_deref(), Some("gpt-test"));
         assert_eq!(resolved.codex_needs_proxy, Some(true));
         let snapshot: String = state
             .db
@@ -3531,6 +3561,156 @@ mod tests {
             )
             .unwrap();
         assert_eq!(snapshot, "codex-profile");
+    }
+
+    #[test]
+    fn claude_code_keeps_builtin_model_when_session_model_is_set() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        // 模拟"从自定义切到内置"后的 DB 状态：provider_id=NULL, model=sonnet
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, provider_id, model, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                "session-claude-builtin",
+                "Claude",
+                "claude_code",
+                None::<String>,
+                "sonnet",
+                "agent",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+        // 全局仍有一个激活的自定义 claude_code profile（bug 场景：会被错误回退）
+        let mut config = crate::config::types::AppConfig::default();
+        let profile = crate::provider_profiles::types::AgentProviderProfile {
+            id: "claude-custom".to_string(),
+            agent_kind: AgentKind::ClaudeCode,
+            name: "自定义 Claude".to_string(),
+            note: String::new(),
+            models: vec![crate::provider_profiles::types::ProfileModel {
+                id: "custom-model".to_string(),
+                name: None,
+                context_window: None,
+            }],
+            default_model: "custom-model".to_string(),
+            native_config: crate::provider_profiles::types::NativeProfileConfig::ClaudeCode {
+                settings: serde_json::json!({}),
+                requires_review: false,
+            },
+        };
+        config.agent_profile_registry.profiles.push(profile);
+        config
+            .agent_profile_registry
+            .active_profile_ids
+            .insert(AgentKind::ClaudeCode, "claude-custom".to_string());
+        let state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(config),
+            provider_profile_operation_lock: std::sync::Mutex::new(()),
+            app_data_dir: std::path::PathBuf::new(),
+        };
+
+        let resolved = resolve_active_runtime_config(&state, "session-claude-builtin").unwrap();
+
+        // 应使用内置 sonnet，而不是回退到激活的自定义 profile
+        assert_eq!(resolved.profile_id, "__claude_default__");
+        assert_eq!(resolved.model.as_deref(), Some("sonnet"));
+        assert_eq!(resolved.api_key, None);
+        assert_eq!(resolved.base_url, None);
+        // session.model 不应被覆写
+        let snapshot_model: Option<String> = state
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT model FROM sessions WHERE id = 'session-claude-builtin'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(snapshot_model.as_deref(), Some("sonnet"));
+    }
+
+    #[test]
+    fn respects_persisted_session_model_within_profile() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        // session 已绑定 profile，且保存了用户选择的具体模型（非 models[0]）
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, provider_id, model, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                "session-codex-switched",
+                "Codex",
+                "codex",
+                "codex-profile",
+                "gpt-test",
+                "agent",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+        let mut config = crate::config::types::AppConfig::default();
+        let profile = crate::provider_profiles::types::AgentProviderProfile {
+            id: "codex-profile".to_string(),
+            agent_kind: AgentKind::Codex,
+            name: "Codex 测试档案".to_string(),
+            note: String::new(),
+            models: vec![
+                crate::provider_profiles::types::ProfileModel {
+                    id: "gpt-first".to_string(),
+                    name: None,
+                    context_window: None,
+                },
+                crate::provider_profiles::types::ProfileModel {
+                    id: "gpt-test".to_string(),
+                    name: None,
+                    context_window: None,
+                },
+            ],
+            default_model: String::new(),
+            native_config: crate::provider_profiles::types::NativeProfileConfig::Codex {
+                api_key: "internal-secret".to_string(),
+                openai_base_url: "https://provider.example/v1".to_string(),
+                codex_needs_proxy: Some(true),
+                advanced_config: None,
+                auth_json: None,
+                config_toml: None,
+                model_catalog: None,
+                requires_review: false,
+            },
+        };
+        config.agent_profile_registry.profiles.push(profile);
+        config
+            .agent_profile_registry
+            .active_profile_ids
+            .insert(AgentKind::Codex, "codex-profile".to_string());
+        let state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(config),
+            provider_profile_operation_lock: std::sync::Mutex::new(()),
+            app_data_dir: std::path::PathBuf::new(),
+        };
+
+        let resolved = resolve_active_runtime_config(&state, "session-codex-switched").unwrap();
+
+        // 应使用 session 保存的 gpt-test，而不是 models[0]（gpt-first）
+        assert_eq!(resolved.profile_id, "codex-profile");
+        assert_eq!(resolved.model.as_deref(), Some("gpt-test"));
+        // provider_id 已存在，不应触发覆写
+        let snapshot_model: Option<String> = state
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT model FROM sessions WHERE id = 'session-codex-switched'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(snapshot_model.as_deref(), Some("gpt-test"));
     }
 
     #[test]

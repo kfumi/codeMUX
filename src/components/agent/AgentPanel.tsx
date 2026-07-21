@@ -84,7 +84,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     } else if (!userModifiedRef.current) {
       const next = session?.model?.trim() || activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '';
       if (next) {
-        setSelectorModelState((prev) => prev || next);
+        setSelectorModelState(next);
       }
     }
   }, [sessionId, session?.model, activeProfile]);
@@ -201,12 +201,13 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     setSelectorModelState(nextModel);
     updateSessionModel(sessionId, nextModel);
     try {
-      if (activeProfile) {
+      const isProfileModel = Boolean(activeProfile?.models.some((m) => m.id.trim() === nextModel));
+      if (isProfileModel) {
         await setActiveAgentProfileModel(agentKind, nextModel);
-      } else {
-        await sessionApi.updateProvider(sessionId, null, nextModel);
       }
+      await sessionApi.updateProvider(sessionId, isProfileModel ? (activeProfile?.id ?? null) : null, nextModel);
     } catch (error) {
+      console.warn('[AgentPanel] handleModelChange failed:', error);
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
       }));

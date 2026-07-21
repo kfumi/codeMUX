@@ -1,5 +1,5 @@
 use crate::agent::context_usage::{ThreadTokenUsageSnapshot, TokenUsageBreakdown};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 
 #[cfg(test)]
@@ -378,6 +378,68 @@ fn delete_opencode_session_from_connection(
         .map_err(|error| format!("Failed to commit OpenCode session deletion: {}", error))?;
     Ok(deleted)
 }
+pub fn rewind_opencode_session_to_latest_turn(
+    home: &std::path::Path,
+    session_id: &str,
+) -> Result<bool, String> {
+    let Some(path) = find_opencode_database(home) else {
+        return Ok(false);
+    };
+    let connection = Connection::open(path)
+        .map_err(|error| format!("Failed to open OpenCode database for rewind: {}", error))?;
+    rewind_opencode_events_from_connection(&connection, session_id)
+}
+
+fn rewind_opencode_events_from_connection(
+    connection: &Connection,
+    session_id: &str,
+) -> Result<bool, String> {
+    let latest_user_time: Option<i64> = connection
+        .query_row(
+            "SELECT time_created FROM message WHERE session_id = ?1 AND json_extract(data, '$.role') = 'user' ORDER BY time_created DESC, id DESC LIMIT 1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("Failed to query latest user message in OpenCode session: {}", e))?;
+
+    let Some(latest_user_time) = latest_user_time else {
+        return Ok(true);
+    };
+
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|e| format!("Failed to begin OpenCode rewind transaction: {}", e))?;
+
+    transaction
+        .execute(
+            "DELETE FROM part WHERE message_id IN (SELECT id FROM message WHERE session_id = ?1 AND time_created >= ?2)",
+            rusqlite::params![session_id, latest_user_time],
+        )
+        .map_err(|e| format!("Failed to delete OpenCode parts during rewind: {}", e))?;
+
+    transaction
+        .execute(
+            "DELETE FROM message WHERE session_id = ?1 AND time_created >= ?2",
+            rusqlite::params![session_id, latest_user_time],
+        )
+        .map_err(|e| format!("Failed to delete OpenCode messages during rewind: {}", e))?;
+
+    transaction
+        .commit()
+        .map_err(|e| format!("Failed to commit OpenCode rewind: {}", e))?;
+
+    let remaining: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM message WHERE session_id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    Ok(remaining == 0)
+}
+
 fn find_opencode_database(home: &std::path::Path) -> Option<std::path::PathBuf> {
     let mut candidates = Vec::new();
     if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
