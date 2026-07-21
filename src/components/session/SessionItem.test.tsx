@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SessionItem } from './SessionItem';
 import type { Session } from '../../types/session';
@@ -27,8 +27,13 @@ function makeSession(overrides: Partial<Session>): Session {
 }
 
 describe('SessionItem', () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(() => {});
+  });
+
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
   });
 
   it('keeps the session title visible for Codex sessions', () => {
@@ -41,9 +46,6 @@ describe('SessionItem', () => {
         onArchive={vi.fn()}
         onDelete={vi.fn()}
         onRename={vi.fn()}
-        isMenuOpen={false}
-        onOpenMenu={vi.fn()}
-        onCloseMenu={vi.fn()}
       />,
     );
 
@@ -61,9 +63,6 @@ describe('SessionItem', () => {
         onArchive={vi.fn()}
         onDelete={vi.fn()}
         onRename={vi.fn()}
-        isMenuOpen={false}
-        onOpenMenu={vi.fn()}
-        onCloseMenu={vi.fn()}
       />,
     );
 
@@ -71,7 +70,7 @@ describe('SessionItem', () => {
     expect(screen.queryByText('Claude Code')).toBeNull();
   });
 
-  it('keeps delete available from the session context menu with confirmation', () => {
+  it('keeps delete available from the session context menu with confirmation', async () => {
     const onDelete = vi.fn();
 
     render(
@@ -83,12 +82,11 @@ describe('SessionItem', () => {
         onArchive={vi.fn()}
         onDelete={onDelete}
         onRename={vi.fn()}
-        isMenuOpen
-        onOpenMenu={vi.fn()}
-        onCloseMenu={vi.fn()}
       />,
     );
 
+    fireEvent.contextMenu(screen.getByText('Deletable Session'));
+    await waitFor(() => expect(screen.getByText('删除')).toBeTruthy());
     fireEvent.click(screen.getByText('删除'));
 
     expect(screen.getByText('删除对话')).toBeTruthy();
@@ -112,9 +110,6 @@ describe('SessionItem', () => {
         onArchive={onArchive}
         onDelete={vi.fn()}
         onRename={vi.fn()}
-        isMenuOpen={false}
-        onOpenMenu={vi.fn()}
-        onCloseMenu={vi.fn()}
       />,
     );
 

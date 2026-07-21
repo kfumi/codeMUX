@@ -1062,6 +1062,8 @@ type SidecarRuntime = {
   interrupt(): Promise<void>;
   shutdown(): Promise<void>;
   respondToPermission?(requestId: string, response: OpenCodePermissionResponse, sessionId: string): Promise<void>;
+  respondToQuestion?(requestId: string, answers: string[][]): Promise<void>;
+  isPendingQuestion?(requestId: string): boolean;
 };
 
 type SidecarCommandDispatcherOptions = {
@@ -1191,13 +1193,19 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           if (!isAbortError(error)) emitError(error);
         }
         return;
-      case 'tool_response':
-        if (getRuntimeFlavor(activeAgentKind) === 'opencode') {
+      case 'tool_response': {
+        const openCodeRuntime = getRuntimeFlavor(activeAgentKind) === 'opencode' ? activeOpenCodeRuntime : undefined;
+        if (openCodeRuntime?.isPendingQuestion?.(cmd.toolUseId)) {
+          const raw = Array.isArray(cmd.response) ? cmd.response : [];
+          const answers = raw.map((a: unknown) => (Array.isArray(a) ? a : [String(a)]));
+          openCodeRuntime.respondToQuestion?.(cmd.toolUseId, answers).catch((err: unknown) => emitError(err));
+        } else if (openCodeRuntime) {
           options.emit({ type: 'sidecar_error', error: 'OpenCode tool responses are server-managed/not supported' });
         } else if (!resolveClaudeToolResponse(cmd.toolUseId, cmd.response)) {
           resolveInteractiveToolResponse(cmd.toolUseId, cmd.response);
         }
         return;
+      }
       case 'respond_to_permission': {
         const current = getRuntimeFlavor(activeAgentKind) === 'opencode' ? activeOpenCodeRuntime : undefined;
         if (!current?.respondToPermission) {
@@ -1298,6 +1306,8 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
     interrupt: () => openCodeRuntime.interrupt(),
     shutdown: () => openCodeRuntime.shutdown(),
     respondToPermission: (requestId, response, sessionId) => openCodeRuntime.respondToPermission(requestId, response, sessionId),
+    respondToQuestion: (requestId, answers) => openCodeRuntime.respondToQuestion(requestId, answers),
+    isPendingQuestion: (requestId) => openCodeRuntime.isPendingQuestion(requestId),
   };
 }
 

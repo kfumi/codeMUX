@@ -58,6 +58,7 @@ const BUILT_IN_TOOL_ALIASES: Record<string, string> = {
   skill: 'Skill',
   task: 'Task',
   todowrite: 'TodoWrite',
+  question: 'AskUserQuestion',
 };
 
 function normalizeToolName(toolName: string): string {

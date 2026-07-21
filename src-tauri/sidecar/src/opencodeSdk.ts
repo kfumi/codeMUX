@@ -46,6 +46,7 @@ export interface OpenCodeClientPort {
   prompt(input: OpenCodePromptInput): Promise<void>;
   abort(sessionId: string): Promise<boolean | void>;
   respondToPermission(input: { sessionId: string; requestId: string; response: OpenCodeNativePermissionResponse }): Promise<boolean | void>;
+  respondToQuestion?(input: { requestId: string; answers: string[][]; directory?: string }): Promise<boolean | void>;
   subscribe?(input: { cwd: string; onEvent: (event: unknown) => void; onError: (error: unknown) => void; onRetry?: (error: unknown) => void; onDisconnect?: (error: unknown) => void }): Promise<OpenCodeEventSubscription>;
 }
 
@@ -350,6 +351,21 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
                 body: { response },
               }),
             );
+          },
+          async respondToQuestion({ requestId, answers, directory }) {
+            const normalized = Array.isArray(answers)
+              ? answers.map((a) => (Array.isArray(a) ? a : [String(a)]))
+              : [];
+            const params = new URLSearchParams({ directory: directory ?? cwd });
+            const url = `${serverBaseUrl.replace(/\/+$/, '')}/question/${encodeURIComponent(requestId)}/reply?${params}`;
+            const res = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ answers: normalized }),
+            });
+            if (!res.ok) {
+              throw new Error(`OpenCode question reply failed: ${res.status} ${res.statusText}`);
+            }
           },
         },
       };

@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { ChevronUp, ChevronDown, ListTodo } from 'lucide-react';
+import { ListTodo } from 'lucide-react';
 import type { TodoItem } from '../../types/agent';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 
 interface TodoListProps {
   todos: TodoItem[];
@@ -32,8 +32,6 @@ function getStatusIcon(status: TodoItem['status']) {
 }
 
 export function TodoList({ todos, className, dropdownSide = 'up', align = 'left' }: TodoListProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-
   if (todos.length === 0) return null;
 
   const completed = todos.filter((t) => t.status === 'completed').length;
@@ -41,70 +39,53 @@ export function TodoList({ todos, className, dropdownSide = 'up', align = 'left'
   const progressPct = total > 0 ? (completed / total) * 100 : 0;
 
   return (
-    <div className={`relative ${className ?? ''}`}>
-      {/* Expandable list */}
-      {isExpanded && (
-        <div
-          className={[
-            'absolute z-50 w-85 max-h-75 overflow-auto rounded-xl border border-border/40 bg-[hsl(var(--card))] animate-in fade-in zoom-in-95 fill-mode-forwards animation-duration-[300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]',
-            dropdownSide === 'up'
-              ? 'bottom-full mb-2 shadow-[0_-4px_24px_-4px_hsl(var(--foreground)/0.06)]'
-              : 'top-full mt-2 shadow-[0_12px_34px_-18px_hsl(var(--foreground)/0.34)]',
-            align === 'right' ? 'right-0' : 'left-0',
-          ].join(' ')}
-        >
-          <div className="px-3 py-2.5 space-y-0.5 stagger-children">
-            {todos.map((todo, i) => (
-              <div key={i} className="flex items-start gap-2.5 py-1.5 text-xs leading-relaxed">
-                <span className="mt-0.5 shrink-0">{getStatusIcon(todo.status)}</span>
-                <span className={
-                  todo.status === 'completed'
-                    ? 'text-muted-foreground/40 line-through'
-                    : todo.status === 'in_progress'
-                      ? 'text-foreground/90 font-medium'
-                      : 'text-foreground/60'
-                }>
-                  {todo.status === 'in_progress' && todo.activeForm
-                    ? todo.activeForm
-                    : todo.content}
-                </span>
-              </div>
-            ))}
-          </div>
-          {/* Progress bar at bottom */}
-          <div className="px-3 pb-2.5 pt-1">
-            <div className="h-1 w-full rounded-full bg-muted/40 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-linear-to-r from-[hsl(var(--primary)/0.6)] to-[hsl(var(--primary))] transition-all duration-500"
-                style={{ width: `${progressPct}%` }}
-              />
+    <div className={className}>
+      <Popover>
+      <PopoverTrigger asChild>
+        <button className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-border/45 bg-[hsl(var(--card))]/65 hover:bg-muted/40 transition-all duration-200 text-left">
+          <ListTodo className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.5)] shrink-0" />
+          <span className="text-xs font-medium text-foreground/70">任务</span>
+          <span className="text-xs text-muted-foreground/50 tabular-nums ml-auto"
+            style={{ fontFamily: "'JetBrains Mono', monospace" }}
+          >
+            {completed}/{total}
+          </span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side={dropdownSide === 'up' ? 'top' : 'bottom'}
+        sideOffset={8}
+        align={align === 'left' ? 'start' : 'end'}
+        className={'w-85 max-h-75 overflow-auto rounded-xl border border-border/40 bg-[hsl(var(--card))] p-0 ' + (dropdownSide === 'up' ? 'shadow-[0_-4px_24px_-4px_hsl(var(--foreground)/0.06)]' : 'shadow-[0_12px_34px_-18px_hsl(var(--foreground)/0.34)]')}
+      >
+        <div className="px-3 py-2.5 space-y-0.5 stagger-children">
+          {todos.map((todo, i) => (
+            <div key={i} className="flex items-start gap-2.5 py-1.5 text-xs leading-relaxed">
+              <span className="mt-0.5 shrink-0">{getStatusIcon(todo.status)}</span>
+              <span className={
+                todo.status === 'completed'
+                  ? 'text-muted-foreground/40 line-through'
+                  : todo.status === 'in_progress'
+                    ? 'text-foreground/90 font-medium'
+                    : 'text-foreground/60'
+              }>
+                {todo.status === 'in_progress' && todo.activeForm
+                  ? todo.activeForm
+                  : todo.content}
+              </span>
             </div>
+          ))}
+        </div>
+        <div className="px-3 pb-2.5 pt-1">
+          <div className="h-1 w-full rounded-full bg-muted/40 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-linear-to-r from-[hsl(var(--primary)/0.6)] to-[hsl(var(--primary))] transition-all duration-500"
+              style={{ width: `${progressPct}%` }}
+            />
           </div>
         </div>
-      )}
-
-      {/* Trigger button */}
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/30 bg-[hsl(var(--card))]/50 hover:bg-muted/30 transition-all duration-200 text-left"
-      >
-        {isExpanded ? (
-          dropdownSide === 'up'
-            ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-            : <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-        ) : (
-          dropdownSide === 'up'
-            ? <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-            : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-        )}
-        <ListTodo className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.5)] shrink-0" />
-        <span className="text-xs font-medium text-foreground/70">任务</span>
-        <span className="text-xs text-muted-foreground/50 tabular-nums ml-auto"
-          style={{ fontFamily: "'JetBrains Mono', monospace" }}
-        >
-          {completed}/{total}
-        </span>
-      </button>
+      </PopoverContent>
+    </Popover>
     </div>
   );
 }

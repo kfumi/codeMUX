@@ -1,46 +1,12 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef } from 'react';
 import { FileCode, GitCompare, Loader2, PanelLeft, X } from 'lucide-react';
 
 import { usePreviewStore } from '../../stores/previewStore';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui/context-menu';
 import { DiffView } from './DiffView';
 import { FileView } from './FileView';
 import { FileTree } from './FileTree';
 import { cn } from '../../lib/utils';
-
-function TabContextMenu({
-  filePath,
-  filePaths,
-  onClose,
-  onCloseOthers,
-  onCloseAll,
-  style,
-}: {
-  filePath: string;
-  filePaths: string[];
-  onClose: (path: string) => void;
-  onCloseOthers: (path: string) => void;
-  onCloseAll: () => void;
-  style: React.CSSProperties;
-}) {
-  return (
-    <div
-      className="fixed z-50 min-w-37 rounded-xl border border-border/60 bg-popover/98 py-1.5 text-xs shadow-[0_18px_48px_-20px_hsl(var(--foreground)/0.35)] backdrop-blur-sm animate-in fade-in zoom-in-95 fill-mode-forwards animation-duration-[300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]"
-      style={style}
-    >
-      <button className="w-full px-3 py-1.5 text-left transition-colors hover:bg-muted/50" onClick={() => { onClose(filePath); }}>
-        关闭
-      </button>
-      <button className="w-full px-3 py-1.5 text-left transition-colors hover:bg-muted/50" onClick={() => { onCloseOthers(filePath); }}>
-        关闭其他
-      </button>
-      {filePaths.length > 1 && (
-        <button className="w-full px-3 py-1.5 text-left transition-colors hover:bg-muted/50" onClick={onCloseAll}>
-          关闭所有
-        </button>
-      )}
-    </div>
-  );
-}
 
 export function PreviewPanel() {
   const {
@@ -55,15 +21,6 @@ export function PreviewPanel() {
   const activeFile = currentFiles.find((file) => file.path === currentActivePath);
   const hasOriginal = activeFile?.originalContent !== undefined;
   const isDiffView = viewMode === 'diff' && hasOriginal;
-
-  const [contextMenu, setContextMenu] = useState<{ path: string; x: number; y: number } | null>(null);
-
-  useEffect(() => {
-    if (!contextMenu) return;
-    const handler = () => setContextMenu(null);
-    window.addEventListener('click', handler);
-    return () => window.removeEventListener('click', handler);
-  }, [contextMenu]);
 
   const treeDragRef = useRef(false);
   const handleTreeMouseDown = useCallback((event: React.MouseEvent) => {
@@ -92,11 +49,6 @@ export function PreviewPanel() {
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   }, [fileTreeWidth, setFileTreeWidth]);
-
-  const handleTabContextMenu = useCallback((event: React.MouseEvent, path: string) => {
-    event.preventDefault();
-    setContextMenu({ path, x: event.clientX, y: event.clientY });
-  }, []);
 
   return (
     <div
@@ -185,32 +137,47 @@ export function PreviewPanel() {
                   const fileIsModified = file.originalContent && file.currentContent && file.originalContent !== file.currentContent;
 
                   return (
-                    <div
-                      key={file.path}
-                      className={cn(
-                        'relative flex cursor-pointer select-none items-center gap-1.5 border-r border-border/20 px-3 py-2 text-xs font-mono whitespace-nowrap transition-all duration-200',
-                        isActive
-                          ? 'bg-background/90 text-foreground/84'
-                          : 'text-muted-foreground/52 hover:bg-muted/20 hover:text-muted-foreground',
-                      )}
-                      onClick={() => setActiveFile(file.path)}
-                      onContextMenu={(event) => handleTabContextMenu(event, file.path)}
-                    >
-                      {isActive && (
-                        <div className="absolute left-0 right-0 top-0 h-0.5 bg-primary/70" />
-                      )}
-                      <span className="max-w-35 truncate">{fileName}</span>
-                      {fileIsModified && <span className="text-[hsl(var(--warning))] text-[10px]">●</span>}
-                      <button
-                        className="ml-0.5 rounded-sm p-0.5 text-muted-foreground/34 transition-colors hover:bg-muted/50 hover:text-muted-foreground/72"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          closeFile(file.path);
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
+                    <ContextMenu key={file.path}>
+                      <ContextMenuTrigger asChild>
+                        <div
+                          className={cn(
+                            'relative flex cursor-pointer select-none items-center gap-1.5 border-r border-border/20 px-3 py-2 text-xs font-mono whitespace-nowrap transition-all duration-200',
+                            isActive
+                              ? 'bg-background/90 text-foreground/84'
+                              : 'text-muted-foreground/52 hover:bg-muted/20 hover:text-muted-foreground',
+                          )}
+                          onClick={() => setActiveFile(file.path)}
+                        >
+                          {isActive && (
+                            <div className="absolute left-0 right-0 top-0 h-0.5 bg-primary/70" />
+                          )}
+                          <span className="max-w-35 truncate">{fileName}</span>
+                          {fileIsModified && <span className="text-[hsl(var(--warning))] text-[10px]">●</span>}
+                          <button
+                            className="ml-0.5 rounded-sm p-0.5 text-muted-foreground/34 transition-colors hover:bg-muted/50 hover:text-muted-foreground/72"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              closeFile(file.path);
+                            }}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="min-w-37 rounded-xl border border-border/60 bg-popover/98 py-1.5 text-xs shadow-[0_18px_48px_-20px_hsl(var(--foreground)/0.35)] backdrop-blur-sm animate-in fade-in zoom-in-95 fill-mode-forwards animation-duration-[300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+                        <ContextMenuItem onClick={() => closeFile(file.path)}>
+                          关闭
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => closeOtherFiles(file.path)}>
+                          关闭其他
+                        </ContextMenuItem>
+                        {currentFiles.length > 1 && (
+                          <ContextMenuItem onClick={closeAllFiles}>
+                            关闭所有
+                          </ContextMenuItem>
+                        )}
+                      </ContextMenuContent>
+                    </ContextMenu>
                   );
                 })}
               </div>
@@ -244,16 +211,6 @@ export function PreviewPanel() {
           </div>
         </div>
 
-        {contextMenu && (
-          <TabContextMenu
-            filePath={contextMenu.path}
-            filePaths={currentFiles.map((file) => file.path)}
-            onClose={closeFile}
-            onCloseOthers={closeOtherFiles}
-            onCloseAll={closeAllFiles}
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-          />
-        )}
       </div>
     </div>
   );

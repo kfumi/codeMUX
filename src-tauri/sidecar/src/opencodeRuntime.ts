@@ -62,6 +62,7 @@ export class OpenCodeRuntime {
   private seenPayloadKeyBytes = 0;
   private readonly terminalSessionIds = new Set<string>();
   private readonly terminalToolIds = new Set<string>();
+  private readonly pendingQuestionIds = new Set<string>();
   private pendingTurnCompletion: { resolve: () => void; reject: (reason: unknown) => void; sessionId: string } | undefined;
   private readonly pendingTaskToolCallIds = new Set<string>();
   private readonly assistantMessageIds = new Set<string>();
@@ -203,6 +204,22 @@ export class OpenCodeRuntime {
 
   respondToPermission(requestId: string, response: OpenCodePermissionResponse, codeMuxSessionId = this.config.sessionId): Promise<void> {
     return this.permissions.respond(requestId, codeMuxSessionId, response);
+  }
+
+  async respondToQuestion(requestId: string, answers: string[][]): Promise<void> {
+    this.pendingQuestionIds.delete(requestId);
+    const client = this.client;
+    if (client?.respondToQuestion) {
+      await client.respondToQuestion({ requestId, answers, directory: this.config.cwd });
+      this.emitEvent({
+        ...buildToolResultEvent({ sessionId: this.config.sessionId, toolUseId: requestId, content: JSON.stringify({ answers }), eventIdFactory: this.eventIdFactory }),
+        agent_id: this.agentId,
+      });
+    }
+  }
+
+  isPendingQuestion(requestId: string): boolean {
+    return this.pendingQuestionIds.has(requestId);
   }
 
   resetSession(): Promise<void> {
@@ -404,9 +421,9 @@ export class OpenCodeRuntime {
       this.eventSequence += diagnosticEvents.length;
       return;
     }
-    if (eventSessionId && eventSessionId !== activeSessionId) {
-      return;
-    }
+
+    // Handle permission and question events from ANY session (including subagents)
+    // These must be processed before the session filter below.
     if (type === 'permission.updated') {
       this.handlePermissionEvent(event, eventSessionId, identity, payloadKey);
       if (identity) {
@@ -414,6 +431,19 @@ export class OpenCodeRuntime {
       } else if (payloadKey) {
         this.rememberSeenPayloadKey(payloadKey);
       }
+      return;
+    }
+    if (type === 'question.asked') {
+      this.handleQuestionEvent(event, eventSessionId, identity, payloadKey);
+      if (identity) {
+        this.rememberSeenEventId(identity);
+      } else if (payloadKey) {
+        this.rememberSeenPayloadKey(payloadKey);
+      }
+      return;
+    }
+
+    if (eventSessionId && eventSessionId !== activeSessionId) {
       return;
     }
     const terminalSessionId = eventSessionId ?? activeSessionId;
@@ -626,6 +656,38 @@ export class OpenCodeRuntime {
     this.eventSequence += 1;
   }
 
+  private handleQuestionEvent(event: unknown, eventSessionId: string | undefined, nativeRequestIdentity: string | undefined, nativePayloadFingerprint: string | undefined): void {
+    const properties = asRecord(asRecord(event)?.properties);
+    const requestId = readString(properties?.id);
+    if (!requestId) {
+      return;
+    }
+    const questions = readArray(properties?.questions);
+    if (!questions || questions.length === 0) {
+      return;
+    }
+    this.pendingQuestionIds.add(requestId);
+    const openCodeSessionId = eventSessionId ?? readString(properties?.sessionID);
+    this.emitEvent({
+      type: 'ask_user_question',
+      agent_id: this.agentId,
+      session_id: this.config.sessionId,
+      ...(openCodeSessionId ? { agent_session_id: openCodeSessionId, opencode_session_id: openCodeSessionId } : {}),
+      tool_use_id: requestId,
+      questions: questions.map((q: unknown) => {
+        const qr = asRecord(q);
+        const options = Array.isArray(qr?.options) ? (qr.options as Array<Record<string, unknown>>).map((opt) => ({
+          label: String(opt.label ?? ''),
+          ...(opt.description ? { description: String(opt.description) } : {}),
+        })) : [];
+        return { question: readString(qr?.question) ?? '', header: readString(qr?.header), options };
+      }),
+      sequence: this.eventSequence,
+      uuid: this.eventIdFactory(),
+    });
+    this.eventSequence += 1;
+  }
+
   private async closeEventSubscription(errors: unknown[]): Promise<void> {
     const subscription = this.eventSubscription;
     this.eventSubscription = undefined;
@@ -823,6 +885,10 @@ function isAbortError(error: unknown): boolean {
 
 function isTerminalEventType(type: string): boolean {
   return type === 'session.idle' || type === 'session.error' || type === 'session.interrupted' || type === 'session.aborted' || type === 'server.disconnected' || type === 'server.error' || type === 'disconnect' || type === 'connection.error';
+}
+
+function readArray(value: unknown): unknown[] | undefined {
+  return Array.isArray(value) && value.length > 0 ? value : undefined;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

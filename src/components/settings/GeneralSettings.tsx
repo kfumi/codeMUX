@@ -84,7 +84,7 @@ export function GeneralSettings() {
                   const Icon = option.Icon;
                   return (
                     <span className="flex items-center gap-2">
-                      <Icon className="h-3.5 w-3.5 text-foreground/60" />
+                      <Icon className="h-4 w-4 text-foreground/60" />
                       <span>{option.label}</span>
                     </span>
                   );
@@ -97,7 +97,7 @@ export function GeneralSettings() {
                 return (
                   <SelectItem key={option.value} value={option.value}>
                     <span className="flex items-center gap-2">
-                      <Icon className="h-3.5 w-3.5 text-foreground/60" />
+                      <Icon className="h-4 w-4 text-foreground/60" />
                       <span>{option.label}</span>
                     </span>
                   </SelectItem>

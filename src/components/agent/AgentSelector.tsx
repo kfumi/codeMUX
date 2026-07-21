@@ -3,7 +3,7 @@
 import { cn } from '../../lib/utils';
 import { AGENT_REGISTRY, getAgentDefinition } from '../../types/agentRegistry';
 import type { AgentKind } from '../../types/session';
-import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { AgentBrandIcon } from './AgentBrandIcon';
 
 const SELECTABLE_AGENTS = AGENT_REGISTRY.filter((agent) => agent.capabilities.length > 0);
@@ -25,12 +25,8 @@ export function AgentSelector({ value, onChange, variant = 'inline' }: AgentSele
   const isHero = variant === 'hero';
 
   return (
-    <DropdownMenu
-      panelClassName={cn(
-        (isFloating || isHero) &&
-          'rounded-lg border border-border/60 bg-popover p-1.5 shadow-[0_18px_44px_-26px_hsl(var(--foreground)/0.36)]',
-      )}
-      trigger={
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
         <button
           type="button"
           aria-label={current.label}
@@ -71,20 +67,24 @@ export function AgentSelector({ value, onChange, variant = 'inline' }: AgentSele
             </>
           )}
         </button>
-      }
-    >
-      {SELECTABLE_AGENTS.map((agent) => (
-        <DropdownMenuItem key={agent.kind} onClick={() => onChange(agent.kind)}>
-          <div className={cn(
-            'flex min-w-45 items-center gap-2',
-            agent.kind === value && 'text-foreground'
-          )}>
-            <AgentBrandIcon agent={agent} size="sm" />
-            <span className="font-medium text-foreground">{agent.label}</span>
-            {agent.kind === value && <span className="ml-auto text-foreground/80">✓</span>}
-          </div>
-        </DropdownMenuItem>
-      ))}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className={cn(
+        (isFloating || isHero) &&
+          'rounded-lg border border-border/60 bg-popover p-1.5 shadow-[0_18px_44px_-26px_hsl(var(--foreground)/0.36)]',
+      )}>
+        {SELECTABLE_AGENTS.map((agent) => (
+          <DropdownMenuItem key={agent.kind} onClick={() => onChange(agent.kind)}>
+            <div className={cn(
+              'flex min-w-45 items-center gap-2',
+              agent.kind === value && 'text-foreground'
+            )}>
+              <AgentBrandIcon agent={agent} size="sm" />
+              <span className="font-medium text-foreground">{agent.label}</span>
+              {agent.kind === value && <span className="ml-auto text-foreground/80">✓</span>}
+            </div>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
     </DropdownMenu>
   );
 }

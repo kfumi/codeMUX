@@ -71,7 +71,7 @@ describe('ProjectOpenTargetButton', () => {
       </TooltipProvider>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '选择打开项目方式' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: '选择打开项目方式' }));
     fireEvent.click(screen.getByText('VS Code'));
 
     expect(openProjectPathMock).toHaveBeenCalledWith('D:\\project\\ai-code\\codeMUX', 'vscode');
@@ -84,7 +84,7 @@ describe('ProjectOpenTargetButton', () => {
       </TooltipProvider>,
     );
 
-    fireEvent.click(screen.getAllByRole('button')[1]);
+    fireEvent.pointerDown(screen.getAllByRole('button')[1]);
 
     expect(screen.getByText('Cursor')).toBeTruthy();
     expect(screen.queryByText('Visual Studio')).toBeNull();

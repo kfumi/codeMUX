@@ -87,23 +87,9 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
     updateSessionTitle,
   } = useSessionStore();
   const { projects, activeProjectId, fetchProjects, deleteProject, renameProject, setActiveProject } = useProjectStore();
-  const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
   const [pinnedExpanded, setPinnedExpanded] = useState(() => loadSectionExpanded(PINNED_SECTION_KEY));
   const [projectsExpanded, setProjectsExpanded] = useState(() => loadSectionExpanded(PROJECTS_SECTION_KEY));
   const [conversationsExpanded, setConversationsExpanded] = useState(() => loadSectionExpanded(CONVERSATIONS_SECTION_KEY));
-
-  const closeMenu = useCallback(() => setMenuSessionId(null), []);
-
-  useEffect(() => {
-    if (!menuSessionId) return;
-    const close = () => setMenuSessionId(null);
-    window.addEventListener('click', close);
-    window.addEventListener('contextmenu', close);
-    return () => {
-      window.removeEventListener('click', close);
-      window.removeEventListener('contextmenu', close);
-    };
-  }, [menuSessionId]);
 
   useEffect(() => {
     fetchSessions();
@@ -173,9 +159,6 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
               onArchive={() => archiveSession(session.id)}
               onDelete={() => deleteSession(session.id)}
               onRename={(title) => updateSessionTitle(session.id, title)}
-              isMenuOpen={menuSessionId === session.id}
-              onOpenMenu={() => setMenuSessionId(session.id)}
-              onCloseMenu={closeMenu}
             />
           ))}
         </div>
@@ -223,9 +206,6 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
               onNewSessionInProject={onNewSessionInProject}
               onDeleteProject={deleteProject}
               onRenameProject={renameProject}
-              menuSessionId={menuSessionId}
-              onOpenMenu={setMenuSessionId}
-              onCloseMenu={closeMenu}
             />
           ))}
         </div>
@@ -253,9 +233,6 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
               onArchive={() => archiveSession(session.id)}
               onDelete={() => deleteSession(session.id)}
               onRename={(title) => updateSessionTitle(session.id, title)}
-              isMenuOpen={menuSessionId === session.id}
-              onOpenMenu={() => setMenuSessionId(session.id)}
-              onCloseMenu={closeMenu}
             />
           ))}
         </div>

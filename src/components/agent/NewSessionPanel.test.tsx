@@ -166,8 +166,8 @@ describe('NewSessionPanel', () => {
   it('passes the selected agent to the composer when Codex is selected', () => {
     render(<NewSessionPanel onSubmit={vi.fn()} />);
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Claude Code' }).find((element) => element.tagName === 'BUTTON')!);
-    fireEvent.click(screen.getByRole('button', { name: 'Codex' }));
+    fireEvent.pointerDown(screen.getAllByRole('button', { name: 'Claude Code' }).find((element) => element.tagName === 'BUTTON')!);
+    fireEvent.click(screen.getByText('Codex'));
 
     expect(composerProps.at(-1)?.agentKind).toBe('codex');
     expect(composerProps.at(-1)?.placeholder).toBe('给 Codex 发送第一条任务指令... (@ 引用文件, / 查看命令)');

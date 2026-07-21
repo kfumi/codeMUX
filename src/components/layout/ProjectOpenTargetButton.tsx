@@ -5,7 +5,7 @@ import { fileApi } from '../../lib/tauri';
 import { getOpenTargetOption, normalizeOpenTarget, OPEN_TARGET_OPTIONS, type OpenTarget } from '../../lib/openTargets';
 import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 interface ProjectOpenTargetButtonProps {
@@ -34,18 +34,16 @@ export function ProjectOpenTargetButton({ projectPath }: ProjectOpenTargetButton
             onClick={() => openProject(defaultTarget)}
             className="flex h-7 w-8 items-center justify-center text-foreground/60 transition-colors hover:bg-muted/50 hover:text-foreground"
           >
-            <DefaultIcon className="h-3.5 w-3.5" />
+            <DefaultIcon className="h-4 w-4" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="bottom">
           <p>用 {defaultOption.label} 打开项目</p>
         </TooltipContent>
       </Tooltip>
-      <DropdownMenu
-        align="right"
-        panelClassName="z-[180] min-w-[168px]"
-        trigger={(
-          <Tooltip>
+      <DropdownMenu>
+        <Tooltip>
+          <DropdownMenuTrigger asChild>
             <TooltipTrigger asChild>
               <button
                 type="button"
@@ -55,27 +53,28 @@ export function ProjectOpenTargetButton({ projectPath }: ProjectOpenTargetButton
                 <ChevronDown className="h-3.5 w-3.5" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p>选择打开项目方式</p>
-            </TooltipContent>
-          </Tooltip>
-        )}
-      >
-        {OPEN_TARGET_OPTIONS.map((option) => {
-          const Icon = option.Icon;
-          const active = option.value === defaultTarget;
-          return (
-            <DropdownMenuItem
-              key={option.value}
-              icon={<Icon className={cn('h-3.5 w-3.5', active ? 'text-primary' : 'text-foreground/58')} />}
-              onClick={() => openProject(option.value)}
-            >
-              <span className={cn('text-[12px]', active && 'font-medium text-foreground')}>
-                {option.label}
-              </span>
-            </DropdownMenuItem>
-          );
-        })}
+          </DropdownMenuTrigger>
+          <TooltipContent side="bottom">
+            <p>选择打开项目方式</p>
+          </TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="end" className="z-[180] min-w-[168px]">
+          {OPEN_TARGET_OPTIONS.map((option) => {
+            const Icon = option.Icon;
+            const active = option.value === defaultTarget;
+            return (
+              <DropdownMenuItem
+                key={option.value}
+                icon={<Icon className={cn('h-4 w-4', active ? 'text-primary' : 'text-foreground/58')} />}
+                onClick={() => openProject(option.value)}
+              >
+                <span className={cn('text-[12px]', active && 'font-medium text-foreground')}>
+                  {option.label}
+                </span>
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
       </DropdownMenu>
     </div>
   );

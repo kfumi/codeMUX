@@ -445,7 +445,7 @@ function isDuplicateAskUserQuestionToolCall(
 }
 
 function isAskUserQuestionToolName(toolName: string): boolean {
-  return toolName === 'AskUserQuestion' || toolName === 'askUserQuestion' || toolName === 'request_user_input';
+  return toolName === 'AskUserQuestion' || toolName === 'askUserQuestion' || toolName === 'request_user_input' || toolName === 'question';
 }
 
 function attachToolResult(

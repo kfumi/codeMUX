@@ -20,6 +20,7 @@ import { cn } from '../../lib/utils';
 import type { AgentKind } from '../../types/session';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
 import { Button } from '../ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 
 interface AgentPermissionSelectorProps {
   agentKind: AgentKind;
@@ -133,51 +134,31 @@ export function AgentPermissionSelector({
   };
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        disabled={disabled}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title={selected.label}
-        onClick={() => setOpen((value) => !value)}
-        className={cn(
-          'inline-flex h-7 items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-200 hover:bg-muted/58 hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
-          compact ? 'max-w-9' : 'max-w-40',
-          selected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
-        )}
-      >
-        <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
-        {!compact && <span className="truncate">{selected.label}</span>}
-        {!compact && <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />}
-      </button>
-
-      {pendingPermission && (
-        <div data-testid="pending-agent-permission" className="mt-2 rounded-md border border-orange-500/40 bg-orange-500/10 px-2.5 py-2 text-xs">
-          <div className="font-medium text-foreground">需要权限确认</div>
-          <div className="mt-1 font-mono text-foreground/90">{pendingPermission.permission_type}</div>
-          <div className="mt-1 text-muted-foreground">{pendingPermission.description}</div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <Button type="button" size="sm" variant="outline" disabled={permissionResponsePending} onClick={() => onPermissionResponse?.('once')}>允许一次</Button>
-            <Button type="button" size="sm" variant="outline" disabled={permissionResponsePending} onClick={() => onPermissionResponse?.('always')}>始终允许</Button>
-            <Button type="button" size="sm" variant="ghost" disabled={permissionResponsePending} onClick={() => onPermissionResponse?.('reject')}>拒绝</Button>
-          </div>
-        </div>
-      )}
-      {(rawPermissionType || rawPermissionDescription) && (
-        <div
-          data-testid="native-permission-details"
-          className="mt-2 rounded-md border border-border/50 bg-muted/30 px-2.5 py-2 text-xs"
-        >
-          {rawPermissionType && <div className="font-mono text-foreground/90">{rawPermissionType}</div>}
-          {rawPermissionDescription && <div className="mt-1 text-muted-foreground">{rawPermissionDescription}</div>}
-        </div>
-      )}
-
-      {open && (
-        <div
-          role="menu"
-          className="absolute bottom-full left-0 z-50 mb-2 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 p-1.5 shadow-[0_22px_54px_-28px_hsl(var(--foreground)/0.55)] backdrop-blur-lg"
+    <div>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={disabled}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            title={selected.label}
+            className={cn(
+              'inline-flex h-7 items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-200 hover:bg-muted/58 hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
+              compact ? 'max-w-9' : 'max-w-40',
+              selected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
+            )}
+          >
+            <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
+            {!compact && <span className="truncate">{selected.label}</span>}
+            {!compact && <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          side="top"
+          sideOffset={8}
+          align="start"
+          className="w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 p-1.5 shadow-[0_22px_54px_-28px_hsl(var(--foreground)/0.55)] backdrop-blur-lg"
         >
           {options.map((option) => {
             const active = selectedMode === option.mode;
@@ -204,6 +185,28 @@ export function AgentPermissionSelector({
               </button>
             );
           })}
+        </PopoverContent>
+      </Popover>
+
+      {pendingPermission && (
+        <div data-testid="pending-agent-permission" className="mt-2 rounded-md border border-orange-500/40 bg-orange-500/10 px-2.5 py-2 text-xs">
+          <div className="font-medium text-foreground">需要权限确认</div>
+          <div className="mt-1 font-mono text-foreground/90">{pendingPermission.permission_type}</div>
+          <div className="mt-1 text-muted-foreground">{pendingPermission.description}</div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <Button type="button" size="sm" variant="outline" disabled={permissionResponsePending} onClick={() => onPermissionResponse?.('once')}>允许一次</Button>
+            <Button type="button" size="sm" variant="outline" disabled={permissionResponsePending} onClick={() => onPermissionResponse?.('always')}>始终允许</Button>
+            <Button type="button" size="sm" variant="ghost" disabled={permissionResponsePending} onClick={() => onPermissionResponse?.('reject')}>拒绝</Button>
+          </div>
+        </div>
+      )}
+      {(rawPermissionType || rawPermissionDescription) && (
+        <div
+          data-testid="native-permission-details"
+          className="mt-2 rounded-md border border-border/50 bg-muted/30 px-2.5 py-2 text-xs"
+        >
+          {rawPermissionType && <div className="font-mono text-foreground/90">{rawPermissionType}</div>}
+          {rawPermissionDescription && <div className="mt-1 text-muted-foreground">{rawPermissionDescription}</div>}
         </div>
       )}
     </div>

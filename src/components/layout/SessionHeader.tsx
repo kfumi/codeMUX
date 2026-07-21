@@ -7,7 +7,7 @@ import { agentApi } from '../../lib/tauri';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
-import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 
@@ -74,50 +74,51 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
           <span>{project.name}</span>
         </div>
       )}
-      <DropdownMenu
-        trigger={(
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
           <button
             aria-label="任务菜单"
             className="rounded-lg p-1 text-muted-foreground/66 transition-colors hover:bg-muted/55 hover:text-foreground"
           >
             <MoreHorizontal className="h-4 w-4" />
           </button>
-        )}
-      >
-        <DropdownMenuItem
-          icon={session?.is_pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-          onClick={() => session && void setSessionPinned(session.id, !session.is_pinned)}
-        >
-          {session?.is_pinned ? '取消置顶任务' : '置顶任务'}
-        </DropdownMenuItem>
-        <DropdownMenuItem icon={<Pencil className="h-3.5 w-3.5" />} onClick={handleRenameOpen}>
-          重命名任务
-        </DropdownMenuItem>
-        <DropdownMenuItem icon={<Archive className="h-3.5 w-3.5" />} onClick={() => void handleArchive()}>
-          归档任务
-        </DropdownMenuItem>
-        <DropdownMenuItem icon={<Mail className="h-3.5 w-3.5" />} onClick={() => markSessionUnread(sessionId)}>
-          标记为未读
-        </DropdownMenuItem>
-        {project && (
-          <>
-            <DropdownMenuItem
-              icon={<FolderOpen className="h-3.5 w-3.5" />}
-              onClick={() => void invoke('open_in_explorer', { path: project.path })}
-            >
-              在资源管理器中打开
-            </DropdownMenuItem>
-            <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyText(project.path)}>
-              复制路径
-            </DropdownMenuItem>
-          </>
-        )}
-        <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyAgentSessionValue('messagePath')}>
-          复制任务路径
-        </DropdownMenuItem>
-        <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyAgentSessionValue('agentSessionId')}>
-          复制会话ID
-        </DropdownMenuItem>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem
+            icon={session?.is_pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+            onClick={() => session && void setSessionPinned(session.id, !session.is_pinned)}
+          >
+            {session?.is_pinned ? '取消置顶任务' : '置顶任务'}
+          </DropdownMenuItem>
+          <DropdownMenuItem icon={<Pencil className="h-3.5 w-3.5" />} onClick={handleRenameOpen}>
+            重命名任务
+          </DropdownMenuItem>
+          <DropdownMenuItem icon={<Archive className="h-3.5 w-3.5" />} onClick={() => void handleArchive()}>
+            归档任务
+          </DropdownMenuItem>
+          <DropdownMenuItem icon={<Mail className="h-3.5 w-3.5" />} onClick={() => markSessionUnread(sessionId)}>
+            标记为未读
+          </DropdownMenuItem>
+          {project && (
+            <>
+              <DropdownMenuItem
+                icon={<FolderOpen className="h-3.5 w-3.5" />}
+                onClick={() => void invoke('open_in_explorer', { path: project.path })}
+              >
+                在资源管理器中打开
+              </DropdownMenuItem>
+              <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyText(project.path)}>
+                复制路径
+              </DropdownMenuItem>
+            </>
+          )}
+          <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyAgentSessionValue('messagePath')}>
+            复制任务路径
+          </DropdownMenuItem>
+          <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyAgentSessionValue('agentSessionId')}>
+            复制会话ID
+          </DropdownMenuItem>
+        </DropdownMenuContent>
       </DropdownMenu>
 
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>

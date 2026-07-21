@@ -73,8 +73,8 @@ describe('ReviewPanel git actions', () => {
     render(<ReviewPanel projectPath="D:/project/app" />);
 
     await screen.findByText('master');
-    fireEvent.click(screen.getByTestId('git-branch-trigger'));
-    fireEvent.click(screen.getByRole('button', { name: 'feature/git-panel' }));
+    fireEvent.pointerDown(screen.getByTestId('git-branch-trigger'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'feature/git-panel' }));
 
     await waitFor(() => expect(gitApiMock.checkoutBranch).toHaveBeenCalledWith('D:/project/app', 'feature/git-panel'));
     await waitFor(() => expect(gitApiMock.getRepositoryState).toHaveBeenCalledTimes(2));

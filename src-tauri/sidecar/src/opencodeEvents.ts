@@ -182,8 +182,10 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
         const callId = readString(part.callID) ?? readString(part.id) ?? 'unknown-tool';
         if (context.terminalToolIds?.has(callId)) break;
         const toolName = readString(part.tool) ?? 'unknown';
+        const isQuestionTool = toolName === 'question' || toolName === 'request_user_input' || toolName === 'AskUserQuestion' || toolName === 'askUserQuestion';
         const status = readString(state?.status);
         if (status === 'pending' || status === 'running') {
+          if (isQuestionTool) break;
           events.push({
             ...buildAssistantEnvelope(context, sessionId, [{ type: 'tool_use', id: callId, name: toolName, input: asRecord(state?.input) ?? {} }]),
             event_kind: 'tool_call',
@@ -243,6 +245,24 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
     case 'permission.updated':
       events.push(buildEnvelope({ type: 'diagnostic', subtype: 'permission_request', permission_id: readString(properties.id), title: readString(properties.title) }, context, sessionId));
       break;
+    case 'question.asked': {
+      const questions = readArray(properties.questions);
+      if (questions && questions.length > 0) {
+        events.push(buildEnvelope({
+          type: 'ask_user_question',
+          tool_use_id: readString(properties.id) ?? `question-${context.sequence}`,
+          questions: questions.map((q: unknown) => {
+            const qr = asRecord(q);
+            const options = Array.isArray(qr?.options) ? (qr.options as Array<Record<string, unknown>>).map((opt) => ({
+              label: String(opt.label ?? ''),
+              ...(opt.description ? { description: String(opt.description) } : {}),
+            })) : [];
+            return { question: readString(qr?.question) ?? '', header: readString(qr?.header), options };
+          }),
+        }, context, sessionId));
+      }
+      break;
+    }
     case 'server.connected':
       events.push(buildEnvelope({ type: 'status', subtype: 'connected', status: 'connected' }, context, sessionId));
       break;
@@ -349,6 +369,10 @@ function readString(value: unknown): string | undefined {
 
 function readNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function readArray(value: unknown): unknown[] | undefined {
+  return Array.isArray(value) && value.length > 0 ? value : undefined;
 }
 
 function stableStringify(value: unknown, seen = new WeakSet<object>()): string {

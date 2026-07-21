@@ -106,7 +106,7 @@ describe('SessionHeader', () => {
 
   function openMenu() {
     render(<SessionHeader sessionId="session-1" />);
-    fireEvent.click(screen.getByLabelText('任务菜单'));
+    fireEvent.pointerDown(screen.getByLabelText('任务菜单'));
   }
 
   it('renders the expanded session menu actions', () => {
@@ -133,27 +133,27 @@ describe('SessionHeader', () => {
     fireEvent.click(screen.getByText('置顶任务'));
     await waitFor(() => expect(useSessionStore.getState().sessions[0].is_pinned).toBe(true));
 
-    fireEvent.click(screen.getByLabelText('任务菜单'));
+    fireEvent.pointerDown(screen.getByLabelText('任务菜单'));
     fireEvent.click(screen.getByText('标记为未读'));
     expect(useSessionStore.getState().unreadSessions.has('session-1')).toBe(false);
 
-    fireEvent.click(screen.getByLabelText('任务菜单'));
+    fireEvent.pointerDown(screen.getByLabelText('任务菜单'));
     fireEvent.click(screen.getByText('在资源管理器中打开'));
     expect(mocks.openInExplorer).toHaveBeenCalledWith({ path: 'D:\\project\\ai-code\\codeMUX' });
 
-    fireEvent.click(screen.getByLabelText('任务菜单'));
+    fireEvent.pointerDown(screen.getByLabelText('任务菜单'));
     fireEvent.click(screen.getByText('复制路径'));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('D:\\project\\ai-code\\codeMUX');
 
-    fireEvent.click(screen.getByLabelText('任务菜单'));
+    fireEvent.pointerDown(screen.getByLabelText('任务菜单'));
     fireEvent.click(screen.getByText('复制任务路径'));
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('C:\\Users\\me\\.codex\\sessions\\session.jsonl'));
 
-    fireEvent.click(screen.getByLabelText('任务菜单'));
+    fireEvent.pointerDown(screen.getByLabelText('任务菜单'));
     fireEvent.click(screen.getByText('复制会话ID'));
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('codex-session-1'));
 
-    fireEvent.click(screen.getByLabelText('任务菜单'));
+    fireEvent.pointerDown(screen.getByLabelText('任务菜单'));
     fireEvent.click(screen.getByText('归档任务'));
     await waitFor(() => expect(useSessionStore.getState().archivedSessions[0].id).toBe('session-1'));
   });

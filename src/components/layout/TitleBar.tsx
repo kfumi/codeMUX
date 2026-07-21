@@ -14,7 +14,7 @@ import { cn } from '../../lib/utils';
 import { useSidePanelStore } from '../../stores/sidePanelStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Theme } from '../../types/provider';
-import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { ProjectOpenTargetButton } from './ProjectOpenTargetButton';
 
@@ -183,11 +183,9 @@ export function TitleBar({
           </Tooltip>
         )}
 
-        <DropdownMenu
-          align="right"
-          panelClassName="z-[180] min-w-[136px]"
-          trigger={(
-            <Tooltip>
+        <DropdownMenu>
+          <Tooltip>
+            <DropdownMenuTrigger asChild>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -196,30 +194,31 @@ export function TitleBar({
                   <ThemeIcon className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>主题切换</p>
-              </TooltipContent>
-            </Tooltip>
-          )}
-        >
-          {themeOptions.map(({ value, label, Icon }) => (
-            <DropdownMenuItem
-              key={value}
-              onClick={() => {
-                void setTheme(value);
-              }}
-            >
-              <div className={cn('flex w-full items-center gap-2 rounded-sm px-0.5 py-0.5 text-[12px] -mx-0.5 -my-0.5', currentTheme === value && 'bg-muted/70')}>
-                <Icon className="h-3.5 w-3.5" />
-                <span className={currentTheme === value ? 'font-medium text-foreground' : 'text-foreground/76'}>
-                  {label}
-                </span>
-                {currentTheme === value && (
-                  <Check className="ml-auto h-3.5 w-3.5 text-primary" />
-                )}
-              </div>
-            </DropdownMenuItem>
-          ))}
+            </DropdownMenuTrigger>
+            <TooltipContent side="bottom">
+              <p>主题切换</p>
+            </TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="z-[180] min-w-[136px]">
+            {themeOptions.map(({ value, label, Icon }) => (
+              <DropdownMenuItem
+                key={value}
+                onClick={() => {
+                  void setTheme(value);
+                }}
+              >
+                <div className={cn('flex w-full items-center gap-2 rounded-sm px-0.5 py-0.5 text-[12px] -mx-0.5 -my-0.5', currentTheme === value && 'bg-muted/70')}>
+                  <Icon className="h-3.5 w-3.5" />
+                  <span className={currentTheme === value ? 'font-medium text-foreground' : 'text-foreground/76'}>
+                    {label}
+                  </span>
+                  {currentTheme === value && (
+                    <Check className="ml-auto h-3.5 w-3.5 text-primary" />
+                  )}
+                </div>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
         </DropdownMenu>
       </div>
 

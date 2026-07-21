@@ -457,11 +457,6 @@ html:not(.dark) .sidebar-grain::after {
   color: inherit;
 }
 
-*:focus-visible {
-  outline: 2px solid hsl(var(--ring) / 0.32);
-  outline-offset: 2px;
-}
-
 /* composer 和新建会话的输入框不需要额外的 focus outline */
 .aui-composer-root textarea:focus-visible,
 .new-session-input textarea:focus-visible,

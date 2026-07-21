@@ -7,7 +7,7 @@ import { Project } from '../../types/project';
 import { useProjectStore } from '../../stores/projectStore';
 import { SessionItem } from './SessionItem';
 import { Button } from '../ui/button';
-import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { cn } from '../../lib/utils';
@@ -29,9 +29,6 @@ interface ProjectGroupProps {
   onNewSessionInProject: (projectId: string) => void;
   onDeleteProject: (projectId: string) => void;
   onRenameProject: (projectId: string, newName: string) => void;
-  menuSessionId: string | null;
-  onOpenMenu: (sessionId: string) => void;
-  onCloseMenu: () => void;
 }
 
 export function ProjectGroup({
@@ -47,9 +44,6 @@ export function ProjectGroup({
   onNewSessionInProject,
   onDeleteProject,
   onRenameProject,
-  menuSessionId,
-  onOpenMenu,
-  onCloseMenu,
 }: ProjectGroupProps) {
   const collapsedProjects = useProjectStore((state) => state.collapsedProjects);
   const toggleProjectExpanded = useProjectStore((state) => state.toggleProjectExpanded);
@@ -121,36 +115,36 @@ export function ProjectGroup({
           <span className="flex-1 truncate text-[13px] font-medium">{project.name}</span>
         )}
         <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100" onClick={(event) => event.stopPropagation()}>
-          <DropdownMenu
-            trigger={(
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md text-[hsl(var(--sidebar-fg))]/55 hover:bg-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))]">
                 <MoreHorizontal className="h-3 w-3" />
               </Button>
-            )}
-            align="right"
-          >
-            <DropdownMenuItem
-              icon={<FolderOpen className="h-3.5 w-3.5" />}
-              onClick={() => invoke('open_in_explorer', { path: project.path })}
-            >
-              在资源管理器中打开
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              icon={<Pencil className="h-3.5 w-3.5" />}
-              onClick={() => {
-                setRenameValue(project.name);
-                setRenaming(true);
-              }}
-            >
-              重命名项目
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              icon={<Trash2 className="h-3.5 w-3.5" />}
-              danger
-              onClick={() => setConfirmOpen(true)}
-            >
-              移除
-            </DropdownMenuItem>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                icon={<FolderOpen className="h-3.5 w-3.5" />}
+                onClick={() => invoke('open_in_explorer', { path: project.path })}
+              >
+                在资源管理器中打开
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                icon={<Pencil className="h-3.5 w-3.5" />}
+                onClick={() => {
+                  setRenameValue(project.name);
+                  setRenaming(true);
+                }}
+              >
+                重命名项目
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                icon={<Trash2 className="h-3.5 w-3.5" />}
+                danger
+                onClick={() => setConfirmOpen(true)}
+              >
+                移除
+              </DropdownMenuItem>
+            </DropdownMenuContent>
           </DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -177,9 +171,6 @@ export function ProjectGroup({
               onArchive={() => onArchiveSession(session.id)}
               onDelete={() => onDeleteSession(session.id)}
               onRename={(title) => onRenameSession(session.id, title)}
-              isMenuOpen={menuSessionId === session.id}
-              onOpenMenu={() => onOpenMenu(session.id)}
-              onCloseMenu={onCloseMenu}
             />
           ))}
           {(hasHiddenSessions || canCollapseSessions) && (

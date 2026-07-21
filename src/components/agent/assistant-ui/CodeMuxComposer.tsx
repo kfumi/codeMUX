@@ -36,6 +36,7 @@ import type { SlashCommand } from '../../../lib/slashCommands';
 import { findCommand, getAllCommands } from '../../../lib/slashCommands';
 import { createLogger, serializeError } from '../../../lib/logger';
 import { cn } from '../../../lib/utils';
+import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
 import { useAgentStore } from '../../../stores/agentStore';
 import { usePreviewStore, type FileTreeNodeData } from '../../../stores/previewStore';
 import { useSessionStore } from '../../../stores/sessionStore';
@@ -500,24 +501,43 @@ export function CodeMuxComposer({
 
             {!pendingQuestion && !pendingPlan && <div className="relative flex items-center justify-between pl-1">
               <div className="flex items-center gap-2">
-                <div className="relative">
+                <Popover open={addMenuOpen} onOpenChange={setAddMenuOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/76 transition-all duration-200 hover:bg-muted/58 hover:text-foreground"
+                      title="添加附件或功能"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </PopoverTrigger>
+                <PopoverContent
+                  side="top"
+                  sideOffset={8}
+                  align="start"
+                  className="w-44 overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 p-1 shadow-[0_18px_46px_-28px_hsl(var(--foreground)/0.48)] backdrop-blur-lg"
+                >
                   <button
                     type="button"
-                    onClick={() => setAddMenuOpen((value) => !value)}
-                    disabled={disabled}
-                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/76 transition-all duration-200 hover:bg-muted/58 hover:text-foreground"
-                    title="添加附件或功能"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => { openFilePicker(); }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted/56"
                   >
-                    <Plus className="h-4 w-4" />
+                    <FilePlus2 className="h-4 w-4 text-muted-foreground" />
+                    <span>选择文件</span>
                   </button>
-                  {addMenuOpen ? (
-                    <AddMenu
-                      onSelectFile={openFilePicker}
-                      onActivatePlanMode={onActivatePlanMode}
-                      onClose={() => setAddMenuOpen(false)}
-                    />
-                  ) : null}
-                </div>
+                  <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => { onActivatePlanMode?.(); setAddMenuOpen(false); }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground"
+                  >
+                    <ListTodo className="h-4 w-4" />
+                    <span>计划模式</span>
+                  </button>
+                </PopoverContent>
+              </Popover>
                 {permissionSelector}
               </div>
               <div className="flex items-center gap-2">
@@ -852,39 +872,6 @@ export function ComposerAttachmentPreview() {
         </AttachmentPrimitive.Remove>
       </div>
     </AttachmentPrimitive.Root>
-  );
-}
-
-function AddMenu({
-  onSelectFile,
-  onActivatePlanMode,
-  onClose,
-}: {
-  onSelectFile: () => void;
-  onActivatePlanMode?: () => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="absolute bottom-full left-0 z-50 mb-2 w-44 overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 p-1 shadow-[0_18px_46px_-28px_hsl(var(--foreground)/0.48)] backdrop-blur-lg">
-      <button
-        type="button"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => { onSelectFile(); onClose(); }}
-        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted/56"
-      >
-        <FilePlus2 className="h-4 w-4 text-muted-foreground" />
-        <span>选择文件</span>
-      </button>
-      <button
-        type="button"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => { onActivatePlanMode?.(); onClose(); }}
-        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground"
-      >
-        <ListTodo className="h-4 w-4" />
-        <span>计划模式</span>
-      </button>
-    </div>
   );
 }
 

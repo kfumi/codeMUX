@@ -3,7 +3,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 
 import { cn } from '../../lib/utils';
 import { useSidePanelStore, type SidePanelTab } from '../../stores/sidePanelStore';
-import { DropdownMenu, DropdownMenuItem } from '../ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { PlanPreviewPanel } from './plan/PlanPreviewPanel';
 import { ReviewPanel } from './review/ReviewPanel';
 import { TerminalPanel } from './terminal/TerminalPanel';
@@ -109,10 +109,8 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
           </div>
 
           {projectPath ? (
-            <DropdownMenu
-              align="right"
-              panelClassName="z-[190] min-w-32"
-              trigger={(
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
                 <button
                   type="button"
                   className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
@@ -120,14 +118,15 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
                 >
                   <Plus className="h-4 w-4" />
                 </button>
-              )}
-            >
-              <DropdownMenuItem onClick={openReview} icon={<FileSearch className="h-3.5 w-3.5" />}>
-                审查
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={openTerminal} icon={<Terminal className="h-3.5 w-3.5" />}>
-                终端
-              </DropdownMenuItem>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="z-[190] min-w-32">
+                <DropdownMenuItem onClick={openReview} icon={<FileSearch className="h-3.5 w-3.5" />}>
+                  审查
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={openTerminal} icon={<Terminal className="h-3.5 w-3.5" />}>
+                  终端
+                </DropdownMenuItem>
+              </DropdownMenuContent>
             </DropdownMenu>
           ) : (
             <span title="请先选择项目">
