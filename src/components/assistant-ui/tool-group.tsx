@@ -94,14 +94,14 @@ function ToolGroupTrigger({
     // Build summary
     const parts: string[] = [];
     for (const [name, count] of counts) {
-      parts.push(`${name}(${count})`);
+      parts.push(`${name} × ${count}`);
     }
 
     if (parts.length === 1) {
-      return `执行 ${parts[0]}`;
+      return `已执行 ${parts[0]}`;
     }
     if (parts.length <= 3) {
-      return `执行 ${parts.join('、')}`;
+      return `已执行 ${parts.join('、')}`;
     }
     // Too many types, just show count
     return `工具调用(${count})`;

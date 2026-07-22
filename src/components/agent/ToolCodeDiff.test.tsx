@@ -26,6 +26,22 @@ describe('ToolCodeDiff', () => {
     expect(container.querySelector('[data-slot="diff-viewer-line"][data-type="add"]')?.textContent).toContain('new blog');
   });
 
+  it('renders opencode edit (lowercase) with camelCase params as an inline diff', () => {
+    const { container } = render(
+      <ToolCodeDiff
+        toolName="edit"
+        input={{
+          filePath: 'D:\\project\\compiler.xml',
+          oldString: '    <bytecodeTargetLevel target="8" />',
+          newString: '    <bytecodeTargetLevel target="7" />',
+        }}
+      />,
+    );
+
+    expect(container.querySelector('[data-slot="diff-viewer-line"][data-type="del"]')?.textContent).toContain('target="8"');
+    expect(container.querySelector('[data-slot="diff-viewer-line"][data-type="add"]')?.textContent).toContain('target="7"');
+  });
+
   it('renders write arguments as a new-file diff', () => {
     const { container } = render(
       <ToolCodeDiff

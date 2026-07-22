@@ -24,9 +24,9 @@ describe('toolHeaderSummary', () => {
   it('maps known agent built-in tool names to Chinese display names', () => {
     expect(getToolDisplayName('Bash')).toBe('运行命令');
     expect(getToolDisplayName('shell_command')).toBe('运行命令');
-    expect(getToolDisplayName('Read')).toBe('读取文件');
-    expect(getToolDisplayName('Write')).toBe('写入文件');
-    expect(getToolDisplayName('Edit')).toBe('编辑文件');
+    expect(getToolDisplayName('Read')).toBe('读取');
+    expect(getToolDisplayName('Write')).toBe('写入');
+    expect(getToolDisplayName('Edit')).toBe('编辑');
     expect(getToolDisplayName('Agent')).toBe('子智能体');
     expect(getToolDisplayName('AskUserQuestion')).toBe('询问用户');
     expect(getToolDisplayName('update_plan')).toBe('更新计划');
@@ -45,9 +45,9 @@ describe('toolHeaderSummary', () => {
 
   it('maps lowercase OpenCode tool names to the existing Chinese display names', () => {
     expect(getToolDisplayName('bash')).toBe('运行命令');
-    expect(getToolDisplayName('read')).toBe('读取文件');
-    expect(getToolDisplayName('write')).toBe('写入文件');
-    expect(getToolDisplayName('edit')).toBe('编辑文件');
+    expect(getToolDisplayName('read')).toBe('读取');
+    expect(getToolDisplayName('write')).toBe('写入');
+    expect(getToolDisplayName('edit')).toBe('编辑');
     expect(getToolDisplayName('ls')).toBe('列目录');
     expect(getToolDisplayName('grep')).toBe('搜索文本');
     expect(getToolDisplayName('glob')).toBe('匹配文件');
@@ -61,9 +61,55 @@ describe('toolHeaderSummary', () => {
 
     const readInput = { file_path: 'src/components/agent/toolHeaderSummary.ts', offset: 0 };
     const readSummary = getToolHeaderSummary('read', readInput);
-    expect(readSummary.displayName).toBe('读取文件');
+    expect(readSummary.displayName).toBe('读取');
     expect(readSummary.text).toBe('toolHeaderSummary.ts');
     expect(getDisplayableArgs(readInput, readSummary.consumedKeys)).toEqual({ offset: 0 });
+  });
+
+  it('shows line range for Read tool with file_path, offset, and limit', () => {
+    const input = {
+      file_path: 'D:/project/wfm/xjyd/xjwlcs/src/wlcs/install/service/InstallBaseService.java',
+      offset: 515,
+      limit: 20,
+    };
+    const summary = getToolHeaderSummary('Read', input);
+    expect(summary.displayName).toBe('读取');
+    expect(summary.text).toBe('InstallBaseService.java 515-534行');
+    expect(summary.fullPath).toBe(input.file_path);
+    expect(getDisplayableArgs(input, summary.consumedKeys)).toBeNull();
+  });
+
+  it('shows line range for Read tool with opencode filePath and limit', () => {
+    const input = {
+      filePath: '/home/user/src/app.ts',
+      offset: 10,
+      limit: 5,
+    };
+    const summary = getToolHeaderSummary('read', input);
+    expect(summary.displayName).toBe('读取');
+    expect(summary.text).toBe('app.ts 10-14行');
+    expect(summary.fullPath).toBe('/home/user/src/app.ts');
+    expect(getDisplayableArgs(input, summary.consumedKeys)).toBeNull();
+  });
+
+  it('falls back to just filename for Read when offset is 0 and no limit', () => {
+    const input = {
+      file_path: 'src/index.ts',
+      offset: 0,
+    };
+    const summary = getToolHeaderSummary('read', input);
+    expect(summary.text).toBe('index.ts');
+    expect(getDisplayableArgs(input, summary.consumedKeys)).toEqual({ offset: 0 });
+  });
+
+  it('falls back to just filename for Read when limit is 0', () => {
+    const input = {
+      file_path: 'src/index.ts',
+      offset: 10,
+      limit: 0,
+    };
+    const summary = getToolHeaderSummary('read', input);
+    expect(summary.text).toBe('index.ts');
   });
 
   it('uses the MCP server name as the display name without the mcp prefix or method name', () => {

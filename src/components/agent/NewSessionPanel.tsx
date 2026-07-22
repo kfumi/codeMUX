@@ -122,15 +122,9 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     () => projects.find((project) => project.id === draftProjectId) ?? null,
     [draftProjectId, projects],
   );
-  const draftProjectFolderName = useMemo(() => {
-    if (!draftProject?.path) {
-      return draftProject?.name ?? '';
-    }
-    const segments = draftProject.path.split(/[\\/]+/).filter(Boolean);
-    return segments.at(-1) ?? draftProject.name;
-  }, [draftProject?.name, draftProject?.path]);
-  const title = draftProjectFolderName
-    ? `我们应该在 ${draftProjectFolderName} 中构建什么？`
+  const projectName = draftProject?.name ?? '';
+  const title = projectName
+    ? `我们应该在 ${projectName} 中构建什么？`
     : '我们应该做什么？';
   const placeholder = useMemo(() => {
     const label = selectedAgent?.label ?? 'Claude Code';

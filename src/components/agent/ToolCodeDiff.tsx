@@ -25,7 +25,7 @@ type PatchFile = {
 };
 
 export function getCodeChangeFilePath(input: Record<string, unknown>): string | undefined {
-  const filePath = input.file_path;
+  const filePath = input.file_path ?? input.filePath;
   if (typeof filePath === 'string' && filePath.trim()) {
     return getFileName(normalizePath(filePath));
   }
@@ -43,8 +43,8 @@ function getFileName(path: string): string {
 
 export function getCodeChangeDiff(input: Record<string, unknown>): ContentDiff | PatchDiff | null {
   const filePath = getCodeChangeFilePath(input);
-  const oldString = input.old_string;
-  const newString = input.new_string;
+  const oldString = input.old_string ?? input.oldString;
+  const newString = input.new_string ?? input.newString;
   if (filePath && typeof oldString === 'string' && typeof newString === 'string') {
     return { kind: 'content', filePath, oldFile: oldString, newFile: newString };
   }
@@ -92,8 +92,10 @@ export function ToolCodeDiff({ toolName, input }: ToolCodeDiffProps) {
   );
 }
 
+const CODE_CHANGE_TOOL_NAMES = new Set(['write', 'edit']);
+
 export function isCodeChangeTool(toolName: string, input?: Record<string, unknown>) {
-  if (toolName === 'Write' || toolName === 'Edit') return true;
+  if (CODE_CHANGE_TOOL_NAMES.has(toolName.toLowerCase())) return true;
   if ((toolName === 'Bash' || toolName === 'shell_command') && input) {
     return getApplyPatchFiles(input).length > 0;
   }

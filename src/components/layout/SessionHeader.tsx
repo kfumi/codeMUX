@@ -71,7 +71,7 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
       {project && (
         <div className="hidden shrink-0 items-center gap-1.5 rounded-md border border-border/42 bg-[hsl(var(--surface-2))]/88 px-2 py-1 text-[12px] text-foreground/68 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.03)] dark:border-[hsl(var(--surface-edge))]/72 dark:bg-[hsl(var(--surface-3))]/74 dark:text-foreground/76 dark:shadow-[inset_0_1px_0_hsl(var(--foreground)/0.045),0_8px_20px_-18px_hsl(var(--surface-shadow-strong)/0.9)] min-[640px]:flex">
           <FolderOpen className="h-3 w-3 shrink-0 text-foreground/54 dark:text-[hsl(var(--sidebar-accent))]/78" />
-          <span>{project.name}</span>
+          <span title={project.path}>{project.path.split(/[/\\]+/).filter(Boolean).at(-1) ?? project.path}</span>
         </div>
       )}
       <DropdownMenu>

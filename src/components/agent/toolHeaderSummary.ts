@@ -92,12 +92,13 @@ export function getToolHeaderSummary(toolName: string, input: Record<string, unk
   const summary = (() => {
     switch (normalizedToolName) {
       case 'Read':
+        return readSummary(input);
       case 'Write':
       case 'Edit':
       case 'MultiEdit':
       case 'NotebookRead':
       case 'NotebookEdit':
-        return fromFirstKey(input, ['file_path', 'notebook_path', 'path']);
+        return fromFirstKey(input, ['file_path', 'filePath', 'notebook_path', 'path']);
 
       case 'LS':
         return fromFirstKey(input, ['path']);
@@ -164,6 +165,38 @@ export function getDisplayableArgs(input: Record<string, unknown>, consumedKeys:
   const entries = Object.entries(input).filter(([key]) => !consumed.has(key));
   if (entries.length === 0) return null;
   return Object.fromEntries(entries);
+}
+
+function readSummary(input: Record<string, unknown>): ToolHeaderSummary {
+  const fileKey = firstPresentKey(input, ['file_path', 'filePath', 'path']);
+  if (!fileKey) return { consumedKeys: [] };
+
+  const rawValue = asDisplayText(input[fileKey]);
+  const filename = getFileName(normalizePath(rawValue));
+  const consumedKeys = [fileKey];
+
+  const rawOffset = input.offset;
+  const rawLimit = input.limit;
+  if (rawOffset != null && rawLimit != null) {
+    const offset = Number(rawOffset);
+    const limit = Number(rawLimit);
+    if (Number.isFinite(offset) && Number.isFinite(limit) && limit > 0) {
+      const start = offset;
+      const end = offset + limit - 1;
+      consumedKeys.push('offset', 'limit');
+      return {
+        text: `${filename} ${start}-${end}行`,
+        fullPath: normalizePath(rawValue),
+        consumedKeys,
+      };
+    }
+  }
+
+  return {
+    text: filename,
+    fullPath: normalizePath(rawValue),
+    consumedKeys,
+  };
 }
 
 function shellCommandSummary(toolName: string, input: Record<string, unknown>): ToolHeaderSummary {
