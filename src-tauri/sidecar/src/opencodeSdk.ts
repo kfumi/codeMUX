@@ -99,8 +99,11 @@ export interface OpenCodeServerConfigInput {
 
 export function buildOpenCodeServerConfig(input: OpenCodeServerConfigInput): Config {
   if (input.provider === 'opencode') {
+    const { provider: existingProviders, ...rest } = input.existingConfig ?? {};
+    const opencodeProvider = existingProviders?.opencode;
     return {
-      ...input.existingConfig,
+      ...rest,
+      ...(opencodeProvider ? { provider: { opencode: opencodeProvider } } : {}),
       model: `opencode/${input.model}`,
     };
   }

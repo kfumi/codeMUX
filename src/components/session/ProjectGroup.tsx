@@ -140,7 +140,7 @@ export function ProjectGroup({
               <DropdownMenuItem
                 icon={<Trash2 className="h-3.5 w-3.5" />}
                 danger
-                onClick={() => setConfirmOpen(true)}
+                onClick={() => window.setTimeout(() => setConfirmOpen(true), 0)}
               >
                 移除
               </DropdownMenuItem>

@@ -4,11 +4,9 @@ import { useCallback, useMemo, useRef, type ReactNode } from 'react';
 
 import type { SlashCommand } from '../../../lib/slashCommands';
 import { findCommand } from '../../../lib/slashCommands';
-import { createLogger } from '../../../lib/logger';
 import { useAgentStore } from '../../../stores/agentStore';
 import type { AgentMessage } from '../../../stores/agentStore';
 
-const logger = createLogger('CodeMuxAssistantRuntime');
 import type { AgentInputPayload } from '../../../types/agentInput';
 import type { AgentKind } from '../../../types/session';
 import {

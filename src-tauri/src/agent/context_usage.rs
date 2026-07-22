@@ -232,7 +232,7 @@ mod tests {
                             "reasoning_output_tokens": 999,
                             "total_tokens": 110
                         },
-                        "model_context_window": 258400
+                        "model_context_window": 200000
                     }
                 }
             }),
@@ -248,7 +248,7 @@ mod tests {
                             "reasoning_output_tokens": 666,
                             "total_tokens": 156061
                         },
-                        "model_context_window": 258400
+                        "model_context_window": 200000
                     }
                 }
             }),
@@ -262,7 +262,7 @@ mod tests {
         assert_eq!(snapshot.last.output_tokens, 1_128);
         assert_eq!(snapshot.last.reasoning_output_tokens, 0);
         assert_eq!(snapshot.last.total_tokens, 156_061);
-        assert_eq!(snapshot.model_context_window, Some(258_400));
+        assert_eq!(snapshot.model_context_window, Some(200_000));
         assert_eq!(snapshot.context_usage_source, "history_file");
         assert_eq!(snapshot.context_usage_freshness, "live_synced");
     }

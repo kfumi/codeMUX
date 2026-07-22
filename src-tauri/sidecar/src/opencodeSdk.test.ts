@@ -137,6 +137,27 @@ describe('official OpenCode SDK adapter', () => {
     });
   });
 
+  it('excludes non-opencode custom providers when selecting the built-in free model', () => {
+    const config = buildOpenCodeServerConfig({
+      provider: 'opencode',
+      model: 'deepseek-v4-flash-free',
+      credentialSource: 'opencode',
+      existingConfig: {
+        provider: {
+          glm: {
+            npm: '@ai-sdk/openai-compatible',
+            options: { apiKey: 'custom-key', baseURL: 'http://localhost:3002/v1' },
+            models: { 'glm-5.1': { name: 'GLM 5.1' } },
+          },
+        },
+      },
+    });
+
+    expect(config.model).toBe('opencode/deepseek-v4-flash-free');
+    expect(config.provider?.glm).toBeUndefined();
+    expect(config.provider?.opencode).toBeUndefined();
+  });
+
   it('preserves the native OpenCode config while selecting the built-in free model', () => {
     expect(buildOpenCodeServerConfig({
       provider: 'opencode',

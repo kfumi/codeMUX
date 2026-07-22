@@ -89,7 +89,7 @@ describe('SessionItem', () => {
     await waitFor(() => expect(screen.getByText('删除')).toBeTruthy());
     fireEvent.click(screen.getByText('删除'));
 
-    expect(screen.getByText('删除对话')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('删除对话')).toBeTruthy());
     expect(onDelete).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: '删除' }));

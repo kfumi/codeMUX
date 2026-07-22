@@ -14,7 +14,7 @@ describe('history-file context usage view model', () => {
       input_tokens: 352,
       cache_read_input_tokens: 25_088,
       output_tokens: 152,
-      model_context_window: 258_400,
+      model_context_window: 200_000,
       context_usage_source: 'history_file',
       context_usage_freshness: 'restored',
     });
@@ -27,7 +27,7 @@ describe('history-file context usage view model', () => {
         outputTokens: 152,
         reasoningOutputTokens: 0,
       },
-      modelContextWindow: 258_400,
+      modelContextWindow: 200_000,
       contextUsageSource: 'history_file',
       contextUsageFreshness: 'restored',
     });
@@ -39,7 +39,7 @@ describe('history-file context usage view model', () => {
       activeProviderUsesLargeContext: false,
     })).toEqual({
       usedTokens: 25_440,
-      totalTokens: 258_400,
+      totalTokens: 200_000,
       inputTokens: 352,
       cachedTokens: 25_088,
       outputTokens: 152,
@@ -62,7 +62,7 @@ describe('history-file context usage view model', () => {
         output_tokens: 1_128,
         reasoning_output_tokens: 666,
       },
-      model_context_window: 258_400,
+      model_context_window: 200_000,
       context_usage_source: 'history_file',
       context_usage_freshness: 'live_synced',
     });

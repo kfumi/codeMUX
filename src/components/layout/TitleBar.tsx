@@ -207,7 +207,7 @@ export function TitleBar({
                   void setTheme(value);
                 }}
               >
-                <div className={cn('flex w-full items-center gap-2 rounded-sm px-0.5 py-0.5 text-[12px] -mx-0.5 -my-0.5', currentTheme === value && 'bg-muted/70')}>
+                <div className="flex w-full items-center gap-2 rounded-sm px-0.5 py-0.5 text-[12px] -mx-0.5 -my-0.5">
                   <Icon className="h-3.5 w-3.5" />
                   <span className={currentTheme === value ? 'font-medium text-foreground' : 'text-foreground/76'}>
                     {label}

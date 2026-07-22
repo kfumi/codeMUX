@@ -826,7 +826,7 @@ function MessageNav({
   return (
     <div
       data-testid="message-nav"
-      className="pointer-events-none absolute left-3 top-0 bottom-0 z-10 flex w-18 items-stretch justify-start"
+      className="pointer-events-none absolute left-3 top-0 bottom-0 z-10 flex w-12 items-stretch justify-start"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => {
         setHovered(false);

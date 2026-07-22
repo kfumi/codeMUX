@@ -133,7 +133,7 @@ export function SessionItem({
   };
 
   const handleDelete = () => {
-    setConfirmOpen(true);
+    window.setTimeout(() => setConfirmOpen(true), 0);
   };
 
   return (

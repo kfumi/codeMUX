@@ -2902,7 +2902,7 @@ mod tests {
             sessions_dir.join("rollout.jsonl"),
             concat!(
                 "{\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-session-1\"}}\n",
-                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":20,\"cached_input_tokens\":7,\"output_tokens\":5},\"model_context_window\":258400}}}\n"
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":20,\"cached_input_tokens\":7,\"output_tokens\":5},\"model_context_window\":200000}}}\n"
             ),
         )
         .unwrap();
@@ -2918,7 +2918,7 @@ mod tests {
 
         assert_eq!(usage.last.total_tokens, 25);
         assert_eq!(usage.last.cached_input_tokens, 7);
-        assert_eq!(usage.model_context_window, Some(258_400));
+        assert_eq!(usage.model_context_window, Some(200_000));
 
         let _ = std::fs::remove_dir_all(&temp);
     }
@@ -4347,7 +4347,7 @@ mod tests {
                             "output_tokens": 0,
                             "reasoning_output_tokens": 0
                         },
-                        "model_context_window": 258400
+                        "model_context_window": 200000
                     }
                 }
             }),

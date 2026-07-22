@@ -1280,9 +1280,11 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
 }
 
 function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime {
-  const modelReference = cmd.provider
-    ? { provider: cmd.provider, model: cmd.model ?? 'default' }
-    : normalizeOpenCodeModelReference(cmd.model ?? 'default');
+  const modelReference = cmd.model?.startsWith('opencode/')
+    ? normalizeOpenCodeModelReference(cmd.model)
+    : cmd.provider
+      ? { provider: cmd.provider, model: cmd.model ?? 'default' }
+      : normalizeOpenCodeModelReference(cmd.model ?? 'default');
   const config: OpenCodeSessionConfig = {
     cwd: ensureWorkingDirectory(cmd.cwd),
     sessionId: cmd.sessionId ?? crypto.randomUUID(),
