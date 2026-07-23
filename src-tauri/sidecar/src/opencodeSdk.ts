@@ -34,6 +34,7 @@ export interface OpenCodePromptInput {
   images: OpenCodeImageInput[];
   provider: string;
   model: string;
+  agent?: string;
 }
 
 export interface OpenCodeEventSubscription {
@@ -48,6 +49,7 @@ export interface OpenCodeClientPort {
   respondToPermission(input: { sessionId: string; requestId: string; response: OpenCodeNativePermissionResponse }): Promise<boolean | void>;
   respondToQuestion?(input: { requestId: string; answers: string[][]; directory?: string }): Promise<boolean | void>;
   subscribe?(input: { cwd: string; onEvent: (event: unknown) => void; onError: (error: unknown) => void; onRetry?: (error: unknown) => void; onDisconnect?: (error: unknown) => void }): Promise<OpenCodeEventSubscription>;
+  switchAgent?(input: { sessionId: string; agent: string }): Promise<void>;
 }
 
 export interface OpenCodeSdkStartResources {
@@ -261,7 +263,26 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
               await client.session.get({ path: { id: sessionId }, query: { directory: sessionCwd } }),
             );
           },
-          async prompt({ sessionId, prompt, inputPayload, images, provider, model }) {
+          async switchAgent({ sessionId, agent }: { sessionId: string; agent: string }) {
+            process.stderr.write(`[opencode-task] switchAgent CALL sessionId=${sessionId} agent=${agent}\n`);
+            try {
+              const res = await fetch(`${serverBaseUrl.replace(/\/+$/, '')}/api/session/${encodeURIComponent(sessionId)}/agent`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ agent }),
+                signal: AbortSignal.timeout(10_000),
+              });
+              if (!res.ok) {
+                const text = await res.text().catch(() => `HTTP ${res.status}`);
+                process.stderr.write(`[opencode-task] switchAgent FAILED sessionId=${sessionId} agent=${agent} status=${res.status} body=${text.slice(0, 500)}\n`);
+                return;
+              }
+              process.stderr.write(`[opencode-task] switchAgent OK sessionId=${sessionId} agent=${agent}\n`);
+            } catch (err) {
+              process.stderr.write(`[opencode-task] switchAgent ERROR sessionId=${sessionId} agent=${agent} error=${err instanceof Error ? err.message : String(err)}\n`);
+            }
+          },
+          async prompt({ sessionId, prompt, inputPayload, images, provider, model, agent }) {
             const parts = [
               { type: 'text' as const, text: inputPayload?.text ?? prompt },
               ...images.map((image) => ({
@@ -271,13 +292,14 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
                 url: image.dataUrl,
               })),
             ];
-            process.stderr.write(`[opencode-task] SDK promptAsync CALL sessionId=${sessionId} model=${provider}/${model} prompt_len=${(inputPayload?.text ?? prompt).length} parts=${parts.length}\n`);
+            process.stderr.write(`[opencode-task] SDK promptAsync CALL sessionId=${sessionId} model=${provider}/${model} agent=${agent ?? 'default'} prompt_len=${(inputPayload?.text ?? prompt).length} parts=${parts.length}\n`);
             try {
               const sdkResponse = await client.session.promptAsync({
                 path: { id: sessionId },
                 query: { directory: cwd },
                 body: {
                   model: { providerID: provider, modelID: model },
+                  ...(agent ? { agent } : {}),
                   parts,
                 },
               });

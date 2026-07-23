@@ -58,6 +58,7 @@ const claudeOptions: PermissionOption[] = [
 ];
 
 const opencodeOptions: PermissionOption[] = [
+  { mode: 'plan', label: '计划模式', description: '先分析和规划，暂不直接修改。', icon: ClipboardList },
   { mode: 'full_access', label: '完全访问', description: 'OpenCode 使用服务端按工具配置的权限规则。', icon: Shield, tone: 'warning' },
 ];
 
@@ -116,7 +117,7 @@ export function AgentPermissionSelector({
 
   const selectMode = (mode: AgentExecutionMode) => {
     const nextConfig = mapExecutionModeToPermissionConfig(agentKind, mode);
-    const nextPlanMode = (agentKind === 'claude_code' || agentKind === 'codex')
+    const nextPlanMode = (agentKind === 'claude_code' || agentKind === 'codex' || agentKind === 'opencode')
       ? (mode === 'plan' ? 'on' as const : 'off' as const)
       : planMode;
 
@@ -126,7 +127,7 @@ export function AgentPermissionSelector({
       onModeChange(nextConfig, nextPlanMode);
     } else {
       onPermissionConfigChange(nextConfig);
-      if (agentKind === 'claude_code' || agentKind === 'codex') {
+      if (agentKind === 'claude_code' || agentKind === 'codex' || agentKind === 'opencode') {
         onPlanModeChange(nextPlanMode);
       }
     }
@@ -219,6 +220,7 @@ function inferExecutionMode(
   planMode: AgentPlanMode,
 ): AgentExecutionMode {
   if (agentKind === 'opencode' && permissionConfig.kind === 'opencode') {
+    if (planMode === 'on' || permissionConfig.permissionMode === 'plan') return 'plan';
     return 'full_access';
   }
 

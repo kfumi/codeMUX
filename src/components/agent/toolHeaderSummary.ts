@@ -59,6 +59,8 @@ const BUILT_IN_TOOL_ALIASES: Record<string, string> = {
   task: 'Task',
   todowrite: 'TodoWrite',
   question: 'AskUserQuestion',
+  websearch: 'WebSearch',
+  webfetch: 'WebFetch',
 };
 
 function normalizeToolName(toolName: string): string {

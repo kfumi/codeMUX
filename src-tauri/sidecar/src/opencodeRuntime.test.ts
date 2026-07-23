@@ -417,6 +417,7 @@ describe('OpenCodeRuntime', () => {
       images: [],
       provider: 'codemux-openai',
       model: 'gpt-5',
+      agent: 'build',
     });
   });
 
@@ -437,6 +438,7 @@ describe('OpenCodeRuntime', () => {
       images: inputPayload.images,
       provider: 'codemux-openai',
       model: 'gpt-5',
+      agent: 'build',
     });
   });
 

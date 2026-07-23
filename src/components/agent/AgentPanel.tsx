@@ -365,7 +365,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                   />
                 )}
                 onStop={() => interrupt(sessionId)}
-                onActivatePlanMode={agentKind === 'opencode' ? undefined : () => handleModeChange(mapExecutionModeToPermissionConfig(agentKind, 'plan'), 'on')}
+                onActivatePlanMode={() => handleModeChange(mapExecutionModeToPermissionConfig(agentKind, 'plan'), 'on')}
               />
             </div>
           )}

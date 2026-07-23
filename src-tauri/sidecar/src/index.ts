@@ -1297,6 +1297,9 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
     ...(cmd.baseUrl ? { baseUrl: cmd.baseUrl } : {}),
   };
   const openCodeRuntime = new OpenCodeRuntime(config);
+  if (cmd.planMode === 'on' || cmd.planMode === 'off') {
+    openCodeRuntime.updatePermissions({ planMode: cmd.planMode });
+  }
   return {
     ensure: async () => {
       const mapping = await openCodeRuntime.start();

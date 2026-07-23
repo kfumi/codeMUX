@@ -5,7 +5,7 @@ export type AgentPlanMode = 'off' | 'on';
 export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk' | 'bypassPermissions';
 export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 export type CodexApprovalPolicy = 'untrusted' | 'on-request' | 'never';
-export type OpenCodePermissionMode = 'full_access';
+export type OpenCodePermissionMode = 'full_access' | 'plan';
 
 export type ClaudePermissionConfig = {
   kind: 'claude_code';
@@ -71,7 +71,13 @@ export function mapExecutionModeToPermissionConfig(
   executionMode: AgentExecutionMode,
 ): AgentPermissionConfig {
   if (agentKind === 'opencode') {
-    return { kind: 'opencode', permissionMode: 'full_access' };
+    switch (executionMode) {
+      case 'plan':
+        return { kind: 'opencode', permissionMode: 'plan' };
+      case 'full_access':
+      default:
+        return { kind: 'opencode', permissionMode: 'full_access' };
+    }
   }
 
   if (agentKind === 'codex') {
@@ -107,6 +113,9 @@ export function resolveEffectivePermissionConfig(
 ): AgentPermissionConfig {
   const normalized = serializePermissionConfig(agentKind, config);
   if (agentKind === 'opencode') {
+    if (planMode === 'on') {
+      return { kind: 'opencode', permissionMode: 'plan' };
+    }
     return { kind: 'opencode', permissionMode: 'full_access' };
   }
   if (agentKind === 'codex' && planMode === 'on') {
@@ -129,7 +138,10 @@ export function serializePermissionConfig(agentKind: AgentKind, value: unknown):
 
   const raw = value as Record<string, unknown>;
   if (agentKind === 'opencode') {
-    return { kind: 'opencode', permissionMode: 'full_access' };
+    return {
+      kind: 'opencode',
+      permissionMode: isOpenCodePermissionMode(raw.permissionMode) ? raw.permissionMode : 'full_access',
+    };
   }
   if (agentKind === 'codex') {
     return {
@@ -144,6 +156,10 @@ export function serializePermissionConfig(agentKind: AgentKind, value: unknown):
     kind: 'claude_code',
     permissionMode: isClaudePermissionMode(raw.permissionMode) ? raw.permissionMode : 'default',
   };
+}
+
+function isOpenCodePermissionMode(value: unknown): value is OpenCodePermissionMode {
+  return value === 'full_access' || value === 'plan';
 }
 
 function isClaudePermissionMode(value: unknown): value is ClaudePermissionMode {

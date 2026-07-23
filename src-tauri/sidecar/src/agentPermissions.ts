@@ -5,7 +5,7 @@ export type CodexApprovalPolicy = 'untrusted' | 'on-request' | 'never';
 
 export type SidecarPermissionConfig =
   | { kind: 'claude_code'; permissionMode?: ClaudePermissionMode }
-  | { kind: 'opencode'; permissionMode?: 'full_access' }
+  | { kind: 'opencode'; permissionMode?: 'full_access' | 'plan' }
   | {
     kind: 'codex';
     sandboxMode?: CodexSandboxMode;

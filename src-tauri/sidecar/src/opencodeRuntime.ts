@@ -141,6 +141,10 @@ export class OpenCodeRuntime {
         this.pendingTurnCompletion = { resolve, reject, sessionId };
       });
       try {
+        const agent = this.planMode === 'on' ? 'plan' : 'build';
+        if (client.switchAgent) {
+          await client.switchAgent({ sessionId, agent });
+        }
         await client.prompt({
           sessionId,
           prompt: normalizedPrompt,
@@ -148,6 +152,7 @@ export class OpenCodeRuntime {
           images: mapOpenCodeImages(normalizedPayload),
           provider: this.config.provider,
           model: this.config.model,
+          agent,
         });
       } catch (error) {
         this.pendingTurnCompletion = undefined;
