@@ -405,6 +405,8 @@ pub fn run() {
             #[cfg(windows)]
             refresh_windows_shell_icon_cache();
 
+            commands::perf::init_tracing();
+
             let conn = db::initialize(app.handle()).expect("Failed to initialize database");
             let config = config::load_config(app.handle());
             info!(
@@ -550,6 +552,8 @@ pub fn run() {
             skills::commands::scan_disk_skills,
             skills::commands::register_skill_from_disk,
             skills::commands::get_enabled_skill_names,
+            commands::perf::get_tokio_console_info,
+            commands::perf::export_perf_snapshot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
