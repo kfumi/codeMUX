@@ -29,6 +29,9 @@ const AgentPanel = lazy(async () => ({ default: (await import('./components/agen
 const NewSessionPanel = lazy(async () => ({ default: (await import('./components/agent/NewSessionPanel')).NewSessionPanel }));
 const SettingsView = lazy(async () => ({ default: (await import('./components/settings/SettingsDialog')).SettingsView }));
 const SessionHeader = lazy(async () => ({ default: (await import('./components/layout/SessionHeader')).SessionHeader }));
+const PerfOverlay = import.meta.env.DEV
+  ? lazy(async () => ({ default: (await import('./components/dev/PerfOverlay')).PerfOverlay }))
+  : null;
 const EMPTY_TODOS: TodoItem[] = [];
 
 const panelFallback = (
@@ -52,6 +55,18 @@ function App() {
   const openDraft = useNewSessionStore((state) => state.openDraft);
   const closeDraft = useNewSessionStore((state) => state.closeDraft);
   const [activeView, setActiveView] = useState<'app' | 'settings'>('app');
+  const [perfOverlayVisible, setPerfOverlayVisible] = useState(true);
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+        e.preventDefault();
+        setPerfOverlayVisible((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   const activeSession = activeSessionId ? sessions.find((session) => session.id === activeSessionId) : null;
   const activeProjectId = activeSession?.project_id ?? draftProjectId ?? null;
@@ -137,6 +152,11 @@ function App() {
   return (
     <UpdaterProvider>
       <TooltipProvider>
+        {PerfOverlay && perfOverlayVisible && (
+          <Suspense fallback={null}>
+            <PerfOverlay />
+          </Suspense>
+        )}
         <MainLayout
           sidebar={activeView === 'settings' ? undefined : (
             <Sidebar

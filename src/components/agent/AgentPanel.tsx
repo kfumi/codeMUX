@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Profiler, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getStoredAgentCwd } from '../../lib/sessionCwd';
 import { getProfilePrimaryModel, profileToSelectorProvider } from '../../lib/agentProfileSelector';
@@ -13,6 +13,7 @@ import { usePreviewStore } from '../../stores/previewStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { usePerfStore } from '../../stores/perfStore';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
@@ -313,8 +314,18 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
   }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, agentKind, handleSend]);
 
+  const handleProfilerRender = useCallback(
+    (_id: string, _phase: 'mount' | 'update' | 'nested-update', actualDuration: number, baseDuration: number) => {
+      if (import.meta.env.DEV) {
+        usePerfStore.getState().recordRender('MessageList', actualDuration, baseDuration);
+      }
+    },
+    [],
+  );
+
   return (
     <div ref={containerRef} className="flex h-full flex-col">
+      <Profiler id="MessageList" onRender={handleProfilerRender}>
       <CodeMuxAssistantRuntimeProvider sessionId={sessionId} agentKind={agentKind} onSend={handleSend} onCommand={handleCommand} sendDisabled={!hasUsableProfile}>
         <CodeMuxThread
           sessionId={sessionId}
@@ -361,6 +372,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           )}
         />
       </CodeMuxAssistantRuntimeProvider>
+      </Profiler>
 
       <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
         <DialogContent className="sm:max-w-120">
