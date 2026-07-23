@@ -483,6 +483,8 @@ pub fn run() {
             commands::session::touch_session,
             commands::session::update_session_provider,
             commands::session::update_session_permissions,
+            commands::usage::get_usage_stats,
+            commands::usage::get_usage_token_breakdown,
             commands::project::create_project,
             commands::project::get_all_projects,
             commands::project::delete_project,

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Archive, ArrowLeft, Bot, FileText, Info, Palette, Plug, Puzzle, Server, Settings, Terminal } from 'lucide-react';
+import { Archive, ArrowLeft, BarChart3, Bot, FileText, Info, Palette, Plug, Puzzle, Server, Settings, Terminal } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
 import { AboutSettings } from './AboutSettings';
@@ -12,12 +12,13 @@ import { McpSettingsPanel } from './McpSettings';
 import { ProviderConfigPanel } from './ProviderConfig';
 import { SkillsSettingsPanel } from './SkillsSettings';
 import { ThemeToggle } from './ThemeToggle';
+import { UsageStatistics } from './UsageStatistics';
 
 interface SettingsViewProps {
   onBack: () => void;
 }
 
-type SettingsTab = 'general' | 'appearance' | 'provider' | 'agents' | 'mcp' | 'skills' | 'archive' | 'environment' | 'logs' | 'about';
+type SettingsTab = 'general' | 'appearance' | 'provider' | 'agents' | 'mcp' | 'skills' | 'usage' | 'archive' | 'environment' | 'logs' | 'about';
 
 const primaryTabs = [
   { id: 'general' as const, label: '常规', description: '应用级的通用信息与偏好设置。', icon: Settings },
@@ -26,6 +27,7 @@ const primaryTabs = [
   { id: 'agents' as const, label: '智能体', description: '选择新建对话时默认预选的智能体。', icon: Bot },
   { id: 'mcp' as const, label: 'MCP', description: '管理 MCP 服务器，为智能体扩展工具与能力。', icon: Server },
   { id: 'skills' as const, label: 'Skills', description: '查看、卸载已安装的 skills，从各智能体工具导入。', icon: Puzzle },
+  { id: 'usage' as const, label: '使用统计', description: '查看会话活跃度、Token 用量与模型分布。', icon: BarChart3 },
   { id: 'archive' as const, label: '已归档对话', description: '查询、取消归档、删除归档会话。', icon: Archive },
 ];
 
@@ -102,6 +104,7 @@ export function SettingsView({ onBack }: SettingsViewProps) {
           {activeTab === 'agents' && <AgentSettingsPanel />}
           {activeTab === 'mcp' && <McpSettingsPanel />}
           {activeTab === 'skills' && <SkillsSettingsPanel />}
+          {activeTab === 'usage' && <UsageStatistics />}
           {activeTab === 'archive' && <ArchivedSessionsPanel />}
           {activeTab === 'environment' && <EnvironmentSettings />}
           {activeTab === 'logs' && <LogSettings />}

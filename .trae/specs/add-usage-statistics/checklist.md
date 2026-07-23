@@ -1,0 +1,29 @@
+- [x] `get_usage_heatmap` 函数从 sessions 表按 `DATE(created_at)` 聚合返回全年度每日会话数
+- [x] `get_usage_overview` 函数支持 agent_kind + days 参数过滤，返回会话数和活跃天数
+- [x] `get_agent_distribution` 函数支持 days 参数过滤，返回各 agent_kind 的会话数
+- [x] `get_model_distribution` 函数支持 agent_kind + days 参数过滤，返回各 model 的会话数
+- [x] `get_usage_stats` Tauri 命令一次性返回 heatmap + overview + agent_distribution + model_distribution
+- [x] `get_usage_token_breakdown` Tauri 命令异步批量解析 JSONL 文件，按天聚合 input/output/cached token
+- [x] Claude Code 解析: 遍历 assistant 事件提取 timestamp + message.usage 按天求和
+- [x] Codex 解析: 遍历 token_count 事件提取 timestamp + last_token_usage 差值计算增量按天求和
+- [x] OpenCode 解析: 遍历事件提取 timestamp + per-event usage 按天求和
+- [x] 无 JSONL 文件的会话被安全跳过不影响统计
+- [x] 两个新命令已在 `lib.rs` 的 `generate_handler!` 中注册
+- [x] `usageApi` 已在 `tauri.ts` 中导出，包含 `getStats` 和 `getTokenBreakdown` 方法
+- [x] TypeScript 类型定义完整（UsageStats / TokenBreakdown / DailyTokenBreakdown）
+- [x] 智能体下拉筛选（全部 / Claude Code / Codex / Gemini / OpenCode）正常工作
+- [x] 时间范围切换（7 天 / 30 天，默认 30 天）正常工作
+- [x] 概览卡片展示 Token 总用量、会话数量、活跃天数、缓存共享率
+- [x] 会话数和活跃天数即时显示，token 数据异步加载显示加载状态
+- [x] 缓存共享率 = cached_tokens / (input_tokens + cached_tokens) × 100%
+- [x] 热力图 53 列 × 7 行，颜色分 5 级，悬停 tooltip 显示日期 + 会话数
+- [x] 热力图全年度展示不受智能体/时间范围筛选影响
+- [x] 柱状图按天展示输入/输出/缓存三段堆叠，悬停 tooltip 显示明细
+- [x] 柱状图纯 CSS/SVG 实现无第三方图表库
+- [x] 模型统计列表按 token 降序排列，空 model 归入「未知模型」
+- [x] 切换智能体或时间范围时重新加载数据，token 区域重新显示加载状态
+- [x] 面板风格使用 FormSection 保持与其他设置面板一致
+- [x] `cargo fmt --check` 通过
+- [x] `cargo clippy -D warnings` 通过
+- [x] `cargo check --all-targets --all-features` 通过
+- [x] `npm run build` 通过

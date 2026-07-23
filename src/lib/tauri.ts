@@ -8,6 +8,7 @@ import type { AgentPermissionConfig, AgentPlanMode } from './agentPermissions';
 import type { Project } from '../types/project';
 import type { McpServer } from '../types/mcp';
 import type { ImportableSkill, Skill } from '../types/skill';
+import type { UsageStatsResponse, TokenBreakdownResponse } from '../types/usage';
 import { createLogger, serializeError } from './logger';
 
 const logger = createLogger('tauri');
@@ -432,4 +433,11 @@ export const appApi = {
   showMainWindow: (): Promise<void> => invokeLogged('show_main_window_command'),
   sendAgentNotification: (payload: { title: string; body: string; sessionId: string }): Promise<void> =>
     invokeLogged('send_agent_notification_command', payload),
+};
+
+export const usageApi = {
+  getStats: (agentKind?: string, days?: number): Promise<UsageStatsResponse> =>
+    invokeLogged('get_usage_stats', { agentKind: agentKind ?? null, days: days ?? null }),
+  getTokenBreakdown: (agentKind?: string, days?: number): Promise<TokenBreakdownResponse> =>
+    invokeLogged('get_usage_token_breakdown', { agentKind: agentKind ?? null, days: days ?? null }),
 };

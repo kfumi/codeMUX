@@ -647,10 +647,7 @@ fn json_to_toml_item(json_value: &Value) -> Result<Item, String> {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn merge_opencode_config(
-    existing: Value,
-    profile: &NativeProfileConfig,
-) -> Result<Value, String> {
+fn merge_opencode_config(existing: Value, profile: &NativeProfileConfig) -> Result<Value, String> {
     merge_opencode_config_with_model(existing, profile, None, None)
 }
 

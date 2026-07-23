@@ -19,14 +19,14 @@ use super::opencode_history;
 use super::{spawn_sidecar, SidecarHandle};
 use crate::agent_runtime::opencode::OpenCodeRuntime;
 
-fn home_dir() -> Result<PathBuf, String> {
+pub(crate) fn home_dir() -> Result<PathBuf, String> {
     std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .map(PathBuf::from)
         .map_err(|_| "Cannot determine home directory".to_string())
 }
 
-fn get_agent_session_id(
+pub(crate) fn get_agent_session_id(
     state: &crate::AppState,
     app_session_id: &str,
     agent_kind: AgentKind,
@@ -229,7 +229,10 @@ fn resolve_default_claude_runtime_config() -> ResolvedRuntimeConfig {
     }
 }
 
-fn find_claude_session_jsonl(claude_dir: &Path, claude_session_id: &str) -> Option<PathBuf> {
+pub(crate) fn find_claude_session_jsonl(
+    claude_dir: &Path,
+    claude_session_id: &str,
+) -> Option<PathBuf> {
     use std::fs;
 
     let projects_dir = claude_dir.join("projects");
@@ -728,7 +731,10 @@ fn collect_codex_jsonl_files(root: &Path, output: &mut Vec<PathBuf>) {
     }
 }
 
-fn find_codex_session_jsonl(sessions_dir: &Path, codex_session_id: &str) -> Option<PathBuf> {
+pub(crate) fn find_codex_session_jsonl(
+    sessions_dir: &Path,
+    codex_session_id: &str,
+) -> Option<PathBuf> {
     use std::fs;
 
     let mut candidates = Vec::new();
@@ -2460,10 +2466,15 @@ pub async fn rewind_agent_session(
     };
 
     let home = home_dir()?;
-    let (rewind_outcome, history_display): (RewindOutcome, String) = if agent_kind == AgentKind::Opencode {
+    let (rewind_outcome, history_display): (RewindOutcome, String) = if agent_kind
+        == AgentKind::Opencode
+    {
         let truncated_to_empty =
             opencode_history::rewind_opencode_session_to_latest_turn(&home, &agent_session_id)?;
-        (RewindOutcome { truncated_to_empty }, agent_session_id.clone())
+        (
+            RewindOutcome { truncated_to_empty },
+            agent_session_id.clone(),
+        )
     } else {
         let history_path = match agent_kind {
             AgentKind::ClaudeCode => {
@@ -2482,14 +2493,14 @@ pub async fn rewind_agent_session(
             )
         })?;
 
-        let outcome =
-            rewind_jsonl_before_target_turn(&history_path, agent_kind, target.clone())?;
+        let outcome = rewind_jsonl_before_target_turn(&history_path, agent_kind, target.clone())?;
 
         if agent_kind == AgentKind::Codex {
             let interactive_path = codex_interactive_events_dir(&home)
                 .join(format!("{}.jsonl", sanitize_file_segment(&app_session_id)));
             if interactive_path.exists() {
-                let _ = rewind_jsonl_before_target_turn(&interactive_path, agent_kind, target.clone());
+                let _ =
+                    rewind_jsonl_before_target_turn(&interactive_path, agent_kind, target.clone());
             }
         }
 

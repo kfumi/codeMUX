@@ -1,6 +1,6 @@
 import type { Theme } from '../types/provider';
 
-export type AccentKey = 'azure' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet';
+export type AccentKey = 'azure' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet' | 'graphite';
 export type FontSizeKey = 'compact' | 'standard' | 'comfortable';
 export type RadiusKey = 'sharp' | 'soft' | 'round';
 export type ContentWidthKey = 'fixed' | 'stream';
@@ -16,16 +16,19 @@ export interface AccentPreset {
   name: string;
   light: string;
   dark: string;
+  lightForeground: string;
+  darkForeground: string;
   swatch: string;
 }
 
 export const ACCENTS: Record<AccentKey, AccentPreset> = {
-  azure: { name: '天蓝', light: '217 42% 48%', dark: '198 42% 49%', swatch: 'hsl(217 42% 48%)' },
-  cyan: { name: '青碧', light: '192 75% 42%', dark: '187 70% 55%', swatch: 'hsl(192 75% 42%)' },
-  emerald: { name: '翠绿', light: '152 56% 40%', dark: '152 56% 50%', swatch: 'hsl(152 56% 40%)' },
-  amber: { name: '琥珀', light: '36 80% 42%', dark: '38 90% 58%', swatch: 'hsl(36 80% 42%)' },
-  rose: { name: '玫红', light: '346 70% 50%', dark: '346 70% 65%', swatch: 'hsl(346 70% 50%)' },
-  violet: { name: '紫罗兰', light: '262 55% 55%', dark: '262 60% 68%', swatch: 'hsl(262 55% 55%)' },
+  azure: { name: '天蓝', light: '217 42% 48%', dark: '198 42% 49%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(217 42% 48%)' },
+  cyan: { name: '青碧', light: '192 75% 42%', dark: '187 70% 55%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(192 75% 42%)' },
+  emerald: { name: '翠绿', light: '152 56% 40%', dark: '152 56% 50%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(152 56% 40%)' },
+  amber: { name: '琥珀', light: '36 80% 42%', dark: '38 90% 58%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(36 80% 42%)' },
+  rose: { name: '玫红', light: '346 70% 50%', dark: '346 70% 65%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(346 70% 50%)' },
+  violet: { name: '紫罗兰', light: '262 55% 55%', dark: '262 60% 68%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(262 55% 55%)' },
+  graphite: { name: '墨黑', light: '222 18% 10%', dark: '220 10% 88%', lightForeground: '210 24% 98%', darkForeground: '220 15% 9%', swatch: 'hsl(222 18% 10%)' },
 };
 
 export const FONT_SIZES: Record<FontSizeKey, string> = {
@@ -91,8 +94,10 @@ export function applyAppearance(prefs: AppearancePrefs, isDark: boolean): void {
   const root = document.documentElement;
   const accent = ACCENTS[prefs.accent];
   const accentColor = isDark ? accent.dark : accent.light;
+  const accentForeground = isDark ? accent.darkForeground : accent.lightForeground;
 
   root.style.setProperty('--primary', accentColor);
+  root.style.setProperty('--primary-foreground', accentForeground);
   root.style.setProperty('--ring', accentColor);
   root.style.setProperty('--glow', accentColor);
   root.style.setProperty('--radius', RADII[prefs.radius]);

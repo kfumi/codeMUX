@@ -381,12 +381,157 @@ pub fn update_session_permissions(
     Ok(())
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageHeatmapDay {
+    pub date: String,
+    pub count: i64,
+}
+
+pub fn get_usage_heatmap(conn: &Connection) -> Result<Vec<UsageHeatmapDay>> {
+    let mut stmt = conn.prepare(
+        "SELECT DATE(created_at) as date, COUNT(*) as count \
+         FROM sessions \
+         WHERE created_at >= date('now', '-365 days') \
+         GROUP BY DATE(created_at) \
+         ORDER BY date",
+    )?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(UsageHeatmapDay {
+                date: row.get(0)?,
+                count: row.get(1)?,
+            })
+        })?
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(rows)
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageOverview {
+    pub total_sessions: i64,
+    pub active_days: i64,
+}
+
+pub fn get_usage_overview(
+    conn: &Connection,
+    agent_kind: Option<&str>,
+    days: u32,
+) -> Result<UsageOverview> {
+    let days_modifier = format!("-{} days", days);
+
+    let (total_sessions, active_days) = if let Some(kind) = agent_kind {
+        conn.query_row(
+            "SELECT COUNT(*), COUNT(DISTINCT DATE(created_at)) \
+             FROM sessions \
+             WHERE created_at >= date('now', ?1) AND agent_kind = ?2",
+            params![days_modifier, kind],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?
+    } else {
+        conn.query_row(
+            "SELECT COUNT(*), COUNT(DISTINCT DATE(created_at)) \
+             FROM sessions \
+             WHERE created_at >= date('now', ?1)",
+            params![days_modifier],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?
+    };
+
+    Ok(UsageOverview {
+        total_sessions,
+        active_days,
+    })
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDistribution {
+    pub agent_kind: String,
+    pub count: i64,
+}
+
+pub fn get_agent_distribution(conn: &Connection, days: u32) -> Result<Vec<AgentDistribution>> {
+    let days_modifier = format!("-{} days", days);
+    let mut stmt = conn.prepare(
+        "SELECT agent_kind, COUNT(*) as count \
+         FROM sessions \
+         WHERE created_at >= date('now', ?1) \
+         GROUP BY agent_kind \
+         ORDER BY count DESC",
+    )?;
+
+    let rows = stmt
+        .query_map(params![days_modifier], |row| {
+            Ok(AgentDistribution {
+                agent_kind: row.get(0)?,
+                count: row.get(1)?,
+            })
+        })?
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(rows)
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelDistribution {
+    pub model: String,
+    pub session_count: i64,
+}
+
+pub fn get_model_distribution(
+    conn: &Connection,
+    agent_kind: Option<&str>,
+    days: u32,
+) -> Result<Vec<ModelDistribution>> {
+    let days_modifier = format!("-{} days", days);
+
+    let result = if let Some(kind) = agent_kind {
+        let mut stmt = conn.prepare(
+            "SELECT COALESCE(NULLIF(model, ''), '未知模型') as model, COUNT(*) as session_count \
+             FROM sessions \
+             WHERE created_at >= date('now', ?1) AND agent_kind = ?2 \
+             GROUP BY COALESCE(NULLIF(model, ''), '未知模型') \
+             ORDER BY session_count DESC",
+        )?;
+        let rows = stmt.query_map(params![days_modifier, kind], |row| {
+            Ok(ModelDistribution {
+                model: row.get(0)?,
+                session_count: row.get(1)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>>>()?
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT COALESCE(NULLIF(model, ''), '未知模型') as model, COUNT(*) as session_count \
+             FROM sessions \
+             WHERE created_at >= date('now', ?1) \
+             GROUP BY COALESCE(NULLIF(model, ''), '未知模型') \
+             ORDER BY session_count DESC",
+        )?;
+        let rows = stmt.query_map(params![days_modifier], |row| {
+            Ok(ModelDistribution {
+                model: row.get(0)?,
+                session_count: row.get(1)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>>>()?
+    };
+
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        archive_session, delete_agent_session_mapping, get_agent_session_mapping,
-        get_all_archived_sessions, get_all_sessions, set_session_pinned, unarchive_session,
-        update_session_provider, upsert_agent_session_mapping,
+        archive_session, delete_agent_session_mapping, get_agent_distribution,
+        get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
+        get_model_distribution, get_usage_heatmap, get_usage_overview, set_session_pinned,
+        unarchive_session, update_session_provider, upsert_agent_session_mapping,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -686,5 +831,161 @@ mod tests {
         assert_eq!(active[0].id, "session-archived");
         assert!(!active[0].is_archived);
         assert!(archived.is_empty());
+    }
+
+    fn insert_session_at(conn: &Connection, id: &str, agent_kind: &str, created_at: &str) {
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![id, "Test", agent_kind, "agent", created_at, created_at],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn aggregates_usage_heatmap_by_day() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+
+        let now = chrono::Utc::now();
+        let today = now.format("%Y-%m-%dT00:00:00Z").to_string();
+        let yesterday = (now - chrono::Duration::days(1))
+            .format("%Y-%m-%dT00:00:00Z")
+            .to_string();
+
+        insert_session_at(&conn, "session-1", "claude_code", &today);
+        insert_session_at(&conn, "session-2", "codex", &today);
+        insert_session_at(&conn, "session-3", "claude_code", &yesterday);
+
+        let heatmap = get_usage_heatmap(&conn).unwrap();
+
+        let today_date = now.format("%Y-%m-%d").to_string();
+        let yesterday_date = (now - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+
+        let today_entry = heatmap
+            .iter()
+            .find(|day| day.date == today_date)
+            .expect("today should be in heatmap");
+        assert_eq!(today_entry.count, 2);
+
+        let yesterday_entry = heatmap
+            .iter()
+            .find(|day| day.date == yesterday_date)
+            .expect("yesterday should be in heatmap");
+        assert_eq!(yesterday_entry.count, 1);
+    }
+
+    #[test]
+    fn gets_usage_overview_with_and_without_agent_kind_filter() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+
+        let now = chrono::Utc::now();
+        let today = now.format("%Y-%m-%dT00:00:00Z").to_string();
+        let yesterday = (now - chrono::Duration::days(1))
+            .format("%Y-%m-%dT00:00:00Z")
+            .to_string();
+
+        insert_session_at(&conn, "session-1", "claude_code", &today);
+        insert_session_at(&conn, "session-2", "codex", &today);
+        insert_session_at(&conn, "session-3", "claude_code", &yesterday);
+
+        let all_overview = get_usage_overview(&conn, None, 30).unwrap();
+        assert_eq!(all_overview.total_sessions, 3);
+        assert_eq!(all_overview.active_days, 2);
+
+        let claude_overview = get_usage_overview(&conn, Some("claude_code"), 30).unwrap();
+        assert_eq!(claude_overview.total_sessions, 2);
+        assert_eq!(claude_overview.active_days, 2);
+
+        let codex_overview = get_usage_overview(&conn, Some("codex"), 30).unwrap();
+        assert_eq!(codex_overview.total_sessions, 1);
+        assert_eq!(codex_overview.active_days, 1);
+    }
+
+    #[test]
+    fn gets_agent_distribution_within_days_window() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+
+        let now = chrono::Utc::now();
+        let today = now.format("%Y-%m-%dT00:00:00Z").to_string();
+        let old = (now - chrono::Duration::days(60))
+            .format("%Y-%m-%dT00:00:00Z")
+            .to_string();
+
+        insert_session_at(&conn, "session-1", "claude_code", &today);
+        insert_session_at(&conn, "session-2", "claude_code", &today);
+        insert_session_at(&conn, "session-3", "codex", &today);
+        insert_session_at(&conn, "session-old", "codex", &old);
+
+        let dist = get_agent_distribution(&conn, 30).unwrap();
+        assert_eq!(dist.len(), 2);
+
+        let claude = dist
+            .iter()
+            .find(|d| d.agent_kind == "claude_code")
+            .expect("claude_code should be present");
+        assert_eq!(claude.count, 2);
+
+        let codex = dist
+            .iter()
+            .find(|d| d.agent_kind == "codex")
+            .expect("codex should be present");
+        assert_eq!(codex.count, 1);
+    }
+
+    #[test]
+    fn gets_model_distribution_with_unknown_group_and_agent_filter() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+
+        let now = chrono::Utc::now();
+        let today = now.format("%Y-%m-%dT00:00:00Z").to_string();
+
+        // session with model
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, model, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            rusqlite::params![
+                "session-1",
+                "A",
+                "claude_code",
+                "agent",
+                "claude-sonnet-4",
+                &today
+            ],
+        )
+        .unwrap();
+        // session without model (NULL)
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-2", "B", "claude_code", "agent", &today, &today],
+        )
+        .unwrap();
+        // session with empty model string
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, model, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            rusqlite::params!["session-3", "C", "codex", "agent", "", &today],
+        )
+        .unwrap();
+
+        let all = get_model_distribution(&conn, None, 30).unwrap();
+        let unknown = all
+            .iter()
+            .find(|d| d.model == "未知模型")
+            .expect("unknown model group should exist");
+        assert_eq!(unknown.session_count, 2);
+
+        let claude_only = get_model_distribution(&conn, Some("claude_code"), 30).unwrap();
+        let claude_unknown = claude_only
+            .iter()
+            .find(|d| d.model == "未知模型")
+            .expect("unknown model group should exist for claude_code");
+        assert_eq!(claude_unknown.session_count, 1);
     }
 }
