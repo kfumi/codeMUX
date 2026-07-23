@@ -77,6 +77,7 @@ export function PerfOverlay() {
         last = now;
         const mem = (performance as unknown as { memory?: { usedJSHeapSize?: number } }).memory;
         setMemoryMb(mem?.usedJSHeapSize ? mem.usedJSHeapSize / 1048576 : null);
+        usePerfStore.getState().pruneIpc();
       }
       raf = requestAnimationFrame(tick);
     };

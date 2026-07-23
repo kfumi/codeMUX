@@ -39,6 +39,7 @@ interface PerfState {
   slowThresholdMs: number;
 
   recordIpc: (command: string, durationMs: number, failed: boolean) => void;
+  pruneIpc: () => void;
   recordRender: (id: string, actualDurationMs: number, baseDurationMs: number) => void;
   setFps: (fps: number) => void;
   setMemoryMb: (mb: number | null) => void;
@@ -87,6 +88,20 @@ export const usePerfStore = create<PerfState>((set, get) => ({
     }
 
     set({ slowIpcSamples: nextSlow, ipcTimestamps: nextTimestamps });
+  },
+
+  pruneIpc: () => {
+    const now = Date.now();
+    const state = get();
+    const next = [...state.ipcTimestamps];
+    let changed = false;
+    while (next.length > 0 && now - next[0] > IPC_RATE_WINDOW_MS) {
+      next.shift();
+      changed = true;
+    }
+    if (changed) {
+      set({ ipcTimestamps: next });
+    }
   },
 
   recordRender: (id, actualDurationMs, baseDurationMs) => {
