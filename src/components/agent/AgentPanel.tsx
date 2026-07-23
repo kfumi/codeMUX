@@ -34,7 +34,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { startQuery, interrupt, loadSessionMessages, clearEvents, respondToPermission } = useAgentStore();
   const pendingPermission = useAgentStore((state) => state.pendingPermissions[sessionId] ?? null);
   const { config, getActiveProvider, setActiveAgentProfileModel } = useSettingsStore();
-  const { loadFileTree, setProjectPath } = usePreviewStore();
+  const { setProjectPath } = usePreviewStore();
 
   // 检测容器宽度，窄屏时启用紧凑模式
   const containerRef = useRef<HTMLDivElement>(null);
@@ -132,12 +132,11 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   useEffect(() => {
     if (project?.path) {
       setProjectPath(project.path);
-      loadFileTree(project.path);
     } else {
       setProjectPath(null);
       usePreviewStore.setState({ treeRoot: null, treeRootPath: null });
     }
-  }, [project?.path, setProjectPath, loadFileTree]);
+  }, [project?.path, setProjectPath]);
 
   useEffect(() => {
     if (project?.path) {

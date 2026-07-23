@@ -2217,7 +2217,6 @@ pub async fn ensure_agent_session(
 
     ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
 
-    // Get stderr Arc before sending command (for proxy port parsing)
     let stderr_lines = {
         let sidecars = agent_state.sidecars.lock().await;
         sidecars.get(&session_id).map(|h| h.stderr_lines.clone())
@@ -2238,12 +2237,9 @@ pub async fn ensure_agent_session(
         runtime_generation,
     )?;
 
-    // If the proxy is already running (e.g. started manually from settings),
-    // tell the sidecar to use it directly instead of starting a new one.
     send_command_to_session(&agent_state, &session_id, cmd).await?;
     info!(target: "agent", "Agent ensure command sent for session_id={} agent_kind={}", session_id, agent_kind);
 
-    // Parse proxy port from stderr if proxy was auto-started
     if agent_kind == "codex" && agent_state.proxy_port.lock().await.is_none() {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         if let Some(lines) = stderr_lines {

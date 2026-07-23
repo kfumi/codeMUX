@@ -16,6 +16,7 @@ CodeMUX is a Tauri 2 desktop app: React/Vite frontend, Rust backend, and TypeScr
 - `cd src-tauri/sidecar && npm ci` installs sidecar dependencies.
 - `npm run dev` starts the Vite frontend on port 1420.
 - `npm run tauri dev` runs the desktop app in development mode.
+- `$env:RUSTFLAGS="--cfg tokio_unstable"; npm run tauri dev -- --features tokio-console` runs with tokio-console tracing (requires the `.cargo/config.toml` in `src-tauri/` to also set `rustflags = ["--cfg", "tokio_unstable"]`;`.cargo/config.toml` is already committed, so the RUSTFLAGS env var is only needed as a fallback if that file doesn't apply).
 - `npm run build` type-checks `src/` and builds the Vite app.
 - `cd src-tauri/sidecar && npm run build` compiles sidecar TypeScript.
 - `cd src-tauri && cargo fmt --all -- --check` verifies Rust formatting.

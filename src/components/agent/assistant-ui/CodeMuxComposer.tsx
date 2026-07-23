@@ -259,6 +259,14 @@ export function CodeMuxComposer({
     setHighlightedIndex(0);
   }, [activeChar, activeQuery, menuItems.length]);
 
+  const fileTreeLoading = usePreviewStore((s) => s.fileTreeLoading);
+  const loadFileTree = usePreviewStore((s) => s.loadFileTree);
+  useEffect(() => {
+    if (activeChar === '@' && projectPath && treeRoot === null && !fileTreeLoading) {
+      loadFileTree(projectPath);
+    }
+  }, [activeChar, projectPath, treeRoot, fileTreeLoading, loadFileTree]);
+
   useEffect(() => {
     if (!menuVisible) {
       return;

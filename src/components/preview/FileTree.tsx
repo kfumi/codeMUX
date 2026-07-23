@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { ChevronRight, ChevronDown, Folder, FolderOpen, FileCode } from 'lucide-react';
 import { usePreviewStore, type FileTreeNodeData } from '../../stores/previewStore';
+import { Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 function TreeNode({ node, onFileClick, level = 0 }: { node: FileTreeNodeData; onFileClick: (path: string) => void; level: number }) {
@@ -58,6 +59,7 @@ function TreeNode({ node, onFileClick, level = 0 }: { node: FileTreeNodeData; on
 
 export function FileTree() {
   const treeRoot = usePreviewStore((s) => s.treeRoot);
+  const fileTreeLoading = usePreviewStore((s) => s.fileTreeLoading);
   const openFile = usePreviewStore((s) => s.openFile);
 
   const handleFileClick = useCallback(
@@ -66,6 +68,15 @@ export function FileTree() {
     },
     [openFile]
   );
+
+  if (fileTreeLoading) {
+    return (
+      <div className="flex items-center justify-center h-full text-muted-foreground/40 text-xs p-4 text-center gap-1.5">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        加载中
+      </div>
+    );
+  }
 
   if (!treeRoot || treeRoot.length === 0) {
     return (

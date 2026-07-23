@@ -101,16 +101,18 @@ export function extractOpenCodeUsageUpdate(event: unknown): OpenCodeUsageUpdate 
   const cache = asRecord(tokens.cache);
   const input = readNumber(tokens.input);
   const output = readNumber(tokens.output);
+  const total = readNumber(tokens.total);
   const reasoning = readNumber(tokens.reasoning);
   const cacheRead = readNumber(cache?.read);
   const cacheWrite = readNumber(cache?.write);
-  if (input === undefined && output === undefined && reasoning === undefined && cacheRead === undefined && cacheWrite === undefined) return undefined;
+  if (input === undefined && output === undefined && reasoning === undefined && cacheRead === undefined && cacheWrite === undefined && total === undefined) return undefined;
   // SDK message.updated info.tokens are cumulative snapshots; step-finish part.tokens are per-step deltas.
   return {
     mode: partTokens ? 'step' : 'snapshot',
     usage: {
       input_tokens: input ?? 0,
       output_tokens: output ?? 0,
+      ...(total !== undefined ? { total_tokens: total } : {}),
       ...(reasoning !== undefined ? { reasoning_output_tokens: reasoning } : {}),
       ...(cacheRead !== undefined ? { cached_input_tokens: cacheRead } : {}),
       ...(cacheWrite !== undefined ? { cache_write_input_tokens: cacheWrite } : {}),
@@ -128,11 +130,12 @@ export function mergeOpenCodeUsage(previous: OpenCodeTokenUsage, next: OpenCodeT
     input_tokens: mergeValue(previous.input_tokens, next.input_tokens),
     output_tokens: mergeValue(previous.output_tokens, next.output_tokens),
   };
-  const optionalKeys: Array<keyof Pick<OpenCodeTokenUsage, 'cached_input_tokens' | 'cache_write_input_tokens' | 'cache_creation_input_tokens' | 'reasoning_output_tokens'>> = [
+  const optionalKeys: Array<keyof Pick<OpenCodeTokenUsage, 'cached_input_tokens' | 'cache_write_input_tokens' | 'cache_creation_input_tokens' | 'reasoning_output_tokens' | 'total_tokens'>> = [
     'cached_input_tokens',
     'cache_write_input_tokens',
     'cache_creation_input_tokens',
     'reasoning_output_tokens',
+    'total_tokens',
   ];
   for (const key of optionalKeys) {
     const value = next[key];

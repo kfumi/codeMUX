@@ -134,6 +134,9 @@ vi.mock('../../../lib/tauri', () => ({
   sessionApi: {
     updatePermissions: updatePermissionsMock,
   },
+  fileApi: {
+    listDirectory: vi.fn().mockResolvedValue([]),
+  },
 }));
 
 const pendingQuestionEvents: AgentMessage[] = [

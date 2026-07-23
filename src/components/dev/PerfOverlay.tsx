@@ -1,8 +1,9 @@
 import { Gauge } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
 import { usePerfStore } from '../../stores/perfStore';
 import './PerfOverlay.css';
 
@@ -48,7 +49,11 @@ export function PerfOverlay() {
   const memoryMb = usePerfStore((s) => s.memoryMb);
   const ipcRate = usePerfStore((s) => s.ipcTimestamps.length);
   const slowIpc = usePerfStore((s) => s.slowIpcSamples);
-  const topRenders = usePerfStore((s) => s.getTopRenders(5));
+  const renderAggregates = usePerfStore((s) => s.renderAggregates);
+  const topRenders = useMemo(
+    () => Object.values(renderAggregates).sort((a, b) => b.commitCount - a.commitCount).slice(0, 5),
+    [renderAggregates],
+  );
   const slowThresholdMs = usePerfStore((s) => s.slowThresholdMs);
 
   useEffect(() => {
@@ -95,6 +100,7 @@ export function PerfOverlay() {
   }, []);
 
   const onPointerDown = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest('button, select')) return;
     const el = e.currentTarget as HTMLElement;
     const rect = el.getBoundingClientRect();
     dragging.current = { offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top };
@@ -127,12 +133,12 @@ export function PerfOverlay() {
       const info = await invoke<{ enabled: boolean; addr: string }>('get_tokio_console_info');
       if (info.enabled) {
         await navigator.clipboard.writeText(info.addr);
-        console.info(`[PerfOverlay] tokio-console enabled at ${info.addr} (已复制到剪贴板)`);
+        toast.success(`已复制 tokio-console gRPC 地址：${info.addr}（浏览器打不开，请在终端运行 \`tokio-console\`）`);
       } else {
-        console.info('[PerfOverlay] tokio-console 未启用。请用 `npm run tauri dev -- --features tokio-console` 启动');
+        toast.info('tokio-console 未启用，请运行: $env:RUSTFLAGS="--cfg tokio_unstable"; npm run tauri dev -- --features tokio-console');
       }
-    } catch (error) {
-      console.warn('[PerfOverlay] get_tokio_console_info failed:', error);
+    } catch {
+      toast.error('获取 tokio-console 信息失败');
     }
   }, []);
 
@@ -143,11 +149,14 @@ export function PerfOverlay() {
         defaultPath: `codemux-perf-${Date.now()}.json`,
         filters: [{ name: 'JSON', extensions: ['json'] }],
       });
-      if (!filePath) return;
+      if (!filePath) {
+        toast.info('已取消');
+        return;
+      }
       await invoke('export_perf_snapshot', { path: filePath, content: JSON.stringify(snap, null, 2) });
-      console.info(`[PerfOverlay] snapshot exported to ${filePath}`);
-    } catch (error) {
-      console.warn('[PerfOverlay] export failed:', error);
+      toast.success('快照已保存');
+    } catch {
+      toast.error('保存失败');
     }
   }, []);
 
@@ -157,13 +166,7 @@ export function PerfOverlay() {
 
   if (pos.collapsed) {
     return (
-      <div
-        className={`perf-overlay is-${isLight ? 'light' : 'dark'}`}
-        style={style}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-      >
+      <div className={`perf-overlay is-${isLight ? 'light' : 'dark'}`} style={style}>
         <button className="perf-overlay__collapsed" onClick={toggleCollapsed}>
           <Gauge size={12} /> Perf
         </button>
@@ -174,14 +177,8 @@ export function PerfOverlay() {
   const slowTop5 = [...slowIpc].sort((a, b) => b.durationMs - a.durationMs).slice(0, 5);
 
   return (
-    <div
-      className={`perf-overlay is-${isLight ? 'light' : 'dark'}`}
-      style={style}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-    >
-      <div className="perf-overlay__header">
+    <div className={`perf-overlay is-${isLight ? 'light' : 'dark'}`} style={style}>
+      <div className="perf-overlay__header" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
         <span>Performance</span>
         <button className="perf-overlay__toggle" onClick={toggleCollapsed} title="折叠">–</button>
       </div>

@@ -82,7 +82,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const projects = useProjectStore((state) => state.projects);
   const config = useSettingsStore((s) => s.config);
   const getActiveProvider = useSettingsStore((s) => s.getActiveProvider);
-  const { loadFileTree, setProjectPath } = usePreviewStore();
+  const { setProjectPath } = usePreviewStore();
   const clearEvents = useAgentStore((state) => state.clearEvents);
 
   const selectedAgent = getAgentDefinition(selectedAgentKind);
@@ -134,12 +134,11 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   useEffect(() => {
     if (draftProject?.path) {
       setProjectPath(draftProject.path);
-      loadFileTree(draftProject.path);
     } else {
       setProjectPath(null);
       usePreviewStore.setState({ treeRoot: null, treeRootPath: null });
     }
-  }, [draftProject?.path, loadFileTree, setProjectPath]);
+  }, [draftProject?.path, setProjectPath]);
 
   useEffect(() => {
     const configured = selectedAgentKind === 'codex'

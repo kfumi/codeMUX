@@ -16,7 +16,7 @@ pub fn get_tokio_console_info() -> TokioConsoleInfo {
     {
         TokioConsoleInfo {
             enabled: true,
-            addr: "127.0.0.1:6669".to_string(),
+            addr: "127.0.0.1:6670".to_string(),
         }
     }
     #[cfg(not(feature = "tokio-console"))]
@@ -40,10 +40,13 @@ pub fn export_perf_snapshot(path: String, content: String) -> Result<(), String>
 }
 
 /// 条件初始化 tracing subscriber。无 feature 时为空操作。
+/// 必须在 tauri::Builder::default() 之前调用，避免 subscriber/logger 冲突。
 pub fn init_tracing() {
     #[cfg(feature = "tokio-console")]
     {
+        std::env::set_var("TOKIO_CONSOLE_BIND", "127.0.0.1:6670");
         console_subscriber::init();
+        let _ = tracing_log::LogTracer::init();
     }
     #[cfg(all(feature = "cmd-tracing", not(feature = "tokio-console")))]
     {

@@ -42,6 +42,7 @@ interface PreviewState {
   // 文件树
   treeRoot: FileTreeNodeData[] | null;
   treeRootPath: string | null;
+  fileTreeLoading: boolean;
 
   // 项目路径
   projectPath: string | null;
@@ -108,6 +109,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
 
   treeRoot: null,
   treeRootPath: null,
+  fileTreeLoading: false,
 
   projectPath: null,
 
@@ -308,12 +310,13 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
   setViewMode: (mode: 'diff' | 'file') => set({ viewMode: mode }),
 
   loadFileTree: async (rootPath: string) => {
+    set({ fileTreeLoading: true });
     try {
-      const nodes = await fileApi.listDirectory(rootPath, 5, rootPath);
-      set({ treeRoot: convertTree(nodes), treeRootPath: rootPath });
+      const nodes = await fileApi.listDirectory(rootPath, 3, rootPath);
+      set({ treeRoot: convertTree(nodes), treeRootPath: rootPath, fileTreeLoading: false });
     } catch (error) {
       logger.error('Failed to load file tree', { rootPath }, serializeError(error));
-      set({ treeRoot: null });
+      set({ treeRoot: null, fileTreeLoading: false });
     }
   },
 
@@ -327,5 +330,6 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
       viewMode: 'file',
       treeRoot: null,
       treeRootPath: null,
+      fileTreeLoading: false,
     }),
 }));

@@ -28,6 +28,7 @@ export type ClaudeTokenUsage = {
 export type OpenCodeTokenUsage = {
   input_tokens: number;
   output_tokens: number;
+  total_tokens?: number;
   cached_input_tokens?: number;
   cache_write_input_tokens?: number;
   cache_creation_input_tokens?: number;
@@ -107,7 +108,7 @@ export function buildOpenCodeResultEvent({
         ? { cache_creation_input_tokens: usage.cache_creation_input_tokens }
         : {}),
       ...(reasoningOutputTokens !== undefined ? { reasoning_output_tokens: reasoningOutputTokens } : {}),
-      total_tokens: usage.input_tokens + usage.output_tokens,
+      total_tokens: usage.total_tokens ?? (usage.input_tokens + usage.output_tokens),
     },
   };
 }

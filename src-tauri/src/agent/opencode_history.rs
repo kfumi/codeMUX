@@ -669,6 +669,10 @@ fn build_opencode_success_result_event(
         .and_then(|tokens| tokens.get("output"))
         .and_then(Value::as_i64)
         .unwrap_or(0);
+    let total_tokens_from_api = tokens
+        .and_then(|tokens| tokens.get("total"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     let reasoning_output_tokens = tokens
         .and_then(|tokens| tokens.get("reasoning"))
         .and_then(Value::as_i64)
@@ -683,6 +687,11 @@ fn build_opencode_success_result_event(
         .and_then(|cache| cache.get("write"))
         .and_then(Value::as_i64)
         .unwrap_or(0);
+    let total_tokens = if total_tokens_from_api > 0 {
+        total_tokens_from_api
+    } else {
+        input_tokens.saturating_add(output_tokens)
+    };
 
     let duration_ms = (time_updated - time_created).max(0);
     let mut result = serde_json::json!({
@@ -706,7 +715,7 @@ fn build_opencode_success_result_event(
             "output_tokens": output_tokens,
             "cached_input_tokens": cached_input_tokens,
             "cache_write_input_tokens": cache_write_input_tokens,
-            "total_tokens": input_tokens.saturating_add(output_tokens),
+            "total_tokens": total_tokens,
         },
         "timestamp": timestamp_string(time_updated),
     });
@@ -754,6 +763,7 @@ fn load_latest_opencode_token_usage_from_connection(
 
         let input_tokens = read_u64_value(tokens.get("input"));
         let output_tokens = read_u64_value(tokens.get("output"));
+        let total_tokens_from_api = read_u64_value(tokens.get("total"));
         let cached_input_tokens =
             read_u64_value(tokens.get("cache").and_then(|cache| cache.get("read")));
         let cache_write_input_tokens =
@@ -764,12 +774,19 @@ fn load_latest_opencode_token_usage_from_connection(
             && cached_input_tokens == 0
             && cache_write_input_tokens == 0
             && reasoning_output_tokens == 0
+            && total_tokens_from_api == 0
         {
             continue;
         }
 
+        let total_tokens = if total_tokens_from_api > 0 {
+            total_tokens_from_api
+        } else {
+            input_tokens.saturating_add(output_tokens)
+        };
+
         let breakdown = TokenUsageBreakdown {
-            total_tokens: input_tokens.saturating_add(output_tokens),
+            total_tokens,
             input_tokens,
             cached_input_tokens,
             output_tokens,

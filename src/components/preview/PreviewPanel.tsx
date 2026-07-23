@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { FileCode, GitCompare, Loader2, PanelLeft, X } from 'lucide-react';
 
 import { usePreviewStore } from '../../stores/previewStore';
@@ -12,7 +12,7 @@ export function PreviewPanel() {
   const {
     isOpen, panelWidth, showFileTree, fileTreeWidth, diffFiles, activeDiffPath, openFiles, activeFilePath, viewMode, isResizing,
     togglePanel, setActiveFile, setViewMode, closeFile, closeOtherFiles, closeAllFiles,
-    toggleFileTree, setFileTreeWidth,
+    toggleFileTree, setFileTreeWidth, projectPath, treeRoot, fileTreeLoading, loadFileTree,
   } = usePreviewStore();
 
   // 根据 viewMode 决定显示哪个 tab 列表和活动文件
@@ -49,6 +49,12 @@ export function PreviewPanel() {
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   }, [fileTreeWidth, setFileTreeWidth]);
+
+  useEffect(() => {
+    if (showFileTree && projectPath && !treeRoot && !fileTreeLoading) {
+      loadFileTree(projectPath);
+    }
+  }, [showFileTree, projectPath, treeRoot, fileTreeLoading, loadFileTree]);
 
   return (
     <div

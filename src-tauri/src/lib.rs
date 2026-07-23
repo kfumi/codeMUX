@@ -349,6 +349,8 @@ fn handle_global_window_event<R: tauri::Runtime>(window: &Window<R>, event: &Win
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    commands::perf::init_tracing();
+
     let mut builder = tauri::Builder::default();
 
     #[cfg(desktop)]
@@ -363,21 +365,25 @@ pub fn run() {
     builder
         .on_window_event(handle_global_window_event)
         .plugin(
-            tauri_plugin_log::Builder::new()
-                .clear_targets()
-                .targets([
-                    Target::new(TargetKind::Stdout),
-                    Target::new(TargetKind::LogDir {
-                        file_name: Some("codemux".into()),
-                    }),
-                    Target::new(TargetKind::Webview),
-                ])
-                .level(log::LevelFilter::Debug)
-                .level_for("codemux_lib", log::LevelFilter::Debug)
-                .rotation_strategy(RotationStrategy::KeepSome(10))
-                .max_file_size(1_048_576)
-                .timezone_strategy(TimezoneStrategy::UseLocal)
-                .build(),
+            {
+                let log_builder = tauri_plugin_log::Builder::new()
+                    .clear_targets()
+                    .targets([
+                        Target::new(TargetKind::Stdout),
+                        Target::new(TargetKind::LogDir {
+                            file_name: Some("codemux".into()),
+                        }),
+                        Target::new(TargetKind::Webview),
+                    ])
+                    .level(log::LevelFilter::Debug)
+                    .level_for("codemux_lib", log::LevelFilter::Debug)
+                    .rotation_strategy(RotationStrategy::KeepSome(10))
+                    .max_file_size(1_048_576)
+                    .timezone_strategy(TimezoneStrategy::UseLocal);
+                #[cfg(feature = "tokio-console")]
+                let log_builder = log_builder.skip_logger();
+                log_builder.build()
+            },
         )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -404,8 +410,6 @@ pub fn run() {
 
             #[cfg(windows)]
             refresh_windows_shell_icon_cache();
-
-            commands::perf::init_tracing();
 
             let conn = db::initialize(app.handle()).expect("Failed to initialize database");
             let config = config::load_config(app.handle());
