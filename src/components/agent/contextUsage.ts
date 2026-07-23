@@ -166,12 +166,14 @@ function getSessionContextLimit({
   activeProviderUsesLargeContext: boolean;
   modelContextWindow?: number;
 }) {
-  if (modelContextWindow && modelContextWindow > 0) {
-    return modelContextWindow;
+  if (typeof model === 'string' && model.trim().length > 0) {
+    if (model.toLowerCase().includes(LARGE_CONTEXT_MODEL_SUFFIX)) {
+      return LARGE_CONTEXT_TOKENS;
+    }
   }
 
-  if (typeof model === 'string' && model.trim().length > 0) {
-    return model.includes(LARGE_CONTEXT_MODEL_SUFFIX) ? LARGE_CONTEXT_TOKENS : DEFAULT_CONTEXT_TOKENS;
+  if (modelContextWindow && modelContextWindow > 0) {
+    return modelContextWindow;
   }
 
   if (sessionProviderUsesLargeContext) {

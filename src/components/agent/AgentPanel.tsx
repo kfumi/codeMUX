@@ -20,7 +20,7 @@ import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistant
 import { CodeMuxThread } from './assistant-ui/CodeMuxThread';
 import { AgentPermissionSelector } from './AgentPermissionSelector';
 import { AgentModelSelector } from './AgentModelSelector';
-import { formatModelDisplayName } from './modelDisplay';
+import { checkProfileModelSupports1m, formatModelDisplayName } from './modelDisplay';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface AgentPanelProps {
@@ -72,27 +72,31 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   );
   const runtimeProfile = sessionProfile ?? activeProfile;
   const runtimeProvider = useMemo(() => runtimeProfile ? profileToSelectorProvider(runtimeProfile) : null, [runtimeProfile]);
-  const model = session?.model || runtimeProfile?.default_model.trim() || getProfilePrimaryModel(runtimeProfile) || activeProfile?.models[0]?.id.trim() || '';
-  const [selectorModelState, setSelectorModelState] = useState(() => session?.model?.trim() || activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '');
+  const stripSuffix = (s: string) => s.replace(/\[1m\]/gi, '').trim();
+  const model = stripSuffix(session?.model ?? '') || runtimeProfile?.default_model.trim() || getProfilePrimaryModel(runtimeProfile) || activeProfile?.models[0]?.id.trim() || '';
+  const [selectorModelState, setSelectorModelState] = useState(() => stripSuffix(session?.model ?? '') || activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '');
   const prevSessionIdRef = useRef<string | null>(null);
   const userModifiedRef = useRef(false);
   useEffect(() => {
     if (prevSessionIdRef.current !== sessionId) {
       prevSessionIdRef.current = sessionId;
       userModifiedRef.current = false;
-      setSelectorModelState(session?.model?.trim() || activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '');
+      setSelectorModelState(stripSuffix(session?.model ?? '') || activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '');
     } else if (!userModifiedRef.current) {
-      const next = session?.model?.trim() || activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '';
+      const next = stripSuffix(session?.model ?? '') || activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '';
       if (next) {
         setSelectorModelState(next);
       }
     }
   }, [sessionId, session?.model, activeProfile]);
+  const modelSupports1m = useCallback((modelId: string) => {
+    return checkProfileModelSupports1m(runtimeProfile, modelId);
+  }, [runtimeProfile]);
   const formatSelectedProviderModel = useCallback((item: string) => formatModelDisplayName({
     model: item,
     agentKind,
-    usesLargeContext: runtimeProvider?.context_1m,
-  }), [agentKind, runtimeProvider?.context_1m]);
+    usesLargeContext: runtimeProvider?.context_1m || modelSupports1m(item),
+  }), [agentKind, runtimeProvider?.context_1m, modelSupports1m]);
   const modelNameWithSuffix = useMemo(() => model ? formatSelectedProviderModel(model) : undefined, [model, formatSelectedProviderModel]);
   const usesClaudeDefault = agentKind === 'claude_code' && !runtimeProfile && !activeProfileId;
   const usesOpenCodeFree = agentKind === 'opencode' && !runtimeProfile && !activeProfileId;
@@ -199,20 +203,23 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
     userModifiedRef.current = true;
     setSelectorModelState(nextModel);
-    updateSessionModel(sessionId, nextModel);
+    const suffixedModel = (runtimeProvider?.context_1m || modelSupports1m(nextModel))
+      ? `${nextModel}[1m]`
+      : nextModel;
+    updateSessionModel(sessionId, suffixedModel);
     try {
       const isProfileModel = Boolean(activeProfile?.models.some((m) => m.id.trim() === nextModel));
       if (isProfileModel) {
         await setActiveAgentProfileModel(agentKind, nextModel);
       }
-      await sessionApi.updateProvider(sessionId, isProfileModel ? (activeProfile?.id ?? null) : null, nextModel);
+      await sessionApi.updateProvider(sessionId, isProfileModel ? (activeProfile?.id ?? null) : null, suffixedModel);
     } catch (error) {
       console.warn('[AgentPanel] handleModelChange failed:', error);
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
       }));
     }
-  }, [activeProfile, agentKind, isProfileAgent, sessionId, selectorModelState, setActiveAgentProfileModel, updateSessionModel]);
+  }, [activeProfile, agentKind, isProfileAgent, modelSupports1m, sessionId, selectorModelState, runtimeProvider?.context_1m, setActiveAgentProfileModel, updateSessionModel]);
 
   const handleReasoningEffortChange = useCallback(async (nextEffort: ReasoningEffort) => {
     const latestSession = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
