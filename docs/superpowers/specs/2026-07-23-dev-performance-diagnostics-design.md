@@ -233,7 +233,7 @@ src-tauri/src/commands/mod.rs                   # 声明 perf 子模块
 1. `npm run tauri dev` 启动后，右上角出现性能浮层，FPS/内存/IPC 数实时刷新
 2. 触发一次流式对话，浮层能看到 IPC 数飙升 + re-render Top-N 命中消息组件
 3. `Ctrl+Shift+D` 能隐藏/显示浮层
-4. `npm run build`（release）构建产物中不含 perfStore / PerfOverlay 代码（通过 bundle 分析确认 dead-code 已移除）
+4. `npm run build`（release）构建产物中不含 PerfOverlay UI 代码（已验证完全移除）。所有 instrumentation 调用（recordIpc/recordRender 调用）经 `if (import.meta.env.DEV)` dead-code 消除，release 运行时零 instrumentation 开销。**已知接受偏差**：perfStore 模块定义（~1-2KB，Zustand `create()` 副作用阻止 tree-shake）残留在 release bundle，但除启动时一次微秒级 store 初始化外无任何运行时开销。经用户确认接受此 tradeoff。
 5. `npx vitest run` 全绿；`cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings` 无警告
 6. `cargo build` 不带新 feature 时与改动前行为完全一致
 
