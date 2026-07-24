@@ -45,6 +45,58 @@ describe('OpenCode event normalization', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'result', subtype: 'success', is_error: false, agent_id: 'agent-1', session_id: 'codemux-session-1', agent_session_id: 'opencode-session-1', sequence: 7, usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 3, cache_write_input_tokens: 1, reasoning_output_tokens: 2 } });
   });
+  it('converts compaction part to compact_boundary system event', () => {
+    const autoCompaction = toCodeMuxEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-session-1',
+        part: {
+          id: 'prt_compaction',
+          messageID: 'msg_compaction',
+          sessionID: 'opencode-session-1',
+          type: 'compaction',
+          auto: true,
+          overflow: false,
+        },
+      },
+    }, context());
+    expect(autoCompaction).toHaveLength(1);
+    expect(autoCompaction[0]).toMatchObject({
+      type: 'system',
+      subtype: 'compact_boundary',
+      content: 'Conversation compacted',
+      compact_metadata: {
+        trigger: 'auto',
+        pre_tokens: 0,
+        overflow: false,
+      },
+    });
+
+    const manualCompaction = toCodeMuxEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-session-1',
+        part: {
+          id: 'prt_compaction_manual',
+          messageID: 'msg_compaction_manual',
+          sessionID: 'opencode-session-1',
+          type: 'compaction',
+          auto: false,
+          overflow: true,
+        },
+      },
+    }, context());
+    expect(manualCompaction).toHaveLength(1);
+    expect(manualCompaction[0]).toMatchObject({
+      type: 'system',
+      subtype: 'compact_boundary',
+      compact_metadata: {
+        trigger: 'manual',
+        overflow: true,
+      },
+    });
+  });
+
   it('normalizes SDK errors, interruptions, and permission requests without dropping them', () => {
     const error = toCodeMuxEvent({ type: 'session.error', properties: { sessionID: 'opencode-session-1', error: { name: 'UnknownError', data: { message: 'upstream down' } } } }, context());
     const interrupted = toCodeMuxEvent({ type: 'session.error', properties: { sessionID: 'opencode-session-1', error: { name: 'MessageAbortedError', data: { message: 'aborted' } } } }, context({ sequence: 9 }));

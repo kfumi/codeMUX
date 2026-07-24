@@ -154,6 +154,7 @@ function convertCodeMuxMessageToThreadMessageLike(
     typeof message.metadata.sourceEventIndex === 'number'
       ? eventTimestamps[message.metadata.sourceEventIndex]
       : undefined;
+  const sourceRole = message.role;
 
   return {
     id: message.id,
@@ -173,7 +174,7 @@ function convertCodeMuxMessageToThreadMessageLike(
     metadata: {
       custom: {
         ...message.metadata,
-        sourceRole: message.role,
+        sourceRole,
         sourceTimestamp,
         isFinalAssistantMessage: message.metadata.isFinalAssistantMessage,
       },

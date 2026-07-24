@@ -74,6 +74,7 @@ type CodeMuxThreadRenderContextValue = {
   resultStatsByAssistantIndex: Record<number, MessageFooterStats>;
   latestFinalAssistantIndex: number | null;
   latestFinalAssistantFooterStats?: MessageFooterStats;
+  lastCompactEventIndex: number;
 };
 
 const EMPTY_EVENTS: AgentMessage[] = [];
@@ -188,9 +189,17 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
   const latestRewindableUserIndex = useMemo(() => findLatestRewindableUserIndex(events), [events]);
   const latestFinalAssistantIndex = useMemo(() => {
+    let lastCompactIndex = -1;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].kind === 'compact') {
+        lastCompactIndex = i;
+        break;
+      }
+    }
+
     let latestIndex: number | null = null;
     for (const assistantIndex of buildAssistantResultTargetMap(events).keys()) {
-      if (latestIndex == null || assistantIndex > latestIndex) {
+      if (assistantIndex > lastCompactIndex && (latestIndex == null || assistantIndex > latestIndex)) {
         latestIndex = assistantIndex;
       }
     }
@@ -208,6 +217,15 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     () => buildAssistantCollapseInfoMap(events, eventTimestamps),
     [events, eventTimestamps],
   );
+
+  const lastCompactEventIndex = useMemo(() => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].kind === 'compact') {
+        return i;
+      }
+    }
+    return -1;
+  }, [events]);
   const threadRenderContextValue = useMemo(() => ({
     sessionId,
     compactAiOutput,
@@ -220,6 +238,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     resultStatsByAssistantIndex,
     latestFinalAssistantIndex,
     latestFinalAssistantFooterStats,
+    lastCompactEventIndex,
   }), [
     sessionId,
     compactAiOutput,
@@ -232,6 +251,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     resultStatsByAssistantIndex,
     latestFinalAssistantIndex,
     latestFinalAssistantFooterStats,
+    lastCompactEventIndex,
   ]);
 
   return (
@@ -329,6 +349,7 @@ function CodeMuxAssistantMessage() {
     resultStatsByAssistantIndex,
     latestFinalAssistantIndex,
     latestFinalAssistantFooterStats,
+    lastCompactEventIndex,
   } = useCodeMuxThreadRenderContext();
   return (
     <AssistantLikeMessage
@@ -342,6 +363,7 @@ function CodeMuxAssistantMessage() {
       resultStatsByAssistantIndex={resultStatsByAssistantIndex}
       latestFinalAssistantIndex={latestFinalAssistantIndex}
       latestFinalAssistantFooterStats={latestFinalAssistantFooterStats}
+      lastCompactEventIndex={lastCompactEventIndex}
     />
   );
 }
@@ -902,6 +924,7 @@ function AssistantLikeMessage({
   resultStatsByAssistantIndex,
   latestFinalAssistantIndex,
   latestFinalAssistantFooterStats,
+  lastCompactEventIndex,
 }: {
   message: MessageState;
   sessionId: string;
@@ -913,6 +936,7 @@ function AssistantLikeMessage({
   resultStatsByAssistantIndex: Record<number, MessageFooterStats>;
   latestFinalAssistantIndex: number | null;
   latestFinalAssistantFooterStats?: MessageFooterStats;
+  lastCompactEventIndex: number;
 }) {
   if (message.content.length === 0) {
     return null;
@@ -935,8 +959,9 @@ function AssistantLikeMessage({
   const footerStats = isFinal && isLatestFinalMessage
     ? (latestFinalAssistantFooterStats ?? resultFooterStats)
     : resultFooterStats;
+  const isAfterLastCompact = sourceEventIndex != null && sourceEventIndex > lastCompactEventIndex;
   const shouldRenderFooter =
-    isFinal && message.metadata.custom?.sourceRole !== 'system' && (footerStats !== undefined || sourceTimestamp !== undefined);
+    isFinal && message.metadata.custom?.sourceRole !== 'system' && isAfterLastCompact && (footerStats !== undefined || sourceTimestamp !== undefined);
 
   return (
     <MessagePrimitive.Root data-message-row className="group/message-row mb-2 flex w-full justify-start">

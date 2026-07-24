@@ -285,6 +285,19 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
             event_kind: 'tool_call',
           });
         }
+      } else if (partType === 'compaction') {
+        const auto = part.auto === true;
+        const overflow = part.overflow === true;
+        events.push(buildEnvelope({
+          type: 'system',
+          subtype: 'compact_boundary',
+          content: 'Conversation compacted',
+          compact_metadata: {
+            trigger: auto ? 'auto' : 'manual',
+            pre_tokens: 0,
+            overflow,
+          },
+        }, context, sessionId));
       }
       break;
     }
