@@ -35,6 +35,11 @@ export interface OpenCodeEventContext extends RuntimeEventContext {
   eventIdFactory: () => string;
   streamingParts?: Map<string, StreamingPartState>;
   nextSection?: { kind: NextSectionKind };
+  /**
+   * When session.next.* is absent, field=text is ambiguous (reasoning + answer both use it).
+   * Prefer thinking until a reasoning part is finalized, then text.
+   */
+  idleStreamKind?: { kind: 'thinking' | 'text' };
 }
 
 export function getOpenCodeEventIdentity(event: unknown, turnId = 0): string | undefined {
@@ -193,6 +198,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       if (partType === 'text' || partType === 'reasoning') {
         if (partState?.buffered) {
           if (partType === 'reasoning') partState.kind = 'thinking';
+          else if (partType === 'text') partState.kind = 'text';
           const text = partState.deltaText?.join('') ?? readString(properties.delta) ?? readString(part.text) ?? '';
           partState.deltaText = [];
           if (partState.kind === 'thinking') {
@@ -208,8 +214,11 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
               ...(partState.kind === 'thinking' ? { thinking: text } : { text }),
             }]));
           }
+          if (context.idleStreamKind) context.idleStreamKind.kind = 'text';
         } else if (partState) {
+          // Authoritative part type wins over provisional stream kind.
           if (partType === 'reasoning') partState.kind = 'thinking';
+          else if (partType === 'text') partState.kind = 'text';
           events.push(buildStreamEvent(sessionId, { type: 'content_block_stop', index: partState.index }));
           const text = readString(properties.delta) ?? readString(part.text) ?? '';
           if (text) {
@@ -218,6 +227,14 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
               ...(partState.kind === 'thinking' ? { thinking: text } : { text }),
             }]));
           }
+          if (context.idleStreamKind) {
+            // After reasoning finishes, subsequent field=text deltas are answer text.
+            // After text finishes, keep preferring text for follow-up parts.
+            context.idleStreamKind.kind = 'text';
+          }
+          if (context.nextSection && partType === 'reasoning') {
+            context.nextSection.kind = 'idle';
+          }
         } else {
           const text = readString(properties.delta) ?? readString(part.text) ?? '';
           if (text) {
@@ -225,6 +242,9 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
               type: partType === 'reasoning' ? 'thinking' : 'text',
               ...(partType === 'reasoning' ? { thinking: text } : { text }),
             }]));
+          }
+          if (context.idleStreamKind) {
+            context.idleStreamKind.kind = 'text';
           }
         }
       } else if (partType === 'tool') {
@@ -273,81 +293,49 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       const field = readString(properties.field);
       const delta = readString(properties.delta);
       if (!partId || !field || !delta || !context.streamingParts) break;
-      if (field === 'reasoning') {
-        let partState = context.streamingParts.get(partId);
-        if (partState?.streamedByNext) break;
-        if (context.nextSection?.kind === 'reasoning') break;
-        if (!partState) {
-          const index = context.streamingParts.size;
-          partState = { kind: 'thinking', index, started: false };
-          context.streamingParts.set(partId, partState);
-        }
-        if (!partState.started) {
-          partState.started = true;
-          events.push(buildStreamEvent(sessionId, {
-            type: 'content_block_start',
-            index: partState.index,
-            content_block: { type: 'thinking', thinking: '' },
-          }));
-        }
-        events.push(buildStreamEvent(sessionId, {
-          type: 'content_block_delta',
-          index: partState.index,
-          delta: { type: 'thinking_delta', thinking: delta },
-        }));
-      } else if (field === 'text') {
-        let partState = context.streamingParts.get(partId);
+
+      const resolveStreamKind = (): 'thinking' | 'text' => {
+        if (field === 'reasoning') return 'thinking';
         const sectionKind = context.nextSection?.kind;
-        if (partState?.streamedByNext) {
-          break;
-        } else if (sectionKind === 'reasoning') {
-          if (!partState) {
-            const index = context.streamingParts.size;
-            partState = { kind: 'thinking', index, started: false };
-            context.streamingParts.set(partId, partState);
-          }
-          if (!partState.started) {
-            partState.started = true;
-            events.push(buildStreamEvent(sessionId, {
-              type: 'content_block_start',
-              index: partState.index,
-              content_block: { type: 'thinking', thinking: '' },
-            }));
-          }
-          events.push(buildStreamEvent(sessionId, {
-            type: 'content_block_delta',
-            index: partState.index,
-            delta: { type: 'thinking_delta', thinking: delta },
-          }));
-        } else if (sectionKind === 'text') {
-          if (!partState) {
-            const index = context.streamingParts.size;
-            partState = { kind: 'text', index, started: false };
-            context.streamingParts.set(partId, partState);
-          }
-          if (!partState.started) {
-            partState.started = true;
-            events.push(buildStreamEvent(sessionId, {
-              type: 'content_block_start',
-              index: partState.index,
-              content_block: { type: 'text', text: '' },
-            }));
-          }
-          events.push(buildStreamEvent(sessionId, {
-            type: 'content_block_delta',
-            index: partState.index,
-            delta: { type: 'text_delta', text: delta },
-          }));
-        } else {
-          if (!partState) {
-            partState = { kind: 'text', index: -1, started: false, buffered: true, deltaText: [] };
-            context.streamingParts.set(partId, partState);
-          }
-          if (partState.buffered) {
-            partState.deltaText!.push(delta);
-          }
-        }
+        if (sectionKind === 'reasoning') return 'thinking';
+        if (sectionKind === 'text') return 'text';
+        // field=text without session.next.*: OpenCode uses the same field for
+        // reasoning and answer. Prefer thinking until a reasoning part completes.
+        return context.idleStreamKind?.kind === 'text' ? 'text' : 'thinking';
+      };
+
+      let partState = context.streamingParts.get(partId);
+      if (partState?.streamedByNext) break;
+      // When session.next.reasoning is active, field=reasoning is redundant.
+      if (field === 'reasoning' && context.nextSection?.kind === 'reasoning') break;
+
+      const streamKind = partState?.kind ?? resolveStreamKind();
+      if (!partState) {
+        const index = context.streamingParts.size;
+        partState = { kind: streamKind, index, started: false };
+        context.streamingParts.set(partId, partState);
+      } else if (partState.buffered) {
+        partState.deltaText!.push(delta);
+        break;
       }
+
+      if (!partState.started) {
+        partState.started = true;
+        events.push(buildStreamEvent(sessionId, {
+          type: 'content_block_start',
+          index: partState.index,
+          content_block: partState.kind === 'thinking'
+            ? { type: 'thinking', thinking: '' }
+            : { type: 'text', text: '' },
+        }));
+      }
+      events.push(buildStreamEvent(sessionId, {
+        type: 'content_block_delta',
+        index: partState.index,
+        delta: partState.kind === 'thinking'
+          ? { type: 'thinking_delta', thinking: delta }
+          : { type: 'text_delta', text: delta },
+      }));
       break;
     }
     case 'message.updated': {
@@ -409,6 +397,10 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
           partState.index = context.streamingParts.size;
           partState.buffered = undefined;
           partState.deltaText = [];
+          partState.kind = 'thinking';
+          partState.streamedByNext = true;
+        } else if (partState.kind === 'text') {
+          // Was optimistically streamed as text; reclassify as thinking for subsequent deltas.
           partState.kind = 'thinking';
           partState.streamedByNext = true;
         }

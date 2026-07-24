@@ -139,12 +139,29 @@ type StreamingBuffer = {
   text: string;
 };
 
-const STREAMING_FLUSH_THROTTLE_MS = 100;
+// Leading-edge + coalesce: first delta paints immediately; later deltas
+// coalesce into at most one flush per throttle window for UI smoothness.
+const STREAMING_FLUSH_THROTTLE_MS = 32;
 const logger = createLogger('agentStore');
 const pendingStreamingBuffers = new Map<string, StreamingBuffer>();
 const pendingStreamingFlushHandles = new Map<string, ReturnType<typeof setTimeout>>();
 const sessionsWithLiveTextStream = new Set<string>();
+/** Per-session live stream phase. OpenCode often emits reasoning as text_delta;
+ * keep content in the reasoning panel until we explicitly enter the answer phase. */
+const sessionStreamPhase = new Map<string, 'thinking' | 'answer'>();
 const streamingTelemetry = new Map<string, { deltas: number; flushes: number; uiUpdates: number }>();
+
+function getSessionStreamPhase(sessionId: string): 'thinking' | 'answer' {
+  return sessionStreamPhase.get(sessionId) ?? 'thinking';
+}
+
+function setSessionStreamPhase(sessionId: string, phase: 'thinking' | 'answer') {
+  sessionStreamPhase.set(sessionId, phase);
+}
+
+function resetSessionStreamPhase(sessionId: string) {
+  sessionStreamPhase.delete(sessionId);
+}
 
 function scheduleStreamingFlush(callback: () => void) {
   return setTimeout(callback, STREAMING_FLUSH_THROTTLE_MS);
@@ -265,27 +282,31 @@ function queueStreamingDelta(
   if (key === 'text') {
     sessionsWithLiveTextStream.add(sessionId);
   }
-  const buffer = pendingStreamingBuffers.get(sessionId) ?? { thinking: '', text: '' };
-  buffer[key] += chunk;
-  pendingStreamingBuffers.set(sessionId, buffer);
 
-  if (pendingStreamingFlushHandles.has(sessionId)) {
+  // Leading edge: first paint with no pending timer so UI updates immediately.
+  if (!pendingStreamingFlushHandles.has(sessionId)) {
+    recordStreamingTelemetry(sessionId, 'flushes');
+    recordStreamingTelemetry(sessionId, 'uiUpdates');
+    applyStreamingBuffer(sessionId, { thinking: key === 'thinking' ? chunk : '', text: key === 'text' ? chunk : '' }, set);
+
+    const handle = scheduleStreamingFlush(() => {
+      pendingStreamingFlushHandles.delete(sessionId);
+      const pending = pendingStreamingBuffers.get(sessionId);
+      if (!pending) {
+        return;
+      }
+
+      pendingStreamingBuffers.delete(sessionId);
+      recordStreamingTelemetry(sessionId, 'flushes');
+      applyStreamingBuffer(sessionId, pending, set);
+    });
+    pendingStreamingFlushHandles.set(sessionId, handle);
     return;
   }
 
-  const handle = scheduleStreamingFlush(() => {
-    pendingStreamingFlushHandles.delete(sessionId);
-    const pending = pendingStreamingBuffers.get(sessionId);
-    if (!pending) {
-      return;
-    }
-
-    pendingStreamingBuffers.delete(sessionId);
-    recordStreamingTelemetry(sessionId, 'flushes');
-    applyStreamingBuffer(sessionId, pending, set);
-  });
-
-  pendingStreamingFlushHandles.set(sessionId, handle);
+  const buffer = pendingStreamingBuffers.get(sessionId) ?? { thinking: '', text: '' };
+  buffer[key] += chunk;
+  pendingStreamingBuffers.set(sessionId, buffer);
 }
 
 // ---------------------------------------------------------------------------
@@ -404,30 +425,52 @@ function commitPendingSimulatedStream(
   });
 }
 
-function simulateStreamingText(
+function simulateStreamingContent(
   sessionId: string,
   event: AgentMessage,
-  text: string,
+  chunks: Array<{ key: keyof StreamingBuffer; text: string }>,
   set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
 ) {
-  // Clear any prior simulation for this session.
   clearSimulatedStream(sessionId);
 
-  // Reset streaming state so StreamingContent starts fresh.
   set((s) => ({
     streamingText: { ...s.streamingText, [sessionId]: '' },
     streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
   }));
 
-  const entry: SimulatedStreamEntry = { event, remaining: text, timer: 0 };
+  const queue: Array<{ key: keyof StreamingBuffer; remaining: string }> = chunks
+    .filter((chunk) => chunk.text.length > 0)
+    .map((chunk) => ({ key: chunk.key, remaining: chunk.text }));
+
+  if (queue.length === 0) {
+    set((s) => {
+      const prev = s.events[sessionId] || [];
+      const timestamps = s.eventTimestamps[sessionId] || [];
+      return {
+        events: { ...s.events, [sessionId]: [...prev, event] },
+        eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...timestamps, Date.now()] },
+      };
+    });
+    return;
+  }
+
+  const entry: SimulatedStreamEntry = {
+    event,
+    remaining: queue.map((item) => item.remaining).join(''),
+    timer: 0,
+  };
+  // Stash queue on entry via closure
   pendingSimulatedStreams.set(sessionId, entry);
 
   const tick = () => {
     const current = pendingSimulatedStreams.get(sessionId);
-    if (!current || current !== entry) return; // superseded or cleared
+    if (!current || current !== entry) return;
 
-    if (!current.remaining) {
-      // All chunks delivered — commit the event and clear streaming state.
+    while (queue.length > 0 && !queue[0].remaining) {
+      queue.shift();
+    }
+
+    if (queue.length === 0) {
       pendingSimulatedStreams.delete(sessionId);
       clearPendingStreaming(sessionId);
       set((s) => {
@@ -437,23 +480,34 @@ function simulateStreamingText(
           events: { ...s.events, [sessionId]: [...prev, current.event] },
           eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...timestamps, Date.now()] },
           streamingText: { ...s.streamingText, [sessionId]: '' },
+          streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
         };
       });
       return;
     }
 
-    const size = Math.min(SIM_CHARS_PER_TICK, current.remaining.length);
-    const chunk = current.remaining.slice(0, size);
-    current.remaining = current.remaining.slice(size);
+    const active = queue[0];
+    const size = Math.min(SIM_CHARS_PER_TICK, active.remaining.length);
+    const chunk = active.remaining.slice(0, size);
+    active.remaining = active.remaining.slice(size);
+    current.remaining = queue.map((item) => item.remaining).join('');
 
-    queueStreamingDelta(sessionId, 'text', chunk, set);
-
+    queueStreamingDelta(sessionId, active.key, chunk, set);
     current.timer = window.setTimeout(tick, SIM_TICK_MS);
   };
 
-  // Start on the next frame so the UI renders the empty streaming state first.
   entry.timer = window.setTimeout(tick, 30);
 }
+
+function simulateStreamingText(
+  sessionId: string,
+  event: AgentMessage,
+  text: string,
+  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
+) {
+  simulateStreamingContent(sessionId, event, [{ key: 'text', text }], set);
+}
+
 
 function parseAgentEvent(raw: string): AgentMessage {
   try {
@@ -650,6 +704,30 @@ function preserveFirstOriginalSnapshot(
 
 function getSessionAgentKind(sessionId: string) {
   return useSessionStore.getState().sessions.find((session) => session.id === sessionId)?.agent_kind;
+}
+
+function hasCurrentTurnCommittedThinking(events: AgentMessage[]): boolean {
+  let lastUserIdx = -1;
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    if (events[i]?.kind === 'user') {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  for (let i = lastUserIdx + 1; i < events.length; i += 1) {
+    const evt = events[i];
+    if (evt?.kind !== 'assistant') continue;
+    const content = evt.data?.message?.content || [];
+    if (content.some((b: any) => b?.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.length > 0)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isOpencodeLikeAgent(sessionId: string): boolean {
+  const kind = getSessionAgentKind(sessionId);
+  return kind === 'opencode';
 }
 
 function getRewindableUserIndex(events: AgentMessage[]): number {
@@ -1094,7 +1172,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       promptLength: prompt.length,
     });
     // Clear force-stopped flag when starting a new query
-    set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
+          resetSessionStreamPhase(sessionId);
+      setSessionStreamPhase(sessionId, 'thinking');
+set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     // Auto-update session title from the first user message (skip slash commands)
     const state = get();
     const hasExistingUserMsg = (state.events[sessionId] || []).some(e => e.kind === 'user');
@@ -1264,10 +1344,24 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               const contentBlock = streamEvent.content_block as Record<string, unknown> | undefined;
               if (contentBlock?.type === 'thinking') {
                 logger.debug('Thinking block started', { sessionId });
+                setSessionStreamPhase(sessionId, 'thinking');
                 flushPendingStreaming(sessionId, set);
                 clearStreamingTextField(sessionId, 'streamingThinking', set, get);
               } else if (contentBlock?.type === 'text') {
                 logger.debug('Text block started', { sessionId });
+                const hasThinkingContent = Boolean(get().streamingThinking[sessionId]);
+                const hasCommittedThinking = hasCurrentTurnCommittedThinking(get().events[sessionId] || []);
+                if (
+                  !isOpencodeLikeAgent(sessionId)
+                  || hasThinkingContent
+                  || hasCommittedThinking
+                  || getSessionStreamPhase(sessionId) === 'answer'
+                ) {
+                  setSessionStreamPhase(sessionId, 'answer');
+                  if (hasThinkingContent) {
+                    clearStreamingTextField(sessionId, 'streamingThinking', set, get);
+                  }
+                }
                 flushPendingStreaming(sessionId, set);
                 clearStreamingTextField(sessionId, 'streamingText', set, get);
               } else if (contentBlock?.type === 'tool_use') {
@@ -1297,9 +1391,48 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   appendPendingStreamingToolInput(sessionId, toolId, delta.partial_json);
                 }
               } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+                setSessionStreamPhase(sessionId, 'thinking');
+                // Reclassify any content that was mis-routed into the answer stream.
+                const misrouted = get().streamingText[sessionId] || '';
+                if (misrouted) {
+                  flushPendingStreaming(sessionId, set);
+                  set((s) => ({
+                    streamingThinking: {
+                      ...s.streamingThinking,
+                      [sessionId]: (s.streamingThinking[sessionId] || '') + misrouted,
+                    },
+                    streamingText: { ...s.streamingText, [sessionId]: '' },
+                  }));
+                  sessionsWithLiveTextStream.delete(sessionId);
+                }
                 queueStreamingDelta(sessionId, 'thinking', delta.thinking, set);
               } else if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
-                queueStreamingDelta(sessionId, 'text', delta.text, set);
+                // OpenCode streams reasoning with field=text (text_delta). Keep it in the
+                // reasoning panel until this turn enters the answer phase.
+                // Other agents emit real answer text via text_delta — don't hijack them.
+                const phase = getSessionStreamPhase(sessionId);
+                const preferThinking = isOpencodeLikeAgent(sessionId) && phase !== 'answer';
+                if (preferThinking) {
+                  setSessionStreamPhase(sessionId, 'thinking');
+                  if (get().streamingText[sessionId]) {
+                    flushPendingStreaming(sessionId, set);
+                    const misrouted = get().streamingText[sessionId] || '';
+                    set((s) => ({
+                      streamingThinking: {
+                        ...s.streamingThinking,
+                        [sessionId]: (s.streamingThinking[sessionId] || '') + misrouted,
+                      },
+                      streamingText: { ...s.streamingText, [sessionId]: '' },
+                    }));
+                    sessionsWithLiveTextStream.delete(sessionId);
+                  }
+                  queueStreamingDelta(sessionId, 'thinking', delta.text, set);
+                } else {
+                  if (phase === 'thinking' && !isOpencodeLikeAgent(sessionId)) {
+                    setSessionStreamPhase(sessionId, 'answer');
+                  }
+                  queueStreamingDelta(sessionId, 'text', delta.text, set);
+                }
               }
             } else if (eventType === 'content_block_stop') {
               const blockType = (streamEvent.content_block as Record<string, unknown> | undefined)?.type as string | undefined;
@@ -1483,12 +1616,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             };
           }
 
-          // If the event only carries text (no tool_use) and the SDK did not
-          // stream it incrementally (streamingText is empty), simulate a
-          // token-by-token render so the user sees text appear progressively.
+          // If the SDK did not stream incrementally, simulate progressive render.
           const textBlock = filtered.find(
             (b: any): b is { type: 'text'; text: string } =>
               b?.type === 'text' && typeof b.text === 'string' && b.text.length > 0,
+          );
+          const thinkingBlock = filtered.find(
+            (b: any): b is { type: 'thinking'; thinking: string } =>
+              b?.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.length > 0,
           );
           const hasToolUse = filtered.some((b: any) => b?.type === 'tool_use');
           const currentStreamingText = get().streamingText[sessionId] || '';
@@ -1505,8 +1640,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               || currentStreamingText.startsWith(textBlock.text)
             ),
           );
-          if (textBlock && !hasToolUse && !currentStreamingText && !currentStreamingThinking) {
-            simulateStreamingText(sessionId, event, textBlock.text, set);
+          const thinkingOnly = Boolean(thinkingBlock && !textBlock && !hasToolUse);
+          const shouldSimulate = Boolean(
+            !hasToolUse
+            && !currentStreamingText
+            && !currentStreamingThinking
+            && (textBlock || thinkingBlock),
+          );
+          if (shouldSimulate) {
+            const chunks: Array<{ key: keyof StreamingBuffer; text: string }> = [];
+            if (thinkingBlock) chunks.push({ key: 'thinking', text: thinkingBlock.thinking });
+            if (textBlock) chunks.push({ key: 'text', text: textBlock.text });
+            simulateStreamingContent(sessionId, event, chunks, set);
             return;
           }
 
@@ -1528,8 +1673,44 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 ),
               };
             }
-            if (s.streamingThinking[sessionId]) updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
-            if (s.streamingText[sessionId]) updates.streamingText = { ...s.streamingText, [sessionId]: '' };
+            if (thinkingOnly && s.streamingText[sessionId]) {
+              const fullThinking = thinkingBlock!.thinking;
+              const liveText = s.streamingText[sessionId];
+              if (
+                liveText === fullThinking
+                || fullThinking.startsWith(liveText)
+                || liveText.startsWith(fullThinking)
+              ) {
+                updates.streamingText = { ...s.streamingText, [sessionId]: '' };
+                sessionsWithLiveTextStream.delete(sessionId);
+              }
+            }
+            if (thinkingOnly) {
+              // Keep the live reasoning panel populated with full text while running;
+              // Thread also commits the thinking block. Prefer live panel for open streaming UX.
+              setSessionStreamPhase(sessionId, 'answer');
+              const fullThinking = thinkingBlock!.thinking;
+              if ((s.streamingThinking[sessionId] || '') !== fullThinking) {
+                updates.streamingThinking = { ...s.streamingThinking, [sessionId]: fullThinking };
+              }
+              // Do NOT clear streamingThinking here — panel stays until answer text starts.
+            } else if (textBlock) {
+              setSessionStreamPhase(sessionId, 'answer');
+              // Answer arrived: clear live reasoning so committed Thread panel + markdown take over.
+              if (s.streamingThinking[sessionId]) {
+                updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
+              }
+              if (s.streamingText[sessionId]) {
+                updates.streamingText = { ...s.streamingText, [sessionId]: '' };
+              }
+            } else {
+              if (s.streamingThinking[sessionId]) {
+                updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
+              }
+              if (s.streamingText[sessionId]) {
+                updates.streamingText = { ...s.streamingText, [sessionId]: '' };
+              }
+            }
             if (finalTextReplacesLiveText) {
               sessionsWithLiveTextStream.delete(sessionId);
             }
@@ -1545,6 +1726,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
 
         if (event.kind === 'result') {
+          resetSessionStreamPhase(sessionId);
           logger.info('Agent query result received', {
             sessionId,
             isError: event.data?.is_error,

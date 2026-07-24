@@ -1074,6 +1074,7 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
   const thinking = useAgentStore((state) => state.streamingThinking[sessionId] ?? '');
   const text = useAgentStore((state) => state.streamingText[sessionId] ?? '');
   const lastAssistantText = useMemo(() => getLastAssistantText(events), [events]);
+  const lastAssistantThinking = useMemo(() => getLastAssistantThinking(events), [events]);
   const duplicateLiveText = Boolean(
     text
     && lastAssistantText
@@ -1083,7 +1084,25 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
       || lastAssistantText.startsWith(text)
     ),
   );
-  const visibleText = duplicateLiveText ? '' : text;
+  // If text is actually a mis-routed thinking stream, keep it out of the markdown area.
+  const textIsMisroutedThinking = Boolean(
+    text
+    && (
+      (thinking && (thinking.startsWith(text) || text.startsWith(thinking) || thinking.includes(text)))
+      || (lastAssistantThinking && (
+        lastAssistantThinking === text
+        || lastAssistantThinking.startsWith(text)
+        || text.startsWith(lastAssistantThinking)
+      ))
+    ),
+  );
+  // Prefer reasoning panel: never show live thinking content as answer markdown.
+  const visibleThinking = thinking || (textIsMisroutedThinking ? text : '');
+  const visibleText = (
+    duplicateLiveText
+    || textIsMisroutedThinking
+    || visibleThinking.length > 0
+  ) ? '' : text;
 
   useEffect(() => {
     if (isRunning && thinking.length > 0) {
@@ -1110,11 +1129,38 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
     return null;
   }
 
-  const isThinking = thinking.length > 0;
+  const isThinking = visibleThinking.length > 0;
 
   return (
     <div className="mb-5 flex w-full justify-start">
       <div className="w-full min-w-0 space-y-2 text-lg leading-relaxed">
+        {isRunning && !visibleText && !isThinking ? (
+          <div
+            className={cn(
+              'flex items-center gap-2.5 py-1 text-sm text-muted-foreground/60 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
+              'text-muted-foreground',
+            )}
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
+            <RunningElapsedTimer startTime={queryStartTime} label="思考中" />
+          </div>
+        ) : null}
+
+        {isThinking ? (
+          <div data-streaming-reasoning="true" className="w-full min-w-0">
+            <ReasoningRoot variant="ghost" defaultOpen={false}>
+              <ReasoningTrigger active={isRunning} />
+              <ReasoningContent aria-busy={isRunning}>
+                <ReasoningText>
+                  <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-muted-foreground">
+                    {visibleThinking}
+                  </pre>
+                </ReasoningText>
+              </ReasoningContent>
+            </ReasoningRoot>
+          </div>
+        ) : null}
+
         {visibleText ? (
           <div
             data-streaming-text="markdown"
@@ -1131,31 +1177,6 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
             </Streamdown>
             <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse rounded-full bg-foreground/60 align-text-bottom" />
           </div>
-        ) : null}
-
-        {isThinking && visibleText ? null : isRunning ? (
-          <div
-            className={cn(
-              'flex items-center gap-2.5 py-1 text-sm text-muted-foreground/60 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
-              !isThinking && !visibleText && 'text-muted-foreground',
-            )}
-          >
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
-            <RunningElapsedTimer startTime={queryStartTime} label="思考中" />
-          </div>
-        ) : null}
-
-        {isThinking ? (
-          <ReasoningRoot variant="ghost" defaultOpen>
-            <ReasoningTrigger active />
-            <ReasoningContent>
-              <ReasoningText>
-                <pre className="aui-md whitespace-pre-wrap font-sans text-xs leading-relaxed">
-                  {thinking}
-                </pre>
-              </ReasoningText>
-            </ReasoningContent>
-          </ReasoningRoot>
         ) : null}
       </div>
     </div>
@@ -1174,6 +1195,25 @@ function getLastAssistantText(events: AgentMessage[]): string {
         block?.type === 'text' && typeof block.text === 'string',
       )
       .map((block) => block.text)
+      .join('')
+      .trim();
+  }
+
+  return '';
+}
+
+function getLastAssistantThinking(events: AgentMessage[]): string {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.kind !== 'assistant') {
+      continue;
+    }
+
+    return event.data.message.content
+      .filter((block): block is { type: 'thinking'; thinking: string } =>
+        block?.type === 'thinking' && typeof block.thinking === 'string',
+      )
+      .map((block) => block.thinking)
       .join('')
       .trim();
   }

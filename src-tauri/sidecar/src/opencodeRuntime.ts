@@ -67,8 +67,9 @@ export class OpenCodeRuntime {
   private readonly pendingTaskToolCallIds = new Set<string>();
   private readonly assistantMessageIds = new Set<string>();
   private readonly userMessageIds = new Set<string>();
-  private readonly streamingParts = new Map<string, { kind: 'text' | 'thinking'; index: number; started: boolean }>();
-  private readonly nextSection = { kind: 'idle' as const };
+  private readonly streamingParts = new Map<string, import('./opencodeEvents.js').StreamingPartState>();
+  private readonly nextSection: { kind: import('./opencodeEvents.js').NextSectionKind } = { kind: 'idle' };
+  private readonly idleStreamKind: { kind: 'thinking' | 'text' } = { kind: 'thinking' };
   private eventSequence = 0;
   private usage: import('./runtimeEvents.js').OpenCodeTokenUsage = { input_tokens: 0, output_tokens: 0 };
   private turnStartedAt = 0;
@@ -426,6 +427,7 @@ export class OpenCodeRuntime {
         eventIdFactory: this.eventIdFactory,
         streamingParts: this.streamingParts,
         nextSection: this.nextSection,
+        idleStreamKind: this.idleStreamKind,
       });
       for (const diagnosticEvent of diagnosticEvents) {
         this.emitEvent(diagnosticEvent);
@@ -499,15 +501,19 @@ export class OpenCodeRuntime {
       eventIdFactory: this.eventIdFactory,
       streamingParts: this.streamingParts,
       nextSection: this.nextSection,
+      idleStreamKind: this.idleStreamKind,
     });
     const serialized = JSON.stringify(event);
     if (serialized.toLowerCase().includes('cancelled') || serialized.includes('Task cancelled') || serialized.includes('task was cancelled')) {
       process.stderr.write(`[opencode-task][error] CANCELLED_DETECTED type=${type} sessionId=${eventSessionId ?? this.agentSessionId ?? 'null'} preview=${serialized.slice(0, 800)}\n`);
     }
     for (const normalizedEvent of events) {
-      const emitJson = (() => { try { return JSON.stringify(normalizedEvent).slice(0, 1000) } catch { return String(normalizedEvent).slice(0, 1000) } })();
-      process.stderr.write(`[opencode-debug] EMIT to frontend type=${normalizedEvent.type ?? '(no type)'} preview=${emitJson}\n`);
-      this.emitEvent(normalizedEvent);
+      const toEmit = normalizedEvent.type === 'stream_event'
+        ? { ...normalizedEvent, session_id: this.config.sessionId }
+        : normalizedEvent;
+      const emitJson = (() => { try { return JSON.stringify(toEmit).slice(0, 1000) } catch { return String(toEmit).slice(0, 1000) } })();
+      process.stderr.write(`[opencode-debug] EMIT to frontend type=${toEmit.type ?? '(no type)'} preview=${emitJson}\n`);
+      this.emitEvent(toEmit);
     }
     this.eventSequence += events.length;
 
@@ -586,6 +592,8 @@ export class OpenCodeRuntime {
     this.assistantMessageIds.clear();
     this.userMessageIds.clear();
     this.streamingParts.clear();
+    this.nextSection.kind = 'idle';
+    this.idleStreamKind.kind = 'thinking';
     this.usage = { input_tokens: 0, output_tokens: 0 };
     this.turnStartedAt = Date.now();
   }

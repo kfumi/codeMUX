@@ -13,7 +13,7 @@ import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
 
 import { extractCodexBaseUrl, extractCodexModelName, generateCodexDefaultConfigToml, setCodexBaseUrl, setCodexModelName } from '../../lib/codexTomlUtils';
 import { modelsFromText, modelsToText } from '../../lib/providerModels';
-import { applyClaudeFormToSettings, CLAUDE_SETTINGS_DEFAULT, parseClaudeSettingsDraft, type ClaudeCustomModel, type ClaudeRoleMapping, type ClaudeSettingsForm } from '../../lib/claudeSettingsConfig';
+import { applyClaudeFormToSettings, CLAUDE_SETTINGS_DEFAULT, parseClaudeSettingsDraft, type ClaudeCustomModel, type ClaudeRoleMapping, type ClaudeSettings, type ClaudeSettingsForm } from '../../lib/claudeSettingsConfig';
 import { OPENCODE_NPM_PACKAGES, OPENCODE_DEFAULT_NPM } from '../../lib/opencodePresets';
 import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -58,12 +58,14 @@ const AGENTS: Array<{ id: ProfileAgentKind; label: string; description: string; 
   { id: 'opencode', label: 'OpenCode', description: '写入 OpenCode 的 opencode.json 配置。', baseUrlLabel: 'Base URL', placeholder: 'https://api.openai.com/v1' },
 ];
 
-function emptyDraft(): ProfileDraft {
+function emptyDraft(agentKind: ProfileAgentKind): ProfileDraft {
   const settings = structuredClone(CLAUDE_SETTINGS_DEFAULT);
   const { form } = parseClaudeSettingsDraft(JSON.stringify(settings));
   const configToml = generateCodexDefaultConfigToml();
-  const opencodeConfig = JSON.stringify({ npm: OPENCODE_DEFAULT_NPM, options: { baseURL: '', apiKey: '', setCacheKey: true }, models: {} }, null, 2);
-  return { id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2), name: '', note: '', models: '', apiKey: '', baseUrl: '', defaultModel: extractCodexModelName(configToml) || 'gpt-5.6', context1m: false, codexNeedsProxy: false, advancedConfig: opencodeConfig, authJson: JSON.stringify({ OPENAI_API_KEY: '' }, null, 2), configToml, modelCatalog: [], claudeForm: form, providerKey: '', npmPackage: OPENCODE_DEFAULT_NPM, modelsConfig: {}, extraOptions: {} };
+  const claudeAdvanced = JSON.stringify(settings, null, 2);
+  const opencodeAdvanced = JSON.stringify({ npm: OPENCODE_DEFAULT_NPM, options: { baseURL: '', apiKey: '', setCacheKey: true }, models: {} }, null, 2);
+  const advancedConfig = agentKind === 'claude_code' ? claudeAdvanced : agentKind === 'opencode' ? opencodeAdvanced : '{}';
+  return { id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2), name: '', note: '', models: '', apiKey: '', baseUrl: '', defaultModel: extractCodexModelName(configToml) || 'gpt-5.6', context1m: false, codexNeedsProxy: false, advancedConfig, authJson: JSON.stringify({ OPENAI_API_KEY: '' }, null, 2), configToml, modelCatalog: [], claudeForm: form, providerKey: '', npmPackage: OPENCODE_DEFAULT_NPM, modelsConfig: {}, extraOptions: {} };
 }
 
 function toDraft(profile: AgentProviderProfile): ProfileDraft {
@@ -892,7 +894,12 @@ export function ProviderConfigPanel() {
   };
   const updateClaudeForm = (nextForm: ClaudeSettingsForm) => {
     if (!editing) return;
-    const current = parseClaudeSettingsDraft(editing.advancedConfig).settings;
+    let current: ClaudeSettings;
+    try {
+      current = parseClaudeSettingsDraft(editing.advancedConfig).settings;
+    } catch {
+      current = structuredClone(CLAUDE_SETTINGS_DEFAULT);
+    }
     const settings = applyClaudeFormToSettings(current, nextForm);
     setEditing({
       ...editing,
@@ -1131,7 +1138,7 @@ export function ProviderConfigPanel() {
           {agentKind === 'codex' && <div className={cn('flex min-h-42 flex-col gap-3 rounded-xl border p-4', !activeId ? 'border-primary/45 bg-primary/5' : 'border-border/55 bg-muted/20')}><div><div className="font-medium">默认供应商</div><p className="mt-1 text-xs text-muted-foreground">直接使用 ~/.codex/ 配置</p></div>{!activeId && <span className="w-fit rounded-full bg-primary/12 px-2 py-0.5 text-[11px] text-primary">当前使用</span>}<div className="mt-auto"><Button size="sm" variant="outline" disabled={busy || !activeId} onClick={() => run(() => activateDefaultCodexSupplier(), '已切换到默认供应商。')}>切换</Button></div></div>}
           {agentKind === 'opencode' && <div className={cn('flex min-h-42 flex-col gap-3 rounded-xl border p-4', !activeId ? 'border-primary/45 bg-primary/5' : 'border-border/55 bg-muted/20')}><div><div className="font-medium">默认供应商</div><p className="mt-1 text-xs text-muted-foreground">直接使用 ~/.config/opencode/opencode.json</p></div>{!activeId && <span className="w-fit rounded-full bg-primary/12 px-2 py-0.5 text-[11px] text-primary">当前使用</span>}<div className="mt-auto"><Button size="sm" variant="outline" disabled={busy || !activeId} onClick={() => run(() => activateDefaultOpenCodeSupplier(), '已切换到默认供应商。')}>切换</Button></div></div>}
           {profiles.map((profile) => { const active = profile.id === activeId; const requiresReview = Boolean(profile.native_config.requires_review); const nativeCfg = profile.native_config; const profileUrl = nativeCfg.type === 'claude_code' ? (typeof nativeCfg.settings?.env === 'object' && nativeCfg.settings.env !== null ? (nativeCfg.settings.env as Record<string, unknown>).ANTHROPIC_BASE_URL : undefined) : nativeCfg.openai_base_url; return <div key={profile.id} className={cn('flex min-h-42 flex-col gap-3 rounded-xl border p-4', active ? 'border-primary/45 bg-primary/5' : 'border-border/55 bg-muted/20')}><div className="flex items-start justify-between gap-2"><div className="min-w-0"><div className="truncate font-medium">{profile.name}</div><div className="mt-1 truncate font-mono text-xs text-muted-foreground">{(typeof profileUrl === 'string' ? profileUrl : '') || '未设置 URL'}</div></div>{active && <span className="shrink-0 whitespace-nowrap rounded-full bg-primary/12 px-2 py-0.5 text-[11px] text-primary">当前使用</span>}</div>{profile.note && <p className="line-clamp-2 text-xs text-muted-foreground">{profile.note}</p>}{requiresReview && <p className="text-xs text-amber-700 dark:text-amber-300">由旧供应商迁移而来，请核对高级原生配置。</p>}<div className="mt-auto flex flex-wrap gap-1.5"><Button size="sm" variant="outline" onClick={() => setEditing(toDraft(profile))}>编辑</Button><Button size="sm" variant="outline" disabled={busy || active} onClick={() => run(() => activateAgentProfile(agentKind, profile.id), `已切换到“${profile.name}”。`)}>切换</Button><Button size="sm" variant="ghost" title="测试连接" aria-label={`测试“${profile.name}”连接`} disabled={busy} onClick={() => test(profile)}><Zap className="size-3.5" /></Button><Button size="sm" variant="ghost" title="删除供应商" aria-label={`删除供应商“${profile.name}”`} disabled={busy} onClick={() => setDeleteTarget({ id: profile.id, name: profile.name })}><Trash2 className="size-3.5 text-destructive" /></Button></div></div>; })}
-          <button type="button" onClick={() => setEditing(emptyDraft())} className="flex min-h-42 items-center justify-center gap-2 rounded-xl border border-dashed border-border/65 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"><Plus className="size-4" />新建 {agent.label} 供应商</button>
+          <button type="button" onClick={() => setEditing(emptyDraft(agentKind))} className="flex min-h-42 items-center justify-center gap-2 rounded-xl border border-dashed border-border/65 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"><Plus className="size-4" />新建 {agent.label} 供应商</button>
         </div>
       )}
       <ConfirmDialog

@@ -790,7 +790,7 @@ describe('agent store Codex history loading', () => {
     ]);
   });
 
-  it('throttles streaming thinking flushes instead of updating on every animation frame', async () => {
+  it('applies leading-edge streaming thinking and coalesces later deltas', async () => {
     vi.useFakeTimers();
     const requestAnimationFrameMock = vi
       .spyOn(window, 'requestAnimationFrame')
@@ -824,12 +824,10 @@ describe('agent store Codex history loading', () => {
         .getState()
         .startQuery(session.id, 'stream thinking', 'D:\\project\\ai-code\\codeMUX');
 
-      expect(useAgentStore.getState().streamingThinking[session.id] ?? '').toBe('');
+      // Leading edge: first delta is visible immediately.
+      expect(useAgentStore.getState().streamingThinking[session.id] ?? '').toBe('chunk-0;');
 
-      await vi.advanceTimersByTimeAsync(50);
-      expect(useAgentStore.getState().streamingThinking[session.id] ?? '').toBe('');
-
-      await vi.advanceTimersByTimeAsync(70);
+      await vi.advanceTimersByTimeAsync(40);
       expect(useAgentStore.getState().streamingThinking[session.id]).toBe(
         'chunk-0;chunk-1;chunk-2;chunk-3;chunk-4;',
       );
@@ -865,11 +863,13 @@ describe('agent store Codex history loading', () => {
         .getState()
         .startQuery(session.id, 'simulate stream', 'D:\\project\\ai-code\\codeMUX');
 
-      await vi.advanceTimersByTimeAsync(80);
-      expect(useAgentStore.getState().streamingText[session.id] ?? '').toBe('');
+      // Leading-edge flush: first sim tick paints immediately after the 30ms start delay.
+      await vi.advanceTimersByTimeAsync(40);
+      expect(useAgentStore.getState().streamingText[session.id] ?? '').toContain('simulated-stream-text');
+      expect((useAgentStore.getState().streamingText[session.id] ?? '').length).toBeLessThan(simulatedText.length);
 
       await vi.advanceTimersByTimeAsync(80);
-      expect(useAgentStore.getState().streamingText[session.id] ?? '').toContain('simulated-stream-text');
+      expect((useAgentStore.getState().streamingText[session.id] ?? '').length).toBeGreaterThan(0);
       expect((useAgentStore.getState().streamingText[session.id] ?? '').length).toBeLessThan(simulatedText.length);
 
       await vi.advanceTimersByTimeAsync(3_000);
