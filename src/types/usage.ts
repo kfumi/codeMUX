@@ -43,4 +43,24 @@ export interface TokenTotal {
 export interface TokenBreakdownResponse {
   daily: DailyTokenBreakdown[];
   total: TokenTotal;
+  heatmapTokens: HeatmapTokenDay[];
+  modelTokens: ModelTokenTotal[];
+  agentTokens: AgentTokenTotal[];
+}
+
+export interface HeatmapTokenDay {
+  date: string;
+  totalTokens: number;
+}
+
+export interface ModelTokenTotal {
+  model: string;
+  totalTokens: number;
+  sessionCount: number;
+}
+
+export interface AgentTokenTotal {
+  agentKind: string;
+  totalTokens: number;
+  sessionCount: number;
 }

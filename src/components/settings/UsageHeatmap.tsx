@@ -4,8 +4,24 @@ import { cn } from '../../lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import type { UsageHeatmapDay } from '../../types/usage';
 
+export function UsageHeatmapLegend() {
+  return (
+    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+      <span>少</span>
+      {[0, 1, 2, 3, 4].map((level) => (
+        <div
+          key={level}
+          className={cn('h-[13px] w-[13px] rounded-[2px]', LEVEL_BG[level])}
+        />
+      ))}
+      <span>多</span>
+    </div>
+  );
+}
+
 interface UsageHeatmapProps {
   data: UsageHeatmapDay[];
+  tokenMap?: Map<string, number>;
 }
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
@@ -19,11 +35,11 @@ const LEVEL_BG: Record<number, string> = {
   4: 'bg-primary/90',
 };
 
-function getLevel(count: number): number {
-  if (count <= 0) return 0;
-  if (count <= 2) return 1;
-  if (count <= 5) return 2;
-  if (count <= 9) return 3;
+function getLevel(tokens: number): number {
+  if (tokens <= 0) return 0;
+  if (tokens < 50_000) return 1;
+  if (tokens < 200_000) return 2;
+  if (tokens < 500_000) return 3;
   return 4;
 }
 
@@ -34,9 +50,22 @@ function formatDateString(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+  }
+  if (n >= 1_000) {
+    const k = n / 1_000;
+    return `${Number.isInteger(k) ? k : k.toFixed(1)}K`;
+  }
+  return String(n);
+}
+
 interface HeatmapCell {
   dateStr: string;
   count: number;
+  tokens: number;
   isFuture: boolean;
 }
 
@@ -45,7 +74,7 @@ interface MonthLabel {
   label: string;
 }
 
-export function UsageHeatmap({ data }: UsageHeatmapProps) {
+export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
   const { weeks, monthLabels } = useMemo<{
     weeks: HeatmapCell[][];
     monthLabels: MonthLabel[];
@@ -78,6 +107,7 @@ export function UsageHeatmap({ data }: UsageHeatmapProps) {
         week.push({
           dateStr,
           count: isFuture ? 0 : (countMap.get(dateStr) ?? 0),
+          tokens: isFuture ? 0 : (tokenMap?.get(dateStr) ?? 0),
           isFuture,
         });
         if (d === 0) {
@@ -94,7 +124,7 @@ export function UsageHeatmap({ data }: UsageHeatmapProps) {
     }
 
     return { weeks, monthLabels };
-  }, [data]);
+  }, [data, tokenMap]);
 
   if (data.length === 0) {
     return (
@@ -106,7 +136,7 @@ export function UsageHeatmap({ data }: UsageHeatmapProps) {
 
   return (
     <div className="w-full">
-      <div className="overflow-x-auto">
+      <div className="flex justify-center overflow-x-auto">
         <div className="inline-flex flex-col">
           <div className="mb-[3px] flex h-4 gap-[2px] pl-[35px]">
             {weeks.map((_, wi) => {
@@ -114,7 +144,7 @@ export function UsageHeatmap({ data }: UsageHeatmapProps) {
               return (
                 <div
                   key={wi}
-                  className="w-[11px] overflow-visible whitespace-nowrap text-[10px] leading-4 text-muted-foreground"
+                  className="w-[13px] overflow-visible whitespace-nowrap text-[10px] leading-4 text-muted-foreground"
                 >
                   {label?.label ?? ''}
                 </div>
@@ -127,7 +157,7 @@ export function UsageHeatmap({ data }: UsageHeatmapProps) {
               {DAY_LABELS.map((label, i) => (
                 <div
                   key={label}
-                  className="h-[11px] text-[10px] leading-[11px] text-muted-foreground"
+                  className="h-[13px] text-[10px] leading-[13px] text-muted-foreground"
                 >
                   {i % 2 === 1 ? label : ''}
                 </div>
@@ -142,17 +172,17 @@ export function UsageHeatmap({ data }: UsageHeatmapProps) {
                       <TooltipTrigger asChild>
                         <div
                           className={cn(
-                            'h-[11px] w-[11px] rounded-[2px]',
+                            'h-[13px] w-[13px] rounded-[2px]',
                             cell.isFuture
                               ? 'bg-transparent'
-                              : LEVEL_BG[getLevel(cell.count)],
+                              : LEVEL_BG[getLevel(cell.tokens)],
                           )}
                         />
                       </TooltipTrigger>
                       <TooltipContent>
                         {cell.isFuture
                           ? cell.dateStr
-                          : `${cell.dateStr}: ${cell.count} 个会话`}
+                          : `${cell.dateStr}: ${cell.count} 个会话 · ${formatTokenCount(cell.tokens)} tokens`}
                       </TooltipContent>
                     </Tooltip>
                   ))}
@@ -161,17 +191,6 @@ export function UsageHeatmap({ data }: UsageHeatmapProps) {
             </div>
           </div>
         </div>
-      </div>
-
-      <div className="mt-3 flex items-center justify-end gap-1.5 text-[10px] text-muted-foreground">
-        <span>少</span>
-        {[0, 1, 2, 3, 4].map((level) => (
-          <div
-            key={level}
-            className={cn('h-[11px] w-[11px] rounded-[2px]', LEVEL_BG[level])}
-          />
-        ))}
-        <span>多</span>
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 
 import { cn } from '../../lib/utils';
 import { usageApi } from '../../lib/tauri';
+import { getAgentDefinition } from '../../types/agentRegistry';
 import type { TokenBreakdownResponse, UsageStatsResponse } from '../../types/usage';
 import { Button } from '../ui/button';
 import {
@@ -11,21 +12,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/select';
+import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { UsageBarChart } from './UsageBarChart';
-import { UsageHeatmap } from './UsageHeatmap';
+import { UsageHeatmap, UsageHeatmapLegend } from './UsageHeatmap';
 
 interface FormSectionProps {
   label: string;
   hint?: string;
+  rightContent?: ReactNode;
   children: ReactNode;
 }
 
-function FormSection({ label, hint, children }: FormSectionProps) {
+function FormSection({ label, hint, rightContent, children }: FormSectionProps) {
   return (
     <section className="space-y-3">
-      <div className="flex items-baseline gap-2">
-        <h3 className="text-[13px] font-medium text-foreground/70">{label}</h3>
-        {hint && <span className="text-xs text-foreground/38">{hint}</span>}
+      <div className="flex items-center justify-between">
+        <div className="flex items-baseline gap-2">
+          <h3 className="text-[13px] font-medium text-foreground/70">{label}</h3>
+          {hint && <span className="text-xs text-foreground/38">{hint}</span>}
+        </div>
+        {rightContent}
       </div>
       {children}
     </section>
@@ -130,20 +136,76 @@ export function UsageStatistics() {
     };
   }, [agentKind, days]);
 
-  const sortedAgentDistribution = useMemo(() => {
-    const list = stats?.agentDistribution ?? [];
-    return [...list].sort((a, b) => b.count - a.count);
-  }, [stats]);
+  const mergedAgentDistribution = useMemo(() => {
+    const statsList = stats?.agentDistribution ?? [];
+    const tokenList = tokenBreakdown?.agentTokens ?? [];
 
-  const agentTotal = useMemo(
-    () => sortedAgentDistribution.reduce((sum, item) => sum + item.count, 0),
-    [sortedAgentDistribution],
+    const tokenMap = new Map(tokenList.map((t) => [t.agentKind, t]));
+    const result = statsList.map((item) => {
+      const tokenData = tokenMap.get(item.agentKind);
+      return {
+        agentKind: item.agentKind,
+        count: item.count,
+        totalTokens: tokenData?.totalTokens ?? 0,
+      };
+    });
+
+    const statsKinds = new Set(statsList.map((s) => s.agentKind));
+    for (const tokenItem of tokenList) {
+      if (!statsKinds.has(tokenItem.agentKind)) {
+        result.push({
+          agentKind: tokenItem.agentKind,
+          count: tokenItem.sessionCount,
+          totalTokens: tokenItem.totalTokens,
+        });
+      }
+    }
+
+    result.sort((a, b) => b.totalTokens - a.totalTokens);
+    return result;
+  }, [stats, tokenBreakdown]);
+
+  const agentTokenTotal = useMemo(
+    () => mergedAgentDistribution.reduce((sum, item) => sum + item.totalTokens, 0),
+    [mergedAgentDistribution],
   );
 
-  const sortedModelDistribution = useMemo(() => {
-    const list = stats?.modelDistribution ?? [];
-    return [...list].sort((a, b) => b.sessionCount - a.sessionCount);
-  }, [stats]);
+  const heatmapTokenMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const day of tokenBreakdown?.heatmapTokens ?? []) {
+      map.set(day.date, day.totalTokens);
+    }
+    return map;
+  }, [tokenBreakdown]);
+
+  const mergedModelDistribution = useMemo(() => {
+    const statsList = stats?.modelDistribution ?? [];
+    const tokenList = tokenBreakdown?.modelTokens ?? [];
+
+    const tokenMap = new Map(tokenList.map((t) => [t.model, t]));
+    const result = statsList.map((item) => {
+      const tokenData = tokenMap.get(item.model || '未知模型');
+      return {
+        model: item.model,
+        sessionCount: item.sessionCount,
+        totalTokens: tokenData?.totalTokens ?? 0,
+      };
+    });
+
+    const statsModels = new Set(statsList.map((s) => s.model || '未知模型'));
+    for (const tokenItem of tokenList) {
+      if (!statsModels.has(tokenItem.model)) {
+        result.push({
+          model: tokenItem.model,
+          sessionCount: tokenItem.sessionCount,
+          totalTokens: tokenItem.totalTokens,
+        });
+      }
+    }
+
+    result.sort((a, b) => b.totalTokens - a.totalTokens);
+    return result;
+  }, [stats, tokenBreakdown]);
 
   const totalTokensValue = tokenBreakdown?.total.totalTokens ?? null;
   const cacheRateValue = tokenBreakdown?.total.cacheRate ?? null;
@@ -157,11 +219,17 @@ export function UsageStatistics() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {AGENT_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
+            {AGENT_OPTIONS.map((opt) => {
+              const agentDef = opt.value === 'all' ? null : getAgentDefinition(opt.value as never);
+              return (
+                <SelectItem key={opt.value} value={opt.value}>
+                  <span className="flex items-center gap-2">
+                    {agentDef && <AgentBrandIcon agent={agentDef} size="sm" />}
+                    {opt.label}
+                  </span>
+                </SelectItem>
+              );
+            })}
           </SelectContent>
         </Select>
 
@@ -208,8 +276,12 @@ export function UsageStatistics() {
       </FormSection>
 
       {/* Heatmap */}
-      <FormSection label="活跃热力图" hint="过去 365 天的会话创建活跃度">
-        <UsageHeatmap data={stats?.heatmap ?? []} />
+      <FormSection
+        label="活跃热力图"
+        hint="过去 365 天的 Token 消耗活跃度"
+        rightContent={<UsageHeatmapLegend />}
+      >
+        <UsageHeatmap data={stats?.heatmap ?? []} tokenMap={heatmapTokenMap} />
       </FormSection>
 
       {/* Daily token bar chart */}
@@ -223,19 +295,21 @@ export function UsageStatistics() {
 
       {/* Agent distribution (only when no specific agent selected) */}
       {agentKind === 'all' && (
-        <FormSection label="智能体分布">
-          {sortedAgentDistribution.length === 0 ? (
+        <FormSection label="智能体分布" hint="按 Token 消耗总量排名">
+          {mergedAgentDistribution.length === 0 ? (
             <div className="rounded-lg border border-border/40 bg-muted/20 px-4 py-6 text-sm text-foreground/40">
               暂无智能体分布数据
             </div>
           ) : (
             <div className="space-y-2.5">
-              {sortedAgentDistribution.map((item) => {
+              {mergedAgentDistribution.map((item) => {
                 const percent =
-                  agentTotal > 0 ? (item.count / agentTotal) * 100 : 0;
+                  agentTokenTotal > 0 ? (item.totalTokens / agentTokenTotal) * 100 : 0;
+                const agentDef = getAgentDefinition(item.agentKind as never);
                 return (
                   <div key={item.agentKind} className="flex items-center gap-3 text-sm">
-                    <span className="w-28 shrink-0 truncate text-foreground/72">
+                    <span className="flex w-28 shrink-0 items-center gap-2 truncate text-foreground/72">
+                      {agentDef && <AgentBrandIcon agent={agentDef} size="sm" />}
                       {agentLabel(item.agentKind)}
                     </span>
                     <div className="relative h-6 flex-1 overflow-hidden rounded bg-muted/40">
@@ -244,8 +318,8 @@ export function UsageStatistics() {
                         style={{ width: `${percent}%` }}
                       />
                     </div>
-                    <span className="w-24 shrink-0 text-right tabular-nums text-foreground/60">
-                      {item.count} · {percent.toFixed(1)}%
+                    <span className="w-32 shrink-0 text-right tabular-nums text-foreground/60">
+                      {formatTokenValue(item.totalTokens)} · {percent.toFixed(1)}%
                     </span>
                   </div>
                 );
@@ -256,8 +330,8 @@ export function UsageStatistics() {
       )}
 
       {/* Model distribution table */}
-      <FormSection label="模型统计">
-        {sortedModelDistribution.length === 0 ? (
+      <FormSection label="模型统计" hint="按 Token 消耗总量排名">
+        {mergedModelDistribution.length === 0 ? (
           <div className="rounded-lg border border-border/40 bg-muted/20 px-4 py-6 text-sm text-foreground/40">
             暂无模型统计数据
           </div>
@@ -268,10 +342,11 @@ export function UsageStatistics() {
                 <tr className="border-b border-border/55 bg-muted/30 text-left text-xs text-foreground/55">
                   <th className="px-4 py-2.5 font-medium">模型名称</th>
                   <th className="px-4 py-2.5 text-right font-medium">会话数</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Token 用量</th>
                 </tr>
               </thead>
               <tbody>
-                {sortedModelDistribution.map((item) => (
+                {mergedModelDistribution.map((item) => (
                   <tr
                     key={`${item.model}-${item.sessionCount}`}
                     className="border-b border-border/40 last:border-b-0"
@@ -282,15 +357,15 @@ export function UsageStatistics() {
                     <td className="px-4 py-2.5 text-right tabular-nums text-foreground/72">
                       {item.sessionCount}
                     </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-foreground/72">
+                      {formatTokenValue(item.totalTokens)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
-        <p className="text-xs text-foreground/42">
-          Token 统计按智能体聚合，不按模型拆分。
-        </p>
       </FormSection>
     </div>
   );

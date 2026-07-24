@@ -77,11 +77,39 @@ pub struct TokenTotal {
 pub struct TokenBreakdownResponse {
     pub daily: Vec<DailyTokenBreakdown>,
     pub total: TokenTotal,
+    pub heatmap_tokens: Vec<HeatmapTokenDay>,
+    pub model_tokens: Vec<ModelTokenTotal>,
+    pub agent_tokens: Vec<AgentTokenTotal>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HeatmapTokenDay {
+    pub date: String,
+    pub total_tokens: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelTokenTotal {
+    pub model: String,
+    pub total_tokens: u64,
+    pub session_count: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTokenTotal {
+    pub agent_kind: String,
+    pub total_tokens: u64,
+    pub session_count: i64,
 }
 
 struct SessionTokenSource {
     agent_kind: String,
     agent_session_id: Option<String>,
+    model: Option<String>,
+    created_at: String,
 }
 
 #[derive(Default)]
@@ -114,19 +142,21 @@ pub async fn get_usage_token_breakdown(
     days: Option<u32>,
 ) -> Result<TokenBreakdownResponse, String> {
     let days = days.unwrap_or(30);
-    let days_modifier = format!("-{} days", days);
+    let heatmap_modifier = "-365 days";
     debug!(
         target: "usage",
         "Loading token breakdown agent_kind={:?} days={}",
         agent_kind, days
     );
 
+    // Always query 365 days of sessions for heatmap token data;
+    // model/created_at are needed for per-model aggregation and days-window filtering.
     let session_sources: Vec<SessionTokenSource> = {
         let db = state.db.lock().unwrap();
         if let Some(ref kind) = agent_kind {
             let mut stmt = db
                 .prepare(
-                    "SELECT s.agent_kind, m.agent_session_id \
+                    "SELECT s.agent_kind, m.agent_session_id, s.model, s.created_at \
                      FROM sessions s \
                      LEFT JOIN agent_session_mappings m \
                      ON s.id = m.app_session_id AND s.agent_kind = m.agent_kind \
@@ -134,10 +164,12 @@ pub async fn get_usage_token_breakdown(
                 )
                 .map_err(|e| e.to_string())?;
             let rows = stmt
-                .query_map(rusqlite::params![days_modifier, kind], |row| {
+                .query_map(rusqlite::params![heatmap_modifier, kind], |row| {
                     Ok(SessionTokenSource {
                         agent_kind: row.get(0)?,
                         agent_session_id: row.get(1)?,
+                        model: row.get(2)?,
+                        created_at: row.get(3)?,
                     })
                 })
                 .map_err(|e| e.to_string())?;
@@ -145,7 +177,7 @@ pub async fn get_usage_token_breakdown(
         } else {
             let mut stmt = db
                 .prepare(
-                    "SELECT s.agent_kind, m.agent_session_id \
+                    "SELECT s.agent_kind, m.agent_session_id, s.model, s.created_at \
                      FROM sessions s \
                      LEFT JOIN agent_session_mappings m \
                      ON s.id = m.app_session_id AND s.agent_kind = m.agent_kind \
@@ -153,10 +185,12 @@ pub async fn get_usage_token_breakdown(
                 )
                 .map_err(|e| e.to_string())?;
             let rows = stmt
-                .query_map(rusqlite::params![days_modifier], |row| {
+                .query_map(rusqlite::params![heatmap_modifier], |row| {
                     Ok(SessionTokenSource {
                         agent_kind: row.get(0)?,
                         agent_session_id: row.get(1)?,
+                        model: row.get(2)?,
+                        created_at: row.get(3)?,
                     })
                 })
                 .map_err(|e| e.to_string())?;
@@ -166,11 +200,22 @@ pub async fn get_usage_token_breakdown(
 
     let home = home_dir()?;
 
-    let daily_map = tokio::task::spawn_blocking(move || {
+    let (daily_map, model_map, agent_map) = tokio::task::spawn_blocking(move || {
         let mut daily_map: BTreeMap<String, DailyTokens> = BTreeMap::new();
+        // model -> (total_tokens, session_count)
+        let mut model_map: BTreeMap<String, (u64, i64)> = BTreeMap::new();
+        // agent_kind -> (total_tokens, session_count)
+        let mut agent_map: BTreeMap<String, (u64, i64)> = BTreeMap::new();
+        let days_cutoff = format!(
+            "{}",
+            chrono::Utc::now()
+                .checked_sub_signed(chrono::Duration::days(days as i64))
+                .unwrap_or_else(chrono::Utc::now)
+                .format("%Y-%m-%d")
+        );
 
         for source in &session_sources {
-            let agent_kind = match AgentKind::from_str(&source.agent_kind) {
+            let agent_kind_enum = match AgentKind::from_str(&source.agent_kind) {
                 Ok(k) => k,
                 Err(_) => continue,
             };
@@ -178,48 +223,99 @@ pub async fn get_usage_token_breakdown(
                 continue;
             };
 
-            let result = match agent_kind {
+            let session_daily_result = match agent_kind_enum {
                 AgentKind::ClaudeCode => {
-                    aggregate_claude_tokens(&home, agent_session_id, &mut daily_map)
+                    aggregate_claude_tokens(&home, agent_session_id)
                 }
-                AgentKind::Codex => aggregate_codex_tokens(&home, agent_session_id, &mut daily_map),
+                AgentKind::Codex => aggregate_codex_tokens(&home, agent_session_id),
                 AgentKind::Opencode => {
-                    aggregate_opencode_tokens(&home, agent_session_id, &mut daily_map)
+                    aggregate_opencode_tokens(&home, agent_session_id)
                 }
-                AgentKind::GeminiCli => Ok(()),
+                AgentKind::GeminiCli => Ok(BTreeMap::new()),
             };
 
-            if let Err(error) = result {
-                warn!(
-                    target: "usage",
-                    "Failed to parse token usage for agent_kind={} agent_session_id={}: {}",
-                    source.agent_kind,
-                    agent_session_id,
-                    error
-                );
+            let session_daily = match session_daily_result {
+                Ok(d) => d,
+                Err(error) => {
+                    warn!(
+                        target: "usage",
+                        "Failed to parse token usage for agent_kind={} agent_session_id={}: {}",
+                        source.agent_kind,
+                        agent_session_id,
+                        error
+                    );
+                    continue;
+                }
+            };
+
+            // Merge session daily tokens into global daily_map (for heatmap + chart)
+            let mut session_total: u64 = 0;
+            for (date, tokens) in &session_daily {
+                let entry = daily_map.entry(date.clone()).or_default();
+                entry.input_tokens += tokens.input_tokens;
+                entry.cached_tokens += tokens.cached_tokens;
+                entry.output_tokens += tokens.output_tokens;
+                session_total +=
+                    tokens.input_tokens + tokens.output_tokens + tokens.cached_tokens;
+            }
+
+            // Aggregate by model and agent_kind (only for sessions within the days window)
+            let session_date = source.created_at.get(..10).unwrap_or(&source.created_at);
+            if session_date >= days_cutoff.as_str() {
+                let model_label = source
+                    .model
+                    .as_deref()
+                    .filter(|m| !m.is_empty())
+                    .unwrap_or("未知模型");
+                let model_entry = model_map.entry(model_label.to_string()).or_insert((0, 0));
+                model_entry.0 += session_total;
+                model_entry.1 += 1;
+
+                let agent_entry = agent_map.entry(source.agent_kind.clone()).or_insert((0, 0));
+                agent_entry.0 += session_total;
+                agent_entry.1 += 1;
             }
         }
 
-        daily_map
+        (daily_map, model_map, agent_map)
     })
     .await
     .map_err(|e| format!("Failed to join token breakdown task: {}", e))?;
+
+    // Split daily_map into chart daily (days window) and heatmap_tokens (all 365 days)
+    let days_cutoff_str = format!(
+        "{}",
+        chrono::Utc::now()
+            .checked_sub_signed(chrono::Duration::days(days as i64))
+            .unwrap_or_else(chrono::Utc::now)
+            .format("%Y-%m-%d")
+    );
 
     let mut total_input: u64 = 0;
     let mut total_output: u64 = 0;
     let mut total_cached: u64 = 0;
 
     let mut daily: Vec<DailyTokenBreakdown> = Vec::new();
-    for (date, tokens) in daily_map {
-        total_input += tokens.input_tokens;
-        total_output += tokens.output_tokens;
-        total_cached += tokens.cached_tokens;
-        daily.push(DailyTokenBreakdown {
-            date,
-            input_tokens: tokens.input_tokens,
-            output_tokens: tokens.output_tokens,
-            cached_tokens: tokens.cached_tokens,
+    let mut heatmap_tokens: Vec<HeatmapTokenDay> = Vec::new();
+
+    for (date, tokens) in &daily_map {
+        let day_total = tokens.input_tokens + tokens.output_tokens + tokens.cached_tokens;
+        heatmap_tokens.push(HeatmapTokenDay {
+            date: date.clone(),
+            total_tokens: day_total,
         });
+
+        if date.as_str() >= days_cutoff_str.as_str() {
+            total_input += tokens.input_tokens;
+            total_output += tokens.output_tokens;
+            total_cached += tokens.cached_tokens;
+            daily.push(DailyTokenBreakdown {
+                date: date.clone(),
+                input_tokens: tokens.input_tokens,
+                output_tokens: tokens.output_tokens,
+                cached_tokens: tokens.cached_tokens,
+            });
+        }
     }
 
     let total_tokens = total_input
@@ -231,10 +327,33 @@ pub async fn get_usage_token_breakdown(
         0.0
     };
 
+    let mut model_tokens: Vec<ModelTokenTotal> = model_map
+        .into_iter()
+        .map(|(model, (total, count))| ModelTokenTotal {
+            model,
+            total_tokens: total,
+            session_count: count,
+        })
+        .collect();
+    model_tokens.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+
+    let mut agent_tokens: Vec<AgentTokenTotal> = agent_map
+        .into_iter()
+        .map(|(agent_kind, (total, count))| AgentTokenTotal {
+            agent_kind,
+            total_tokens: total,
+            session_count: count,
+        })
+        .collect();
+    agent_tokens.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+
     info!(
         target: "usage",
-        "Token breakdown complete: {} daily entries, total_tokens={}",
+        "Token breakdown complete: {} daily entries, {} heatmap entries, {} model entries, {} agent entries, total_tokens={}",
         daily.len(),
+        heatmap_tokens.len(),
+        model_tokens.len(),
+        agent_tokens.len(),
         total_tokens
     );
 
@@ -247,19 +366,23 @@ pub async fn get_usage_token_breakdown(
             total_tokens,
             cache_rate,
         },
+        heatmap_tokens,
+        model_tokens,
+        agent_tokens,
     })
 }
 
 fn aggregate_claude_tokens(
     home: &Path,
     claude_session_id: &str,
-    daily_map: &mut BTreeMap<String, DailyTokens>,
-) -> Result<(), String> {
+) -> Result<BTreeMap<String, DailyTokens>, String> {
     use std::fs;
+
+    let mut session_daily: BTreeMap<String, DailyTokens> = BTreeMap::new();
 
     let claude_dir = home.join(".claude");
     let Some(jsonl_path) = find_claude_session_jsonl(&claude_dir, claude_session_id) else {
-        return Ok(());
+        return Ok(session_daily);
     };
 
     let file = fs::File::open(&jsonl_path).map_err(|e| format!("Failed to open JSONL: {}", e))?;
@@ -314,25 +437,26 @@ fn aggregate_claude_tokens(
         let timestamp = val.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
         let date = extract_date_from_timestamp(timestamp);
 
-        let entry = daily_map.entry(date).or_default();
+        let entry = session_daily.entry(date).or_default();
         entry.input_tokens += input_tokens;
         entry.cached_tokens += cache_read;
         entry.output_tokens += output_tokens;
     }
 
-    Ok(())
+    Ok(session_daily)
 }
 
 fn aggregate_codex_tokens(
     home: &Path,
     codex_session_id: &str,
-    daily_map: &mut BTreeMap<String, DailyTokens>,
-) -> Result<(), String> {
+) -> Result<BTreeMap<String, DailyTokens>, String> {
     use std::fs;
+
+    let mut session_daily: BTreeMap<String, DailyTokens> = BTreeMap::new();
 
     let sessions_dir = home.join(".codex").join("sessions");
     let Some(jsonl_path) = find_codex_session_jsonl(&sessions_dir, codex_session_id) else {
-        return Ok(());
+        return Ok(session_daily);
     };
 
     let file = fs::File::open(&jsonl_path).map_err(|e| format!("Failed to open JSONL: {}", e))?;
@@ -392,20 +516,21 @@ fn aggregate_codex_tokens(
         let timestamp = val.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
         let date = extract_date_from_timestamp(timestamp);
 
-        let entry = daily_map.entry(date).or_default();
+        let entry = session_daily.entry(date).or_default();
         entry.input_tokens += delta_input;
         entry.cached_tokens += delta_cached;
         entry.output_tokens += delta_output;
     }
 
-    Ok(())
+    Ok(session_daily)
 }
 
 fn aggregate_opencode_tokens(
     home: &Path,
     opencode_session_id: &str,
-    daily_map: &mut BTreeMap<String, DailyTokens>,
-) -> Result<(), String> {
+) -> Result<BTreeMap<String, DailyTokens>, String> {
+    let mut session_daily: BTreeMap<String, DailyTokens> = BTreeMap::new();
+
     let events = opencode_history::load_opencode_session_events(home, opencode_session_id)?;
 
     for event in events {
@@ -431,11 +556,11 @@ fn aggregate_opencode_tokens(
             .unwrap_or("");
         let date = extract_date_from_timestamp(timestamp);
 
-        let entry = daily_map.entry(date).or_default();
+        let entry = session_daily.entry(date).or_default();
         entry.input_tokens += input_tokens;
         entry.cached_tokens += cached_tokens;
         entry.output_tokens += output_tokens;
     }
 
-    Ok(())
+    Ok(session_daily)
 }
