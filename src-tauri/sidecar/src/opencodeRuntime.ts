@@ -67,6 +67,8 @@ export class OpenCodeRuntime {
   private readonly pendingTaskToolCallIds = new Set<string>();
   private readonly assistantMessageIds = new Set<string>();
   private readonly userMessageIds = new Set<string>();
+  private readonly streamingParts = new Map<string, { kind: 'text' | 'thinking'; index: number; started: boolean }>();
+  private readonly nextSection = { kind: 'idle' as const };
   private eventSequence = 0;
   private usage: import('./runtimeEvents.js').OpenCodeTokenUsage = { input_tokens: 0, output_tokens: 0 };
   private turnStartedAt = 0;
@@ -422,6 +424,8 @@ export class OpenCodeRuntime {
         userMessageIds: this.userMessageIds,
         turnId: this.turnId,
         eventIdFactory: this.eventIdFactory,
+        streamingParts: this.streamingParts,
+        nextSection: this.nextSection,
       });
       for (const diagnosticEvent of diagnosticEvents) {
         this.emitEvent(diagnosticEvent);
@@ -493,6 +497,8 @@ export class OpenCodeRuntime {
       userMessageIds: this.userMessageIds,
       turnId: this.turnId,
       eventIdFactory: this.eventIdFactory,
+      streamingParts: this.streamingParts,
+      nextSection: this.nextSection,
     });
     const serialized = JSON.stringify(event);
     if (serialized.toLowerCase().includes('cancelled') || serialized.includes('Task cancelled') || serialized.includes('task was cancelled')) {
@@ -579,6 +585,7 @@ export class OpenCodeRuntime {
     this.pendingTaskToolCallIds.clear();
     this.assistantMessageIds.clear();
     this.userMessageIds.clear();
+    this.streamingParts.clear();
     this.usage = { input_tokens: 0, output_tokens: 0 };
     this.turnStartedAt = Date.now();
   }

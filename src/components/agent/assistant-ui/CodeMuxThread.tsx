@@ -1133,7 +1133,7 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
           </div>
         ) : null}
 
-        {isRunning ? (
+        {isThinking && visibleText ? null : isRunning ? (
           <div
             className={cn(
               'flex items-center gap-2.5 py-1 text-sm text-muted-foreground/60 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
@@ -1143,6 +1143,19 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
             <RunningElapsedTimer startTime={queryStartTime} label="思考中" />
           </div>
+        ) : null}
+
+        {isThinking ? (
+          <ReasoningRoot variant="ghost" defaultOpen>
+            <ReasoningTrigger active />
+            <ReasoningContent>
+              <ReasoningText>
+                <pre className="aui-md whitespace-pre-wrap font-sans text-xs leading-relaxed">
+                  {thinking}
+                </pre>
+              </ReasoningText>
+            </ReasoningContent>
+          </ReasoningRoot>
         ) : null}
       </div>
     </div>

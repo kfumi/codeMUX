@@ -397,14 +397,15 @@ function ClaudeAdvancedOptions({ editing, updateClaudeForm, fetchedModels, fetch
             </div>
             {editing.claudeForm.customModels.length > 0 && (
               <div className="space-y-2">
-                <div className={`grid gap-2 text-xs text-foreground ${fetchedModels.length > 0 ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px_36px]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_36px]'}`}>
+                <div className={`grid gap-2 text-xs text-foreground ${fetchedModels.length > 0 ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px_92px_36px]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_92px_36px]'}`}>
                   <span>显示名称</span>
                   <span>实际请求模型</span>
                   {fetchedModels.length > 0 && <span />}
+                  <span>声明支持 1M</span>
                   <span />
                 </div>
                 {editing.claudeForm.customModels.map((model, index) => (
-                  <div key={index} className={`grid gap-2 items-center ${fetchedModels.length > 0 ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px_36px]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_36px]'}`}>
+                  <div key={index} className={`grid gap-2 items-center ${fetchedModels.length > 0 ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px_92px_36px]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_92px_36px]'}`}>
                     <Input
                       aria-label={`自定义模型 ${index + 1} 显示名称`}
                       value={model.displayName}
@@ -426,6 +427,13 @@ function ClaudeAdvancedOptions({ editing, updateClaudeForm, fetchedModels, fetch
                         })}
                       />
                     )}
+                    <label className="flex items-center gap-2">
+                      <Switch
+                        checked={model.supports1m ?? false}
+                        onCheckedChange={(c) => handleUpdateCustomModel(index, { supports1m: c })}
+                      />
+                      1M
+                    </label>
                     <Button
                       type="button"
                       variant="ghost"

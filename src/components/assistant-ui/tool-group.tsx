@@ -81,7 +81,7 @@ function ToolGroupTrigger({
   // Generate label based on tool names if available
   const label = useMemo(() => {
     if (!toolNames || toolNames.length === 0) {
-      return `工具调用(${count})`;
+      return `工具调用 × ${count}`;
     }
 
     // Count by tool name
@@ -104,7 +104,7 @@ function ToolGroupTrigger({
       return `已执行 ${parts.join('、')}`;
     }
     // Too many types, just show count
-    return `工具调用(${count})`;
+    return `工具调用 × ${count}`;
   }, [count, toolNames]);
 
   return (

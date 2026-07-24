@@ -1452,7 +1452,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.queryByText('结果 119')).toBeNull();
   }, 30_000);
 
-  it('does not render streaming thinking content and only shows elapsed thinking status', () => {
+  it('renders streaming thinking content in a live reasoning panel', () => {
     const shortThinking = 'short thinking stays fully visible';
     const longThinking = `${'x'.repeat(21_000)}`;
 
@@ -1468,19 +1468,24 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     const { container } = render(<Harness sessionId="session-stream-short" />);
 
-    // Thinking content is NOT rendered during streaming
-    expect(container.textContent).not.toContain(shortThinking);
-    // No collapsible reasoning block is rendered while thinking is in progress
-    expect(container.querySelector('[data-slot="reasoning-trigger"]')).toBeNull();
-    // Status line shows thinking label and elapsed time only
-    expect(container.textContent).toContain('思考中');
+    // Thinking content IS rendered during streaming in a reasoning panel
+    expect(container.textContent).toContain(shortThinking);
+    // Collapsible reasoning block is rendered while thinking is in progress
+    const trigger = container.querySelector('[data-slot="reasoning-trigger"]');
+    expect(trigger).not.toBeNull();
+    // Reasoning content shows the thinking text
+    const thinkingContent = container.querySelector('[data-slot="reasoning-text"]');
+    expect(thinkingContent?.textContent).toContain(shortThinking);
+    // Trigger label shows 思考 (with possible duration/time suffix)
+    expect(trigger?.textContent).toContain('思考');
+    // No tokens shown during streaming (only on completed)
     expect(container.textContent).not.toContain('tokens');
 
     cleanup();
     const longView = render(<Harness sessionId="session-stream-long" />);
-    // Long thinking content is also NOT rendered (no streaming render at all)
-    expect(longView.container.querySelector('[data-slot="reasoning-trigger"]')).toBeNull();
-    expect(longView.container.textContent).toContain('思考中');
+    // Long thinking content is also rendered in a reasoning panel
+    expect(longView.container.querySelector('[data-slot="reasoning-trigger"]')).not.toBeNull();
+    expect(longView.container.textContent).toContain('思考');
     expect(longView.container.textContent).not.toContain('tokens');
   });
 

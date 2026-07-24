@@ -16,6 +16,7 @@ type ClaudeHaikuRoleMapping = {
 export type ClaudeCustomModel = {
   displayName: string;
   requestModel: string;
+  supports1m?: boolean;
 };
 
 export type ClaudeSettingsForm = {
@@ -114,6 +115,7 @@ export function applyClaudeFormToSettings(
     settings.custom_models = form.customModels.map((m) => ({
       displayName: m.displayName,
       requestModel: m.requestModel,
+      ...(m.supports1m ? { supports1m: true } : {}),
     }));
   } else {
     delete settings.custom_models;
@@ -146,6 +148,7 @@ function formFromClaudeSettings(settings: ClaudeSettings): ClaudeSettingsForm {
         .map((m) => ({
           displayName: typeof m.displayName === 'string' ? m.displayName : '',
           requestModel: typeof m.requestModel === 'string' ? m.requestModel : '',
+          supports1m: m.supports1m === true,
         }))
     : [];
 

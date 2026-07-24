@@ -16,7 +16,7 @@ import { AskUserQuestionCard } from '../AskUserQuestionCard';
 import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
 import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
 import { AlertTriangle, Check, Copy, Maximize2, ListTodo, XCircle } from 'lucide-react';
-import { getCodeChangeFilePath, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
+import { getCodeChangeFilePath, getCodeChangeStats, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
 import { getDisplayableArgs, getToolHeaderSummary } from '../toolHeaderSummary';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
@@ -233,6 +233,7 @@ export function CodeMuxToolCallMessagePart({
   const headerSummary = getToolHeaderSummary(toolName, args);
   const codeFilePath = isCodeChangeTool(toolName, args) ? getCodeChangeFilePath(args) : undefined;
   const headerText = codeFilePath || headerSummary.text;
+  const codeChangeStats = codeFilePath ? getCodeChangeStats(args) : null;
   const displayableArgs = codeFilePath ? null : getToolDisplayableArgs(toolName, args, []);
   const subAgentPrompt = getSubAgentPrompt(toolName, args);
   const isSubAgentToolCall = isSubAgentTool(toolName);
@@ -287,6 +288,20 @@ export function CodeMuxToolCallMessagePart({
               {headerText}
             </span>
           )
+        )}
+        {codeChangeStats && (
+          <span className="ml-2 inline-flex shrink-0 gap-1.5 font-mono text-[11px] tabular-nums">
+            {(codeChangeStats.additions > 0 || codeChangeStats.deletions > 0) && (
+              <>
+                <span className="text-green-600 dark:text-green-400">
+                  +{codeChangeStats.additions}
+                </span>
+                <span className="text-red-600 dark:text-red-400">
+                  -{codeChangeStats.deletions}
+                </span>
+              </>
+            )}
+          </span>
         )}
         {durationMs != null && (
           <span className="inline-flex rounded-md border border-border/16 bg-[hsl(var(--surface-3))]/20 px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground/56">

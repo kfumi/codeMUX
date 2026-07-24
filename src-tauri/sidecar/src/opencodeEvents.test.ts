@@ -118,6 +118,237 @@ describe('OpenCode event normalization', () => {
     const key = getOpenCodePayloadKey(event);
     expect(toCodeMuxEvent(event, context({ seenPayloadKeys: new Set([key!]) }))).toEqual([]);
   });
+  describe('streaming via message.part.delta', () => {
+    function streamingContext(overrides: Partial<OpenCodeEventContext> = {}): OpenCodeEventContext {
+      return context({ streamingParts: new Map(), ...overrides });
+    }
+
+    it('buffers field=text deltas without emitting stream events', () => {
+      const ctx = streamingContext();
+      const first = toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'part-1', messageID: 'msg-1', field: 'text', delta: 'Hel' },
+      }, ctx);
+      expect(first).toHaveLength(0);
+      const second = toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'part-1', messageID: 'msg-1', field: 'text', delta: 'lo' },
+      }, ctx);
+      expect(second).toHaveLength(0);
+    });
+
+    it('flushes buffered field=text as assistant on message.part.updated for text type', () => {
+      const parts = new Map<string, any>();
+      parts.set('part-1', { kind: 'text', index: -1, started: false, buffered: true, deltaText: ['Hel', 'lo'] });
+      const events = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'part-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'text', text: 'Hello' } },
+      }, streamingContext({ streamingParts: parts }));
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ type: 'assistant', message: { content: [{ type: 'text', text: 'Hello' }] } });
+    });
+
+    it('flushes buffered field=text as thinking stream burst on message.part.updated for reasoning type', () => {
+      const parts = new Map<string, any>();
+      const ctx = streamingContext({ streamingParts: parts });
+      const delta = toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'prt-1', messageID: 'msg-1', field: 'text', delta: 'ap' },
+      }, ctx);
+      expect(delta).toHaveLength(0);
+      toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'prt-1', messageID: 'msg-1', field: 'text', delta: 'prove.' },
+      }, ctx);
+
+      const done = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'prt-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'reasoning', text: 'approve.' } },
+      }, ctx);
+      expect(done).toHaveLength(4);
+      expect(done[0]).toMatchObject({ event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } } });
+      expect(done[1]).toMatchObject({ event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'approve.' } } });
+      expect(done[2]).toMatchObject({ event: { type: 'content_block_stop', index: 0 } });
+      expect(done[3]).toMatchObject({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'approve.' }] } });
+    });
+
+    it('emits assistant event on message.part.updated when part was NOT streamed', () => {
+      const events = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'part-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'text', text: 'Hello' } },
+      }, streamingContext());
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ type: 'assistant' });
+      expect(events[0]).not.toHaveProperty('event');
+    });
+
+    it('supports thinking content blocks via message.part.delta field=reasoning', () => {
+      const parts = new Map<string, { kind: 'text' | 'thinking'; index: number; started: boolean }>();
+      const ctx = streamingContext({ streamingParts: parts });
+      const first = toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'part-think', messageID: 'msg-1', field: 'reasoning', delta: '思考' },
+      }, ctx);
+      expect(first).toHaveLength(2);
+      expect(first[0]).toMatchObject({ event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } } });
+      expect(first[1]).toMatchObject({ event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: '思考' } } });
+
+      const second = toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'part-think', messageID: 'msg-1', field: 'reasoning', delta: '中' },
+      }, ctx);
+      expect(second).toHaveLength(1);
+      expect(second[0]).toMatchObject({ event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: '中' } } });
+
+      const stop = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'part-think', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'text', text: '思考中' } },
+      }, ctx);
+      expect(stop).toHaveLength(2);
+      expect(stop[0]).toMatchObject({ event: { type: 'content_block_stop', index: 0 } });
+      expect(stop[1]).toMatchObject({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: '思考中' }] } });
+    });
+
+    it('produces no events when streamingParts is absent from context', () => {
+      const events = toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'part-1', messageID: 'msg-1', field: 'text', delta: 'Hello' },
+      }, context());
+      expect(events).toHaveLength(0);
+    });
+
+    it('does not affect tool part handling in message.part.updated', () => {
+      const parts = new Map<string, { kind: 'text' | 'thinking'; index: number; started: boolean }>();
+      const events = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'tool-part-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'tool', callID: 'call-1', tool: 'bash', state: { status: 'running', input: { command: 'pwd' } } } },
+      }, streamingContext({ streamingParts: parts }));
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ type: 'assistant', event_kind: 'tool_call' });
+    });
+
+    it('emits thinking_delta stream events from session.next.reasoning.delta', () => {
+      const parts = new Map<string, any>();
+      const ctx = streamingContext({ streamingParts: parts });
+      const started = toCodeMuxEvent({
+        type: 'session.next.reasoning.started',
+        properties: { sessionID: 'opencode-session-1', reasoningID: 'rn-1', assistantMessageID: 'msg-1', timestamp: 1000 },
+      }, ctx);
+      expect(started).toHaveLength(0);
+
+      const delta = toCodeMuxEvent({
+        type: 'session.next.reasoning.delta',
+        properties: { sessionID: 'opencode-session-1', reasoningID: 'rn-1', assistantMessageID: 'msg-1', delta: 'thinking...', timestamp: 1001 },
+      }, ctx);
+      expect(delta).toHaveLength(2);
+      expect(delta[0]).toMatchObject({ event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } } });
+      expect(delta[1]).toMatchObject({ event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'thinking...' } } });
+
+      const delta2 = toCodeMuxEvent({
+        type: 'session.next.reasoning.delta',
+        properties: { sessionID: 'opencode-session-1', reasoningID: 'rn-1', assistantMessageID: 'msg-1', delta: ' more', timestamp: 1002 },
+      }, ctx);
+      expect(delta2).toHaveLength(1);
+      expect(delta2[0]).toMatchObject({ event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: ' more' } } });
+    });
+
+    it('message.part.delta field:text skips buffering for parts pre-registered by reasoning.started', () => {
+      const parts = new Map<string, any>();
+      const ctx = streamingContext({ streamingParts: parts });
+      toCodeMuxEvent({
+        type: 'session.next.reasoning.started',
+        properties: { sessionID: 'opencode-session-1', reasoningID: 'rn-1', assistantMessageID: 'msg-1', timestamp: 1000 },
+      }, ctx);
+      const delta = toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'rn-1', messageID: 'msg-1', field: 'text', delta: 'Hello' },
+      }, ctx);
+      expect(delta).toHaveLength(0);
+      const partState = parts.get('rn-1');
+      expect(partState?.buffered).toBeUndefined();
+      expect(partState?.deltaText?.length ?? 0).toBe(0);
+    });
+
+    it('message.part.updated handles parts streamed via reasoning.delta', () => {
+      const parts = new Map<string, any>();
+      const ctx = streamingContext({ streamingParts: parts });
+      toCodeMuxEvent({
+        type: 'session.next.reasoning.started',
+        properties: { sessionID: 'opencode-session-1', reasoningID: 'rn-1', assistantMessageID: 'msg-1', timestamp: 1000 },
+      }, ctx);
+      toCodeMuxEvent({
+        type: 'session.next.reasoning.delta',
+        properties: { sessionID: 'opencode-session-1', reasoningID: 'rn-1', assistantMessageID: 'msg-1', delta: 'thinking...', timestamp: 1001 },
+      }, ctx);
+      const updated = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'rn-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'reasoning', text: 'thinking...' } },
+      }, ctx);
+      expect(updated).toHaveLength(2);
+      expect(updated[0]).toMatchObject({ event: { type: 'content_block_stop', index: 0 } });
+      expect(updated[1]).toMatchObject({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'thinking...' }] } });
+    });
+
+    it('session.next.reasoning.delta reclassifies pre-existing buffered entry when arriving after message.part.delta', () => {
+      const parts = new Map<string, any>();
+      const ctx = streamingContext({ streamingParts: parts });
+      toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'rn-1', messageID: 'msg-1', field: 'text', delta: 'thinking...' },
+      }, ctx);
+      expect(parts.get('rn-1')?.buffered).toBe(true);
+      expect(parts.get('rn-1')?.deltaText).toEqual(['thinking...']);
+
+      const delta = toCodeMuxEvent({
+        type: 'session.next.reasoning.delta',
+        properties: { sessionID: 'opencode-session-1', reasoningID: 'rn-1', assistantMessageID: 'msg-1', delta: 'thinking...', timestamp: 1001 },
+      }, ctx);
+      expect(delta).toHaveLength(2);
+      const partState = parts.get('rn-1');
+      expect(partState?.buffered).toBeUndefined();
+      expect(partState?.deltaText).toEqual([]);
+      expect(partState?.kind).toBe('thinking');
+    });
+
+    it('session.next.reasoning.ended does not emit events', () => {
+      const events = toCodeMuxEvent({
+        type: 'session.next.reasoning.ended',
+        properties: { sessionID: 'opencode-session-1', reasoningID: 'rn-1', assistantMessageID: 'msg-1', text: 'done', timestamp: 1002 },
+      }, streamingContext());
+      expect(events).toHaveLength(0);
+    });
+
+    it('assigns incrementing content block indices for multiple streamed parts', () => {
+      const parts = new Map<string, { kind: 'text' | 'thinking'; index: number; started: boolean }>();
+      const ctx = streamingContext({ streamingParts: parts });
+      const think = toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'think-1', messageID: 'msg-1', field: 'reasoning', delta: 'reason...' },
+      }, ctx);
+      expect(think[0]).toMatchObject({ event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } } });
+
+      const text = toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'text-1', messageID: 'msg-1', field: 'text', delta: 'Hello' },
+      }, ctx);
+      expect(text).toHaveLength(0);
+
+      const thinkStop = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'think-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'text', text: 'reason...' } },
+      }, ctx);
+      expect(thinkStop[0]).toMatchObject({ event: { type: 'content_block_stop', index: 0 } });
+      expect(thinkStop[1]).toMatchObject({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'reason...' }] } });
+
+      const textStop = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'text-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'text', text: 'Hello' } },
+      }, ctx);
+      expect(textStop).toHaveLength(1);
+      expect(textStop[0]).toMatchObject({ type: 'assistant', message: { content: [{ type: 'text', text: 'Hello' }] } });
+    });
+  });
+
   it('uses a stable session and turn key when a terminal event has no provider event ID', () => {
     const first = { type: 'session.idle', properties: { sessionID: 'opencode-session-1', turnID: 'turn-1', noise: 'first' } };
     const replay = { type: 'session.idle', properties: { sessionID: 'opencode-session-1', turnID: 'turn-1', noise: 'replay' } };

@@ -32,7 +32,7 @@ export function checkProfileModelSupports1m(
     if (value && /\[1m\]|\[1M\]/i.test(value)) return true;
   }
 
-  // Check custom models (requestModel field)
+  // Check custom models (supports1m flag or [1M] suffix in requestModel)
   const customModels = (settings as Record<string, unknown>).custom_models;
   if (Array.isArray(customModels)) {
     for (const cm of customModels) {
@@ -41,7 +41,7 @@ export function checkProfileModelSupports1m(
         const requestModel = String(rec.requestModel ?? '');
         const displayName = String(rec.displayName ?? '');
         if (requestModel === modelId || displayName === modelId) {
-          if (/\[1m\]|\[1M\]/i.test(requestModel)) return true;
+          if (rec.supports1m === true || /\[1m\]|\[1M\]/i.test(requestModel)) return true;
         }
       }
     }

@@ -225,8 +225,30 @@ describe('Claude settings configuration', () => {
 
     const parsed = parseClaudeSettingsDraft(JSON.stringify(settings));
     expect(parsed.form.customModels).toEqual([
-      { displayName: 'DeepSeek V4', requestModel: 'deepseek-v4' },
-      { displayName: 'Qwen Max', requestModel: 'qwen-max' },
+      { displayName: 'DeepSeek V4', requestModel: 'deepseek-v4', supports1m: false },
+      { displayName: 'Qwen Max', requestModel: 'qwen-max', supports1m: false },
+    ]);
+  });
+
+  it('persists and restores custom model supports1m flag through round trip', () => {
+    const formWithCustom: ClaudeSettingsForm = {
+      ...completeForm,
+      customModels: [
+        { displayName: 'Big Context', requestModel: 'big-model', supports1m: true },
+        { displayName: 'Small Context', requestModel: 'small-model', supports1m: false },
+      ],
+    };
+
+    const settings = applyClaudeFormToSettings(CLAUDE_SETTINGS_DEFAULT, formWithCustom);
+    expect(settings.custom_models).toEqual([
+      { displayName: 'Big Context', requestModel: 'big-model', supports1m: true },
+      { displayName: 'Small Context', requestModel: 'small-model' },
+    ]);
+
+    const parsed = parseClaudeSettingsDraft(JSON.stringify(settings));
+    expect(parsed.form.customModels).toEqual([
+      { displayName: 'Big Context', requestModel: 'big-model', supports1m: true },
+      { displayName: 'Small Context', requestModel: 'small-model', supports1m: false },
     ]);
   });
 

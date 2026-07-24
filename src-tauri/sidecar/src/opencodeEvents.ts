@@ -11,6 +11,17 @@ import {
 
 export type CodeMuxEvent = Record<string, unknown>;
 
+export type StreamingPartState = {
+  kind: 'text' | 'thinking';
+  index: number;
+  started: boolean;
+  buffered?: true;
+  deltaText?: string[];
+  streamedByNext?: true;
+};
+
+export type NextSectionKind = 'idle' | 'reasoning' | 'text';
+
 export interface OpenCodeEventContext extends RuntimeEventContext {
   durationMs?: number;
   usage?: OpenCodeTokenUsage;
@@ -22,6 +33,8 @@ export interface OpenCodeEventContext extends RuntimeEventContext {
   assistantMessageIds?: ReadonlySet<string>;
   userMessageIds?: ReadonlySet<string>;
   eventIdFactory: () => string;
+  streamingParts?: Map<string, StreamingPartState>;
+  nextSection?: { kind: NextSectionKind };
 }
 
 export function getOpenCodeEventIdentity(event: unknown, turnId = 0): string | undefined {
@@ -174,14 +187,45 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       if (!part) break;
       const messageId = readString(part.messageID);
       if (messageId && context.userMessageIds?.has(messageId)) break;
+      const partId = readString(part.id);
       const partType = readString(part.type);
+      const partState = partId ? context.streamingParts?.get(partId) : undefined;
       if (partType === 'text' || partType === 'reasoning') {
-        const text = readString(properties.delta) ?? readString(part.text);
-        if (text) {
-          events.push(buildAssistantEnvelope(context, sessionId, [{
-            type: partType === 'reasoning' ? 'thinking' : 'text',
-            ...(partType === 'reasoning' ? { thinking: text } : { text }),
-          }]));
+        if (partState?.buffered) {
+          if (partType === 'reasoning') partState.kind = 'thinking';
+          const text = partState.deltaText?.join('') ?? readString(properties.delta) ?? readString(part.text) ?? '';
+          partState.deltaText = [];
+          if (partState.kind === 'thinking') {
+            events.push(buildStreamEvent(sessionId, { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }));
+            if (text) {
+              events.push(buildStreamEvent(sessionId, { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: text } }));
+            }
+            events.push(buildStreamEvent(sessionId, { type: 'content_block_stop', index: 0 }));
+          }
+          if (text) {
+            events.push(buildAssistantEnvelope(context, sessionId, [{
+              type: partState.kind,
+              ...(partState.kind === 'thinking' ? { thinking: text } : { text }),
+            }]));
+          }
+        } else if (partState) {
+          if (partType === 'reasoning') partState.kind = 'thinking';
+          events.push(buildStreamEvent(sessionId, { type: 'content_block_stop', index: partState.index }));
+          const text = readString(properties.delta) ?? readString(part.text) ?? '';
+          if (text) {
+            events.push(buildAssistantEnvelope(context, sessionId, [{
+              type: partState.kind,
+              ...(partState.kind === 'thinking' ? { thinking: text } : { text }),
+            }]));
+          }
+        } else {
+          const text = readString(properties.delta) ?? readString(part.text) ?? '';
+          if (text) {
+            events.push(buildAssistantEnvelope(context, sessionId, [{
+              type: partType === 'reasoning' ? 'thinking' : 'text',
+              ...(partType === 'reasoning' ? { thinking: text } : { text }),
+            }]));
+          }
         }
       } else if (partType === 'tool') {
         const state = asRecord(part.state);
@@ -224,6 +268,88 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       }
       break;
     }
+    case 'message.part.delta': {
+      const partId = readString(properties.partID);
+      const field = readString(properties.field);
+      const delta = readString(properties.delta);
+      if (!partId || !field || !delta || !context.streamingParts) break;
+      if (field === 'reasoning') {
+        let partState = context.streamingParts.get(partId);
+        if (partState?.streamedByNext) break;
+        if (context.nextSection?.kind === 'reasoning') break;
+        if (!partState) {
+          const index = context.streamingParts.size;
+          partState = { kind: 'thinking', index, started: false };
+          context.streamingParts.set(partId, partState);
+        }
+        if (!partState.started) {
+          partState.started = true;
+          events.push(buildStreamEvent(sessionId, {
+            type: 'content_block_start',
+            index: partState.index,
+            content_block: { type: 'thinking', thinking: '' },
+          }));
+        }
+        events.push(buildStreamEvent(sessionId, {
+          type: 'content_block_delta',
+          index: partState.index,
+          delta: { type: 'thinking_delta', thinking: delta },
+        }));
+      } else if (field === 'text') {
+        let partState = context.streamingParts.get(partId);
+        const sectionKind = context.nextSection?.kind;
+        if (partState?.streamedByNext) {
+          break;
+        } else if (sectionKind === 'reasoning') {
+          if (!partState) {
+            const index = context.streamingParts.size;
+            partState = { kind: 'thinking', index, started: false };
+            context.streamingParts.set(partId, partState);
+          }
+          if (!partState.started) {
+            partState.started = true;
+            events.push(buildStreamEvent(sessionId, {
+              type: 'content_block_start',
+              index: partState.index,
+              content_block: { type: 'thinking', thinking: '' },
+            }));
+          }
+          events.push(buildStreamEvent(sessionId, {
+            type: 'content_block_delta',
+            index: partState.index,
+            delta: { type: 'thinking_delta', thinking: delta },
+          }));
+        } else if (sectionKind === 'text') {
+          if (!partState) {
+            const index = context.streamingParts.size;
+            partState = { kind: 'text', index, started: false };
+            context.streamingParts.set(partId, partState);
+          }
+          if (!partState.started) {
+            partState.started = true;
+            events.push(buildStreamEvent(sessionId, {
+              type: 'content_block_start',
+              index: partState.index,
+              content_block: { type: 'text', text: '' },
+            }));
+          }
+          events.push(buildStreamEvent(sessionId, {
+            type: 'content_block_delta',
+            index: partState.index,
+            delta: { type: 'text_delta', text: delta },
+          }));
+        } else {
+          if (!partState) {
+            partState = { kind: 'text', index: -1, started: false, buffered: true, deltaText: [] };
+            context.streamingParts.set(partId, partState);
+          }
+          if (partState.buffered) {
+            partState.deltaText!.push(delta);
+          }
+        }
+      }
+      break;
+    }
     case 'message.updated': {
       const info = asRecord(properties.info);
       const error = asRecord(info?.error);
@@ -261,6 +387,56 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       events.push(...buildResultEvents(context, status, sessionId));
       break;
     }
+    case 'session.next.reasoning.started': {
+      const reasoningID = readString(properties.reasoningID);
+      if (reasoningID && context.streamingParts) {
+        const index = context.streamingParts.size;
+        context.streamingParts.set(reasoningID, { kind: 'thinking', index, started: false, streamedByNext: true });
+      }
+      if (context.nextSection) context.nextSection.kind = 'reasoning';
+      break;
+    }
+    case 'session.next.reasoning.delta': {
+      const deltaReasoningID = readString(properties.reasoningID);
+      const deltaText = readString(properties.delta);
+      if (deltaReasoningID && deltaText && context.streamingParts) {
+        let partState = context.streamingParts.get(deltaReasoningID);
+        if (!partState) {
+          const index = context.streamingParts.size;
+          partState = { kind: 'thinking', index, started: false, streamedByNext: true };
+          context.streamingParts.set(deltaReasoningID, partState);
+        } else if (partState.buffered) {
+          partState.index = context.streamingParts.size;
+          partState.buffered = undefined;
+          partState.deltaText = [];
+          partState.kind = 'thinking';
+          partState.streamedByNext = true;
+        }
+        if (!partState.started) {
+          partState.started = true;
+          events.push(buildStreamEvent(sessionId, {
+            type: 'content_block_start',
+            index: partState.index,
+            content_block: { type: 'thinking', thinking: '' },
+          }));
+        }
+        events.push(buildStreamEvent(sessionId, {
+          type: 'content_block_delta',
+          index: partState.index,
+          delta: { type: 'thinking_delta', thinking: deltaText },
+        }));
+      }
+      break;
+    }
+    case 'session.next.reasoning.ended':
+      break;
+    case 'session.next.text.started': {
+      if (context.nextSection) context.nextSection.kind = 'text';
+      break;
+    }
+    case 'session.next.text.ended':
+      if (context.nextSection) context.nextSection.kind = 'idle';
+      break;
     case 'permission.updated':
       events.push(buildEnvelope({ type: 'diagnostic', subtype: 'permission_request', permission_id: readString(properties.id), title: readString(properties.title) }, context, sessionId));
       break;
@@ -327,6 +503,10 @@ function buildFailureEvents(context: OpenCodeEventContext, error: unknown, sessi
 
 function buildAssistantEnvelope(context: OpenCodeEventContext, sessionId: string | undefined, content: Array<Record<string, unknown>>): CodeMuxEvent {
   return { ...buildAssistantEvent({ sessionId: context.sessionId, content: content as AssistantContentBlock[], eventIdFactory: context.eventIdFactory }), ...routingMetadata(context, sessionId) };
+}
+
+function buildStreamEvent(sessionId: string | undefined, event: unknown): CodeMuxEvent {
+  return { type: 'stream_event', session_id: sessionId, event };
 }
 
 function buildEnvelope(event: CodeMuxEvent, context: OpenCodeEventContext, sessionId: string | undefined): CodeMuxEvent {

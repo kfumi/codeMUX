@@ -1,4 +1,5 @@
 import { DiffViewer } from '@/components/assistant-ui/diff-viewer';
+import { countDiffLines } from '@/lib/diffStats';
 import { cn } from '@/lib/utils';
 
 interface ToolCodeDiffProps {
@@ -58,6 +59,23 @@ export function getCodeChangeDiff(input: Record<string, unknown>): ContentDiff |
   if (patchFiles.length) return { kind: 'patch', files: patchFiles };
 
   return null;
+}
+
+export function getCodeChangeStats(input: Record<string, unknown>): { additions: number; deletions: number } | null {
+  const diff = getCodeChangeDiff(input);
+  if (!diff) return null;
+  if (diff.kind === 'content') {
+    return countDiffLines(diff.oldFile, diff.newFile);
+  }
+  let additions = 0;
+  let deletions = 0;
+  for (const file of diff.files) {
+    for (const line of file.lines) {
+      if (isAddedPatchLine(line)) additions++;
+      if (isDeletedPatchLine(line)) deletions++;
+    }
+  }
+  return { additions, deletions };
 }
 
 export function ToolCodeDiff({ toolName, input }: ToolCodeDiffProps) {
