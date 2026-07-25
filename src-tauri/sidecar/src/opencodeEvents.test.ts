@@ -234,7 +234,72 @@ describe('OpenCode event normalization', () => {
       expect(done).toHaveLength(2);
       expect(done[0]).toMatchObject({ event: { type: 'content_block_stop', index: 0 } });
       expect(done[1]).toMatchObject({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'approve.' }] } });
+      // Reasoning finalization must NOT flip idleStreamKind to 'text':
+      // OpenCode may emit multiple reasoning parts in one turn.
+      expect(idleStreamKind.kind).toBe('thinking');
+    });
+
+    it('uses part.updated type when part.updated arrives before part.delta (reasoning)', () => {
+      // Reproduces user-reported scenario: OpenCode emits message.part.updated
+      // (type=reasoning, text="") as a start marker BEFORE message.part.delta.
+      // The delta must stream as thinking_delta, not text_delta.
+      const parts = new Map<string, any>();
+      const idleStreamKind = { kind: 'thinking' as const };
+      const ctx = streamingContext({ streamingParts: parts, idleStreamKind });
+
+      const start = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'prt-reason-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'reasoning', text: '', time: { start: 1 } } },
+      }, ctx);
+      expect(start).toHaveLength(0);
+      expect(idleStreamKind.kind).toBe('thinking');
+
+      const delta = toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'prt-reason-1', messageID: 'msg-1', field: 'text', delta: 'Let' },
+      }, ctx);
+      expect(delta).toHaveLength(2);
+      expect(delta[0]).toMatchObject({ event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } } });
+      expect(delta[1]).toMatchObject({ event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Let' } } });
+    });
+
+    it('uses part.updated type=text when part.updated arrives before part.delta (text)', () => {
+      // After a reasoning part, a text part's part.updated(type=text, text="")
+      // arrives first; its delta must stream as text_delta.
+      const parts = new Map<string, any>();
+      const idleStreamKind = { kind: 'thinking' as const };
+      const ctx = streamingContext({ streamingParts: parts, idleStreamKind });
+
+      // Reasoning part lifecycle
+      toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'prt-reason-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'reasoning', text: '', time: { start: 1 } } },
+      }, ctx);
+      toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'prt-reason-1', messageID: 'msg-1', field: 'text', delta: 'reasoning...' },
+      }, ctx);
+      toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'prt-reason-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'reasoning', text: 'reasoning...', time: { start: 1, end: 2 } } },
+      }, ctx);
+      expect(idleStreamKind.kind).toBe('thinking');
+
+      // Text part: start marker arrives first
+      const textStart = toCodeMuxEvent({
+        type: 'message.part.updated',
+        properties: { sessionID: 'opencode-session-1', part: { id: 'prt-text-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'text', text: '', time: { start: 3 } } },
+      }, ctx);
+      expect(textStart).toHaveLength(0);
       expect(idleStreamKind.kind).toBe('text');
+
+      const textDelta = toCodeMuxEvent({
+        type: 'message.part.delta',
+        properties: { sessionID: 'opencode-session-1', partID: 'prt-text-1', messageID: 'msg-1', field: 'text', delta: '以下是' },
+      }, ctx);
+      expect(textDelta).toHaveLength(2);
+      expect(textDelta[0]).toMatchObject({ event: { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } } });
+      expect(textDelta[1]).toMatchObject({ event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '以下是' } } });
     });
 
     it('streams field=text as answer text after reasoning is finalized', () => {

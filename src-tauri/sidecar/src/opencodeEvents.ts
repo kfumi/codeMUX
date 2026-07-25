@@ -214,12 +214,18 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
               ...(partState.kind === 'thinking' ? { thinking: text } : { text }),
             }]));
           }
-          if (context.idleStreamKind) context.idleStreamKind.kind = 'text';
+          if (context.idleStreamKind && partType === 'text') context.idleStreamKind.kind = 'text';
         } else if (partState) {
           // Authoritative part type wins over provisional stream kind.
           if (partType === 'reasoning') partState.kind = 'thinking';
           else if (partType === 'text') partState.kind = 'text';
-          events.push(buildStreamEvent(sessionId, { type: 'content_block_stop', index: partState.index }));
+          // Only emit content_block_stop when this part was actually streamed
+          // (had a content_block_start). part.updated can arrive twice for a
+          // part (start marker + end marker); the start-marker arrival must not
+          // emit a stop without a matching start.
+          if (partState.started) {
+            events.push(buildStreamEvent(sessionId, { type: 'content_block_stop', index: partState.index }));
+          }
           const text = readString(properties.delta) ?? readString(part.text) ?? '';
           if (text) {
             events.push(buildAssistantEnvelope(context, sessionId, [{
@@ -227,15 +233,27 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
               ...(partState.kind === 'thinking' ? { thinking: text } : { text }),
             }]));
           }
-          if (context.idleStreamKind) {
-            // After reasoning finishes, subsequent field=text deltas are answer text.
-            // After text finishes, keep preferring text for follow-up parts.
+          // Only advance idleStreamKind to 'text' when a text part finalizes.
+          // A reasoning part finalizing does NOT mean subsequent parts are text —
+          // OpenCode may emit multiple reasoning parts within one turn.
+          if (context.idleStreamKind && partType === 'text') {
             context.idleStreamKind.kind = 'text';
           }
           if (context.nextSection && partType === 'reasoning') {
             context.nextSection.kind = 'idle';
           }
         } else {
+          // part.updated arrived before any part.delta for this partID
+          // (OpenCode typically emits part.updated with text="" as a start
+          // marker, then streams part.delta). Pre-create the partState with
+          // the authoritative kind from partType so subsequent part.delta
+          // events stream into the correct block (thinking vs text) instead
+          // of falling back to the unreliable idleStreamKind heuristic.
+          if (partId && context.streamingParts) {
+            const index = context.streamingParts.size;
+            const kind = partType === 'reasoning' ? 'thinking' : 'text';
+            context.streamingParts.set(partId, { kind, index, started: false });
+          }
           const text = readString(properties.delta) ?? readString(part.text) ?? '';
           if (text) {
             events.push(buildAssistantEnvelope(context, sessionId, [{
@@ -243,7 +261,8 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
               ...(partType === 'reasoning' ? { thinking: text } : { text }),
             }]));
           }
-          if (context.idleStreamKind) {
+          // Only advance idleStreamKind to 'text' when a text part is seen.
+          if (context.idleStreamKind && partType === 'text') {
             context.idleStreamKind.kind = 'text';
           }
         }
