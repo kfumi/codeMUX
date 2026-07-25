@@ -62,6 +62,88 @@ describe('appApi', () => {
 
     expect(invokeMock).toHaveBeenCalledWith('check_development_environment', undefined);
   });
+
+  it('checks agent runtimes without arguments', async () => {
+    invokeMock.mockResolvedValue({ checkedAt: '2026-07-25T00:00:00Z', runtimes: [] });
+    const { appApi } = await import('./tauri');
+
+    await appApi.checkAgentRuntimes();
+
+    expect(invokeMock).toHaveBeenCalledWith('check_agent_runtimes', undefined);
+  });
+
+  it('upgrades an agent runtime with the agent kind argument', async () => {
+    invokeMock.mockResolvedValue({
+      agentKind: 'codex',
+      success: true,
+      message: 'Codex 升级完成。',
+      newVersion: '0.140.0',
+    });
+    const { appApi } = await import('./tauri');
+
+    await appApi.upgradeAgentRuntime('codex');
+
+    expect(invokeMock).toHaveBeenCalledWith('upgrade_agent_runtime', { agentKind: 'codex' });
+  });
+
+  it('exposes installedButBroken on AgentRuntimeCheck results', async () => {
+    invokeMock.mockResolvedValue({
+      checkedAt: '2026-07-25T00:00:00Z',
+      runtimes: [
+        {
+          agentKind: 'claude_code',
+          label: 'Claude Code',
+          command: 'claude',
+          status: 'error',
+          currentVersion: null,
+          latestVersion: '1.0.16',
+          executablePath: '/usr/local/bin/claude',
+          configPath: null,
+          npmPackage: '@anthropic-ai/claude-code',
+          message: 'Claude Code 已安装但无法运行：error',
+          installedButBroken: true,
+        },
+      ],
+    });
+    const { appApi } = await import('./tauri');
+
+    const result = await appApi.checkAgentRuntimes();
+
+    expect(invokeMock).toHaveBeenCalledWith('check_agent_runtimes', undefined);
+    expect(result.runtimes[0].installedButBroken).toBe(true);
+  });
+
+  it('exposes outcome on AgentRuntimeUpgradeResult', async () => {
+    invokeMock.mockResolvedValue({
+      agentKind: 'codex',
+      success: true,
+      outcome: 'success',
+      message: 'Codex 升级完成。',
+      newVersion: '0.140.0',
+    });
+    const { appApi } = await import('./tauri');
+
+    const result = await appApi.upgradeAgentRuntime('codex');
+
+    expect(invokeMock).toHaveBeenCalledWith('upgrade_agent_runtime', { agentKind: 'codex' });
+    expect(result.outcome).toBe('success');
+  });
+
+  it('probes agent installations with the agent kind argument', async () => {
+    invokeMock.mockResolvedValue({
+      agentKind: 'claude_code',
+      installs: [],
+      isConflict: false,
+      needsConfirmation: false,
+      anchored: false,
+      command: null,
+    });
+    const { appApi } = await import('./tauri');
+
+    await appApi.probeAgentInstallations('claude_code');
+
+    expect(invokeMock).toHaveBeenCalledWith('probe_agent_installations', { agentKind: 'claude_code' });
+  });
 });
 
 describe('gitApi', () => {

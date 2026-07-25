@@ -449,6 +449,64 @@ export interface DevelopmentEnvironmentCheck {
   tools: EnvironmentToolCheck[];
 }
 
+export type AgentRuntimeStatus = 'ok' | 'outdated' | 'missing' | 'error';
+
+export type InstallSource =
+  | 'nvm' | 'homebrew' | 'volta' | 'fnm' | 'mise'
+  | 'bun' | 'pnpm' | 'scoop' | 'system' | 'unknown';
+
+export interface AgentInstallation {
+  path: string;
+  real: string;
+  version: string | null;
+  runnable: boolean;
+  error: string | null;
+  source: InstallSource;
+  isPathDefault: boolean;
+}
+
+export interface AgentInstallationReport {
+  agentKind: string;
+  installs: AgentInstallation[];
+  isConflict: boolean;
+  needsConfirmation: boolean;
+  anchored: boolean;
+  command: string | null;
+}
+
+export interface AgentRuntimeCheck {
+  agentKind: string;
+  label: string;
+  command: string;
+  status: AgentRuntimeStatus;
+  currentVersion: string | null;
+  latestVersion: string | null;
+  executablePath: string | null;
+  configPath: string | null;
+  npmPackage: string;
+  message: string;
+  installedButBroken: boolean;
+}
+
+export interface AgentRuntimeCheckResult {
+  checkedAt: string;
+  runtimes: AgentRuntimeCheck[];
+}
+
+export type UpgradeOutcome =
+  | 'success'
+  | 'soft_version_unchanged'
+  | 'soft_not_runnable'
+  | 'hard_failure';
+
+export interface AgentRuntimeUpgradeResult {
+  agentKind: string;
+  success: boolean;
+  outcome: UpgradeOutcome;
+  message: string;
+  newVersion: string | null;
+}
+
 export const appApi = {
   getLogDirectory: (): Promise<string> => invokeLogged('get_log_directory'),
   getAppDataDirectory: (): Promise<string> => invokeLogged('get_app_data_directory'),
@@ -459,6 +517,12 @@ export const appApi = {
   showMainWindow: (): Promise<void> => invokeLogged('show_main_window_command'),
   sendAgentNotification: (payload: { title: string; body: string; sessionId: string }): Promise<void> =>
     invokeLogged('send_agent_notification_command', payload),
+  checkAgentRuntimes: (): Promise<AgentRuntimeCheckResult> =>
+    invokeLogged('check_agent_runtimes'),
+  upgradeAgentRuntime: (agentKind: string): Promise<AgentRuntimeUpgradeResult> =>
+    invokeLogged('upgrade_agent_runtime', { agentKind }),
+  probeAgentInstallations: (agentKind: string): Promise<AgentInstallationReport> =>
+    invokeLogged('probe_agent_installations', { agentKind }),
 };
 
 export const usageApi = {

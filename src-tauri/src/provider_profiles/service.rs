@@ -1001,9 +1001,8 @@ impl<O: FileOps> NativeConfigWriteService<O> {
                             expected_new_content_hash,
                         ),
                         Ok(true)
-                    ) {
-                        partial = true;
-                    } else if !self.target_matches_original_content(session_dir, file) {
+                    ) || !self.target_matches_original_content(session_dir, file)
+                    {
                         partial = true;
                     }
                 }

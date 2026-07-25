@@ -209,9 +209,7 @@ pub async fn spawn_sidecar(
                 debug!(target: "sidecar_stderr", "(suppressed abort cleanup) {}", line);
                 continue;
             }
-            if line.contains("[codex][compact") {
-                info!(target: "sidecar_stderr", "{}", line);
-            } else if line.contains("[opencode-task]") {
+            if line.contains("[codex][compact") || line.contains("[opencode-task]") {
                 info!(target: "sidecar_stderr", "{}", line);
             } else if line.to_ascii_lowercase().contains("error") {
                 warn!(target: "sidecar_stderr", "{}", line);

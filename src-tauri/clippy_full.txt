@@ -1,0 +1,227 @@
+    Checking codemux v0.1.8 (D:\project\ai-code\codeMUX\src-tauri)
+error: this function has too many arguments (9/7)
+    --> src\agent\commands.rs:2274:1
+     |
+2274 | / pub async fn start_agent_session(
+2275 | |     app: AppHandle,
+2276 | |     state: State<'_, crate::AppState>,
+2277 | |     agent_state: State<'_, AgentState>,
+...    |
+2283 | |     input_payload: Option<serde_json::Value>,
+2284 | | ) -> Result<(), String> {
+     | |_______________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#too_many_arguments
+     = note: `-D clippy::too-many-arguments` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::too_many_arguments)]`
+
+error: this `if` has identical blocks
+   --> src\agent\mod.rs:212:49
+    |
+212 |               if line.contains("[codex][compact") {
+    |  _________________________________________________^
+213 | |                 info!(target: "sidecar_stderr", "{}", line);
+214 | |             } else if line.contains("[opencode-task]") {
+    | |_____________^
+    |
+note: same as this
+   --> src\agent\mod.rs:214:56
+    |
+214 |               } else if line.contains("[opencode-task]") {
+    |  ________________________________________________________^
+215 | |                 info!(target: "sidecar_stderr", "{}", line);
+216 | |             } else if line.to_ascii_lowercase().contains("error") {
+    | |_____________^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#if_same_then_else
+    = note: `-D clippy::if-same-then-else` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::if_same_then_else)]`
+
+error: this function has too many arguments (8/7)
+  --> src\commands\session.rs:10:1
+   |
+10 | / pub fn create_session(
+11 | |     state: State<'_, AppState>,
+12 | |     title: String,
+13 | |     agent_kind: Option<String>,
+...  |
+18 | |     model: Option<String>,
+19 | | ) -> Result<operations::Session, String> {
+   | |________________________________________^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#too_many_arguments
+
+error: consider using `sort_by_key`
+   --> src\commands\usage.rs:333:5
+    |
+333 |     model_tokens.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#unnecessary_sort_by
+    = note: `-D clippy::unnecessary-sort-by` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::unnecessary_sort_by)]`
+help: try
+    |
+333 -     model_tokens.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+333 +     model_tokens.sort_by_key(|b| std::cmp::Reverse(b.total_tokens));
+    |
+
+error: consider using `sort_by_key`
+   --> src\commands\usage.rs:343:5
+    |
+343 |     agent_tokens.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#unnecessary_sort_by
+help: try
+    |
+343 -     agent_tokens.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+343 +     agent_tokens.sort_by_key(|b| std::cmp::Reverse(b.total_tokens));
+    |
+
+error: this function has too many arguments (8/7)
+   --> src\db\operations.rs:153:1
+    |
+153 | / pub fn create_session_for_project_with_permissions(
+154 | |     conn: &Connection,
+155 | |     title: &str,
+156 | |     agent_kind: AgentKind,
+...   |
+161 | |     model: Option<&str>,
+162 | | ) -> Result<Session> {
+    | |____________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#too_many_arguments
+
+error: this `if` has identical blocks
+    --> src\provider_profiles\service.rs:1004:23
+     |
+1004 |                       ) {
+     |  _______________________^
+1005 | |                         partial = true;
+1006 | |                     } else if !self.target_matches_original_content(session_dir, file) {
+     | |_____________________^
+     |
+note: same as this
+    --> src\provider_profiles\service.rs:1006:88
+     |
+1006 |                       } else if !self.target_matches_original_content(session_dir, file) {
+     |  ________________________________________________________________________________________^
+1007 | |                         partial = true;
+1008 | |                     }
+     | |_____________________^
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#if_same_then_else
+
+error: could not compile `codemux` (lib) due to 7 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: items after a test module
+    --> src\agent\opencode_history.rs:6:1
+     |
+   6 |   mod tests {
+     |   ^^^^^^^^^
+...
+ 440 | / pub fn load_opencode_session_events(
+ 441 | |     home: &std::path::Path,
+ 442 | |     session_id: &str,
+ 443 | | ) -> Result<Vec<Value>, String> {
+     | |_______________________________^
+...
+ 452 | / pub fn load_latest_opencode_token_usage(
+ 453 | |     home: &std::path::Path,
+ 454 | |     session_id: &str,
+ 455 | |     freshness: &str,
+ 456 | | ) -> Result<Option<ThreadTokenUsageSnapshot>, String> {
+     | |_____________________________________________________^
+...
+ 465 |   pub fn delete_opencode_session(home: &std::path::Path, session_id: &str) -> Result<bool, String> {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 474 | / fn delete_opencode_session_from_connection(
+ 475 | |     connection: &Connection,
+ 476 | |     session_id: &str,
+ 477 | | ) -> Result<bool, String> {
+     | |_________________________^
+...
+ 498 | / pub fn rewind_opencode_session_to_latest_turn(
+ 499 | |     home: &std::path::Path,
+ 500 | |     session_id: &str,
+ 501 | | ) -> Result<bool, String> {
+     | |_________________________^
+...
+ 510 | / fn rewind_opencode_events_from_connection(
+ 511 | |     connection: &Connection,
+ 512 | |     session_id: &str,
+ 513 | | ) -> Result<bool, String> {
+     | |_________________________^
+...
+ 560 |   fn find_opencode_database(home: &std::path::Path) -> Option<std::path::PathBuf> {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 570 | / fn load_opencode_events_from_connection(
+ 571 | |     connection: &Connection,
+ 572 | |     session_id: &str,
+ 573 | | ) -> Result<Vec<Value>, String> {
+     | |_______________________________^
+...
+ 825 | / fn build_opencode_success_result_event(
+ 826 | |     message_id: &str,
+ 827 | |     session_id: &str,
+ 828 | |     time_created: i64,
+ 829 | |     time_updated: i64,
+ 830 | |     message: &Value,
+ 831 | | ) -> Option<Value> {
+     | |__________________^
+...
+ 899 | / fn load_latest_opencode_token_usage_from_connection(
+ 900 | |     connection: &Connection,
+ 901 | |     session_id: &str,
+ 902 | |     freshness: &str,
+ 903 | | ) -> Result<Option<ThreadTokenUsageSnapshot>, String> {
+     | |_____________________________________________________^
+...
+ 976 |   struct OpenCodePart {
+     |   ^^^^^^^^^^^^^^^^^^^
+...
+ 982 | / fn load_opencode_parts(
+ 983 | |     connection: &Connection,
+ 984 | |     session_id: &str,
+ 985 | |     message_id: &str,
+ 986 | | ) -> Result<Vec<OpenCodePart>, String> {
+     | |______________________________________^
+...
+1004 |   fn opencode_error_message(error: &Value) -> String {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1014 |   fn stringify_value(value: &Value) -> String {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1021 |   fn read_u64_value(value: Option<&Value>) -> u64 {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1029 |   fn timestamp_string(timestamp: i64) -> String {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#items_after_test_module
+     = note: `-D clippy::items-after-test-module` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::items_after_test_module)]`
+     = help: move the items to before the test module was defined
+
+error: this `map_or` can be simplified
+   --> src\config\mod.rs:594:17
+    |
+594 |           assert!(persisted
+    |  _________________^
+595 | |             .get("providers")
+596 | |             .and_then(|providers| providers.as_array())
+597 | |             .map_or(true, |providers| providers.is_empty()));
+    | |___________________________________________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#unnecessary_map_or
+    = note: `-D clippy::unnecessary-map-or` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::unnecessary_map_or)]`
+help: use `is_none_or` instead
+    |
+597 -             .map_or(true, |providers| providers.is_empty()));
+597 +             .is_none_or(|providers| providers.is_empty()));
+    |
+
+error: could not compile `codemux` (lib test) due to 9 previous errors

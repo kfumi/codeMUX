@@ -224,13 +224,9 @@ pub async fn get_usage_token_breakdown(
             };
 
             let session_daily_result = match agent_kind_enum {
-                AgentKind::ClaudeCode => {
-                    aggregate_claude_tokens(&home, agent_session_id)
-                }
+                AgentKind::ClaudeCode => aggregate_claude_tokens(&home, agent_session_id),
                 AgentKind::Codex => aggregate_codex_tokens(&home, agent_session_id),
-                AgentKind::Opencode => {
-                    aggregate_opencode_tokens(&home, agent_session_id)
-                }
+                AgentKind::Opencode => aggregate_opencode_tokens(&home, agent_session_id),
                 AgentKind::GeminiCli => Ok(BTreeMap::new()),
             };
 
@@ -255,8 +251,7 @@ pub async fn get_usage_token_breakdown(
                 entry.input_tokens += tokens.input_tokens;
                 entry.cached_tokens += tokens.cached_tokens;
                 entry.output_tokens += tokens.output_tokens;
-                session_total +=
-                    tokens.input_tokens + tokens.output_tokens + tokens.cached_tokens;
+                session_total += tokens.input_tokens + tokens.output_tokens + tokens.cached_tokens;
             }
 
             // Aggregate by model and agent_kind (only for sessions within the days window)
@@ -335,7 +330,7 @@ pub async fn get_usage_token_breakdown(
             session_count: count,
         })
         .collect();
-    model_tokens.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+    model_tokens.sort_by_key(|b| std::cmp::Reverse(b.total_tokens));
 
     let mut agent_tokens: Vec<AgentTokenTotal> = agent_map
         .into_iter()
@@ -345,7 +340,7 @@ pub async fn get_usage_token_breakdown(
             session_count: count,
         })
         .collect();
-    agent_tokens.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+    agent_tokens.sort_by_key(|b| std::cmp::Reverse(b.total_tokens));
 
     info!(
         target: "usage",

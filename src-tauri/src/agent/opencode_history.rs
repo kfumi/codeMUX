@@ -3,6 +3,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -683,8 +684,16 @@ fn load_opencode_events_from_connection(
                     }
                 }
                 "compaction" => {
-                    let auto = part.data.get("auto").and_then(Value::as_bool).unwrap_or(false);
-                    let overflow = part.data.get("overflow").and_then(Value::as_bool).unwrap_or(false);
+                    let auto = part
+                        .data
+                        .get("auto")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let overflow = part
+                        .data
+                        .get("overflow")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
                     events.push(serde_json::json!({
                         "type": "system",
                         "subtype": "compact_boundary",
@@ -748,9 +757,15 @@ fn load_opencode_events_from_connection(
                 continue;
             }
 
-            let mode = message.get("mode").and_then(Value::as_str).unwrap_or_default();
+            let mode = message
+                .get("mode")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             if mode == "compaction" {
-                let is_summary = message.get("summary").and_then(Value::as_bool).unwrap_or(false);
+                let is_summary = message
+                    .get("summary")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
                 if is_summary && content.is_empty() {
                     events.push(serde_json::json!({
                         "type": "system",

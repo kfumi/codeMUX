@@ -364,27 +364,25 @@ pub fn run() {
 
     builder
         .on_window_event(handle_global_window_event)
-        .plugin(
-            {
-                let log_builder = tauri_plugin_log::Builder::new()
-                    .clear_targets()
-                    .targets([
-                        Target::new(TargetKind::Stdout),
-                        Target::new(TargetKind::LogDir {
-                            file_name: Some("codemux".into()),
-                        }),
-                        Target::new(TargetKind::Webview),
-                    ])
-                    .level(log::LevelFilter::Debug)
-                    .level_for("codemux_lib", log::LevelFilter::Debug)
-                    .rotation_strategy(RotationStrategy::KeepSome(10))
-                    .max_file_size(1_048_576)
-                    .timezone_strategy(TimezoneStrategy::UseLocal);
-                #[cfg(feature = "tokio-console")]
-                let log_builder = log_builder.skip_logger();
-                log_builder.build()
-            },
-        )
+        .plugin({
+            let log_builder = tauri_plugin_log::Builder::new()
+                .clear_targets()
+                .targets([
+                    Target::new(TargetKind::Stdout),
+                    Target::new(TargetKind::LogDir {
+                        file_name: Some("codemux".into()),
+                    }),
+                    Target::new(TargetKind::Webview),
+                ])
+                .level(log::LevelFilter::Debug)
+                .level_for("codemux_lib", log::LevelFilter::Debug)
+                .rotation_strategy(RotationStrategy::KeepSome(10))
+                .max_file_size(1_048_576)
+                .timezone_strategy(TimezoneStrategy::UseLocal);
+            #[cfg(feature = "tokio-console")]
+            let log_builder = log_builder.skip_logger();
+            log_builder.build()
+        })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
@@ -476,6 +474,10 @@ pub fn run() {
             commands::app::check_development_environment,
             commands::app::get_log_files,
             commands::app::read_log_file,
+            commands::agent_runtime_check::check_agent_runtimes,
+            commands::agent_runtime_check::upgrade_agent_runtime,
+            commands::agent_runtime_check::probe_agent_installations,
+            commands::agent_runtime_check::get_user_home_directory,
             show_main_window_command,
             send_agent_notification_command,
             commands::session::create_session,

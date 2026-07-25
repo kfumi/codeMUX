@@ -2271,6 +2271,7 @@ pub async fn send_agent_input(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn start_agent_session(
     app: AppHandle,
     state: State<'_, crate::AppState>,

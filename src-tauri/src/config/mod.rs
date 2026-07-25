@@ -594,7 +594,7 @@ mod tests {
         assert!(persisted
             .get("providers")
             .and_then(|providers| providers.as_array())
-            .map_or(true, |providers| providers.is_empty()));
+            .is_none_or(|providers| providers.is_empty()));
         assert_eq!(persisted["active_provider_id"], serde_json::Value::Null);
         assert!(persisted["agent_profile_registry"]["profiles"]
             .as_array()

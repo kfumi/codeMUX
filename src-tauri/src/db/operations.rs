@@ -150,6 +150,7 @@ pub fn create_session_with_mode_and_permissions(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn create_session_for_project_with_permissions(
     conn: &Connection,
     title: &str,

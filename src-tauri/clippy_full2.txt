@@ -1,0 +1,20 @@
+    Blocking waiting for file lock on build directory
+    Checking codemux v0.1.8 (D:\project\ai-code\codeMUX\src-tauri)
+error: consider using `sort_by_key`
+   --> src\commands\usage.rs:333:5
+    |
+333 |     model_tokens.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#unnecessary_sort_by
+    = note: `-D clippy::unnecessary-sort-by` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::unnecessary_sort_by)]`
+help: try
+    |
+333 -     model_tokens.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+333 +     model_tokens.sort_by_key(|b| std::cmp::Reverse(b.total_tokens));
+    |
+
+error: could not compile `codemux` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `codemux` (lib test) due to 1 previous error

@@ -7,6 +7,7 @@ use std::str::FromStr;
 use tauri::State;
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn create_session(
     state: State<'_, AppState>,
     title: String,
