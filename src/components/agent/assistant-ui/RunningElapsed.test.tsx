@@ -3,7 +3,7 @@
 import { act, render, screen, cleanup } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { RunningElapsedTimer, formatElapsed } from './running-elapsed';
+import { RunningElapsedTimer, formatElapsed } from './RunningElapsed';
 
 describe('formatElapsed', () => {
   it('formats seconds when under a minute', () => {

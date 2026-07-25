@@ -39,7 +39,7 @@ import {
 } from './CodeMuxMessageParts';
 import { CodeMuxDirectiveText } from './CodeMuxDirectiveText';
 import { buildAssistantResultTargetMap } from './assistantResultTargets';
-import { RunningElapsedTimer, formatElapsed } from './running-elapsed';
+import { RunningElapsedTimer, formatElapsed } from './RunningElapsed';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 import { CODEMUX_FORMATTER, DIRECTIVE_CHIP } from './CodeMuxComposer';
 import { type ThreadTokenUsage } from '../contextUsage';

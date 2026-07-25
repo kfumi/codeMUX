@@ -37,8 +37,8 @@
    ```
 4. **安装依赖**：
    ```bash
-   npm install
-   cd src-tauri/sidecar && npm install && npm run build && cd ../..
+   npm ci
+   cd src-tauri/sidecar && npm ci && npm run build && cd ../..
    ```
 5. **开发与测试**：
    ```bash
@@ -119,18 +119,25 @@ chore(deps): bump tauri to 2.1.0
 ## 项目结构速览
 
 ```
-src/                    # React 前端
-  components/agent/     # Agent 对话面板
-  components/settings/  # 设置页面
-  stores/               # Zustand 状态
-  types/                # TypeScript 类型
-  lib/                  # 工具函数
+src/                        # React 前端
+  components/agent/         # Agent 对话面板、工具卡片、权限卡片、上下文进度
+  components/assistant-ui/  # assistant-ui 自定义组件（消息、Diff、Reasoning 等）
+  components/settings/      # 设置页（Provider / MCP / Skills / 通知 / 使用统计 / 日志）
+  components/workspace/     # Review / Terminal / Plan 等侧边面板
+  components/dev/           # 开发模式性能诊断覆盖层
+  features/update/          # 自动更新 Provider 与入口
+  stores/                   # Zustand 状态（agent / session / mcp / skill / perf 等）
+  types/                    # TypeScript 类型
+  lib/                      # 工具函数（通知、权限、模型、上下文计算等）
+  hooks/                    # 自定义 Hooks（agent models / notifications / theme）
 
-src-tauri/              # Rust 后端
-  src/commands/         # Tauri 命令处理器
-  src/mcp/              # MCP 管理
-  src/skills/           # Skills 管理
-  sidecar/              # Node.js Agent Sidecar
+src-tauri/                  # Rust 后端
+  src/agent_runtime/        # Claude / Codex / OpenCode 运行时抽象
+  src/commands/             # Tauri 命令（usage / git / mcp / session / perf 等）
+  src/mcp/adapters/         # MCP 各 Agent 适配器（claude / codex / gemini / opencode）
+  src/skills/adapters/      # Skills 各 Agent 适配器
+  src/provider_profiles/    # Provider Profile 服务与原生配置
+  sidecar/src/              # Node.js Agent Sidecar（Claude / Codex / OpenCode 运行时）
 ```
 
 ## 设计文档
@@ -139,8 +146,18 @@ src-tauri/              # Rust 后端
 
 - `2026-05-27-ai-codeMUX-design.md` — 项目整体设计
 - `2026-05-28-claude-agent-sdk-integration-design.md` — Claude Agent SDK 集成设计
-- `2026-06-04-mcp-management-design.md` — MCP 管理设计
-- `2026-06-06-skills-management-design.md` — Skills 系统设计
+- `2026-06-08-assistant-ui-runtime-adapter-design.md` — assistant-ui 运行时适配设计
+- `2026-06-10-multi-agent-codex-integration-design.md` — Codex 多 Agent 集成设计
+- `2026-06-13-mcp-management-refactor-design.md` — MCP 管理重构设计
+- `2026-06-29-agent-permission-approval-alignment-design.md` — Agent 权限审批对齐设计
+- `2026-07-01-updater-mechanism-design.md` — 自动更新机制设计
+- `2026-07-03-agent-system-notifications-design.md` — Agent 系统通知设计
+- `2026-07-03-git-branch-management-design.md` — Git 分支管理设计
+- `2026-07-12-opencode-sdk-agent-design.md` — OpenCode SDK Agent 接入设计
+- `2026-07-14-agent-provider-profile-refactor-design.md` — Provider Profile 重构设计
+- `2026-07-23-dev-performance-diagnostics-design.md` — 开发性能诊断设计
+
+此外 `docs/` 下还有面向使用者的指南：`agent-provider-profiles-guide.md`、`codex-routing-proxy-guide.md`、`mcp-unified-management-guide.md`、`skills-unified-management-guide.md`、`ai-agent-permission-approval-guide.md`、`desktop-release-guide.md`。
 
 ## Pull Request 检查清单
 
