@@ -20,7 +20,11 @@ const getEventsMock = vi.fn<(sessionId: string) => Promise<string>>();
 const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadLatestTokenUsageMock = vi.fn<(appSessionId: string, agentKind: string, freshness: 'live_synced' | 'restored') => Promise<Record<string, unknown> | null>>();
-const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator) => Promise<void>>();
+const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator) => Promise<{ cutoffOrdinal: number | null }>>();
+const loadTurnArtifactsMock = vi.fn<(appSessionId: string) => Promise<unknown[]>>();
+const buildTurnArtifactMock = vi.fn<() => Promise<unknown>>();
+const revertTurnArtifactMock = vi.fn<(artifactId: string) => Promise<unknown>>();
+const captureWorkspaceBaselineMock = vi.fn<(projectPath: string) => Promise<string | null>>();
 
 vi.mock('../lib/tauri', () => ({
   agentApi: {
@@ -38,6 +42,9 @@ vi.mock('../lib/tauri', () => ({
     loadCodexSessionEvents: loadCodexSessionEventsMock,
     loadLatestTokenUsage: loadLatestTokenUsageMock,
     rewindSession: rewindSessionMock,
+    loadTurnArtifacts: loadTurnArtifactsMock,
+    buildTurnArtifact: buildTurnArtifactMock,
+    revertTurnArtifact: revertTurnArtifactMock,
     startProxy: vi.fn(),
     stopProxy: vi.fn(),
     getProxyPort: vi.fn(),
@@ -68,7 +75,22 @@ vi.mock('../lib/tauri', () => ({
     deleteFile: vi.fn(),
     listDirectory: vi.fn(),
   },
-  gitApi: {},
+  gitApi: {
+    captureWorkspaceBaseline: captureWorkspaceBaselineMock,
+    getChangedFiles: vi.fn(),
+    getChangedFilesSinceHead: vi.fn(),
+    getRepositoryState: vi.fn(),
+    createBranch: vi.fn(),
+    checkoutBranch: vi.fn(),
+    getStatusChanges: vi.fn(),
+    getStatusChangeDetail: vi.fn(),
+    stageStatusChanges: vi.fn(),
+    unstageStatusChanges: vi.fn(),
+    revertStatusChanges: vi.fn(),
+    commitChanges: vi.fn(),
+    pushBranch: vi.fn(),
+    generateCommitMessage: vi.fn(),
+  },
   mcpApi: {
     getAll: vi.fn(),
     upsert: vi.fn(),
@@ -180,7 +202,11 @@ describe('agent store Codex history loading', () => {
     loadClaudeSessionEventsMock.mockResolvedValue([]);
     loadCodexSessionEventsMock.mockResolvedValue([]);
     loadLatestTokenUsageMock.mockResolvedValue(null);
-    rewindSessionMock.mockResolvedValue();
+    rewindSessionMock.mockResolvedValue({ cutoffOrdinal: null });
+    loadTurnArtifactsMock.mockResolvedValue([]);
+    buildTurnArtifactMock.mockResolvedValue(null);
+    revertTurnArtifactMock.mockResolvedValue({ status: 'conflict', conflicts: [] });
+    captureWorkspaceBaselineMock.mockResolvedValue(null);
     localStorage.clear();
   });
 
@@ -1765,5 +1791,222 @@ describe('agent store Codex history loading', () => {
     await useAgentStore.getState().loadSessionMessages(session.id);
 
     expect(useAgentStore.getState().acknowledgedFiles[session.id]).toBeUndefined();
+  });
+
+  describe('Turn Artifact lifecycle', () => {
+    it('captures workspace baseline before dispatching to the agent on startQuery', async () => {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('codex');
+      captureWorkspaceBaselineMock.mockResolvedValueOnce('tree-hash-123');
+
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
+
+      // Baseline must be captured before the agent is dispatched.
+      expect(captureWorkspaceBaselineMock).toHaveBeenCalledWith('D:\\project\\ai-code\\codeMUX');
+      // startSession must be called after captureWorkspaceBaseline.
+      const captureOrder = captureWorkspaceBaselineMock.mock.invocationCallOrder[0];
+      const startOrder = startSessionMock.mock.invocationCallOrder[0];
+      expect(captureOrder).toBeLessThan(startOrder);
+    });
+
+    it('continues without artifact when baseline capture fails (F1)', async () => {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('codex');
+      captureWorkspaceBaselineMock.mockRejectedValueOnce(new Error('not a git repo'));
+
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
+
+      // Agent still ran and completed.
+      expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+      // Running turn was cleared on terminal event; the build path skipped
+      // because baselineTree was null. No artifact was built.
+      expect(buildTurnArtifactMock).not.toHaveBeenCalled();
+    });
+
+    it('builds and stores a turn artifact on successful completion with a baseline', async () => {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('codex');
+      captureWorkspaceBaselineMock.mockResolvedValueOnce('tree-hash-456');
+      buildTurnArtifactMock.mockResolvedValueOnce({
+        id: 'artifact-1',
+        appSessionId: session.id,
+        turnOrdinal: 1,
+        projectPath: 'D:\\project\\ai-code\\codeMUX',
+        summary: {
+          schemaVersion: 1,
+          files: [],
+          reverted: false,
+          totalAdditions: 0,
+          totalDeletions: 0,
+        },
+        createdAt: '2026-07-27T00:00:00Z',
+      });
+
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
+
+      // Wait for the async artifact build (void-fired).
+      await vi.waitFor(() => {
+        expect(buildTurnArtifactMock).toHaveBeenCalledWith(
+          session.id,
+          'D:\\project\\ai-code\\codeMUX',
+          expect.any(String),
+          'tree-hash-456',
+        );
+      });
+
+      const stored = useAgentStore.getState().artifactsBySession[session.id]?.[1];
+      expect(stored).toBeDefined();
+      expect(stored.id).toBe('artifact-1');
+      expect(stored.turnOrdinal).toBe(1);
+    });
+
+    it('clears running turn state on terminal events (interrupt / error)', async () => {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('codex');
+      captureWorkspaceBaselineMock.mockResolvedValueOnce('tree-hash-789');
+
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
+
+      // Successful result clears the running turn.
+      expect(useAgentStore.getState().runningTurns[session.id]).toBeUndefined();
+    });
+
+    it('loads turn artifacts in parallel with session messages (A1)', async () => {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('codex');
+      loadCodexSessionEventsMock.mockResolvedValueOnce([
+        {
+          type: 'assistant',
+          timestamp: '2026-06-18T12:00:00.000Z',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'reply' }] },
+        },
+      ]);
+      loadTurnArtifactsMock.mockResolvedValueOnce([
+        {
+          id: 'artifact-loaded-1',
+          appSessionId: session.id,
+          turnOrdinal: 1,
+          projectPath: 'D:\\project',
+          summary: {
+            schemaVersion: 1,
+            files: [{ path: 'src/a.ts', status: 'modified', additions: 1, deletions: 1, original: null, current: null, contentAvailable: false }],
+            reverted: false,
+            totalAdditions: 1,
+            totalDeletions: 1,
+          },
+          createdAt: '2026-07-27T00:00:00Z',
+        },
+      ]);
+
+      await useAgentStore.getState().loadSessionMessages(session.id);
+
+      expect(loadTurnArtifactsMock).toHaveBeenCalledWith(session.id);
+      const stored = useAgentStore.getState().artifactsBySession[session.id]?.[1];
+      expect(stored).toBeDefined();
+      expect(stored.id).toBe('artifact-loaded-1');
+    });
+
+    it('GCs in-memory artifacts with turn_ordinal >= cutoff on rewind (RW1)', async () => {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('codex');
+      // Pre-populate artifacts: ordinals 1, 2, 3.
+      useAgentStore.setState((s) => ({
+        artifactsBySession: {
+          ...s.artifactsBySession,
+          [session.id]: {
+            1: { id: 'a1', appSessionId: session.id, turnOrdinal: 1, projectPath: '', summary: { schemaVersion: 1, files: [], reverted: false, totalAdditions: 0, totalDeletions: 0 }, createdAt: '' },
+            2: { id: 'a2', appSessionId: session.id, turnOrdinal: 2, projectPath: '', summary: { schemaVersion: 1, files: [], reverted: false, totalAdditions: 0, totalDeletions: 0 }, createdAt: '' },
+            3: { id: 'a3', appSessionId: session.id, turnOrdinal: 3, projectPath: '', summary: { schemaVersion: 1, files: [], reverted: false, totalAdditions: 0, totalDeletions: 0 }, createdAt: '' },
+          },
+        },
+        events: {
+          ...s.events,
+          [session.id]: [
+            { kind: 'user', data: { content: 'first' } },
+            { kind: 'assistant', data: { message: { role: 'assistant', content: [] } } as any },
+            { kind: 'user', data: { content: 'second' } },
+            { kind: 'assistant', data: { message: { role: 'assistant', content: [] } } as any },
+          ],
+        },
+      }));
+      // Rewind to cutoff=2: should keep ordinal 1, drop 2 and 3.
+      rewindSessionMock.mockResolvedValueOnce({ cutoffOrdinal: 2 });
+
+      await useAgentStore.getState().rewindLastTurn(session.id);
+
+      const stored = useAgentStore.getState().artifactsBySession[session.id] ?? {};
+      expect(Object.keys(stored)).toEqual(['1']);
+      expect(stored[1].id).toBe('a1');
+    });
+
+    it('updates artifactsBySession on successful revert (RV1)', async () => {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('codex');
+      const revertedArtifact = {
+        id: 'a1',
+        appSessionId: session.id,
+        turnOrdinal: 1,
+        projectPath: 'D:\\project',
+        summary: {
+          schemaVersion: 1,
+          files: [],
+          reverted: true,
+          totalAdditions: 0,
+          totalDeletions: 0,
+        },
+        createdAt: '2026-07-27T00:00:00Z',
+      };
+      revertTurnArtifactMock.mockResolvedValueOnce({ status: 'reverted', artifact: revertedArtifact });
+
+      const result = await useAgentStore.getState().revertTurnArtifact(session.id, 'a1');
+
+      expect(result?.status).toBe('reverted');
+      expect(useAgentStore.getState().artifactsBySession[session.id]?.[1].summary.reverted).toBe(true);
+    });
+
+    it('annotates the latest final assistant event with turnOrdinal after artifact build (META1 live back-fill)', async () => {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('codex');
+      captureWorkspaceBaselineMock.mockResolvedValueOnce('tree-hash-777');
+      buildTurnArtifactMock.mockResolvedValueOnce({
+        id: 'artifact-live',
+        appSessionId: session.id,
+        turnOrdinal: 1,
+        projectPath: 'D:\\project',
+        summary: {
+          schemaVersion: 1,
+          files: [{ path: 'src/a.ts', status: 'modified', additions: 1, deletions: 1, original: 'old', current: 'new', contentAvailable: true }],
+          reverted: false,
+          totalAdditions: 1,
+          totalDeletions: 1,
+        },
+        createdAt: '2026-07-27T00:00:00Z',
+      });
+
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
+
+      // Live assistant event initially has no turnOrdinal (Rust only annotates
+      // history events). After the artifact is built, the store back-fills it
+      // onto the latest final assistant event so the UI can mount the card.
+      await vi.waitFor(() => {
+        expect(buildTurnArtifactMock).toHaveBeenCalled();
+      });
+
+      const events = useAgentStore.getState().events[session.id] ?? [];
+      const assistantEvents = events.filter((e) => e.kind === 'assistant');
+      const lastAssistant = assistantEvents[assistantEvents.length - 1];
+      expect(lastAssistant).toBeDefined();
+      expect((lastAssistant as { data: { turnOrdinal?: number } }).data.turnOrdinal).toBe(1);
+    });
   });
 });

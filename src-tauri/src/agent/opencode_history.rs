@@ -499,9 +499,10 @@ fn delete_opencode_session_from_connection(
 pub fn rewind_opencode_session_to_latest_turn(
     home: &std::path::Path,
     session_id: &str,
-) -> Result<bool, String> {
+) -> Result<(bool, Option<u32>), String> {
     let Some(path) = find_opencode_database(home) else {
-        return Ok(false);
+        // No DB → no rewind happened; caller should not GC.
+        return Ok((false, None));
     };
     let connection = Connection::open(path)
         .map_err(|error| format!("Failed to open OpenCode database for rewind: {}", error))?;
@@ -511,7 +512,7 @@ pub fn rewind_opencode_session_to_latest_turn(
 fn rewind_opencode_events_from_connection(
     connection: &Connection,
     session_id: &str,
-) -> Result<bool, String> {
+) -> Result<(bool, Option<u32>), String> {
     let latest_user_time: Option<i64> = connection
         .query_row(
             "SELECT time_created FROM message WHERE session_id = ?1 AND json_extract(data, '$.role') = 'user' ORDER BY time_created DESC, id DESC LIMIT 1",
@@ -522,7 +523,9 @@ fn rewind_opencode_events_from_connection(
         .map_err(|e| format!("Failed to query latest user message in OpenCode session: {}", e))?;
 
     let Some(latest_user_time) = latest_user_time else {
-        return Ok(true);
+        // No user message → nothing to rewind, but report truncated_to_empty
+        // (history has no user turns) and GC all artifacts (cutoff=1).
+        return Ok((true, Some(1)));
     };
 
     let transaction = connection
@@ -547,15 +550,19 @@ fn rewind_opencode_events_from_connection(
         .commit()
         .map_err(|e| format!("Failed to commit OpenCode rewind: {}", e))?;
 
-    let remaining: i64 = connection
+    let remaining_user: i64 = connection
         .query_row(
-            "SELECT COUNT(*) FROM message WHERE session_id = ?1",
+            "SELECT COUNT(*) FROM message WHERE session_id = ?1 AND json_extract(data, '$.role') = 'user'",
             [session_id],
             |row| row.get(0),
         )
         .unwrap_or(0);
 
-    Ok(remaining == 0)
+    let truncated_to_empty = remaining_user == 0;
+    // cutoff_ordinal = remaining_user_count + 1 (the ordinal of the rewound message).
+    // When truncated_to_empty, remaining=0 → cutoff=1 → GC all artifacts.
+    let cutoff_ordinal = (remaining_user as u32) + 1;
+    Ok((truncated_to_empty, Some(cutoff_ordinal)))
 }
 
 fn find_opencode_database(home: &std::path::Path) -> Option<std::path::PathBuf> {

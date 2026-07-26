@@ -48,6 +48,10 @@ export interface AgentAssistantMessage {
     model?: string;
   };
   parent_tool_use_id: string | null;
+  /** Added by Rust `annotate_events_with_turn_ordinal` (META1/NORM1) for
+   *  history-loaded events. Live sidecar events omit this field until the
+   *  session is reloaded; the agentStore back-fills it on artifact build. */
+  turnOrdinal?: number;
 }
 
 /** Tool result from user message */

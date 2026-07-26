@@ -59,6 +59,51 @@ export interface GitCommitMessageSuggestion {
   message: string;
 }
 
+/** Single file entry in a Turn Artifact (mirrors Rust `ArtifactFile`). */
+export interface ArtifactFile {
+  path: string;
+  status: 'added' | 'modified' | 'deleted';
+  additions: number;
+  deletions: number;
+  original: string | null;
+  current: string | null;
+  contentAvailable: boolean;
+}
+
+/** Summary payload stored as `summary_json` (VER1: schemaVersion: 1). */
+export interface ArtifactSummary {
+  schemaVersion: number;
+  files: ArtifactFile[];
+  reverted: boolean;
+  totalAdditions: number;
+  totalDeletions: number;
+}
+
+/** A Turn Artifact record returned to the frontend (mirrors Rust `TurnArtifact`). */
+export interface TurnArtifact {
+  id: string;
+  appSessionId: string;
+  turnOrdinal: number;
+  projectPath: string;
+  summary: ArtifactSummary;
+  createdAt: string;
+}
+
+/** Result of a Safe File Revert attempt (RET1). Tagged union on `status`. */
+export type RevertResult =
+  | { status: 'reverted'; artifact: TurnArtifact }
+  | { status: 'conflict'; conflicts: RevertConflict[] };
+
+export interface RevertConflict {
+  path: string;
+  reason: string;
+}
+
+/** Result of a successful rewind: the cutoff ordinal for Artifact GC (RW1). */
+export interface RewindAgentSessionResult {
+  cutoffOrdinal: number | null;
+}
+
 export type TerminalEvent =
   | { type: 'output'; terminalId: string; data: string }
   | { type: 'exit'; terminalId: string; code: number | null }
@@ -283,9 +328,29 @@ export const agentApi = {
     freshness: 'live_synced' | 'restored',
   ): Promise<Record<string, unknown> | null> =>
     invokeLogged('load_agent_latest_token_usage', { appSessionId, agentKind, freshness }),
-  /** Rewind the latest visible turn in the provider session history. */
-  rewindSession: (appSessionId: string, agentKind: AgentKind, target?: AgentUserMessageLocator): Promise<void> =>
+  /** Rewind the latest visible turn in the provider session history. Returns
+   *  the cutoff ordinal for Artifact GC (RW1); `null` means no rewind happened. */
+  rewindSession: (appSessionId: string, agentKind: AgentKind, target?: AgentUserMessageLocator): Promise<RewindAgentSessionResult> =>
     invokeLogged('rewind_agent_session', { appSessionId, agentKind, target }),
+  /** Build (and persist) a Turn Artifact for the just-completed turn (R1).
+   *  Returns the artifact, or `null` for zero-file turns (E1) / baseline
+   *  missing (F1) / any failure (FAIL1: silent degradation). */
+  buildTurnArtifact: (
+    appSessionId: string,
+    projectPath: string,
+    turnId: string | null,
+    baselineTree: string | null,
+  ): Promise<TurnArtifact | null> =>
+    invokeLogged('build_turn_artifact', { appSessionId, projectPath, turnId, baselineTree }),
+  /** Load all Turn Artifacts for a session, applying the H3 filter against
+   *  the current agent history's effective user turn count. */
+  loadTurnArtifacts: (appSessionId: string): Promise<TurnArtifact[]> =>
+    invokeLogged('load_turn_artifacts', { appSessionId }),
+  /** Perform an idempotent whole-turn Safe File Revert (RV1/RF2). Returns
+   *  either `{ status: 'reverted', artifact }` or `{ status: 'conflict',
+   *  conflicts }` (zero files written on conflict). */
+  revertTurnArtifact: (artifactId: string): Promise<RevertResult> =>
+    invokeLogged('revert_turn_artifact', { artifactId }),
   getSessionInfo: (appSessionId: string, agentKind: AgentKind): Promise<{ agentSessionId: string | null; messagePath: string | null }> =>
     invokeLogged('get_agent_session_info', { appSessionId, agentKind }),
   stopProxy: (): Promise<void> => invokeLogged('stop_codex_proxy'),
@@ -351,6 +416,8 @@ export const gitApi = {
     invokeLogged('get_git_changed_files', { projectPath, baselineTree }),
   getChangedFilesSinceHead: (projectPath: string): Promise<GitChangedFile[]> =>
     invokeLogged('get_git_changed_files_since_head', { projectPath }),
+  captureWorkspaceBaseline: (projectPath: string): Promise<string | null> =>
+    invokeLogged('capture_workspace_baseline', { projectPath }),
   getRepositoryState: (projectPath: string): Promise<GitRepositoryState> =>
     invokeLogged('get_git_repository_state', { projectPath }),
   createBranch: (projectPath: string, branchName: string, checkout: boolean): Promise<void> =>

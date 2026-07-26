@@ -1085,6 +1085,33 @@ pub fn read_git_changed_files_for_tree(
     Ok(changed_files)
 }
 
+/// Capture a Git Tree Baseline of the current workspace without modifying the
+/// user's real index or worktree. Uses a unique temporary index file to run
+/// `add -A` + `write-tree`. Returns `None` on any failure (non-git repo, git
+/// error, etc.) so the caller can degrade gracefully.
+pub fn capture_workspace_baseline_in_project(project_path: &Path) -> Option<String> {
+    let root = project_path.canonicalize().ok()?;
+    if !is_inside_git_repo(&root) {
+        return None;
+    }
+
+    let index_file = temp_index_path();
+    let result = (|| {
+        run_git_with_env(&root, &["add", "-A", "--", "."], Some(&index_file))?;
+        let output = run_git_with_env(&root, &["write-tree"], Some(&index_file))?;
+        Ok::<String, String>(String::from_utf8_lossy(&output).trim().to_string())
+    })();
+
+    let _ = std::fs::remove_file(&index_file);
+
+    result.ok().filter(|hash| !hash.is_empty())
+}
+
+#[tauri::command]
+pub fn capture_workspace_baseline(project_path: String) -> Option<String> {
+    capture_workspace_baseline_in_project(Path::new(&project_path))
+}
+
 #[tauri::command]
 pub fn get_git_changed_files(
     project_path: String,
@@ -1199,8 +1226,9 @@ pub async fn generate_git_commit_message(
 mod tests {
     use super::{
         build_commit_message_prompt, build_commit_message_prompt_in_project,
-        checkout_git_branch_in_project, clean_commit_message, commit_git_changes_in_project,
-        create_git_branch_in_project, decode_text_bytes, parse_anthropic_commit_message_response,
+        capture_workspace_baseline_in_project, checkout_git_branch_in_project,
+        clean_commit_message, commit_git_changes_in_project, create_git_branch_in_project,
+        decode_text_bytes, parse_anthropic_commit_message_response,
         parse_openai_commit_message_response, push_git_branch_in_project,
         read_git_changed_files_for_tree, read_git_repository_state, read_git_status_change_detail,
         read_git_status_changes, revert_git_status_changes_in_project,
@@ -1870,6 +1898,75 @@ mod tests {
         assert!(read_git_status_changes(&project, GitStatusArea::Staged)
             .unwrap()
             .is_empty());
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn capture_workspace_baseline_returns_tree_hash_for_git_repo() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .arg("init")
+            .output()
+            .unwrap();
+        fs::write(project.join("hello.txt"), "hello\n").unwrap();
+        fs::write(project.join("world.txt"), "world\n").unwrap();
+
+        let tree_hash = capture_workspace_baseline_in_project(&project);
+
+        assert!(
+            tree_hash.is_some(),
+            "should return a tree hash for a git repo with files"
+        );
+        let hash = tree_hash.unwrap();
+        assert_eq!(hash.len(), 40, "tree hash should be 40 hex chars");
+        assert!(
+            hash.chars().all(|c| c.is_ascii_hexdigit()),
+            "tree hash should be hex: {hash}"
+        );
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn capture_workspace_baseline_returns_none_for_non_git_dir() {
+        let project = temp_project();
+        fs::write(project.join("hello.txt"), "hello\n").unwrap();
+
+        let tree_hash = capture_workspace_baseline_in_project(&project);
+
+        assert!(tree_hash.is_none(), "non-git directory should return None");
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn capture_workspace_baseline_represents_current_workspace_including_uncommitted() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+        // Make uncommitted changes: modify a tracked file + add an untracked file
+        fs::write(project.join("README.md"), "modified\n").unwrap();
+        fs::write(project.join("new.txt"), "untracked\n").unwrap();
+
+        let baseline = capture_workspace_baseline_in_project(&project).unwrap();
+
+        // Diffing the baseline against the current workspace should show zero
+        // changes because the baseline IS the current workspace state.
+        let changed = read_git_changed_files_for_tree(&project, &baseline).unwrap();
+        assert!(
+            changed.is_empty(),
+            "baseline should match current workspace state including uncommitted changes"
+        );
 
         let _ = fs::remove_dir_all(project);
     }

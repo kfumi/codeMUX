@@ -1,4 +1,4 @@
-﻿import type { AgentMessage } from '../../../stores/agentStore';
+import type { AgentMessage } from '../../../stores/agentStore';
 import { isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
 import type { AgentUserMessageLocator, ContentBlock } from '../../../types/agent';
 import type { UserAttachmentPreview } from '../../../types/agentInput';
@@ -40,6 +40,11 @@ export type CodeMuxAssistantMessage = {
     isFinalAssistantMessage?: boolean;
     attachments?: UserAttachmentPreview[];
     locator?: AgentUserMessageLocator;
+    /** Set on assistant messages by Rust META1 annotation so the UI can
+     *  mount the matching Turn Artifact Card under the final assistant
+     *  message of each turn. Omitted for live events until the session
+     *  is reloaded or the agentStore back-fills it after artifact build. */
+    turnOrdinal?: number;
   };
 };
 
@@ -723,6 +728,12 @@ function createMessage(
   event: AgentMessage,
   index: number,
 ): CodeMuxAssistantMessage {
+  // META1: Rust annotates history events with `turnOrdinal`. Assistant events
+  // carry it so the UI can mount the matching Turn Artifact Card under the
+  // final assistant message of each turn. Live events omit it until reload.
+  const assistantTurnOrdinal =
+    event.kind === 'assistant' ? event.data.turnOrdinal : undefined;
+
   return {
     id,
     role,
@@ -736,6 +747,9 @@ function createMessage(
         : {}),
       ...(event.kind === 'user' && event.data.locator
         ? { locator: event.data.locator }
+        : {}),
+      ...(assistantTurnOrdinal !== undefined
+        ? { turnOrdinal: assistantTurnOrdinal }
         : {}),
     },
   };

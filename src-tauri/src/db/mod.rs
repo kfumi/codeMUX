@@ -1,3 +1,4 @@
+pub mod artifact;
 pub mod operations;
 pub mod schema;
 
