@@ -55,6 +55,9 @@ type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
 type UpdatePermissionsCommand = Extract<SidecarCommand, { type: 'update_permissions' }>;
 const DEFAULT_SHELL_COMMAND_TIMEOUT_MS = 10000;
 
+// Gate per-event stderr logs for debugging. Enable with CODEMUX_CODEX_DEBUG=1.
+const CODEX_DEBUG_LOGS = process.env.CODEMUX_CODEX_DEBUG === '1';
+
 type CodexSessionBootstrap = {
   sessionId?: string;
   agentSessionId?: string;
@@ -390,6 +393,7 @@ export class CodexSessionRuntime {
     );
 
     process.stderr.write(`[codex] Processing input via SDK: ${payload.text.slice(0, 80)}...\n`);
+    process.stderr.write(`[codex-task] sendInput START sessionId=${sessionId || 'none'} model=${model} prompt_preview=${payload.text.slice(0, 120)} includeImages=${includeImages}\n`);
 
     emit({
       type: 'system',
@@ -434,6 +438,10 @@ export class CodexSessionRuntime {
 
       try {
         for await (const event of events) {
+          if (CODEX_DEBUG_LOGS) {
+            const eventPreview = (() => { try { return JSON.stringify(event).slice(0, 2000) } catch { return String(event).slice(0, 2000) } })();
+            process.stderr.write(`[codex-debug] handleSdkEvent type=${event.type} preview=${eventPreview}\n`);
+          }
           if (this.abortController?.signal.aborted || forceBreak) break;
 
           if (event.type === 'turn.completed') {
@@ -454,6 +462,9 @@ export class CodexSessionRuntime {
 
           if (this.abortController?.signal.aborted || forceBreak) break;
           await this.handleSdkEvent(sessionId, event, emitFailure, noteStreamError);
+        }
+        if (CODEX_DEBUG_LOGS) {
+          process.stderr.write(`[codex-debug] event stream ended sessionId=${sessionId}\n`);
         }
       } finally {
         this.abortController?.signal.removeEventListener('abort', onAbort);
@@ -497,6 +508,19 @@ export class CodexSessionRuntime {
         process.stderr.write(
           `[codex] Skipping success result: completed=${turnCompleted} failed=${turnFailed}\n`,
         );
+      }
+
+      // Lifecycle log — capture state before cleanup nulls abortController
+      if (!retryingWithoutImages) {
+        if (this.abortController?.signal.aborted) {
+          process.stderr.write(`[codex-task] sendInput ABORT sessionId=${sessionId}\n`);
+        } else if (turnFailed) {
+          process.stderr.write(`[codex-task] sendInput FAILED sessionId=${sessionId}\n`);
+        } else if (turnCompleted) {
+          process.stderr.write(`[codex-task] sendInput COMPLETE sessionId=${sessionId}\n`);
+        } else {
+          process.stderr.write(`[codex-task] sendInput ENDED sessionId=${sessionId} completed=${turnCompleted} failed=${turnFailed}\n`);
+        }
       }
 
       activeAbortController = null;

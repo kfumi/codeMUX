@@ -374,7 +374,14 @@ export class SessionRuntime {
     this.turnActive = true;
     this.generation += 1;
 
-    await this.startPersistentQuery(prompt, this.generation, this.activeConfigGeneration, inputPayload);
+    process.stderr.write(`[claude-task] sendInput START sessionId=${this.config.sessionId || 'none'} model=${this.config.model ?? 'default'} prompt_preview=${prompt.slice(0, 120)}\n`);
+
+    try {
+      await this.startPersistentQuery(prompt, this.generation, this.activeConfigGeneration, inputPayload);
+    } catch (error) {
+      process.stderr.write(`[claude-task] sendInput FAILED sessionId=${this.config.sessionId || 'none'} error=${error instanceof Error ? error.message : String(error)}\n`);
+      throw error;
+    }
   }
 
   async interrupt(): Promise<void> {
@@ -866,7 +873,8 @@ export class SessionRuntime {
         msgCount += 1;
         const msg = result.value as Record<string, unknown>;
         if (DEBUG_MESSAGE_LOGS) {
-          process.stderr.write(`[sidecar] Message #${msgCount}: type=${msg.type}, subtype=${String(msg.subtype || 'none')}\n`);
+          const msgPreview = (() => { try { return JSON.stringify(msg).slice(0, 2000) } catch { return String(msg).slice(0, 2000) } })();
+          process.stderr.write(`[claude-debug] message #${msgCount} type=${msg.type} subtype=${String(msg.subtype || 'none')} preview=${msgPreview}\n`);
         }
 
         if (msg.type === 'system' && msg.subtype === 'status' && (msg as any).status === 'compacting') {
@@ -912,6 +920,11 @@ export class SessionRuntime {
           process.stderr.write(`[sidecar]   -> result usage: ${JSON.stringify(resultEvent.usage || 'NONE')}, modelUsage=${JSON.stringify(resultEvent.modelUsage || 'NONE')}\n`);
         }
 
+        if (DEBUG_MESSAGE_LOGS) {
+          const emitObj = eventToEmit as Record<string, unknown>;
+          const emitPreview = (() => { try { return JSON.stringify(emitObj).slice(0, 1000) } catch { return String(emitObj).slice(0, 1000) } })();
+          process.stderr.write(`[claude-debug] EMIT type=${emitObj?.type ?? '(no type)'} preview=${emitPreview}\n`);
+        }
         emit(eventToEmit);
 
         if (msg.type === 'system' && msg.subtype === 'init' && Array.isArray((msg as any).mcp_servers)) {
@@ -932,12 +945,16 @@ export class SessionRuntime {
 
         if (msg.type === 'result') {
           sawResult = true;
+          process.stderr.write(`[claude-task] sendInput COMPLETE sessionId=${appSessionId || 'none'}\n`);
           this.finishTurn();
           this.closeQueryHandle('turn_complete');
           if (this.config) {
             this.startWarmup(this.activeConfigGeneration);
           }
         }
+      }
+      if (DEBUG_MESSAGE_LOGS) {
+        process.stderr.write(`[claude-debug] query iterator ended sessionId=${appSessionId || 'none'} msgCount=${msgCount} sawResult=${sawResult}\n`);
       }
     } catch (err: unknown) {
       if (includeImages && isImageUnsupportedError(err) && prompt) {
@@ -966,8 +983,10 @@ export class SessionRuntime {
         this.closeQueryHandle('timeout');
       }
       if (!isAbort && !isGracefulInterruptCleanup) {
+        process.stderr.write(`[claude-task] sendInput FAILED sessionId=${appSessionId || 'none'} error=${errorMsg.slice(0, 500)}\n`);
         emit({ type: 'sidecar_error', error: errorMsg });
       } else {
+        process.stderr.write(`[claude-task] sendInput ABORT sessionId=${appSessionId || 'none'}\n`);
         process.stderr.write(`[sidecar] Suppressed interrupt cleanup error: ${errorMsg}\n`);
       }
       this.finishTurn();
