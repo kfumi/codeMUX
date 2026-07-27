@@ -37,6 +37,7 @@ export type CodeMuxAssistantMessage = {
     sourceEventIndex: number;
     sourceEventIndices: number[];
     sourceKind: AgentMessage['kind'];
+    sourceUuid?: string;
     isFinalAssistantMessage?: boolean;
     attachments?: UserAttachmentPreview[];
     locator?: AgentUserMessageLocator;
@@ -742,6 +743,7 @@ function createMessage(
       sourceEventIndex: index,
       sourceEventIndices: [index],
       sourceKind: event.kind,
+      ...(event.kind === 'assistant' && event.data.uuid ? { sourceUuid: event.data.uuid } : {}),
       ...(event.kind === 'user' && event.data.attachments?.length
         ? { attachments: event.data.attachments }
         : {}),

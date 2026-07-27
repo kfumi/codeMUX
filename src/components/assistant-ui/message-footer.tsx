@@ -1,7 +1,9 @@
 "use client";
 
 import { ActionBarPrimitive, useAuiState } from '@assistant-ui/react';
-import { Check, Copy } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { Check, Copy, Bug } from 'lucide-react';
+import { useState } from 'react';
 
 import { cn } from '@/lib/utils';
 
@@ -19,9 +21,11 @@ type MessageFooterProps = {
   stats?: MessageFooterStats;
   className?: string;
   revealOnHover?: boolean;
+  sessionId?: string;
+  sourceUuid?: string;
 };
 
-export function MessageFooter({ timestamp, stats, className, revealOnHover = false }: MessageFooterProps) {
+export function MessageFooter({ timestamp, stats, className, revealOnHover = false, sessionId, sourceUuid }: MessageFooterProps) {
   const hasStats =
     stats &&
     (stats.durationMs != null ||
@@ -39,6 +43,7 @@ export function MessageFooter({ timestamp, stats, className, revealOnHover = fal
       >
         <ActionBarPrimitive.Root autohide="never" className="flex items-center gap-1">
           <MessageCopyButton />
+          {sessionId ? <DebugCopyButton sessionId={sessionId} sourceUuid={sourceUuid} /> : null}
         </ActionBarPrimitive.Root>
       </div>
     );
@@ -64,6 +69,7 @@ export function MessageFooter({ timestamp, stats, className, revealOnHover = fal
     >
       <ActionBarPrimitive.Root autohide="never" className="flex items-center gap-1">
         <MessageCopyButton />
+        {sessionId ? <DebugCopyButton sessionId={sessionId} sourceUuid={sourceUuid} /> : null}
       </ActionBarPrimitive.Root>
 
       {timestamp ? <FooterItem>{formatTime(timestamp)}</FooterItem> : null}
@@ -75,6 +81,34 @@ export function MessageFooter({ timestamp, stats, className, revealOnHover = fal
       ) : null}
       {cacheHitRate != null ? <FooterItem>缓存命中 {cacheHitRate.toFixed(0)}%</FooterItem> : null}
     </div>
+  );
+}
+
+function DebugCopyButton({ sessionId, sourceUuid }: { sessionId: string; sourceUuid?: string }) {
+  const [isCopied, setIsCopied] = useState(false);
+
+  const copyDebugPrompt = async () => {
+    const logDirectory = await invoke<string>('get_log_directory');
+    await navigator.clipboard.writeText(
+      `请排查 CodeMUX 的问题。\n会话ID: ${sessionId}\n本轮对话ID: ${sourceUuid ?? '未知'}\n日志目录: ${logDirectory}`,
+    );
+    setIsCopied(true);
+    window.setTimeout(() => setIsCopied(false), 1500);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={() => void copyDebugPrompt()}
+      className={cn(
+        'inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors',
+        'text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground',
+      )}
+      title="复制排查问题提示词"
+      aria-label="复制排查问题提示词"
+    >
+      {isCopied ? <Check className="h-3 w-3" /> : <Bug className="h-3 w-3" />}
+    </button>
   );
 }
 

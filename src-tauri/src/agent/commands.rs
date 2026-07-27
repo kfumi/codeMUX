@@ -2422,41 +2422,45 @@ pub async fn start_agent_session(
     reasoning_effort: Option<String>,
     input_payload: Option<serde_json::Value>,
 ) -> Result<(), String> {
-    info!(target: "agent", "Starting agent session wrapper for session_id={}", session_id);
+    let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
+    crate::log_ctx::with_ctx(ctx, || async {
+        crate::log_ctx!(info, target: "agent", "Starting agent session wrapper");
 
-    let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
-    let _lifecycle_guard = lifecycle_lock.lock().await;
-    let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
-    let runtime_config = resolve_active_runtime_config(&state, &session_id)?;
-    let runtime_generation = if agent_kind == "opencode" {
-        Some(begin_session_generation(agent_state.inner(), &session_id).await)
-    } else {
-        None
-    };
+        let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
+        let _lifecycle_guard = lifecycle_lock.lock().await;
+        let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
+        let runtime_config = resolve_active_runtime_config(&state, &session_id)?;
+        let runtime_generation = if agent_kind == "opencode" {
+            Some(begin_session_generation(agent_state.inner(), &session_id).await)
+        } else {
+            None
+        };
 
-    ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
-    let ensure_cmd = build_ensure_session_command(
-        &state,
-        &session_id,
-        &agent_kind,
-        cwd,
-        runtime_config.api_key,
-        runtime_config.base_url,
-        runtime_config.model,
-        reasoning_effort,
-        runtime_config.codex_needs_proxy,
-        runtime_config.provider,
-        runtime_config.credential_source,
-        runtime_generation,
-    )?;
+        ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
+        let ensure_cmd = build_ensure_session_command(
+            &state,
+            &session_id,
+            &agent_kind,
+            cwd,
+            runtime_config.api_key,
+            runtime_config.base_url,
+            runtime_config.model,
+            reasoning_effort,
+            runtime_config.codex_needs_proxy,
+            runtime_config.provider,
+            runtime_config.credential_source,
+            runtime_generation,
+        )?;
 
-    send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
+        send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 
-    let mut input_cmd = OpenCodeRuntime::send_input_command(prompt);
-    if let Some(payload) = input_payload {
-        input_cmd["inputPayload"] = payload;
-    }
-    send_command_to_session(&agent_state, &session_id, input_cmd).await
+        let mut input_cmd = OpenCodeRuntime::send_input_command(prompt);
+        if let Some(payload) = input_payload {
+            input_cmd["inputPayload"] = payload;
+        }
+        send_command_to_session(&agent_state, &session_id, input_cmd).await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2464,21 +2468,32 @@ pub async fn interrupt_agent_session(
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
-    info!(target: "agent", "Interrupt requested for session_id={}", session_id);
-    let command_sender = {
-        let sidecars = agent_state.sidecars.lock().await;
-        sidecars.get(&session_id).map(SidecarHandle::command_sender)
-    };
-    if let Some(command_sender) = command_sender {
-        command_sender
-            .send(OpenCodeRuntime::interrupt_command().to_string())
-            .await
-            .map_err(|_| "Failed to send command to sidecar".to_string())?;
-        info!(target: "agent", "Interrupt command sent, sidecar kept alive for session_id={}", session_id);
-    } else {
-        debug!(target: "agent", "Interrupt skipped; no active sidecar for session_id={}", session_id);
-    }
-    Ok(())
+    let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
+    crate::log_ctx::with_ctx(ctx, || async {
+        crate::log_ctx!(info, target: "agent", "Interrupt requested");
+        let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
+        let _lifecycle_guard = lifecycle_lock.lock().await;
+        invalidate_session_generation(agent_state.inner(), &session_id).await;
+        let sidecar = {
+            let mut sidecars = agent_state.sidecars.lock().await;
+            sidecars.remove(&session_id)
+        };
+        if let Some(handle) = sidecar {
+            let _ = handle
+                .send_command(&OpenCodeRuntime::interrupt_command().to_string())
+                .await;
+            agent_state
+                .sidecars
+                .lock()
+                .await
+                .insert(session_id.clone(), handle);
+            crate::log_ctx!(info, target: "agent", "Interrupt command sent, sidecar kept alive");
+        } else {
+            crate::log_ctx!(info, target: "agent", "Interrupt skipped; no active sidecar");
+        }
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2486,20 +2501,24 @@ pub async fn shutdown_agent(
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
-    info!(target: "agent", "Shutdown requested for session_id={}", session_id);
-    let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
-    let _lifecycle_guard = lifecycle_lock.lock().await;
-    invalidate_session_generation(agent_state.inner(), &session_id).await;
-    let sidecar = {
-        let mut sidecars = agent_state.sidecars.lock().await;
-        sidecars.remove(&session_id)
-    };
-    if let Some(mut handle) = sidecar {
-        handle.shutdown().await;
-    } else {
-        debug!(target: "agent", "Shutdown skipped; no active sidecar for session_id={}", session_id);
-    }
-    Ok(())
+    let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
+    crate::log_ctx::with_ctx(ctx, || async {
+        crate::log_ctx!(info, target: "agent", "Shutdown requested");
+        let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
+        let _lifecycle_guard = lifecycle_lock.lock().await;
+        invalidate_session_generation(agent_state.inner(), &session_id).await;
+        let sidecar = {
+            let mut sidecars = agent_state.sidecars.lock().await;
+            sidecars.remove(&session_id)
+        };
+        if let Some(mut handle) = sidecar {
+            handle.shutdown().await;
+        } else {
+            crate::log_ctx!(info, target: "agent", "Shutdown skipped; no active sidecar");
+        }
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2509,27 +2528,28 @@ pub async fn send_tool_response(
     tool_use_id: String,
     response: serde_json::Value,
 ) -> Result<(), String> {
-    info!(target: "agent", "Sending tool response for session_id={} tool_use_id={}", session_id, tool_use_id);
-    let cmd = serde_json::json!({
-        "type": "tool_response",
-        "toolUseId": tool_use_id,
-        "response": response,
-    });
-
-    let command_sender = {
-        let sidecars = agent_state.sidecars.lock().await;
-        sidecars.get(&session_id).map(SidecarHandle::command_sender)
-    };
-    if let Some(command_sender) = command_sender {
-        command_sender
-            .send(cmd.to_string())
-            .await
-            .map_err(|_| "Failed to send command to sidecar".to_string())?;
-    } else {
-        warn!(target: "agent", "Tool response skipped because no sidecar was found for session_id={} tool_use_id={}", session_id, tool_use_id);
-    }
-
-    Ok(())
+    let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
+    crate::log_ctx::with_ctx(ctx, || async {
+        crate::log_ctx!(info, target: "agent", "Sending tool response tool_use_id={}", tool_use_id);
+        let cmd = serde_json::json!({
+            "type": "tool_response",
+            "toolUseId": tool_use_id,
+            "response": response,
+        });
+        let command_sender = {
+            let sidecars = agent_state.sidecars.lock().await;
+            sidecars.get(&session_id).map(SidecarHandle::command_sender)
+        };
+        if let Some(command_sender) = command_sender {
+            command_sender
+                .send(cmd.to_string())
+                .await
+                .map_err(|_| "Failed to send command to sidecar".to_string())?;
+        } else {
+            crate::log_ctx!(warn, target: "agent", "Tool response skipped because no sidecar was found tool_use_id={}", tool_use_id);
+        }
+        Ok(())
+    }).await
 }
 
 #[tauri::command]
@@ -2539,8 +2559,14 @@ pub async fn respond_to_agent_permission(
     request_id: String,
     response: serde_json::Value,
 ) -> Result<(), String> {
-    let cmd = OpenCodeRuntime::respond_to_permission_command(&request_id, &session_id, response);
-    send_command_to_session(&agent_state, &session_id, cmd).await
+    let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
+    crate::log_ctx::with_ctx(ctx, || async {
+        crate::log_ctx!(info, target: "agent", "Respond to permission request_id={}", request_id);
+        let cmd =
+            OpenCodeRuntime::respond_to_permission_command(&request_id, &session_id, response);
+        send_command_to_session(&agent_state, &session_id, cmd).await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2549,39 +2575,42 @@ pub async fn reset_agent_session(
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
-    info!(target: "agent", "Reset requested for session_id={}", session_id);
-    let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
-    let _lifecycle_guard = lifecycle_lock.lock().await;
-    let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
-    invalidate_session_generation(agent_state.inner(), &session_id).await;
-    let cmd = OpenCodeRuntime::reset_session_command(&session_id);
+    let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
+    crate::log_ctx::with_ctx(ctx, || async {
+        crate::log_ctx!(info, target: "agent", "Reset requested");
+        let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
+        let _lifecycle_guard = lifecycle_lock.lock().await;
+        let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
+        invalidate_session_generation(agent_state.inner(), &session_id).await;
+        let cmd = OpenCodeRuntime::reset_session_command(&session_id);
 
-    let command_sender = {
-        let sidecars = agent_state.sidecars.lock().await;
-        sidecars.get(&session_id).map(SidecarHandle::command_sender)
-    };
-    if let Some(command_sender) = command_sender {
-        command_sender
-            .send(cmd.to_string())
-            .await
-            .map_err(|_| "Failed to send command to sidecar".to_string())?;
-    } else {
-        debug!(target: "agent", "Reset skipped; no active sidecar for session_id={}", session_id);
-    }
+        let command_sender = {
+            let sidecars = agent_state.sidecars.lock().await;
+            sidecars.get(&session_id).map(SidecarHandle::command_sender)
+        };
+        if let Some(command_sender) = command_sender {
+            command_sender
+                .send(cmd.to_string())
+                .await
+                .map_err(|_| "Failed to send command to sidecar".to_string())?;
+        } else {
+            crate::log_ctx!(info, target: "agent", "Reset skipped; no active sidecar");
+        }
 
-    if agent_kind == "opencode" {
-        let db = state.db.lock().unwrap();
-        operations::delete_agent_session_mapping(&db, &session_id, AgentKind::Opencode).map_err(
-            |error| {
-                format!(
-                    "Failed to clear OpenCode session mapping for session_id={}: {}",
-                    session_id, error
-                )
-            },
-        )?;
-    }
+        if agent_kind == "opencode" {
+            let db = state.db.lock().unwrap();
+            operations::delete_agent_session_mapping(&db, &session_id, AgentKind::Opencode)
+                .map_err(|error| {
+                    format!(
+                        "Failed to clear OpenCode session mapping for session_id={}: {}",
+                        session_id, error
+                    )
+                })?;
+        }
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 /// Result of a successful rewind: the cutoff ordinal for Artifact GC (RW1).

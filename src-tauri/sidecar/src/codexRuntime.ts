@@ -48,6 +48,7 @@ import {
   shouldBlockPlanModeItem,
   type CodexCollaborationPolicy,
 } from './codexCollaborationPolicy.js';
+import { setLogCtx, writeLog } from './writeLog.js';
 
 export { emit } from './streamEventBatcher.js';
 
@@ -173,7 +174,10 @@ export class CodexSessionRuntime {
   private previousTotalUsage: UsageBaseline | null = null;
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
-    if (cmd.sessionId) setActiveSessionId(cmd.sessionId);
+    if (cmd.sessionId) {
+      setActiveSessionId(cmd.sessionId);
+      setLogCtx({ sessionId: cmd.sessionId });
+    }
     const cwd = ensureWorkingDirectory(cmd.cwd);
     const requestedConfig = {
       sessionId: cmd.sessionId,
@@ -393,7 +397,7 @@ export class CodexSessionRuntime {
     );
 
     process.stderr.write(`[codex] Processing input via SDK: ${payload.text.slice(0, 80)}...\n`);
-    process.stderr.write(`[codex-task] sendInput START sessionId=${sessionId || 'none'} model=${model} prompt_preview=${payload.text.slice(0, 120)} includeImages=${includeImages}\n`);
+    writeLog('[codex-task]', `sendInput START model=${model} prompt_preview=${payload.text.slice(0, 120)} includeImages=${includeImages}`);
 
     emit({
       type: 'system',
@@ -513,13 +517,13 @@ export class CodexSessionRuntime {
       // Lifecycle log — capture state before cleanup nulls abortController
       if (!retryingWithoutImages) {
         if (this.abortController?.signal.aborted) {
-          process.stderr.write(`[codex-task] sendInput ABORT sessionId=${sessionId}\n`);
+          writeLog('[codex-task]', 'sendInput ABORT');
         } else if (turnFailed) {
-          process.stderr.write(`[codex-task] sendInput FAILED sessionId=${sessionId}\n`);
+          writeLog('[codex-task]', 'sendInput FAILED');
         } else if (turnCompleted) {
-          process.stderr.write(`[codex-task] sendInput COMPLETE sessionId=${sessionId}\n`);
+          writeLog('[codex-task]', 'sendInput COMPLETE');
         } else {
-          process.stderr.write(`[codex-task] sendInput ENDED sessionId=${sessionId} completed=${turnCompleted} failed=${turnFailed}\n`);
+          writeLog('[codex-task]', `sendInput ENDED completed=${turnCompleted} failed=${turnFailed}`);
         }
       }
 
@@ -620,6 +624,11 @@ export class CodexSessionRuntime {
     emitFailure: (message: string) => void,
     noteStreamError: (message: string) => void,
   ): Promise<void> {
+    const eventItem = (event as { item?: { id?: unknown } }).item;
+    const itemId = typeof eventItem?.id === 'string' ? eventItem.id : undefined;
+    if (itemId) {
+      setLogCtx({ sessionId, messageId: itemId });
+    }
     if (this.handleLiveCodexCompactEvent(sessionId, event)) {
       return;
     }

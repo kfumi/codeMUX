@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use log::info;
 use serde_json::{json, Value};
 
 use super::types::{AgentRuntime, RuntimeRequest};
@@ -82,10 +81,10 @@ impl AgentRuntime for OpenCodeRuntime {
     }
 
     async fn ensure(&self, request: RuntimeRequest) -> Result<(), String> {
-        info!(
+        crate::log_ctx!(
+            info,
             target: "agent_runtime::opencode",
-            "ensure session_id={} cwd={}",
-            request.session_id,
+            "ensure cwd={}",
             request.cwd,
         );
         Ok(())
@@ -95,39 +94,39 @@ impl AgentRuntime for OpenCodeRuntime {
         self.ensure(request).await
     }
 
-    async fn send_input(&self, session_id: &str, prompt: String) -> Result<(), String> {
-        info!(
+    async fn send_input(&self, _session_id: &str, prompt: String) -> Result<(), String> {
+        crate::log_ctx!(
+            info,
             target: "agent_runtime::opencode",
-            "send_input session_id={} prompt_len={}",
-            session_id,
+            "send_input prompt_len={}",
             prompt.len(),
         );
         Ok(())
     }
 
-    async fn interrupt(&self, session_id: &str) -> Result<(), String> {
-        info!(
+    async fn interrupt(&self, _session_id: &str) -> Result<(), String> {
+        crate::log_ctx!(
+            info,
             target: "agent_runtime::opencode",
-            "interrupt session_id={}",
-            session_id,
+            "interrupt",
         );
         Ok(())
     }
 
-    async fn shutdown(&self, session_id: &str) -> Result<(), String> {
-        info!(
+    async fn shutdown(&self, _session_id: &str) -> Result<(), String> {
+        crate::log_ctx!(
+            info,
             target: "agent_runtime::opencode",
-            "shutdown session_id={}",
-            session_id,
+            "shutdown",
         );
         Ok(())
     }
 
-    async fn reset(&self, session_id: &str) -> Result<(), String> {
-        info!(
+    async fn reset(&self, _session_id: &str) -> Result<(), String> {
+        crate::log_ctx!(
+            info,
             target: "agent_runtime::opencode",
-            "reset session_id={}",
-            session_id,
+            "reset",
         );
         Ok(())
     }

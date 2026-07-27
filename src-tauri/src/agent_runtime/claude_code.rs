@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use log::info;
 
 use super::types::{AgentRuntime, RuntimeRequest};
 
@@ -20,10 +19,10 @@ impl AgentRuntime for ClaudeCodeRuntime {
     }
 
     async fn ensure(&self, request: RuntimeRequest) -> Result<(), String> {
-        info!(
+        crate::log_ctx!(
+            info,
             target: "agent_runtime::claude_code",
-            "ensure session_id={} cwd={}",
-            request.session_id,
+            "ensure cwd={}",
             request.cwd,
         );
         // Actual sidecar delegation happens in agent::commands — see
@@ -31,57 +30,57 @@ impl AgentRuntime for ClaudeCodeRuntime {
         Ok(())
     }
 
-    async fn start(&self, request: RuntimeRequest) -> Result<(), String> {
-        info!(
+    async fn start(&self, _request: RuntimeRequest) -> Result<(), String> {
+        crate::log_ctx!(
+            info,
             target: "agent_runtime::claude_code",
-            "start session_id={}",
-            request.session_id,
+            "start",
         );
         Ok(())
     }
 
-    async fn send_input(&self, session_id: &str, prompt: String) -> Result<(), String> {
-        info!(
+    async fn send_input(&self, _session_id: &str, prompt: String) -> Result<(), String> {
+        crate::log_ctx!(
+            info,
             target: "agent_runtime::claude_code",
-            "send_input session_id={} prompt_len={}",
-            session_id,
+            "send_input prompt_len={}",
             prompt.len(),
         );
         Ok(())
     }
 
-    async fn interrupt(&self, session_id: &str) -> Result<(), String> {
-        info!(
+    async fn interrupt(&self, _session_id: &str) -> Result<(), String> {
+        crate::log_ctx!(
+            info,
             target: "agent_runtime::claude_code",
-            "interrupt session_id={}",
-            session_id,
+            "interrupt",
         );
         Ok(())
     }
 
-    async fn shutdown(&self, session_id: &str) -> Result<(), String> {
-        info!(
+    async fn shutdown(&self, _session_id: &str) -> Result<(), String> {
+        crate::log_ctx!(
+            info,
             target: "agent_runtime::claude_code",
-            "shutdown session_id={}",
-            session_id,
+            "shutdown",
         );
         Ok(())
     }
 
-    async fn reset(&self, session_id: &str) -> Result<(), String> {
-        info!(
+    async fn reset(&self, _session_id: &str) -> Result<(), String> {
+        crate::log_ctx!(
+            info,
             target: "agent_runtime::claude_code",
-            "reset session_id={}",
-            session_id,
+            "reset",
         );
         Ok(())
     }
 
-    async fn load_history(&self, session_id: &str) -> Result<Vec<serde_json::Value>, String> {
-        info!(
+    async fn load_history(&self, _session_id: &str) -> Result<Vec<serde_json::Value>, String> {
+        crate::log_ctx!(
+            info,
             target: "agent_runtime::claude_code",
-            "load_history session_id={}",
-            session_id,
+            "load_history",
         );
         Ok(Vec::new())
     }

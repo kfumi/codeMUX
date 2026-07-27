@@ -3,6 +3,7 @@ mod agent_runtime;
 mod commands;
 mod config;
 mod db;
+mod log_ctx;
 mod mcp;
 mod provider_profiles;
 mod skills;

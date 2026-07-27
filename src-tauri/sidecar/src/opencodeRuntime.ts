@@ -17,6 +17,7 @@ import {
   type OpenCodeSdkStartResources,
   type OpenCodeServerHandle,
 } from './opencodeSdk.js';
+import { setLogCtx, writeLog } from './writeLog.js';
 
 type RuntimeState = 'idle' | 'starting' | 'started' | 'disposing' | 'cleanup_failed' | 'disposed';
 
@@ -86,6 +87,7 @@ export class OpenCodeRuntime {
   ) {
     this.config = config;
     this.sdk = sdk;
+    setLogCtx({ sessionId: config.sessionId });
     this.activeTaskTimeoutMs = options.activeTaskTimeoutMs ?? DEFAULT_ACTIVE_TASK_TIMEOUT_MS;
     this.promptTimeoutMs = options.promptTimeoutMs ?? DEFAULT_PROMPT_TIMEOUT_MS;
     this.serverCloseTimeoutMs = options.serverCloseTimeoutMs ?? DEFAULT_SERVER_CLOSE_TIMEOUT_MS;
@@ -138,7 +140,8 @@ export class OpenCodeRuntime {
     this.beginTurnEventState();
     const normalizedPayload = normalizeAgentInputPayload(prompt, inputPayload);
     const normalizedPrompt = normalizedPayload.text;
-    process.stderr.write(`[opencode-task] sendInput START sessionId=${sessionId} model=${this.config.provider}/${this.config.model} prompt_preview=${normalizedPrompt.slice(0, 120)}\n`);
+    setLogCtx({ sessionId: this.config.sessionId });
+    writeLog('[opencode-task]', `sendInput START model=${this.config.provider}/${this.config.model} prompt_preview=${normalizedPrompt.slice(0, 120)}`);
     const task = (async () => {
       const turnCompletion = new Promise<void>((resolve, reject) => {
         this.pendingTurnCompletion = { resolve, reject, sessionId };
@@ -159,7 +162,7 @@ export class OpenCodeRuntime {
         });
       } catch (error) {
         this.pendingTurnCompletion = undefined;
-        process.stderr.write(`[opencode-task] sendInput promptAsync FAILED sessionId=${sessionId} error=${errorMessage(error)}\n`);
+        writeLog('[opencode-task]', `sendInput promptAsync FAILED error=${errorMessage(error)}`);
         throw error;
       }
       if (!this.eventSubscription) {
@@ -176,16 +179,16 @@ export class OpenCodeRuntime {
     })();
     const handledTask = this.awaitPromptWithTimeout(task, sessionId).catch((error) => {
       if (isAbortError(error)) {
-        process.stderr.write(`[opencode-task] sendInput ABORT_ERROR swallowed: ${errorMessage(error)}\n`);
+        writeLog('[opencode-task]', `sendInput ABORT_ERROR swallowed: ${errorMessage(error)}`);
         return;
       }
-      process.stderr.write(`[opencode-task] sendInput ERROR propagating: ${errorMessage(error)}\n`);
+      writeLog('[opencode-task]', `sendInput ERROR propagating: ${errorMessage(error)}`);
       throw error;
     });
     this.activeTask = handledTask;
     try {
       await handledTask;
-      process.stderr.write(`[opencode-task] sendInput COMPLETE sessionId=${sessionId}\n`);
+      writeLog('[opencode-task]', 'sendInput COMPLETE');
     } finally {
       if (this.pendingTurnCompletion?.sessionId === sessionId) {
         this.pendingTurnCompletion = undefined;
@@ -391,12 +394,17 @@ export class OpenCodeRuntime {
   private handleSdkEvent(event: unknown): void {
     const eventSessionId = getOpenCodeEventSessionId(event);
     const activeSessionId = this.agentSessionId;
+    const eventProperties = (event as { properties?: Record<string, unknown> })?.properties;
+    const eventMessageId = typeof eventProperties?.messageID === 'string' ? eventProperties.messageID : undefined;
+    if (eventMessageId) {
+      setLogCtx({ sessionId: this.config.sessionId, messageId: eventMessageId });
+    }
     const type = typeof (event as { type?: unknown })?.type === 'string' ? (event as { type: string }).type : '';
     const eventLower = type.toLowerCase();
     const eventJson = (() => { try { return JSON.stringify(event).slice(0, 2000) } catch { return String(event).slice(0, 2000) } })();
     process.stderr.write(`[opencode-debug] handleSdkEvent type=${type} sessionId=${eventSessionId ?? 'null'} activeSessionId=${activeSessionId ?? 'null'} event=${eventJson}\n`);
     if (eventLower.includes('cancel') || eventLower.includes('abort') || eventLower.includes('interrupt') || type === 'session.error') {
-      process.stderr.write(`[opencode-task] handleSdkEvent type=${type} sessionId=${eventSessionId ?? 'null'} activeSessionId=${activeSessionId ?? 'null'} event=${JSON.stringify(event).slice(0, 500)}\n`);
+      writeLog('[opencode-task]', `handleSdkEvent type=${type} eventSessionId=${eventSessionId ?? 'null'} activeSessionId=${activeSessionId ?? 'null'} event=${JSON.stringify(event).slice(0, 500)}`);
     }
     if (type === 'permission.updated' && this.permissionClosing) {
       return;
@@ -546,7 +554,7 @@ export class OpenCodeRuntime {
       }
       const pending = this.pendingTurnCompletion;
       if (pending && pending.sessionId === terminalSessionId) {
-        process.stderr.write(`[opencode-task] handleSdkEvent RESOLVE_TURN sessionId=${terminalSessionId} type=${type}\n`);
+        writeLog('[opencode-task]', `handleSdkEvent RESOLVE_TURN type=${type}`);
         this.pendingTurnCompletion = undefined;
         if (type === 'session.error') {
           const properties = asRecord(asRecord(event)?.properties);
@@ -573,9 +581,9 @@ export class OpenCodeRuntime {
     });
     try {
       await Promise.race([task, timeout]);
-      process.stderr.write(`[opencode-task] awaitPromptWithTimeout RESOLVED sessionId=${sessionId}\n`);
+        writeLog('[opencode-task]', 'awaitPromptWithTimeout RESOLVED');
     } catch (error) {
-      process.stderr.write(`[opencode-task] awaitPromptWithTimeout ERROR sessionId=${sessionId} error=${errorMessage(error)} isTimeout=${isPromptTimeoutError(error)}\n`);
+        writeLog('[opencode-task]', `awaitPromptWithTimeout ERROR error=${errorMessage(error)} isTimeout=${isPromptTimeoutError(error)}`);
       if (!isPromptTimeoutError(error)) throw error;
       void this.client?.abort(sessionId).catch(() => undefined);
       this.handleSdkEvent({ type: 'session.error', properties: { sessionID: sessionId, error: { name: 'OpenCodePromptTimeoutError', data: { message: errorMessage(error) } } } });
@@ -726,7 +734,7 @@ export class OpenCodeRuntime {
     }
   }
   private async interruptInternal(): Promise<void> {
-    process.stderr.write(`[opencode-task] interruptInternal START state=${this.state} hasActiveTask=${!!this.activeTask} sessionId=${this.agentSessionId ?? 'null'}\n`);
+    writeLog('[opencode-task]', `interruptInternal START state=${this.state} hasActiveTask=${!!this.activeTask}`);
     const cancellation = this.beginPermissionCancellation();
     try {
       await this.permissions.cancelAll(this.config.sessionId);
@@ -734,11 +742,11 @@ export class OpenCodeRuntime {
       const sessionId = this.agentSessionId;
       if (client && sessionId && this.activeTask) {
         try {
-          process.stderr.write(`[opencode-task] interruptInternal calling client.abort sessionId=${sessionId}\n`);
+          writeLog('[opencode-task]', 'interruptInternal calling client.abort');
           await client.abort(sessionId);
-          process.stderr.write(`[opencode-task] interruptInternal client.abort DONE sessionId=${sessionId}\n`);
+          writeLog('[opencode-task]', 'interruptInternal client.abort DONE');
         } catch (error) {
-          process.stderr.write(`[opencode-task] interruptInternal client.abort ERROR sessionId=${sessionId} error=${errorMessage(error)} isAbort=${isAbortError(error)}\n`);
+          writeLog('[opencode-task]', `interruptInternal client.abort ERROR error=${errorMessage(error)} isAbort=${isAbortError(error)}`);
           if (!isAbortError(error)) {
             throw error;
           }
@@ -749,7 +757,7 @@ export class OpenCodeRuntime {
     } finally {
       this.finishPermissionCancellation(cancellation);
     }
-    process.stderr.write(`[opencode-task] interruptInternal END\n`);
+    writeLog('[opencode-task]', 'interruptInternal END');
   }
 
   private async disposeResources(): Promise<void> {

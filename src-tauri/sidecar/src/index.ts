@@ -44,6 +44,7 @@ import {
   type AgentInputPayload,
 } from './agentInputPayload.js';
 import { shouldCaptureClaudeSessionMapping } from './claudeSessionMapping.js';
+import { setLogCtx, writeLog } from './writeLog.js';
 
 // Suppress unhandled abort rejections from child process termination during interrupt.
 // These are expected when the user cancels a running Codex turn.
@@ -374,12 +375,12 @@ export class SessionRuntime {
     this.turnActive = true;
     this.generation += 1;
 
-    process.stderr.write(`[claude-task] sendInput START sessionId=${this.config.sessionId || 'none'} model=${this.config.model ?? 'default'} prompt_preview=${prompt.slice(0, 120)}\n`);
+    writeLog('[claude-task]', `sendInput START model=${this.config.model ?? 'default'} prompt_preview=${prompt.slice(0, 120)}`);
 
     try {
       await this.startPersistentQuery(prompt, this.generation, this.activeConfigGeneration, inputPayload);
     } catch (error) {
-      process.stderr.write(`[claude-task] sendInput FAILED sessionId=${this.config.sessionId || 'none'} error=${error instanceof Error ? error.message : String(error)}\n`);
+      writeLog('[claude-task]', `sendInput FAILED error=${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
   }
@@ -872,6 +873,10 @@ export class SessionRuntime {
 
         msgCount += 1;
         const msg = result.value as Record<string, unknown>;
+        const messageUuid = typeof msg.uuid === 'string' ? msg.uuid : undefined;
+        if (messageUuid && appSessionId) {
+          setLogCtx({ sessionId: appSessionId, messageId: messageUuid });
+        }
         if (DEBUG_MESSAGE_LOGS) {
           const msgPreview = (() => { try { return JSON.stringify(msg).slice(0, 2000) } catch { return String(msg).slice(0, 2000) } })();
           process.stderr.write(`[claude-debug] message #${msgCount} type=${msg.type} subtype=${String(msg.subtype || 'none')} preview=${msgPreview}\n`);
@@ -945,7 +950,7 @@ export class SessionRuntime {
 
         if (msg.type === 'result') {
           sawResult = true;
-          process.stderr.write(`[claude-task] sendInput COMPLETE sessionId=${appSessionId || 'none'}\n`);
+          writeLog('[claude-task]', 'sendInput COMPLETE');
           this.finishTurn();
           this.closeQueryHandle('turn_complete');
           if (this.config) {
@@ -983,10 +988,10 @@ export class SessionRuntime {
         this.closeQueryHandle('timeout');
       }
       if (!isAbort && !isGracefulInterruptCleanup) {
-        process.stderr.write(`[claude-task] sendInput FAILED sessionId=${appSessionId || 'none'} error=${errorMsg.slice(0, 500)}\n`);
+        writeLog('[claude-task]', `sendInput FAILED error=${errorMsg.slice(0, 500)}`);
         emit({ type: 'sidecar_error', error: errorMsg });
       } else {
-        process.stderr.write(`[claude-task] sendInput ABORT sessionId=${appSessionId || 'none'}\n`);
+        writeLog('[claude-task]', 'sendInput ABORT');
         process.stderr.write(`[sidecar] Suppressed interrupt cleanup error: ${errorMsg}\n`);
       }
       this.finishTurn();
@@ -1158,6 +1163,10 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
   };
 
   const dispatch = async (cmd: SidecarCommand): Promise<void> => {
+    const cmdSessionId = (cmd as { sessionId?: string }).sessionId;
+    if (cmdSessionId) {
+      setLogCtx({ sessionId: cmdSessionId });
+    }
     switch (cmd.type) {
       case 'ensure_session':
         try {

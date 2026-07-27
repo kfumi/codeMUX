@@ -1060,7 +1060,13 @@ function AssistantLikeMessage({
           </MessagePrimitive.GroupedParts>
         ) : null}
         {!shouldHideCollapsedContent && shouldRenderFooter ? (
-          <MessageFooter timestamp={sourceTimestamp} stats={footerStats} revealOnHover />
+          <MessageFooter
+            timestamp={sourceTimestamp}
+            stats={footerStats}
+            revealOnHover
+            sessionId={sessionId}
+            sourceUuid={message.metadata.custom?.sourceUuid as string | undefined}
+          />
         ) : null}
         {artifact && isFinal && isAfterLastCompact ? (
           <ArtifactSummaryCard artifact={artifact} sessionId={sessionId} />
