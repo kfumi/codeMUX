@@ -2075,7 +2075,9 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
           ? new Date(rawMsg.timestamp).getTime() || 0
           : 0;
 
-        const event = mapPersistedClaudeMessage(rawMsg, agentKind ?? 'claude_code');
+        const event = isCodeMuxToolEvent(rawMsg) || isCodeMuxTurnEvent(rawMsg) || isCodeMuxStreamEvent(rawMsg)
+          ? parseAgentEvent(JSON.stringify(rawMsg))
+          : mapPersistedClaudeMessage(rawMsg, agentKind ?? 'claude_code');
         if (event) {
           events.push(event as AgentMessage);
           timestamps.push(ts);

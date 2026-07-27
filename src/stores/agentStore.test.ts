@@ -1301,6 +1301,60 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().events[session.id]).toBeUndefined();
   });
 
+  it('loads Codex history CodeMUX tool and outcome events through the live adapter', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    loadCodexSessionEventsMock.mockResolvedValueOnce([
+      {
+        type: 'tool_started',
+        session_id: session.id,
+        tool_use_id: 'call-read',
+        name: 'read_file',
+        input: { path: 'README.md' },
+        timestamp: '2026-07-10T12:00:01.000Z',
+        event_id: 'history-event-1',
+        sequence: 0,
+      },
+      {
+        type: 'tool_finished',
+        session_id: session.id,
+        tool_use_id: 'call-read',
+        content: '内容',
+        is_error: false,
+        timestamp: '2026-07-10T12:00:02.000Z',
+        event_id: 'history-event-2',
+        sequence: 1,
+      },
+      {
+        type: 'turn_finished',
+        session_id: session.id,
+        outcome: 'completed',
+        usage: { input_tokens: 10, cached_input_tokens: 2, output_tokens: 4 },
+        timestamp: '2026-07-10T12:00:03.000Z',
+        event_id: 'history-event-3',
+        sequence: 2,
+      },
+    ]);
+
+    await useAgentStore.getState().loadSessionMessages(session.id);
+
+    expect(useAgentStore.getState().events[session.id]).toEqual([
+      expect.objectContaining({
+        kind: 'assistant',
+        data: expect.objectContaining({ uuid: 'history-event-1' }),
+      }),
+      expect.objectContaining({
+        kind: 'tool_result',
+        data: expect.objectContaining({ uuid: 'history-event-2' }),
+      }),
+      expect.objectContaining({
+        kind: 'result',
+        data: expect.objectContaining({ subtype: 'success', uuid: 'history-event-3' }),
+      }),
+    ]);
+  });
+
   it('refreshes Claude Code token usage from history after loading historical messages', async () => {
     const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');

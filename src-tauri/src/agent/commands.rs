@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -1153,6 +1153,137 @@ fn convert_codex_item_to_claude_format(val: &serde_json::Value) -> Option<serde_
     None
 }
 
+/// 将持久化的 Codex 工具记录转换为实时 sidecar 使用的 CodeMUX Event。
+/// 插入回合结束事件后再分配 sequence 和 event_id，以最终历史顺序为准。
+fn convert_codex_tool_to_codemux(
+    val: &serde_json::Value,
+    app_session_id: &str,
+) -> Option<(&'static str, String, serde_json::Value)> {
+    if val.get("type").and_then(|entry| entry.as_str()) != Some("response_item") {
+        return None;
+    }
+
+    let payload = val.get("payload")?;
+    let payload_type = payload.get("type")?.as_str()?;
+    let timestamp = val.get("timestamp").cloned();
+
+    match payload_type {
+        "function_call" => {
+            let tool_use_id = payload.get("call_id")?.as_str()?.to_string();
+            let name = payload.get("name")?.as_str()?;
+            let input = parse_codex_tool_input(payload.get("arguments"));
+            Some((
+                "tool_started",
+                tool_use_id.clone(),
+                serde_json::json!({
+                    "type": "tool_started",
+                    "session_id": app_session_id,
+                    "tool_use_id": tool_use_id,
+                    "name": name,
+                    "input": input,
+                    "timestamp": timestamp,
+                    "event_id": "",
+                    "sequence": 0
+                }),
+            ))
+        }
+        "custom_tool_call" => {
+            let tool_use_id = payload.get("call_id")?.as_str()?.to_string();
+            let name = payload.get("name")?.as_str()?;
+            let input_value = payload
+                .get("input")
+                .cloned()
+                .unwrap_or(serde_json::json!({}));
+            let input = if input_value.is_object() {
+                input_value
+            } else if input_value.is_null() {
+                serde_json::json!({})
+            } else {
+                serde_json::json!({ "input": input_value })
+            };
+            Some((
+                "tool_started",
+                tool_use_id.clone(),
+                serde_json::json!({
+                    "type": "tool_started",
+                    "session_id": app_session_id,
+                    "tool_use_id": tool_use_id,
+                    "name": name,
+                    "input": input,
+                    "timestamp": timestamp,
+                    "event_id": "",
+                    "sequence": 0
+                }),
+            ))
+        }
+        "function_call_output" | "custom_tool_call_output" => {
+            let tool_use_id = payload.get("call_id")?.as_str()?.to_string();
+            let content = stringify_codex_tool_output(payload.get("output"));
+            let is_error = payload.get("is_error").and_then(|entry| entry.as_bool()) == Some(true)
+                || payload.get("error").and_then(|entry| entry.as_bool()) == Some(true);
+            Some((
+                "tool_finished",
+                tool_use_id.clone(),
+                serde_json::json!({
+                    "type": "tool_finished",
+                    "session_id": app_session_id,
+                    "tool_use_id": tool_use_id,
+                    "content": content,
+                    "is_error": is_error,
+                    "timestamp": timestamp,
+                    "event_id": "",
+                    "sequence": 0
+                }),
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn parse_codex_tool_input(value: Option<&serde_json::Value>) -> serde_json::Value {
+    let Some(value) = value else {
+        return serde_json::json!({});
+    };
+    if let Some(raw) = value.as_str() {
+        return serde_json::from_str(raw).unwrap_or_else(|_| serde_json::json!({ "raw": raw }));
+    }
+    if value.is_null() {
+        serde_json::json!({})
+    } else if value.is_object() {
+        value.clone()
+    } else {
+        serde_json::json!({ "input": value })
+    }
+}
+
+fn stringify_codex_tool_output(value: Option<&serde_json::Value>) -> String {
+    let Some(value) = value else {
+        return String::new();
+    };
+    value
+        .as_str()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| value.to_string())
+}
+
+fn assign_codex_history_event_sequence(messages: &mut [serde_json::Value], app_session_id: &str) {
+    let mut sequence = 0u64;
+    for event in messages {
+        let event_type = event.get("type").and_then(|entry| entry.as_str());
+        if event_type != Some("tool_started")
+            && event_type != Some("tool_finished")
+            && event_type != Some("error")
+            && event_type != Some("turn_finished")
+        {
+            continue;
+        }
+        event["event_id"] =
+            serde_json::json!(format!("codemux-history-{}-{}", app_session_id, sequence));
+        event["sequence"] = serde_json::json!(sequence);
+        sequence += 1;
+    }
+}
+
 fn is_codex_assistant_response_message(val: &serde_json::Value) -> bool {
     val.get("type").and_then(|t| t.as_str()) == Some("response_item")
         && val
@@ -1295,6 +1426,7 @@ fn convert_codex_history_values_to_events(
         model_context_window: Option<u64>,
         duration_ms: Option<u64>,
         last_assistant_msg_idx: Option<usize>,
+        last_event_idx: Option<usize>,
         compaction_only: bool,
     }
 
@@ -1307,6 +1439,8 @@ fn convert_codex_history_values_to_events(
     let mut messages = Vec::new();
     let mut turns: Vec<TurnInfo> = Vec::new();
     let mut msg_idx: usize = 0;
+    let mut emitted_tool_started = HashSet::new();
+    let mut emitted_tool_finished = HashSet::new();
 
     for val in raw_events {
         let item_type = val.get("type").and_then(|t| t.as_str());
@@ -1325,8 +1459,25 @@ fn convert_codex_history_values_to_events(
         if let Some(converted) = convert_codex_compacted_to_compact_boundary(val) {
             current_turn.last_assistant_msg_idx = None;
             current_turn.compaction_only = true;
+            current_turn.last_event_idx = Some(msg_idx);
             messages.push(converted);
             msg_idx += 1;
+            continue;
+        }
+
+        if let Some((event_type, tool_use_id, converted)) =
+            convert_codex_tool_to_codemux(val, app_session_id)
+        {
+            let is_new = if event_type == "tool_started" {
+                emitted_tool_started.insert(tool_use_id)
+            } else {
+                emitted_tool_finished.insert(tool_use_id)
+            };
+            if is_new {
+                current_turn.last_event_idx = Some(msg_idx);
+                messages.push(converted);
+                msg_idx += 1;
+            }
             continue;
         }
 
@@ -1340,6 +1491,7 @@ fn convert_codex_history_values_to_events(
                         }
                         if let Some(converted) = convert_codex_user_event_to_claude_format(val) {
                             current_turn.compaction_only = false;
+                            current_turn.last_event_idx = Some(msg_idx);
                             messages.push(converted);
                             msg_idx += 1;
                         }
@@ -1348,6 +1500,7 @@ fn convert_codex_history_values_to_events(
                         if let Some(converted) = convert_codex_agent_message_to_claude_format(val) {
                             current_turn.last_assistant_msg_idx = Some(msg_idx);
                             current_turn.compaction_only = false;
+                            current_turn.last_event_idx = Some(msg_idx);
                             messages.push(converted);
                             msg_idx += 1;
                         }
@@ -1390,6 +1543,7 @@ fn convert_codex_history_values_to_events(
                 current_turn.last_assistant_msg_idx = Some(msg_idx);
                 current_turn.compaction_only = false;
             }
+            current_turn.last_event_idx = Some(msg_idx);
             messages.push(converted);
             msg_idx += 1;
         }
@@ -1401,7 +1555,7 @@ fn convert_codex_history_values_to_events(
     }
     let mut turn_results: Vec<TurnResult> = Vec::new();
 
-    for (i, turn) in turns.iter().enumerate() {
+    for turn in &turns {
         let usage = match &turn.last_token_usage {
             Some(u) => u,
             None => continue,
@@ -1426,32 +1580,21 @@ fn convert_codex_history_values_to_events(
             .get("reasoning_output_tokens")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
-        let total = input + output + reasoning;
-
         if input > 0 || output > 0 {
-            if let Some(insert_at) = turn.last_assistant_msg_idx {
+            if let Some(insert_at) = turn.last_event_idx.or(turn.last_assistant_msg_idx) {
                 let mut result = serde_json::json!({
-                    "type": "result",
-                    "subtype": "success",
-                    "is_error": false,
-                    "uuid": format!("synthetic-codex-turn-{}-{}", app_session_id, i),
+                    "type": "turn_finished",
                     "session_id": app_session_id,
+                    "outcome": "completed",
                     "duration_ms": turn.duration_ms.unwrap_or(0),
-                    "duration_api_ms": 0,
-                    "num_turns": 1,
-                    "result": "",
                     "usage": {
                         "input_tokens": input,
-                        "cache_read_input_tokens": cached,
-                        "cache_creation_input_tokens": 0,
-                        "output_tokens": output
-                    },
-                    "last_token_usage": {
-                        "input_tokens": input,
-                        "output_tokens": output,
                         "cached_input_tokens": cached,
-                        "total_tokens": total
-                    }
+                        "output_tokens": output,
+                        "reasoning_output_tokens": reasoning
+                    },
+                    "event_id": "",
+                    "sequence": 0
                 });
                 if let Some(ctx) = turn.model_context_window {
                     result["model_context_window"] = serde_json::json!(ctx);
@@ -1465,6 +1608,8 @@ fn convert_codex_history_values_to_events(
         let pos = (turn_result.insert_at + 1).min(messages.len());
         messages.insert(pos, turn_result.result);
     }
+
+    assign_codex_history_event_sequence(&mut messages, app_session_id);
 
     messages
 }
@@ -4459,8 +4604,103 @@ mod tests {
         );
         assert_eq!(
             converted[1].get("type").and_then(|v| v.as_str()),
-            Some("result")
+            Some("turn_finished")
         );
+        assert_eq!(converted[1]["outcome"], "completed");
+        assert_eq!(converted[1]["sequence"], 0);
+    }
+
+    #[test]
+    fn codex_history_emits_deduplicated_codemux_tool_lifecycle_and_turn_outcome() {
+        let raw_events = vec![
+            serde_json::json!({
+                "timestamp": "2026-07-03T18:00:00.000Z",
+                "type": "event_msg",
+                "payload": { "type": "agent_message", "message": "先执行工具" }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-07-03T18:00:01.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "call_id": "call-read",
+                    "name": "read_file",
+                    "arguments": "{\"path\":\"README.md\"}"
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-07-03T18:00:02.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "call_id": "call-read",
+                    "name": "read_file",
+                    "arguments": "{\"path\":\"README.md\"}"
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-07-03T18:00:03.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": "call-read",
+                    "output": "内容"
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-07-03T18:00:04.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": "call-read",
+                    "output": "内容"
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-07-03T18:00:05.000Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {
+                            "input_tokens": 10,
+                            "cached_input_tokens": 2,
+                            "output_tokens": 4,
+                            "reasoning_output_tokens": 1
+                        }
+                    }
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-07-03T18:00:06.000Z",
+                "type": "event_msg",
+                "payload": { "type": "task_complete", "duration_ms": 123 }
+            }),
+        ];
+
+        let converted = convert_codex_history_values_to_events(&raw_events, "app-session-1");
+        let codemux_events: Vec<&serde_json::Value> = converted
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event.get("type").and_then(|value| value.as_str()),
+                    Some("tool_started") | Some("tool_finished") | Some("turn_finished")
+                )
+            })
+            .collect();
+
+        assert_eq!(codemux_events.len(), 3);
+        assert_eq!(codemux_events[0]["type"], "tool_started");
+        assert_eq!(codemux_events[1]["type"], "tool_finished");
+        assert_eq!(codemux_events[2]["type"], "turn_finished");
+        assert_eq!(
+            codemux_events
+                .iter()
+                .map(|event| event["sequence"].as_u64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert_eq!(codemux_events[2]["usage"]["reasoning_output_tokens"], 1);
     }
 
     #[test]

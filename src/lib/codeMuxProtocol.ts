@@ -12,6 +12,7 @@ type CodeMuxStreamEvent = {
 type CodeMuxToolEvent = {
   type: 'tool_started' | 'tool_finished';
   session_id?: string;
+  timestamp?: string;
   tool_use_id?: string;
   name?: string;
   input?: Record<string, unknown>;
@@ -23,6 +24,7 @@ type CodeMuxToolEvent = {
 type CodeMuxTurnEvent = {
   type: 'error' | 'turn_finished';
   session_id?: string;
+  timestamp?: string;
   subtype?: string;
   error?: string;
   outcome?: 'completed' | 'failed' | 'interrupted' | 'cancelled';
@@ -136,6 +138,12 @@ export function toLegacyTurnMessage(event: CodeMuxTurnEvent): AgentMessage {
         input_tokens: numberValue(usage.input_tokens),
         output_tokens: numberValue(usage.output_tokens),
         ...(usage.cached_input_tokens !== undefined ? { cache_read_input_tokens: numberValue(usage.cached_input_tokens) } : {}),
+      },
+      last_token_usage: {
+        input_tokens: numberValue(usage.input_tokens),
+        output_tokens: numberValue(usage.output_tokens),
+        cached_input_tokens: numberValue(usage.cached_input_tokens),
+        total_tokens: numberValue(usage.input_tokens) + numberValue(usage.output_tokens),
       },
     },
   };
