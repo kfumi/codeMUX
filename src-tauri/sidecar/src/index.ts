@@ -14,6 +14,7 @@ import type { SidecarCommand } from './types.js';
 import { getProviderMode } from './sessionRuntimeHelpers.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion.js';
+import { projectClaudeToolEvents } from './claudeToolEvents.js';
 import { CodexSessionRuntime, interruptActiveTurn } from './codexRuntime.js';
 import { OpenCodeRuntime } from './opencodeRuntime.js';
 import { normalizeOpenCodeModelReference } from './opencodeSdk.js';
@@ -940,7 +941,15 @@ export class SessionRuntime {
         if (msg.type === 'result') {
           this.emitTurnOutcome(toClaudeTurnOutcome(eventToEmit as Record<string, unknown>));
         } else {
-          emit(eventToEmit);
+          const projection = projectClaudeToolEvents(eventToEmit as Record<string, unknown>);
+          for (const sourceEvent of projection.toolEvents) {
+            for (const normalizedEvent of this.turnEventNormalizer?.accept(sourceEvent) ?? []) {
+              emit(normalizedEvent);
+            }
+          }
+          if (projection.remainingEvent) {
+            emit(projection.remainingEvent);
+          }
         }
 
         if (msg.type === 'system' && msg.subtype === 'init' && Array.isArray((msg as any).mcp_servers)) {
