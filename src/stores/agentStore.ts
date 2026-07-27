@@ -21,6 +21,7 @@ import { useSessionStore } from './sessionStore';
 import { normalizeFilePath, usePreviewStore } from './previewStore';
 import { useSettingsStore } from './settingsStore';
 import { countDiffLines } from '../lib/diffStats';
+import { isCodeMuxStreamEvent, toLegacyStreamingMessage } from '../lib/codeMuxProtocol';
 import type {
   AgentAssistantMessage,
   AgentToolResult,
@@ -499,16 +500,6 @@ function simulateStreamingContent(
   entry.timer = window.setTimeout(tick, 30);
 }
 
-function simulateStreamingText(
-  sessionId: string,
-  event: AgentMessage,
-  text: string,
-  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
-) {
-  simulateStreamingContent(sessionId, event, [{ key: 'text', text }], set);
-}
-
-
 function parseAgentEvent(raw: string): AgentMessage {
   try {
     const data = JSON.parse(raw);
@@ -604,6 +595,22 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'streaming', data: { event: data.event, session_id: data.session_id } };
       case 'stream_event_batch':
         return { kind: 'streaming_batch', data: { events: Array.isArray(data.events) ? data.events : [], session_id: data.session_id } };
+      case 'codemux_event_batch': {
+        const codeMuxEvents = Array.isArray(data.events)
+          ? (data.events as unknown[]).filter(isCodeMuxStreamEvent)
+          : [];
+        const events = codeMuxEvents.flatMap((event) => {
+          const legacy = toLegacyStreamingMessage(event);
+          return legacy.kind === 'streaming' ? [legacy.data.event] : [];
+        });
+        return { kind: 'streaming_batch', data: { events, session_id: data.session_id } };
+      }
+      case 'content_started':
+      case 'text_delta':
+      case 'reasoning_delta':
+      case 'content_finished':
+        if (isCodeMuxStreamEvent(data)) return toLegacyStreamingMessage(data);
+        return { kind: 'raw', data };
       case 'sidecar_debug':
         return { kind: 'raw', data };
       case 'sidecar_stream_status':

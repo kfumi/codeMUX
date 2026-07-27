@@ -870,47 +870,30 @@ describe('CodexSessionRuntime', () => {
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
         .map((line) => JSON.parse(line))
-        .flatMap((event) => event.type === 'stream_event_batch'
-          ? event.events.map((streamEvent: unknown) => ({ type: 'stream_event', session_id: event.session_id, event: streamEvent }))
+        .flatMap((event) => event.type === 'codemux_event_batch'
+          ? event.events
           : [event])
-        .filter((event) => event.type === 'stream_event');
+        .filter((event) => ['content_started', 'text_delta', 'reasoning_delta', 'content_finished'].includes(event.type))
+        .map(({ event_id: _eventId, ...event }) => event);
 
       expect(streamEvents).toEqual([
         {
-          type: 'stream_event',
+          type: 'content_started',
           session_id: 'session-1',
-          event: {
-            type: 'content_block_start',
-            index: 0,
-            content_block: {
-              type: 'text',
-              text: '',
-            },
-          },
+          index: 0,
+          content_kind: 'text',
         },
         {
-          type: 'stream_event',
+          type: 'text_delta',
           session_id: 'session-1',
-          event: {
-            type: 'content_block_delta',
-            index: 0,
-            delta: {
-              type: 'text_delta',
-              text: '让我再次',
-            },
-          },
+          index: 0,
+          text: '让我再次',
         },
         {
-          type: 'stream_event',
+          type: 'text_delta',
           session_id: 'session-1',
-          event: {
-            type: 'content_block_delta',
-            index: 0,
-            delta: {
-              type: 'text_delta',
-              text: '尝试调用 Context7 工具：',
-            },
-          },
+          index: 0,
+          text: '尝试调用 Context7 工具：',
         },
       ]);
     } finally {

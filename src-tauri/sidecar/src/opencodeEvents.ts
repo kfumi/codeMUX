@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { RuntimeEventContext } from './types.js';
+import { toCodeMuxStreamEvent } from './codeMuxProtocol.js';
 import {
   buildAssistantEvent,
   buildOpenCodeResultEvent,
@@ -530,7 +531,7 @@ function buildAssistantEnvelope(context: OpenCodeEventContext, sessionId: string
 }
 
 function buildStreamEvent(sessionId: string | undefined, event: unknown): CodeMuxEvent {
-  return { type: 'stream_event', session_id: sessionId, event };
+  return toCodeMuxStreamEvent(sessionId, event) ?? { type: 'diagnostic', subtype: 'unsupported_stream_event' };
 }
 
 function buildEnvelope(event: CodeMuxEvent, context: OpenCodeEventContext, sessionId: string | undefined): CodeMuxEvent {
