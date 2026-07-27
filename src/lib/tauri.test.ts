@@ -299,7 +299,7 @@ describe('agentApi', () => {
   });
 
   it('rewinds an agent session with app session id and agent kind', async () => {
-    invokeMock.mockResolvedValue({ cutoffOrdinal: null });
+    invokeMock.mockResolvedValue(undefined);
     const { agentApi } = await import('./tauri');
 
     await agentApi.rewindSession('session-1', 'codex');

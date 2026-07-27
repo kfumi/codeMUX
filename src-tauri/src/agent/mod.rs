@@ -1,7 +1,6 @@
 pub mod commands;
 pub mod context_usage;
 pub(crate) mod opencode_history;
-pub mod turn_meta;
 
 use log::{debug, info, warn};
 use std::io;

@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+﻿import { create } from 'zustand';
 import { fileApi, type FileTreeNode } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 
@@ -10,20 +10,7 @@ export interface OpenFile {
   currentContent?: string;   // 当前磁盘内容
   isLoading: boolean;
   error?: string;
-  /** Origin of the diff content. `'artifact'` uses persisted snapshots
-   *  from a Turn Artifact (no disk read); `'disk'` reads current content
-   *  from disk (legacy behavior). Defaults to `'disk'`. */
-  source?: 'disk' | 'artifact';
 }
-
-/** Options for `openFile`. Accepts either a plain string (legacy
- *  `originalContent` for diff mode) or a structured object that also
- *  carries `currentContent` and `source` for Turn Artifact previews. */
-export type OpenFileOptions = {
-  originalContent?: string;
-  currentContent?: string;
-  source?: 'disk' | 'artifact';
-};
 
 export interface FileTreeNodeData {
   name: string;
@@ -62,7 +49,7 @@ interface PreviewState {
 
   // Actions
   setProjectPath: (path: string | null) => void;
-  openFile: (path: string, options?: OpenFileOptions | string) => Promise<void>;
+  openFile: (path: string, originalContent?: string) => Promise<void>;
   closeFile: (path: string) => void;
   closeOtherFiles: (path: string) => void;
   closeAllFiles: () => void;
@@ -128,16 +115,10 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
 
   setProjectPath: (path: string | null) => set({ projectPath: path }),
 
-  openFile: async (path: string, options?: OpenFileOptions | string) => {
-    // Backward-compat: callers may pass a plain string for `originalContent`.
-    const opts: OpenFileOptions = typeof options === 'string'
-      ? { originalContent: options }
-      : (options ?? {});
-    const { originalContent, currentContent, source = 'disk' } = opts;
+  openFile: async (path: string, originalContent?: string) => {
     const normalizedPath = normalizeFilePath(path);
     const state = get();
-    const isDiffMode = originalContent !== undefined || source === 'artifact';
-    const isArtifact = source === 'artifact';
+    const isDiffMode = originalContent !== undefined;
 
     // Check if file is already open in the appropriate list
     const existingList = isDiffMode ? state.diffFiles : state.openFiles;
@@ -151,26 +132,11 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
           viewMode: 'diff',
           isOpen: true,
         });
-        // Update originalContent / currentContent / source if newly provided.
-        const updates: Partial<OpenFile> = {};
-        if (originalContent !== undefined && originalContent !== existing.originalContent) {
-          updates.originalContent = originalContent;
-        }
-        if (currentContent !== undefined && currentContent !== existing.currentContent) {
-          updates.currentContent = currentContent;
-        }
-        if (isArtifact && existing.source !== 'artifact') {
-          updates.source = 'artifact';
-          // For artifact source we trust the persisted snapshot over disk.
-          if (currentContent !== undefined) {
-            updates.currentContent = currentContent;
-          }
-          updates.isLoading = false;
-        }
-        if (Object.keys(updates).length > 0) {
+        // Update originalContent if newly provided
+        if (originalContent && originalContent !== existing.originalContent) {
           set({
             diffFiles: state.diffFiles.map((f) =>
-              normalizeFilePath(f.path) === normalizedPath ? { ...f, ...updates } : f
+              normalizeFilePath(f.path) === normalizedPath ? { ...f, originalContent } : f
             ),
           });
         }
@@ -184,17 +150,8 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
       return;
     }
 
-    // Add new file entry with loading state.
-    // Artifact-sourced files already carry both snapshots; no disk read.
-    const newFile: OpenFile = isArtifact
-      ? {
-          path: normalizedPath,
-          originalContent,
-          currentContent,
-          isLoading: false,
-          source: 'artifact',
-        }
-      : { path: normalizedPath, originalContent, isLoading: true, source: 'disk' };
+    // Add new file entry with loading state
+    const newFile: OpenFile = { path: normalizedPath, originalContent, isLoading: true };
 
     if (isDiffMode) {
       set({
@@ -210,11 +167,6 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
         viewMode: 'file',
         isOpen: true,
       });
-    }
-
-    // Artifact source: snapshots are already populated; skip disk read.
-    if (isArtifact) {
-      return;
     }
 
     // Load file content from disk

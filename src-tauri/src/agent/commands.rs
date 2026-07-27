@@ -16,7 +16,6 @@ use super::context_usage::{
     latest_claude_usage_from_values, latest_codex_usage_from_values, ThreadTokenUsageSnapshot,
 };
 use super::opencode_history;
-use super::turn_meta::annotate_events_with_turn_ordinal;
 use super::{spawn_sidecar, SidecarHandle};
 use crate::agent_runtime::opencode::OpenCodeRuntime;
 
@@ -341,11 +340,6 @@ pub struct RewindTarget {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct RewindOutcome {
     truncated_to_empty: bool,
-    /// 1-based ordinal of the rewound user message. Artifacts with
-    /// `turn_ordinal >= cutoff_ordinal` must be GC'd (RW1).
-    /// `None` when no rewind actually happened (e.g. opencode DB missing) —
-    /// caller should skip GC. Always `Some(n)` for claude/codex rewinds.
-    cutoff_ordinal: Option<u32>,
 }
 
 fn is_claude_visible_user_value(value: &serde_json::Value) -> bool {
@@ -572,8 +566,8 @@ fn find_rewind_user_line_by_target(
     lines: &[String],
     agent_kind: AgentKind,
     target: &RewindTarget,
-) -> Option<(usize, u32)> {
-    let mut targetable_ordinal = 0u32;
+) -> Option<usize> {
+    let mut targetable_ordinal = 0usize;
     for (index, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -586,21 +580,15 @@ fn find_rewind_user_line_by_target(
             continue;
         }
         targetable_ordinal += 1;
-        if rewind_target_matches(
-            &value,
-            index,
-            targetable_ordinal as usize,
-            agent_kind,
-            target,
-        ) {
-            return Some((index, targetable_ordinal));
+        if rewind_target_matches(&value, index, targetable_ordinal, agent_kind, target) {
+            return Some(index);
         }
     }
 
     None
 }
 
-fn find_latest_rewind_user_line(lines: &[String], agent_kind: AgentKind) -> Option<(usize, u32)> {
+fn find_latest_rewind_user_line(lines: &[String], agent_kind: AgentKind) -> Option<usize> {
     // Step 1: find the latest user line (any type: "user" — plain text, meta,
     // command XML echo, or tool_result). All of these belong to the current turn.
     let mut latest_user_index: Option<usize> = None;
@@ -625,8 +613,7 @@ fn find_latest_rewind_user_line(lines: &[String], agent_kind: AgentKind) -> Opti
         agent_kind,
         AgentKind::ClaudeCode | AgentKind::GeminiCli | AgentKind::Opencode
     ) {
-        let ordinal = count_targetable_user_lines(lines, latest_user_index, agent_kind);
-        return Some((latest_user_index, ordinal));
+        return Some(latest_user_index);
     }
 
     // Step 2: scan backwards to find the earliest user line in this turn.
@@ -651,29 +638,7 @@ fn find_latest_rewind_user_line(lines: &[String], agent_kind: AgentKind) -> Opti
         }
     }
 
-    let ordinal = count_targetable_user_lines(lines, earliest_user_index, agent_kind);
-    Some((earliest_user_index, ordinal))
-}
-
-/// Count targetable user lines in `lines[..=end_index]` (inclusive) — i.e. the
-/// 1-based ordinal of the user message at `end_index` if it is targetable, or
-/// the count of targetable user messages up to and including that index.
-/// Used to compute `cutoff_ordinal` after rewind (RW1).
-fn count_targetable_user_lines(lines: &[String], end_index: usize, agent_kind: AgentKind) -> u32 {
-    let mut count = 0u32;
-    for line in &lines[..=end_index] {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
-            continue;
-        };
-        if is_targetable_rewind_user_value(&value, agent_kind) {
-            count += 1;
-        }
-    }
-    count
+    Some(earliest_user_index)
 }
 
 #[cfg(test)]
@@ -694,7 +659,7 @@ fn rewind_jsonl_before_target_turn(
     let content = fs::read_to_string(path)
         .map_err(|err| format!("Failed to read session history {}: {}", path.display(), err))?;
     let lines = split_jsonl_preserving_newlines(&content);
-    let (user_line_index, targetable_ordinal) = if let Some(target) = target.as_ref() {
+    let user_line_index = if let Some(target) = target.as_ref() {
         find_rewind_user_line_by_target(&lines, agent_kind, target).ok_or_else(|| {
             format!(
                 "Target rewind user message not found in session history {}",
@@ -732,14 +697,17 @@ fn rewind_jsonl_before_target_turn(
         )
     })?;
 
-    // `targetable_ordinal` is the 1-based ordinal of the rewound user message.
-    // Artifacts with `turn_ordinal >= targetable_ordinal` must be GC'd (RW1).
-    // `truncated_to_empty` is true iff no targetable user message remains in
-    // the truncated history (i.e. the rewound message was the first turn).
-    let truncated_to_empty = targetable_ordinal == 1;
     Ok(RewindOutcome {
-        truncated_to_empty,
-        cutoff_ordinal: Some(targetable_ordinal),
+        truncated_to_empty: !lines[..user_line_index].iter().any(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                return false;
+            }
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+                return false;
+            };
+            is_targetable_rewind_user_value(&value, agent_kind)
+        }),
     })
 }
 
@@ -950,11 +918,6 @@ pub async fn load_claude_session_events(
             messages.push(val);
         }
     }
-
-    // NORM1/META1: annotate every event with `turnOrdinal` and `isEffectiveUserTurn`
-    // so the frontend can bind artifacts to the corresponding turn without
-    // inferring ordinals from event-array position.
-    annotate_events_with_turn_ordinal(&mut messages);
 
     info!(target: "agent", "Loaded {} messages from Claude JSONL for app_session_id={}", messages.len(), app_session_id);
     Ok(messages)
@@ -1669,17 +1632,11 @@ pub async fn load_opencode_session_events(
         return Ok(Vec::new());
     };
     let home = home_dir()?;
-    let mut messages = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         super::opencode_history::load_opencode_session_events(&home, &opencode_session_id)
     })
     .await
-    .map_err(|error| format!("Failed to join OpenCode history loader: {}", error))??;
-
-    // NORM1/META1: annotate events with `turnOrdinal` and `isEffectiveUserTurn`.
-    annotate_events_with_turn_ordinal(&mut messages);
-
-    info!(target: "agent", "Loaded {} messages from OpenCode SQLite for app_session_id={}", messages.len(), app_session_id);
-    Ok(messages)
+    .map_err(|error| format!("Failed to join OpenCode history loader: {}", error))?
 }
 
 #[tauri::command]
@@ -1742,104 +1699,8 @@ pub async fn load_codex_session_events(
 
     messages = convert_codex_history_values_to_events(&raw_events, &app_session_id);
 
-    // NORM1/META1: annotate events with `turnOrdinal` and `isEffectiveUserTurn`.
-    annotate_events_with_turn_ordinal(&mut messages);
-
     info!(target: "agent", "Loaded {} messages from Codex JSONL for app_session_id={}", messages.len(), app_session_id);
     Ok(messages)
-}
-
-/// Load the Claude-shaped history values for a session, dispatching by
-/// `agent_kind`. Reused by the Turn Artifact builder to compute `turn_ordinal`
-/// without going through the Tauri command layer (NORM1/O3).
-pub(crate) fn load_session_history_values(
-    state: &crate::AppState,
-    app_session_id: &str,
-    agent_kind: AgentKind,
-) -> Result<Vec<serde_json::Value>, String> {
-    match agent_kind {
-        AgentKind::ClaudeCode | AgentKind::GeminiCli => {
-            load_claude_history_values(state, app_session_id)
-        }
-        AgentKind::Codex => load_codex_history_values(state, app_session_id),
-        AgentKind::Opencode => {
-            let Some(opencode_session_id) =
-                get_agent_session_id(state, app_session_id, AgentKind::Opencode)?
-            else {
-                return Ok(Vec::new());
-            };
-            let home = home_dir()?;
-            opencode_history::load_opencode_session_events(&home, &opencode_session_id)
-        }
-    }
-}
-
-fn load_claude_history_values(
-    state: &crate::AppState,
-    app_session_id: &str,
-) -> Result<Vec<serde_json::Value>, String> {
-    use std::fs;
-    use std::io::{BufRead, BufReader};
-
-    let mut messages = Vec::new();
-    let Some(claude_session_id) =
-        get_agent_session_id(state, app_session_id, AgentKind::ClaudeCode)?
-    else {
-        return Ok(messages);
-    };
-
-    let claude_dir = home_dir()?.join(".claude");
-    let Some(jsonl_path) = find_claude_session_jsonl(&claude_dir, &claude_session_id) else {
-        return Ok(messages);
-    };
-
-    let file = fs::File::open(&jsonl_path).map_err(|e| format!("Failed to open JSONL: {}", e))?;
-    let reader = BufReader::new(file);
-    for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            if should_include_claude_history_event(&val) {
-                messages.push(val);
-            }
-        }
-    }
-    Ok(messages)
-}
-
-fn load_codex_history_values(
-    state: &crate::AppState,
-    app_session_id: &str,
-) -> Result<Vec<serde_json::Value>, String> {
-    let Some(codex_session_id) = get_agent_session_id(state, app_session_id, AgentKind::Codex)?
-    else {
-        return Ok(Vec::new());
-    };
-
-    let sessions_dir = home_dir()?.join(".codex").join("sessions");
-    let Some(jsonl_path) = find_codex_session_jsonl(&sessions_dir, &codex_session_id) else {
-        return Ok(Vec::new());
-    };
-
-    let mut raw_events = read_json_stream_values(&jsonl_path)?;
-    let mut interactive_events = read_codex_interactive_events_from_dir(
-        &codex_interactive_events_dir(&home_dir()?),
-        app_session_id,
-    )?;
-    if !interactive_events.is_empty() {
-        raw_events.append(&mut interactive_events);
-        sort_events_by_timestamp_stable(&mut raw_events);
-    }
-    Ok(convert_codex_history_values_to_events(
-        &raw_events,
-        app_session_id,
-    ))
 }
 
 type SessionLifecycleLock = Arc<Mutex<()>>;
@@ -2613,17 +2474,6 @@ pub async fn reset_agent_session(
     .await
 }
 
-/// Result of a successful rewind: the cutoff ordinal for Artifact GC (RW1).
-/// `cutoff_ordinal` is `Some(n)` when the rewind produced a cutoff; the
-/// frontend uses it to clear in-memory artifacts with `turn_ordinal >= n`.
-/// `None` means no rewind actually happened (e.g. opencode DB missing) — no
-/// GC was performed and no in-memory cleanup is needed.
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RewindAgentSessionResult {
-    pub cutoff_ordinal: Option<u32>,
-}
-
 #[tauri::command]
 pub async fn rewind_agent_session(
     state: State<'_, crate::AppState>,
@@ -2631,7 +2481,7 @@ pub async fn rewind_agent_session(
     app_session_id: String,
     agent_kind: String,
     target: Option<RewindTarget>,
-) -> Result<RewindAgentSessionResult, String> {
+) -> Result<(), String> {
     let agent_kind = AgentKind::from_str(&agent_kind)?;
     let Some(agent_session_id) = get_agent_session_id(state.inner(), &app_session_id, agent_kind)?
     else {
@@ -2645,13 +2495,10 @@ pub async fn rewind_agent_session(
     let (rewind_outcome, history_display): (RewindOutcome, String) = if agent_kind
         == AgentKind::Opencode
     {
-        let (truncated_to_empty, cutoff_ordinal) =
+        let truncated_to_empty =
             opencode_history::rewind_opencode_session_to_latest_turn(&home, &agent_session_id)?;
         (
-            RewindOutcome {
-                truncated_to_empty,
-                cutoff_ordinal,
-            },
+            RewindOutcome { truncated_to_empty },
             agent_session_id.clone(),
         )
     } else {
@@ -2731,42 +2578,15 @@ pub async fn rewind_agent_session(
         }
     }
 
-    // RW1: GC artifacts with turn_ordinal >= cutoff_ordinal. RGC1: if GC
-    // fails after history was already truncated, return an error so the
-    // frontend can recover by clearing in-memory artifacts and reloading
-    // via load_turn_artifacts (H3 filter).
-    if let Some(cutoff) = rewind_outcome.cutoff_ordinal {
-        let deleted = {
-            let db = state.db.lock().unwrap();
-            crate::db::artifact::delete_turn_artifacts_from_ordinal(&db, &app_session_id, cutoff)
-                .map_err(|err| {
-                    warn!(target: "agent", "Artifact GC failed after rewind session={} cutoff={}: {}", app_session_id, cutoff, err);
-                    format!(
-                        "Agent history was rewound but Artifact GC failed (cutoff={}): {}. \
-                         Reload artifacts to apply H3 filter recovery.",
-                        cutoff, err
-                    )
-                })?
-        };
-        info!(
-            target: "agent",
-            "Artifact GC after rewind: deleted {} artifacts with turn_ordinal>={} for session={}",
-            deleted, cutoff, app_session_id,
-        );
-    }
-
     info!(
         target: "agent",
-        "Rewound agent session app_session_id={} agent_kind={} history_path={} cutoff={:?}",
+        "Rewound agent session app_session_id={} agent_kind={} history_path={}",
         app_session_id,
         agent_kind.as_str(),
         history_display,
-        rewind_outcome.cutoff_ordinal,
     );
 
-    Ok(RewindAgentSessionResult {
-        cutoff_ordinal: rewind_outcome.cutoff_ordinal,
-    })
+    Ok(())
 }
 
 #[tauri::command]
@@ -3004,7 +2824,6 @@ mod tests {
         should_include_claude_history_event, sort_events_by_timestamp_stable, AgentState,
         RewindTarget,
     };
-    use crate::agent::turn_meta::annotate_events_with_turn_ordinal;
     use crate::config::types::AgentKind;
 
     #[test]
@@ -3457,7 +3276,7 @@ mod tests {
         )
         .unwrap();
 
-        let outcome = rewind_jsonl_before_target_turn(
+        rewind_jsonl_before_target_turn(
             &path,
             AgentKind::ClaudeCode,
             Some(RewindTarget {
@@ -3471,10 +3290,6 @@ mod tests {
         )
         .unwrap();
 
-        // u2 is the 2nd targetable user message → cutoff=2 (GC ordinals >= 2)
-        assert!(!outcome.truncated_to_empty);
-        assert_eq!(outcome.cutoff_ordinal, Some(2));
-
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(
             content,
@@ -3483,35 +3298,6 @@ mod tests {
                 "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n"
             )
         );
-
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn rewind_latest_turn_computes_correct_cutoff_ordinal() {
-        // Rewinding the latest turn (no explicit target) should compute the
-        // cutoff_ordinal from the rewound user message's targetable ordinal.
-        let path = std::env::temp_dir().join(format!(
-            "codemux-claude-rewind-latest-cutoff-{}.jsonl",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::write(
-            &path,
-            concat!(
-                "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
-                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"first answer\"}]}}\n",
-                "{\"type\":\"user\",\"uuid\":\"u2\",\"message\":{\"role\":\"user\",\"content\":\"second\"}}\n",
-                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"second answer\"}]}}\n",
-                "{\"type\":\"result\",\"subtype\":\"success\"}\n"
-            ),
-        )
-        .unwrap();
-
-        let outcome = rewind_jsonl_before_latest_turn(&path, AgentKind::ClaudeCode).unwrap();
-
-        // Latest user message (u2) is the 2nd targetable → cutoff=2
-        assert!(!outcome.truncated_to_empty);
-        assert_eq!(outcome.cutoff_ordinal, Some(2));
 
         let _ = std::fs::remove_file(&path);
     }
@@ -3575,7 +3361,6 @@ mod tests {
         .unwrap();
 
         assert!(outcome.truncated_to_empty);
-        assert_eq!(outcome.cutoff_ordinal, Some(1));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
 
         let _ = std::fs::remove_file(&path);
@@ -3614,7 +3399,6 @@ mod tests {
         .unwrap();
 
         assert!(outcome.truncated_to_empty);
-        assert_eq!(outcome.cutoff_ordinal, Some(1));
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s1\"}\n"
@@ -4918,72 +4702,6 @@ mod tests {
         );
 
         let _ = fs::remove_file(path);
-    }
-
-    // NORM1/META1: verify the load_*_session_events paths annotate history
-    // events with `turnOrdinal` and `isEffectiveUserTurn` so the frontend can
-    // bind artifacts to turns without inferring ordinals from array position.
-    #[test]
-    fn codex_history_events_get_annotated_with_turn_ordinal_after_conversion() {
-        let raw_events = vec![
-            serde_json::json!({
-                "timestamp": "2026-07-03T17:31:58.238Z",
-                "type": "event_msg",
-                "payload": {"type": "user_message", "id": "u1", "message": "first"}
-            }),
-            serde_json::json!({
-                "timestamp": "2026-07-03T17:31:58.239Z",
-                "type": "event_msg",
-                "payload": {"type": "agent_message", "id": "a1", "message": "reply1"}
-            }),
-            serde_json::json!({
-                "timestamp": "2026-07-03T17:32:00.000Z",
-                "type": "event_msg",
-                "payload": {"type": "user_message", "id": "u2", "message": "second"}
-            }),
-            serde_json::json!({
-                "timestamp": "2026-07-03T17:32:01.000Z",
-                "type": "event_msg",
-                "payload": {"type": "agent_message", "id": "a2", "message": "reply2"}
-            }),
-        ];
-
-        let mut events = convert_codex_history_values_to_events(&raw_events, "app-session-1");
-        annotate_events_with_turn_ordinal(&mut events);
-
-        assert_eq!(events.len(), 4);
-        // Turn 1: u1 (effective), a1 (not)
-        assert_eq!(events[0]["turnOrdinal"], serde_json::json!(1));
-        assert_eq!(events[0]["isEffectiveUserTurn"], serde_json::json!(true));
-        assert_eq!(events[1]["turnOrdinal"], serde_json::json!(1));
-        assert_eq!(events[1]["isEffectiveUserTurn"], serde_json::json!(false));
-        // Turn 2: u2 (effective), a2 (not)
-        assert_eq!(events[2]["turnOrdinal"], serde_json::json!(2));
-        assert_eq!(events[2]["isEffectiveUserTurn"], serde_json::json!(true));
-        assert_eq!(events[3]["turnOrdinal"], serde_json::json!(2));
-        assert_eq!(events[3]["isEffectiveUserTurn"], serde_json::json!(false));
-    }
-
-    #[test]
-    fn annotation_preserves_codex_event_fields_after_conversion() {
-        let raw_events = vec![serde_json::json!({
-            "__lineIndex": 8,
-            "timestamp": "2026-07-03T17:31:58.238Z",
-            "type": "event_msg",
-            "payload": {"type": "user_message", "id": "event-user-1", "message": "hello"}
-        })];
-
-        let mut events = convert_codex_history_values_to_events(&raw_events, "app-session-1");
-        annotate_events_with_turn_ordinal(&mut events);
-
-        assert_eq!(events.len(), 1);
-        // Pre-existing fields preserved
-        assert_eq!(events[0]["uuid"], serde_json::json!("event-user-1"));
-        assert_eq!(events[0]["__lineIndex"], serde_json::json!(8));
-        assert_eq!(events[0]["type"], serde_json::json!("user"));
-        // Annotation added
-        assert_eq!(events[0]["turnOrdinal"], serde_json::json!(1));
-        assert_eq!(events[0]["isEffectiveUserTurn"], serde_json::json!(true));
     }
 }
 

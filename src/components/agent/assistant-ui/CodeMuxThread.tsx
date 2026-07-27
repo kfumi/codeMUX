@@ -27,7 +27,6 @@ import {
 import { cn } from '../../../lib/utils';
 import { createLogger } from '../../../lib/logger';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
-import type { TurnArtifact } from '../../../lib/tauri';
 
 const logger = createLogger('CodeMuxThread');
 import { isInterruptMarker } from '../../../stores/agentEventParsing';
@@ -44,7 +43,6 @@ import { RunningElapsedTimer, formatElapsed } from './RunningElapsed';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 import { CODEMUX_FORMATTER, DIRECTIVE_CHIP } from './CodeMuxComposer';
 import { type ThreadTokenUsage } from '../contextUsage';
-import { ArtifactSummaryCard } from './ArtifactSummaryCard';
 
 type CodeMuxThreadProps = {
   sessionId: string;
@@ -77,14 +75,10 @@ type CodeMuxThreadRenderContextValue = {
   latestFinalAssistantIndex: number | null;
   latestFinalAssistantFooterStats?: MessageFooterStats;
   lastCompactEventIndex: number;
-  /** Per-session Turn Artifacts keyed by `turnOrdinal` (ST1). Used to mount
-   *  ArtifactSummaryCard under the final assistant message of each turn. */
-  artifactsByOrdinal: Record<number, TurnArtifact>;
 };
 
 const EMPTY_EVENTS: AgentMessage[] = [];
 const EMPTY_TIMESTAMPS: number[] = [];
-const EMPTY_ARTIFACTS: Record<number, TurnArtifact> = {};
 const INTERRUPT_LABEL = '用户中断请求';
 const COLLAPSED_USER_MESSAGE_CLASS = 'max-h-80 overflow-hidden';
 const MESSAGE_NAV_HIDE_BREAKPOINT = 860;
@@ -108,9 +102,6 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
   const tokenUsage = useAgentStore((state) => state.tokenUsageBySession[sessionId] ?? null);
-  // ST1: read per-session artifacts (keyed by turnOrdinal) so we can mount a
-  // card under the final assistant message of each completed turn.
-  const artifactsByOrdinal = useAgentStore((state) => state.artifactsBySession[sessionId] ?? EMPTY_ARTIFACTS);
   const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
@@ -248,7 +239,6 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     latestFinalAssistantIndex,
     latestFinalAssistantFooterStats,
     lastCompactEventIndex,
-    artifactsByOrdinal,
   }), [
     sessionId,
     compactAiOutput,
@@ -262,7 +252,6 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     latestFinalAssistantIndex,
     latestFinalAssistantFooterStats,
     lastCompactEventIndex,
-    artifactsByOrdinal,
   ]);
 
   return (
@@ -361,7 +350,6 @@ function CodeMuxAssistantMessage() {
     latestFinalAssistantIndex,
     latestFinalAssistantFooterStats,
     lastCompactEventIndex,
-    artifactsByOrdinal,
   } = useCodeMuxThreadRenderContext();
   return (
     <AssistantLikeMessage
@@ -376,7 +364,6 @@ function CodeMuxAssistantMessage() {
       latestFinalAssistantIndex={latestFinalAssistantIndex}
       latestFinalAssistantFooterStats={latestFinalAssistantFooterStats}
       lastCompactEventIndex={lastCompactEventIndex}
-      artifactsByOrdinal={artifactsByOrdinal}
     />
   );
 }
@@ -938,7 +925,6 @@ function AssistantLikeMessage({
   latestFinalAssistantIndex,
   latestFinalAssistantFooterStats,
   lastCompactEventIndex,
-  artifactsByOrdinal,
 }: {
   message: MessageState;
   sessionId: string;
@@ -951,7 +937,6 @@ function AssistantLikeMessage({
   latestFinalAssistantIndex: number | null;
   latestFinalAssistantFooterStats?: MessageFooterStats;
   lastCompactEventIndex: number;
-  artifactsByOrdinal: Record<number, TurnArtifact>;
 }) {
   if (message.content.length === 0) {
     return null;
@@ -977,13 +962,6 @@ function AssistantLikeMessage({
   const isAfterLastCompact = sourceEventIndex != null && sourceEventIndex > lastCompactEventIndex;
   const shouldRenderFooter =
     isFinal && message.metadata.custom?.sourceRole !== 'system' && isAfterLastCompact && (footerStats !== undefined || sourceTimestamp !== undefined);
-  // ST1: mount ArtifactSummaryCard under the final assistant message of each
-  // turn. `turnOrdinal` is annotated by `convertAgentEvents` (META1) onto the
-  // assistant message metadata; the matching artifact lives in `artifactsByOrdinal`.
-  const turnOrdinal = typeof message.metadata.custom?.turnOrdinal === 'number'
-    ? message.metadata.custom.turnOrdinal
-    : undefined;
-  const artifact = turnOrdinal != null ? artifactsByOrdinal[turnOrdinal] : undefined;
 
   return (
     <MessagePrimitive.Root data-message-row className="group/message-row mb-2 flex w-full justify-start">
@@ -1067,9 +1045,6 @@ function AssistantLikeMessage({
             sessionId={sessionId}
             sourceUuid={message.metadata.custom?.sourceUuid as string | undefined}
           />
-        ) : null}
-        {artifact && isFinal && isAfterLastCompact ? (
-          <ArtifactSummaryCard artifact={artifact} sessionId={sessionId} />
         ) : null}
       </div>
     </MessagePrimitive.Root>

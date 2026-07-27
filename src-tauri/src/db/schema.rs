@@ -77,19 +77,6 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
-
-        CREATE TABLE IF NOT EXISTS turn_artifacts (
-            id TEXT PRIMARY KEY,
-            app_session_id TEXT NOT NULL,
-            turn_ordinal INTEGER NOT NULL,
-            project_path TEXT NOT NULL,
-            summary_json TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (app_session_id) REFERENCES sessions(id) ON DELETE CASCADE
-        );
-
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_artifacts_session_ordinal
-            ON turn_artifacts(app_session_id, turn_ordinal);
         ",
     )?;
 
@@ -242,7 +229,6 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         "
         CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions(project_id);
         CREATE INDEX IF NOT EXISTS idx_agent_session_mappings_app_session_id ON agent_session_mappings(app_session_id);
-        CREATE INDEX IF NOT EXISTS idx_turn_artifacts_app_session_id ON turn_artifacts(app_session_id);
         "
     )?;
 

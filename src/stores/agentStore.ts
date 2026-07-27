@@ -1,6 +1,5 @@
 import { create } from 'zustand';
-import { agentApi, fileApi, gitApi } from '../lib/tauri';
-import type { TurnArtifact } from '../lib/tauri';
+import { agentApi, fileApi } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 import {
   isClaudeSubagentEvent,
@@ -110,15 +109,6 @@ interface AgentState {
   /** Draft text for each session's composer input (preserved across session switches) */
   composerDrafts: Record<string, string>;
   pendingPermissions: Record<string, AgentPermissionRequest | null>;
-  /** Per-session Turn Artifacts keyed by `turnOrdinal` (ST1). Loaded by
-   *  `loadSessionMessages` (A1) and updated by the live completion handler
-   *  (SYNC2). Cleared locally by `rewindLastTurn` (RW1) and Revert (RV1). */
-  artifactsBySession: Record<string, Record<number, TurnArtifact>>;
-  /** Running-turn state captured at `startQuery` time (BAPI-1/SYNC2). Holds
-   *  the `turnId` and `baselineTree` to be passed to `build_turn_artifact` on
-   *  successful completion. `null` when no turn is running or baseline capture
-   *  failed (F1: agent still continues). */
-  runningTurns: Record<string, { turnId: string; baselineTree: string | null; cwd: string } | null>;
   respondToPermission: (sessionId: string, response: AgentPermissionResponse) => Promise<void>;
   /** Start a new agent query */
   startQuery: (sessionId: string, prompt: string, cwd: string, reasoningEffort?: ReasoningEffort, displayContent?: string, inputPayload?: AgentInputPayload, modelForVision?: string) => Promise<void>;
@@ -142,9 +132,6 @@ interface AgentState {
   getComposerDraft: (sessionId: string) => string;
   /** Rewind the latest user turn and prepare its payload for composer editing */
   rewindLastTurn: (sessionId: string) => Promise<AgentInputPayload | null>;
-  /** Revert a whole Turn Artifact (RV1). Updates `artifactsBySession` on
-   *  success; returns the structured result so the caller can show conflicts. */
-  revertTurnArtifact: (sessionId: string, artifactId: string) => Promise<import('../lib/tauri').RevertResult | null>;
 }
 
 type StreamingBuffer = {
@@ -510,6 +497,15 @@ function simulateStreamingContent(
   };
 
   entry.timer = window.setTimeout(tick, 30);
+}
+
+function simulateStreamingText(
+  sessionId: string,
+  event: AgentMessage,
+  text: string,
+  set: (partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)) => void,
+) {
+  simulateStreamingContent(sessionId, event, [{ key: 'text', text }], set);
 }
 
 
@@ -1163,8 +1159,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   acknowledgedFiles: {},
   composerDrafts: {},
   pendingPermissions: {},
-  artifactsBySession: {},
-  runningTurns: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, reasoningEffort?: ReasoningEffort, displayContent?: string, inputPayload?: AgentInputPayload, modelForVision?: string) => {
     clearPendingStreaming(sessionId);
@@ -1211,6 +1205,8 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     // Update session activity timestamp
     useSessionStore.getState().touchSession(sessionId);
 
+    // Git baseline is no longer needed since we use HEAD comparison directly
+
     // 添加用户消息到事件列表
     const userMsg: AgentMessage = {
       kind: 'user',
@@ -1240,26 +1236,6 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
           model: modelForVision || 'default',
         });
       }
-
-      // BAPI-1 / F1: capture Git Tree Baseline before dispatching to the agent.
-      // Await success so the baseline is ready when the turn completes; on
-      // failure (or non-Git project) store `null` and continue — the agent
-      // still runs, and the completion handler will skip artifact generation.
-      const turnId = `${sessionId}-${Date.now()}`;
-      let baselineTree: string | null = null;
-      try {
-        baselineTree = await gitApi.captureWorkspaceBaseline(cwd);
-        if (baselineTree) {
-          logger.info('[artifact] Captured workspace baseline', { sessionId, turnId, baselineTree });
-        } else {
-          logger.info('[artifact] Baseline capture returned null (non-Git or empty repo); agent continues without artifact', { sessionId, turnId });
-        }
-      } catch (baselineErr) {
-        logger.warn('[artifact] Baseline capture failed; agent continues without artifact', { sessionId, turnId }, serializeError(baselineErr));
-      }
-      set((s) => ({
-        runningTurns: { ...s.runningTurns, [sessionId]: { turnId, baselineTree, cwd } },
-      }));
 
       const handleEvent = (raw: string) => {
         let event = parseAgentEvent(raw);
@@ -1867,15 +1843,6 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
           });
           if (event.kind === 'result' && !event.data?.is_error) {
             void get().refreshLatestTokenUsage(sessionId, 'live_synced');
-            // SYNC2 / R1: build the Turn Artifact on successful completion.
-            // Failures are silent (FAIL1) — agent completion state is not rolled back.
-            void buildTurnArtifactForRunningTurn(sessionId);
-          }
-          if (isTerminalEvent) {
-            // Always clear the running turn state on terminal events so the
-            // next turn can capture a fresh baseline. (For non-success
-            // terminals we don't build an artifact, but still clear state.)
-            clearRunningTurn(sessionId);
           }
         }
       };
@@ -1935,9 +1902,6 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         queryStartTime: rest,
         streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
         streamingText: { ...s.streamingText, [sessionId]: '' },
-        // Clear the running turn so a stale baseline isn't used to build an
-        // artifact for an interrupted turn (中断 turn 不生成 artifact).
-        runningTurns: removeSessionEntry(s.runningTurns, sessionId),
       };
     });
 
@@ -1975,10 +1939,6 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
       delete newStreamingText[sessionId];
       const newForceStopped = { ...state.forceStopped };
       delete newForceStopped[sessionId];
-      const newArtifactsBySession = { ...state.artifactsBySession };
-      delete newArtifactsBySession[sessionId];
-      const newRunningTurns = { ...state.runningTurns };
-      delete newRunningTurns[sessionId];
       return {
         events: newEvents,
         eventTimestamps: newTimestamps,
@@ -1992,8 +1952,6 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         streamingText: newStreamingText,
         forceStopped: newForceStopped,
         pendingPermissions: { ...state.pendingPermissions, [sessionId]: null },
-        artifactsBySession: newArtifactsBySession,
-        runningTurns: newRunningTurns,
       };
     });
   },
@@ -2072,21 +2030,11 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     const agentKind = getSessionAgentKind(sessionId);
 
     try {
-      // A1: load agent history and Turn Artifacts in parallel. Rust applies
-      // the H3 filter (turn_ordinal <= current effective user turn count) so
-      // we get a consistent view in one round-trip — no long-lived mismatch
-      // between cards and messages.
-      const [historyMessages, artifacts] = await Promise.all([
-        agentKind === 'codex'
-          ? agentApi.loadCodexSessionEvents(sessionId)
-          : agentKind === 'opencode'
-            ? agentApi.loadOpenCodeSessionEvents(sessionId)
-            : agentApi.loadClaudeSessionEvents(sessionId),
-        agentApi.loadTurnArtifacts(sessionId).catch((err) => {
-          logger.warn('[artifact] loadTurnArtifacts failed; continuing with empty artifact set', { sessionId }, serializeError(err));
-          return [] as TurnArtifact[];
-        }),
-      ]);
+      const historyMessages = agentKind === 'codex'
+        ? await agentApi.loadCodexSessionEvents(sessionId)
+        : agentKind === 'opencode'
+          ? await agentApi.loadOpenCodeSessionEvents(sessionId)
+          : await agentApi.loadClaudeSessionEvents(sessionId);
 
       if (!historyMessages || historyMessages.length === 0) {
         logger.info('No agent history found for session', {
@@ -2188,29 +2136,16 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         }
       }
 
-      set((state) => {
-        // ST1: index artifacts by turnOrdinal for O(1) lookup when mounting
-        // cards under the corresponding assistant turn.
-        const artifactsByOrdinal: Record<number, TurnArtifact> = {};
-        for (const artifact of artifacts) {
-          artifactsByOrdinal[artifact.turnOrdinal] = artifact;
-        }
-        return {
-          events: { ...state.events, [sessionId]: events },
-          eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
-          todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
-          artifactsBySession: {
-            ...state.artifactsBySession,
-            [sessionId]: artifactsByOrdinal,
-          },
-        };
-      });
+      set((state) => ({
+        events: { ...state.events, [sessionId]: events },
+        eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
+        todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
+      }));
       await get().refreshLatestTokenUsage(sessionId, 'restored');
       logger.info('Loaded session events from agent JSONL', {
         sessionId,
         agentKind: agentKind ?? 'claude_code',
         eventCount: events.length,
-        artifactCount: artifacts.length,
       });
     } catch (err) {
       logger.error('Failed to load session messages from agent JSONL', {
@@ -2284,66 +2219,35 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
       ? userEvent.data.locator
       : undefined;
 
-    // RW1: Rust rewinds the agent history and returns `cutoffOrdinal` for
-    // Artifact GC. We then clear in-memory artifacts with `turnOrdinal >=
-    // cutoff` so the UI doesn't show ghost cards for rewound turns.
-    let cutoffOrdinal: number | null = null;
-    try {
-      const rewindResult = await agentApi.rewindSession(sessionId, agentKind, target);
-      cutoffOrdinal = rewindResult?.cutoffOrdinal ?? null;
-    } catch (err) {
-      // RGC1: rewind itself failed — surface the error and bail out without
-      // mutating local state. The user can retry.
-      logger.error('[artifact] Rewind failed; no local state mutated', { sessionId }, serializeError(err));
-      set((s) => ({ error: { ...s.error, [sessionId]: String(err) } }));
-      return null;
-    }
+    await agentApi.rewindSession(sessionId, agentKind, target);
 
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
     set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: null } }));
     clearSimulatedStream(sessionId);
 
-    set((s) => {
-      // RW1: GC in-memory artifacts with turn_ordinal >= cutoff_ordinal.
-      const existingArtifacts = s.artifactsBySession[sessionId] ?? {};
-      const nextArtifacts: Record<number, TurnArtifact> = {};
-      if (cutoffOrdinal !== null) {
-        for (const [ordinalKey, artifact] of Object.entries(existingArtifacts)) {
-          const ordinal = Number(ordinalKey);
-          if (!Number.isNaN(ordinal) && ordinal < cutoffOrdinal) {
-            nextArtifacts[ordinal] = artifact;
-          }
-        }
-      }
-      return {
-        events: { ...s.events, [sessionId]: events.slice(0, userIndex) },
-        eventTimestamps: { ...s.eventTimestamps, [sessionId]: (s.eventTimestamps[sessionId] ?? []).slice(0, userIndex) },
-        isRunning: { ...s.isRunning, [sessionId]: false },
-        queryStartTime: removeSessionEntry(s.queryStartTime, sessionId),
-        error: { ...s.error, [sessionId]: null },
-        mcpRuntimeStatus: removeSessionEntry(s.mcpRuntimeStatus, sessionId),
-        todos: removeSessionEntry(s.todos, sessionId),
-        tokenUsageBySession: removeSessionEntry(s.tokenUsageBySession, sessionId),
-        tokenUsageRefreshRequests: removeSessionEntry(s.tokenUsageRefreshRequests, sessionId),
-        streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
-        streamingText: { ...s.streamingText, [sessionId]: '' },
-        forceStopped: { ...s.forceStopped, [sessionId]: false },
-        streamingToolInputs: removeSessionEntry(s.streamingToolInputs, sessionId),
-        streamingToolMeta: removeSessionEntry(s.streamingToolMeta, sessionId),
-        streamingToolIndexMap: removeSessionEntry(s.streamingToolIndexMap, sessionId),
-        streamedToolUseIds: removeSessionEntry(s.streamedToolUseIds, sessionId),
-        changedFiles: removeSessionEntry(s.changedFiles, sessionId),
-        fileOriginals: removeSessionEntry(s.fileOriginals, sessionId),
-        acknowledgedFiles: removeSessionEntry(s.acknowledgedFiles, sessionId),
-        composerDrafts: removeSessionEntry(s.composerDrafts, sessionId),
-        runningTurns: removeSessionEntry(s.runningTurns, sessionId),
-        artifactsBySession: {
-          ...s.artifactsBySession,
-          [sessionId]: nextArtifacts,
-        },
-      };
-    });
+    set((s) => ({
+      events: { ...s.events, [sessionId]: events.slice(0, userIndex) },
+      eventTimestamps: { ...s.eventTimestamps, [sessionId]: (s.eventTimestamps[sessionId] ?? []).slice(0, userIndex) },
+      isRunning: { ...s.isRunning, [sessionId]: false },
+      queryStartTime: removeSessionEntry(s.queryStartTime, sessionId),
+      error: { ...s.error, [sessionId]: null },
+      mcpRuntimeStatus: removeSessionEntry(s.mcpRuntimeStatus, sessionId),
+      todos: removeSessionEntry(s.todos, sessionId),
+      tokenUsageBySession: removeSessionEntry(s.tokenUsageBySession, sessionId),
+      tokenUsageRefreshRequests: removeSessionEntry(s.tokenUsageRefreshRequests, sessionId),
+      streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+      streamingText: { ...s.streamingText, [sessionId]: '' },
+      forceStopped: { ...s.forceStopped, [sessionId]: false },
+      streamingToolInputs: removeSessionEntry(s.streamingToolInputs, sessionId),
+      streamingToolMeta: removeSessionEntry(s.streamingToolMeta, sessionId),
+      streamingToolIndexMap: removeSessionEntry(s.streamingToolIndexMap, sessionId),
+      streamedToolUseIds: removeSessionEntry(s.streamedToolUseIds, sessionId),
+      changedFiles: removeSessionEntry(s.changedFiles, sessionId),
+      fileOriginals: removeSessionEntry(s.fileOriginals, sessionId),
+      acknowledgedFiles: removeSessionEntry(s.acknowledgedFiles, sessionId),
+      composerDrafts: removeSessionEntry(s.composerDrafts, sessionId),
+    }));
 
     try {
       localStorage.removeItem(`acknowledged-files-${sessionId}`);
@@ -2351,126 +2255,4 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
 
     return payload;
   },
-
-  revertTurnArtifact: async (sessionId: string, artifactId: string) => {
-    try {
-      const result = await agentApi.revertTurnArtifact(artifactId);
-      if (result.status === 'reverted') {
-        // RV1 / V2: persist the reverted artifact back into the store so the
-        // card immediately reflects the new `reverted=true` state.
-        const artifact = result.artifact;
-        useAgentStore.setState((s) => ({
-          artifactsBySession: {
-            ...s.artifactsBySession,
-            [sessionId]: {
-              ...(s.artifactsBySession[sessionId] ?? {}),
-              [artifact.turnOrdinal]: artifact,
-            },
-          },
-        }));
-      }
-      return result;
-    } catch (err) {
-      logger.error('[artifact] Revert failed', { sessionId, artifactId }, serializeError(err));
-      return null;
-    }
-  },
 }));
-
-// --- Turn Artifact helpers (SYNC2 / R1 / FAIL1) -----------------------------
-//
-// `buildTurnArtifactForRunningTurn` reads the running turn captured at
-// `startQuery` time, calls `build_turn_artifact`, and writes the result into
-// `artifactsBySession[sessionId][turnOrdinal]`. Failures are silent (FAIL1):
-// no card is shown, no error is surfaced, and the agent's completion state is
-// not rolled back. Called with `void` from the success terminal-event block
-// so it never blocks the streaming UI.
-async function buildTurnArtifactForRunningTurn(sessionId: string) {
-  const state = useAgentStore.getState();
-  const running = state.runningTurns[sessionId];
-  if (!running) {
-    logger.info('[artifact] No running turn state; skipping artifact build', { sessionId });
-    return;
-  }
-  if (!running.baselineTree) {
-    logger.info('[artifact] No baseline tree for running turn; skipping artifact build (F1)', { sessionId, turnId: running.turnId });
-    return;
-  }
-  try {
-    const artifact = await agentApi.buildTurnArtifact(
-      sessionId,
-      running.cwd,
-      running.turnId,
-      running.baselineTree,
-    );
-    if (!artifact) {
-      // E1 (zero files) or FAIL1 (silent degradation) — no card to show.
-      logger.info('[artifact] build_turn_artifact returned null (zero files or silent failure)', { sessionId, turnId: running.turnId });
-      return;
-    }
-    useAgentStore.setState((s) => ({
-      artifactsBySession: {
-        ...s.artifactsBySession,
-        [sessionId]: {
-          ...(s.artifactsBySession[sessionId] ?? {}),
-          [artifact.turnOrdinal]: artifact,
-        },
-      },
-    }));
-    // META1 live back-fill: live sidecar assistant events don't carry
-    // `turnOrdinal` (Rust only annotates history events). Now that the
-    // artifact is built we know this turn's ordinal; stamp it onto the
-    // latest final assistant event so the UI can mount the card under it.
-    annotateLatestFinalAssistantWithTurnOrdinal(sessionId, artifact.turnOrdinal);
-    logger.info('[artifact] Built and stored turn artifact', {
-      sessionId,
-      turnId: running.turnId,
-      turnOrdinal: artifact.turnOrdinal,
-      fileCount: artifact.summary.files.length,
-    });
-  } catch (err) {
-    // FAIL1: silent degradation — log only, no UI surface.
-    logger.warn('[artifact] build_turn_artifact threw; silent degradation', { sessionId, turnId: running.turnId }, serializeError(err));
-  }
-}
-
-/// Clear the running-turn state captured at `startQuery` time. Called on any
-/// terminal event (success, error, done) so the next turn can capture a fresh
-/// baseline. Also called by `interrupt`.
-function clearRunningTurn(sessionId: string) {
-  useAgentStore.setState((s) => ({
-    runningTurns: removeSessionEntry(s.runningTurns, sessionId),
-  }));
-}
-
-/// Back-fill `turnOrdinal` onto the latest final assistant event for a live
-/// turn (META1). Live sidecar events don't carry the ordinal (Rust only
-/// annotates history events), so without this the UI can't mount the artifact
-/// card under the correct assistant message. We walk backwards from the end
-/// of the events array to find the most recent assistant event and stamp it.
-/// Idempotent: if the event already has the same ordinal, no work is done.
-function annotateLatestFinalAssistantWithTurnOrdinal(sessionId: string, turnOrdinal: number) {
-  useAgentStore.setState((s) => {
-    const events = s.events[sessionId];
-    if (!events || events.length === 0) return {};
-    let lastIndex = -1;
-    for (let i = events.length - 1; i >= 0; i--) {
-      if (events[i].kind === 'assistant') {
-        lastIndex = i;
-        break;
-      }
-    }
-    if (lastIndex < 0) return {};
-    const target = events[lastIndex];
-    if (target.kind !== 'assistant') return {};
-    if (target.data.turnOrdinal === turnOrdinal) return {};
-    const nextEvents = events.slice();
-    nextEvents[lastIndex] = {
-      ...target,
-      data: { ...target.data, turnOrdinal },
-    };
-    return {
-      events: { ...s.events, [sessionId]: nextEvents },
-    };
-  });
-}

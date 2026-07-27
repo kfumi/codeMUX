@@ -133,63 +133,6 @@ describe('convertAgentEventsToAssistantMessages', () => {
     });
   });
 
-  it('preserves turnOrdinal on assistant message metadata for artifact mounting (META1)', () => {
-    const events: AgentMessage[] = [
-      {
-        kind: 'user',
-        data: { content: 'fix the bug' },
-      },
-      {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid: 'assistant-1',
-          session_id: 'session-1',
-          message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
-          // Rust annotate_events_with_turn_ordinal adds this to all events.
-          turnOrdinal: 1,
-        } as never,
-      },
-      {
-        kind: 'result',
-        data: {
-          type: 'result',
-          subtype: 'success',
-          is_error: false,
-          uuid: 'result-1',
-          session_id: 'session-1',
-          duration_ms: 5,
-          duration_api_ms: 5,
-          num_turns: 1,
-          result: '',
-          usage: { input_tokens: 1, output_tokens: 1 },
-        },
-      },
-    ];
-
-    const messages = convertAgentEventsToAssistantMessages(events);
-
-    expect(messages[1]?.metadata.turnOrdinal).toBe(1);
-  });
-
-  it('omits turnOrdinal from metadata when the assistant event does not carry it', () => {
-    const events: AgentMessage[] = [
-      {
-        kind: 'assistant',
-        data: {
-          type: 'assistant',
-          uuid: 'assistant-1',
-          session_id: 'session-1',
-          message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
-        },
-      },
-    ];
-
-    const messages = convertAgentEventsToAssistantMessages(events);
-
-    expect(messages[0]?.metadata).not.toHaveProperty('turnOrdinal');
-  });
-
   it('does not crash on error or result events with missing text fields', () => {
     const events: AgentMessage[] = [
       {
