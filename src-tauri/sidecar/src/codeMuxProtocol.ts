@@ -20,6 +20,53 @@ export type CodeMuxStreamEvent =
       event_id: string;
     };
 
+export type CodeMuxToolEvent =
+  | {
+      type: 'tool_started';
+      session_id?: string;
+      tool_use_id: string;
+      name: string;
+      input: Record<string, unknown>;
+      event_id: string;
+      sequence: number;
+    }
+  | {
+      type: 'tool_finished';
+      session_id?: string;
+      tool_use_id: string;
+      content: string;
+      is_error: boolean;
+      event_id: string;
+      sequence: number;
+    };
+
+export type CodeMuxTurnEvent =
+  | {
+      type: 'error';
+      session_id?: string;
+      subtype: string;
+      error: string;
+      event_id: string;
+      sequence: number;
+    }
+  | {
+      type: 'turn_finished';
+      session_id?: string;
+      outcome: 'completed' | 'failed' | 'interrupted' | 'cancelled';
+      reason?: string;
+      usage?: {
+        input_tokens: number;
+        output_tokens: number;
+        cached_input_tokens: number;
+        reasoning_output_tokens: number;
+      };
+      duration_ms?: number;
+      event_id: string;
+      sequence: number;
+    };
+
+export type CodeMuxRuntimeEvent = CodeMuxStreamEvent | CodeMuxToolEvent | CodeMuxTurnEvent;
+
 export function toCodeMuxStreamEvent(
   sessionId: string | undefined,
   event: unknown,
@@ -72,4 +119,12 @@ function withLegacyProjection<T extends CodeMuxStreamEvent>(event: T, legacyEven
 
 export function isCodeMuxStreamEvent(value: unknown): value is CodeMuxStreamEvent {
   return Boolean(value) && typeof value === 'object' && ['content_started', 'text_delta', 'reasoning_delta', 'content_finished'].includes((value as { type?: unknown }).type as string);
+}
+
+export function isCodeMuxToolEvent(value: unknown): value is CodeMuxToolEvent {
+  return Boolean(value) && typeof value === 'object' && ['tool_started', 'tool_finished'].includes((value as { type?: unknown }).type as string);
+}
+
+export function isCodeMuxTurnEvent(value: unknown): value is CodeMuxTurnEvent {
+  return Boolean(value) && typeof value === 'object' && ['error', 'turn_finished'].includes((value as { type?: unknown }).type as string);
 }

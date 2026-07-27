@@ -11,13 +11,12 @@ import { readLatestCodexTotalTokenUsage } from './codexSessionUsage.js';
 import { CodexSessionEventTailer, type CodexSessionTailEvent } from './codexSessionEventTailer.js';
 import {
   buildAssistantEvent,
-  buildCodexResultEvent,
   buildCodexTodoListEvent,
   buildCodexToolResultContent,
   buildCodexToolUseContent,
-  buildToolResultEvent,
   isCodexToolResultError,
 } from './runtimeEvents.js';
+import { CodexTurnEventNormalizer, type CodexTurnOutcome } from './codexTurnEventNormalizer.js';
 import { shouldUseCodexChatCompatProxy } from './sessionRuntimeHelpers.js';
 import { proxyManager } from './proxyManager.js';
 import { emit } from './streamEventBatcher.js';
@@ -163,8 +162,6 @@ export class CodexSessionRuntime {
   private thread: Thread | null = null;
   private streamingItemState = new Map<string, { kind: 'text' | 'thinking'; text: string }>();
   private todoListState = new Map<string, string>();
-  private emittedToolUseIds = new Set<string>();
-  private emittedToolResultIds = new Set<string>();
   private nativeSessionEventTailer: CodexSessionEventTailer | null = null;
   private nativeSessionEventTailerTimer: ReturnType<typeof setInterval> | null = null;
   private nativeSessionEventTailerThreadId: string | null = null;
@@ -172,6 +169,7 @@ export class CodexSessionRuntime {
   private activeCompactItemIds = new Set<string>();
   private emittedCompactItemIds = new Set<string>();
   private previousTotalUsage: UsageBaseline | null = null;
+  private turnEventNormalizer: CodexTurnEventNormalizer | null = null;
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     if (cmd.sessionId) {
@@ -409,6 +407,7 @@ export class CodexSessionRuntime {
       tools: [],
       permissionMode: describeCodexPermissionOptions(permissionOptions),
     });
+    this.turnEventNormalizer = new CodexTurnEventNormalizer(sessionId);
 
     const emitFailure = (message: string): void => {
       turnFailed = true;
@@ -416,7 +415,7 @@ export class CodexSessionRuntime {
         return;
       }
       failureEmitted = true;
-      emit({ type: 'sidecar_error', error: message });
+      this.emitTurnEvent(sessionId, { kind: 'error', subtype: 'runtime', message });
     };
 
     const noteStreamError = (message: string): void => {
@@ -501,14 +500,19 @@ export class CodexSessionRuntime {
       const finalUsage = usageSeen ? usage : emptyUsage();
       if (!retryingWithoutImages && !this.abortController?.signal.aborted && turnCompleted && !turnFailed) {
         const threadId = this.thread.id ?? this.config.agentSessionId ?? sessionId;
-        const lastTokenUsage = this.calculateLiveTurnUsage(threadId, completedTurnUsages, finalUsage);
-        emit(buildCodexResultEvent({
-          sessionId,
-          usage: finalUsage,
-          lastTokenUsage,
+        const liveUsage = this.calculateLiveTurnUsage(threadId, completedTurnUsages, finalUsage);
+        this.emitTurnOutcome({
+          outcome: 'completed',
+          usage: {
+            input_tokens: liveUsage.input_tokens,
+            output_tokens: liveUsage.output_tokens,
+            cached_input_tokens: liveUsage.cached_input_tokens,
+            reasoning_output_tokens: liveUsage.reasoning_output_tokens,
+          },
           durationMs: Date.now() - startedAt,
-        }));
+        });
       } else if (!retryingWithoutImages && !this.abortController?.signal.aborted) {
+        this.emitTurnOutcome({ outcome: turnFailed ? 'failed' : 'interrupted', reason: pendingStreamError ?? undefined });
         process.stderr.write(
           `[codex] Skipping success result: completed=${turnCompleted} failed=${turnFailed}\n`,
         );
@@ -540,6 +544,7 @@ export class CodexSessionRuntime {
     process.stderr.write('[codex] Interrupt requested — tearing down client to stop agentic loop\n');
     // Abort the signal first for immediate effect on in-flight requests.
     this.abortController?.abort();
+    this.emitTurnOutcome({ outcome: 'interrupted', reason: 'Interrupted by user' });
     // Emit done so the frontend clears isRunning.
     await this.finishTurn();
     // Destroy the SDK client and thread to stop the agentic loop.
@@ -553,7 +558,6 @@ export class CodexSessionRuntime {
     this.abortController = null;
     this.streamingItemState.clear();
     this.todoListState.clear();
-    this.emittedToolUseIds.clear();
     this.blockedPlanMutationItemIds.clear();
     this.activeCompactItemIds.clear();
     this.emittedCompactItemIds.clear();
@@ -568,7 +572,6 @@ export class CodexSessionRuntime {
     this.abortController = null;
     this.streamingItemState.clear();
     this.todoListState.clear();
-    this.emittedToolUseIds.clear();
     this.blockedPlanMutationItemIds.clear();
     this.activeCompactItemIds.clear();
     this.emittedCompactItemIds.clear();
@@ -823,14 +826,9 @@ export class CodexSessionRuntime {
     });
     if (eventType === 'item.started') {
       if (toolUse) {
-        if (this.emittedToolUseIds.has(item.id)) {
-          return;
+        if (toolUse.type === 'tool_use') {
+          this.emitTurnEvent(sessionId, { kind: 'tool_started', toolUseId: item.id, name: toolUse.name, input: toolUse.input });
         }
-        this.emittedToolUseIds.add(item.id);
-        emit(buildAssistantEvent({
-          sessionId,
-          content: [toolUse],
-        }));
       } else {
         process.stderr.write(`[codex] item.started with no tool_use mapping: type=${item.type} id=${item.id}\n`);
       }
@@ -841,26 +839,15 @@ export class CodexSessionRuntime {
         || item.type === 'mcp_tool_call'
         || item.type === 'file_change'
         || item.type === 'web_search') {
-        if (item.type === 'file_change' && toolUse && !this.emittedToolUseIds.has(item.id)) {
-          this.emittedToolUseIds.add(item.id);
-          emit(buildAssistantEvent({
-            sessionId,
-            content: [toolUse],
-          }));
+        if (item.type === 'file_change' && toolUse) {
+          if (toolUse.type === 'tool_use') {
+            this.emitTurnEvent(sessionId, { kind: 'tool_started', toolUseId: item.id, name: toolUse.name, input: toolUse.input });
+          }
         }
         const result = buildCodexToolResultContent(item);
         if (result) {
           const isError = isCodexToolResultError(item);
-          if (this.emittedToolResultIds.has(item.id)) {
-            return;
-          }
-          this.emittedToolResultIds.add(item.id);
-          emit(buildToolResultEvent({
-            sessionId,
-            toolUseId: item.id,
-            content: result,
-            isError,
-          }));
+          this.emitTurnEvent(sessionId, { kind: 'tool_finished', toolUseId: item.id, content: result, isError });
         }
       } else {
         const unhandledItem = item as { type: string; id?: string };
@@ -920,36 +907,34 @@ export class CodexSessionRuntime {
 
   private handleNativeSessionTailEvent(sessionId: string, event: CodexSessionTailEvent): void {
     if (event.type === 'tool_use') {
-      if (this.emittedToolUseIds.has(event.id)) {
-        return;
-      }
-      this.emittedToolUseIds.add(event.id);
-      emit(buildAssistantEvent({
-        sessionId,
-        content: [{ type: 'tool_use', id: event.id, name: event.name, input: event.input }],
-      }));
+      this.emitTurnEvent(sessionId, { kind: 'tool_started', toolUseId: event.id, name: event.name, input: event.input });
       return;
     }
 
-    if (this.emittedToolResultIds.has(event.toolUseId)) {
-      return;
-    }
-    this.emittedToolResultIds.add(event.toolUseId);
-    emit(buildToolResultEvent({
-      sessionId,
-      toolUseId: event.toolUseId,
-      content: event.content,
-      isError: event.isError,
-    }));
+    this.emitTurnEvent(sessionId, { kind: 'tool_finished', toolUseId: event.toolUseId, content: event.content, isError: event.isError });
   }
   private async finishTurn(): Promise<void> {
     await this.flushAndStopNativeSessionEventTailer();
     this.streamingItemState.clear();
-    this.emittedToolUseIds.clear();
-    this.emittedToolResultIds.clear();
     this.blockedPlanMutationItemIds.clear();
     this.activeCompactItemIds.clear();
     emit({ type: 'sidecar_query_done' });
+    this.turnEventNormalizer = null;
+  }
+
+  private emitTurnEvent(sessionId: string, source: Parameters<CodexTurnEventNormalizer['accept']>[0]): void {
+    if (!this.turnEventNormalizer) {
+      this.turnEventNormalizer = new CodexTurnEventNormalizer(sessionId);
+    }
+    for (const event of this.turnEventNormalizer?.accept(source) ?? []) {
+      emit(event);
+    }
+  }
+
+  private emitTurnOutcome(outcome: CodexTurnOutcome): void {
+    for (const event of this.turnEventNormalizer?.finish(outcome) ?? []) {
+      emit(event);
+    }
   }
 
   private async teardownClient(): Promise<void> {
@@ -957,8 +942,6 @@ export class CodexSessionRuntime {
     this.abortController = null;
     this.streamingItemState.clear();
     this.todoListState.clear();
-    this.emittedToolUseIds.clear();
-    this.emittedToolResultIds.clear();
     await this.flushAndStopNativeSessionEventTailer();
     this.blockedPlanMutationItemIds.clear();
     this.activeCompactItemIds.clear();

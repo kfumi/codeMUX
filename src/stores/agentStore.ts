@@ -21,7 +21,14 @@ import { useSessionStore } from './sessionStore';
 import { normalizeFilePath, usePreviewStore } from './previewStore';
 import { useSettingsStore } from './settingsStore';
 import { countDiffLines } from '../lib/diffStats';
-import { isCodeMuxStreamEvent, toLegacyStreamingMessage } from '../lib/codeMuxProtocol';
+import {
+  isCodeMuxStreamEvent,
+  isCodeMuxToolEvent,
+  isCodeMuxTurnEvent,
+  toLegacyStreamingMessage,
+  toLegacyToolMessage,
+  toLegacyTurnMessage,
+} from '../lib/codeMuxProtocol';
 import type {
   AgentAssistantMessage,
   AgentToolResult,
@@ -610,6 +617,14 @@ function parseAgentEvent(raw: string): AgentMessage {
       case 'reasoning_delta':
       case 'content_finished':
         if (isCodeMuxStreamEvent(data)) return toLegacyStreamingMessage(data);
+        return { kind: 'raw', data };
+      case 'tool_started':
+      case 'tool_finished':
+        if (isCodeMuxToolEvent(data)) return toLegacyToolMessage(data);
+        return { kind: 'raw', data };
+      case 'error':
+      case 'turn_finished':
+        if (isCodeMuxTurnEvent(data)) return toLegacyTurnMessage(data);
         return { kind: 'raw', data };
       case 'sidecar_debug':
         return { kind: 'raw', data };

@@ -235,19 +235,14 @@ describe('CodexSessionRuntime', () => {
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
         .map((line) => JSON.parse(line))
-        .find((event) => event.type === 'result');
+        .find((event) => event.type === 'turn_finished');
 
       expect(resultEvent).toMatchObject({
+        outcome: 'completed',
         usage: {
           input_tokens: 100,
           output_tokens: 5,
-          cache_read_input_tokens: 20,
-        },
-        last_token_usage: {
-          input_tokens: 100,
-          output_tokens: 5,
           cached_input_tokens: 20,
-          total_tokens: 105,
         },
       });
     } finally {
@@ -321,19 +316,14 @@ describe('CodexSessionRuntime', () => {
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
         .map((line) => JSON.parse(line))
-        .filter((event) => event.type === 'result');
+        .filter((event) => event.type === 'turn_finished');
 
       expect(resultEvents[0]).toMatchObject({
+        outcome: 'completed',
         usage: {
-          input_tokens: 175,
-          output_tokens: 13,
-          cache_read_input_tokens: 35,
-        },
-        last_token_usage: {
           input_tokens: 75,
           output_tokens: 8,
           cached_input_tokens: 15,
-          total_tokens: 83,
         },
       });
     } finally {
@@ -425,14 +415,14 @@ describe('CodexSessionRuntime', () => {
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
         .map((line) => JSON.parse(line))
-        .find((event) => event.type === 'result');
+        .find((event) => event.type === 'turn_finished');
 
       expect(resultEvent).toMatchObject({
-        last_token_usage: {
+        outcome: 'completed',
+        usage: {
           input_tokens: 125,
           output_tokens: 25,
           cached_input_tokens: 25,
-          total_tokens: 150,
         },
       });
     } finally {
@@ -497,11 +487,11 @@ describe('CodexSessionRuntime', () => {
         .filter((line) => line.length > 0)
         .map((line) => JSON.parse(line));
 
-      expect(emittedEvents.some((event) => event.type === 'sidecar_error')).toBe(false);
+      expect(emittedEvents.some((event) => event.type === 'error')).toBe(false);
       expect(emittedEvents).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ type: 'assistant' }),
-          expect.objectContaining({ type: 'result', subtype: 'success', is_error: false }),
+          expect.objectContaining({ type: 'turn_finished', outcome: 'completed' }),
           expect.objectContaining({ type: 'sidecar_query_done' }),
         ]),
       );
@@ -947,21 +937,13 @@ describe('CodexSessionRuntime', () => {
 
       expect(emittedEvents).toEqual([
         {
-          type: 'user',
+          type: 'tool_finished',
           session_id: 'session-1',
-          uuid: expect.any(String),
-          message: {
-            role: 'user',
-            content: [
-              {
-                type: 'tool_result',
-                tool_use_id: 'tool-1',
-                content: 'unsupported call: mcp__context7__resolve_library_id',
-                is_error: true,
-              },
-            ],
-          },
-          parent_tool_use_id: null,
+          tool_use_id: 'tool-1',
+          content: 'unsupported call: mcp__context7__resolve_library_id',
+          is_error: true,
+          event_id: expect.any(String),
+          sequence: 0,
         },
       ]);
     } finally {
@@ -1012,42 +994,22 @@ describe('CodexSessionRuntime', () => {
 
       expect(emittedEvents).toEqual([
         {
-          type: 'assistant',
+          type: 'tool_started',
           session_id: 'session-1',
-          uuid: expect.any(String),
-          message: {
-            role: 'assistant',
-            content: [
-              {
-                type: 'tool_use',
-                id: 'patch-1',
-                name: 'apply_patch',
-                input: {
-                  changes: [
-                    { path: 'src/app.ts', kind: 'update' },
-                  ],
-                },
-              },
-            ],
-          },
-          parent_tool_use_id: null,
+          tool_use_id: 'patch-1',
+          name: 'apply_patch',
+          input: { changes: [{ path: 'src/app.ts', kind: 'update' }] },
+          event_id: expect.any(String),
+          sequence: 0,
         },
         {
-          type: 'user',
+          type: 'tool_finished',
           session_id: 'session-1',
-          uuid: expect.any(String),
-          message: {
-            role: 'user',
-            content: [
-              {
-                type: 'tool_result',
-                tool_use_id: 'patch-1',
-                content: 'Patch completed: update src/app.ts',
-                is_error: false,
-              },
-            ],
-          },
-          parent_tool_use_id: null,
+          tool_use_id: 'patch-1',
+          content: 'Patch completed: update src/app.ts',
+          is_error: false,
+          event_id: expect.any(String),
+          sequence: 1,
         },
       ]);
     } finally {
@@ -1275,26 +1237,13 @@ describe('CodexSessionRuntime', () => {
 
       expect(emittedEvents).toEqual([
         expect.objectContaining({
-          type: 'assistant',
-          message: expect.objectContaining({
-            content: expect.arrayContaining([
-              expect.objectContaining({
-                type: 'tool_use',
-                name: 'apply_patch',
-              }),
-            ]),
-          }),
+          type: 'tool_started',
+          tool_use_id: 'patch-1',
+          name: 'apply_patch',
         }),
         expect.objectContaining({
-          type: 'user',
-          message: expect.objectContaining({
-            content: expect.arrayContaining([
-              expect.objectContaining({
-                type: 'tool_result',
-                tool_use_id: 'patch-1',
-              }),
-            ]),
-          }),
+          type: 'tool_finished',
+          tool_use_id: 'patch-1',
         }),
       ]);
     } finally {
@@ -1337,30 +1286,16 @@ describe('CodexSessionRuntime', () => {
         .map((line) => JSON.parse(line));
       expect(events).toEqual([
         expect.objectContaining({
-          type: 'assistant',
+          type: 'tool_started',
           session_id: 'session-1',
-          message: expect.objectContaining({
-            content: [
-              expect.objectContaining({
-                type: 'tool_use',
-                id: 'call-spawn',
-                name: 'spawn_agent',
-              }),
-            ],
-          }),
+          tool_use_id: 'call-spawn',
+          name: 'spawn_agent',
         }),
         expect.objectContaining({
-          type: 'user',
+          type: 'tool_finished',
           session_id: 'session-1',
-          message: expect.objectContaining({
-            content: [
-              expect.objectContaining({
-                type: 'tool_result',
-                tool_use_id: 'call-spawn',
-                content: 'completed',
-              }),
-            ],
-          }),
+          tool_use_id: 'call-spawn',
+          content: 'completed',
         }),
       ]);
     } finally {
@@ -1610,7 +1545,7 @@ describe('CodexSessionRuntime', () => {
           expect.objectContaining({ type: 'sidecar_query_done' }),
         ]),
       );
-      expect(emittedEvents.some((event) => event.type === 'result')).toBe(true);
+      expect(emittedEvents.some((event) => event.type === 'turn_finished' && event.outcome === 'completed')).toBe(true);
     } finally {
       stdoutSpy.mockRestore();
     }
