@@ -24,6 +24,8 @@ import {
   normalizeClaudeResultEvent,
   type ClaudeTokenUsage,
 } from './runtimeEvents.js';
+import { toClaudeTurnOutcome } from './claudeTurnOutcome.js';
+import { TurnEventNormalizer, type TurnOutcome } from './turnEventNormalizer.js';
 import { proxyManager } from './proxyManager.js';
 import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
 import { emit } from './streamEventBatcher.js';
@@ -292,6 +294,7 @@ export class SessionRuntime {
   private warmQuery: WarmQuery | null = null;
   private warmPromise: Promise<WarmQuery | null> | null = null;
   private turnActive = false;
+  private turnEventNormalizer: TurnEventNormalizer | null = null;
   private generation = 0;
   private activeConfigGeneration = 0;
   private claudeExecutablePath: string | undefined;
@@ -374,6 +377,7 @@ export class SessionRuntime {
 
     this.turnActive = true;
     this.generation += 1;
+    this.turnEventNormalizer = new TurnEventNormalizer(this.config.sessionId ?? '');
 
     writeLog('[claude-task]', `sendInput START model=${this.config.model ?? 'default'} prompt_preview=${prompt.slice(0, 120)}`);
 
@@ -391,6 +395,7 @@ export class SessionRuntime {
       if (this.abortController && !this.abortController.signal.aborted) {
         this.abortController.abort('user_interrupt_no_query');
       }
+      this.emitTurnOutcome({ outcome: 'interrupted', reason: 'Interrupted by user' });
       this.finishTurn();
       return;
     }
@@ -402,6 +407,7 @@ export class SessionRuntime {
         process.stderr.write('[sidecar] Interrupt fallback timeout reached; aborting transport\n');
         controller.abort('user_interrupt_fallback');
         this.closeQueryHandle('interrupt_fallback');
+        this.emitTurnOutcome({ outcome: 'interrupted', reason: 'Interrupted by user' });
         this.finishTurn();
         if (this.config) {
           this.startWarmup(this.activeConfigGeneration);
@@ -419,6 +425,7 @@ export class SessionRuntime {
       }
     } finally {
       clearTimeout(fallbackTimer);
+      this.emitTurnOutcome({ outcome: 'interrupted', reason: 'Interrupted by user' });
       this.finishTurn();
     }
   }
@@ -930,7 +937,11 @@ export class SessionRuntime {
           const emitPreview = (() => { try { return JSON.stringify(emitObj).slice(0, 1000) } catch { return String(emitObj).slice(0, 1000) } })();
           process.stderr.write(`[claude-debug] EMIT type=${emitObj?.type ?? '(no type)'} preview=${emitPreview}\n`);
         }
-        emit(eventToEmit);
+        if (msg.type === 'result') {
+          this.emitTurnOutcome(toClaudeTurnOutcome(eventToEmit as Record<string, unknown>));
+        } else {
+          emit(eventToEmit);
+        }
 
         if (msg.type === 'system' && msg.subtype === 'init' && Array.isArray((msg as any).mcp_servers)) {
           const mcpServers = (msg as any).mcp_servers as Array<{ name: string; status: string }>;
@@ -989,10 +1000,12 @@ export class SessionRuntime {
       }
       if (!isAbort && !isGracefulInterruptCleanup) {
         writeLog('[claude-task]', `sendInput FAILED error=${errorMsg.slice(0, 500)}`);
-        emit({ type: 'sidecar_error', error: errorMsg });
+        this.emitTurnError(errorMsg);
+        this.emitTurnOutcome({ outcome: 'failed', reason: errorMsg });
       } else {
         writeLog('[claude-task]', 'sendInput ABORT');
         process.stderr.write(`[sidecar] Suppressed interrupt cleanup error: ${errorMsg}\n`);
+        this.emitTurnOutcome({ outcome: 'interrupted', reason: 'Interrupted by user' });
       }
       this.finishTurn();
       if (isIdleTimeout && this.config) {
@@ -1006,6 +1019,8 @@ export class SessionRuntime {
         aborted: Boolean(this.abortController?.signal.aborted),
       })) {
         process.stderr.write('[sidecar] Claude query iterator ended without result; marking turn complete\n');
+        this.emitTurnError('Claude query ended without a result', 'iterator');
+        this.emitTurnOutcome({ outcome: 'failed', reason: 'Claude query ended without a result' });
         this.finishTurn();
       }
       if (this.queryHandle === queryHandle && this.abortController?.signal.aborted) {
@@ -1042,6 +1057,19 @@ export class SessionRuntime {
     }
     this.turnActive = false;
     emit({ type: 'sidecar_query_done' });
+    this.turnEventNormalizer = null;
+  }
+
+  private emitTurnError(message: string, subtype = 'runtime'): void {
+    for (const event of this.turnEventNormalizer?.accept({ kind: 'error', subtype, message }) ?? []) {
+      emit(event);
+    }
+  }
+
+  private emitTurnOutcome(outcome: TurnOutcome): void {
+    for (const event of this.turnEventNormalizer?.finish(outcome) ?? []) {
+      emit(event);
+    }
   }
 }
 
