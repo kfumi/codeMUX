@@ -124,7 +124,7 @@ describe('OpenCodeRuntime', () => {
     await runtime.shutdown();
   });
 
-  it('finishes OpenCode subtasks before the terminal result', async () => {
+  it('finishes OpenCode subtasks before the terminal outcome', async () => {
     const { port, client } = createPort();
     const emitted: Array<Record<string, unknown>> = [];
     let onEvent!: (event: unknown) => void;
@@ -150,7 +150,7 @@ describe('OpenCodeRuntime', () => {
     });
     onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
 
-    expect(emitted.map((event) => event.type)).toEqual(['tool_started', 'tool_finished', 'result']);
+    expect(emitted.map((event) => event.type)).toEqual(['tool_started', 'tool_finished', 'turn_finished']);
     expect(emitted.map((event) => event.sequence)).toEqual([0, 1, 2]);
     await runtime.shutdown();
   });
@@ -176,7 +176,7 @@ describe('OpenCodeRuntime', () => {
       expect(client.abort).toHaveBeenCalledWith('opencode-new');
       expect(emitted).toEqual(expect.arrayContaining([
         expect.objectContaining({ type: 'error', subtype: 'timeout' }),
-        expect.objectContaining({ type: 'result', subtype: 'error', is_error: true }),
+        expect.objectContaining({ type: 'turn_finished', outcome: 'failed' }),
       ]));
     } finally {
       vi.useRealTimers();
@@ -744,7 +744,7 @@ describe('OpenCodeRuntime', () => {
     onEvent({ type: 'session.error', properties: { sessionID: 'opencode-new', error: { name: 'UnknownError', data: { message: 'late error' } } } });
     onEvent({ type: 'message.part.updated', properties: { part: { id: 'tool-part', sessionID: 'opencode-new', messageID: 'm', type: 'tool', callID: 'call-1', tool: 'bash', state: { status: 'completed', input: {}, output: 'done', title: 'bash', metadata: {}, time: { start: 1, end: 2 } } } } });
     onEvent({ type: 'message.part.updated', properties: { part: { id: 'tool-part', sessionID: 'opencode-new', messageID: 'm', type: 'tool', callID: 'call-1', tool: 'bash', state: { status: 'running', input: {} } } } });
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(1));
     expect(emitted.filter((event) => (event as { type?: string }).event_kind === 'tool_call')).toHaveLength(0);
     await runtime.shutdown();
   });
@@ -780,13 +780,13 @@ describe('OpenCodeRuntime', () => {
     const firstSend = runtime.sendInput('first turn');
     onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new', id: 'idle-1' } });
     await firstSend;
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(1));
 
     const secondSend = runtime.sendInput('second turn');
     onEvent({ type: 'session.status', properties: { sessionID: 'opencode-new', status: { type: 'busy' } } });
     onEvent({ type: 'session.idle', id: 'idle-2', properties: { sessionID: 'opencode-new' } });
     await secondSend;
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(2));
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(2));
 
     await runtime.shutdown();
   });
@@ -802,7 +802,7 @@ describe('OpenCodeRuntime', () => {
     const disconnectError = new Error('socket lost');
     onDisconnect(disconnectError);
     onDisconnect(disconnectError);
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(1));
     expect(emitted).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'error', subtype: 'disconnected', error: 'socket lost' })]));
     await runtime.shutdown();
   });
@@ -816,15 +816,15 @@ describe('OpenCodeRuntime', () => {
     await runtime.start();
     const idle = { type: 'session.idle', id: 'idle-1', properties: { sessionID: 'opencode-new' } };
     onEvent(idle);
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(1));
 
     const secondSend = runtime.sendInput('second turn');
     onEvent({ type: 'session.status', properties: { sessionID: 'opencode-new', status: { type: 'busy' } } });
     onEvent(idle);
-    expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1);
+    expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(1);
     onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new', id: 'idle-2' } });
     await secondSend;
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(2));
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(2));
     await runtime.shutdown();
   });
 
@@ -885,9 +885,9 @@ describe('OpenCodeRuntime', () => {
     await runtime.start();
     onEvent({ type: 'message.updated', properties: { info: { tokens: { input: 99, output: 88, reasoning: 77, cache: { read: 66, write: 55 } } } } });
     onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(1));
     expect(emitted).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'diagnostic', subtype: 'missing_session_id' })]));
-    expect(emitted.find((event) => (event as { type?: string }).type === 'result')).toMatchObject({ usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_write_input_tokens: 0 } });
+    expect(emitted.find((event) => (event as { type?: string }).type === 'turn_finished')).toMatchObject({ usage: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reasoning_output_tokens: 0 } });
     await runtime.shutdown();
   });
 
@@ -927,8 +927,8 @@ describe('OpenCodeRuntime', () => {
     onEvent(step('step-2', 20, 5, 3, 8, 6));
     onEvent(step('step-2', 20, 5, 3, 8, 6));
     onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
-    expect(emitted.find((event) => (event as { type?: string }).type === 'result')).toMatchObject({ usage: { input_tokens: 30, output_tokens: 7, reasoning_output_tokens: 4, cache_read_input_tokens: 11, cache_write_input_tokens: 10 } });
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(1));
+    expect(emitted.find((event) => (event as { type?: string }).type === 'turn_finished')).toMatchObject({ usage: { input_tokens: 30, output_tokens: 7, reasoning_output_tokens: 4, cached_input_tokens: 11 } });
     await runtime.shutdown();
   });
   it('preserves cumulative reasoning and cache usage across multiple SDK usage events', async () => {
@@ -946,8 +946,8 @@ describe('OpenCodeRuntime', () => {
     onEvent(usageEvent('usage-2', { input: 14, output: 5, reasoning: 3, cache: { read: 8, write: 6 } }));
     onEvent(usageEvent('usage-3', { input: 14, output: 5, reasoning: 3, cache: { read: 8, write: 6 } }));
     onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
-    expect(emitted.find((event) => (event as { type?: string }).type === 'result')).toMatchObject({ usage: { input_tokens: 14, output_tokens: 5, reasoning_output_tokens: 3, cache_read_input_tokens: 8, cache_write_input_tokens: 6 } });
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(1));
+    expect(emitted.find((event) => (event as { type?: string }).type === 'turn_finished')).toMatchObject({ usage: { input_tokens: 14, output_tokens: 5, reasoning_output_tokens: 3, cached_input_tokens: 8 } });
     await runtime.shutdown();
   });
   it('allows the official ID-less session.idle fixture to complete two prompt turns', async () => {
@@ -965,12 +965,12 @@ describe('OpenCodeRuntime', () => {
     const firstSend = runtime.sendInput('first turn');
     onEvent(idle);
     await firstSend;
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(1));
 
     const secondSend = runtime.sendInput('second turn');
     onEvent(idle);
     await secondSend;
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(2));
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(2));
     await runtime.shutdown();
   });
 
@@ -992,10 +992,10 @@ describe('OpenCodeRuntime', () => {
     onRetry(new Error('temporary socket failure'));
     onEvent({ type: 'message.part.updated', properties: { part: { id: 'after-retry', sessionID: 'opencode-new', messageID: 'm', type: 'text', text: 'resumed' }, delta: 'resumed' } });
     await vi.waitFor(() => expect(emitted.some((event) => (event as { type?: string }).type === 'assistant')).toBe(true));
-    expect(emitted.some((event) => (event as { type?: string }).type === 'result')).toBe(false);
+    expect(emitted.some((event) => (event as { type?: string }).type === 'turn_finished')).toBe(false);
 
     onDisconnect(new Error('stream ended'));
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'result')).toHaveLength(1));
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(1));
     await runtime.shutdown();
   });
 });

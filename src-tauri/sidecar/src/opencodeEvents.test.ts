@@ -49,10 +49,11 @@ describe('OpenCode event normalization', () => {
       content: 'permission denied', is_error: true, event_id: 'test-event-id', sequence: 9,
     });
   });
-  it('builds one unified result with all usage dimensions on session completion', () => {
+  it('builds one unified turn outcome with protocol usage on session completion', () => {
     const events = toCodeMuxEvent({ type: 'session.idle', properties: { sessionID: 'opencode-session-1' } }, context());
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ type: 'result', subtype: 'success', is_error: false, agent_id: 'agent-1', session_id: 'codemux-session-1', agent_session_id: 'opencode-session-1', sequence: 7, usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 3, cache_write_input_tokens: 1, reasoning_output_tokens: 2 } });
+    expect(events[0]).toMatchObject({ type: 'turn_finished', outcome: 'completed', agent_id: 'agent-1', session_id: 'codemux-session-1', agent_session_id: 'opencode-session-1', sequence: 7, usage: { input_tokens: 10, output_tokens: 4, cached_input_tokens: 3, reasoning_output_tokens: 2 }, duration_ms: 123, event_id: 'test-event-id' });
+    expect(events[0]).not.toHaveProperty('usage.cache_write_input_tokens');
   });
   it('converts compaction part to compact_boundary system event', () => {
     const autoCompaction = toCodeMuxEvent({
@@ -110,9 +111,15 @@ describe('OpenCode event normalization', () => {
     const error = toCodeMuxEvent({ type: 'session.error', properties: { sessionID: 'opencode-session-1', error: { name: 'UnknownError', data: { message: 'upstream down' } } } }, context());
     const interrupted = toCodeMuxEvent({ type: 'session.error', properties: { sessionID: 'opencode-session-1', error: { name: 'MessageAbortedError', data: { message: 'aborted' } } } }, context({ sequence: 9 }));
     const permission = toCodeMuxEvent({ type: 'permission.updated', properties: { id: 'permission-1', sessionID: 'opencode-session-1', messageID: 'message-1', type: 'read', title: 'Read file', metadata: { path: 'a.txt' }, time: { created: 1 } } }, context({ sequence: 11 }));
-    expect(error).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'error', error: 'upstream down' }), expect.objectContaining({ type: 'result', subtype: 'error', is_error: true })]));
-    expect(interrupted).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'error', subtype: 'interrupted' }), expect.objectContaining({ type: 'result', subtype: 'interrupted' })]));
+    expect(error).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'error', error: 'upstream down', event_id: 'test-event-id' }), expect.objectContaining({ type: 'turn_finished', outcome: 'failed', reason: 'upstream down' })]));
+    expect(interrupted).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'error', subtype: 'interrupted', event_id: 'test-event-id' }), expect.objectContaining({ type: 'turn_finished', outcome: 'interrupted', reason: 'aborted' })]));
     expect(permission[0]).toMatchObject({ type: 'diagnostic', subtype: 'permission_request' });
+  });
+  it('emits an interrupted outcome without an error for explicit session interruption', () => {
+    const events = toCodeMuxEvent({ type: 'session.aborted', properties: { sessionID: 'opencode-session-1' } }, context());
+    expect(events).toEqual([expect.objectContaining({
+      type: 'turn_finished', outcome: 'interrupted', reason: 'OpenCode session interrupted by user', event_id: 'test-event-id',
+    })]);
   });
   it('returns a diagnostic for unknown events and exposes a stable identity for deduplication', () => {
     const event = { type: 'future.event', id: 'event-1', properties: { value: 1 } };
@@ -127,7 +134,7 @@ describe('OpenCode event normalization', () => {
     const events = toCodeMuxEvent({ type: 'session.error', properties: { sessionID: 'event-session', error: { name: 'UnknownError', data: { message: 'failed' } } } }, context({ agentSessionId: undefined }));
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'error', agent_session_id: 'event-session', opencode_session_id: 'event-session' }),
-      expect.objectContaining({ type: 'result', agent_session_id: 'event-session', opencode_session_id: 'event-session' }),
+      expect.objectContaining({ type: 'turn_finished', agent_session_id: 'event-session', opencode_session_id: 'event-session' }),
     ]));
   });
 

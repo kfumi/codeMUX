@@ -3,9 +3,7 @@ import type { RuntimeEventContext } from './types.js';
 import { toCodeMuxStreamEvent } from './codeMuxProtocol.js';
 import {
   buildAssistantEvent,
-  buildOpenCodeResultEvent,
   type AssistantContentBlock,
-  type OpenCodeResultStatus,
   type OpenCodeTokenUsage,
 } from './runtimeEvents.js';
 
@@ -381,15 +379,15 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       break;
     }
     case 'session.idle':
-      events.push(...buildResultEvents(context, 'success', sessionId));
+      events.push(buildTurnFinishedEvent(context, 'completed', sessionId));
       break;
     case 'session.error': {
       const error = properties.error ?? properties;
-      const status = isInterruptedError(error) ? 'interrupted' : 'error';
+      const outcome = isInterruptedError(error) ? 'interrupted' : 'failed';
       const errorText = errorMessage(error);
-      process.stderr.write(`[opencode-task] toCodeMuxEvent session.error sessionId=${sessionId ?? 'null'} status=${status} error=${errorText} isInterrupted=${isInterruptedError(error)} isTimeout=${isTimeoutError(error)}\n`);
-      events.push(buildEnvelope({ type: 'error', subtype: isTimeoutError(error) ? 'timeout' : status, error: errorText }, context, sessionId));
-      events.push(...buildResultEvents(context, status, sessionId));
+      process.stderr.write(`[opencode-task] toCodeMuxEvent session.error sessionId=${sessionId ?? 'null'} outcome=${outcome} error=${errorText} isInterrupted=${isInterruptedError(error)} isTimeout=${isTimeoutError(error)}\n`);
+      events.push(buildTurnErrorEvent(context, isTimeoutError(error) ? 'timeout' : outcome, errorText, sessionId));
+      events.push(buildTurnFinishedEvent(context, outcome, sessionId, errorText));
       break;
     }
     case 'session.next.reasoning.started': {
@@ -482,15 +480,15 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
     case 'disconnect':
     case 'connection.error': {
       const error = record?.error ?? properties.error ?? record;
-      events.push(buildEnvelope({ type: 'error', subtype: 'disconnected', error: errorMessage(error) }, context, sessionId));
-      events.push(...buildResultEvents(context, 'error', sessionId));
+      const errorText = errorMessage(error);
+      events.push(buildTurnErrorEvent(context, 'disconnected', errorText, sessionId));
+      events.push(buildTurnFinishedEvent(context, 'failed', sessionId, errorText));
       break;
     }
     case 'session.interrupted':
     case 'session.aborted':
       process.stderr.write(`[opencode-task] toCodeMuxEvent ${type} sessionId=${sessionId ?? 'null'}\n`);
-      events.push(buildEnvelope({ type: 'error', subtype: 'interrupted', error: 'OpenCode session interrupted by user' }, context, sessionId));
-      events.push(...buildResultEvents(context, 'interrupted', sessionId));
+      events.push(buildTurnFinishedEvent(context, 'interrupted', sessionId, 'OpenCode session interrupted by user'));
       break;
     default:
       events.push(buildEnvelope({ type: 'diagnostic', subtype: 'unknown_event', event_type: type }, context, sessionId));
@@ -532,14 +530,53 @@ function buildToolFinishedEvent(
   };
 }
 
-function buildResultEvents(context: OpenCodeEventContext, status: OpenCodeResultStatus, sessionId?: string): CodeMuxEvent[] {
-  const resultContext = { ...context, agentSessionId: sessionId };
-  return [{ ...buildOpenCodeResultEvent({ context: resultContext, usage: context.usage ?? emptyUsage(), durationMs: context.durationMs ?? 0, status }) as CodeMuxEvent, ...routingMetadata(context, sessionId) }];
+function buildTurnFinishedEvent(
+  context: OpenCodeEventContext,
+  outcome: 'completed' | 'failed' | 'interrupted',
+  sessionId?: string,
+  reason?: string,
+): CodeMuxEvent {
+  const usage = context.usage ?? emptyUsage();
+  return {
+    type: 'turn_finished',
+    session_id: context.sessionId,
+    outcome,
+    ...(reason ? { reason } : {}),
+    usage: {
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      cached_input_tokens: usage.cached_input_tokens ?? 0,
+      reasoning_output_tokens: usage.reasoning_output_tokens ?? 0,
+    },
+    duration_ms: context.durationMs ?? 0,
+    event_id: context.eventIdFactory(),
+    ...routingMetadata(context, sessionId),
+  };
 }
 
 function buildFailureEvents(context: OpenCodeEventContext, error: unknown, sessionId?: string): CodeMuxEvent[] {
-  const status = isInterruptedError(error) ? 'interrupted' : 'error';
-  return [buildEnvelope({ type: 'error', subtype: isTimeoutError(error) ? 'timeout' : status, error: errorMessage(error) }, context, sessionId), ...buildResultEvents(context, status, sessionId)];
+  const outcome = isInterruptedError(error) ? 'interrupted' : 'failed';
+  const message = errorMessage(error);
+  return [
+    buildTurnErrorEvent(context, isTimeoutError(error) ? 'timeout' : outcome, message, sessionId),
+    buildTurnFinishedEvent(context, outcome, sessionId, message),
+  ];
+}
+
+function buildTurnErrorEvent(
+  context: OpenCodeEventContext,
+  subtype: string,
+  error: string,
+  sessionId?: string,
+): CodeMuxEvent {
+  return {
+    type: 'error',
+    session_id: context.sessionId,
+    subtype,
+    error,
+    event_id: context.eventIdFactory(),
+    ...routingMetadata(context, sessionId),
+  };
 }
 
 function buildAssistantEnvelope(context: OpenCodeEventContext, sessionId: string | undefined, content: Array<Record<string, unknown>>): CodeMuxEvent {

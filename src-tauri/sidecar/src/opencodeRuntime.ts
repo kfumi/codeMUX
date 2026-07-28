@@ -538,7 +538,7 @@ export class OpenCodeRuntime {
     }
 
     if (terminalSessionId && isTerminalEventType(type)) {
-      if (events.some((eventItem) => eventItem.type === 'result' || eventItem.type === 'error')) {
+      if (events.some((eventItem) => eventItem.type === 'turn_finished')) {
         this.terminalSessionIds.add(terminalSessionId);
         this.turnStartedAt = 0;
         this.usage = { input_tokens: 0, output_tokens: 0 };

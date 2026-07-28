@@ -7,7 +7,7 @@ import type {
   Usage,
   WebSearchItem,
 } from '@openai/codex-sdk';
-import type { RuntimeEventContext, RuntimeFlavor } from './types.js';
+import type { RuntimeFlavor } from './types.js';
 export type { RuntimeFlavor } from './types.js';
 
 export type CodexTokenUsage = {
@@ -35,8 +35,6 @@ export type OpenCodeTokenUsage = {
   reasoning_output_tokens?: number;
 };
 
-export type OpenCodeResultStatus = 'success' | 'error' | 'interrupted';
-
 export type AssistantContentBlock =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string }
@@ -59,58 +57,6 @@ export function getRuntimeFlavor(agentKind?: string): RuntimeFlavor {
     return 'opencode';
   }
   return 'claude';
-}
-
-export function buildOpenCodeResultEvent({
-  context,
-  usage,
-  durationMs,
-  status = 'success',
-}: {
-  context: RuntimeEventContext;
-  usage: OpenCodeTokenUsage;
-  durationMs: number;
-  status?: OpenCodeResultStatus;
-}) {
-  const cachedInputTokens = usage.cached_input_tokens ?? 0;
-  const cacheWriteInputTokens = usage.cache_write_input_tokens ?? usage.cache_creation_input_tokens ?? 0;
-  const reasoningOutputTokens = usage.reasoning_output_tokens;
-
-  return {
-    type: 'result',
-    subtype: status,
-    is_error: status === 'error',
-    agent_id: context.agentId,
-    session_id: context.sessionId,
-    ...(context.agentSessionId ? { agent_session_id: context.agentSessionId } : {}),
-    sequence: context.sequence,
-    uuid: createEventId(context.eventIdFactory),
-    duration_ms: durationMs,
-    duration_api_ms: durationMs,
-    num_turns: 1,
-    result: status === 'success' ? 'ok' : status,
-    usage: {
-      input_tokens: usage.input_tokens,
-      output_tokens: usage.output_tokens,
-      cache_read_input_tokens: cachedInputTokens,
-      cache_write_input_tokens: cacheWriteInputTokens,
-      ...(usage.cache_creation_input_tokens !== undefined
-        ? { cache_creation_input_tokens: usage.cache_creation_input_tokens }
-        : {}),
-      ...(reasoningOutputTokens !== undefined ? { reasoning_output_tokens: reasoningOutputTokens } : {}),
-    },
-    last_token_usage: {
-      input_tokens: usage.input_tokens,
-      output_tokens: usage.output_tokens,
-      cached_input_tokens: cachedInputTokens,
-      cache_write_input_tokens: cacheWriteInputTokens,
-      ...(usage.cache_creation_input_tokens !== undefined
-        ? { cache_creation_input_tokens: usage.cache_creation_input_tokens }
-        : {}),
-      ...(reasoningOutputTokens !== undefined ? { reasoning_output_tokens: reasoningOutputTokens } : {}),
-      total_tokens: usage.total_tokens ?? (usage.input_tokens + usage.output_tokens),
-    },
-  };
 }
 
 export function buildAssistantEvent({
