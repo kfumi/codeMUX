@@ -36,9 +36,18 @@ describe('OpenCode event normalization', () => {
     const started = toCodeMuxEvent({ type: 'message.part.updated', properties: { part: { ...base, state: { status: 'running', input: { command: 'pwd' } } } } }, context());
     const completed = toCodeMuxEvent({ type: 'message.part.updated', properties: { part: { ...base, state: { status: 'completed', input: { command: 'pwd' }, output: '/tmp', title: 'pwd', metadata: {}, time: { start: 1, end: 2 } } } } }, context({ sequence: 8 }));
     const failed = toCodeMuxEvent({ type: 'message.part.updated', properties: { part: { ...base, state: { status: 'error', input: { command: 'pwd' }, error: 'permission denied', time: { start: 1, end: 2 } } } } }, context({ sequence: 9 }));
-    expect(started[0]).toMatchObject({ type: 'assistant', event_kind: 'tool_call', message: { content: [{ type: 'tool_use', id: 'call-1', name: 'bash', input: { command: 'pwd' } }] } });
-    expect(completed[0]).toMatchObject({ type: 'user', event_kind: 'tool_result', message: { content: [{ type: 'tool_result', tool_use_id: 'call-1', content: '/tmp', is_error: false }] } });
-    expect(failed[0]).toMatchObject({ type: 'user', event_kind: 'tool_result', message: { content: [{ type: 'tool_result', tool_use_id: 'call-1', content: 'permission denied', is_error: true }] } });
+    expect(started[0]).toMatchObject({
+      type: 'tool_started', session_id: 'codemux-session-1', tool_use_id: 'call-1',
+      name: 'bash', input: { command: 'pwd' }, event_id: 'test-event-id', sequence: 7,
+    });
+    expect(completed[0]).toMatchObject({
+      type: 'tool_finished', session_id: 'codemux-session-1', tool_use_id: 'call-1',
+      content: '/tmp', is_error: false, event_id: 'test-event-id', sequence: 8,
+    });
+    expect(failed[0]).toMatchObject({
+      type: 'tool_finished', session_id: 'codemux-session-1', tool_use_id: 'call-1',
+      content: 'permission denied', is_error: true, event_id: 'test-event-id', sequence: 9,
+    });
   });
   it('builds one unified result with all usage dimensions on session completion', () => {
     const events = toCodeMuxEvent({ type: 'session.idle', properties: { sessionID: 'opencode-session-1' } }, context());
@@ -125,7 +134,9 @@ describe('OpenCode event normalization', () => {
   it('serializes structured tool output and suppresses terminal tool states supplied by context', () => {
     const completed = toCodeMuxEvent({ type: 'message.part.updated', properties: { part: { id: 'part-1', sessionID: 'opencode-session-1', messageID: 'message-1', type: 'tool', callID: 'call-1', tool: 'search', state: { status: 'completed', input: {}, output: { matches: ['a', 'b'] }, title: 'search', metadata: {}, time: { start: 1, end: 2 } } } } }, context());
     const lateRunning = toCodeMuxEvent({ type: 'message.part.updated', properties: { part: { id: 'part-1', sessionID: 'opencode-session-1', messageID: 'message-1', type: 'tool', callID: 'call-1', tool: 'search', state: { status: 'running', input: {} } } } }, context({ terminalToolIds: new Set(['call-1']) }));
-    expect(completed[0]).toMatchObject({ message: { content: [{ content: '{"matches":["a","b"]}' }] } });
+    expect(completed[0]).toMatchObject({
+      type: 'tool_finished', tool_use_id: 'call-1', content: '{"matches":["a","b"]}', is_error: false,
+    });
     expect(lateRunning).toEqual([]);
   });
 
@@ -367,7 +378,7 @@ describe('OpenCode event normalization', () => {
         properties: { sessionID: 'opencode-session-1', part: { id: 'tool-part-1', messageID: 'msg-1', sessionID: 'opencode-session-1', type: 'tool', callID: 'call-1', tool: 'bash', state: { status: 'running', input: { command: 'pwd' } } } },
       }, streamingContext({ streamingParts: parts }));
       expect(events).toHaveLength(1);
-      expect(events[0]).toMatchObject({ type: 'assistant', event_kind: 'tool_call' });
+      expect(events[0]).toMatchObject({ type: 'tool_started', tool_use_id: 'call-1', name: 'bash' });
     });
 
     it('emits thinking_delta stream events from session.next.reasoning.delta', () => {

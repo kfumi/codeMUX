@@ -4,7 +4,6 @@ import { toCodeMuxStreamEvent } from './codeMuxProtocol.js';
 import {
   buildAssistantEvent,
   buildOpenCodeResultEvent,
-  buildToolResultEvent,
   type AssistantContentBlock,
   type OpenCodeResultStatus,
   type OpenCodeTokenUsage,
@@ -276,18 +275,11 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
         const status = readString(state?.status);
         if (status === 'pending' || status === 'running') {
           if (isQuestionTool) break;
-          events.push({
-            ...buildAssistantEnvelope(context, sessionId, [{ type: 'tool_use', id: callId, name: toolName, input: asRecord(state?.input) ?? {} }]),
-            event_kind: 'tool_call',
-          });
+          events.push(buildToolStartedEvent(context, callId, toolName, asRecord(state?.input) ?? {}));
         } else if (status === 'completed' || status === 'error') {
           const rawOutput = status === 'completed' ? state?.output : state?.error;
           const output = serializeToolValue(rawOutput ?? (status === 'error' ? 'OpenCode tool failed' : ''));
-          events.push({
-            ...buildToolResultEvent({ sessionId: context.sessionId, toolUseId: callId, content: output, isError: status === 'error', eventIdFactory: context.eventIdFactory }),
-            ...routingMetadata(context, sessionId),
-            event_kind: 'tool_result',
-          });
+          events.push(buildToolFinishedEvent(context, callId, output, status === 'error'));
         }
       } else if (partType === 'subtask') {
         const prompt = readString(part.prompt) ?? '';
@@ -295,15 +287,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
         const agent = readString(part.agent) ?? '';
         const callId = readString(part.id) ?? `subtask-${context.turnId}-${context.sequence}`;
         if (prompt || description) {
-          events.push({
-            ...buildAssistantEnvelope(context, sessionId, [{
-              type: 'tool_use',
-              id: callId,
-              name: 'Task',
-              input: { prompt, description, agent },
-            }]),
-            event_kind: 'tool_call',
-          });
+          events.push(buildToolStartedEvent(context, callId, 'Task', { prompt, description, agent }));
         }
       } else if (partType === 'compaction') {
         const auto = part.auto === true;
@@ -514,6 +498,38 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
   }
 
   return events.map((output, index) => ({ ...output, sequence: context.sequence + index }));
+}
+
+function buildToolStartedEvent(
+  context: OpenCodeEventContext,
+  toolUseId: string,
+  name: string,
+  input: Record<string, unknown>,
+): CodeMuxEvent {
+  return {
+    type: 'tool_started',
+    session_id: context.sessionId,
+    tool_use_id: toolUseId,
+    name,
+    input,
+    event_id: context.eventIdFactory(),
+  };
+}
+
+function buildToolFinishedEvent(
+  context: OpenCodeEventContext,
+  toolUseId: string,
+  content: string,
+  isError: boolean,
+): CodeMuxEvent {
+  return {
+    type: 'tool_finished',
+    session_id: context.sessionId,
+    tool_use_id: toolUseId,
+    content,
+    is_error: isError,
+    event_id: context.eventIdFactory(),
+  };
 }
 
 function buildResultEvents(context: OpenCodeEventContext, status: OpenCodeResultStatus, sessionId?: string): CodeMuxEvent[] {

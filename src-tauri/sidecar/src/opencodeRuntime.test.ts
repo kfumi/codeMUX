@@ -85,6 +85,76 @@ describe('OpenCodeRuntime', () => {
     expect((runtime as unknown as { planMode: string }).planMode).toBe('off');
   });
 
+  it('emits a CodeMUX lifecycle around an OpenCode user question', async () => {
+    const { port, client } = createPort();
+    Object.assign(client, { respondToQuestion: vi.fn().mockResolvedValue(true) });
+    const emitted: Array<Record<string, unknown>> = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, {
+      emitEvent: (event) => emitted.push(event as Record<string, unknown>),
+      eventIdFactory: () => 'event-1',
+    });
+
+    await runtime.start();
+    onEvent({
+      type: 'question.asked',
+      properties: {
+        id: 'question-1',
+        sessionID: 'opencode-new',
+        questions: [{ question: '继续吗？', options: [{ label: '继续' }] }],
+      },
+    });
+    await runtime.respondToQuestion('question-1', [['继续']]);
+
+    expect(emitted).toMatchObject([
+      {
+        type: 'tool_started', tool_use_id: 'question-1', name: 'request_user_input', sequence: 0,
+      },
+      {
+        type: 'ask_user_question', tool_use_id: 'question-1', sequence: 1,
+      },
+      {
+        type: 'tool_finished', tool_use_id: 'question-1', content: '{"answers":[["继续"]]}', sequence: 2,
+      },
+    ]);
+    await runtime.shutdown();
+  });
+
+  it('finishes OpenCode subtasks before the terminal result', async () => {
+    const { port, client } = createPort();
+    const emitted: Array<Record<string, unknown>> = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, {
+      emitEvent: (event) => emitted.push(event as Record<string, unknown>),
+      eventIdFactory: () => 'event-1',
+    });
+
+    await runtime.start();
+    onEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-new',
+        part: {
+          id: 'task-1', messageID: 'message-1', type: 'subtask',
+          prompt: '检查测试', description: '检查测试', agent: 'explore',
+        },
+      },
+    });
+    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
+
+    expect(emitted.map((event) => event.type)).toEqual(['tool_started', 'tool_finished', 'result']);
+    expect(emitted.map((event) => event.sequence)).toEqual([0, 1, 2]);
+    await runtime.shutdown();
+  });
+
   it('aborts and emits a terminal error when the provider prompt exceeds its timeout', async () => {
     vi.useFakeTimers();
     try {
@@ -779,9 +849,12 @@ describe('OpenCodeRuntime', () => {
     onEvent(toolPart('completed', { output: { matches: ['a'] } }));
     onEvent(toolPart('running'));
 
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'assistant')).toHaveLength(3));
-    expect(emitted.filter((event) => (event as { event_kind?: string }).event_kind === 'tool_result')).toHaveLength(1);
-    expect(emitted.filter((event) => (event as { type?: string }).type === 'assistant').map((event) => (event as { event_kind?: string }).event_kind)).toEqual([undefined, undefined, 'tool_call']);
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'tool_finished')).toHaveLength(1));
+    expect(emitted.filter((event) => (event as { type?: string }).type === 'assistant')).toHaveLength(2);
+    expect(emitted.filter((event) => (event as { type?: string }).type === 'tool_started')).toHaveLength(1);
+    expect(emitted.filter((event) => (event as { type?: string }).type === 'tool_finished')).toMatchObject([{
+      tool_use_id: 'call-1', content: '{"matches":["a"]}', is_error: false,
+    }]);
     await runtime.shutdown();
   });
   it('suppresses identical unknown event replays without suppressing changed payloads', async () => {

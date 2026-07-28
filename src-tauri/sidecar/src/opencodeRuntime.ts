@@ -1,7 +1,6 @@
 import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInputPayload.js';
 import { emit } from './streamEventBatcher.js';
 import { OpenCodePermissionRegistry, type OpenCodePermissionResponse } from './opencodePermissions.js';
-import { buildToolResultEvent } from './runtimeEvents.js';
 import { extractOpenCodeUsageUpdate, mergeOpenCodeUsage, getOpenCodeEventIdentity, isOpenCodeSessionScopedEvent, getOpenCodeEventSessionId, getOpenCodePayloadKey, getOpenCodeToolId, getOpenCodeToolStatus, toCodeMuxEvent } from './opencodeEvents.js';
 import type { OpenCodeEventSubscription, OpenCodePermissionUpdate } from './opencodeSdk.js';
 import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
@@ -222,10 +221,7 @@ export class OpenCodeRuntime {
     const client = this.client;
     if (client?.respondToQuestion) {
       await client.respondToQuestion({ requestId, answers, directory: this.config.cwd });
-      this.emitEvent({
-        ...buildToolResultEvent({ sessionId: this.config.sessionId, toolUseId: requestId, content: JSON.stringify({ answers }), eventIdFactory: this.eventIdFactory }),
-        agent_id: this.agentId,
-      });
+      this.emitToolFinished(requestId, JSON.stringify({ answers }));
     }
   }
 
@@ -494,6 +490,12 @@ export class OpenCodeRuntime {
     if (usageUpdate) {
       this.usage = mergeOpenCodeUsage(this.usage, usageUpdate.usage, usageUpdate.mode);
     }
+    if (type === 'session.idle' && this.pendingTaskToolCallIds.size > 0 && activeSessionId) {
+      for (const taskId of this.pendingTaskToolCallIds) {
+        this.emitToolFinished(taskId, '', activeSessionId);
+      }
+      this.pendingTaskToolCallIds.clear();
+    }
     const events = toCodeMuxEvent(event, {
       agentId: this.agentId,
       sessionId: this.config.sessionId,
@@ -525,25 +527,14 @@ export class OpenCodeRuntime {
     }
     this.eventSequence += events.length;
 
-    const assistantMessage = asRecord(events.find((e) => e.type === 'assistant')?.message);
-    const content = Array.isArray(assistantMessage?.content) ? assistantMessage?.content : [];
-    for (const block of content) {
-      const recordBlock = asRecord(block);
-      if (recordBlock?.type === 'tool_use' && typeof recordBlock.id === 'string' && (recordBlock.name === 'Task' || recordBlock.name === 'Agent')) {
-        this.pendingTaskToolCallIds.add(recordBlock.id as string);
+    for (const normalizedEvent of events) {
+      if (
+        normalizedEvent.type === 'tool_started'
+        && typeof normalizedEvent.tool_use_id === 'string'
+        && (normalizedEvent.name === 'Task' || normalizedEvent.name === 'Agent')
+      ) {
+        this.pendingTaskToolCallIds.add(normalizedEvent.tool_use_id);
       }
-    }
-
-    if (type === 'session.idle' && this.pendingTaskToolCallIds.size > 0 && activeSessionId) {
-      for (const taskId of this.pendingTaskToolCallIds) {
-        this.emitEvent({
-          ...buildToolResultEvent({ sessionId: this.config.sessionId, toolUseId: taskId, content: '', eventIdFactory: this.eventIdFactory }),
-          agent_id: this.agentId,
-          agent_session_id: activeSessionId,
-          opencode_session_id: activeSessionId,
-        });
-      }
-      this.pendingTaskToolCallIds.clear();
     }
 
     if (terminalSessionId && isTerminalEventType(type)) {
@@ -701,22 +692,57 @@ export class OpenCodeRuntime {
     }
     this.pendingQuestionIds.add(requestId);
     const openCodeSessionId = eventSessionId ?? readString(properties?.sessionID);
+    const normalizedQuestions = questions.map((q: unknown) => {
+      const qr = asRecord(q);
+      const options = Array.isArray(qr?.options) ? (qr.options as Array<Record<string, unknown>>).map((opt) => ({
+        label: String(opt.label ?? ''),
+        ...(opt.description ? { description: String(opt.description) } : {}),
+      })) : [];
+      return { question: readString(qr?.question) ?? '', header: readString(qr?.header), options };
+    });
+    this.emitToolStarted(requestId, 'request_user_input', { questions: normalizedQuestions }, openCodeSessionId);
     this.emitEvent({
       type: 'ask_user_question',
       agent_id: this.agentId,
       session_id: this.config.sessionId,
       ...(openCodeSessionId ? { agent_session_id: openCodeSessionId, opencode_session_id: openCodeSessionId } : {}),
       tool_use_id: requestId,
-      questions: questions.map((q: unknown) => {
-        const qr = asRecord(q);
-        const options = Array.isArray(qr?.options) ? (qr.options as Array<Record<string, unknown>>).map((opt) => ({
-          label: String(opt.label ?? ''),
-          ...(opt.description ? { description: String(opt.description) } : {}),
-        })) : [];
-        return { question: readString(qr?.question) ?? '', header: readString(qr?.header), options };
-      }),
+      questions: normalizedQuestions,
       sequence: this.eventSequence,
       uuid: this.eventIdFactory(),
+    });
+    this.eventSequence += 1;
+  }
+
+  private emitToolStarted(
+    toolUseId: string,
+    name: string,
+    input: Record<string, unknown>,
+    agentSessionId?: string,
+  ): void {
+    this.emitEvent({
+      type: 'tool_started',
+      session_id: this.config.sessionId,
+      tool_use_id: toolUseId,
+      name,
+      input,
+      event_id: this.eventIdFactory(),
+      sequence: this.eventSequence,
+      ...(agentSessionId ? { agent_session_id: agentSessionId, opencode_session_id: agentSessionId } : {}),
+    });
+    this.eventSequence += 1;
+  }
+
+  private emitToolFinished(toolUseId: string, content: string, agentSessionId?: string): void {
+    this.emitEvent({
+      type: 'tool_finished',
+      session_id: this.config.sessionId,
+      tool_use_id: toolUseId,
+      content,
+      is_error: false,
+      event_id: this.eventIdFactory(),
+      sequence: this.eventSequence,
+      ...(agentSessionId ? { agent_session_id: agentSessionId, opencode_session_id: agentSessionId } : {}),
     });
     this.eventSequence += 1;
   }
