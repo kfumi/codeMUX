@@ -9,7 +9,6 @@ import { CodexHistoryStore } from './codexHistory.js';
 import { inferReasoningConfig } from './codexReasoning.js';
 // Keep legacy imports for non-streaming path compatibility
 import { CodexChatHistory, convertChatCompletionToResponses } from './codexChatCompat.js';
-import { buildToolResultEvent } from './runtimeEvents.js';
 import crypto from 'node:crypto';
 import { isInteractiveToolTimeoutResponse, waitForInteractiveToolResponse } from './interactiveToolResponses.js';
 import {
@@ -345,18 +344,19 @@ async function emitToolResultEventsFromRequest(
   }
 
   try {
-    const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
+    const { emitActiveCodexTurnEvent, activeSessionId } = await import('./codexRuntime.js');
     for (const item of functionCallOutputs) {
       const emittedKey = `${activeSessionId}\0${item.call_id}`;
       if (emittedToolResultIds.has(emittedKey)) {
         continue;
       }
       emittedToolResultIds.add(emittedKey);
-      emitEvent(buildToolResultEvent({
-        sessionId: activeSessionId,
+      emitActiveCodexTurnEvent({
+        kind: 'tool_finished',
         toolUseId: item.call_id ?? '',
         content: stringifyFunctionCallOutput(item.output),
-      }));
+        isError: false,
+      });
     }
   } catch (error) {
     proxyLog(`failed to emit tool_result event: ${error instanceof Error ? error.message : String(error)}`);
@@ -662,7 +662,7 @@ async function resolveInteractiveUserInputToolCalls(
   collaborationPolicy: CodexCollaborationPolicy,
 ): Promise<unknown[]> {
   const responses: unknown[] = [];
-  const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
+  const { emit: emitEvent, emitActiveCodexTurnEvent, activeSessionId } = await import('./codexRuntime.js');
 
   for (const toolCall of interactiveToolCalls) {
     const currentPolicy = getCurrentCodexCollaborationPolicy(activeSessionId) ?? collaborationPolicy;
@@ -679,34 +679,24 @@ async function resolveInteractiveUserInputToolCalls(
     } else {
       const input = parseJsonObject(toolCall.arguments);
       const questions = parseInteractiveQuestions(input.questions);
-      emitEvent({
-        type: 'ask_user_question',
-        tool_use_id: toolCall.id,
-        questions,
-      });
+      emitActiveCodexTurnEvent({ kind: 'user_input_requested', toolUseId: toolCall.id, questions });
       response = await waitForInteractiveToolResponse(toolCall.id, {
         sessionId: activeSessionId,
         timeoutMs: INTERACTIVE_USER_INPUT_TIMEOUT_MS,
       });
       if (isInteractiveToolTimeoutResponse(response)) {
         isError = true;
-        emitEvent({
-          type: 'ask_user_question_timeout',
-          tool_use_id: toolCall.id,
-          timeout_ms: INTERACTIVE_USER_INPUT_TIMEOUT_MS,
-          message: INTERACTIVE_USER_INPUT_TIMEOUT_MESSAGE,
+        emitActiveCodexTurnEvent({
+          kind: 'error', subtype: 'user_input_timeout', message: INTERACTIVE_USER_INPUT_TIMEOUT_MESSAGE,
         });
       }
       persistInteractiveUserInputHistory(activeSessionId, toolCall, questions, response);
     }
 
     responses.push(response);
-    emitEvent(buildToolResultEvent({
-      sessionId: activeSessionId,
-      toolUseId: toolCall.id,
-      content: stringifyInteractiveToolResponse(response),
-      isError,
-    }));
+    emitActiveCodexTurnEvent({
+      kind: 'tool_finished', toolUseId: toolCall.id, content: stringifyInteractiveToolResponse(response), isError,
+    });
   }
 
   return responses;
@@ -848,17 +838,8 @@ function buildInteractiveContinuationChatRequest(
 }
 
 async function emitToolUseEvent(toolCall: StreamingToolCall, input: Record<string, unknown>): Promise<void> {
-  const { emit: emitEvent, activeSessionId } = await import('./codexRuntime.js');
-  emitEvent({
-    type: 'assistant',
-    uuid: crypto.randomUUID(),
-    session_id: activeSessionId,
-    message: {
-      role: 'assistant',
-      content: [{ type: 'tool_use', id: toolCall.id, name: toolCall.name, input }],
-    },
-    parent_tool_use_id: null,
-  });
+  const { emitActiveCodexTurnEvent } = await import('./codexRuntime.js');
+  emitActiveCodexTurnEvent({ kind: 'tool_started', toolUseId: toolCall.id, name: toolCall.name, input });
 }
 
 function parseJsonObject(value: string): Record<string, unknown> {

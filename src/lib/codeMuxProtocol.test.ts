@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toLegacyAssistantMessage, toLegacyStreamingMessage, toLegacyToolMessage, toLegacyTurnMessage } from './codeMuxProtocol';
+import { toLegacyAssistantMessage, toLegacyPermissionRequestedMessage, toLegacyStreamingMessage, toLegacyToolMessage, toLegacyTurnMessage, toLegacyUserInputRequestedMessage } from './codeMuxProtocol';
 
 describe('CodeMUX frontend protocol adapter', () => {
   it('keeps domain deltas compatible with the internal streaming model', () => {
@@ -42,6 +42,24 @@ describe('CodeMUX frontend protocol adapter', () => {
     })).toMatchObject({
       kind: 'assistant',
       data: { session_id: 'session-1', message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] } },
+    });
+  });
+
+  it('projects user input requests to the existing question model', () => {
+    expect(toLegacyUserInputRequestedMessage({
+      type: 'user_input_requested', tool_use_id: 'question-1', questions: [{ question: '继续吗？', options: [] }],
+    })).toEqual({
+      kind: 'ask_user_question',
+      data: { tool_use_id: 'question-1', questions: [{ question: '继续吗？', options: [] }] },
+    });
+  });
+
+  it('projects permission requests to the existing permission model', () => {
+    expect(toLegacyPermissionRequestedMessage({
+      type: 'permission_requested', request_id: 'permission-1', permission_type: 'read', description: '读取文件',
+    })).toEqual({
+      kind: 'permission',
+      data: { request_id: 'permission-1', permission_type: 'read', description: '读取文件', permission_id: undefined, metadata: undefined },
     });
   });
 

@@ -444,13 +444,21 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       if (context.nextSection) context.nextSection.kind = 'idle';
       break;
     case 'permission.updated':
-      events.push(buildEnvelope({ type: 'diagnostic', subtype: 'permission_request', permission_id: readString(properties.id), title: readString(properties.title) }, context, sessionId));
+      events.push(buildEnvelope({
+        type: 'permission_requested',
+        request_id: readString(properties.id) ?? `permission-${context.sequence}`,
+        permission_id: readString(properties.id),
+        permission_type: readString(properties.type) ?? 'unknown',
+        description: readString(properties.title) ?? readString(properties.type) ?? 'Permission request',
+        ...(asRecord(properties.metadata) ? { metadata: asRecord(properties.metadata) } : {}),
+        event_id: context.eventIdFactory(),
+      }, context, sessionId));
       break;
     case 'question.asked': {
       const questions = readArray(properties.questions);
       if (questions && questions.length > 0) {
         events.push(buildEnvelope({
-          type: 'ask_user_question',
+          type: 'user_input_requested',
           tool_use_id: readString(properties.id) ?? `question-${context.sequence}`,
           questions: questions.map((q: unknown) => {
             const qr = asRecord(q);
@@ -460,6 +468,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
             })) : [];
             return { question: readString(qr?.question) ?? '', header: readString(qr?.header), options };
           }),
+          event_id: context.eventIdFactory(),
         }, context, sessionId));
       }
       break;

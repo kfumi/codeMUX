@@ -25,10 +25,14 @@ import {
   isCodeMuxStreamEvent,
   isCodeMuxToolEvent,
   isCodeMuxAssistantMessageEvent,
+  isCodeMuxUserInputRequestedEvent,
+  isCodeMuxPermissionRequestedEvent,
   isCodeMuxTurnEvent,
   toLegacyStreamingMessage,
   toLegacyToolMessage,
   toLegacyAssistantMessage,
+  toLegacyUserInputRequestedMessage,
+  toLegacyPermissionRequestedMessage,
   toLegacyTurnMessage,
 } from '../lib/codeMuxProtocol';
 import type {
@@ -626,6 +630,12 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'raw', data };
       case 'assistant_message':
         if (isCodeMuxAssistantMessageEvent(data)) return toLegacyAssistantMessage(data);
+        return { kind: 'raw', data };
+      case 'user_input_requested':
+        if (isCodeMuxUserInputRequestedEvent(data)) return toLegacyUserInputRequestedMessage(data);
+        return { kind: 'raw', data };
+      case 'permission_requested':
+        if (isCodeMuxPermissionRequestedEvent(data)) return toLegacyPermissionRequestedMessage(data);
         return { kind: 'raw', data };
       case 'error':
       case 'turn_finished':

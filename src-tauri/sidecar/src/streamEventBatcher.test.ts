@@ -29,7 +29,7 @@ describe('stream event transport batching', () => {
     });
   });
 
-  it('keeps unsupported provider deltas on the legacy compatibility path', () => {
+  it('converts supported legacy deltas and diagnoses unsupported provider deltas', () => {
     const writes: string[] = [];
     vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
       writes.push(String(chunk));
@@ -69,9 +69,9 @@ describe('stream event transport batching', () => {
         ],
       },
       {
-        type: 'stream_event_batch',
+        type: 'diagnostic',
+        subtype: 'unsupported_stream_event',
         session_id: 'session-1',
-        events: [{ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{' } }],
       },
     ]);
   });

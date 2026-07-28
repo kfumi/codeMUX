@@ -1,5 +1,5 @@
 import type { AgentMessage } from '@/stores/agentStore';
-import type { AgentAssistantMessage } from '@/types/agent';
+import type { AgentAssistantMessage, AgentPermissionRequest } from '@/types/agent';
 
 type CodeMuxStreamEvent = {
   type: 'content_started' | 'text_delta' | 'reasoning_delta' | 'content_finished';
@@ -26,6 +26,33 @@ type CodeMuxAssistantMessageEvent = {
   type: 'assistant_message';
   session_id?: string;
   content?: AgentAssistantMessage['message']['content'];
+  event_id?: string;
+};
+
+type CodeMuxQuestion = {
+  question: string;
+  header?: string;
+  options: Array<{ label: string; description?: string; value?: unknown }>;
+  multiSelect?: boolean;
+  allowOther?: boolean;
+};
+
+type CodeMuxUserInputRequestedEvent = {
+  type: 'user_input_requested';
+  session_id?: string;
+  tool_use_id?: string;
+  questions?: CodeMuxQuestion[];
+  event_id?: string;
+};
+
+type CodeMuxPermissionRequestedEvent = {
+  type: 'permission_requested';
+  session_id?: string;
+  request_id?: string;
+  permission_id?: string;
+  permission_type?: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
   event_id?: string;
 };
 
@@ -58,6 +85,18 @@ export function isCodeMuxAssistantMessageEvent(value: unknown): value is CodeMux
   return Boolean(value)
     && typeof value === 'object'
     && (value as { type?: unknown }).type === 'assistant_message';
+}
+
+export function isCodeMuxUserInputRequestedEvent(value: unknown): value is CodeMuxUserInputRequestedEvent {
+  return Boolean(value)
+    && typeof value === 'object'
+    && (value as { type?: unknown }).type === 'user_input_requested';
+}
+
+export function isCodeMuxPermissionRequestedEvent(value: unknown): value is CodeMuxPermissionRequestedEvent {
+  return Boolean(value)
+    && typeof value === 'object'
+    && (value as { type?: unknown }).type === 'permission_requested';
 }
 
 export function isCodeMuxTurnEvent(value: unknown): value is CodeMuxTurnEvent {
@@ -139,6 +178,27 @@ export function toLegacyAssistantMessage(event: CodeMuxAssistantMessageEvent): A
       parent_tool_use_id: null,
     },
   };
+}
+
+export function toLegacyUserInputRequestedMessage(event: CodeMuxUserInputRequestedEvent): AgentMessage {
+  return {
+    kind: 'ask_user_question',
+    data: {
+      tool_use_id: event.tool_use_id ?? '',
+      questions: event.questions ?? [],
+    },
+  };
+}
+
+export function toLegacyPermissionRequestedMessage(event: CodeMuxPermissionRequestedEvent): AgentMessage {
+  const data: AgentPermissionRequest = {
+    request_id: event.request_id ?? '',
+    permission_id: event.permission_id,
+    permission_type: event.permission_type ?? 'unknown',
+    description: event.description ?? event.permission_type ?? 'Permission request',
+    metadata: event.metadata,
+  };
+  return { kind: 'permission', data };
 }
 
 export function toLegacyTurnMessage(event: CodeMuxTurnEvent): AgentMessage {

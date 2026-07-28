@@ -115,7 +115,7 @@ describe('OpenCodeRuntime', () => {
         type: 'tool_started', tool_use_id: 'question-1', name: 'request_user_input', sequence: 0,
       },
       {
-        type: 'ask_user_question', tool_use_id: 'question-1', sequence: 1,
+        type: 'user_input_requested', tool_use_id: 'question-1', sequence: 1,
       },
       {
         type: 'tool_finished', tool_use_id: 'question-1', content: '{"answers":[["继续"]]}', sequence: 2,
@@ -216,12 +216,14 @@ describe('OpenCodeRuntime', () => {
 
     expect(runtime.permissions.get('permission-1')).toMatchObject({ permissionType: 'future_permission', raw: rawPermission });
     expect(emitted).toContainEqual(expect.objectContaining({
-      type: 'permission',
+      type: 'permission_requested',
       request_id: 'permission-1',
       agent_id: 'agent-1',
       session_id: 'codemux-session-1',
       opencode_session_id: 'opencode-new',
-      raw_permission: rawPermission,
+      permission_type: 'future_permission',
+      description: 'Do something',
+      metadata: rawPermission.metadata,
     }));
     await runtime.respondToPermission('permission-1', { approved: true });
     expect(client.respondToPermission).toHaveBeenCalledWith({ sessionId: 'opencode-new', requestId: 'permission-1', response: 'once' });
@@ -286,7 +288,7 @@ describe('OpenCodeRuntime', () => {
     onEvent(first);
     onEvent(changed);
 
-    expect(emitted.filter((event) => (event as { type?: string }).type === 'permission')).toHaveLength(2);
+    expect(emitted.filter((event) => (event as { type?: string }).type === 'permission_requested')).toHaveLength(2);
     expect(runtime.permissions.get('permission-1')).toMatchObject({ permissionType: 'write', description: 'Write', raw: changed.properties });
     await runtime.shutdown();
   });
@@ -314,11 +316,11 @@ describe('OpenCodeRuntime', () => {
       expect(runtime.permissions.size).toBe(0);
 
       onEvent({ type: 'permission.updated', properties: payloadA });
-      expect(emitted.filter((event) => (event as { type?: string }).type === 'permission')).toHaveLength(1);
+      expect(emitted.filter((event) => (event as { type?: string }).type === 'permission_requested')).toHaveLength(1);
       expect(runtime.permissions.size).toBe(0);
 
       onEvent({ type: 'permission.updated', properties: payloadB });
-      expect(emitted.filter((event) => (event as { type?: string }).type === 'permission')).toHaveLength(2);
+      expect(emitted.filter((event) => (event as { type?: string }).type === 'permission_requested')).toHaveLength(2);
       expect(runtime.permissions.get('permission-1')).toMatchObject({
         permissionType: 'write',
         raw: payloadB,

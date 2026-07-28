@@ -113,7 +113,10 @@ describe('OpenCode event normalization', () => {
     const permission = toCodeMuxEvent({ type: 'permission.updated', properties: { id: 'permission-1', sessionID: 'opencode-session-1', messageID: 'message-1', type: 'read', title: 'Read file', metadata: { path: 'a.txt' }, time: { created: 1 } } }, context({ sequence: 11 }));
     expect(error).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'error', error: 'upstream down', event_id: 'test-event-id' }), expect.objectContaining({ type: 'turn_finished', outcome: 'failed', reason: 'upstream down' })]));
     expect(interrupted).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'error', subtype: 'interrupted', event_id: 'test-event-id' }), expect.objectContaining({ type: 'turn_finished', outcome: 'interrupted', reason: 'aborted' })]));
-    expect(permission[0]).toMatchObject({ type: 'diagnostic', subtype: 'permission_request' });
+    expect(permission[0]).toMatchObject({
+      type: 'permission_requested', request_id: 'permission-1', permission_id: 'permission-1',
+      permission_type: 'read', description: 'Read file', metadata: { path: 'a.txt' },
+    });
   });
   it('emits an interrupted outcome without an error for explicit session interruption', () => {
     const events = toCodeMuxEvent({ type: 'session.aborted', properties: { sessionID: 'opencode-session-1' } }, context());

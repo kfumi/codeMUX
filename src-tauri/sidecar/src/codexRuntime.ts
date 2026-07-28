@@ -15,7 +15,7 @@ import {
   buildCodexToolUseContent,
   isCodexToolResultError,
 } from './runtimeEvents.js';
-import { CodexTurnEventNormalizer, type CodexTurnOutcome } from './codexTurnEventNormalizer.js';
+import { CodexTurnEventNormalizer, type CodexTurnOutcome, type CodexTurnSourceEvent } from './codexTurnEventNormalizer.js';
 import { shouldUseCodexChatCompatProxy } from './sessionRuntimeHelpers.js';
 import { proxyManager } from './proxyManager.js';
 import { emit } from './streamEventBatcher.js';
@@ -80,6 +80,27 @@ type UsageBaseline = {
 
 /** Current active session ID — shared with the proxy for event routing. */
 export let activeSessionId = '';
+let activeCodexRuntime: CodexSessionRuntime | null = null;
+const fallbackProxyTurnNormalizers = new Map<string, CodexTurnEventNormalizer>();
+
+export function emitActiveCodexTurnEvent(source: CodexTurnSourceEvent): void {
+  if (activeCodexRuntime) {
+    activeCodexRuntime.emitProxyTurnEvent(source);
+    return;
+  }
+  const sessionId = activeSessionId;
+  const normalizer = fallbackProxyTurnNormalizers.get(sessionId)
+    ?? new CodexTurnEventNormalizer(sessionId);
+  fallbackProxyTurnNormalizers.set(sessionId, normalizer);
+  for (const event of normalizer.accept(source)) {
+    emit(event);
+  }
+}
+
+export function resetActiveCodexEventState(): void {
+  fallbackProxyTurnNormalizers.clear();
+}
+
 export function setActiveSessionId(id: string): void {
   activeSessionId = id;
 }
@@ -171,6 +192,7 @@ export class CodexSessionRuntime {
   private turnEventNormalizer: CodexTurnEventNormalizer | null = null;
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
+    activeCodexRuntime = this;
     if (cmd.sessionId) {
       setActiveSessionId(cmd.sessionId);
       setLogCtx({ sessionId: cmd.sessionId });
@@ -924,6 +946,15 @@ export class CodexSessionRuntime {
     }
   }
 
+  emitProxyTurnEvent(source: CodexTurnSourceEvent): void {
+    const sessionId = this.config?.sessionId ?? activeSessionId;
+    if (!sessionId) {
+      process.stderr.write('[codex] Dropped proxy event because no active CodeMUX session is available\n');
+      return;
+    }
+    this.emitTurnEvent(sessionId, source);
+  }
+
   private emitTurnOutcome(outcome: CodexTurnOutcome): void {
     for (const event of this.turnEventNormalizer?.finish(outcome) ?? []) {
       emit(event);
@@ -956,17 +987,10 @@ export class CodexSessionRuntime {
       : nextText;
 
     if (!previous) {
-      emit({
-        type: 'stream_event',
-        session_id: sessionId,
-        event: {
-          type: 'content_block_start',
-          index: 0,
-          content_block: {
-            type: kind === 'thinking' ? 'thinking' : 'text',
-            [kind === 'thinking' ? 'thinking' : 'text']: '',
-          },
-        },
+      this.emitTurnEvent(sessionId, {
+        kind: 'content_started',
+        index: 0,
+        contentKind: kind === 'thinking' ? 'reasoning' : 'text',
       });
     }
 
@@ -976,22 +1000,10 @@ export class CodexSessionRuntime {
       return;
     }
 
-    emit({
-      type: 'stream_event',
-      session_id: sessionId,
-      event: {
-        type: 'content_block_delta',
-        index: 0,
-        delta: kind === 'thinking'
-          ? {
-              type: 'thinking_delta',
-              thinking: delta,
-            }
-          : {
-              type: 'text_delta',
-              text: delta,
-            },
-      },
+    this.emitTurnEvent(sessionId, {
+      kind: kind === 'thinking' ? 'reasoning_delta' : 'text_delta',
+      index: 0,
+      text: delta,
     });
   }
 
@@ -1001,14 +1013,7 @@ export class CodexSessionRuntime {
       return;
     }
 
-    emit({
-      type: 'stream_event',
-      session_id: sessionId,
-      event: {
-        type: 'content_block_stop',
-        index: 0,
-      },
-    });
+    this.emitTurnEvent(sessionId, { kind: 'content_finished', index: 0 });
     this.streamingItemState.delete(itemId);
   }
 

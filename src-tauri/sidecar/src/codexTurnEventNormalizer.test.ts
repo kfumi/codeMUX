@@ -31,6 +31,26 @@ describe('CodexTurnEventNormalizer', () => {
     ]);
   });
 
+  it('normalizes and deduplicates user input and permission requests', () => {
+    const normalizer = new CodexTurnEventNormalizer('session-1', () => 'event-1');
+
+    expect(normalizer.accept({
+      kind: 'user_input_requested', toolUseId: 'question-1', questions: [{ question: '继续？', options: [] }],
+    })).toEqual([{
+      type: 'user_input_requested', session_id: 'session-1', tool_use_id: 'question-1',
+      questions: [{ question: '继续？', options: [] }], event_id: 'event-1', sequence: 0,
+    }]);
+    expect(normalizer.accept({
+      kind: 'user_input_requested', toolUseId: 'question-1', questions: [],
+    })).toEqual([]);
+    expect(normalizer.accept({
+      kind: 'permission_requested', requestId: 'permission-1', permissionType: 'read', description: '读取文件',
+    })).toEqual([{
+      type: 'permission_requested', session_id: 'session-1', request_id: 'permission-1',
+      permission_type: 'read', description: '读取文件', event_id: 'event-1', sequence: 1,
+    }]);
+  });
+
   it('separates error reasons from the idempotent turn outcome', () => {
     const normalizer = new CodexTurnEventNormalizer('session-1', () => 'event-1');
 

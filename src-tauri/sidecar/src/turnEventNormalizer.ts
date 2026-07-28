@@ -2,6 +2,11 @@ import type { CodeMuxRuntimeEvent, CodeMuxTurnEvent } from './codeMuxProtocol.js
 
 export type TurnSourceEvent =
   | { kind: 'assistant_message'; content: Array<Record<string, unknown>> }
+  | { kind: 'user_input_requested'; toolUseId: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; allowOther?: boolean }> }
+  | { kind: 'permission_requested'; requestId: string; permissionId?: string; permissionType: string; description: string; metadata?: Record<string, unknown> }
+  | { kind: 'content_started'; index: number; contentKind: 'text' | 'reasoning' }
+  | { kind: 'text_delta' | 'reasoning_delta'; index: number; text: string }
+  | { kind: 'content_finished'; index: number }
   | { kind: 'tool_started'; toolUseId: string; name: string; input: Record<string, unknown> }
   | { kind: 'tool_finished'; toolUseId: string; content: string; isError: boolean }
   | { kind: 'error'; subtype: string; message: string };
@@ -23,6 +28,8 @@ export class TurnEventNormalizer {
   private finished = false;
   private readonly startedToolIds = new Set<string>();
   private readonly finishedToolIds = new Set<string>();
+  private readonly requestedInputIds = new Set<string>();
+  private readonly requestedPermissionIds = new Set<string>();
 
   constructor(
     private readonly sessionId: string,
@@ -34,6 +41,43 @@ export class TurnEventNormalizer {
     if (source.kind === 'assistant_message') {
       return [this.withSequence({
         type: 'assistant_message', session_id: this.sessionId, content: source.content,
+        event_id: this.eventIdFactory(), sequence: 0,
+      })];
+    }
+    if (source.kind === 'user_input_requested') {
+      if (this.requestedInputIds.has(source.toolUseId)) return [];
+      this.requestedInputIds.add(source.toolUseId);
+      return [this.withSequence({
+        type: 'user_input_requested', session_id: this.sessionId, tool_use_id: source.toolUseId,
+        questions: source.questions, event_id: this.eventIdFactory(), sequence: 0,
+      })];
+    }
+    if (source.kind === 'permission_requested') {
+      if (this.requestedPermissionIds.has(source.requestId)) return [];
+      this.requestedPermissionIds.add(source.requestId);
+      return [this.withSequence({
+        type: 'permission_requested', session_id: this.sessionId, request_id: source.requestId,
+        ...(source.permissionId ? { permission_id: source.permissionId } : {}),
+        permission_type: source.permissionType, description: source.description,
+        ...(source.metadata ? { metadata: source.metadata } : {}),
+        event_id: this.eventIdFactory(), sequence: 0,
+      })];
+    }
+    if (source.kind === 'content_started') {
+      return [this.withSequence({
+        type: 'content_started', session_id: this.sessionId, index: source.index,
+        content_kind: source.contentKind, event_id: this.eventIdFactory(), sequence: 0,
+      })];
+    }
+    if (source.kind === 'text_delta' || source.kind === 'reasoning_delta') {
+      return [this.withSequence({
+        type: source.kind, session_id: this.sessionId, index: source.index, text: source.text,
+        event_id: this.eventIdFactory(), sequence: 0,
+      })];
+    }
+    if (source.kind === 'content_finished') {
+      return [this.withSequence({
+        type: 'content_finished', session_id: this.sessionId, index: source.index,
         event_id: this.eventIdFactory(), sequence: 0,
       })];
     }
@@ -53,10 +97,13 @@ export class TurnEventNormalizer {
         is_error: source.isError, event_id: this.eventIdFactory(), sequence: 0,
       })];
     }
-    return [this.withSequence({
-      type: 'error', session_id: this.sessionId, subtype: source.subtype,
-      error: source.message, event_id: this.eventIdFactory(), sequence: 0,
-    })];
+    if (source.kind === 'error') {
+      return [this.withSequence({
+        type: 'error', session_id: this.sessionId, subtype: source.subtype,
+        error: source.message, event_id: this.eventIdFactory(), sequence: 0,
+      })];
+    }
+    return [];
   }
 
   finish(outcome: TurnOutcome): CodeMuxTurnEvent[] {

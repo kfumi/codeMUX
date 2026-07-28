@@ -872,18 +872,21 @@ describe('CodexSessionRuntime', () => {
           session_id: 'session-1',
           index: 0,
           content_kind: 'text',
+          sequence: 0,
         },
         {
           type: 'text_delta',
           session_id: 'session-1',
           index: 0,
           text: '让我再次',
+          sequence: 1,
         },
         {
           type: 'text_delta',
           session_id: 'session-1',
           index: 0,
           text: '尝试调用 Context7 工具：',
+          sequence: 2,
         },
       ]);
     } finally {

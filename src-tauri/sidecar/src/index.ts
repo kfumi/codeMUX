@@ -118,6 +118,7 @@ type PendingToolResponseResult =
 const pendingToolResponses = new Map<string, {
   sessionId?: string;
   timeoutTimer?: ReturnType<typeof setTimeout>;
+  onExpired?: () => void;
   resolve: (value: PendingToolResponseResult) => void;
 }>();
 const SIDECAR_DIST_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -137,6 +138,7 @@ function waitForClaudeToolResponse(
   toolUseId: string,
   sessionId?: string,
   timeoutMs = MESSAGE_TIMEOUT_MS,
+  onExpired?: () => void,
 ): Promise<PendingToolResponseResult> {
   return new Promise((resolve) => {
     const timeoutTimer = setTimeout(() => {
@@ -146,6 +148,7 @@ function waitForClaudeToolResponse(
     pendingToolResponses.set(toolUseId, {
       sessionId,
       timeoutTimer,
+      onExpired,
       resolve,
     });
   });
@@ -175,7 +178,7 @@ function expireClaudeToolResponse(toolUseId: string): boolean {
   if (pending.timeoutTimer) {
     clearTimeout(pending.timeoutTimer);
   }
-  emitAskUserQuestionTimeout(toolUseId);
+  pending.onExpired?.();
   pending.resolve({ kind: 'expired' });
   return true;
 }
@@ -207,15 +210,6 @@ function clearClaudeToolResponses(sessionId?: string): number {
     cleared += 1;
   }
   return cleared;
-}
-
-function emitAskUserQuestionTimeout(toolUseId: string): void {
-  emit({
-    type: 'ask_user_question_timeout',
-    tool_use_id: toolUseId,
-    timeout_ms: MESSAGE_TIMEOUT_MS,
-    message: ASK_USER_QUESTION_TIMEOUT_MESSAGE,
-  });
 }
 
 function isQueryIdleTimeout(errorText: string): boolean {
@@ -717,12 +711,13 @@ export class SessionRuntime {
           } else if (Array.isArray(rawQ)) {
             questions = rawQ;
           }
-          emit({
-            type: 'ask_user_question',
-            tool_use_id: toolUseId,
-            questions,
-          });
-          const response = await waitForClaudeToolResponse(toolUseId, config.sessionId);
+          this.emitTurnSource({ kind: 'user_input_requested', toolUseId, questions });
+          const response = await waitForClaudeToolResponse(
+            toolUseId,
+            config.sessionId,
+            MESSAGE_TIMEOUT_MS,
+            () => this.emitClaudeInteractionTimeout(toolUseId),
+          );
           if (response.kind === 'expired') {
             return {
               behavior: 'deny',
@@ -760,9 +755,9 @@ export class SessionRuntime {
         }
 
         const title = getClaudeApprovalTitle(toolName, input, opts);
-        emit({
-          type: 'ask_user_question',
-          tool_use_id: toolUseId,
+        this.emitTurnSource({
+          kind: 'user_input_requested',
+          toolUseId,
           questions: [{
             header: '审批',
             question: title,
@@ -778,7 +773,12 @@ export class SessionRuntime {
             allowOther: false,
           }],
         });
-        const response = await waitForClaudeToolResponse(toolUseId, config.sessionId);
+        const response = await waitForClaudeToolResponse(
+          toolUseId,
+          config.sessionId,
+          MESSAGE_TIMEOUT_MS,
+          () => this.emitClaudeInteractionTimeout(toolUseId),
+        );
         if (response.kind === 'expired') {
           return {
             behavior: 'deny',
@@ -1080,6 +1080,22 @@ export class SessionRuntime {
     for (const event of this.turnEventNormalizer?.accept({ kind: 'error', subtype, message }) ?? []) {
       emit(event);
     }
+  }
+
+  private emitTurnSource(source: TurnSourceEvent): void {
+    for (const event of this.turnEventNormalizer?.accept(source) ?? []) {
+      emit(event);
+    }
+  }
+
+  private emitClaudeInteractionTimeout(toolUseId: string): void {
+    this.emitTurnError(ASK_USER_QUESTION_TIMEOUT_MESSAGE, 'user_input_timeout');
+    this.emitTurnSource({
+      kind: 'tool_finished',
+      toolUseId,
+      content: ASK_USER_QUESTION_TIMEOUT_MESSAGE,
+      isError: true,
+    });
   }
 
   private emitTurnOutcome(outcome: TurnOutcome): void {

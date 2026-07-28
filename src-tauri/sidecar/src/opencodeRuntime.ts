@@ -663,8 +663,7 @@ export class OpenCodeRuntime {
       return;
     }
     this.emitEvent({
-      type: 'permission',
-      subtype: 'request',
+      type: 'permission_requested',
       agent_id: this.agentId,
       session_id: this.config.sessionId,
       ...(openCodeSessionId ? { agent_session_id: openCodeSessionId, opencode_session_id: openCodeSessionId } : {}),
@@ -674,8 +673,7 @@ export class OpenCodeRuntime {
       permission_type: permissionType,
       description,
       ...(metadata ? { metadata } : {}),
-      raw_permission: rawPermission,
-      raw_permission_payload: rawPermission,
+      event_id: this.eventIdFactory(),
     });
     this.eventSequence += 1;
   }
@@ -702,14 +700,14 @@ export class OpenCodeRuntime {
     });
     this.emitToolStarted(requestId, 'request_user_input', { questions: normalizedQuestions }, openCodeSessionId);
     this.emitEvent({
-      type: 'ask_user_question',
+      type: 'user_input_requested',
       agent_id: this.agentId,
       session_id: this.config.sessionId,
       ...(openCodeSessionId ? { agent_session_id: openCodeSessionId, opencode_session_id: openCodeSessionId } : {}),
       tool_use_id: requestId,
       questions: normalizedQuestions,
       sequence: this.eventSequence,
-      uuid: this.eventIdFactory(),
+      event_id: this.eventIdFactory(),
     });
     this.eventSequence += 1;
   }

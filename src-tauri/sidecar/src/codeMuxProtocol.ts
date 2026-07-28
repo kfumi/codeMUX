@@ -5,6 +5,7 @@ export type CodeMuxStreamEvent =
       index: number;
       content_kind: 'text' | 'reasoning';
       event_id: string;
+      sequence?: number;
     }
   | {
       type: 'text_delta' | 'reasoning_delta';
@@ -12,12 +13,14 @@ export type CodeMuxStreamEvent =
       index: number;
       text: string;
       event_id: string;
+      sequence?: number;
     }
   | {
       type: 'content_finished';
       session_id?: string;
       index: number;
       event_id: string;
+      sequence?: number;
     };
 
 export type CodeMuxToolEvent =
@@ -48,6 +51,35 @@ export type CodeMuxAssistantMessageEvent = {
   sequence: number;
 };
 
+export type CodeMuxQuestion = {
+  question: string;
+  header?: string;
+  options: Array<{ label: string; description?: string; value?: unknown }>;
+  multiSelect?: boolean;
+  allowOther?: boolean;
+};
+
+export type CodeMuxUserInputRequestedEvent = {
+  type: 'user_input_requested';
+  session_id?: string;
+  tool_use_id: string;
+  questions: CodeMuxQuestion[];
+  event_id: string;
+  sequence: number;
+};
+
+export type CodeMuxPermissionRequestedEvent = {
+  type: 'permission_requested';
+  session_id?: string;
+  request_id: string;
+  permission_id?: string;
+  permission_type: string;
+  description: string;
+  metadata?: Record<string, unknown>;
+  event_id: string;
+  sequence: number;
+};
+
 export type CodeMuxTurnEvent =
   | {
       type: 'error';
@@ -73,7 +105,7 @@ export type CodeMuxTurnEvent =
       sequence: number;
     };
 
-export type CodeMuxRuntimeEvent = CodeMuxStreamEvent | CodeMuxToolEvent | CodeMuxAssistantMessageEvent | CodeMuxTurnEvent;
+export type CodeMuxRuntimeEvent = CodeMuxStreamEvent | CodeMuxToolEvent | CodeMuxAssistantMessageEvent | CodeMuxUserInputRequestedEvent | CodeMuxPermissionRequestedEvent | CodeMuxTurnEvent;
 
 export function toCodeMuxStreamEvent(
   sessionId: string | undefined,
@@ -135,6 +167,14 @@ export function isCodeMuxToolEvent(value: unknown): value is CodeMuxToolEvent {
 
 export function isCodeMuxAssistantMessageEvent(value: unknown): value is CodeMuxAssistantMessageEvent {
   return Boolean(value) && typeof value === 'object' && (value as { type?: unknown }).type === 'assistant_message';
+}
+
+export function isCodeMuxUserInputRequestedEvent(value: unknown): value is CodeMuxUserInputRequestedEvent {
+  return Boolean(value) && typeof value === 'object' && (value as { type?: unknown }).type === 'user_input_requested';
+}
+
+export function isCodeMuxPermissionRequestedEvent(value: unknown): value is CodeMuxPermissionRequestedEvent {
+  return Boolean(value) && typeof value === 'object' && (value as { type?: unknown }).type === 'permission_requested';
 }
 
 export function isCodeMuxTurnEvent(value: unknown): value is CodeMuxTurnEvent {

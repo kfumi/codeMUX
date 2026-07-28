@@ -45,10 +45,6 @@ type ToolUseContext = {
   timeoutMs?: number;
 };
 
-function createEventId(factory?: () => string): string {
-  return factory?.() ?? crypto.randomUUID();
-}
-
 export function getRuntimeFlavor(agentKind?: string): RuntimeFlavor {
   if (agentKind === 'codex') {
     return 'codex';
@@ -57,38 +53,6 @@ export function getRuntimeFlavor(agentKind?: string): RuntimeFlavor {
     return 'opencode';
   }
   return 'claude';
-}
-
-export function buildToolResultEvent({
-  sessionId,
-  toolUseId,
-  content,
-  isError = false,
-  eventIdFactory,
-}: {
-  sessionId: string;
-  toolUseId: string;
-  eventIdFactory?: () => string;
-  content: string;
-  isError?: boolean;
-}) {
-  return {
-    type: 'user',
-    uuid: createEventId(eventIdFactory),
-    session_id: sessionId,
-    message: {
-      role: 'user' as const,
-      content: [
-        {
-          type: 'tool_result' as const,
-          tool_use_id: toolUseId,
-          content,
-          is_error: isError,
-        },
-      ],
-    },
-    parent_tool_use_id: null,
-  };
 }
 
 export function buildCodexResultEvent({

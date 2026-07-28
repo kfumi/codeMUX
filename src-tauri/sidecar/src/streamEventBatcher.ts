@@ -3,13 +3,6 @@ import { toCodeMuxStreamEvent, type CodeMuxStreamEvent } from './codeMuxProtocol
 const STREAM_EVENT_BATCH_INTERVAL_MS = 50;
 const STREAM_EVENT_BATCH_MAX_SIZE = 100;
 
-type StreamEventEnvelope = {
-  type: 'stream_event';
-  session_id?: string;
-  event: unknown;
-};
-
-let pendingStreamEvents: StreamEventEnvelope[] = [];
 let pendingCodeMuxDeltas: CodeMuxStreamEvent[] = [];
 let pendingTimer: NodeJS.Timeout | null = null;
 
@@ -35,7 +28,6 @@ export function flushStreamEvents(): void {
     pendingTimer = null;
   }
 
-  flushLegacyStreamEvents();
   flushCodeMuxDeltas();
 }
 
@@ -46,7 +38,7 @@ export function emit(obj: unknown): void {
   }
 
   if (obj && typeof obj === 'object' && (obj as { type?: unknown }).type === 'stream_event') {
-    const streamEnvelope = obj as StreamEventEnvelope;
+    const streamEnvelope = obj as { type: 'stream_event'; session_id?: string; event: unknown };
     const codeMuxEvent = toCodeMuxStreamEvent(streamEnvelope.session_id, streamEnvelope.event);
     if (codeMuxEvent) {
       queueCodeMuxEvent(codeMuxEvent);
@@ -54,9 +46,11 @@ export function emit(obj: unknown): void {
     }
 
     flushCodeMuxDeltas();
-    pendingStreamEvents.push(streamEnvelope);
-    if (pendingStreamEvents.length >= STREAM_EVENT_BATCH_MAX_SIZE) flushStreamEvents();
-    else scheduleFlush();
+    writeJsonLine({
+      type: 'diagnostic',
+      subtype: 'unsupported_stream_event',
+      session_id: streamEnvelope.session_id,
+    });
     return;
   }
 
@@ -71,21 +65,9 @@ function queueCodeMuxEvent(event: CodeMuxStreamEvent): void {
     return;
   }
 
-  flushLegacyStreamEvents();
   pendingCodeMuxDeltas.push(event);
   if (pendingCodeMuxDeltas.length >= STREAM_EVENT_BATCH_MAX_SIZE) flushStreamEvents();
   else scheduleFlush();
-}
-
-function flushLegacyStreamEvents(): void {
-  if (pendingStreamEvents.length === 0) return;
-  const batch = pendingStreamEvents;
-  pendingStreamEvents = [];
-  writeJsonLine({
-    type: 'stream_event_batch',
-    session_id: batch[0]?.session_id,
-    events: batch.map((item) => item.event),
-  });
 }
 
 function flushCodeMuxDeltas(): void {

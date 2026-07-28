@@ -10,7 +10,7 @@ import {
   setActiveCodexCollaborationPolicy,
 } from './codexCollaborationPolicy.js';
 import { clearInteractiveToolResponses, expireInteractiveToolResponses, resolveInteractiveToolResponse } from './interactiveToolResponses.js';
-import { setActiveSessionId } from './codexRuntime.js';
+import { resetActiveCodexEventState, setActiveSessionId } from './codexRuntime.js';
 import { clearActivePermissionState } from './activePermissionState.js';
 
 function listen(server: ReturnType<typeof createServer>): Promise<number> {
@@ -54,6 +54,7 @@ let stdoutSpy: ReturnType<typeof vi.spyOn> | null = null;
 let stdoutWrites: string[] = [];
 
 beforeEach(() => {
+  resetActiveCodexEventState();
   clearActivePermissionState();
   setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({ planMode: 'off' }));
   setActiveSessionId('');
@@ -317,29 +318,14 @@ describe('createCodexCompatProxyServer', () => {
     expect(emittedEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          type: 'assistant',
-          message: {
-            role: 'assistant',
-            content: [
-              expect.objectContaining({
-                type: 'tool_use',
-                id: 'call_123',
-              }),
-            ],
-          },
+          type: 'tool_started',
+          tool_use_id: 'call_123',
+          name: 'shell',
         }),
         expect.objectContaining({
-          type: 'user',
-          message: {
-            role: 'user',
-            content: [
-              expect.objectContaining({
-                type: 'tool_result',
-                tool_use_id: 'call_123',
-                content: 'D:/project/ai-code/codeMUX',
-              }),
-            ],
-          },
+          type: 'tool_finished',
+          tool_use_id: 'call_123',
+          content: 'D:/project/ai-code/codeMUX',
         }),
       ]),
     );
@@ -403,10 +389,7 @@ describe('createCodexCompatProxyServer', () => {
       .filter((line) => line.length > 0)
       .map((line) => JSON.parse(line))
       .filter((event) =>
-        event.type === 'user' &&
-        event.message?.content?.some?.((content: Record<string, unknown>) =>
-          content.type === 'tool_result' && content.tool_use_id === 'call_repeat',
-        ),
+        event.type === 'tool_finished' && event.tool_use_id === 'call_repeat',
       );
 
     expect(emittedToolResults).toHaveLength(1);
@@ -691,16 +674,16 @@ describe('createCodexCompatProxyServer', () => {
       }),
     });
 
-    await waitUntil(() => stdoutWrites.some((line) => line.includes('"type":"ask_user_question"')));
+    await waitUntil(() => stdoutWrites.some((line) => line.includes('"type":"user_input_requested"')));
 
     const askEvent = stdoutWrites
       .map((line) => line.trim())
       .filter((line) => line.length > 0)
       .map((line) => JSON.parse(line))
-      .find((event) => event.type === 'ask_user_question');
+      .find((event) => event.type === 'user_input_requested');
 
     expect(askEvent).toMatchObject({
-      type: 'ask_user_question',
+      type: 'user_input_requested',
       tool_use_id: 'call_question',
       questions: [
         expect.objectContaining({
@@ -931,7 +914,7 @@ describe('createCodexCompatProxyServer', () => {
       }),
     });
 
-    await waitUntil(() => stdoutWrites.some((line) => line.includes('"type":"ask_user_question"')));
+    await waitUntil(() => stdoutWrites.some((line) => line.includes('"type":"user_input_requested"')));
     expect(resolveInteractiveToolResponse('call_question', ['A'])).toBe(true);
 
     const firstResponse = await responsePromise;
@@ -1090,7 +1073,7 @@ describe('createCodexCompatProxyServer', () => {
     );
     expect(events).not.toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: 'ask_user_question' }),
+        expect.objectContaining({ type: 'user_input_requested' }),
       ]),
     );
     expect(upstreamBodies).toHaveLength(2);
@@ -1206,7 +1189,7 @@ describe('createCodexCompatProxyServer', () => {
     );
     expect(events).not.toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: 'ask_user_question' }),
+        expect.objectContaining({ type: 'user_input_requested' }),
       ]),
     );
     expect(events).not.toEqual(
@@ -1431,7 +1414,7 @@ describe('createCodexCompatProxyServer', () => {
       }),
     });
 
-    await waitUntil(() => stdoutWrites.some((line) => line.includes('"type":"ask_user_question"')));
+    await waitUntil(() => stdoutWrites.some((line) => line.includes('"type":"user_input_requested"')));
     expect(resolveInteractiveToolResponse('call_question', ['A'])).toBe(true);
 
     const response = await responsePromise;
@@ -1445,7 +1428,7 @@ describe('createCodexCompatProxyServer', () => {
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          type: 'ask_user_question',
+          type: 'user_input_requested',
           tool_use_id: 'call_question',
         }),
       ]),
@@ -1677,7 +1660,7 @@ describe('createCodexCompatProxyServer', () => {
     await waitUntil(() => upstreamBodies.length === 1);
     setActiveCodexCollaborationPolicy(resolveCodexCollaborationPolicy({ planMode: 'on' }));
     releaseFirstResponse?.();
-    await waitUntil(() => stdoutWrites.some((line) => line.includes('"type":"ask_user_question"')));
+    await waitUntil(() => stdoutWrites.some((line) => line.includes('"type":"user_input_requested"')));
     expect(resolveInteractiveToolResponse('call_question', ['A'])).toBe(true);
 
     const response = await responsePromise;
@@ -1691,7 +1674,7 @@ describe('createCodexCompatProxyServer', () => {
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          type: 'ask_user_question',
+          type: 'user_input_requested',
           tool_use_id: 'call_question',
         }),
       ]),
