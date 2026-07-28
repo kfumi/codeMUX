@@ -477,7 +477,10 @@ export class CodexSessionRuntime {
             );
             usageSeen = true;
             turnCompleted = true;
-            continue;
+            // Codex marks turn.completed as terminal. Some compatible
+            // providers leave the SSE connection open after that event, so
+            // draining the iterator would delay the frontend completion.
+            break;
           }
 
           if (event.type === 'item.completed' && event.item.type === 'agent_message') {

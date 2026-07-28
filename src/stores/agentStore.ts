@@ -1329,8 +1329,9 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         // The Sidecar now emits the canonical user_message event. Keep the
         // optimistic local message and discard its wire echo once it arrives.
         if (event.kind === 'user') {
-          const lastEvent = get().events[sessionId]?.at(-1);
-          if (lastEvent?.kind === 'user' && lastEvent.data.content === event.data.content) {
+          const previousEvents = get().events[sessionId] || [];
+          const lastUserEvent = [...previousEvents].reverse().find((existingEvent) => existingEvent.kind === 'user');
+          if (lastUserEvent?.kind === 'user' && lastUserEvent.data.content === event.data.content) {
             return;
           }
         }

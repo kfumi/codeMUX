@@ -105,7 +105,7 @@ describe('CodexSessionRuntime', () => {
     });
   });
 
-  it('drains the Codex SDK stream after turn.completed instead of closing it early', async () => {
+  it('closes the Codex SDK stream after turn.completed', async () => {
     const writes: string[] = [];
     let returnedEarly = false;
     const stdoutSpy = vi
@@ -180,7 +180,7 @@ describe('CodexSessionRuntime', () => {
         runInput: (prompt: string, inputPayload: undefined, includeImages: boolean) => Promise<void>;
       }).runInput('hello', undefined, false);
 
-      expect(returnedEarly).toBe(false);
+      expect(returnedEarly).toBe(true);
     } finally {
       stdoutSpy.mockRestore();
     }
@@ -257,7 +257,7 @@ describe('CodexSessionRuntime', () => {
     }
   });
 
-  it('derives live Codex turn token usage from adjacent turn.completed usages in the same stream', async () => {
+  it('uses the terminal Codex turn.completed usage for the live turn', async () => {
     const writes: string[] = [];
     const stdoutSpy = vi
       .spyOn(process.stdout, 'write')
@@ -302,15 +302,6 @@ describe('CodexSessionRuntime', () => {
                 reasoning_output_tokens: 0,
               },
             } as ThreadEvent;
-            yield {
-              type: 'turn.completed',
-              usage: {
-                input_tokens: 175,
-                cached_input_tokens: 35,
-                output_tokens: 13,
-                reasoning_output_tokens: 2,
-              },
-            } as ThreadEvent;
           })(),
         }),
       };
@@ -328,9 +319,9 @@ describe('CodexSessionRuntime', () => {
       expect(resultEvents[0]).toMatchObject({
         outcome: 'completed',
         usage: {
-          input_tokens: 75,
-          output_tokens: 8,
-          cached_input_tokens: 15,
+          input_tokens: 100,
+          output_tokens: 5,
+          cached_input_tokens: 20,
         },
       });
     } finally {

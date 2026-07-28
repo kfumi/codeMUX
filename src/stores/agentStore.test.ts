@@ -613,6 +613,31 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().events[session.id]?.filter((event) => event.kind === 'user')).toHaveLength(1);
   });
 
+  it('deduplicates a canonical user message even when a system event arrives first', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'system_event',
+        session_id: sessionId,
+        subtype: 'init',
+        event_id: 'system-event-1',
+        sequence: 0,
+      }));
+      onEvent(JSON.stringify({
+        type: 'user_message',
+        session_id: sessionId,
+        content: 'hello',
+        event_id: 'user-event-1',
+        sequence: 1,
+      }));
+    });
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore.getState().startQuery(session.id, 'hello', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useAgentStore.getState().events[session.id]?.filter((event) => event.kind === 'user')).toHaveLength(1);
+  });
+
   it('treats isMeta user events from the live stream as raw, not as user turns', async () => {
     startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
       onEvent(JSON.stringify({
