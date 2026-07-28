@@ -1,4 +1,5 @@
 import type { AgentMessage } from '@/stores/agentStore';
+import type { AgentAssistantMessage } from '@/types/agent';
 
 type CodeMuxStreamEvent = {
   type: 'content_started' | 'text_delta' | 'reasoning_delta' | 'content_finished';
@@ -18,6 +19,13 @@ type CodeMuxToolEvent = {
   input?: Record<string, unknown>;
   content?: string;
   is_error?: boolean;
+  event_id?: string;
+};
+
+type CodeMuxAssistantMessageEvent = {
+  type: 'assistant_message';
+  session_id?: string;
+  content?: AgentAssistantMessage['message']['content'];
   event_id?: string;
 };
 
@@ -44,6 +52,12 @@ export function isCodeMuxToolEvent(value: unknown): value is CodeMuxToolEvent {
   return Boolean(value)
     && typeof value === 'object'
     && ['tool_started', 'tool_finished'].includes((value as { type?: unknown }).type as string);
+}
+
+export function isCodeMuxAssistantMessageEvent(value: unknown): value is CodeMuxAssistantMessageEvent {
+  return Boolean(value)
+    && typeof value === 'object'
+    && (value as { type?: unknown }).type === 'assistant_message';
 }
 
 export function isCodeMuxTurnEvent(value: unknown): value is CodeMuxTurnEvent {
@@ -109,6 +123,19 @@ export function toLegacyToolMessage(event: CodeMuxToolEvent): AgentMessage {
         role: 'user',
         content: [{ type: 'tool_result', tool_use_id: event.tool_use_id ?? '', content: event.content ?? '', is_error: event.is_error }],
       },
+      parent_tool_use_id: null,
+    },
+  };
+}
+
+export function toLegacyAssistantMessage(event: CodeMuxAssistantMessageEvent): AgentMessage {
+  return {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: event.event_id ?? crypto.randomUUID(),
+      session_id: event.session_id ?? '',
+      message: { role: 'assistant', content: event.content ?? [] },
       parent_tool_use_id: null,
     },
   };

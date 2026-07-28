@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import type { RuntimeEventContext } from './types.js';
 import { toCodeMuxStreamEvent } from './codeMuxProtocol.js';
 import {
-  buildAssistantEvent,
   type AssistantContentBlock,
   type OpenCodeTokenUsage,
 } from './runtimeEvents.js';
@@ -580,7 +579,13 @@ function buildTurnErrorEvent(
 }
 
 function buildAssistantEnvelope(context: OpenCodeEventContext, sessionId: string | undefined, content: Array<Record<string, unknown>>): CodeMuxEvent {
-  return { ...buildAssistantEvent({ sessionId: context.sessionId, content: content as AssistantContentBlock[], eventIdFactory: context.eventIdFactory }), ...routingMetadata(context, sessionId) };
+  return {
+    type: 'assistant_message',
+    session_id: context.sessionId,
+    content: content as AssistantContentBlock[],
+    event_id: context.eventIdFactory(),
+    ...routingMetadata(context, sessionId),
+  };
 }
 
 function buildStreamEvent(sessionId: string | undefined, event: unknown): CodeMuxEvent {

@@ -26,7 +26,7 @@ import {
   type ClaudeTokenUsage,
 } from './runtimeEvents.js';
 import { toClaudeTurnOutcome } from './claudeTurnOutcome.js';
-import { TurnEventNormalizer, type TurnOutcome } from './turnEventNormalizer.js';
+import { TurnEventNormalizer, type TurnOutcome, type TurnSourceEvent } from './turnEventNormalizer.js';
 import { proxyManager } from './proxyManager.js';
 import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
 import { emit } from './streamEventBatcher.js';
@@ -948,7 +948,14 @@ export class SessionRuntime {
             }
           }
           if (projection.remainingEvent) {
-            emit(projection.remainingEvent);
+            const remainingMessage = toClaudeAssistantMessageEvent(projection.remainingEvent);
+            if (remainingMessage) {
+              for (const normalizedEvent of this.turnEventNormalizer?.accept(remainingMessage) ?? []) {
+                emit(normalizedEvent);
+              }
+            } else {
+              emit(projection.remainingEvent);
+            }
           }
         }
 
@@ -1080,6 +1087,18 @@ export class SessionRuntime {
       emit(event);
     }
   }
+}
+
+function toClaudeAssistantMessageEvent(event: Record<string, unknown>): TurnSourceEvent | undefined {
+  if (event.type !== 'assistant') return undefined;
+  const message = event.message;
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return undefined;
+  const content = (message as Record<string, unknown>).content;
+  if (!Array.isArray(content)) return undefined;
+  return {
+    kind: 'assistant_message',
+    content: content.filter((block): block is Record<string, unknown> => typeof block === 'object' && block !== null && !Array.isArray(block)),
+  };
 }
 
 function normalizeReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | undefined {

@@ -490,7 +490,7 @@ describe('CodexSessionRuntime', () => {
       expect(emittedEvents.some((event) => event.type === 'error')).toBe(false);
       expect(emittedEvents).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ type: 'assistant' }),
+          expect.objectContaining({ type: 'assistant_message' }),
           expect.objectContaining({ type: 'turn_finished', outcome: 'completed' }),
           expect.objectContaining({ type: 'sidecar_query_done' }),
         ]),

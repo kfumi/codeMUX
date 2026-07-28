@@ -40,6 +40,14 @@ export type CodeMuxToolEvent =
       sequence: number;
     };
 
+export type CodeMuxAssistantMessageEvent = {
+  type: 'assistant_message';
+  session_id?: string;
+  content: Array<Record<string, unknown>>;
+  event_id: string;
+  sequence: number;
+};
+
 export type CodeMuxTurnEvent =
   | {
       type: 'error';
@@ -65,7 +73,7 @@ export type CodeMuxTurnEvent =
       sequence: number;
     };
 
-export type CodeMuxRuntimeEvent = CodeMuxStreamEvent | CodeMuxToolEvent | CodeMuxTurnEvent;
+export type CodeMuxRuntimeEvent = CodeMuxStreamEvent | CodeMuxToolEvent | CodeMuxAssistantMessageEvent | CodeMuxTurnEvent;
 
 export function toCodeMuxStreamEvent(
   sessionId: string | undefined,
@@ -123,6 +131,10 @@ export function isCodeMuxStreamEvent(value: unknown): value is CodeMuxStreamEven
 
 export function isCodeMuxToolEvent(value: unknown): value is CodeMuxToolEvent {
   return Boolean(value) && typeof value === 'object' && ['tool_started', 'tool_finished'].includes((value as { type?: unknown }).type as string);
+}
+
+export function isCodeMuxAssistantMessageEvent(value: unknown): value is CodeMuxAssistantMessageEvent {
+  return Boolean(value) && typeof value === 'object' && (value as { type?: unknown }).type === 'assistant_message';
 }
 
 export function isCodeMuxTurnEvent(value: unknown): value is CodeMuxTurnEvent {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toLegacyStreamingMessage, toLegacyToolMessage, toLegacyTurnMessage } from './codeMuxProtocol';
+import { toLegacyAssistantMessage, toLegacyStreamingMessage, toLegacyToolMessage, toLegacyTurnMessage } from './codeMuxProtocol';
 
 describe('CodeMUX frontend protocol adapter', () => {
   it('keeps domain deltas compatible with the internal streaming model', () => {
@@ -33,6 +33,15 @@ describe('CodeMUX frontend protocol adapter', () => {
     })).toMatchObject({
       kind: 'tool_result',
       data: { message: { content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'ok', is_error: false }] } },
+    });
+  });
+
+  it('maps completed assistant content to the existing assistant model', () => {
+    expect(toLegacyAssistantMessage({
+      type: 'assistant_message', session_id: 'session-1', event_id: 'event-3', content: [{ type: 'text', text: 'hello' }],
+    })).toMatchObject({
+      kind: 'assistant',
+      data: { session_id: 'session-1', message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] } },
     });
   });
 

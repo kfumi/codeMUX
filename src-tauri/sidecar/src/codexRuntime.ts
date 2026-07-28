@@ -10,7 +10,6 @@ import type { SidecarCommand } from './types.js';
 import { readLatestCodexTotalTokenUsage } from './codexSessionUsage.js';
 import { CodexSessionEventTailer, type CodexSessionTailEvent } from './codexSessionEventTailer.js';
 import {
-  buildAssistantEvent,
   buildCodexTodoListEvent,
   buildCodexToolResultContent,
   buildCodexToolUseContent,
@@ -776,10 +775,7 @@ export class CodexSessionRuntime {
         return;
       }
       if (item.text.trim()) {
-        emit(buildAssistantEvent({
-          sessionId,
-          content: [{ type: 'text', text: item.text }],
-        }));
+        this.emitTurnEvent(sessionId, { kind: 'assistant_message', content: [{ type: 'text', text: item.text }] });
       }
       return;
     }
@@ -797,10 +793,7 @@ export class CodexSessionRuntime {
     if (item.type === 'reasoning' && eventType === 'item.completed') {
       this.completeStreamingText(sessionId, item.id);
       if (item.text.trim()) {
-        emit(buildAssistantEvent({
-          sessionId,
-          content: [{ type: 'thinking', thinking: item.text }],
-        }));
+        this.emitTurnEvent(sessionId, { kind: 'assistant_message', content: [{ type: 'thinking', thinking: item.text }] });
       }
       return;
     }

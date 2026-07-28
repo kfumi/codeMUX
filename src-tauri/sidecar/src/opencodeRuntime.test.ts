@@ -196,7 +196,7 @@ describe('OpenCodeRuntime', () => {
     onEvent({ type: 'message.updated', properties: { sessionID: 'opencode-new', info: { id: 'user-message-1', role: 'user' } } });
     onEvent({ type: 'message.part.updated', properties: { sessionID: 'opencode-new', part: { id: 'user-part-1', sessionID: 'opencode-new', messageID: 'user-message-1', type: 'text', text: 'hello' }, delta: 'hello' } });
 
-    expect(emitted.some((event) => (event as { type?: string }).type === 'assistant')).toBe(false);
+    expect(emitted.some((event) => (event as { type?: string }).type === 'assistant_message')).toBe(false);
     await runtime.shutdown();
   });
 
@@ -386,7 +386,7 @@ describe('OpenCodeRuntime', () => {
     onEvent(event);
 
     await vi.waitFor(() => expect(emitted).toHaveLength(1));
-    expect(emitted[0]).toMatchObject({ type: 'assistant', agent_id: 'agent-1', session_id: 'codemux-session-1', agent_session_id: 'opencode-new', sequence: 0 });
+    expect(emitted[0]).toMatchObject({ type: 'assistant_message', agent_id: 'agent-1', session_id: 'codemux-session-1', agent_session_id: 'opencode-new', sequence: 0 });
     await runtime.shutdown();
     expect(client.subscribe).toHaveBeenCalledWith(expect.objectContaining({ cwd: 'D:/workspace/demo' }));
   });
@@ -728,7 +728,7 @@ describe('OpenCodeRuntime', () => {
     onEvent({ type: 'message.part.updated', properties: { part: { id: 'other', sessionID: 'other-session', messageID: 'm', type: 'text', text: 'other' }, delta: 'other' } });
     onEvent({ type: 'message.part.updated', properties: { part: { id: 'current', sessionID: 'opencode-new', messageID: 'm', type: 'text', text: 'current' }, delta: 'current' } });
     await vi.waitFor(() => expect(emitted).toHaveLength(1));
-    expect(emitted[0]).toMatchObject({ message: { content: [{ text: 'current' }] } });
+    expect(emitted[0]).toMatchObject({ type: 'assistant_message', content: [{ text: 'current' }] });
     await runtime.shutdown();
   });
 
@@ -762,7 +762,7 @@ describe('OpenCodeRuntime', () => {
     client.createSession.mockResolvedValueOnce({ id: 'opencode-reset' });
     await runtime.start();
     onEvent({ ...oldEvent, properties: { ...oldEvent.properties, part: { ...(oldEvent.properties as { part: Record<string, unknown> }).part, sessionID: 'opencode-reset' } } });
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'assistant')).toHaveLength(2));
+    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'assistant_message')).toHaveLength(2));
     await runtime.shutdown();
   });
 
@@ -850,7 +850,7 @@ describe('OpenCodeRuntime', () => {
     onEvent(toolPart('running'));
 
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'tool_finished')).toHaveLength(1));
-    expect(emitted.filter((event) => (event as { type?: string }).type === 'assistant')).toHaveLength(2);
+    expect(emitted.filter((event) => (event as { type?: string }).type === 'assistant_message')).toHaveLength(2);
     expect(emitted.filter((event) => (event as { type?: string }).type === 'tool_started')).toHaveLength(1);
     expect(emitted.filter((event) => (event as { type?: string }).type === 'tool_finished')).toMatchObject([{
       tool_use_id: 'call-1', content: '{"matches":["a"]}', is_error: false,
@@ -991,7 +991,7 @@ describe('OpenCodeRuntime', () => {
 
     onRetry(new Error('temporary socket failure'));
     onEvent({ type: 'message.part.updated', properties: { part: { id: 'after-retry', sessionID: 'opencode-new', messageID: 'm', type: 'text', text: 'resumed' }, delta: 'resumed' } });
-    await vi.waitFor(() => expect(emitted.some((event) => (event as { type?: string }).type === 'assistant')).toBe(true));
+    await vi.waitFor(() => expect(emitted.some((event) => (event as { type?: string }).type === 'assistant_message')).toBe(true));
     expect(emitted.some((event) => (event as { type?: string }).type === 'turn_finished')).toBe(false);
 
     onDisconnect(new Error('stream ended'));

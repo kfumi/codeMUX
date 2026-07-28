@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { CodexTurnEventNormalizer } from './codexTurnEventNormalizer.js';
 
 describe('CodexTurnEventNormalizer', () => {
+  it('normalizes assistant content with the same sequence as tool and turn events', () => {
+    const normalizer = new CodexTurnEventNormalizer('session-1', () => 'event-1');
+
+    expect(normalizer.accept({ kind: 'assistant_message', content: [{ type: 'text', text: 'hello' }] })).toEqual([
+      {
+        type: 'assistant_message', session_id: 'session-1', content: [{ type: 'text', text: 'hello' }],
+        event_id: 'event-1', sequence: 0,
+      },
+    ]);
+  });
+
   it('normalizes tool lifecycle and assigns monotonic sequences', () => {
     const normalizer = new CodexTurnEventNormalizer('session-1', () => 'event-1');
 

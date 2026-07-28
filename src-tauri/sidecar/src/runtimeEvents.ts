@@ -59,27 +59,6 @@ export function getRuntimeFlavor(agentKind?: string): RuntimeFlavor {
   return 'claude';
 }
 
-export function buildAssistantEvent({
-  sessionId,
-  content,
-  eventIdFactory,
-}: {
-  sessionId: string;
-  content: AssistantContentBlock[];
-  eventIdFactory?: () => string;
-}) {
-  return {
-    type: 'assistant',
-    uuid: createEventId(eventIdFactory),
-    session_id: sessionId,
-    message: {
-      role: 'assistant' as const,
-      content,
-    },
-    parent_tool_use_id: null,
-  };
-}
-
 export function buildToolResultEvent({
   sessionId,
   toolUseId,

@@ -24,9 +24,11 @@ import { countDiffLines } from '../lib/diffStats';
 import {
   isCodeMuxStreamEvent,
   isCodeMuxToolEvent,
+  isCodeMuxAssistantMessageEvent,
   isCodeMuxTurnEvent,
   toLegacyStreamingMessage,
   toLegacyToolMessage,
+  toLegacyAssistantMessage,
   toLegacyTurnMessage,
 } from '../lib/codeMuxProtocol';
 import type {
@@ -621,6 +623,9 @@ function parseAgentEvent(raw: string): AgentMessage {
       case 'tool_started':
       case 'tool_finished':
         if (isCodeMuxToolEvent(data)) return toLegacyToolMessage(data);
+        return { kind: 'raw', data };
+      case 'assistant_message':
+        if (isCodeMuxAssistantMessageEvent(data)) return toLegacyAssistantMessage(data);
         return { kind: 'raw', data };
       case 'error':
       case 'turn_finished':

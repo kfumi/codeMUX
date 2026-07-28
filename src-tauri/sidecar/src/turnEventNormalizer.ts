@@ -1,6 +1,7 @@
 import type { CodeMuxRuntimeEvent, CodeMuxTurnEvent } from './codeMuxProtocol.js';
 
 export type TurnSourceEvent =
+  | { kind: 'assistant_message'; content: Array<Record<string, unknown>> }
   | { kind: 'tool_started'; toolUseId: string; name: string; input: Record<string, unknown> }
   | { kind: 'tool_finished'; toolUseId: string; content: string; isError: boolean }
   | { kind: 'error'; subtype: string; message: string };
@@ -30,6 +31,12 @@ export class TurnEventNormalizer {
 
   accept(source: TurnSourceEvent): CodeMuxRuntimeEvent[] {
     if (this.finished) return [];
+    if (source.kind === 'assistant_message') {
+      return [this.withSequence({
+        type: 'assistant_message', session_id: this.sessionId, content: source.content,
+        event_id: this.eventIdFactory(), sequence: 0,
+      })];
+    }
     if (source.kind === 'tool_started') {
       if (this.startedToolIds.has(source.toolUseId)) return [];
       this.startedToolIds.add(source.toolUseId);
