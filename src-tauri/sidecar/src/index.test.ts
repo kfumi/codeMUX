@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
 import type { SidecarCommand } from './types.js';
-import { buildOpenCodeSessionMappingEvent, createSidecarCommandDispatcher } from './index.js';
+import { buildOpenCodeSessionMappingEvent, buildUserMessageEvent, createSidecarCommandDispatcher } from './index.js';
 
 function createRuntime() {
   return {
@@ -17,6 +17,20 @@ function createRuntime() {
 }
 
 describe('sidecar command dispatcher', () => {
+  it('builds a canonical user message while preserving display text and images', () => {
+    expect(buildUserMessageEvent('session-1', 'generated prompt', {
+      text: 'generated prompt',
+      images: [{ name: 'screen.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,AAAA' }],
+    }, '/review')).toMatchObject({
+      type: 'user_message',
+      session_id: 'session-1',
+      content: [
+        { type: 'text', text: '/review' },
+        { type: 'image', name: 'screen.png' },
+      ],
+    });
+  });
+
   it.skipIf(process.platform !== 'win32')('emits readiness when Node receives a Windows verbatim script path', () => {
     const entrypoint = path.resolve('dist/index.js');
     const verbatimEntrypoint = `\\\\?\\${entrypoint}`;
@@ -56,13 +70,14 @@ describe('sidecar command dispatcher', () => {
 
     await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'opencode', cwd: 'D:\\workspace', sessionId: 'session-1', provider: 'codemux-openai', model: 'gpt-5' });
     await dispatcher.dispatch({ type: 'update_permissions', agentKind: 'opencode', sessionId: 'session-1', permissionConfig: { mode: 'default' } });
-    await dispatcher.dispatch({ type: 'send_input', prompt: 'hello' });
+    await dispatcher.dispatch({ type: 'send_input', sessionId: 'session-1', prompt: 'hello' });
     await dispatcher.dispatch({ type: 'reset_session', sessionId: 'session-1' });
     await dispatcher.dispatch({ type: 'interrupt' });
     await dispatcher.dispatch({ type: 'tool_response', toolUseId: 'tool-1', response: { approved: true } });
     await dispatcher.dispatch({ type: 'respond_to_permission', requestId: 'permission-1', sessionId: 'session-1', response: { approved: true } });
 
     expect(opencode.ensure).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({ type: 'user_message', session_id: 'session-1', content: 'hello' }));
     expect(opencode.updatePermissions).toHaveBeenCalledWith(expect.objectContaining({
       type: 'update_permissions',
       agentKind: 'opencode',
@@ -94,10 +109,10 @@ describe('sidecar command dispatcher', () => {
 
     await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'codex', cwd: 'D:\\workspace', sessionId: 'codex-session' });
     await dispatcher.dispatch({ type: 'update_permissions', agentKind: 'codex', sessionId: 'codex-session', permissionConfig: { kind: 'codex', approvalPolicy: 'never' } });
-    await dispatcher.dispatch({ type: 'send_input', prompt: 'codex' });
+    await dispatcher.dispatch({ type: 'send_input', sessionId: 'codex-session', prompt: 'codex' });
     await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'claude_code', cwd: 'D:\\workspace', sessionId: 'claude-session' });
     await dispatcher.dispatch({ type: 'update_permissions', agentKind: 'claude_code', sessionId: 'claude-session', permissionConfig: { kind: 'claude_code', permissionMode: 'default' } });
-    await dispatcher.dispatch({ type: 'send_input', prompt: 'claude' });
+    await dispatcher.dispatch({ type: 'send_input', sessionId: 'claude-session', prompt: 'claude' });
 
     expect(codex.ensure).toHaveBeenCalledTimes(1);
     expect(codex.updatePermissions).toHaveBeenCalledTimes(1);

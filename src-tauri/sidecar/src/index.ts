@@ -858,7 +858,7 @@ export class SessionRuntime {
           compactTimer = setTimeout(() => {
             process.stderr.write(`[sidecar] Compact timeout: no message after ${COMPACT_TIMEOUT_MS}ms, treating turn as complete\n`);
             emit({
-              type: 'system',
+              type: 'system_event',
               subtype: 'compact_boundary',
               compact_metadata: { trigger: 'manual', pre_tokens: 0 },
               session_id: appSessionId || '',
@@ -926,7 +926,9 @@ export class SessionRuntime {
 
         const eventToEmit = msg.type === 'result'
           ? normalizeClaudeResultEvent(result.value as Record<string, unknown>, lastAssistantUsage)
-          : result.value;
+          : msg.type === 'system' && msg.subtype === 'compact_boundary'
+            ? { ...(result.value as Record<string, unknown>), type: 'system_event', event_id: msg.uuid ?? crypto.randomUUID() }
+            : result.value;
 
         if (msg.type === 'result') {
           const resultEvent = eventToEmit as Record<string, unknown>;
@@ -1117,6 +1119,29 @@ function toClaudeAssistantMessageEvent(event: Record<string, unknown>): TurnSour
   };
 }
 
+export function buildUserMessageEvent(
+  sessionId: string,
+  prompt: string,
+  inputPayload?: AgentInputPayload,
+  displayContent?: string,
+): Record<string, unknown> {
+  const payload = normalizeAgentInputPayload(prompt, inputPayload);
+  const imageBlocks = buildClaudeUserMessageContent(payload, true)
+    .filter((block): block is { type: 'image'; source: { type: 'base64'; media_type: string; data: string } } => block.type === 'image')
+    .map((block, index) => ({
+      ...block,
+      ...(payload.images?.[index]?.name ? { name: payload.images[index].name } : {}),
+    }));
+
+  return {
+    type: 'user_message',
+    session_id: sessionId,
+    content: imageBlocks.length > 0
+      ? [{ type: 'text', text: displayContent ?? payload.text }, ...imageBlocks]
+      : displayContent ?? payload.text,
+  };
+}
+
 function normalizeReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | undefined {
   return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
 }
@@ -1175,6 +1200,7 @@ type SidecarCommandDispatcherOptions = {
 
 export function createSidecarCommandDispatcher(options: SidecarCommandDispatcherOptions) {
   let activeAgentKind: string | undefined;
+  let activeSessionId: string | undefined;
   let activeOpenCodeRuntime: SidecarRuntime | undefined;
   let ensureTail: Promise<void> = Promise.resolve();
   const pendingPermissionResponses = new Map<SidecarRuntime, Map<string, Promise<void>>>();
@@ -1200,6 +1226,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
   const ensureSession = async (cmd: EnsureSessionCommand): Promise<void> => {
     const flavor = getRuntimeFlavor(cmd.agentKind);
     activeAgentKind = cmd.agentKind;
+    activeSessionId = cmd.sessionId;
     if (flavor !== 'opencode') {
       await shutdownOpenCodeRuntime();
       const selectedRuntime = flavor === 'codex' ? options.codexRuntime : options.claudeRuntime;
@@ -1268,6 +1295,10 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         if (!current) {
           emitError('OpenCode runtime is not initialized');
           return;
+        }
+        const sessionId = cmd.sessionId ?? activeSessionId;
+        if (sessionId) {
+          options.emit(buildUserMessageEvent(sessionId, cmd.prompt, cmd.inputPayload, cmd.displayContent));
         }
         void current.sendInput(cmd.prompt, cmd.inputPayload).catch((error) => {
           if (!isAbortError(error)) emitError(error);

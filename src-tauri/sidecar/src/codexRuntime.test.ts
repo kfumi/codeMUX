@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ThreadEvent } from '@openai/codex-sdk';
 
 import {
@@ -13,9 +13,16 @@ import {
 } from './activePermissionState.js';
 import { resolveCodexCollaborationPolicy } from './codexCollaborationPolicy.js';
 import { buildCodexToolUseContent } from './runtimeEvents.js';
-import { flushStreamEvents } from './streamEventBatcher.js';
+import { flushStreamEvents, resetStreamEventSequences } from './streamEventBatcher.js';
 
 describe('CodexSessionRuntime', () => {
+  afterEach(() => {
+    flushStreamEvents();
+    resetStreamEventSequences();
+    vi.restoreAllMocks();
+    clearActivePermissionState();
+  });
+
   it('configures a native Responses model provider for the selected Codex provider', () => {
     expect(buildCodexCliConfig('https://example.test')).toEqual({
       model_provider: 'codemux_proxy',
@@ -1461,11 +1468,13 @@ describe('CodexSessionRuntime', () => {
 
       expect(emittedEvents).toEqual([
         {
-          type: 'system',
+          type: 'system_event',
           subtype: 'compact_boundary',
           content: 'Conversation compacted',
           timestamp: '2026-07-03T17:22:53.471Z',
           session_id: 'session-1',
+          event_id: expect.any(String),
+          sequence: expect.any(Number),
           compact_metadata: {
             trigger: 'auto',
             pre_tokens: 0,
@@ -1544,7 +1553,7 @@ describe('CodexSessionRuntime', () => {
 
       expect(emittedEvents).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ type: 'system', subtype: 'compact_boundary' }),
+          expect.objectContaining({ type: 'system_event', subtype: 'compact_boundary' }),
           expect.objectContaining({ type: 'sidecar_query_done' }),
         ]),
       );
@@ -1611,10 +1620,12 @@ describe('CodexSessionRuntime', () => {
 
       expect(emittedEvents).toEqual([
         {
-          type: 'system',
+          type: 'system_event',
           subtype: 'compact_boundary',
           content: 'Conversation compacted',
           session_id: 'session-1',
+          event_id: expect.any(String),
+          sequence: expect.any(Number),
           compact_metadata: {
             trigger: 'auto',
             pre_tokens: 0,

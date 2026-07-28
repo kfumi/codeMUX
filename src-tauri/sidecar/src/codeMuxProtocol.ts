@@ -51,6 +51,40 @@ export type CodeMuxAssistantMessageEvent = {
   sequence: number;
 };
 
+export type CodeMuxUserMessageEvent = {
+  type: 'user_message';
+  session_id?: string;
+  content: string | Array<Record<string, unknown>>;
+  provider_message_id?: string;
+  line_index?: number;
+  source_event_index?: number;
+  turn_ordinal?: number;
+  event_id: string;
+  sequence: number;
+};
+
+export type CodeMuxSystemEvent = {
+  type: 'system_event';
+  session_id?: string;
+  subtype: string;
+  content?: string;
+  compact_metadata?: Record<string, unknown>;
+  event_id: string;
+  sequence: number;
+  [key: string]: unknown;
+};
+
+export type CodeMuxDiagnosticEvent = {
+  type: 'diagnostic';
+  session_id?: string;
+  subtype: string;
+  error?: string;
+  event_type?: string;
+  event_id: string;
+  sequence: number;
+  [key: string]: unknown;
+};
+
 export type CodeMuxQuestion = {
   question: string;
   header?: string;
@@ -105,7 +139,7 @@ export type CodeMuxTurnEvent =
       sequence: number;
     };
 
-export type CodeMuxRuntimeEvent = CodeMuxStreamEvent | CodeMuxToolEvent | CodeMuxAssistantMessageEvent | CodeMuxUserInputRequestedEvent | CodeMuxPermissionRequestedEvent | CodeMuxTurnEvent;
+export type CodeMuxRuntimeEvent = CodeMuxStreamEvent | CodeMuxToolEvent | CodeMuxAssistantMessageEvent | CodeMuxUserMessageEvent | CodeMuxSystemEvent | CodeMuxDiagnosticEvent | CodeMuxUserInputRequestedEvent | CodeMuxPermissionRequestedEvent | CodeMuxTurnEvent;
 
 export function toCodeMuxStreamEvent(
   sessionId: string | undefined,
@@ -167,6 +201,18 @@ export function isCodeMuxToolEvent(value: unknown): value is CodeMuxToolEvent {
 
 export function isCodeMuxAssistantMessageEvent(value: unknown): value is CodeMuxAssistantMessageEvent {
   return Boolean(value) && typeof value === 'object' && (value as { type?: unknown }).type === 'assistant_message';
+}
+
+export function isCodeMuxUserMessageEvent(value: unknown): value is CodeMuxUserMessageEvent {
+  return Boolean(value) && typeof value === 'object' && (value as { type?: unknown }).type === 'user_message';
+}
+
+export function isCodeMuxSystemEvent(value: unknown): value is CodeMuxSystemEvent {
+  return Boolean(value) && typeof value === 'object' && (value as { type?: unknown }).type === 'system_event';
+}
+
+export function isCodeMuxDiagnosticEvent(value: unknown): value is CodeMuxDiagnosticEvent {
+  return Boolean(value) && typeof value === 'object' && (value as { type?: unknown }).type === 'diagnostic';
 }
 
 export function isCodeMuxUserInputRequestedEvent(value: unknown): value is CodeMuxUserInputRequestedEvent {

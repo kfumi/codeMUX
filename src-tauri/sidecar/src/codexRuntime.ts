@@ -419,7 +419,7 @@ export class CodexSessionRuntime {
     writeLog('[codex-task]', `sendInput START model=${model} prompt_preview=${payload.text.slice(0, 120)} includeImages=${includeImages}`);
 
     emit({
-      type: 'system',
+      type: 'system_event',
       subtype: 'init',
       uuid: crypto.randomUUID(),
       session_id: sessionId,
@@ -1094,7 +1094,7 @@ function buildLiveCodexCompactBoundaryEvent(sessionId: string, compactEvent: Liv
   const postTokens = readFiniteNumber(payload.post_tokens) ?? readFiniteNumber(payload.postTokens) ?? 0;
 
   return {
-    type: 'system',
+    type: 'system_event',
     subtype: 'compact_boundary',
     content: 'Conversation compacted',
     ...(compactEvent.timestamp !== undefined ? { timestamp: compactEvent.timestamp } : {}),

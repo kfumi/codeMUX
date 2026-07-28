@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushStreamEvents, emit } from './streamEventBatcher.js';
+import { flushStreamEvents, emit, resetStreamEventSequences } from './streamEventBatcher.js';
 
 describe('stream event transport batching', () => {
   afterEach(() => {
     flushStreamEvents();
+    resetStreamEventSequences();
     vi.restoreAllMocks();
   });
 
@@ -23,8 +24,8 @@ describe('stream event transport batching', () => {
       type: 'codemux_event_batch',
       session_id: 'session-1',
       events: [
-        { type: 'text_delta', session_id: 'session-1', index: 0, text: 'a', event_id: 'event-1' },
-        { type: 'text_delta', session_id: 'session-1', index: 0, text: 'b', event_id: 'event-2' },
+        { type: 'text_delta', session_id: 'session-1', index: 0, text: 'a', event_id: 'event-1', sequence: expect.any(Number) },
+        { type: 'text_delta', session_id: 'session-1', index: 0, text: 'b', event_id: 'event-2', sequence: expect.any(Number) },
       ],
     });
   });
@@ -60,19 +61,39 @@ describe('stream event transport batching', () => {
         index: 0,
         content_kind: 'text',
         event_id: expect.any(String),
+        sequence: expect.any(Number),
       },
       {
         type: 'codemux_event_batch',
         session_id: 'session-1',
         events: [
-          { type: 'text_delta', session_id: 'session-1', index: 0, text: 'hello', event_id: expect.any(String) },
+          { type: 'text_delta', session_id: 'session-1', index: 0, text: 'hello', event_id: expect.any(String), sequence: expect.any(Number) },
         ],
       },
       {
         type: 'diagnostic',
         subtype: 'unsupported_stream_event',
         session_id: 'session-1',
+        event_id: expect.any(String),
+        sequence: expect.any(Number),
       },
     ]);
+  });
+
+  it('assigns a monotonic envelope to non-batched CodeMUX events', () => {
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      writes.push(String(chunk));
+      return true;
+    });
+
+    emit({ type: 'assistant_message', session_id: 'envelope-session', content: [{ type: 'text', text: 'ok' }] });
+    emit({ type: 'diagnostic', session_id: 'envelope-session', subtype: 'gap_detected' });
+
+    const events = writes.map((line) => JSON.parse(line));
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ type: 'assistant_message', event_id: expect.any(String), sequence: expect.any(Number) });
+    expect(events[1]).toMatchObject({ type: 'diagnostic', event_id: expect.any(String), sequence: expect.any(Number) });
+    expect(events[1].sequence).toBe(events[0].sequence + 1);
   });
 });

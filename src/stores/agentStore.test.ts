@@ -587,11 +587,30 @@ describe('agent store Codex history loading', () => {
       expect.any(Function),
       undefined,
       { text: 'TEMPLATE: review current changes' },
+      '/review',
     );
     expect(useAgentStore.getState().events[session.id]?.[0]).toEqual({
       kind: 'user',
       data: { content: '/review' },
     });
+  });
+
+  it('deduplicates the canonical Sidecar user message against the optimistic local message', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'user_message',
+        session_id: sessionId,
+        content: 'hello',
+        event_id: 'user-event-1',
+        sequence: 0,
+      }));
+    });
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore.getState().startQuery(session.id, 'hello', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useAgentStore.getState().events[session.id]?.filter((event) => event.kind === 'user')).toHaveLength(1);
   });
 
   it('treats isMeta user events from the live stream as raw, not as user turns', async () => {
@@ -1565,6 +1584,7 @@ describe('agent store Codex history loading', () => {
       expect.any(Function),
       undefined,
       inputPayload,
+      'inspect this',
     );
   });
 
@@ -1591,6 +1611,7 @@ describe('agent store Codex history loading', () => {
       expect.any(Function),
       undefined,
       { text: 'inspect this' },
+      'inspect this',
     );
     expect(useAgentStore.getState().events[session.id]?.[0]).toEqual({
       kind: 'user',

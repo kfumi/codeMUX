@@ -5,6 +5,11 @@ const STREAM_EVENT_BATCH_MAX_SIZE = 100;
 
 let pendingCodeMuxDeltas: CodeMuxStreamEvent[] = [];
 let pendingTimer: NodeJS.Timeout | null = null;
+const nextSequenceBySession = new Map<string, number>();
+
+export function resetStreamEventSequences(): void {
+  nextSequenceBySession.clear();
+}
 
 function writeJsonLine(obj: unknown): void {
   process.stdout.write(JSON.stringify(obj) + '\n');
@@ -33,7 +38,7 @@ export function flushStreamEvents(): void {
 
 export function emit(obj: unknown): void {
   if (isBatchableCodeMuxDelta(obj)) {
-    queueCodeMuxEvent(obj);
+    queueCodeMuxEvent(withCodeMuxEnvelope(obj) as CodeMuxStreamEvent);
     return;
   }
 
@@ -41,21 +46,21 @@ export function emit(obj: unknown): void {
     const streamEnvelope = obj as { type: 'stream_event'; session_id?: string; event: unknown };
     const codeMuxEvent = toCodeMuxStreamEvent(streamEnvelope.session_id, streamEnvelope.event);
     if (codeMuxEvent) {
-      queueCodeMuxEvent(codeMuxEvent);
+      queueCodeMuxEvent(withCodeMuxEnvelope(codeMuxEvent) as CodeMuxStreamEvent);
       return;
     }
 
     flushCodeMuxDeltas();
-    writeJsonLine({
+    writeJsonLine(withCodeMuxEnvelope({
       type: 'diagnostic',
       subtype: 'unsupported_stream_event',
       session_id: streamEnvelope.session_id,
-    });
+    }));
     return;
   }
 
   flushStreamEvents();
-  writeJsonLine(obj);
+  writeJsonLine(withCodeMuxEnvelope(obj));
 }
 
 function queueCodeMuxEvent(event: CodeMuxStreamEvent): void {
@@ -81,4 +86,60 @@ function isBatchableCodeMuxDelta(value: unknown): value is CodeMuxStreamEvent {
   return Boolean(value)
     && typeof value === 'object'
     && ((value as { type?: unknown }).type === 'text_delta' || (value as { type?: unknown }).type === 'reasoning_delta');
+}
+
+function withCodeMuxEnvelope(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value;
+  }
+
+  const event = value as Record<string, unknown>;
+  if (!isCodeMuxDomainEvent(event.type)) {
+    return value;
+  }
+
+  const sessionId = typeof event.session_id === 'string' && event.session_id.length > 0
+    ? event.session_id
+    : undefined;
+  const eventId = typeof event.event_id === 'string' && event.event_id.length > 0
+    ? event.event_id
+    : typeof event.uuid === 'string' && event.uuid.length > 0
+      ? event.uuid
+      : crypto.randomUUID();
+  // Runtime normalizers may restart their local counter for each turn. The
+  // transport owns the session-wide sequence so every provider shares one
+  // monotonic ordering at the wire seam.
+  const sequence = sessionId
+    ? nextSequenceBySession.get(sessionId) ?? 0
+    : typeof event.sequence === 'number' && Number.isFinite(event.sequence)
+      ? event.sequence
+      : undefined;
+
+  if (sessionId && sequence !== undefined) {
+    nextSequenceBySession.set(sessionId, Math.max(nextSequenceBySession.get(sessionId) ?? 0, sequence + 1));
+  }
+
+  const { event: _legacyEvent, ...wireEvent } = event;
+  return {
+    ...wireEvent,
+    event_id: eventId,
+    ...(sequence !== undefined ? { sequence } : {}),
+  };
+}
+
+function isCodeMuxDomainEvent(type: unknown): boolean {
+  return type === 'content_started'
+    || type === 'text_delta'
+    || type === 'reasoning_delta'
+    || type === 'content_finished'
+    || type === 'user_message'
+    || type === 'assistant_message'
+    || type === 'tool_started'
+    || type === 'tool_finished'
+    || type === 'user_input_requested'
+    || type === 'permission_requested'
+    || type === 'system_event'
+    || type === 'diagnostic'
+    || type === 'error'
+    || type === 'turn_finished';
 }

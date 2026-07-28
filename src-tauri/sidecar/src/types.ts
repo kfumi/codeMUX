@@ -35,7 +35,7 @@ export interface RuntimeEventContext {
 export type SidecarCommand =
   | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; runtimeGeneration?: number; apiKey?: string; baseUrl?: string; provider?: string; credentialSource?: OpenCodeCredentialSource; model?: string; reasoningEffort?: string; codexNeedsProxy?: boolean; skills?: string[]; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode }
   | { type: 'update_permissions'; sessionId?: string; agentKind?: string; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode }
-  | { type: 'send_input'; prompt: string; inputPayload?: AgentInputPayload }
+  | { type: 'send_input'; sessionId?: string; prompt: string; displayContent?: string; inputPayload?: AgentInputPayload }
   | { type: 'reset_session'; sessionId: string }
   | { type: 'interrupt' }
   | { type: 'shutdown' }

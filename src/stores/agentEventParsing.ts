@@ -412,6 +412,11 @@ export function mapPersistedClaudeMessage(
   raw: Record<string, unknown>,
   agentKind: AgentKind = 'claude_code',
 ): ParsedStoreEvent | null {
+  const codeMuxProjection = projectCodeMuxHistoryEvent(raw);
+  if (codeMuxProjection) {
+    return mapPersistedClaudeMessage(codeMuxProjection, agentKind);
+  }
+
   if (isClaudeSubagentEvent(raw)) {
     return null;
   }
@@ -501,6 +506,41 @@ export function mapPersistedClaudeMessage(
     return { ...normalizedUserEvent, data: { ...normalizedUserEvent.data, content } };
   }
 
+  return null;
+}
+
+function projectCodeMuxHistoryEvent(raw: Record<string, unknown>): Record<string, unknown> | null {
+  if (raw.type === 'assistant_message') {
+    return {
+      type: 'assistant',
+      uuid: raw.event_id,
+      session_id: raw.session_id,
+      timestamp: raw.timestamp,
+      message: { role: 'assistant', content: raw.content },
+    };
+  }
+  if (raw.type === 'user_message') {
+    return {
+      type: 'user',
+      uuid: raw.provider_message_id ?? raw.event_id,
+      session_id: raw.session_id,
+      timestamp: raw.timestamp,
+      ...(raw.line_index !== undefined ? { __lineIndex: raw.line_index } : {}),
+      ...(raw.source_event_index !== undefined ? { sourceEventIndex: raw.source_event_index } : {}),
+      ...(raw.turn_ordinal !== undefined ? { turnOrdinal: raw.turn_ordinal } : {}),
+      message: { role: 'user', content: raw.content },
+    };
+  }
+  if (raw.type === 'system_event') {
+    return {
+      type: 'system',
+      subtype: raw.subtype,
+      timestamp: raw.timestamp,
+      session_id: raw.session_id,
+      content: raw.content,
+      compact_metadata: raw.compact_metadata,
+    };
+  }
   return null;
 }
 

@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod context_usage;
+pub(crate) mod history_events;
 pub(crate) mod opencode_history;
 
 use log::{debug, info, warn};

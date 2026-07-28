@@ -290,7 +290,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
         const auto = part.auto === true;
         const overflow = part.overflow === true;
         events.push(buildEnvelope({
-          type: 'system',
+          type: 'system_event',
           subtype: 'compact_boundary',
           content: 'Conversation compacted',
           compact_metadata: {
@@ -364,7 +364,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       if (statusType === 'retry') {
         const retryDelayMs = status!.next ? Math.max(0, Number(status!.next) - Date.now()) : undefined;
         events.push(buildEnvelope({
-          type: 'system',
+          type: 'system_event',
           subtype: 'api_retry',
           attempt: Number(status!.attempt) || 0,
           max_retries: Number(status!.max_retries) || 5,
@@ -373,7 +373,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
           error: String(status!.message ?? 'Rate limit exceeded'),
         }, context, sessionId));
       } else {
-        events.push(buildEnvelope({ type: 'status', subtype: statusType, status: statusType }, context, sessionId));
+        events.push(buildEnvelope({ type: 'system_event', subtype: statusType, status: statusType }, context, sessionId));
       }
       break;
     }
@@ -474,13 +474,13 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       break;
     }
     case 'server.connected':
-      events.push(buildEnvelope({ type: 'status', subtype: 'connected', status: 'connected' }, context, sessionId));
+      events.push(buildEnvelope({ type: 'system_event', subtype: 'connected', status: 'connected' }, context, sessionId));
       break;
     case 'server.retry': {
       const retryError = properties.error;
       const errorStr = errorMessage(retryError);
       process.stderr.write(`[opencode-debug] toCodeMuxEvent server.retry error=${errorStr} attempt=${properties.attempt} maxRetries=${properties.maxRetries} retryDelayMs=${properties.retryDelayMs}\n`);
-      events.push(buildEnvelope({ type: 'status', subtype: 'retrying', status: 'retrying', ...(retryError !== undefined ? { error: errorStr } : {}) }, context, sessionId));
+      events.push(buildEnvelope({ type: 'system_event', subtype: 'retrying', status: 'retrying', ...(retryError !== undefined ? { error: errorStr } : {}) }, context, sessionId));
       break;
     }
     case 'server.disconnected':
@@ -598,11 +598,17 @@ function buildAssistantEnvelope(context: OpenCodeEventContext, sessionId: string
 }
 
 function buildStreamEvent(sessionId: string | undefined, event: unknown): CodeMuxEvent {
-  return toCodeMuxStreamEvent(sessionId, event) ?? { type: 'diagnostic', subtype: 'unsupported_stream_event' };
+  return toCodeMuxStreamEvent(sessionId, event) ?? {
+    type: 'diagnostic',
+    subtype: 'unsupported_stream_event',
+    ...(sessionId ? { session_id: sessionId } : {}),
+    event_id: crypto.randomUUID(),
+  };
 }
 
 function buildEnvelope(event: CodeMuxEvent, context: OpenCodeEventContext, sessionId: string | undefined): CodeMuxEvent {
-  return { ...event, ...routingMetadata(context, sessionId), uuid: context.eventIdFactory() };
+  const eventId = context.eventIdFactory();
+  return { ...event, ...routingMetadata(context, sessionId), event_id: eventId, uuid: eventId };
 }
 
 function routingMetadata(context: OpenCodeEventContext, sessionId: string | undefined): CodeMuxEvent {

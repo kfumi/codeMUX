@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 use super::context_usage::{
     latest_claude_usage_from_values, latest_codex_usage_from_values, ThreadTokenUsageSnapshot,
 };
+use super::history_events::normalize_history_events;
 use super::opencode_history;
 use super::{spawn_sidecar, SidecarHandle};
 use crate::agent_runtime::opencode::OpenCodeRuntime;
@@ -919,8 +920,9 @@ pub async fn load_claude_session_events(
         }
     }
 
-    info!(target: "agent", "Loaded {} messages from Claude JSONL for app_session_id={}", messages.len(), app_session_id);
-    Ok(messages)
+    let normalized = normalize_history_events(messages, &app_session_id);
+    info!(target: "agent", "Loaded {} CodeMUX events from Claude JSONL for app_session_id={}", normalized.len(), app_session_id);
+    Ok(normalized)
 }
 
 /// Convert a codex JSONL response_item to a Claude-compatible message format.
@@ -1777,11 +1779,12 @@ pub async fn load_opencode_session_events(
         return Ok(Vec::new());
     };
     let home = home_dir()?;
-    tokio::task::spawn_blocking(move || {
+    let events = tokio::task::spawn_blocking(move || {
         super::opencode_history::load_opencode_session_events(&home, &opencode_session_id)
     })
     .await
-    .map_err(|error| format!("Failed to join OpenCode history loader: {}", error))?
+    .map_err(|error| format!("Failed to join OpenCode history loader: {}", error))??;
+    Ok(normalize_history_events(events, &app_session_id))
 }
 
 #[tauri::command]
@@ -1843,8 +1846,9 @@ pub async fn load_codex_session_events(
     }
 
     messages = convert_codex_history_values_to_events(&raw_events, &app_session_id);
+    messages = normalize_history_events(messages, &app_session_id);
 
-    info!(target: "agent", "Loaded {} messages from Codex JSONL for app_session_id={}", messages.len(), app_session_id);
+    info!(target: "agent", "Loaded {} CodeMUX events from Codex JSONL for app_session_id={}", messages.len(), app_session_id);
     Ok(messages)
 }
 
@@ -2405,8 +2409,10 @@ pub async fn send_agent_input(
     session_id: String,
     prompt: String,
     input_payload: Option<serde_json::Value>,
+    display_content: Option<String>,
 ) -> Result<(), String> {
-    let mut cmd = OpenCodeRuntime::send_input_command(prompt);
+    let mut cmd =
+        OpenCodeRuntime::send_input_command(&session_id, prompt, display_content.as_deref());
     if let Some(payload) = input_payload {
         cmd["inputPayload"] = payload;
     }
@@ -2427,6 +2433,7 @@ pub async fn start_agent_session(
     channel: tauri::ipc::Channel<String>,
     reasoning_effort: Option<String>,
     input_payload: Option<serde_json::Value>,
+    display_content: Option<String>,
 ) -> Result<(), String> {
     let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
     crate::log_ctx::with_ctx(ctx, || async {
@@ -2460,7 +2467,8 @@ pub async fn start_agent_session(
 
         send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 
-        let mut input_cmd = OpenCodeRuntime::send_input_command(prompt);
+        let mut input_cmd =
+            OpenCodeRuntime::send_input_command(&session_id, prompt, display_content.as_deref());
         if let Some(payload) = input_payload {
             input_cmd["inputPayload"] = payload;
         }

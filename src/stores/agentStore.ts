@@ -25,12 +25,17 @@ import {
   isCodeMuxStreamEvent,
   isCodeMuxToolEvent,
   isCodeMuxAssistantMessageEvent,
+  isCodeMuxUserMessageEvent,
+  isCodeMuxSystemEvent,
+  isCodeMuxDiagnosticEvent,
   isCodeMuxUserInputRequestedEvent,
   isCodeMuxPermissionRequestedEvent,
   isCodeMuxTurnEvent,
   toLegacyStreamingMessage,
   toLegacyToolMessage,
   toLegacyAssistantMessage,
+  toLegacyUserMessage,
+  toLegacySystemMessage,
   toLegacyUserInputRequestedMessage,
   toLegacyPermissionRequestedMessage,
   toLegacyTurnMessage,
@@ -629,7 +634,26 @@ function parseAgentEvent(raw: string): AgentMessage {
         if (isCodeMuxToolEvent(data)) return toLegacyToolMessage(data);
         return { kind: 'raw', data };
       case 'assistant_message':
-        if (isCodeMuxAssistantMessageEvent(data)) return toLegacyAssistantMessage(data);
+        if (isCodeMuxAssistantMessageEvent(data)) {
+          const event = toLegacyAssistantMessage(data);
+          return event.kind === 'assistant' && isAssistantCompactSummaryEvent(event.data as unknown as Record<string, unknown>)
+            ? { kind: 'raw', data }
+            : event;
+        }
+        return { kind: 'raw', data };
+      case 'user_message':
+        if (isCodeMuxUserMessageEvent(data)) {
+          const event = toLegacyUserMessage(data);
+          return event.kind === 'user' && isAgentInjectedUserMessage(event.data.content)
+            ? { kind: 'raw', data }
+            : event;
+        }
+        return { kind: 'raw', data };
+      case 'system_event':
+        if (isCodeMuxSystemEvent(data)) return toLegacySystemMessage(data);
+        return { kind: 'raw', data };
+      case 'diagnostic':
+        if (isCodeMuxDiagnosticEvent(data)) return { kind: 'raw', data };
         return { kind: 'raw', data };
       case 'user_input_requested':
         if (isCodeMuxUserInputRequestedEvent(data)) return toLegacyUserInputRequestedMessage(data);
@@ -1301,6 +1325,15 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
           return;
         }
 
+        // The Sidecar now emits the canonical user_message event. Keep the
+        // optimistic local message and discard its wire echo once it arrives.
+        if (event.kind === 'user') {
+          const lastEvent = get().events[sessionId]?.at(-1);
+          if (lastEvent?.kind === 'user' && lastEvent.data.content === event.data.content) {
+            return;
+          }
+        }
+
         if (event.kind === 'raw' && event.data?.type === 'sidecar_debug') {
           return;
         }
@@ -1883,7 +1916,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
           }
         }
       };
-      await agentApi.startSession(sessionId, payloadForModel.text, cwd, handleEvent, reasoningEffort, payloadForModel);
+      await agentApi.startSession(sessionId, payloadForModel.text, cwd, handleEvent, reasoningEffort, payloadForModel, userContent);
     } catch (err) {
       logger.error('Agent query failed to start or stream', { sessionId, cwd, displayModel: modelForVision }, serializeError(err));
       set((s) => {
@@ -2090,7 +2123,10 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
           ? new Date(rawMsg.timestamp).getTime() || 0
           : 0;
 
-        const event = isCodeMuxToolEvent(rawMsg) || isCodeMuxTurnEvent(rawMsg) || isCodeMuxStreamEvent(rawMsg)
+        const event = isCodeMuxToolEvent(rawMsg)
+          || isCodeMuxTurnEvent(rawMsg)
+          || isCodeMuxStreamEvent(rawMsg)
+          || isCodeMuxDiagnosticEvent(rawMsg)
           ? parseAgentEvent(JSON.stringify(rawMsg))
           : mapPersistedClaudeMessage(rawMsg, agentKind ?? 'claude_code');
         if (event) {

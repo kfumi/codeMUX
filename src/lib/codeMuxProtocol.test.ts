@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toLegacyAssistantMessage, toLegacyPermissionRequestedMessage, toLegacyStreamingMessage, toLegacyToolMessage, toLegacyTurnMessage, toLegacyUserInputRequestedMessage } from './codeMuxProtocol';
+import { toLegacyAssistantMessage, toLegacyPermissionRequestedMessage, toLegacyStreamingMessage, toLegacySystemMessage, toLegacyToolMessage, toLegacyTurnMessage, toLegacyUserInputRequestedMessage, toLegacyUserMessage } from './codeMuxProtocol';
 
 describe('CodeMUX frontend protocol adapter', () => {
   it('keeps domain deltas compatible with the internal streaming model', () => {
@@ -42,6 +42,44 @@ describe('CodeMUX frontend protocol adapter', () => {
     })).toMatchObject({
       kind: 'assistant',
       data: { session_id: 'session-1', message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] } },
+    });
+  });
+
+  it('maps restored user messages and preserves their locator fields', () => {
+    expect(toLegacyUserMessage({
+      type: 'user_message',
+      session_id: 'session-1',
+      content: [{ type: 'text', text: 'hello' }],
+      provider_message_id: 'provider-user-1',
+      line_index: 12,
+      event_id: 'event-1',
+    })).toEqual({
+      kind: 'user',
+      data: {
+        content: 'hello',
+        locator: {
+          providerMessageId: 'provider-user-1',
+          lineIndex: 12,
+          role: 'user',
+          textFingerprint: 'hello',
+        },
+      },
+    });
+  });
+
+  it('maps restored compaction system events to the existing compact model', () => {
+    expect(toLegacySystemMessage({
+      type: 'system_event',
+      subtype: 'compact_boundary',
+      compact_metadata: { trigger: 'auto', pre_tokens: 42 },
+      event_id: 'event-2',
+    })).toEqual({
+      kind: 'compact',
+      data: {
+        type: 'system',
+        subtype: 'compact_boundary',
+        compact_metadata: { trigger: 'auto', pre_tokens: 42 },
+      },
     });
   });
 

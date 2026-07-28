@@ -20,6 +20,16 @@
 6. 批处理属于 transport concern。传输层可以批量发送连续增量事件，但进入 store 前必须展开为单条 CodeMUX Event。
 7. Event Sequence 在会话内单调递增。重复事件在 Sidecar 去重；发现缺口时产生诊断但继续处理后续事件；重复结束事件不得生成第二个结果。
 
+## 事件分类
+
+CodeMUX Event 的领域事件包括用户消息、助手消息、文本或推理增量、工具开始、工具结束、用户输入请求、权限请求、系统事件、诊断、错误和 Turn Outcome。历史恢复必须在返回前把 Claude、Codex 和 OpenCode 的原始记录转换为这些事件，并为每条事件补齐 `session_id`、`event_id` 和单调递增的 `sequence`。
+
+系统事件使用 `system_event` 类型；上下文压缩使用 `subtype=compact_boundary`。诊断使用 `diagnostic` 类型。前端只将这些事件投影为内部 `AgentMessage`，不再直接解释 provider 的历史 envelope。
+
+MCP 状态、代理端口、Todo、文件快照、Sidecar 生命周期和重连提示属于 Application Control Event。它们服务于应用控制面，不属于对话领域事件，也不进入历史 CodeMUX Event 序列；如果需要诊断，应另外发出 Diagnostic Event。
+
+历史恢复和实时处理共用同一套 CodeMUX Event interface。provider loader 可以保留内部原始记录和测试 fixture，但不得把旧的 `assistant`、`user`、`result` 或 `system` envelope 直接返回给前端。
+
 ## 取舍
 
 这会增加 Sidecar provider adapter 的实现复杂度，并要求历史恢复路径也遵守协议；换取前端 interface 更小、provider 变化的 locality 更好，以及实时和历史事件可以使用同一组等价性测试。

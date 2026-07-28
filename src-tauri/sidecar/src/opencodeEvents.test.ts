@@ -72,7 +72,7 @@ describe('OpenCode event normalization', () => {
     }, context());
     expect(autoCompaction).toHaveLength(1);
     expect(autoCompaction[0]).toMatchObject({
-      type: 'system',
+      type: 'system_event',
       subtype: 'compact_boundary',
       content: 'Conversation compacted',
       compact_metadata: {
@@ -98,7 +98,7 @@ describe('OpenCode event normalization', () => {
     }, context());
     expect(manualCompaction).toHaveLength(1);
     expect(manualCompaction[0]).toMatchObject({
-      type: 'system',
+      type: 'system_event',
       subtype: 'compact_boundary',
       compact_metadata: {
         trigger: 'manual',

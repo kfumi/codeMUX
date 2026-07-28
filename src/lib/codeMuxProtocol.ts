@@ -1,5 +1,6 @@
+import { parseSdkUserMessage } from '@/stores/agentEventParsing';
 import type { AgentMessage } from '@/stores/agentStore';
-import type { AgentAssistantMessage, AgentPermissionRequest } from '@/types/agent';
+import type { AgentAssistantMessage, AgentPermissionRequest, AgentSystemMessage } from '@/types/agent';
 
 type CodeMuxStreamEvent = {
   type: 'content_started' | 'text_delta' | 'reasoning_delta' | 'content_finished';
@@ -26,6 +27,36 @@ type CodeMuxAssistantMessageEvent = {
   type: 'assistant_message';
   session_id?: string;
   content?: AgentAssistantMessage['message']['content'];
+  event_id?: string;
+};
+
+type CodeMuxUserMessageEvent = {
+  type: 'user_message';
+  session_id?: string;
+  content: string | Array<Record<string, unknown>>;
+  provider_message_id?: string;
+  line_index?: number;
+  source_event_index?: number;
+  turn_ordinal?: number;
+  event_id?: string;
+};
+
+type CodeMuxSystemEvent = {
+  type: 'system_event';
+  session_id?: string;
+  subtype?: string;
+  content?: string;
+  compact_metadata?: Record<string, unknown>;
+  event_id?: string;
+  [key: string]: unknown;
+};
+
+type CodeMuxDiagnosticEvent = {
+  type: 'diagnostic';
+  session_id?: string;
+  subtype?: string;
+  error?: string;
+  event_type?: string;
   event_id?: string;
 };
 
@@ -85,6 +116,24 @@ export function isCodeMuxAssistantMessageEvent(value: unknown): value is CodeMux
   return Boolean(value)
     && typeof value === 'object'
     && (value as { type?: unknown }).type === 'assistant_message';
+}
+
+export function isCodeMuxUserMessageEvent(value: unknown): value is CodeMuxUserMessageEvent {
+  return Boolean(value)
+    && typeof value === 'object'
+    && (value as { type?: unknown }).type === 'user_message';
+}
+
+export function isCodeMuxSystemEvent(value: unknown): value is CodeMuxSystemEvent {
+  return Boolean(value)
+    && typeof value === 'object'
+    && (value as { type?: unknown }).type === 'system_event';
+}
+
+export function isCodeMuxDiagnosticEvent(value: unknown): value is CodeMuxDiagnosticEvent {
+  return Boolean(value)
+    && typeof value === 'object'
+    && (value as { type?: unknown }).type === 'diagnostic';
 }
 
 export function isCodeMuxUserInputRequestedEvent(value: unknown): value is CodeMuxUserInputRequestedEvent {
@@ -178,6 +227,80 @@ export function toLegacyAssistantMessage(event: CodeMuxAssistantMessageEvent): A
       parent_tool_use_id: null,
     },
   };
+}
+
+export function toLegacyUserMessage(event: CodeMuxUserMessageEvent): AgentMessage {
+  const raw = {
+    type: 'user',
+    ...(event.provider_message_id ? { uuid: event.provider_message_id } : {}),
+    ...(event.line_index !== undefined ? { __lineIndex: event.line_index } : {}),
+    ...(event.source_event_index !== undefined ? { sourceEventIndex: event.source_event_index } : {}),
+    ...(event.turn_ordinal !== undefined ? { turnOrdinal: event.turn_ordinal } : {}),
+    session_id: event.session_id,
+    message: { role: 'user', content: event.content },
+  } as Record<string, unknown>;
+  const parsed = parseSdkUserMessage(raw);
+  if (parsed.kind === 'user') {
+    return parsed;
+  }
+  return {
+    kind: 'user',
+    data: { content: typeof event.content === 'string' ? event.content : '' },
+  };
+}
+
+export function toLegacySystemMessage(event: CodeMuxSystemEvent): AgentMessage {
+  const data = {
+    type: 'system',
+    subtype: event.subtype ?? 'system',
+    ...(event.content !== undefined ? { content: event.content } : {}),
+    ...(event.compact_metadata ? { compact_metadata: event.compact_metadata } : {}),
+    ...(event.session_id ? { session_id: event.session_id } : {}),
+    ...(event.event_id ? { uuid: event.event_id } : {}),
+  } as Record<string, unknown>;
+  if (event.subtype === 'api_retry') {
+    return {
+      kind: 'api_retry',
+      data: {
+        attempt: numberValue(event.attempt),
+        max_retries: numberValue(event.max_retries),
+        retry_delay_ms: numberValue(event.retry_delay_ms),
+        error_status: numberValue(event.error_status),
+        error: typeof event.error === 'string' ? event.error : 'Request retrying',
+      },
+    };
+  }
+  if (event.subtype === 'init') {
+    return {
+      kind: 'system',
+      data: {
+        type: 'system',
+        subtype: 'init',
+        uuid: event.event_id ?? crypto.randomUUID(),
+        session_id: event.session_id ?? '',
+        tools: Array.isArray(event.tools) ? event.tools.filter((tool): tool is string => typeof tool === 'string') : [],
+        model: typeof event.model === 'string' ? event.model : '',
+        cwd: typeof event.cwd === 'string' ? event.cwd : '',
+        permissionMode: typeof event.permissionMode === 'string' ? event.permissionMode : '',
+      } satisfies AgentSystemMessage,
+    };
+  }
+  if (event.subtype === 'compact_boundary') {
+    const metadata = event.compact_metadata ?? {};
+    return {
+      kind: 'compact',
+      data: {
+        type: 'system',
+        subtype: 'compact_boundary',
+        compact_metadata: {
+          ...metadata,
+          trigger: metadata.trigger === 'auto' ? 'auto' : 'manual',
+          pre_tokens: numberValue(metadata.pre_tokens),
+        },
+      },
+    };
+  }
+  return { kind: 'raw', data };
 }
 
 export function toLegacyUserInputRequestedMessage(event: CodeMuxUserInputRequestedEvent): AgentMessage {

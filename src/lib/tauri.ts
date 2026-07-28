@@ -240,7 +240,8 @@ export const agentApi = {
     sessionId: string,
     prompt: string,
     inputPayload?: AgentInputPayload,
-  ): Promise<void> => invokeLogged('send_agent_input', { sessionId, prompt, inputPayload }),
+    displayContent?: string,
+  ): Promise<void> => invokeLogged('send_agent_input', { sessionId, prompt, inputPayload, displayContent }),
   startSession: (
     sessionId: string,
     prompt: string,
@@ -248,9 +249,10 @@ export const agentApi = {
     onEvent: (event: string) => void,
     reasoningEffort?: ReasoningEffort,
     inputPayload?: AgentInputPayload,
+    displayContent?: string,
   ): Promise<void> => {
     const channel = createAgentChannel(sessionId, onEvent);
-    return invokeLogged('start_agent_session', { sessionId, prompt, cwd, channel, reasoningEffort, inputPayload });
+    return invokeLogged('start_agent_session', { sessionId, prompt, cwd, channel, reasoningEffort, inputPayload, displayContent });
   },
   interrupt: (sessionId: string): Promise<void> => invokeLogged('interrupt_agent_session', { sessionId }),
   shutdown: (sessionId: string): Promise<void> => invokeLogged('shutdown_agent', { sessionId }),

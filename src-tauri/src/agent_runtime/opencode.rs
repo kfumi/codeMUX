@@ -31,11 +31,20 @@ impl OpenCodeRuntime {
         command
     }
 
-    pub fn send_input_command(prompt: String) -> Value {
-        json!({
+    pub fn send_input_command(
+        session_id: &str,
+        prompt: String,
+        display_content: Option<&str>,
+    ) -> Value {
+        let mut command = json!({
             "type": "send_input",
+            "sessionId": session_id,
             "prompt": prompt,
-        })
+        });
+        if let Some(display_content) = display_content {
+            command["displayContent"] = Value::String(display_content.to_string());
+        }
+        command
     }
 
     pub fn interrupt_command() -> Value {
@@ -164,8 +173,8 @@ mod tests {
             })
         );
         assert_eq!(
-            OpenCodeRuntime::send_input_command("hello".to_string()),
-            json!({ "type": "send_input", "prompt": "hello" })
+            OpenCodeRuntime::send_input_command("app-session", "hello".to_string(), None),
+            json!({ "type": "send_input", "sessionId": "app-session", "prompt": "hello" })
         );
         assert_eq!(
             OpenCodeRuntime::interrupt_command(),
