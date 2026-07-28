@@ -516,7 +516,12 @@ function projectCodeMuxHistoryEvent(raw: Record<string, unknown>): Record<string
       uuid: raw.event_id,
       session_id: raw.session_id,
       timestamp: raw.timestamp,
-      message: { role: 'assistant', content: raw.content },
+      message: {
+        role: 'assistant',
+        content: raw.content,
+        ...(isRecord(raw.usage) ? { usage: raw.usage } : {}),
+        ...(typeof raw.stop_reason === 'string' ? { stop_reason: raw.stop_reason } : {}),
+      },
     };
   }
   if (raw.type === 'user_message') {

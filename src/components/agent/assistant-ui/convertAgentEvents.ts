@@ -2,7 +2,8 @@
 import { isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
 import type { AgentUserMessageLocator, ContentBlock } from '../../../types/agent';
 import type { UserAttachmentPreview } from '../../../types/agentInput';
-import { buildAssistantResultTargetSet, isHiddenAssistantThreadUserEvent } from './assistantResultTargets';
+import { isHiddenAssistantThreadUserEvent } from './assistantResultTargets';
+import { buildConversationTurns } from '../../../lib/conversationTurns';
 
 type CodeMuxAssistantRole = 'user' | 'assistant' | 'system';
 
@@ -315,7 +316,12 @@ function markFinalAssistantMessages(
   messages: CodeMuxAssistantMessage[],
   events: AgentMessage[],
 ): void {
-  const assistantIndicesWithResult = buildAssistantResultTargetSet(events);
+  const assistantIndicesWithResult = new Set(
+    buildConversationTurns(events, { isRunning: true })
+      .filter((turn) => turn.hasRealUser || turn.status !== 'interrupted')
+      .map((turn) => turn.footerAnchorEventIndex)
+      .filter((index): index is number => index != null),
+  );
 
   // Mark the message whose sourceEventIndex is in that set.
   for (const message of messages) {

@@ -27,6 +27,8 @@ type CodeMuxAssistantMessageEvent = {
   type: 'assistant_message';
   session_id?: string;
   content?: AgentAssistantMessage['message']['content'];
+  usage?: AgentAssistantMessage['message']['usage'];
+  stop_reason?: string | null;
   event_id?: string;
 };
 
@@ -223,7 +225,12 @@ export function toLegacyAssistantMessage(event: CodeMuxAssistantMessageEvent): A
       type: 'assistant',
       uuid: event.event_id ?? crypto.randomUUID(),
       session_id: event.session_id ?? '',
-      message: { role: 'assistant', content: event.content ?? [] },
+      message: {
+        role: 'assistant',
+        content: event.content ?? [],
+        ...(event.usage ? { usage: event.usage } : {}),
+        ...(event.stop_reason !== undefined ? { stop_reason: event.stop_reason } : {}),
+      },
       parent_tool_use_id: null,
     },
   };

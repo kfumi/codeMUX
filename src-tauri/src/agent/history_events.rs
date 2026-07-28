@@ -34,7 +34,9 @@ fn normalize_one(raw: Value) -> Vec<Value> {
 }
 
 fn normalize_assistant(raw: Value) -> Vec<Value> {
-    let content = if raw.get("type").and_then(Value::as_str) == Some("assistant_message") {
+    let is_code_mux_assistant =
+        raw.get("type").and_then(Value::as_str) == Some("assistant_message");
+    let content = if is_code_mux_assistant {
         raw.get("content").cloned().unwrap_or_else(|| json!([]))
     } else {
         raw.get("message")
@@ -42,6 +44,15 @@ fn normalize_assistant(raw: Value) -> Vec<Value> {
             .cloned()
             .unwrap_or_else(|| json!([]))
     };
+    let assistant_usage = if is_code_mux_assistant {
+        raw.get("usage")
+    } else {
+        raw.get("message").and_then(|message| message.get("usage"))
+    };
+    let assistant_stop_reason = raw.get("stop_reason").or_else(|| {
+        raw.get("message")
+            .and_then(|message| message.get("stop_reason"))
+    });
     let blocks = content_blocks(content);
     let mut events = Vec::new();
     let mut assistant_content = Vec::new();
@@ -61,6 +72,12 @@ fn normalize_assistant(raw: Value) -> Vec<Value> {
             "type": "assistant_message",
             "content": assistant_content,
         });
+        if let Some(usage) = assistant_usage {
+            assistant["usage"] = usage.clone();
+        }
+        if let Some(stop_reason) = assistant_stop_reason {
+            assistant["stop_reason"] = stop_reason.clone();
+        }
         copy_history_fields(&mut assistant, &raw);
         events.insert(0, assistant);
     }

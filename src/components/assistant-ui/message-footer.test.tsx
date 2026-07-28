@@ -23,4 +23,11 @@ describe('MessageFooter', () => {
     expect(footer?.className).toContain('opacity-0');
     expect(footer?.className).toContain('group-hover/message-row:opacity-100');
   });
+
+  it('renders interruption status without inventing statistics', () => {
+    render(<MessageFooter status="interrupted" />);
+
+    expect(screen.getByText('Interrupted')).toBeTruthy();
+    expect(screen.queryByText(/耗时/)).toBeNull();
+  });
 });

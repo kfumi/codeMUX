@@ -45,6 +45,13 @@ export interface AgentAssistantMessage {
   message: {
     role: 'assistant';
     content: ContentBlock[];
+    usage?: {
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_input_tokens?: number;
+      cache_creation_input_tokens?: number;
+    };
+    stop_reason?: string | null;
     model?: string;
   };
   parent_tool_use_id: string | null;
@@ -104,6 +111,8 @@ export interface AgentResultMessage {
     total_tokens: number;
   };
   terminal_reason?: string;
+  /** Set only for read-time compatibility results synthesized from history. */
+  synthetic?: boolean;
 }
 
 /** Todo item from TodoWrite or Task tools */

@@ -1445,6 +1445,44 @@ describe('agent store Codex history loading', () => {
     });
   });
 
+  it('restores a Claude footer result from normalized assistant usage', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+ 
+    loadClaudeSessionEventsMock.mockResolvedValueOnce([
+      {
+        type: 'user_message',
+        session_id: session.id,
+        event_id: 'history-user-1',
+        content: [{ type: 'text', text: 'hello' }],
+      },
+      {
+        type: 'assistant_message',
+        session_id: session.id,
+        event_id: 'history-assistant-1',
+        content: [{ type: 'text', text: 'reply' }],
+        usage: {
+          input_tokens: 200,
+          output_tokens: 40,
+          cache_read_input_tokens: 60,
+          cache_creation_input_tokens: 0,
+        },
+        stop_reason: 'end_turn',
+      },
+    ]);
+ 
+    await useAgentStore.getState().loadSessionMessages(session.id);
+ 
+    const events = useAgentStore.getState().events[session.id] ?? [];
+    expect(events.some((event) => event.kind === 'result')).toBe(true);
+ 
+    const assistant = events.find((event) => event.kind === 'assistant');
+    expect(assistant?.kind === 'assistant' && assistant.data.message.usage).toMatchObject({
+      input_tokens: 200,
+      output_tokens: 40,
+    });
+  });
+ 
   it('loads historical Claude Agent tool calls without subagent linkage and filters sidechain history', async () => {
     const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');

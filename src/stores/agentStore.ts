@@ -883,6 +883,7 @@ function buildTurnSyntheticResult(
       kind: 'result',
       data: {
         type: 'result', subtype: 'success', is_error: false,
+        synthetic: true,
         uuid: `synthetic-turn-${sessionId}-${startIdx}`, session_id: sessionId,
         duration_ms: durationMs, duration_api_ms: 0,
         num_turns: 1, result: '',
@@ -2184,6 +2185,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
               kind: 'result',
               data: {
                 type: 'result', subtype: 'success', is_error: false,
+                synthetic: true,
                 uuid: `synthetic-result-${sessionId}`, session_id: sessionId,
                 duration_ms: validTs.length >= 2 ? validTs[validTs.length - 1] - validTs[0] : 0,
                 duration_api_ms: 0,

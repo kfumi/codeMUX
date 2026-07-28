@@ -2,10 +2,11 @@
 
 import { ActionBarPrimitive, useAuiState } from '@assistant-ui/react';
 import { invoke } from '@tauri-apps/api/core';
-import { Check, Copy, Bug } from 'lucide-react';
+import { Check, Copy, Bug, TriangleAlert, CircleX } from 'lucide-react';
 import { useState } from 'react';
 
 import { cn } from '@/lib/utils';
+import type { ConversationTurnStatus } from '@/types/conversationTurn';
 
 export type MessageFooterStats = {
   durationMs?: number;
@@ -19,23 +20,26 @@ export type MessageFooterStats = {
 type MessageFooterProps = {
   timestamp?: number;
   stats?: MessageFooterStats;
+  status?: Exclude<ConversationTurnStatus, 'running' | 'completed'>;
+  statusReason?: string;
   className?: string;
   revealOnHover?: boolean;
   sessionId?: string;
   sourceUuid?: string;
 };
 
-export function MessageFooter({ timestamp, stats, className, revealOnHover = false, sessionId, sourceUuid }: MessageFooterProps) {
+export function MessageFooter({ timestamp, stats, status, statusReason, className, revealOnHover = false, sessionId, sourceUuid }: MessageFooterProps) {
   const hasStats =
     stats &&
     (stats.durationMs != null ||
       stats.inputTokens != null ||
       stats.outputTokens != null);
+  const hasStatus = status !== undefined;
   const revealClass = revealOnHover
     ? 'opacity-0 transition-opacity duration-150 group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100'
     : undefined;
 
-  if (!timestamp && !hasStats) {
+  if (!timestamp && !hasStats && !hasStatus) {
     return (
       <div
         data-message-footer
@@ -73,6 +77,7 @@ export function MessageFooter({ timestamp, stats, className, revealOnHover = fal
       </ActionBarPrimitive.Root>
 
       {timestamp ? <FooterItem>{formatTime(timestamp)}</FooterItem> : null}
+      {status ? <FooterStatus status={status} reason={statusReason} /> : null}
       {stats?.durationMs != null ? <FooterItem>耗时 {(stats.durationMs / 1000).toFixed(1)}s</FooterItem> : null}
       {stats?.outputTokens != null || totalInputTokens > 0 ? (
         <FooterItem>
@@ -81,6 +86,26 @@ export function MessageFooter({ timestamp, stats, className, revealOnHover = fal
       ) : null}
       {cacheHitRate != null ? <FooterItem>缓存命中 {cacheHitRate.toFixed(0)}%</FooterItem> : null}
     </div>
+  );
+}
+
+function FooterStatus({
+  status,
+  reason,
+}: {
+  status: Exclude<ConversationTurnStatus, 'running' | 'completed'>;
+  reason?: string;
+}) {
+  const label = status === 'interrupted' ? 'Interrupted' : 'Failed';
+  const Icon = status === 'interrupted' ? TriangleAlert : CircleX;
+
+  return (
+    <FooterItem>
+      <span className="inline-flex items-center gap-1" title={reason || undefined}>
+        <Icon className="h-3 w-3" aria-hidden="true" />
+        {label}
+      </span>
+    </FooterItem>
   );
 }
 

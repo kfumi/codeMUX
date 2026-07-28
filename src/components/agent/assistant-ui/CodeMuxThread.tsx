@@ -27,6 +27,8 @@ import {
 import { cn } from '../../../lib/utils';
 import { createLogger } from '../../../lib/logger';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
+import { buildConversationTurnIndex, buildConversationTurns } from '../../../lib/conversationTurns';
+import type { ConversationTurn } from '../../../types/conversationTurn';
 
 const logger = createLogger('CodeMuxThread');
 import { isInterruptMarker } from '../../../stores/agentEventParsing';
@@ -42,7 +44,6 @@ import { buildAssistantResultTargetMap } from './assistantResultTargets';
 import { RunningElapsedTimer, formatElapsed } from './RunningElapsed';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 import { CODEMUX_FORMATTER, DIRECTIVE_CHIP } from './CodeMuxComposer';
-import { type ThreadTokenUsage } from '../contextUsage';
 
 type CodeMuxThreadProps = {
   sessionId: string;
@@ -71,9 +72,7 @@ type CodeMuxThreadRenderContextValue = {
   expandedTurnKeys: Set<string>;
   onToggleExpandedTurn: (turnKey: string) => void;
   toolDurations: Record<string, number>;
-  resultStatsByAssistantIndex: Record<number, MessageFooterStats>;
-  latestFinalAssistantIndex: number | null;
-  latestFinalAssistantFooterStats?: MessageFooterStats;
+  turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
   lastCompactEventIndex: number;
 };
 
@@ -167,52 +166,28 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     return newResult;
   }, [events]);
 
-  const resultStatsCacheRef = useRef<{ events: AgentMessage[]; result: Record<number, MessageFooterStats> }>({ events: [], result: {} });
-  const resultStatsByAssistantIndex = useMemo(() => {
-    const cache = resultStatsCacheRef.current;
-    if (cache.events === events) {
-      return cache.result;
-    }
-
-    const prevLen = cache.events.length;
-    if (prevLen > 0 && prevLen < events.length && cache.events[0] === events[0]) {
-      const newResult = incrementAssistantResultStatsMap(cache.result, events, prevLen);
-      resultStatsCacheRef.current = { events, result: newResult };
-      return newResult;
-    }
-
-    const newResult = buildAssistantResultStatsMap(events);
-    resultStatsCacheRef.current = { events, result: newResult };
-    return newResult;
-  }, [events]);
+  const conversationTurns = useMemo(
+    () => buildConversationTurns(events, {
+      isRunning,
+      forceStopped: stopped,
+      sessionId,
+      ...(tokenUsage ? {
+        latestUsage: {
+          inputTokens: tokenUsage.last.inputTokens,
+          outputTokens: tokenUsage.last.outputTokens,
+          cacheReadTokens: tokenUsage.last.cachedInputTokens,
+        },
+      } : {}),
+    }),
+    [events, stopped, isRunning, sessionId, tokenUsage],
+  );
+  const turnByEventIndex = useMemo(
+    () => buildConversationTurnIndex(conversationTurns),
+    [conversationTurns],
+  );
 
   const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
   const latestRewindableUserIndex = useMemo(() => findLatestRewindableUserIndex(events), [events]);
-  const latestFinalAssistantIndex = useMemo(() => {
-    let lastCompactIndex = -1;
-    for (let i = events.length - 1; i >= 0; i--) {
-      if (events[i].kind === 'compact') {
-        lastCompactIndex = i;
-        break;
-      }
-    }
-
-    let latestIndex: number | null = null;
-    for (const assistantIndex of buildAssistantResultTargetMap(events).keys()) {
-      if (assistantIndex > lastCompactIndex && (latestIndex == null || assistantIndex > latestIndex)) {
-        latestIndex = assistantIndex;
-      }
-    }
-    return latestIndex;
-  }, [events]);
-  const latestFinalAssistantFooterStats = useMemo(
-    () => buildLatestFinalAssistantFooterStats(
-      latestFinalAssistantIndex != null ? resultStatsByAssistantIndex[latestFinalAssistantIndex] : undefined,
-      tokenUsage,
-    ),
-    [latestFinalAssistantIndex, resultStatsByAssistantIndex, tokenUsage],
-  );
-
   const collapseInfoByEventIndex = useMemo(
     () => buildAssistantCollapseInfoMap(events, eventTimestamps),
     [events, eventTimestamps],
@@ -235,9 +210,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     expandedTurnKeys,
     onToggleExpandedTurn: toggleExpandedTurn,
     toolDurations,
-    resultStatsByAssistantIndex,
-    latestFinalAssistantIndex,
-    latestFinalAssistantFooterStats,
+    turnByEventIndex,
     lastCompactEventIndex,
   }), [
     sessionId,
@@ -248,9 +221,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     expandedTurnKeys,
     toggleExpandedTurn,
     toolDurations,
-    resultStatsByAssistantIndex,
-    latestFinalAssistantIndex,
-    latestFinalAssistantFooterStats,
+    turnByEventIndex,
     lastCompactEventIndex,
   ]);
 
@@ -346,9 +317,7 @@ function CodeMuxAssistantMessage() {
     expandedTurnKeys,
     onToggleExpandedTurn,
     toolDurations,
-    resultStatsByAssistantIndex,
-    latestFinalAssistantIndex,
-    latestFinalAssistantFooterStats,
+    turnByEventIndex,
     lastCompactEventIndex,
   } = useCodeMuxThreadRenderContext();
   return (
@@ -360,9 +329,7 @@ function CodeMuxAssistantMessage() {
       expandedTurnKeys={expandedTurnKeys}
       onToggleExpandedTurn={onToggleExpandedTurn}
       toolDurations={toolDurations}
-      resultStatsByAssistantIndex={resultStatsByAssistantIndex}
-      latestFinalAssistantIndex={latestFinalAssistantIndex}
-      latestFinalAssistantFooterStats={latestFinalAssistantFooterStats}
+      turnByEventIndex={turnByEventIndex}
       lastCompactEventIndex={lastCompactEventIndex}
     />
   );
@@ -921,9 +888,7 @@ function AssistantLikeMessage({
   expandedTurnKeys,
   onToggleExpandedTurn,
   toolDurations,
-  resultStatsByAssistantIndex,
-  latestFinalAssistantIndex,
-  latestFinalAssistantFooterStats,
+  turnByEventIndex,
   lastCompactEventIndex,
 }: {
   message: MessageState;
@@ -933,9 +898,7 @@ function AssistantLikeMessage({
   expandedTurnKeys: Set<string>;
   onToggleExpandedTurn: (turnKey: string) => void;
   toolDurations: Record<string, number>;
-  resultStatsByAssistantIndex: Record<number, MessageFooterStats>;
-  latestFinalAssistantIndex: number | null;
-  latestFinalAssistantFooterStats?: MessageFooterStats;
+  turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
   lastCompactEventIndex: number;
 }) {
   if (message.content.length === 0) {
@@ -954,14 +917,20 @@ function AssistantLikeMessage({
 
   const sourceTimestamp = getSourceTimestamp(message);
   const isFinal = message.metadata.custom?.isFinalAssistantMessage === true;
-  const resultFooterStats = sourceEventIndex != null ? resultStatsByAssistantIndex[sourceEventIndex] : undefined;
-  const isLatestFinalMessage = latestFinalAssistantIndex != null && getSourceEventIndices(message).includes(latestFinalAssistantIndex);
-  const footerStats = isFinal && isLatestFinalMessage
-    ? (latestFinalAssistantFooterStats ?? resultFooterStats)
-    : resultFooterStats;
+  const turn = getSourceEventIndices(message)
+    .map((eventIndex) => turnByEventIndex.get(eventIndex))
+    .find((candidate) => candidate?.footerAnchorEventIndex != null);
+  const footerStats = turn ? buildFooterStatsFromTurn(turn) : undefined;
+  const footerStatus = turn?.status === 'interrupted' || turn?.status === 'failed'
+    ? turn.status
+    : undefined;
   const isAfterLastCompact = sourceEventIndex != null && sourceEventIndex > lastCompactEventIndex;
   const shouldRenderFooter =
-    isFinal && message.metadata.custom?.sourceRole !== 'system' && isAfterLastCompact && (footerStats !== undefined || sourceTimestamp !== undefined);
+    isFinal
+    && turn?.status !== 'running'
+    && message.metadata.custom?.sourceRole !== 'system'
+    && isAfterLastCompact
+    && (turn !== undefined || sourceTimestamp !== undefined);
 
   return (
     <MessagePrimitive.Root data-message-row className="group/message-row mb-2 flex w-full justify-start">
@@ -1008,7 +977,7 @@ function AssistantLikeMessage({
                   return (
                     <CodeMuxTextMessagePart
                       text={part.text}
-                      parsePlan={isFinal}
+                      parsePlan={isFinal && turn?.status === 'completed'}
                     />
                   );
 
@@ -1041,6 +1010,8 @@ function AssistantLikeMessage({
           <MessageFooter
             timestamp={sourceTimestamp}
             stats={footerStats}
+            status={footerStatus}
+            statusReason={turn?.termination?.reason}
             revealOnHover
             sessionId={sessionId}
             sourceUuid={message.metadata.custom?.sourceUuid as string | undefined}
@@ -1518,100 +1489,60 @@ export function buildToolDurationMap(events: AgentMessage[]): Record<string, num
   return durations;
 }
 
-function incrementAssistantResultStatsMap(
-  prevStats: Record<number, MessageFooterStats>,
-  events: AgentMessage[],
-  fromIndex: number,
-): Record<number, MessageFooterStats> {
-  const resultIndexByAssistantIndex = buildAssistantResultTargetMap(events);
-  const nextAssistantIndices = new Set<number>();
-
-  for (const [assistantIndex, resultIndex] of resultIndexByAssistantIndex) {
-    if (events[resultIndex]?.kind === 'result') {
-      nextAssistantIndices.add(assistantIndex);
-    }
+function buildFooterStatsFromTurn(
+  turn: ConversationTurn<AgentMessage>,
+): MessageFooterStats | undefined {
+  if (turn.status === 'failed') {
+    return undefined;
   }
 
-  const prevAssistantIndices = Object.keys(prevStats).map((key) => Number(key));
-  if (
-    prevAssistantIndices.length !== nextAssistantIndices.size ||
-    prevAssistantIndices.some((assistantIndex) => !nextAssistantIndices.has(assistantIndex))
-  ) {
-    return buildAssistantResultStatsMap(events);
+  if (turn.status === 'interrupted') {
+    return turn.durationMs !== undefined ? { durationMs: turn.durationMs } : undefined;
   }
 
-  const statsMap = { ...prevStats };
-
-  for (const [assistantIndex, resultIndex] of resultIndexByAssistantIndex) {
-    const event = events[resultIndex];
-    if (event?.kind !== 'result') {
-      continue;
-    }
-
-    if (resultIndex < fromIndex && statsMap[assistantIndex] !== undefined) {
-      continue;
-    }
-
-    statsMap[assistantIndex] = buildFooterStatsFromResultEvent(event);
+  if (turn.status !== 'completed') {
+    return undefined;
   }
 
-  return statsMap;
+  const stats: MessageFooterStats = {
+    ...(turn.durationMs !== undefined ? { durationMs: turn.durationMs } : {}),
+    ...(turn.usage?.inputTokens !== undefined ? { inputTokens: turn.usage.inputTokens } : {}),
+    ...(turn.usage?.outputTokens !== undefined ? { outputTokens: turn.usage.outputTokens } : {}),
+    ...(turn.usage?.cacheReadTokens !== undefined ? { cacheReadTokens: turn.usage.cacheReadTokens } : {}),
+    ...(turn.usage?.cacheCreationTokens !== undefined ? { cacheCreationTokens: turn.usage.cacheCreationTokens } : {}),
+  };
+
+  return Object.keys(stats).length > 0 ? stats : undefined;
 }
 
+/**
+ * Compatibility projection for callers that still need result stats by event
+ * index. The UI itself consumes Turn status and stats directly.
+ */
 export function buildAssistantResultStatsMap(
   events: AgentMessage[],
 ): Record<number, MessageFooterStats> {
   const statsMap: Record<number, MessageFooterStats> = {};
-  const resultIndexByAssistantIndex = buildAssistantResultTargetMap(events);
+  const turns = buildConversationTurns(events, { isRunning: false });
 
-  for (const [assistantIndex, resultIndex] of resultIndexByAssistantIndex) {
-    const event = events[resultIndex];
-    if (event?.kind !== 'result') {
+  for (const turn of turns) {
+    if (turn.status !== 'completed' || turn.footerAnchorEventIndex == null) {
       continue;
     }
 
-    statsMap[assistantIndex] = buildFooterStatsFromResultEvent(event);
+    const stats = buildFooterStatsFromTurn(turn);
+    if (!stats) {
+      continue;
+    }
+
+    statsMap[turn.footerAnchorEventIndex] = {
+      ...stats,
+      ...(turn.numTurns !== undefined ? { numTurns: turn.numTurns } : {}),
+      ...(stats.cacheCreationTokens === undefined ? { cacheCreationTokens: 0 } : {}),
+    };
   }
 
   return statsMap;
-}
-
-function buildLatestFinalAssistantFooterStats(
-  resultStats: MessageFooterStats | undefined,
-  tokenUsage: ThreadTokenUsage | null,
-): MessageFooterStats | undefined {
-  if (!resultStats && !tokenUsage) {
-    return undefined;
-  }
-
-  if (!tokenUsage) {
-    return resultStats;
-  }
-
-  return {
-    ...resultStats,
-    inputTokens: Math.max(tokenUsage.last.inputTokens, 0),
-    outputTokens: Math.max(tokenUsage.last.outputTokens, 0),
-    cacheReadTokens: Math.max(tokenUsage.last.cachedInputTokens, 0),
-    cacheCreationTokens: 0,
-  };
-}
-
-function buildFooterStatsFromResultEvent(
-  event: Extract<AgentMessage, { kind: 'result' }>,
-): MessageFooterStats {
-  const lastTokenUsage = (event.data as any).last_token_usage;
-  const usage = event.data.usage;
-  return {
-    durationMs: event.data.duration_ms,
-    numTurns: event.data.num_turns,
-    inputTokens: lastTokenUsage ? lastTokenUsage.input_tokens : (usage?.input_tokens || 0),
-    outputTokens: lastTokenUsage ? lastTokenUsage.output_tokens : (usage?.output_tokens || 0),
-    cacheReadTokens: lastTokenUsage
-      ? (lastTokenUsage.cached_input_tokens || 0)
-      : (usage?.cache_read_input_tokens || 0),
-    cacheCreationTokens: lastTokenUsage ? 0 : (usage?.cache_creation_input_tokens || 0),
-  };
 }
 
 function isRecord(value: unknown): value is Record<string, any> {
