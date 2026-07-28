@@ -45,14 +45,14 @@ describe('agentPermissions', () => {
     });
   });
 
-  it('keeps OpenCode on its single full-access compatibility mode', () => {
+  it('maps OpenCode plan and full-access modes to the runtime contract', () => {
     expect(mapExecutionModeToPermissionConfig('opencode', 'confirm_before_edit')).toEqual({
       kind: 'opencode',
       permissionMode: 'full_access',
     });
     expect(mapExecutionModeToPermissionConfig('opencode', 'plan')).toEqual({
       kind: 'opencode',
-      permissionMode: 'full_access',
+      permissionMode: 'plan',
     });
     expect(serializePermissionConfig('opencode', { kind: 'claude_code', permissionMode: 'default' })).toEqual({
       kind: 'opencode',

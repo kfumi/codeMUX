@@ -138,7 +138,7 @@ describe('CodeMuxToolCallMessagePart', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /写入文件/ }));
+    fireEvent.click(screen.getByRole('button', { name: /写入/ }));
 
     const content = container.querySelector('[data-slot="tool-fallback-content"]');
     const contentBody = content?.firstElementChild;

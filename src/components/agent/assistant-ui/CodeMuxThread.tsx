@@ -1179,7 +1179,7 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
 
         {isThinking ? (
           <div data-streaming-reasoning="true" className="w-full min-w-0">
-            <ReasoningRoot variant="ghost" defaultOpen={false}>
+            <ReasoningRoot variant="ghost" defaultOpen={isRunning}>
               <ReasoningTrigger active={isRunning} />
               <ReasoningContent aria-busy={isRunning}>
                 <ReasoningText>
