@@ -155,6 +155,68 @@ mod tests {
     }
 
     #[test]
+    fn emits_opencode_tool_results_before_the_terminal_result() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);\
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);",
+        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    "user-1",
+                    "session-1",
+                    1000_i64,
+                    1000_i64,
+                    r#"{"role":"user"}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![
+                    "part-user-text",
+                    "user-1",
+                    "session-1",
+                    1001_i64,
+                    r#"{"type":"text","text":"run it"}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    "assistant-1",
+                    "session-1",
+                    2000_i64,
+                    2600_i64,
+                    r#"{"role":"assistant","tokens":{"input":3,"output":2}}"#
+                ],
+            )
+            .unwrap();
+        connection.execute(
+            "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+            rusqlite::params![
+                "part-tool", "assistant-1", "session-1", 2001_i64,
+                r#"{"type":"tool","callID":"call-1","tool":"bash","state":{"status":"completed","input":{"command":"pwd"},"output":"ok"}}"#
+            ],
+        ).unwrap();
+
+        let events = load_opencode_events_from_connection(&connection, "session-1").unwrap();
+        let types: Vec<&str> = events
+            .iter()
+            .filter_map(|event| event.get("type").and_then(Value::as_str))
+            .collect();
+
+        assert_eq!(types, vec!["user", "assistant", "user", "result"]);
+        assert_eq!(events[2]["message"]["content"][0]["type"], "tool_result");
+        assert_eq!(events[3]["subtype"], "success");
+    }
+
+    #[test]
     fn adds_success_result_event_when_opencode_tokens_are_missing_or_zero() {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch(
@@ -212,27 +274,18 @@ mod tests {
 
         let events = load_opencode_events_from_connection(&connection, "session-1").unwrap();
 
-        assert_eq!(events.len(), 4);
+        assert_eq!(events.len(), 3);
         assert_eq!(events[0]["type"], "assistant");
-        assert_eq!(events[1]["type"], "result");
-        assert_eq!(events[1]["subtype"], "success");
-        assert_eq!(events[1]["is_error"], false);
-        assert_eq!(events[1]["duration_ms"], 400);
-        assert_eq!(events[1]["usage"]["input_tokens"], 0);
-        assert_eq!(events[1]["usage"]["output_tokens"], 0);
-        assert_eq!(events[1]["usage"]["cache_read_input_tokens"], 0);
-        assert_eq!(events[1]["usage"]["cache_write_input_tokens"], 0);
-        assert_eq!(events[1]["last_token_usage"]["total_tokens"], 0);
-        assert_eq!(events[2]["type"], "assistant");
-        assert_eq!(events[3]["type"], "result");
-        assert_eq!(events[3]["subtype"], "success");
-        assert_eq!(events[3]["is_error"], false);
-        assert_eq!(events[3]["duration_ms"], 600);
-        assert_eq!(events[3]["usage"]["input_tokens"], 0);
-        assert_eq!(events[3]["usage"]["output_tokens"], 0);
-        assert_eq!(events[3]["usage"]["cache_read_input_tokens"], 0);
-        assert_eq!(events[3]["usage"]["cache_write_input_tokens"], 0);
-        assert_eq!(events[3]["last_token_usage"]["total_tokens"], 0);
+        assert_eq!(events[1]["type"], "assistant");
+        assert_eq!(events[2]["type"], "result");
+        assert_eq!(events[2]["subtype"], "success");
+        assert_eq!(events[2]["is_error"], false);
+        assert_eq!(events[2]["duration_ms"], 600);
+        assert_eq!(events[2]["usage"]["input_tokens"], 0);
+        assert_eq!(events[2]["usage"]["output_tokens"], 0);
+        assert_eq!(events[2]["usage"]["cache_read_input_tokens"], 0);
+        assert_eq!(events[2]["usage"]["cache_write_input_tokens"], 0);
+        assert_eq!(events[2]["last_token_usage"]["total_tokens"], 0);
     }
 
     #[test]
@@ -586,6 +639,7 @@ fn load_opencode_events_from_connection(
         .map_err(|error| format!("Failed to read OpenCode messages: {}", error))?;
 
     let mut events = Vec::new();
+    let mut pending_success_result: Option<Value> = None;
     for row in message_rows {
         let (message_id, time_created, time_updated, data) =
             row.map_err(|error| format!("Failed to decode OpenCode message row: {}", error))?;
@@ -684,6 +738,7 @@ fn load_opencode_events_from_connection(
                     }
                 }
                 "compaction" => {
+                    flush_pending_opencode_result(&mut events, &mut pending_success_result);
                     let auto = part
                         .data
                         .get("auto")
@@ -717,6 +772,7 @@ fn load_opencode_events_from_connection(
         }
         let timestamp = timestamp_string(time_created);
         if role == "user" {
+            flush_pending_opencode_result(&mut events, &mut pending_success_result);
             events.push(serde_json::json!({
                 "type": "user",
                 "uuid": message_id,
@@ -727,6 +783,7 @@ fn load_opencode_events_from_connection(
             }));
         } else {
             if let Some(error) = message.get("error") {
+                pending_success_result = None;
                 let error_text = opencode_error_message(error);
                 events.push(serde_json::json!({
                     "type": "error",
@@ -736,6 +793,7 @@ fn load_opencode_events_from_connection(
                     "session_id": session_id,
                     "timestamp": timestamp_string(time_created),
                 }));
+                events.extend(tool_results);
                 events.push(serde_json::json!({
                     "type": "result",
                     "subtype": "error",
@@ -767,6 +825,7 @@ fn load_opencode_events_from_connection(
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
                 if is_summary && content.is_empty() {
+                    flush_pending_opencode_result(&mut events, &mut pending_success_result);
                     events.push(serde_json::json!({
                         "type": "system",
                         "subtype": "compact_boundary",
@@ -808,19 +867,27 @@ fn load_opencode_events_from_connection(
                 });
             }
             events.push(event);
-            if let Some(result) = build_opencode_success_result_event(
+            // Tool results are part of the current Turn and must be reduced
+            // before its terminal event. Otherwise the reducer sees a
+            // completed Turn with still-pending tools.
+            events.extend(tool_results);
+            pending_success_result = build_opencode_success_result_event(
                 &message_id,
                 session_id,
                 time_created,
                 time_updated,
                 &message,
-            ) {
-                events.push(result);
-            }
-            events.extend(tool_results);
+            );
         }
     }
+    flush_pending_opencode_result(&mut events, &mut pending_success_result);
     Ok(events)
+}
+
+fn flush_pending_opencode_result(events: &mut Vec<Value>, pending: &mut Option<Value>) {
+    if let Some(result) = pending.take() {
+        events.push(result);
+    }
 }
 
 fn build_opencode_success_result_event(

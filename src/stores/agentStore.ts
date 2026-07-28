@@ -60,6 +60,8 @@ import {
   normalizeThreadTokenUsage,
   type ThreadTokenUsage,
 } from '../components/agent/contextUsage';
+import { buildConversationTurns } from '../lib/conversationTurns';
+import type { ConversationTurn } from '../types/conversationTurn';
 
 export type AgentMessage =
   | { kind: 'user'; data: { content: string; attachments?: UserAttachmentPreview[]; locator?: AgentUserMessageLocator } }
@@ -96,6 +98,8 @@ type ModeBlockedDiagnostic = {
 interface AgentState {
   /** Events for each session */
   events: Record<string, AgentMessage[]>;
+  /** Canonical lifecycle model; events remain the assistant-ui compatibility projection. */
+  turns: Record<string, ConversationTurn<AgentMessage>[]>;
   /** Timestamps (ms) for each event, recorded at arrival time */
   eventTimestamps: Record<string, number[]>;
   /** Whether a query is currently running */
@@ -840,73 +844,6 @@ function removeSessionEntry<T>(record: Record<string, T>, sessionId: string): Re
  * and infers status from tool execution flow when TodoWrite doesn't update statuses.
  */
 
-/**
- * Build a synthetic result event for a single turn (Claude Code historical sessions).
- * Accumulates usage from assistant messages between startIdx (inclusive) and endIdx (exclusive).
- */
-function buildTurnSyntheticResult(
-  events: AgentMessage[],
-  timestamps: number[],
-  startIdx: number,
-  endIdx: number,
-  turnStartTime: number,
-  sessionId: string,
-): { insertAt: number; result: AgentMessage } | null {
-  let lastAssistantIdx = -1;
-  let lastUsage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number } | null = null;
-
-  for (let i = startIdx; i < endIdx; i++) {
-    if (events[i].kind === 'assistant') {
-      lastAssistantIdx = i;
-      const evt = events[i] as any;
-      const msg = evt.data?.message;
-      const usage = msg?.usage || evt.data?.usage;
-      // Prefer the message with stop_reason (e.g. "end_turn") — for Claude extended
-      // thinking the SDK emits two assistant messages (thinking + text) that share the
-      // same input_tokens; summing would double-count.  Taking only the last one with
-      // stop_reason gives the correct cumulative usage for the turn.
-      if (usage && (!lastUsage || msg?.stop_reason)) {
-        lastUsage = usage;
-      }
-    }
-  }
-
-  if (!lastUsage || (lastUsage.input_tokens === 0 && lastUsage.output_tokens === 0)) return null;
-  if (lastAssistantIdx < 0) return null;
-
-  const endTime = timestamps[endIdx - 1] || timestamps[lastAssistantIdx] || 0;
-  const durationMs = endTime > turnStartTime ? endTime - turnStartTime : 0;
-
-  return {
-    insertAt: lastAssistantIdx,
-    result: {
-      kind: 'result',
-      data: {
-        type: 'result', subtype: 'success', is_error: false,
-        synthetic: true,
-        uuid: `synthetic-turn-${sessionId}-${startIdx}`, session_id: sessionId,
-        duration_ms: durationMs, duration_api_ms: 0,
-        num_turns: 1, result: '',
-        usage: {
-          input_tokens: lastUsage.input_tokens || 0,
-          output_tokens: lastUsage.output_tokens || 0,
-          cache_creation_input_tokens: lastUsage.cache_creation_input_tokens || 0,
-          cache_read_input_tokens: lastUsage.cache_read_input_tokens || 0,
-        },
-        last_token_usage: {
-          input_tokens: lastUsage.input_tokens || 0,
-          output_tokens: lastUsage.output_tokens || 0,
-          cached_input_tokens: lastUsage.cache_read_input_tokens || 0,
-          total_tokens:
-            (lastUsage.input_tokens || 0)
-            + (lastUsage.cache_read_input_tokens || 0)
-            + (lastUsage.output_tokens || 0),
-        },
-      } as AgentResultMessage,
-    },
-  };
-}
-
 function extractTodosFromEvents(events: AgentMessage[]): TodoItem[] {
   let todos: TodoItem[] = [];
   const taskMap = new Map<string, TodoItem>();
@@ -1201,6 +1138,7 @@ export function extractChangedFilesFromEvents(
 
 export const useAgentStore = create<AgentState>((set, get) => ({
   events: {},
+  turns: {},
   eventTimestamps: {},
   isRunning: {},
   queryStartTime: {},
@@ -2137,83 +2075,6 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         }
       }
 
-      const hasResult = events.some((e) => e.kind === 'result');
-      if (!hasResult && events.length > 0) {
-        // Generate per-turn synthetic result events (for Claude Code historical sessions)
-        // Each turn starts with a user message; accumulate usage across assistant messages in the turn.
-        let turnStartIdx = -1;
-        let turnStartTime = 0;
-        const turnResults: Array<{ insertAt: number; result: AgentMessage }> = [];
-
-        for (let i = 0; i < events.length; i++) {
-          if (events[i].kind === 'user') {
-            // Flush previous turn if it had usage
-            if (turnStartIdx >= 0) {
-              const turnResult = buildTurnSyntheticResult(events, timestamps, turnStartIdx, i, turnStartTime, sessionId);
-              if (turnResult) turnResults.push({ insertAt: turnResult.insertAt, result: turnResult.result });
-            }
-            turnStartIdx = i;
-            turnStartTime = timestamps[i] || 0;
-          }
-        }
-        // Flush last turn
-        if (turnStartIdx >= 0) {
-          const turnResult = buildTurnSyntheticResult(events, timestamps, turnStartIdx, events.length, turnStartTime, sessionId);
-          if (turnResult) turnResults.push({ insertAt: turnResult.insertAt, result: turnResult.result });
-        }
-
-        // Insert in reverse order to preserve indices
-        for (const tr of turnResults.reverse()) {
-          events.splice(tr.insertAt + 1, 0, tr.result);
-          timestamps.splice(tr.insertAt + 1, 0, timestamps[tr.insertAt] || 0);
-        }
-
-        // Fallback: if no per-turn results were generated, create a single one at the end
-        if (turnResults.length === 0) {
-          let fallbackUsage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number } | null = null;
-          for (const evt of events) {
-            if (evt.kind === 'assistant') {
-              const msg = (evt.data as any)?.message;
-              const usage = msg?.usage;
-              if (usage && (!fallbackUsage || msg?.stop_reason)) {
-                fallbackUsage = usage;
-              }
-            }
-          }
-          if (fallbackUsage && (fallbackUsage.input_tokens > 0 || fallbackUsage.output_tokens > 0)) {
-            const validTs = timestamps.filter((t) => t > 0);
-            events.push({
-              kind: 'result',
-              data: {
-                type: 'result', subtype: 'success', is_error: false,
-                synthetic: true,
-                uuid: `synthetic-result-${sessionId}`, session_id: sessionId,
-                duration_ms: validTs.length >= 2 ? validTs[validTs.length - 1] - validTs[0] : 0,
-                duration_api_ms: 0,
-                num_turns: events.filter((e) => e.kind === 'user').length,
-                result: '',
-                usage: {
-                  input_tokens: fallbackUsage.input_tokens || 0,
-                  output_tokens: fallbackUsage.output_tokens || 0,
-                  cache_creation_input_tokens: fallbackUsage.cache_creation_input_tokens || 0,
-                  cache_read_input_tokens: fallbackUsage.cache_read_input_tokens || 0,
-                },
-                last_token_usage: {
-                  input_tokens: fallbackUsage.input_tokens || 0,
-                  output_tokens: fallbackUsage.output_tokens || 0,
-                  cached_input_tokens: fallbackUsage.cache_read_input_tokens || 0,
-                  total_tokens:
-                    (fallbackUsage.input_tokens || 0)
-                    + (fallbackUsage.cache_read_input_tokens || 0)
-                    + (fallbackUsage.output_tokens || 0),
-                },
-              } as AgentResultMessage,
-            });
-            timestamps.push(validTs[validTs.length - 1] || 0);
-          }
-        }
-      }
-
       set((state) => ({
         events: { ...state.events, [sessionId]: events },
         eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
@@ -2334,3 +2195,49 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     return payload;
   },
 }));
+
+// Keep the lifecycle projection in the store so renderers do not independently
+// infer terminal state from the last assistant message. The listener only reacts
+// to inputs used by the reducer; its own `turns` update does not recurse.
+useAgentStore.subscribe((state, previousState) => {
+  const sessionIds = new Set([
+    ...Object.keys(state.events),
+    ...Object.keys(previousState.events),
+    ...Object.keys(state.tokenUsageBySession),
+    ...Object.keys(previousState.tokenUsageBySession),
+    ...Object.keys(state.isRunning),
+    ...Object.keys(previousState.isRunning),
+    ...Object.keys(state.forceStopped),
+    ...Object.keys(previousState.forceStopped),
+  ]);
+  const changedTurns: Record<string, ConversationTurn<AgentMessage>[]> = {};
+
+  for (const sessionId of sessionIds) {
+    if (
+      state.events[sessionId] === previousState.events[sessionId]
+      && state.tokenUsageBySession[sessionId] === previousState.tokenUsageBySession[sessionId]
+      && state.isRunning[sessionId] === previousState.isRunning[sessionId]
+      && state.forceStopped[sessionId] === previousState.forceStopped[sessionId]
+    ) {
+      continue;
+    }
+
+    const usage = state.tokenUsageBySession[sessionId];
+    changedTurns[sessionId] = buildConversationTurns(state.events[sessionId] ?? [], {
+      isRunning: state.isRunning[sessionId] ?? false,
+      forceStopped: state.forceStopped[sessionId] ?? false,
+      sessionId,
+      ...(usage ? {
+        latestUsage: {
+          inputTokens: usage.last.inputTokens,
+          outputTokens: usage.last.outputTokens,
+          cacheReadTokens: usage.last.cachedInputTokens,
+        },
+      } : {}),
+    });
+  }
+
+  if (Object.keys(changedTurns).length > 0) {
+    useAgentStore.setState({ turns: { ...state.turns, ...changedTurns } });
+  }
+});

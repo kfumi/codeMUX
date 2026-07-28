@@ -1452,10 +1452,11 @@ describe('agent store Codex history loading', () => {
 
     await useAgentStore.getState().loadSessionMessages(session.id);
 
-    expect(useAgentStore.getState().events[session.id]).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: 'result' }),
-      ]),
+    expect(useAgentStore.getState().events[session.id]).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'result' })]),
+    );
+    expect(useAgentStore.getState().turns[session.id]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: 'completed' })]),
     );
     expect(loadLatestTokenUsageMock).toHaveBeenCalledWith(session.id, 'claude_code', 'restored');
     expect(useAgentStore.getState().tokenUsageBySession[session.id]).toMatchObject({
@@ -1470,7 +1471,7 @@ describe('agent store Codex history loading', () => {
     });
   });
 
-  it('restores a Claude footer result from normalized assistant usage', async () => {
+  it('restores a completed Turn from normalized assistant usage without a synthetic result', async () => {
     const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
  
@@ -1499,7 +1500,11 @@ describe('agent store Codex history loading', () => {
     await useAgentStore.getState().loadSessionMessages(session.id);
  
     const events = useAgentStore.getState().events[session.id] ?? [];
-    expect(events.some((event) => event.kind === 'result')).toBe(true);
+    expect(events.some((event) => event.kind === 'result')).toBe(false);
+    expect(useAgentStore.getState().turns[session.id]?.[0]).toMatchObject({
+      status: 'completed',
+      usage: { inputTokens: 200, outputTokens: 40, cacheReadTokens: 60 },
+    });
  
     const assistant = events.find((event) => event.kind === 'assistant');
     expect(assistant?.kind === 'assistant' && assistant.data.message.usage).toMatchObject({

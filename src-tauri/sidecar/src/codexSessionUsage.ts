@@ -40,19 +40,23 @@ async function readLatestCodexTokenUsage(
     crlfDelay: Infinity,
   });
 
-  for await (const line of rl) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      continue;
-    }
+  try {
+    for await (const line of rl) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
 
-    const value = parseJsonObject(trimmed);
-    const usage = value?.type === 'event_msg' && isRecord(value.payload)
-      ? readTokenUsage(value.payload, usageKey)
-      : null;
-    if (usage) {
-      latestUsage = usage;
+      const value = parseJsonObject(trimmed);
+      const usage = value?.type === 'event_msg' && isRecord(value.payload)
+        ? readTokenUsage(value.payload, usageKey)
+        : null;
+      if (usage) {
+        latestUsage = usage;
+      }
     }
+  } finally {
+    closeReadline(rl);
   }
 
   return latestUsage;
@@ -107,7 +111,7 @@ async function sessionFileMatches(path: string, threadId: string): Promise<boole
         value.payload.id === threadId;
     }
   } finally {
-    rl.close();
+    closeReadline(rl);
   }
 
   return false;
@@ -159,4 +163,10 @@ function parseJsonObject(line: string): Record<string, unknown> | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function closeReadline(rl: ReturnType<typeof createInterface>): void {
+  rl.close();
+  const input = rl.input as NodeJS.ReadableStream & { destroy?: () => void };
+  input.destroy?.();
 }

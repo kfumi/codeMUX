@@ -1430,6 +1430,8 @@ fn convert_codex_history_values_to_events(
         last_assistant_msg_idx: Option<usize>,
         last_event_idx: Option<usize>,
         compaction_only: bool,
+        terminal_outcome: Option<&'static str>,
+        terminal_reason: Option<String>,
     }
 
     let has_agent_messages = raw_events
@@ -1523,6 +1525,32 @@ fn convert_codex_history_values_to_events(
                         if let Some(dm) = payload.get("duration_ms").and_then(|d| d.as_u64()) {
                             current_turn.duration_ms = Some(dm);
                         }
+                        current_turn.terminal_outcome = Some("completed");
+                        current_turn.terminal_reason = payload
+                            .get("reason")
+                            .or_else(|| payload.get("message"))
+                            .and_then(|value| value.as_str())
+                            .filter(|value| !value.trim().is_empty())
+                            .map(ToOwned::to_owned);
+                    }
+                    Some("turn_aborted") | Some("task_aborted") | Some("turn_cancelled") => {
+                        current_turn.terminal_outcome = Some("interrupted");
+                        current_turn.terminal_reason = payload
+                            .get("reason")
+                            .or_else(|| payload.get("message"))
+                            .and_then(|value| value.as_str())
+                            .filter(|value| !value.trim().is_empty())
+                            .map(ToOwned::to_owned);
+                    }
+                    Some("turn_failed") | Some("task_failed") | Some("api_error") => {
+                        current_turn.terminal_outcome = Some("failed");
+                        current_turn.terminal_reason = payload
+                            .get("error")
+                            .or_else(|| payload.get("reason"))
+                            .or_else(|| payload.get("message"))
+                            .and_then(|value| value.as_str())
+                            .filter(|value| !value.trim().is_empty())
+                            .map(ToOwned::to_owned);
                     }
                     _ => {}
                 }
@@ -1558,52 +1586,40 @@ fn convert_codex_history_values_to_events(
     let mut turn_results: Vec<TurnResult> = Vec::new();
 
     for turn in &turns {
-        let usage = match &turn.last_token_usage {
-            Some(u) => u,
-            None => continue,
-        };
         if turn.compaction_only {
             continue;
         }
 
-        let input = usage
-            .get("input_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let cached = usage
-            .get("cached_input_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let output = usage
-            .get("output_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let reasoning = usage
-            .get("reasoning_output_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        if input > 0 || output > 0 {
-            if let Some(insert_at) = turn.last_event_idx.or(turn.last_assistant_msg_idx) {
-                let mut result = serde_json::json!({
-                    "type": "turn_finished",
-                    "session_id": app_session_id,
-                    "outcome": "completed",
-                    "duration_ms": turn.duration_ms.unwrap_or(0),
-                    "usage": {
-                        "input_tokens": input,
-                        "cached_input_tokens": cached,
-                        "output_tokens": output,
-                        "reasoning_output_tokens": reasoning
-                    },
-                    "event_id": "",
-                    "sequence": 0
-                });
-                if let Some(ctx) = turn.model_context_window {
-                    result["model_context_window"] = serde_json::json!(ctx);
-                }
-                turn_results.push(TurnResult { insert_at, result });
-            }
+        let Some(insert_at) = turn.last_event_idx.or(turn.last_assistant_msg_idx) else {
+            continue;
+        };
+        let Some(outcome) = turn.terminal_outcome else {
+            continue;
+        };
+        let usage = turn.last_token_usage.as_ref();
+        let mut result = serde_json::json!({
+            "type": "turn_finished",
+            "session_id": app_session_id,
+            "outcome": outcome,
+            "duration_ms": turn.duration_ms,
+            "event_id": "",
+            "sequence": 0
+        });
+        if let Some(reason) = &turn.terminal_reason {
+            result["reason"] = serde_json::json!(reason);
         }
+        if let Some(usage) = usage {
+            result["usage"] = serde_json::json!({
+                "input_tokens": usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                "cached_input_tokens": usage.get("cached_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                "output_tokens": usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                "reasoning_output_tokens": usage.get("reasoning_output_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
+            });
+        }
+        if let Some(ctx) = turn.model_context_window {
+            result["model_context_window"] = serde_json::json!(ctx);
+        }
+        turn_results.push(TurnResult { insert_at, result });
     }
 
     for turn_result in turn_results.into_iter().rev() {
@@ -4616,6 +4632,28 @@ mod tests {
         );
         assert_eq!(converted[1]["outcome"], "completed");
         assert_eq!(converted[1]["sequence"], 0);
+    }
+
+    #[test]
+    fn codex_history_keeps_explicit_completion_without_usage() {
+        let raw_events = vec![
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": "agent_message", "message": "完成" }
+            }),
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": "task_complete", "duration_ms": 12 }
+            }),
+        ];
+
+        let converted = convert_codex_history_values_to_events(&raw_events, "app-session-1");
+
+        assert_eq!(converted.len(), 2);
+        assert_eq!(converted[1]["type"], "turn_finished");
+        assert_eq!(converted[1]["outcome"], "completed");
+        assert_eq!(converted[1]["duration_ms"], 12);
+        assert!(converted[1].get("usage").is_none());
     }
 
     #[test]

@@ -124,6 +124,18 @@ describe('buildConversationTurns', () => {
     expect(turn?.pendingToolIds).toEqual(['tool-1']);
   });
 
+  it('does not infer completion from usage when no terminal signal exists', () => {
+    const partial = assistant([{ type: 'text', text: 'still working' }]);
+    partial.data.message.usage = { input_tokens: 20, output_tokens: 4 };
+    const [turn] = buildConversationTurns([
+      user('partial'),
+      partial,
+    ], { isRunning: false });
+
+    expect(turn?.status).toBe('interrupted');
+    expect(turn?.usage).toBeUndefined();
+  });
+
   it('gives failure precedence over a later successful result', () => {
     const [turn] = buildConversationTurns([
       user('run it'),

@@ -18,7 +18,7 @@ pub(crate) fn normalize_history_events(raw_events: Vec<Value>, app_session_id: &
 
 fn normalize_one(raw: Value) -> Vec<Value> {
     let Some(event_type) = raw.get("type").and_then(Value::as_str) else {
-        return Vec::new();
+        return vec![diagnostic_for_raw(raw, "missing_event_type")];
     };
 
     match event_type {
@@ -29,8 +29,25 @@ fn normalize_one(raw: Value) -> Vec<Value> {
         "error" | "diagnostic" => vec![raw],
         "tool_started" | "tool_finished" | "turn_finished" => vec![raw],
         "user_input_requested" | "permission_requested" => vec![raw],
-        _ => Vec::new(),
+        _ => vec![diagnostic_for_raw(raw, "unknown_event")],
     }
+}
+
+fn diagnostic_for_raw(raw: Value, subtype: &str) -> Value {
+    let event_type = raw.get("type").and_then(Value::as_str).unwrap_or("unknown");
+    let mut diagnostic = json!({
+        "type": "diagnostic",
+        "subtype": subtype,
+        "event_type": event_type,
+        "raw": raw,
+    });
+    if let Some(timestamp) = diagnostic
+        .get("raw")
+        .and_then(|value| value.get("timestamp"))
+    {
+        diagnostic["timestamp"] = timestamp.clone();
+    }
+    diagnostic
 }
 
 fn normalize_assistant(raw: Value) -> Vec<Value> {
