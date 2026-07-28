@@ -5,6 +5,7 @@ import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { usePerfStore } from '../../stores/perfStore';
+import { TooltipHint } from '../ui/tooltip';
 import './PerfOverlay.css';
 
 const STORAGE_KEY = 'codemux.perfOverlay';
@@ -180,7 +181,9 @@ export function PerfOverlay() {
     <div className={`perf-overlay is-${isLight ? 'light' : 'dark'}`} style={style}>
       <div className="perf-overlay__header" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
         <span>Performance</span>
-        <button className="perf-overlay__toggle" onClick={toggleCollapsed} title="折叠">–</button>
+        <TooltipHint content="折叠">
+          <button className="perf-overlay__toggle" onClick={toggleCollapsed} aria-label="折叠">–</button>
+        </TooltipHint>
       </div>
       <PerfRow label="FPS" value={String(fps)} bad={fps > 0 && fps < FPS_BAD_THRESHOLD} />
       <PerfRow label="内存 (MB)" value={memoryMb !== null ? memoryMb.toFixed(1) : 'N/A'} />
@@ -205,10 +208,12 @@ export function PerfOverlay() {
           <li style={{ opacity: 0.5 }}>无</li>
         ) : (
           slowTop5.map((s, i) => (
-            <li key={`${s.command}-${i}`} title={s.command}>
-              <span>{s.command}</span>
-              <span>{s.durationMs.toFixed(0)}ms</span>
-            </li>
+            <TooltipHint content={s.command}>
+              <li key={`${s.command}-${i}`}>
+                <span>{s.command}</span>
+                <span>{s.durationMs.toFixed(0)}ms</span>
+              </li>
+            </TooltipHint>
           ))
         )}
       </ul>
@@ -219,10 +224,12 @@ export function PerfOverlay() {
           <li style={{ opacity: 0.5 }}>无</li>
         ) : (
           topRenders.map((r) => (
-            <li key={r.id} title={r.id}>
-              <span>{r.id}</span>
-              <span>{r.commitCount}× / {r.totalMs.toFixed(0)}ms</span>
-            </li>
+            <TooltipHint content={r.id}>
+              <li key={r.id}>
+                <span>{r.id}</span>
+                <span>{r.commitCount}× / {r.totalMs.toFixed(0)}ms</span>
+              </li>
+            </TooltipHint>
           ))
         )}
       </ul>

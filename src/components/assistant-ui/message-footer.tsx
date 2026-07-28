@@ -6,6 +6,7 @@ import { Check, Copy, Bug, TriangleAlert, CircleX } from 'lucide-react';
 import { useState } from 'react';
 
 import { cn } from '@/lib/utils';
+import { TooltipHint } from '@/components/ui/tooltip';
 import type { ConversationTurnStatus } from '@/types/conversationTurn';
 
 export type MessageFooterStats = {
@@ -101,10 +102,12 @@ function FooterStatus({
 
   return (
     <FooterItem>
-      <span className="inline-flex items-center gap-1" title={reason || undefined}>
-        <Icon className="h-3 w-3" aria-hidden="true" />
-        {label}
-      </span>
+      <TooltipHint content={reason || undefined}>
+        <span className="inline-flex items-center gap-1">
+          <Icon className="h-3 w-3" aria-hidden="true" />
+          {label}
+        </span>
+      </TooltipHint>
     </FooterItem>
   );
 }
@@ -122,18 +125,19 @@ function DebugCopyButton({ sessionId, sourceUuid }: { sessionId: string; sourceU
   };
 
   return (
-    <button
-      type="button"
-      onClick={() => void copyDebugPrompt()}
-      className={cn(
-        'inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors',
-        'text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground',
-      )}
-      title="复制排查问题提示词"
-      aria-label="复制排查问题提示词"
-    >
-      {isCopied ? <Check className="h-3 w-3" /> : <Bug className="h-3 w-3" />}
-    </button>
+    <TooltipHint content="复制排查问题提示词">
+      <button
+        type="button"
+        onClick={() => void copyDebugPrompt()}
+        className={cn(
+          'inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors',
+          'text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground',
+        )}
+        aria-label="复制排查问题提示词"
+      >
+        {isCopied ? <Check className="h-3 w-3" /> : <Bug className="h-3 w-3" />}
+      </button>
+    </TooltipHint>
   );
 }
 
@@ -141,17 +145,18 @@ function MessageCopyButton() {
   const isCopied = useAuiState((state) => state.message.isCopied);
 
   return (
-    <ActionBarPrimitive.Copy
-      copiedDuration={1500}
-      className={cn(
-        'inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors',
-        'text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground',
-      )}
-      title="复制"
-      aria-label="复制"
-    >
-      {isCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-    </ActionBarPrimitive.Copy>
+    <TooltipHint content="复制">
+      <ActionBarPrimitive.Copy
+        copiedDuration={1500}
+        className={cn(
+          'inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors',
+          'text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground',
+        )}
+        aria-label="复制"
+      >
+        {isCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+      </ActionBarPrimitive.Copy>
+    </TooltipHint>
   );
 }
 

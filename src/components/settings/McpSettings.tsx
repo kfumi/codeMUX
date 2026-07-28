@@ -5,6 +5,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
+import { TooltipHint } from '../ui/tooltip';
 import { Plus, Pencil, Trash2, Loader2, Server, Wand2, Wand, RefreshCw, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import CodeMirror from '@uiw/react-codemirror';
@@ -369,20 +370,21 @@ export function McpSettingsPanel() {
                 </div>
                 <div className="flex items-center gap-1">
                   {APP_ORDER.map((app) => (
-                    <button
-                      key={app}
-                      aria-label={`toggle-${server.id}-${app}`}
-                      title={APP_LABELS[app]}
-                      onClick={() => toggleApp(server.id, app, !server.apps[app])}
-                      className={cn(
-                        'inline-flex items-center justify-center w-7 h-7 rounded-md border transition-colors',
-                        server.apps[app]
-                          ? 'bg-primary/10 border-primary/30'
-                          : 'bg-background border-transparent opacity-40 hover:opacity-70',
-                      )}
-                    >
-                      <AppIcon app={app} size={16} />
-                    </button>
+                    <TooltipHint content={APP_LABELS[app]}>
+                      <button
+                        key={app}
+                        aria-label={`toggle-${server.id}-${app}`}
+                        onClick={() => toggleApp(server.id, app, !server.apps[app])}
+                        className={cn(
+                          'inline-flex items-center justify-center w-7 h-7 rounded-md border transition-colors',
+                          server.apps[app]
+                            ? 'bg-primary/10 border-primary/30'
+                            : 'bg-background border-transparent opacity-40 hover:opacity-70',
+                        )}
+                      >
+                        <AppIcon app={app} size={16} />
+                      </button>
+                    </TooltipHint>
                   ))}
                 </div>
                 <div className="flex items-center -space-x-1">
@@ -443,23 +445,24 @@ export function McpSettingsPanel() {
                 </div>
                 <div className="flex items-center gap-1.5">
                   {APP_ORDER.map((app) => (
-                    <button
-                      key={app}
-                      aria-label={`toggle-edit-${app}`}
-                      title={APP_LABELS[app]}
-                      onClick={() => setEditing({
-                        ...editing,
-                        apps: { ...editing.apps, [app]: !editing.apps[app] }
-                      })}
-                      className={cn(
-                        'inline-flex items-center justify-center w-8 h-8 rounded-md border transition-colors',
-                        editing.apps[app]
-                          ? 'bg-primary/10 border-primary/30'
-                          : 'bg-background border-transparent opacity-40 hover:opacity-70',
-                      )}
-                    >
-                      <AppIcon app={app} size={20} />
-                    </button>
+                    <TooltipHint content={APP_LABELS[app]}>
+                      <button
+                        key={app}
+                        aria-label={`toggle-edit-${app}`}
+                        onClick={() => setEditing({
+                          ...editing,
+                          apps: { ...editing.apps, [app]: !editing.apps[app] }
+                        })}
+                        className={cn(
+                          'inline-flex items-center justify-center w-8 h-8 rounded-md border transition-colors',
+                          editing.apps[app]
+                            ? 'bg-primary/10 border-primary/30'
+                            : 'bg-background border-transparent opacity-40 hover:opacity-70',
+                        )}
+                      >
+                        <AppIcon app={app} size={20} />
+                      </button>
+                    </TooltipHint>
                   ))}
                 </div>
               </div>

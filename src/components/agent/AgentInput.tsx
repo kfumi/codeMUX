@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, KeyboardEvent } from 'react';
 import { ArrowUp, Square } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
+import { TooltipHint } from '../ui/tooltip';
 import { SlashCommandMenu } from './SlashCommandMenu';
 import { filterCommands, findCommand, SlashCommand } from '../../lib/slashCommands';
 
@@ -158,24 +159,26 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
 
           <div className="flex items-center justify-between px-3.5 pb-3 pt-0.5">
             <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => {
-                  if (textareaRef.current) {
-                    const value = '/';
-                    setInput(value);
-                    textareaRef.current.focus();
-                    updateMenu(value);
-                  }
-                }}
-                className={cn(
-                    'rounded-full px-2.5 py-1 text-[12px] font-medium transition-all duration-200',
-                  'text-muted-foreground/46 hover:bg-muted/55 hover:text-muted-foreground',
-                )}
-                title="斜杠命令"
-                style={{ fontFamily: "'JetBrains Mono', monospace" }}
-              >
-                /
-              </button>
+              <TooltipHint content="斜杠命令">
+                <button
+                  onClick={() => {
+                    if (textareaRef.current) {
+                      const value = '/';
+                      setInput(value);
+                      textareaRef.current.focus();
+                      updateMenu(value);
+                    }
+                  }}
+                  className={cn(
+                      'rounded-full px-2.5 py-1 text-[12px] font-medium transition-all duration-200',
+                    'text-muted-foreground/46 hover:bg-muted/55 hover:text-muted-foreground',
+                  )}
+                  aria-label="斜杠命令"
+                  style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                >
+                  /
+                </button>
+              </TooltipHint>
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -191,30 +194,34 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
               <div className="mx-0.5 h-4 w-px bg-border/45" />
 
               {isLoading ? (
-                <button
-                  onClick={onStop}
-                  className={cn(
-                    'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200',
-                    'bg-[hsl(var(--destructive)/0.10)] text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive)/0.16)]',
-                  )}
-                  title="停止"
-                >
-                  <Square className="h-3.5 w-3.5" fill="currentColor" />
-                </button>
+                <TooltipHint content="停止">
+                  <button
+                    onClick={onStop}
+                    aria-label="停止"
+                    className={cn(
+                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200',
+                      'bg-[hsl(var(--destructive)/0.10)] text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive)/0.16)]',
+                    )}
+                  >
+                    <Square className="h-3.5 w-3.5" fill="currentColor" />
+                  </button>
+                </TooltipHint>
               ) : (
-                <button
-                  onClick={handleSend}
-                  disabled={!hasContent}
-                  className={cn(
-                    'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200',
-                    hasContent
-                      ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-15px_hsl(var(--primary)/0.58)] hover:bg-primary/94'
-                      : 'cursor-not-allowed bg-muted/45 text-muted-foreground/28',
-                  )}
-                  title="发送"
-                >
-                  <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
-                </button>
+                <TooltipHint content="发送">
+                  <button
+                    onClick={handleSend}
+                    disabled={!hasContent}
+                    aria-label="发送"
+                    className={cn(
+                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200',
+                      hasContent
+                        ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-15px_hsl(var(--primary)/0.58)] hover:bg-primary/94'
+                        : 'cursor-not-allowed bg-muted/45 text-muted-foreground/28',
+                    )}
+                  >
+                    <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+                  </button>
+                </TooltipHint>
               )}
             </div>
           </div>

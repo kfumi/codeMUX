@@ -4,6 +4,7 @@ import { GitBranch, GitCommitHorizontal, Plus, RefreshCw, UploadCloud } from 'lu
 import type { GitRepositoryState } from '../../../lib/tauri';
 import { cn } from '../../../lib/utils';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../../ui/dropdown-menu';
+import { TooltipHint } from '../../ui/tooltip';
 import { GitActionPopover } from './GitActionPopover';
 
 interface GitBranchBarProps {
@@ -112,7 +113,6 @@ export function GitBranchBar({
                 type="button"
                 data-testid="git-action-trigger"
                 aria-label={actionMode === 'commit' ? '打开提交窗口' : '打开推送窗口'}
-                title={actionMode === 'commit' ? '提交' : '推送'}
                 disabled={loading || mutating}
                 className={cn(
                   'flex h-8 items-center gap-1.5 rounded-lg border border-border/45 bg-background/92 px-2.5 text-xs font-medium transition-colors hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-50',
@@ -125,26 +125,28 @@ export function GitBranchBar({
             )}
           />
         )}
-        <button
-          type="button"
-          aria-label="新建分支"
-          title="新建分支"
-          data-testid="git-branch-create"
-          onClick={onCreateBranch}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
-        >
-          <Plus className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          aria-label="刷新"
-          title="刷新"
-          onClick={onRefresh}
-          disabled={loading}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground disabled:opacity-50"
-        >
-          <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
-        </button>
+        <TooltipHint content="新建分支">
+          <button
+            type="button"
+            aria-label="新建分支"
+            data-testid="git-branch-create"
+            onClick={onCreateBranch}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        </TooltipHint>
+        <TooltipHint content="刷新">
+          <button
+            type="button"
+            aria-label="刷新"
+            onClick={onRefresh}
+            disabled={loading}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground disabled:opacity-50"
+          >
+            <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+          </button>
+        </TooltipHint>
       </div>
     </div>
   );

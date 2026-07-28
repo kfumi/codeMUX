@@ -21,6 +21,7 @@ import type { AgentKind } from '../../types/session';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
 import { Button } from '../ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 
 interface AgentPermissionSelectorProps {
   agentKind: AgentKind;
@@ -137,24 +138,31 @@ export function AgentPermissionSelector({
   return (
     <div>
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            disabled={disabled}
-            aria-haspopup="menu"
-            aria-expanded={open}
-            title={selected.label}
-            className={cn(
-              'inline-flex h-7 items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-200 hover:bg-muted/58 hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
-              compact ? 'max-w-9' : 'max-w-40',
-              selected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
-            )}
-          >
-            <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
-            {!compact && <span className="truncate">{selected.label}</span>}
-            {!compact && <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />}
-          </button>
-        </PopoverTrigger>
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  aria-haspopup="menu"
+                  aria-expanded={open}
+                  aria-label={selected.label}
+                  className={cn(
+                    'inline-flex h-7 items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-200 hover:bg-muted/58 hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
+                    compact ? 'max-w-9' : 'max-w-40',
+                    selected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
+                  )}
+                >
+                  <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
+                  {!compact && <span className="truncate">{selected.label}</span>}
+                  {!compact && <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+                </button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>{selected.label}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <PopoverContent
           side="top"
           sideOffset={8}

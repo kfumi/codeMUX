@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import type { AgentInstallation, InstallSource } from '@/lib/tauri';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { TooltipHint } from '@/components/ui/tooltip';
 
 // shadcn/ui Badge 在本项目尚未单独抽取，此处复用其标准 API 与样式约定，便于后续替换。
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline';
@@ -69,12 +70,11 @@ export function AgentInstallRow({ install }: AgentInstallRowProps) {
       </Badge>
 
       <div className="flex min-w-0 flex-1 items-center gap-1">
-        <span
-          className="truncate font-mono text-xs text-muted-foreground"
-          title={path}
-        >
-          {path}
-        </span>
+        <TooltipHint content={path}>
+          <span className="truncate font-mono text-xs text-muted-foreground">
+            {path}
+          </span>
+        </TooltipHint>
         <Button
           type="button"
           variant="ghost"

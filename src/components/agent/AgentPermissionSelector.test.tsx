@@ -24,7 +24,7 @@ describe('AgentPermissionSelector', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTitle('变更前确认'));
+    fireEvent.click(screen.getByRole('button', { name: '变更前确认' }));
 
     expect(screen.getAllByText('变更前确认')).toHaveLength(2);
     expect(screen.getByText('自动编辑')).toBeTruthy();
@@ -60,9 +60,9 @@ describe('AgentPermissionSelector', () => {
     const triggerButton = triggerLabel.closest('button');
 
     expect(triggerButton).toBeTruthy();
-    expect(triggerButton?.getAttribute('title')).toBe('计划模式');
+    expect(triggerButton?.getAttribute('aria-label')).toBe('计划模式');
 
-    fireEvent.click(screen.getByTitle('计划模式'));
+    fireEvent.click(screen.getByRole('button', { name: '计划模式' }));
 
     expect(triggerButton?.textContent).toContain('计划模式');
     expect(screen.getAllByText('计划模式')).toHaveLength(2);
@@ -106,7 +106,7 @@ describe('AgentPermissionSelector', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTitle('完全访问'));
+    fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
     fireEvent.click(screen.getByText('计划模式'));
 
     expect(onPermissionConfigChange).toHaveBeenCalledWith({
@@ -139,7 +139,7 @@ describe('AgentPermissionSelector', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTitle('完全访问'));
+    fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
     fireEvent.click(screen.getByText('计划模式'));
 
     expect(onModeChange).toHaveBeenCalledWith(
@@ -213,7 +213,7 @@ describe('AgentPermissionSelector', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTitle('完全访问'));
+    fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
 
     expect(screen.getAllByText('完全访问')).toHaveLength(2);
     expect(screen.getAllByRole('menuitemradio')).toHaveLength(2);

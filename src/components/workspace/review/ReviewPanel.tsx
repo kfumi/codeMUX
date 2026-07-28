@@ -6,6 +6,7 @@ import { cn } from '../../../lib/utils';
 import { DiffView } from '../../preview/DiffView';
 import { ConfirmDialog } from '../../ui/confirm-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
+import { TooltipHint } from '../../ui/tooltip';
 import { GitBranchBar } from './GitBranchBar';
 import { GitBranchDialog } from './GitBranchDialog';
 
@@ -297,27 +298,29 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
             </SelectContent>
           </Select>
 
-          <button
-            className="flex h-8 items-center gap-1.5 rounded-lg border border-border/42 bg-background/80 px-2.5 text-xs text-foreground/82 transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-45"
-            onClick={() => void runStageAction()}
-            disabled={loading || files.length === 0 || mutatingKey != null}
-            aria-label={area === 'unstaged' ? '全部暂存' : '全部取消暂存'}
-            title={area === 'unstaged' ? '全部暂存' : '全部取消暂存'}
-          >
-            {area === 'unstaged' ? <Upload className="h-3.5 w-3.5" /> : <Undo2 className="h-3.5 w-3.5" />}
-            <span className="hidden xl:inline">{area === 'unstaged' ? '全部暂存' : '全部取消暂存'}</span>
-          </button>
-          <button
-            className="flex h-8 items-center gap-1.5 rounded-lg border border-border/42 bg-background/80 px-2.5 text-xs text-destructive transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-45"
-            onClick={() => setRevertTarget({ type: 'all' })}
-            disabled={loading || files.length === 0 || mutatingKey != null}
-            aria-label="全部还原"
-            title="全部还原"
-            data-testid="git-revert-all"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            <span className="hidden xl:inline">全部还原</span>
-          </button>
+          <TooltipHint content={area === 'unstaged' ? '全部暂存' : '全部取消暂存'}>
+            <button
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-border/42 bg-background/80 px-2.5 text-xs text-foreground/82 transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-45"
+              onClick={() => void runStageAction()}
+              disabled={loading || files.length === 0 || mutatingKey != null}
+              aria-label={area === 'unstaged' ? '全部暂存' : '全部取消暂存'}
+            >
+              {area === 'unstaged' ? <Upload className="h-3.5 w-3.5" /> : <Undo2 className="h-3.5 w-3.5" />}
+              <span className="hidden xl:inline">{area === 'unstaged' ? '全部暂存' : '全部取消暂存'}</span>
+            </button>
+          </TooltipHint>
+          <TooltipHint content="全部还原">
+            <button
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-border/42 bg-background/80 px-2.5 text-xs text-destructive transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-45"
+              onClick={() => setRevertTarget({ type: 'all' })}
+              disabled={loading || files.length === 0 || mutatingKey != null}
+              aria-label="全部还原"
+              data-testid="git-revert-all"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span className="hidden xl:inline">全部还原</span>
+            </button>
+          </TooltipHint>
         </div>
 
         <button
@@ -378,24 +381,25 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
                       <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/70" />
                     )}
                   </button>
-                  <button
-                    type="button"
-                    aria-label={`${area === 'unstaged' ? '暂存' : '取消暂存'} ${name}`}
-                    title={area === 'unstaged' ? '暂存此文件' : '取消暂存此文件'}
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/72 transition-colors hover:bg-background/72 hover:text-foreground"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void runStageAction(file.path);
-                    }}
-                  >
-                    {area === 'unstaged' ? <Upload className="h-3.5 w-3.5" /> : <Undo2 className="h-3.5 w-3.5" />}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`还原 ${name}`}
-                    title="还原此文件"
-                    data-testid={`git-revert-${name}`}
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/72 transition-colors hover:bg-background/72 hover:text-destructive"
+                  <TooltipHint content={area === 'unstaged' ? '暂存此文件' : '取消暂存此文件'}>
+                    <button
+                      type="button"
+                      aria-label={`${area === 'unstaged' ? '暂存' : '取消暂存'} ${name}`}
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/72 transition-colors hover:bg-background/72 hover:text-foreground"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void runStageAction(file.path);
+                      }}
+                    >
+                      {area === 'unstaged' ? <Upload className="h-3.5 w-3.5" /> : <Undo2 className="h-3.5 w-3.5" />}
+                    </button>
+                  </TooltipHint>
+                  <TooltipHint content="还原此文件">
+                    <button
+                      type="button"
+                      aria-label={`还原 ${name}`}
+                      data-testid={`git-revert-${name}`}
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/72 transition-colors hover:bg-background/72 hover:text-destructive"
                     onClick={(event) => {
                       event.stopPropagation();
                       setRevertTarget({ type: 'single', filePath: file.path, name });
@@ -403,6 +407,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
+                  </TooltipHint>
                 </div>
                 {expanded && (
                   <div className="border-l-4 border-[hsl(var(--success))] bg-background">

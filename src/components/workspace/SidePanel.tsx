@@ -4,6 +4,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { cn } from '../../lib/utils';
 import { useSidePanelStore, type SidePanelTab } from '../../stores/sidePanelStore';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipHint, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { PlanPreviewPanel } from './plan/PlanPreviewPanel';
 import { ReviewPanel } from './review/ReviewPanel';
 import { TerminalPanel } from './terminal/TerminalPanel';
@@ -88,13 +89,15 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
 
       <div className="flex h-full w-full min-w-0 flex-col pl-2">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/25 px-3">
-          <button
-            className="rounded-lg p-1.5 text-muted-foreground/64 transition-colors hover:bg-muted/55 hover:text-foreground"
-            title="收起面板"
-            onClick={closePanel}
-          >
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
+          <TooltipHint content="收起面板">
+            <button
+              aria-label="收起面板"
+              className="rounded-lg p-1.5 text-muted-foreground/64 transition-colors hover:bg-muted/55 hover:text-foreground"
+              onClick={closePanel}
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </TooltipHint>
 
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
             {tabs.map((tab) => (
@@ -110,15 +113,22 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
 
           {projectPath ? (
             <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
-                  title="打开标签"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </DropdownMenuTrigger>
+              <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="打开标签"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>打开标签</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
               <DropdownMenuContent align="end" className="z-[190] min-w-32">
                 <DropdownMenuItem onClick={openReview} icon={<FileSearch className="h-3.5 w-3.5" />}>
                   审查
@@ -129,15 +139,17 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <span title="请先选择项目">
-              <button
-                type="button"
-                className="flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-lg text-muted-foreground opacity-45"
-                disabled
-              >
-                <Plus className="h-4 w-4" />
-              </button>
-            </span>
+            <TooltipHint content="请先选择项目">
+              <span aria-label="请先选择项目">
+                <button
+                  type="button"
+                  className="flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-lg text-muted-foreground opacity-45"
+                  disabled
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </span>
+            </TooltipHint>
           )}
         </div>
 

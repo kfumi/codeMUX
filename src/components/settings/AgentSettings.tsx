@@ -36,6 +36,7 @@ import { getAgentDefinition } from '../../types/agentRegistry';
 import type { AgentKind } from '../../types/session';
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { Button } from '../ui/button';
+import { TooltipHint } from '../ui/tooltip';
 import { AgentInstallRow } from './AgentInstallRow';
 import { AgentUpgradeConfirmDialog } from './AgentUpgradeConfirmDialog';
 
@@ -616,16 +617,17 @@ function RuntimeInfoRow({ label, value, mono, empty, indicator }: RuntimeInfoRow
             aria-label="已安装"
           />
         )}
-        <span
-          className={cn(
-            'truncate text-[12px]',
-            mono && 'font-mono',
-            empty ? 'text-foreground/35' : 'text-foreground/80',
-          )}
-          title={value}
-        >
-          {value}
-        </span>
+        <TooltipHint content={value}>
+          <span
+            className={cn(
+              'truncate text-[12px]',
+              mono && 'font-mono',
+              empty ? 'text-foreground/35' : 'text-foreground/80',
+            )}
+          >
+            {value}
+          </span>
+        </TooltipHint>
       </div>
     </div>
   );

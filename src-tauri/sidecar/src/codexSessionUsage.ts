@@ -35,8 +35,9 @@ async function readLatestCodexTokenUsage(
   }
 
   let latestUsage: CodexTokenUsage | null = null;
+  const input = createReadStream(sessionFile, { encoding: 'utf8' });
   const rl = createInterface({
-    input: createReadStream(sessionFile, { encoding: 'utf8' }),
+    input,
     crlfDelay: Infinity,
   });
 
@@ -56,7 +57,7 @@ async function readLatestCodexTokenUsage(
       }
     }
   } finally {
-    closeReadline(rl);
+    closeReadline(rl, input);
   }
 
   return latestUsage;
@@ -93,8 +94,9 @@ async function findCodexSessionFile(root: string, threadId: string): Promise<str
 }
 
 async function sessionFileMatches(path: string, threadId: string): Promise<boolean> {
+  const input = createReadStream(path, { encoding: 'utf8' });
   const rl = createInterface({
-    input: createReadStream(path, { encoding: 'utf8' }),
+    input,
     crlfDelay: Infinity,
   });
 
@@ -111,7 +113,7 @@ async function sessionFileMatches(path: string, threadId: string): Promise<boole
         value.payload.id === threadId;
     }
   } finally {
-    closeReadline(rl);
+    closeReadline(rl, input);
   }
 
   return false;
@@ -165,8 +167,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function closeReadline(rl: ReturnType<typeof createInterface>): void {
+function closeReadline(
+  rl: ReturnType<typeof createInterface>,
+  input: NodeJS.ReadableStream & { destroy?: () => void },
+): void {
   rl.close();
-  const input = rl.input as NodeJS.ReadableStream & { destroy?: () => void };
   input.destroy?.();
 }

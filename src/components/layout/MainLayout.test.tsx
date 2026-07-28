@@ -43,8 +43,8 @@ describe('MainLayout', () => {
       </MainLayout>,
     );
 
-    const toggle = document.querySelector('button[title="收起侧栏"]');
-    const update = document.querySelector('button:not([title])');
+    const toggle = document.querySelector('button[aria-label="收起侧栏"]');
+    const update = document.querySelector('button:not([aria-label])');
 
     expect(toggle).toBeTruthy();
     expect(update?.textContent).toBe('更新');

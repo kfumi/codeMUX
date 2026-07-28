@@ -284,7 +284,7 @@ describe('CodeMuxComposer', () => {
   it('renders the add menu with file and plan mode options', () => {
     render(<CodeMuxComposer sessionId="session-1" />);
 
-    fireEvent.click(screen.getByTitle('添加附件或功能'));
+    fireEvent.click(screen.getByRole('button', { name: '添加附件或功能' }));
 
     expect(screen.getByText('选择文件')).toBeTruthy();
     expect(screen.getByText('计划模式')).toBeTruthy();

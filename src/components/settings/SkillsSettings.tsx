@@ -3,6 +3,7 @@ import { useSkillStore } from '../../stores/skillStore';
 import type { ImportableSkill, Skill, SkillApps } from '../../types/skill';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
+import { TooltipHint } from '../ui/tooltip';
 import { Trash2, Loader2, Eye, RefreshCw, Download, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { MarkdownRenderer } from '../agent/MarkdownRenderer';
@@ -181,12 +182,13 @@ export function SkillsSettingsPanel() {
                 </p>
               )}
               {skill.disk_path && (
-                <p
-                  className="text-[10px] text-muted-foreground/60 truncate mt-0.5 font-mono"
-                  title={skill.disk_path}
-                >
-                  {skill.disk_path}
-                </p>
+                <TooltipHint content={skill.disk_path}>
+                  <p
+                    className="text-[10px] text-muted-foreground/60 truncate mt-0.5 font-mono"
+                  >
+                    {skill.disk_path}
+                  </p>
+                </TooltipHint>
               )}
             </div>
             <Button variant="ghost" size="sm" onClick={() => handlePreview(skill)}>
@@ -194,20 +196,21 @@ export function SkillsSettingsPanel() {
             </Button>
             <div className="flex items-center gap-1">
               {APP_ORDER.map((app) => (
-                <button
-                  key={app}
-                  aria-label={`toggle-${skill.id}-${app}`}
-                  title={APP_LABELS[app]}
-                  onClick={() => toggleApp(skill.id, app, !skill.apps[app])}
-                  className={cn(
-                    'inline-flex items-center justify-center w-7 h-7 rounded-md border transition-colors',
-                    skill.apps[app]
-                      ? 'bg-primary/10 border-primary/30'
-                      : 'bg-background border-transparent opacity-40 hover:opacity-70',
-                  )}
-                >
-                  <AppIcon app={app} size={16} />
-                </button>
+                <TooltipHint content={APP_LABELS[app]}>
+                  <button
+                    key={app}
+                    aria-label={`toggle-${skill.id}-${app}`}
+                    onClick={() => toggleApp(skill.id, app, !skill.apps[app])}
+                    className={cn(
+                      'inline-flex items-center justify-center w-7 h-7 rounded-md border transition-colors',
+                      skill.apps[app]
+                        ? 'bg-primary/10 border-primary/30'
+                        : 'bg-background border-transparent opacity-40 hover:opacity-70',
+                    )}
+                  >
+                    <AppIcon app={app} size={16} />
+                  </button>
+                </TooltipHint>
               ))}
             </div>
             <Button
@@ -304,12 +307,13 @@ export function SkillsSettingsPanel() {
                               </p>
                             )}
                             {skill.disk_path && (
-                              <p
-                                className="text-[10px] text-muted-foreground/60 truncate mt-0.5 font-mono"
-                                title={skill.disk_path}
-                              >
-                                {skill.disk_path}
-                              </p>
+                              <TooltipHint content={skill.disk_path}>
+                                <p
+                                  className="text-[10px] text-muted-foreground/60 truncate mt-0.5 font-mono"
+                                >
+                                  {skill.disk_path}
+                                </p>
+                              </TooltipHint>
                             )}
                           </div>
                         </label>

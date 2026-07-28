@@ -191,7 +191,7 @@ describe('AgentPanel session bootstrapping', () => {
   it('keeps the permission selector enabled while the session is running', () => {
     render(<AgentPanel sessionId="session-running" />);
 
-    expect(screen.getByTitle('变更前确认')).toHaveProperty('disabled', false);
+    expect(screen.getByRole('button', { name: '变更前确认' })).toHaveProperty('disabled', false);
     expect(screen.getByTestId('model-selector').dataset.model).toBe('claude-sonnet-4-20250514');
   });
   it('uses global model options while preserving the saved session model for context', async () => {

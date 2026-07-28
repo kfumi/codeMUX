@@ -24,4 +24,39 @@ const TooltipContent = React.forwardRef<
 ));
 TooltipContent.displayName = TooltipPrimitive.Content.displayName;
 
+type TooltipHintProps = {
+  content?: React.ReactNode;
+  side?: 'top' | 'bottom' | 'left' | 'right';
+  delayDuration?: number;
+  children: React.ReactElement;
+};
+
+/**
+ * Wrap any single element with a tooltip. When `content` is null/undefined/empty,
+ * renders children as-is without a tooltip wrapper (matching the semantics of the
+ * native `title` attribute which is omitted when set to undefined).
+ *
+ * The child must be a single element that forwards refs and spreads props onto
+ * its root DOM node (native HTML elements, shadcn components, assistant-ui
+ * primitives all qualify) so that Radix `Slot` can merge trigger props.
+ */
+export function TooltipHint({
+  content,
+  side = 'top',
+  delayDuration = 300,
+  children,
+}: TooltipHintProps) {
+  if (content == null || content === '') {
+    return children;
+  }
+  return (
+    <TooltipProvider delayDuration={delayDuration}>
+      <Tooltip>
+        <TooltipTrigger asChild>{children}</TooltipTrigger>
+        <TooltipContent side={side}>{content}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };

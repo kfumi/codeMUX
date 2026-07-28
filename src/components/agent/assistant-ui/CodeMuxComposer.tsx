@@ -37,6 +37,7 @@ import { findCommand, getAllCommands } from '../../../lib/slashCommands';
 import { createLogger, serializeError } from '../../../lib/logger';
 import { cn } from '../../../lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
+import { Tooltip, TooltipContent, TooltipHint, TooltipProvider, TooltipTrigger } from '../../ui/tooltip';
 import { useAgentStore } from '../../../stores/agentStore';
 import { usePreviewStore, type FileTreeNodeData } from '../../../stores/previewStore';
 import { useSessionStore } from '../../../stores/sessionStore';
@@ -510,16 +511,23 @@ export function CodeMuxComposer({
             {!pendingQuestion && !pendingPlan && <div className="relative flex items-center justify-between pl-1">
               <div className="flex items-center gap-2">
                 <Popover open={addMenuOpen} onOpenChange={setAddMenuOpen}>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      disabled={disabled}
-                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/76 transition-all duration-200 hover:bg-muted/58 hover:text-foreground"
-                      title="添加附件或功能"
-                    >
-                      <Plus className="h-4 w-4" />
-                    </button>
-                  </PopoverTrigger>
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <PopoverTrigger asChild>
+                          <button
+                            type="button"
+                            disabled={disabled}
+                            aria-label="添加附件或功能"
+                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/76 transition-all duration-200 hover:bg-muted/58 hover:text-foreground"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </button>
+                        </PopoverTrigger>
+                      </TooltipTrigger>
+                      <TooltipContent>添加附件或功能</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 <PopoverContent
                   side="top"
                   sideOffset={8}
@@ -565,27 +573,30 @@ export function CodeMuxComposer({
                   </span>
                 )}
                 {isRunning ? (
-                  <button
-                    type="button"
-                    onClick={() => void onStop?.()}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))] transition-all duration-200 hover:scale-105 hover:bg-[hsl(var(--destructive)/0.18)] active:scale-95"
-                    title="停止"
-                  >
-                    <Square className="h-3.5 w-3.5" fill="currentColor" />
-                  </button>
+                  <TooltipHint content="停止">
+                    <button
+                      type="button"
+                      onClick={() => void onStop?.()}
+                      aria-label="停止"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))] transition-all duration-200 hover:scale-105 hover:bg-[hsl(var(--destructive)/0.18)] active:scale-95"
+                    >
+                      <Square className="h-3.5 w-3.5" fill="currentColor" />
+                    </button>
+                  </TooltipHint>
                 ) : (
-                  <ComposerPrimitive.Send
-                    className={cn(
-                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200 active:scale-95',
-                      hasInput && !disabled
-                        ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-15px_hsl(var(--primary)/0.58)] hover:bg-primary/94'
-                        : 'cursor-not-allowed bg-[hsl(var(--surface-3))] text-muted-foreground/42',
-                    )}
-                    title="发送"
-                    disabled={disabled || !hasInput}
-                  >
-                    <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
-                  </ComposerPrimitive.Send>
+                  <TooltipHint content="发送">
+                    <ComposerPrimitive.Send
+                      className={cn(
+                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200 active:scale-95',
+                        hasInput && !disabled
+                          ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-15px_hsl(var(--primary)/0.58)] hover:bg-primary/94'
+                          : 'cursor-not-allowed bg-[hsl(var(--surface-3))] text-muted-foreground/42',
+                      )}
+                      aria-label="发送"
+                    >
+                      <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+                    </ComposerPrimitive.Send>
+                  </TooltipHint>
                 )}
               </div>
             </div>}
@@ -872,12 +883,14 @@ export function ComposerAttachmentPreview() {
             <AttachmentPrimitive.unstable_Thumb className="flex h-full w-full items-center justify-center text-xs text-muted-foreground" />
           </div>
         )}
-        <AttachmentPrimitive.Remove
-          className="absolute right-1 top-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-background/92 text-muted-foreground opacity-100 shadow-sm ring-1 ring-border/50 transition-colors hover:text-foreground"
-          title="移除附件"
-        >
-          <X className="h-3.5 w-3.5" />
-        </AttachmentPrimitive.Remove>
+        <TooltipHint content="移除附件">
+          <AttachmentPrimitive.Remove
+            className="absolute right-1 top-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-background/92 text-muted-foreground opacity-100 shadow-sm ring-1 ring-border/50 transition-colors hover:text-foreground"
+            aria-label="移除附件"
+          >
+            <X className="h-3.5 w-3.5" />
+          </AttachmentPrimitive.Remove>
+        </TooltipHint>
       </div>
     </AttachmentPrimitive.Root>
   );

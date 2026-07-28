@@ -4,6 +4,7 @@ import { Archive, Loader2, Pencil, Pin, PinOff, Trash2, Undo2 } from 'lucide-rea
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui/context-menu';
+import { TooltipHint } from '../ui/tooltip';
 import { cn } from '../../lib/utils';
 import { getAgentDefinition, type AgentDefinition } from '../../types/agentRegistry';
 import { useAgentStore } from '../../stores/agentStore';
@@ -175,35 +176,37 @@ export function SessionItem({
                     {timeLabel}
                   </span>
                   <span className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                    <button
-                      className={cn(
-                        'rounded-md p-1 transition-colors duration-150',
-                        session.is_pinned ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/42',
-                        'hover:bg-[hsl(var(--sidebar-bg))] hover:text-[hsl(var(--sidebar-fg))]',
-                      )}
-                      aria-label={session.is_pinned ? '取消置顶对话' : '置顶对话'}
-                      title={session.is_pinned ? '取消置顶对话' : '置顶对话'}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleTogglePinned();
-                      }}
-                    >
-                      <PinIcon className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      className={cn(
-                        'rounded-md p-1 text-[hsl(var(--sidebar-fg))]/42 transition-colors duration-150',
-                        'hover:bg-[hsl(var(--sidebar-bg))] hover:text-[hsl(var(--sidebar-fg))]',
-                      )}
-                      aria-label={archiveLabel}
-                      title={archiveLabel}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleArchive();
-                      }}
-                    >
-                      <ArchiveIcon className="h-3.5 w-3.5" />
-                    </button>
+                    <TooltipHint content={session.is_pinned ? '取消置顶对话' : '置顶对话'}>
+                      <button
+                        className={cn(
+                          'rounded-md p-1 transition-colors duration-150',
+                          session.is_pinned ? 'text-[hsl(var(--sidebar-glow))]' : 'text-[hsl(var(--sidebar-fg))]/42',
+                          'hover:bg-[hsl(var(--sidebar-bg))] hover:text-[hsl(var(--sidebar-fg))]',
+                        )}
+                        aria-label={session.is_pinned ? '取消置顶对话' : '置顶对话'}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleTogglePinned();
+                        }}
+                      >
+                        <PinIcon className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipHint>
+                    <TooltipHint content={archiveLabel}>
+                      <button
+                        className={cn(
+                          'rounded-md p-1 text-[hsl(var(--sidebar-fg))]/42 transition-colors duration-150',
+                          'hover:bg-[hsl(var(--sidebar-bg))] hover:text-[hsl(var(--sidebar-fg))]',
+                        )}
+                        aria-label={archiveLabel}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleArchive();
+                        }}
+                      >
+                        <ArchiveIcon className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipHint>
                   </span>
                 </span>
               </>

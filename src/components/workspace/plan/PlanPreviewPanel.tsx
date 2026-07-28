@@ -4,6 +4,7 @@ import { code } from '@streamdown/code';
 
 import { CODEMUX_MARKDOWN_REHYPE_PLUGINS, CodeMuxMarkdownLink } from '../../assistant-ui/markdown-link';
 import { FileView } from '../../preview/FileView';
+import { TooltipHint } from '../../ui/tooltip';
 
 function displayName(path: string) {
   const normalized = path.replace(/\\/g, '/');
@@ -40,9 +41,11 @@ export function PlanPreviewPanel({
             {displayName(planFilePath ?? '')}
           </div>
           {planFilePath ? (
-            <div className="mt-0.5 truncate text-xs text-muted-foreground/58" title={planFilePath}>
-              {planFilePath}
-            </div>
+            <TooltipHint content={planFilePath}>
+              <div className="mt-0.5 truncate text-xs text-muted-foreground/58">
+                {planFilePath}
+              </div>
+            </TooltipHint>
           ) : null}
         </div>
       </div>

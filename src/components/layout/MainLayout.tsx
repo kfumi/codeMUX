@@ -3,6 +3,7 @@ import { useRef, useState, useCallback, useLayoutEffect, type ReactNode } from '
 
 import { cn } from '../../lib/utils';
 import { SidePanel } from '../workspace/SidePanel';
+import { TooltipHint } from '../ui/tooltip';
 import { TitleBar } from './TitleBar';
 
 const SIDEBAR_MIN = 200;
@@ -74,22 +75,24 @@ export function MainLayout({
   }, []);
 
   const sidebarToggleButton = sidebar != null ? (
-    <button
-      onClick={toggleSidebar}
-      title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
-      className={cn(
-        'flex h-7 w-8 shrink-0 items-center justify-center rounded-md transition-all duration-150',
-        sidebarCollapsed
-          ? 'text-foreground/58 hover:bg-muted/58 hover:text-foreground'
-          : 'text-[hsl(var(--sidebar-fg))]/58 hover:bg-[hsl(var(--sidebar-muted))]/80 hover:text-[hsl(var(--sidebar-fg))]',
-      )}
-    >
-      {sidebarCollapsed ? (
-        <PanelLeftOpen className="h-3.5 w-3.5" />
-      ) : (
-        <PanelLeftClose className="h-3.5 w-3.5" />
-      )}
-    </button>
+    <TooltipHint content={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}>
+      <button
+        onClick={toggleSidebar}
+        aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+        className={cn(
+          'flex h-7 w-8 shrink-0 items-center justify-center rounded-md transition-all duration-150',
+          sidebarCollapsed
+            ? 'text-foreground/58 hover:bg-muted/58 hover:text-foreground'
+            : 'text-[hsl(var(--sidebar-fg))]/58 hover:bg-[hsl(var(--sidebar-muted))]/80 hover:text-[hsl(var(--sidebar-fg))]',
+        )}
+      >
+        {sidebarCollapsed ? (
+          <PanelLeftOpen className="h-3.5 w-3.5" />
+        ) : (
+          <PanelLeftClose className="h-3.5 w-3.5" />
+        )}
+      </button>
+    </TooltipHint>
   ) : null;
 
   const sidebarControls = sidebarToggleButton ? (

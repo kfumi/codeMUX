@@ -3,6 +3,7 @@ import { FileCode, GitCompare, Loader2, PanelLeft, X } from 'lucide-react';
 
 import { usePreviewStore } from '../../stores/previewStore';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui/context-menu';
+import { TooltipHint } from '../ui/tooltip';
 import { DiffView } from './DiffView';
 import { FileView } from './FileView';
 import { FileTree } from './FileTree';
@@ -70,36 +71,39 @@ export function PreviewPanel() {
         <div className="flex items-center justify-between border-b border-[hsl(var(--border))]/30 px-3.5 py-2.5">
           <div className="flex items-center gap-1">
             {!isDiffView && (
-              <button
-                onClick={toggleFileTree}
-                className={cn(
-                  'rounded-lg p-1.5 transition-all duration-200',
-                  showFileTree ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/45 hover:bg-muted/50 hover:text-foreground/72',
-                )}
-                title="文件树"
-              >
-                <PanelLeft className="h-3.5 w-3.5" />
-              </button>
+              <TooltipHint content="文件树">
+                <button
+                  onClick={toggleFileTree}
+                  aria-label="文件树"
+                  className={cn(
+                    'rounded-lg p-1.5 transition-all duration-200',
+                    showFileTree ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/45 hover:bg-muted/50 hover:text-foreground/72',
+                  )}
+                >
+                  <PanelLeft className="h-3.5 w-3.5" />
+                </button>
+              </TooltipHint>
             )}
           </div>
 
           <div className="surface-panel flex gap-0.5 rounded-xl border border-border/50 bg-muted/28 p-0.5 dark:bg-[linear-gradient(180deg,hsl(var(--surface-3))/0.88,hsl(var(--surface-2))/0.8)]">
-            <button
-              onClick={() => setViewMode('diff')}
-              disabled={!hasOriginal}
-              className={cn(
-                'rounded-lg px-2.5 py-1 text-xs transition-all duration-200',
-                viewMode === 'diff'
-                  ? 'bg-background/90 font-medium text-foreground shadow-[0_1px_0_0_hsl(var(--foreground)/0.03)]'
-                  : hasOriginal
-                    ? 'text-muted-foreground/58 hover:text-foreground/80'
-                    : 'cursor-not-allowed text-muted-foreground/22',
-              )}
-              title={!hasOriginal ? '此文件未被修改' : undefined}
-            >
-              <GitCompare className="mr-1 inline h-3 w-3" />
-              Diff
-            </button>
+            <TooltipHint content={!hasOriginal ? '此文件未被修改' : undefined}>
+              <button
+                onClick={() => setViewMode('diff')}
+                disabled={!hasOriginal}
+                className={cn(
+                  'rounded-lg px-2.5 py-1 text-xs transition-all duration-200',
+                  viewMode === 'diff'
+                    ? 'bg-background/90 font-medium text-foreground shadow-[0_1px_0_0_hsl(var(--foreground)/0.03)]'
+                    : hasOriginal
+                      ? 'text-muted-foreground/58 hover:text-foreground/80'
+                      : 'cursor-not-allowed text-muted-foreground/22',
+                )}
+              >
+                <GitCompare className="mr-1 inline h-3 w-3" />
+                Diff
+              </button>
+            </TooltipHint>
             <button
               onClick={() => setViewMode('file')}
               className={cn(
