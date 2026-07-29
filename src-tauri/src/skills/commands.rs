@@ -24,7 +24,8 @@ fn agents_skills_dir() -> std::path::PathBuf {
 }
 
 /// Scan a single skills directory and register all skills with SKILL.md found there.
-/// Returns (name, skill_dir_path) for each discovered skill.
+/// Returns (directory, ssot_path) for each newly-discovered skill — the ssot_path is what the
+/// caller needs to project the skill into agent dirs.
 fn scan_skills_directory(
     db_guard: &rusqlite::Connection,
     dir: &std::path::Path,
@@ -50,39 +51,35 @@ fn scan_skills_directory(
             Some(n) => n.to_string(),
             None => continue,
         };
-        // Skip symlinks to avoid duplicates
+        // Skip symlinks to avoid re-discovering our own projections
         if std::fs::symlink_metadata(&path)
             .map(|m| m.file_type().is_symlink())
             .unwrap_or(false)
         {
             continue;
         }
-        let content = std::fs::read_to_string(&skill_md).unwrap_or_default();
-        let (description, display_name) = db::parse_frontmatter(&content);
-
-        // Only register if not already in DB (don't overwrite user preferences)
-        let existing = db::get_skill_by_name(db_guard, &name).unwrap_or(None);
-        if existing.is_some() {
-            discovered.push((name, path));
+        #[cfg(windows)]
+        if junction::exists(&path).unwrap_or(false) {
             continue;
         }
 
-        let now = chrono::Utc::now().to_rfc3339();
-        let skill = Skill {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: name.clone(),
-            display_name,
-            description,
-            installed_at: now,
-            apps: SkillApps {
+        // Register newly-discovered skills (names not yet in DB) with all agents enabled.
+        // Existing skills keep their user-configured preferences (helper dedups by name).
+        match super::service::register_discovered_skill(
+            db_guard,
+            &name,
+            &path,
+            SkillApps {
                 claude: true,
-                ..Default::default()
+                codex: true,
+                gemini: true,
+                opencode: true,
             },
-            disk_path: Some(path.to_string_lossy().to_string()),
-            directory: name.clone(),
-        };
-        let _ = db::upsert_skill(db_guard, &skill);
-        discovered.push((name, path));
+        ) {
+            Ok(Some((directory, ssot_path))) => discovered.push((directory, ssot_path)),
+            Ok(None) => {} // already in DB, skip
+            Err(e) => log::warn!(target: "skills_scan", "Failed to register '{}': {}", name, e),
+        }
     }
     discovered
 }
@@ -329,40 +326,52 @@ pub fn get_skill_content(state: State<'_, AppState>, id: String) -> Result<Strin
 
 #[tauri::command]
 pub fn scan_disk_skills(state: State<'_, AppState>) -> Result<Vec<Skill>, String> {
-    // Only run scan + migration when the DB has no skills yet (first-time init).
-    // Subsequent visits read directly from the DB — new skills come in via
-    // the "import from tools" flow, not by re-scanning on every panel open.
+    // Always re-scan the source directories for NEW skills (names not yet in the DB).
+    // The first-time SSOT migration still runs only when the DB is empty.
+    let mut to_sync: Vec<(String, std::path::PathBuf)> = Vec::new();
     {
         let db_guard = state.db.lock().unwrap();
         let existing =
             db::list_skills(&db_guard).map_err(|e| format!("Failed to list skills: {}", e))?;
-        if !existing.is_empty() {
-            return Ok(existing);
+        if existing.is_empty() {
+            // First-time init: run SSOT migration (non-destructive: original files preserved)
+            let _ = ssot::migrate_to_ssot(&db_guard);
         }
 
-        // First-time init: run SSOT migration (non-destructive: original files preserved)
-        let _ = ssot::migrate_to_ssot(&db_guard);
-    }
+        // Scan disk directories for new skills
+        for base in &[skills_dir(), agents_skills_dir()] {
+            to_sync.extend(scan_skills_directory(&db_guard, base));
+        }
 
-    let db_guard = state.db.lock().unwrap();
+        // Scan installed plugins for skills (e.g. superpowers:brainstorming).
+        // Plugin skills stay claude-only and are not projected; the result is dropped —
+        // newly-discovered plugin skills are picked up by the final list_skills below.
+        drop(scan_plugin_skills(&db_guard));
+    } // DB lock released before filesystem projection below
 
-    let mut result = Vec::new();
-
-    // Scan disk directories for skills
-    for base in &[skills_dir(), agents_skills_dir()] {
-        let discovered = scan_skills_directory(&db_guard, base);
-        for (name, _path) in discovered {
-            if let Some(skill) = db::get_skill_by_name(&db_guard, &name).unwrap_or(None) {
-                result.push(skill);
+    // Project each newly-discovered skill into every installed agent's skills dir.
+    // Matches service::toggle_app: filesystem ops happen after the DB lock is dropped.
+    for (directory, ssot_source) in &to_sync {
+        for app in adapters::all_apps() {
+            if let Some(adapter) = adapters::get_adapter(app) {
+                if adapter.should_sync() {
+                    if let Err(e) = adapter.sync_skill(directory, ssot_source) {
+                        log::warn!(
+                            target: "skills_scan",
+                            "Failed to sync skill '{}' to {}: {}",
+                            directory,
+                            app,
+                            e
+                        );
+                    }
+                }
             }
         }
     }
 
-    // Scan installed plugins for skills (e.g. superpowers:brainstorming)
-    let plugin_skills = scan_plugin_skills(&db_guard);
-    result.extend(plugin_skills);
-
-    Ok(result)
+    // Return the full current list (plugin + disk + pre-existing).
+    let db_guard = state.db.lock().unwrap();
+    db::list_skills(&db_guard).map_err(|e| format!("Failed to list skills: {}", e))
 }
 
 #[tauri::command]

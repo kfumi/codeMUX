@@ -1,8 +1,9 @@
 use crate::skills::adapters;
 use crate::skills::db;
 use crate::skills::ssot;
-use crate::skills::types::{ImportableSkill, SkillApps};
+use crate::skills::types::{ImportableSkill, Skill, SkillApps};
 use crate::AppState;
+use std::path::{Path, PathBuf};
 
 /// Result of importing skills from agent directories.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -320,4 +321,257 @@ pub fn import_from_apps(
     }
 
     Ok(result)
+}
+
+/// Register a skill discovered on disk into SSOT + DB.
+///
+/// - Copies the source dir to `~/.codemux/skills/<name>` (non-destructive: skips if the target already exists).
+/// - Parses `SKILL.md` frontmatter for description/display_name.
+/// - Upserts a skill row with the given `apps` enablement and `disk_path` pointing at SSOT.
+///
+/// Returns `Some((directory, ssot_path))` when a new skill was inserted, or `None` when a skill
+/// with this name already exists in the DB (caller skips it). The returned `ssot_path` is what the
+/// caller needs to project the skill into agent dirs.
+pub fn register_discovered_skill(
+    conn: &rusqlite::Connection,
+    name: &str,
+    source_path: &Path,
+    apps: SkillApps,
+) -> Result<Option<(String, PathBuf)>, String> {
+    // Dedup: never overwrite an existing skill's user preferences.
+    if db::get_skill_by_name(conn, name)
+        .map_err(|e| format!("Failed to look up skill '{}': {}", name, e))?
+        .is_some()
+    {
+        return Ok(None);
+    }
+
+    let ssot_dir = ssot::get_ssot_dir();
+    let ssot_target = ssot_dir.join(name);
+
+    // Copy to SSOT if not already there (non-destructive).
+    if !ssot_target.exists() {
+        ssot::copy_dir_recursive(source_path, &ssot_target)
+            .map_err(|e| format!("Failed to copy '{}' to SSOT: {}", name, e))?;
+    }
+
+    // Parse metadata from the source SKILL.md.
+    let skill_md = source_path.join("SKILL.md");
+    let (description, display_name) = if skill_md.exists() {
+        let content = std::fs::read_to_string(&skill_md).unwrap_or_default();
+        db::parse_frontmatter(&content)
+    } else {
+        (None, None)
+    };
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let skill = Skill {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: name.to_string(),
+        display_name,
+        description,
+        installed_at: now,
+        apps,
+        disk_path: Some(ssot_target.to_string_lossy().into_owned()),
+        directory: name.to_string(),
+    };
+
+    db::upsert_skill(conn, &skill)
+        .map_err(|e| format!("Failed to upsert skill '{}': {}", name, e))?;
+
+    Ok(Some((name.to_string(), ssot_target)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::register_discovered_skill;
+    use crate::db::schema::initialize_database;
+    use crate::skills::db;
+    use crate::skills::ssot;
+    use crate::skills::types::{Skill, SkillApps};
+    use rusqlite::Connection;
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+
+    // get_ssot_dir() resolves the home dir from env vars, so tests that touch the SSOT
+    // dir must serialize on a single global lock to avoid stepping on each other.
+    // Locking is poison-tolerant: if a previous test panicked mid-flight, later tests
+    // still acquire the lock instead of cascading into PoisonError failures.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Build a temp "home" tree and point USERPROFILE/HOME at it so SSOT lands inside.
+    fn setup_temp_home(name: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let home = std::env::temp_dir().join(format!(
+            ".codemux-test-{}-{}-{}",
+            name,
+            std::process::id(),
+            nonce
+        ));
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("USERPROFILE", &home);
+        std::env::set_var("HOME", &home);
+        home
+    }
+
+    fn write_skill_md(dir: &Path, body: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("SKILL.md"), body).unwrap();
+    }
+
+    #[test]
+    fn register_discovered_skill_inserts_all_apps_enabled_and_copies_to_ssot() {
+        let _guard = env_lock();
+        let home = setup_temp_home("all_apps");
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+
+        let source = home.join("source").join("my-skill");
+        write_skill_md(
+            &source,
+            "---\nname: My Skill\ndescription: does a thing\n---\n# body\n",
+        );
+
+        let result = register_discovered_skill(
+            &conn,
+            "my-skill",
+            &source,
+            SkillApps {
+                claude: true,
+                codex: true,
+                gemini: true,
+                opencode: true,
+            },
+        )
+        .unwrap();
+
+        let (directory, ssot_path) = result.expect("expected a newly-inserted skill");
+        assert_eq!(directory, "my-skill");
+        assert!(ssot_path.ends_with(std::path::Path::new(".codemux/skills/my-skill")));
+        assert!(
+            ssot_path.join("SKILL.md").exists(),
+            "SSOT copy should exist"
+        );
+
+        let skill = db::get_skill_by_name(&conn, "my-skill")
+            .unwrap()
+            .expect("skill row should exist");
+        assert!(skill.apps.claude);
+        assert!(skill.apps.codex);
+        assert!(skill.apps.gemini);
+        assert!(skill.apps.opencode);
+        assert_eq!(skill.display_name.as_deref(), Some("My Skill"));
+        assert_eq!(skill.description.as_deref(), Some("does a thing"));
+        assert!(skill
+            .disk_path
+            .as_ref()
+            .is_some_and(|p| std::path::Path::new(p).ends_with(".codemux/skills/my-skill")));
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn register_discovered_skill_returns_none_when_name_exists() {
+        let _guard = env_lock();
+        let home = setup_temp_home("exists");
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+
+        // Pre-existing skill, claude-only (user preference) — must NOT be clobbered.
+        let now = chrono::Utc::now().to_rfc3339();
+        let existing = Skill {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "pre-existing".to_string(),
+            display_name: None,
+            description: None,
+            installed_at: now,
+            apps: SkillApps {
+                claude: true,
+                codex: false,
+                gemini: false,
+                opencode: false,
+            },
+            disk_path: None,
+            directory: "pre-existing".to_string(),
+        };
+        db::upsert_skill(&conn, &existing).unwrap();
+
+        let source = home.join("source").join("pre-existing");
+        write_skill_md(&source, "---\nname: Pre\ndescription: new\n---\n");
+
+        let result = register_discovered_skill(
+            &conn,
+            "pre-existing",
+            &source,
+            SkillApps {
+                claude: true,
+                codex: true,
+                gemini: true,
+                opencode: true,
+            },
+        )
+        .unwrap();
+        assert!(result.is_none(), "should skip when name already exists");
+
+        // Existing preferences untouched.
+        let skill = db::get_skill_by_name(&conn, "pre-existing")
+            .unwrap()
+            .unwrap();
+        assert!(skill.apps.claude);
+        assert!(!skill.apps.codex);
+        assert!(!skill.apps.gemini);
+        assert!(!skill.apps.opencode);
+        assert_eq!(
+            skill.description, None,
+            "existing row must not be overwritten"
+        );
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn register_discovered_skill_is_idempotent_on_ssot_dir() {
+        let _guard = env_lock();
+        let home = setup_temp_home("idempotent");
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+
+        // SSOT target already exists (e.g. left over from a previous run).
+        let ssot_dir = ssot::get_ssot_dir();
+        let ssot_target = ssot_dir.join("leftover");
+        write_skill_md(&ssot_target, "---\nname: Leftover\n---\nleftover content\n");
+
+        let source = home.join("source").join("leftover");
+        write_skill_md(
+            &source,
+            "---\nname: Leftover\ndescription: src\n---\nsource content\n",
+        );
+
+        let result = register_discovered_skill(
+            &conn,
+            "leftover",
+            &source,
+            SkillApps {
+                claude: true,
+                codex: true,
+                gemini: true,
+                opencode: true,
+            },
+        )
+        .unwrap();
+
+        let (_, returned_path) = result.expect("should still insert when SSOT dir exists");
+        assert_eq!(returned_path, ssot_target);
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
