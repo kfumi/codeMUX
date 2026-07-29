@@ -21,6 +21,12 @@ fn normalize_one(raw: Value) -> Vec<Value> {
         return vec![diagnostic_for_raw(raw, "missing_event_type")];
     };
 
+    if matches!(event_type, "user" | "user_message")
+        && raw.get("isMeta").and_then(Value::as_bool).unwrap_or(false)
+    {
+        return Vec::new();
+    }
+
     match event_type {
         "assistant" | "assistant_message" => normalize_assistant(raw),
         "user" | "user_message" => normalize_user(raw),
@@ -466,6 +472,20 @@ mod tests {
         assert_eq!(events[0]["type"], "system_event");
         assert_eq!(events[0]["subtype"], "compact_boundary");
         assert_eq!(events[0]["sequence"], 0);
+    }
+
+    #[test]
+    fn drops_meta_user_messages_before_history_projection() {
+        let events = normalize_history_events(
+            vec![json!({
+                "type": "user",
+                "isMeta": true,
+                "message": { "role": "user", "content": "Continue from where you left off." }
+            })],
+            "app-1",
+        );
+
+        assert!(events.is_empty());
     }
 
     #[test]

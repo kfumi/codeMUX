@@ -442,6 +442,10 @@ export function mapPersistedClaudeMessage(
   raw: Record<string, unknown>,
   agentKind: AgentKind = 'claude_code',
 ): ParsedStoreEvent | null {
+  if (isMetaPersistedEvent(raw)) {
+    return null;
+  }
+
   const codeMuxProjection = projectCodeMuxHistoryEvent(raw);
   if (codeMuxProjection) {
     return mapPersistedClaudeMessage(codeMuxProjection, agentKind);
@@ -452,11 +456,6 @@ export function mapPersistedClaudeMessage(
   }
 
   if (isClaudeTaskNotificationEvent(raw)) {
-    return null;
-  }
-
-  // Skip meta messages (slash command auto-generated prompts like /code-review)
-  if (isMetaPersistedEvent(raw)) {
     return null;
   }
 

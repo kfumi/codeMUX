@@ -261,6 +261,14 @@ fn should_include_claude_history_event(val: &serde_json::Value) -> bool {
         return false;
     }
 
+    if val
+        .get("isMeta")
+        .and_then(|entry| entry.as_bool())
+        .unwrap_or(false)
+    {
+        return false;
+    }
+
     let msg_type = val
         .get("type")
         .and_then(|entry| entry.as_str())
@@ -4266,6 +4274,17 @@ mod tests {
 
         assert!(!should_include_claude_history_event(&status));
         assert!(!should_include_claude_history_event(&sidechain_user));
+    }
+
+    #[test]
+    fn claude_history_excludes_meta_user_events() {
+        let meta_user = serde_json::json!({
+            "type": "user",
+            "isMeta": true,
+            "message": { "role": "user", "content": "Continue from where you left off." }
+        });
+
+        assert!(!should_include_claude_history_event(&meta_user));
     }
 
     #[test]

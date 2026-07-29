@@ -958,7 +958,13 @@ function AssistantLikeMessage({
                   if (shouldHideCollapsedReasoning) {
                     return null;
                   }
-                  return <CodeMuxReasoningGroup>{children}</CodeMuxReasoningGroup>;
+                  return (
+                    <CodeMuxReasoningGroup
+                      defaultOpen={compactAiOutput && isCollapseExpanded}
+                    >
+                      {children}
+                    </CodeMuxReasoningGroup>
+                  );
 
                 case 'group-tool-call':
                   // 如果分组只有一个工具，直接展示工具，不用 ToolGroup
@@ -1056,11 +1062,13 @@ function AssistantCollapseToggle({
 
 function CodeMuxReasoningGroup({
   children,
+  defaultOpen = false,
 }: {
   children?: ReactNode;
+  defaultOpen?: boolean;
 }) {
   const isRunning = useAuiState((state) => state.message.status?.type === 'running');
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
     <ReasoningRoot open={isOpen} onOpenChange={setIsOpen} variant="ghost">

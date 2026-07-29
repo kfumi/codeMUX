@@ -252,6 +252,123 @@ const completedTurnEvents: AgentMessage[] = [
   },
 ];
 
+const completedClaudeThinkingTurnEvents: AgentMessage[] = [
+  { kind: 'user', data: { content: 'say hello' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'claude-assistant-final-thinking',
+      session_id: 'session-claude-thinking-turn',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '内部思考过程' },
+          { type: 'text', text: '最终总结结果' },
+        ],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'result',
+    data: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      uuid: 'claude-result-final-thinking',
+      session_id: 'session-claude-thinking-turn',
+      duration_ms: 100,
+      duration_api_ms: 100,
+      num_turns: 1,
+      result: '',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    },
+  },
+];
+
+const historicalClaudeSplitTurnEvents: AgentMessage[] = [
+  { kind: 'user', data: { content: '/statusline' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'claude-history-thinking-1',
+      session_id: 'session-claude-split-history',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: '第一段内部思考' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'claude-history-text-1',
+      session_id: 'session-claude-split-history',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: "I'll create a statusline-setup agent..." }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'claude-history-tool-1',
+      session_id: 'session-claude-split-history',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'claude-history-task-1', name: 'Task', input: { description: 'Configure statusline from PS1' } }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'tool_result',
+    data: {
+      type: 'user',
+      uuid: 'claude-history-tool-result-1',
+      session_id: 'session-claude-split-history',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'claude-history-task-1', content: 'agent completed' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'claude-history-thinking-2',
+      session_id: 'session-claude-split-history',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: '第二段内部思考' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'claude-history-final-1',
+      session_id: 'session-claude-split-history',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '最终总结结果' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+];
+
 const completedOpenCodeToolTurnEvents: AgentMessage[] = [
   { kind: 'user', data: { content: 'inspect the project' } },
   {
@@ -785,6 +902,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-image-only': imageOnlyUserEvents,
         'session-image-text': imageAndTextUserEvents,
         'session-completed-turn': completedTurnEvents,
+        'session-claude-thinking-turn': completedClaudeThinkingTurnEvents,
+        'session-claude-split-history': historicalClaudeSplitTurnEvents,
         'session-opencode-tool-turn': completedOpenCodeToolTurnEvents,
         'session-opencode-history-turn': historicalOpenCodeTurnEvents,
         'session-footer-snapshot': mixedFooterStatsEvents,
@@ -803,6 +922,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
           Date.parse('2026-06-28T10:01:13Z'),
           Date.parse('2026-06-28T10:01:13Z'),
         ],
+        'session-claude-split-history': [1, 2, 3, 4, 5, 6, 7, 8],
         'session-opencode-tool-turn': [1, 2, 3, 4],
         'session-opencode-history-turn': [1, 2, 3, 4, 5, 6, 7],
         'session-footer-snapshot': [
@@ -1549,6 +1669,41 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByRole('button', { name: /鏀惰捣AI杩囩▼|收起AI过程/ })).toBeTruthy();
   });
 
+  it('puts completed Claude thinking under the compact process toggle', () => {
+    useSettingsStore.setState((state) => ({
+      config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
+    }));
+
+    render(<Harness sessionId="session-claude-thinking-turn" />);
+
+    expect(screen.getByText('最终总结结果')).toBeTruthy();
+    expect(screen.queryByText('思考')).toBeNull();
+    expect(screen.getByRole('button', { name: /展开AI过程/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
+
+    expect(screen.getByText('内部思考过程')).toBeTruthy();
+  });
+
+  it('collapses split Claude history output without a persisted result event', () => {
+    useSettingsStore.setState((state) => ({
+      config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
+    }));
+
+    render(<Harness sessionId="session-claude-split-history" />);
+
+    expect(screen.getByText('最终总结结果')).toBeTruthy();
+    expect(screen.queryByText('第一段内部思考')).toBeNull();
+    expect(screen.queryByText("I'll create a statusline-setup agent...")).toBeNull();
+    expect(screen.queryByText('第二段内部思考')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
+
+    expect(screen.getByText('第一段内部思考')).toBeTruthy();
+    expect(screen.getByText("I'll create a statusline-setup agent...")).toBeTruthy();
+    expect(screen.getByText('第二段内部思考')).toBeTruthy();
+  });
+
   it('collapses completed OpenCode tool-only turns when compact output is enabled', () => {
     useSettingsStore.setState((state) => ({
       config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
@@ -1585,10 +1740,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('历史过程二')).toBeTruthy();
 
     const finalRow = screen.getByText('历史最终结果').closest('[data-message-row]');
-    const finalReasoningTrigger = finalRow?.querySelector('[data-slot="reasoning-trigger"]');
-    expect(finalReasoningTrigger).toBeTruthy();
-    fireEvent.click(finalReasoningTrigger!);
-    expect(screen.getByText('最终思考泄漏')).toBeTruthy();
+    expect(finalRow?.textContent).toContain('最终思考泄漏');
   });
 
   it('renders proposed_plan in final assistant messages as a plan preview card', () => {

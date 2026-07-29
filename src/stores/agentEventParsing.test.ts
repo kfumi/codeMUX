@@ -340,6 +340,19 @@ describe('mapPersistedClaudeMessage', () => {
     ).toBeNull();
   });
 
+  it('suppresses normalized CodeMUX meta user messages from user-visible history', () => {
+    expect(
+      mapPersistedClaudeMessage(
+        {
+          type: 'user_message',
+          isMeta: true,
+          content: [{ type: 'text', text: 'Continue from where you left off.' }],
+        },
+        'claude_code',
+      ),
+    ).toBeNull();
+  });
+
   it('suppresses Claude sidechain messages from main persisted history by default', () => {
     expect(
       mapPersistedClaudeMessage({

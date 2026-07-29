@@ -41,9 +41,12 @@ export function buildAssistantResultTargetMap(events: AgentMessage[]): Map<numbe
   let pendingResultIndex: number | undefined;
   let sawAssistantSinceBoundary = false;
 
-  const flushPendingResult = () => {
-    if (pendingResultIndex != null && preferredAssistantIndex != null) {
-      targets.set(preferredAssistantIndex, pendingResultIndex);
+  const flushTurn = () => {
+    if (preferredAssistantIndex != null) {
+      const targetIndex = pendingResultIndex ?? preferredAssistantIndex;
+      if (targetIndex != null) {
+        targets.set(preferredAssistantIndex, targetIndex);
+      }
     }
     pendingResultIndex = undefined;
     preferredAssistantIndex = undefined;
@@ -55,7 +58,10 @@ export function buildAssistantResultTargetMap(events: AgentMessage[]): Map<numbe
 
     if (event.kind === 'user') {
       if (!isHiddenAssistantThreadUserEvent(event)) {
-        flushPendingResult();
+        // Claude history can omit the SDK result line while still ending a
+        // turn at the next real user message. Use the last assistant as the
+        // implicit result anchor in that case.
+        flushTurn();
       }
       continue;
     }
@@ -69,7 +75,7 @@ export function buildAssistantResultTargetMap(events: AgentMessage[]): Map<numbe
     }
 
     if (event.kind === 'compact') {
-      flushPendingResult();
+      flushTurn();
       continue;
     }
 
@@ -78,7 +84,9 @@ export function buildAssistantResultTargetMap(events: AgentMessage[]): Map<numbe
     }
   }
 
-  flushPendingResult();
+  // A loaded session may end after the final assistant line because Claude's
+  // result/system bookkeeping is not persisted in the JSONL transcript.
+  flushTurn();
 
   return targets;
 }
