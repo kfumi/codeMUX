@@ -1682,6 +1682,11 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
 
+    const reasoningTrigger = screen.getByRole('button', { name: /思考/ });
+    expect(reasoningTrigger.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(reasoningTrigger);
+
     expect(screen.getByText('内部思考过程')).toBeTruthy();
   });
 
@@ -1699,8 +1704,15 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
 
-    expect(screen.getByText('第一段内部思考')).toBeTruthy();
     expect(screen.getByText("I'll create a statusline-setup agent...")).toBeTruthy();
+    const reasoningTriggers = screen.getAllByRole('button', { name: /思考/ });
+    expect(reasoningTriggers).toHaveLength(2);
+    expect(reasoningTriggers.every((trigger) => trigger.getAttribute('aria-expanded') === 'false')).toBe(true);
+
+    fireEvent.click(reasoningTriggers[0]!);
+    fireEvent.click(reasoningTriggers[1]!);
+
+    expect(screen.getByText('第一段内部思考')).toBeTruthy();
     expect(screen.getByText('第二段内部思考')).toBeTruthy();
   });
 
@@ -1740,6 +1752,11 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('历史过程二')).toBeTruthy();
 
     const finalRow = screen.getByText('历史最终结果').closest('[data-message-row]');
+    const finalReasoningTrigger = finalRow?.querySelector('[data-slot="reasoning-trigger"]');
+    expect(finalReasoningTrigger?.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(finalReasoningTrigger!);
+
     expect(finalRow?.textContent).toContain('最终思考泄漏');
   });
 

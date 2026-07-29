@@ -56,7 +56,7 @@ export function TodoList({ todos, className, dropdownSide = 'up', align = 'left'
         side={dropdownSide === 'up' ? 'top' : 'bottom'}
         sideOffset={8}
         align={align === 'left' ? 'start' : 'end'}
-        className={'w-85 max-h-75 overflow-auto rounded-xl border border-border/40 bg-[hsl(var(--card))] p-0 ' + (dropdownSide === 'up' ? 'shadow-[0_-4px_24px_-4px_hsl(var(--foreground)/0.06)]' : 'shadow-[0_12px_34px_-18px_hsl(var(--foreground)/0.34)]')}
+        className={'w-85 max-h-75 overflow-auto rounded-xl border border-border/40 bg-[hsl(var(--card))] p-0 ' + (dropdownSide === 'up' ? 'shadow-[0_-4px_24px_-4px_hsl(var(--surface-shadow-strong)/0.06)]' : 'shadow-[0_12px_34px_-18px_hsl(var(--surface-shadow-strong)/0.34)]')}
       >
         <div className="px-3 py-2.5 space-y-0.5 stagger-children">
           {todos.map((todo, i) => (

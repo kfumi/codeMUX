@@ -80,6 +80,16 @@ describe('ChatSearchDialog', () => {
     expect(newer.compareDocumentPosition(older) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('does not use a bright oversized shadow for the dark-theme search window', () => {
+    renderDialog();
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.className).toContain('shadow-[0_18px_46px_-30px_hsl(var(--surface-shadow-strong)/0.82)]');
+    expect(dialog.className).toContain('border-[hsl(var(--surface-edge))]/90');
+    expect(dialog.className).toContain('bg-[hsl(var(--surface-3))]');
+    expect(dialog.className).not.toContain('0_28px_80px_-42px_hsl(var(--foreground)');
+  });
+
   it('filters sessions by title and project name', async () => {
     useProjectStore.setState({
       projects: [{

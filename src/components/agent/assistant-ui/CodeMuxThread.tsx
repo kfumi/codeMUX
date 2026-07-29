@@ -251,7 +251,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
             >
               <TooltipHint content="Scroll to bottom">
                 <ThreadPrimitive.ScrollToBottom
-                  className="absolute -top-12 left-1/2 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--foreground)/0.35)] transition-all hover:-translate-y-0.5 hover:text-foreground disabled:invisible"
+                  className="absolute -top-12 left-1/2 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--surface-shadow-strong)/0.35)] transition-all hover:-translate-y-0.5 hover:text-foreground disabled:invisible"
                   aria-label="Scroll to bottom"
                   behavior="smooth"
                 >
@@ -865,7 +865,7 @@ function MessageNav({
               />
             </button>
             {previewEventIndex === item.eventIndex ? (
-              <div className="pointer-events-none absolute left-full top-1/2 ml-3 w-[min(20rem,calc(100vw-6rem))] -translate-y-1/2 overflow-hidden rounded-[10px] border border-border/45 bg-[hsl(var(--popover))]/94 px-3 py-2.5 text-popover-foreground shadow-[0_18px_46px_-26px_hsl(var(--foreground)/0.58),0_0_0_1px_hsl(var(--background)/0.45)] backdrop-blur-md animate-in fade-in fill-mode-forwards animation-duration-[220ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+              <div className="pointer-events-none absolute left-full top-1/2 ml-3 w-[min(20rem,calc(100vw-6rem))] -translate-y-1/2 overflow-hidden rounded-[10px] border border-border/45 bg-[hsl(var(--popover))]/94 px-3 py-2.5 text-popover-foreground shadow-[0_18px_46px_-26px_hsl(var(--surface-shadow-strong)/0.58),0_0_0_1px_hsl(var(--background)/0.45)] backdrop-blur-md animate-in fade-in fill-mode-forwards animation-duration-[220ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
                 <div className="truncate text-xs font-semibold leading-5 text-foreground">
                   {item.title}
                 </div>
@@ -959,9 +959,7 @@ function AssistantLikeMessage({
                     return null;
                   }
                   return (
-                    <CodeMuxReasoningGroup
-                      defaultOpen={compactAiOutput && isCollapseExpanded}
-                    >
+                    <CodeMuxReasoningGroup>
                       {children}
                     </CodeMuxReasoningGroup>
                   );
@@ -1060,15 +1058,9 @@ function AssistantCollapseToggle({
   );
 }
 
-function CodeMuxReasoningGroup({
-  children,
-  defaultOpen = false,
-}: {
-  children?: ReactNode;
-  defaultOpen?: boolean;
-}) {
+function CodeMuxReasoningGroup({ children }: { children?: ReactNode }) {
   const isRunning = useAuiState((state) => state.message.status?.type === 'running');
-  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const [isOpen, setIsOpen] = useState(false);
 
   return (
     <ReasoningRoot open={isOpen} onOpenChange={setIsOpen} variant="ghost">

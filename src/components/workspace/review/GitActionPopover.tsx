@@ -64,7 +64,7 @@ export function GitActionPopover({
         side="bottom"
         align="end"
         sideOffset={6}
-        className="w-[360px] max-w-[calc(100vw-24px)] rounded-lg border border-border/70 bg-popover/98 p-3 shadow-[0_22px_58px_-34px_hsl(var(--foreground)/0.42),0_0_0_1px_hsl(var(--background)/0.7)] backdrop-blur-md dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.97,hsl(var(--surface-1))/0.95)]"
+        className="w-[360px] max-w-[calc(100vw-24px)] rounded-lg border border-border/70 bg-popover/98 p-3 shadow-[0_22px_58px_-34px_hsl(var(--surface-shadow-strong)/0.42),0_0_0_1px_hsl(var(--background)/0.7)] backdrop-blur-md dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.97,hsl(var(--surface-1))/0.95)]"
         data-testid="git-action-popover"
       >
         <div className="mb-2 flex items-center justify-between gap-3">

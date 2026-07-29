@@ -174,7 +174,7 @@ export function PreviewPanel() {
                           </button>
                         </div>
                       </ContextMenuTrigger>
-                      <ContextMenuContent className="min-w-37 rounded-xl border border-border/60 bg-popover/98 py-1.5 text-xs shadow-[0_18px_48px_-20px_hsl(var(--foreground)/0.35)] backdrop-blur-sm animate-in fade-in zoom-in-95 fill-mode-forwards animation-duration-[300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+                      <ContextMenuContent className="min-w-37 rounded-xl border border-border/60 bg-popover/98 py-1.5 text-xs shadow-[0_18px_48px_-20px_hsl(var(--surface-shadow-strong)/0.35)] backdrop-blur-sm animate-in fade-in zoom-in-95 fill-mode-forwards animation-duration-[300ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
                         <ContextMenuItem onClick={() => closeFile(file.path)}>
                           关闭
                         </ContextMenuItem>

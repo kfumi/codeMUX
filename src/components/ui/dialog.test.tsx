@@ -23,6 +23,8 @@ describe('DialogContent layering', () => {
 
     const dialog = screen.getByRole('dialog');
     expect(dialog.className).toContain('z-50');
+    expect(dialog.className).toContain('dark:bg-[hsl(var(--surface-3))]');
+    expect(dialog.className).toContain('dark:border-[hsl(var(--surface-edge))]');
   });
 
   it('raises content z-index to match overlayClassName so content is not hidden behind the mask', () => {
