@@ -7,6 +7,7 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
   build: {
+    chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -14,15 +15,13 @@ export default defineConfig(async () => ({
             return;
           }
 
+          // @assistant-ui 与 streamdown 系列存在双向引用，必须放在同一 chunk，
+          // 否则会产生 chunk 级别的循环依赖。
           if (
-            id.includes("@assistant-ui/react-markdown") ||
-            id.includes("@assistant-ui/react-streamdown") ||
-            id.includes("streamdown")
+            id.includes("@assistant-ui") ||
+            id.includes("streamdown") ||
+            id.includes("@streamdown")
           ) {
-            return "assistant-ui-markdown";
-          }
-
-          if (id.includes("@assistant-ui")) {
             return "assistant-ui";
           }
 
