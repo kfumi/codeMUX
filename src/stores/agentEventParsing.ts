@@ -12,12 +12,30 @@ export const INTERRUPT_MARKER = '[Request interrupted by user]';
 
 const CODEX_COLLABORATION_POLICY_RE = /<codemux-codex-collaboration-policy>[\s\S]*?<\/codemux-codex-collaboration-policy>\s*/g;
 
+export type SessionSummaryDiff = {
+  file: string;
+  patch?: string;
+  additions?: number;
+  deletions?: number;
+  status?: string;
+};
+
+export type SessionSummaryEvent = {
+  type: string;
+  subtype: string;
+  diffs: SessionSummaryDiff[];
+  session_id?: string;
+  uuid?: string;
+  timestamp?: string;
+};
+
 export type ParsedStoreEvent =
   | { kind: 'user'; data: { content: string; attachments?: UserAttachmentPreview[]; locator?: AgentUserMessageLocator } }
   | { kind: 'assistant'; data: AgentAssistantMessage }
   | { kind: 'tool_result'; data: AgentToolResult }
   | { kind: 'result'; data: AgentResultMessage }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
+  | { kind: 'session_summary'; data: SessionSummaryEvent }
   | { kind: 'file_snapshot'; data: { type: 'file_snapshot'; file_path: string; original_content: string; is_new: boolean; tool_use_id: string } };
 
 export function isInterruptMarker(text: string): boolean {
@@ -376,6 +394,18 @@ function mapCompactBoundary(raw: Record<string, unknown>): Extract<ParsedStoreEv
   };
 }
 
+function mapSessionSummary(raw: Record<string, unknown>): Extract<ParsedStoreEvent, { kind: 'session_summary' }> | null {
+  if (raw.type !== 'system' || raw.subtype !== 'session_summary') {
+    return null;
+  }
+  const diffs = Array.isArray(raw.diffs) ? raw.diffs : [];
+  if (diffs.length === 0) return null;
+  return {
+    kind: 'session_summary',
+    data: raw as unknown as SessionSummaryEvent,
+  };
+}
+
 export function mapCodexCompactedEvent(raw: Record<string, unknown>): Extract<ParsedStoreEvent, { kind: 'compact' }> | null {
   if (raw.type !== 'compacted') {
     return null;
@@ -440,6 +470,11 @@ export function mapPersistedClaudeMessage(
   const compactEvent = mapCompactBoundary(raw);
   if (compactEvent) {
     return compactEvent;
+  }
+
+  const sessionSummaryEvent = mapSessionSummary(raw);
+  if (sessionSummaryEvent) {
+    return sessionSummaryEvent;
   }
 
   if (msgType === 'assistant') {
@@ -544,6 +579,7 @@ function projectCodeMuxHistoryEvent(raw: Record<string, unknown>): Record<string
       session_id: raw.session_id,
       content: raw.content,
       compact_metadata: raw.compact_metadata,
+      ...(raw.diffs !== undefined ? { diffs: raw.diffs } : {}),
     };
   }
   return null;

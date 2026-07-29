@@ -209,6 +209,7 @@ fn normalize_system(raw: Value) -> Vec<Value> {
         "error_status",
         "error",
         "status",
+        "diffs",
     ] {
         if let Some(value) = raw.get(key) {
             event[key] = value.clone();

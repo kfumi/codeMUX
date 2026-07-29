@@ -1,10 +1,11 @@
-import { ChevronRight, FileSearch, FileText, Plus, Terminal, X } from 'lucide-react';
+import { ChevronRight, FileSearch, FileCode, FileText, Plus, Terminal, X } from 'lucide-react';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 
 import { cn } from '../../lib/utils';
 import { useSidePanelStore, type SidePanelTab } from '../../stores/sidePanelStore';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipHint, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import { DiffView } from '../preview/DiffView';
 import { PlanPreviewPanel } from './plan/PlanPreviewPanel';
 import { ReviewPanel } from './review/ReviewPanel';
 import { TerminalPanel } from './terminal/TerminalPanel';
@@ -159,6 +160,10 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
               <ReviewPanel key={activeTab.id} projectPath={activeTab.projectPath ?? projectPath ?? ''} />
             ) : activeTab.kind === 'terminal' ? (
               <TerminalPanel key={activeTab.id} tabId={activeTab.id} projectPath={activeTab.projectPath ?? projectPath ?? ''} />
+            ) : activeTab.kind === 'diff' ? (
+              <div key={activeTab.id} className="h-full overflow-auto">
+                <DiffView oldContent={activeTab.diffOldContent ?? ''} newContent={activeTab.diffNewContent ?? ''} />
+              </div>
             ) : (
               <PlanPreviewPanel
                 key={activeTab.id}
@@ -186,7 +191,7 @@ function TabButton({
   onClick: () => void;
   onClose: () => void;
 }) {
-  const Icon = tab.kind === 'review' ? FileSearch : tab.kind === 'terminal' ? Terminal : FileText;
+  const Icon = tab.kind === 'review' ? FileSearch : tab.kind === 'terminal' ? Terminal : tab.kind === 'diff' ? FileCode : FileText;
 
   return (
     <button

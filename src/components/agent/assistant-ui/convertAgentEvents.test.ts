@@ -997,6 +997,55 @@ describe('convertAgentEventsToAssistantMessages', () => {
     });
   });
 
+  it('renders session_summary events as data-codemux-event parts', () => {
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: 'hello' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'done' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'session_summary',
+        data: {
+          type: 'system',
+          subtype: 'session_summary',
+          diffs: [
+            { file: 'src/foo.ts', additions: 3, deletions: 1, status: 'modified' },
+          ],
+          uuid: 'summary-1',
+          session_id: 'session-1',
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    // Session summary should be attached as a footer on the last assistant
+    // message instead of rendered as a standalone system message.
+    const summaryMessage = messages.find(
+      (m) => m.metadata.sourceKind === 'session_summary',
+    );
+    expect(summaryMessage).toBeUndefined();
+
+    const assistantMessage = messages.find((m) => m.role === 'assistant');
+    expect(assistantMessage).toBeDefined();
+    expect(assistantMessage?.content).toHaveLength(2);
+    expect(assistantMessage?.content[0]).toMatchObject({ type: 'text', text: 'done' });
+    expect(assistantMessage?.content[1]).toMatchObject({
+      type: 'data-codemux-event',
+      eventKind: 'session_summary',
+    });
+  });
+
   it('does not render Claude task notification XML if it reaches the UI converter', () => {
     const events: AgentMessage[] = [
       {

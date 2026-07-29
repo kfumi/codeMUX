@@ -626,6 +626,50 @@ describe('mapPersistedClaudeMessage', () => {
     });
   });
 
+  it('loads OpenCode session summary events as session_summary markers', () => {
+    const event = mapPersistedClaudeMessage(
+      {
+        type: 'system',
+        subtype: 'session_summary',
+        diffs: [
+          { file: 'src/foo.ts', additions: 3, deletions: 1, status: 'modified' },
+          { file: 'src/bar.ts', additions: 10, deletions: 0, status: 'added' },
+        ],
+        uuid: 'summary-1',
+        session_id: 'session-1',
+        timestamp: '2026-07-29T10:00:00.000Z',
+      },
+      'opencode',
+    );
+
+    expect(event).toEqual({
+      kind: 'session_summary',
+      data: expect.objectContaining({
+        type: 'system',
+        subtype: 'session_summary',
+        diffs: [
+          { file: 'src/foo.ts', additions: 3, deletions: 1, status: 'modified' },
+          { file: 'src/bar.ts', additions: 10, deletions: 0, status: 'added' },
+        ],
+      }),
+    });
+  });
+
+  it('skips session summary events with empty diffs', () => {
+    const event = mapPersistedClaudeMessage(
+      {
+        type: 'system',
+        subtype: 'session_summary',
+        diffs: [],
+        uuid: 'summary-1',
+        session_id: 'session-1',
+      },
+      'opencode',
+    );
+
+    expect(event).toBeNull();
+  });
+
   it('preserves Claude CLI command XML tags with surrounding text for rendering', () => {
     const xml = '<command-message>code-review</command-message>\n<command-name>/code-review</command-name>';
     const event = mapPersistedClaudeMessage(

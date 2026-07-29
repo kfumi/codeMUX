@@ -15,13 +15,14 @@ import {
 import { AskUserQuestionCard } from '../AskUserQuestionCard';
 import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
 import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
-import { AlertTriangle, Check, Copy, Maximize2, ListTodo, XCircle } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Maximize2, ListTodo, XCircle, ChevronDown, ChevronRight, FileCode, FileText } from 'lucide-react';
 import { getCodeChangeFilePath, getCodeChangeStats, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
 import { getDisplayableArgs, getToolHeaderSummary } from '../toolHeaderSummary';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipHint } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
 import { CODEMUX_MARKDOWN_REHYPE_PLUGINS, CodeMuxMarkdownLink } from '@/components/assistant-ui/markdown-link';
 import { cn } from '../../../lib/utils';
+import { parseUnifiedDiffPatch } from '../../../lib/diffStats';
 import { getProposedPlanPreview, getProposedPlanTitle, parseProposedPlan } from './proposedPlan';
 
 type CodeMuxToolCallPartProps = {
@@ -412,6 +413,10 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
     );
   }
 
+  if (isSessionSummaryData(data)) {
+    return <SessionSummaryCard event={data.event} />;
+  }
+
   if (!isAskUserQuestionData(data) || !sessionId) {
     return null;
   }
@@ -464,6 +469,15 @@ function isCompactData(value: unknown): value is { eventKind: string; event: Ext
     value.eventKind === 'compact' &&
     isRecord(value.event) &&
     value.event.kind === 'compact'
+  );
+}
+
+function isSessionSummaryData(value: unknown): value is { eventKind: string; event: Extract<AgentMessage, { kind: 'session_summary' }> } {
+  return (
+    isRecord(value) &&
+    value.eventKind === 'session_summary' &&
+    isRecord(value.event) &&
+    value.event.kind === 'session_summary'
   );
 }
 
@@ -595,6 +609,91 @@ function resolveToolStatus(
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function getSummaryFileName(path: string): string {
+  const parts = path.split(/[/\\]/);
+  return parts[parts.length - 1] || path;
+}
+
+function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 'session_summary' }> }) {
+  const [expanded, setExpanded] = useState(false);
+  const openDiffTab = useSidePanelStore((state) => state.openDiffTab);
+  const diffs = event.data.diffs;
+  const totalAdditions = diffs.reduce((sum, d) => sum + (d.additions ?? 0), 0);
+  const totalDeletions = diffs.reduce((sum, d) => sum + (d.deletions ?? 0), 0);
+
+  const handleFileClick = (diff: { file: string; patch?: string }) => {
+    const patch = diff.patch;
+    if (patch) {
+      const parsed = parseUnifiedDiffPatch(patch);
+      if (parsed) {
+        openDiffTab(diff.file, parsed.oldContent, parsed.newContent);
+        return;
+      }
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-xl border border-border/50 bg-[hsl(var(--surface-3))]/80 shadow-sm overflow-hidden animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+      <button
+        className="flex items-center gap-3 w-full px-3.5 py-3 text-sm hover:bg-[hsl(var(--surface-3))] transition-colors duration-200"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {expanded ? (
+          <ChevronDown className="h-4 w-4 text-muted-foreground/60 shrink-0" />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-muted-foreground/60 shrink-0" />
+        )}
+        <FileText className="h-4 w-4 text-muted-foreground/50 shrink-0" />
+        <span className="font-medium">{diffs.length} 个文件已更改</span>
+        <span className="ml-auto inline-flex items-center gap-2 tabular-nums">
+          {totalAdditions > 0 && (
+            <span className="text-green-600 dark:text-green-400">+{totalAdditions}</span>
+          )}
+          {totalDeletions > 0 && (
+            <span className="text-red-600 dark:text-red-400">−{totalDeletions}</span>
+          )}
+          {totalAdditions === 0 && totalDeletions === 0 && (
+            <span className="text-muted-foreground/50">0</span>
+          )}
+        </span>
+      </button>
+      {expanded && (
+        <div className="border-t border-border/30 divide-y divide-border/20">
+          {diffs.map((diff, i) => (
+            <div
+              key={`${diff.file}-${i}`}
+              role="button"
+              tabIndex={0}
+              className="flex items-center gap-3 px-4 py-3 text-xs cursor-pointer hover:bg-[hsl(var(--surface-2))]/50 transition-colors duration-150"
+              onClick={() => handleFileClick(diff)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  handleFileClick(diff);
+                }
+              }}
+            >
+              <FileCode className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
+              <span className="shrink-0 truncate font-mono text-foreground/85 max-w-[28%]">
+                {getSummaryFileName(diff.file)}
+              </span>
+              <TooltipHint content={diff.file}>
+                <span className="flex-1 truncate text-muted-foreground/45 text-left">
+                  {diff.file}
+                </span>
+              </TooltipHint>
+              <span className="shrink-0 inline-flex gap-2 tabular-nums w-[4.5rem] justify-end">
+                <span className="text-green-600 dark:text-green-400 text-right">+{diff.additions ?? 0}</span>
+                <span className="text-red-600 dark:text-red-400 text-right">−{diff.deletions ?? 0}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

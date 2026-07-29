@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type SidePanelTabKind = 'review' | 'terminal' | 'plan';
+export type SidePanelTabKind = 'review' | 'terminal' | 'plan' | 'diff';
 
 export interface SidePanelTab {
   id: string;
@@ -10,6 +10,9 @@ export interface SidePanelTab {
   terminalId?: string;
   planFilePath?: string;
   planContent?: string;
+  diffFilePath?: string;
+  diffOldContent?: string;
+  diffNewContent?: string;
 }
 
 interface SidePanelSnapshot {
@@ -32,6 +35,7 @@ interface SidePanelState {
   openReviewTab: (projectPath: string) => void;
   openTerminalTab: (projectPath: string) => void;
   openPlanTab: (planFilePath: string, planContent: string) => void;
+  openDiffTab: (filePath: string, oldContent: string, newContent: string) => void;
   closePanel: () => void;
   setActiveTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
@@ -85,6 +89,17 @@ function createPlanTab(scopeId: string, planFilePath: string, planContent: strin
     title: getFileName(planFilePath) || '计划',
     planFilePath,
     planContent,
+  };
+}
+
+function createDiffTab(scopeId: string, filePath: string, oldContent: string, newContent: string): SidePanelTab {
+  return {
+    id: tabId(scopeId, 'diff', filePath),
+    kind: 'diff',
+    title: getFileName(filePath) || filePath,
+    diffFilePath: filePath,
+    diffOldContent: oldContent,
+    diffNewContent: newContent,
   };
 }
 
@@ -150,6 +165,17 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
       tabs: state.tabs.some((tab) => tab.id === id)
         ? state.tabs.map((tab) => (tab.id === id ? { ...tab, planContent } : tab))
         : [...state.tabs, createPlanTab(state.activeScopeId, planFilePath, planContent)],
+      activeTabId: id,
+    }));
+  },
+
+  openDiffTab: (filePath: string, oldContent: string, newContent: string) => {
+    const id = tabId(get().activeScopeId, 'diff', filePath);
+    set((state) => ({
+      isOpen: true,
+      tabs: state.tabs.some((tab) => tab.id === id)
+        ? state.tabs.map((tab) => (tab.id === id ? { ...tab, diffOldContent: oldContent, diffNewContent: newContent } : tab))
+        : [...state.tabs, createDiffTab(state.activeScopeId, filePath, oldContent, newContent)],
       activeTabId: id,
     }));
   },

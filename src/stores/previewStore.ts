@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import { fileApi, type FileTreeNode } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 

@@ -16,6 +16,7 @@ import {
   parseSdkUserMessage,
   shouldProcessTerminalEvent,
   shouldSuppressLiveEventWhileStopped,
+  type SessionSummaryEvent,
 } from './agentEventParsing';
 import { useSessionStore } from './sessionStore';
 import { normalizeFilePath, usePreviewStore } from './previewStore';
@@ -77,6 +78,7 @@ export type AgentMessage =
   | { kind: 'ask_user_question_timeout'; data: { tool_use_id: string; timeout_ms: number; message: string } }
   | { kind: 'permission'; data: AgentPermissionRequest }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
+  | { kind: 'session_summary'; data: SessionSummaryEvent }
   | { kind: 'mcp_status'; data: { servers: Record<string, string>; status?: string } }
   | { kind: 'proxy_status'; data: { running: boolean; port: number | null; upstreamBaseUrl: string | null } }
   | { kind: 'todo_list'; data: { todos: TodoItem[] } }

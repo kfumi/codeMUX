@@ -1,4 +1,4 @@
-﻿import type { AgentMessage } from '../../../stores/agentStore';
+import type { AgentMessage } from '../../../stores/agentStore';
 import { isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
 import type { AgentUserMessageLocator, ContentBlock } from '../../../types/agent';
 import type { UserAttachmentPreview } from '../../../types/agentInput';
@@ -7,7 +7,7 @@ import { buildConversationTurns } from '../../../lib/conversationTurns';
 
 type CodeMuxAssistantRole = 'user' | 'assistant' | 'system';
 
-type CodeMuxVisibleEventKind = Extract<AgentMessage['kind'], 'api_retry' | 'compact' | 'error' | 'stream_status'>;
+type CodeMuxVisibleEventKind = Extract<AgentMessage['kind'], 'api_retry' | 'compact' | 'error' | 'stream_status' | 'session_summary'>;
 
 type PersistedContentBlock = ContentBlock | Record<string, unknown> | null | undefined;
 
@@ -45,7 +45,7 @@ export type CodeMuxAssistantMessage = {
   };
 };
 
-const visibleEventKinds = ['api_retry', 'compact', 'error', 'stream_status'] as const satisfies readonly CodeMuxVisibleEventKind[];
+const visibleEventKinds = ['api_retry', 'compact', 'error', 'stream_status', 'session_summary'] as const satisfies readonly CodeMuxVisibleEventKind[];
 
 export function convertAgentEventsToAssistantMessages(
   events: AgentMessage[],
@@ -54,6 +54,35 @@ export function convertAgentEventsToAssistantMessages(
   const toolCallLocationById = new Map<string, { messageIndex: number; partIndex: number }>();
   const askQuestionToolUseIds = new Set<string>();
   const pendingToolResultsById = new Map<string, { content: string; isError: boolean }>();
+  const usedMessageIds = new Set<string>();
+
+  const ensureUniqueId = (id: string, index: number): string => {
+    if (usedMessageIds.has(id)) {
+      return `${id}-dup${index}`;
+    }
+    usedMessageIds.add(id);
+    return id;
+  };
+
+  const attachSessionSummaryToLastAssistant = (summaryEvent: AgentMessage, sourceIndex: number) => {
+    const lastAssistantIndex = messages.reduce<number | undefined>(
+      (acc, message, index) => (message.role === 'assistant' ? index : acc),
+      undefined,
+    );
+    if (lastAssistantIndex != null) {
+      const message = messages[lastAssistantIndex];
+      messages[lastAssistantIndex] = {
+        ...message,
+        content: [...message.content, createEventPart('session_summary', summaryEvent)],
+        metadata: {
+          ...message.metadata,
+          sourceEventIndices: [...message.metadata.sourceEventIndices, sourceIndex],
+        },
+      };
+      return true;
+    }
+    return false;
+  };
 
   events.forEach((event, index) => {
     if (event.kind === 'user') {
@@ -65,7 +94,7 @@ export function convertAgentEventsToAssistantMessages(
       }
 
       if (text.length > 0 || hasAttachments) {
-        messages.push(createMessage(`user-${index}`, 'user', [{ type: 'text', text }], event, index));
+        messages.push(createMessage(ensureUniqueId(`user-${index}`, index), 'user', [{ type: 'text', text }], event, index));
       }
 
       return;
@@ -82,7 +111,7 @@ export function convertAgentEventsToAssistantMessages(
 
       if (parts.length > 0) {
         const message = createMessage(
-          event.data.uuid || `assistant-${index}`,
+          ensureUniqueId(event.data.uuid || `assistant-${index}`, index),
           'assistant',
           parts,
           event,
@@ -211,7 +240,7 @@ export function convertAgentEventsToAssistantMessages(
       if (!toolCallLocationById.has(event.data.tool_use_id)) {
         const part = createAskUserQuestionToolCallPart(event);
         const message = createMessage(
-          `${event.kind}-${index}`,
+          ensureUniqueId(`${event.kind}-${index}`, index),
           'assistant',
           [part],
           event,
@@ -261,6 +290,25 @@ export function convertAgentEventsToAssistantMessages(
     }
 
     if (isVisibleEventKind(event.kind)) {
+      if (event.kind === 'session_summary') {
+        // Attach the summary as a footer on the assistant message that
+        // immediately precedes it, rather than rendering standalone.
+        const attached = attachSessionSummaryToLastAssistant(event, index);
+        if (!attached) {
+          // Fallback: render as a standalone system message if no assistant exists.
+          messages.push(
+            createMessage(
+              ensureUniqueId(`session_summary-${index}`, index),
+              'system',
+              [createEventPart('session_summary', event)],
+              event,
+              index,
+            ),
+          );
+        }
+        return;
+      }
+
       if (event.kind === 'api_retry' && updatePreviousApiRetryMessage(messages, event, index)) {
         return;
       }
@@ -268,7 +316,7 @@ export function convertAgentEventsToAssistantMessages(
       const part = createEventPart(event.kind, event);
       messages.push(
         createMessage(
-          `${event.kind}-${index}`,
+          ensureUniqueId(`${event.kind}-${index}`, index),
           'system',
           [part],
           event,
