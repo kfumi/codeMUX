@@ -101,6 +101,22 @@ pub fn set_session_pinned(
 }
 
 #[tauri::command]
+pub fn set_session_read_only(
+    state: State<'_, AppState>,
+    session_id: String,
+    read_only: bool,
+) -> Result<(), String> {
+    let db = state.db.lock().unwrap();
+    let session = operations::get_session(&db, &session_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("Session not found: {}", session_id))?;
+    if session.origin != "imported" {
+        return Err("Only imported sessions can change read-only state".to_string());
+    }
+    operations::set_session_read_only(&db, &session_id, read_only).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn update_session_title(
     state: State<'_, AppState>,
     session_id: String,
@@ -159,6 +175,20 @@ pub async fn update_session_permissions(
         permission_config.as_ref().map(|value| !value.is_empty()).unwrap_or(false),
         plan_mode.as_deref().unwrap_or("unchanged")
     );
+    if state
+        .db
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT is_read_only FROM sessions WHERE id = ?1",
+            [&session_id],
+            |row| row.get::<_, i32>(0),
+        )
+        .unwrap_or(0)
+        != 0
+    {
+        return Err("会话为只读，原生会话无法恢复".to_string());
+    }
     {
         let db = state.db.lock().unwrap();
         operations::update_session_permissions(

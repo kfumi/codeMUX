@@ -8,15 +8,13 @@ import { useSessionStore } from '../../stores/sessionStore';
 import type { Session } from '../../types/session';
 import { ChatSearchDialog } from './ChatSearchDialog';
 
-const { loadClaudeSessionEventsMock, loadCodexSessionEventsMock } = vi.hoisted(() => ({
-  loadClaudeSessionEventsMock: vi.fn(),
-  loadCodexSessionEventsMock: vi.fn(),
+const { loadSessionEventsMock } = vi.hoisted(() => ({
+  loadSessionEventsMock: vi.fn(),
 }));
 
 vi.mock('../../lib/tauri', () => ({
   agentApi: {
-    loadClaudeSessionEvents: loadClaudeSessionEventsMock,
-    loadCodexSessionEvents: loadCodexSessionEventsMock,
+    loadSessionEvents: loadSessionEventsMock,
   },
 }));
 
@@ -47,10 +45,8 @@ function renderDialog(props: Partial<React.ComponentProps<typeof ChatSearchDialo
 
 describe('ChatSearchDialog', () => {
   beforeEach(() => {
-    loadClaudeSessionEventsMock.mockReset();
-    loadCodexSessionEventsMock.mockReset();
-    loadClaudeSessionEventsMock.mockResolvedValue([]);
-    loadCodexSessionEventsMock.mockResolvedValue([]);
+    loadSessionEventsMock.mockReset();
+    loadSessionEventsMock.mockResolvedValue([]);
 
     useSessionStore.setState({
       sessions: [
@@ -125,7 +121,7 @@ describe('ChatSearchDialog', () => {
         makeSession({ id: 'preview-miss', title: 'Other', updated_at: '2026-01-02T00:00:00.000Z' }),
       ],
     });
-    loadClaudeSessionEventsMock.mockImplementation((sessionId: string) => Promise.resolve(
+    loadSessionEventsMock.mockImplementation((sessionId: string) => Promise.resolve(
       sessionId === 'preview-hit'
         ? [{
             type: 'user',
@@ -197,7 +193,7 @@ describe('ChatSearchDialog', () => {
   });
 
   it('keeps sessions with no history searchable by title', async () => {
-    loadClaudeSessionEventsMock.mockResolvedValue([]);
+    loadSessionEventsMock.mockResolvedValue([]);
     useSessionStore.setState({
       sessions: [
         makeSession({ id: 'empty-history', title: 'No history yet', updated_at: '2026-01-03T00:00:00.000Z' }),
@@ -207,7 +203,7 @@ describe('ChatSearchDialog', () => {
     renderDialog();
 
     await waitFor(() => {
-      expect(loadClaudeSessionEventsMock).toHaveBeenCalledWith('empty-history');
+      expect(loadSessionEventsMock).toHaveBeenCalledWith('empty-history');
     });
 
     fireEvent.change(screen.getByPlaceholderText('搜索聊天或运行命令'), { target: { value: 'history' } });

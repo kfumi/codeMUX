@@ -310,3 +310,31 @@ describe('agentApi', () => {
     });
   });
 });
+
+describe('historyImportApi', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    loggerErrorMock.mockReset();
+  });
+
+  it('wraps import sessions request under the Tauri request argument', async () => {
+    invokeMock.mockResolvedValue({
+      sessions: [],
+      importedCount: 0,
+      refreshedCount: 0,
+      skippedKeys: [],
+      errors: [],
+    });
+    const { historyImportApi } = await import('./tauri');
+    const request = {
+      candidateKeys: ['codex:session-1'],
+      projectId: null,
+      refreshExisting: true,
+      agentKind: 'codex' as const,
+    };
+
+    await historyImportApi.import(request);
+
+    expect(invokeMock).toHaveBeenCalledWith('import_sessions', { request });
+  });
+});

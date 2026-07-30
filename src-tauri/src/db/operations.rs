@@ -1,6 +1,7 @@
 use chrono::Utc;
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::config::types::AgentKind;
@@ -40,6 +41,8 @@ pub struct Session {
     pub permission_config: Option<String>,
     pub plan_mode: Option<String>,
     pub project_id: Option<String>,
+    pub origin: String,
+    pub is_read_only: bool,
     pub is_archived: bool,
     pub is_pinned: bool,
     pub created_at: String,
@@ -53,6 +56,33 @@ pub struct AgentSessionMapping {
     pub agent_session_id: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ImportedSessionSource {
+    pub app_session_id: String,
+    pub agent_kind: AgentKind,
+    pub agent_session_id: String,
+    pub source_locator: String,
+    pub source_fingerprint: String,
+    pub source_modified_at: Option<String>,
+    pub cwd: Option<String>,
+    pub snapshot_version: i32,
+    pub imported_at: String,
+}
+
+pub struct ImportedSessionSnapshot {
+    pub agent_kind: AgentKind,
+    pub agent_session_id: String,
+    pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub project_id: Option<String>,
+    pub source_locator: String,
+    pub source_fingerprint: String,
+    pub source_modified_at: Option<String>,
+    pub cwd: Option<String>,
+    pub events: Vec<Value>,
 }
 
 pub fn create_project(conn: &Connection, name: &str, path: &str) -> Result<Project> {
@@ -143,6 +173,8 @@ pub fn create_session_with_mode_and_permissions(
         permission_config: Some(permission_config.to_string()),
         plan_mode: Some(plan_mode.to_string()),
         project_id: None,
+        origin: "native".to_string(),
+        is_read_only: false,
         is_archived: false,
         is_pinned: false,
         created_at: now.clone(),
@@ -182,6 +214,8 @@ pub fn create_session_for_project_with_permissions(
         permission_config: Some(permission_config.to_string()),
         plan_mode: Some(plan_mode.to_string()),
         project_id: Some(project_id.to_string()),
+        origin: "native".to_string(),
+        is_read_only: false,
         is_archived: false,
         is_pinned: false,
         created_at: now.clone(),
@@ -189,8 +223,249 @@ pub fn create_session_for_project_with_permissions(
     })
 }
 
+pub fn get_session(conn: &Connection, session_id: &str) -> Result<Option<Session>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at FROM sessions WHERE id = ?1 LIMIT 1",
+    )?;
+    let mut rows = stmt.query([session_id])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    Ok(Some(Session {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        agent_kind: validate_agent_kind(&row.get::<_, String>(2)?)?,
+        provider_id: row.get(3)?,
+        model: row.get(4)?,
+        reasoning_effort: row.get(5)?,
+        mode: row.get(6)?,
+        permission_config: row.get(7)?,
+        plan_mode: row.get(8)?,
+        project_id: row.get(9)?,
+        origin: row.get(10)?,
+        is_read_only: row.get::<_, i32>(11)? != 0,
+        is_archived: row.get::<_, i32>(12)? != 0,
+        is_pinned: row.get::<_, i32>(13)? != 0,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
+    }))
+}
+
+pub fn get_imported_source(
+    conn: &Connection,
+    agent_kind: AgentKind,
+    agent_session_id: &str,
+) -> Result<Option<ImportedSessionSource>> {
+    let mut stmt = conn.prepare(
+        "SELECT app_session_id, agent_kind, agent_session_id, source_locator, source_fingerprint, source_modified_at, cwd, snapshot_version, imported_at FROM session_sources WHERE agent_kind = ?1 AND agent_session_id = ?2 LIMIT 1",
+    )?;
+    let mut rows = stmt.query(params![agent_kind.as_str(), agent_session_id])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    Ok(Some(ImportedSessionSource {
+        app_session_id: row.get(0)?,
+        agent_kind: validate_agent_kind(&row.get::<_, String>(1)?)?,
+        agent_session_id: row.get(2)?,
+        source_locator: row.get(3)?,
+        source_fingerprint: row.get(4)?,
+        source_modified_at: row.get(5)?,
+        cwd: row.get(6)?,
+        snapshot_version: row.get(7)?,
+        imported_at: row.get(8)?,
+    }))
+}
+
+pub fn get_session_snapshot(conn: &Connection, session_id: &str) -> Result<Option<Vec<Value>>> {
+    let mut stmt = conn.prepare(
+        "SELECT event_json FROM session_event_snapshots WHERE session_id = ?1 ORDER BY sequence ASC",
+    )?;
+    let rows = stmt.query_map([session_id], |row| row.get::<_, String>(0))?;
+    let mut events = Vec::new();
+    for raw in rows {
+        let raw = raw?;
+        events.push(serde_json::from_str(&raw).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?);
+    }
+    if events.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(events))
+}
+
+pub fn replace_session_snapshot(
+    conn: &mut Connection,
+    session_id: &str,
+    events: &[Value],
+) -> Result<()> {
+    let tx = conn.transaction()?;
+    tx.execute(
+        "DELETE FROM session_event_snapshots WHERE session_id = ?1",
+        [session_id],
+    )?;
+    insert_snapshot_events(&tx, session_id, events)?;
+    tx.commit()
+}
+
+pub fn import_session_snapshot(
+    conn: &mut Connection,
+    snapshot: &ImportedSessionSnapshot,
+    refresh_existing: bool,
+) -> Result<(Session, bool)> {
+    if let Some(existing_source) =
+        get_imported_source(conn, snapshot.agent_kind, &snapshot.agent_session_id)?
+    {
+        let session = get_session(conn, &existing_source.app_session_id)?
+            .expect("imported source must reference an existing session");
+        let mapping_missing =
+            get_agent_session_mapping(conn, &existing_source.app_session_id, snapshot.agent_kind)?
+                .is_none();
+        if !refresh_existing {
+            if mapping_missing {
+                let imported_at = Utc::now().to_rfc3339();
+                let tx = conn.transaction()?;
+                insert_imported_mapping(
+                    &tx,
+                    &existing_source.app_session_id,
+                    snapshot.agent_kind,
+                    &snapshot.agent_session_id,
+                    &imported_at,
+                )?;
+                tx.execute(
+                    "UPDATE sessions SET is_read_only = 0 WHERE id = ?1",
+                    [&existing_source.app_session_id],
+                )?;
+                tx.commit()?;
+                return Ok((
+                    get_session(conn, &existing_source.app_session_id)?.unwrap(),
+                    true,
+                ));
+            }
+            return Ok((session, false));
+        }
+
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM session_event_snapshots WHERE session_id = ?1",
+            [&existing_source.app_session_id],
+        )?;
+        insert_snapshot_events(&tx, &existing_source.app_session_id, &snapshot.events)?;
+        tx.execute(
+            "UPDATE sessions SET title = ?1, updated_at = ?2, project_id = COALESCE(?3, project_id), is_read_only = 0 WHERE id = ?4",
+            params![snapshot.title, snapshot.updated_at, snapshot.project_id, existing_source.app_session_id],
+        )?;
+        if mapping_missing {
+            let imported_at = Utc::now().to_rfc3339();
+            insert_imported_mapping(
+                &tx,
+                &existing_source.app_session_id,
+                snapshot.agent_kind,
+                &snapshot.agent_session_id,
+                &imported_at,
+            )?;
+        }
+        tx.execute(
+            "UPDATE session_sources SET source_locator = ?1, source_fingerprint = ?2, source_modified_at = ?3, cwd = ?4, snapshot_version = 1, imported_at = ?5 WHERE app_session_id = ?6",
+            params![snapshot.source_locator, snapshot.source_fingerprint, snapshot.source_modified_at, snapshot.cwd, Utc::now().to_rfc3339(), existing_source.app_session_id],
+        )?;
+        tx.commit()?;
+        return Ok((
+            get_session(conn, &existing_source.app_session_id)?.unwrap(),
+            true,
+        ));
+    }
+
+    let native_conflict: Option<String> = conn
+        .query_row(
+            "SELECT app_session_id FROM agent_session_mappings WHERE agent_kind = ?1 AND agent_session_id = ?2 LIMIT 1",
+            params![snapshot.agent_kind.as_str(), snapshot.agent_session_id],
+            |row| row.get(0),
+        )
+        .ok();
+    if native_conflict.is_some() {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "原生会话冲突：{} / {} 已被 CodeMUX 运行中会话占用",
+            snapshot.agent_kind.as_str(),
+            snapshot.agent_session_id
+        )));
+    }
+
+    let app_session_id = Uuid::new_v4().to_string();
+    let imported_at = Utc::now().to_rfc3339();
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, origin, is_read_only, created_at, updated_at) VALUES (?1, ?2, ?3, 'chat', ?4, 'imported', 0, ?5, ?6)",
+        params![app_session_id, snapshot.title, snapshot.agent_kind.as_str(), snapshot.project_id, snapshot.created_at, snapshot.updated_at],
+    )?;
+    insert_imported_mapping(
+        &tx,
+        &app_session_id,
+        snapshot.agent_kind,
+        &snapshot.agent_session_id,
+        &imported_at,
+    )?;
+    tx.execute(
+        "INSERT INTO session_sources (app_session_id, agent_kind, agent_session_id, source_locator, source_fingerprint, source_modified_at, cwd, snapshot_version, imported_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)",
+        params![app_session_id, snapshot.agent_kind.as_str(), snapshot.agent_session_id, snapshot.source_locator, snapshot.source_fingerprint, snapshot.source_modified_at, snapshot.cwd, imported_at],
+    )?;
+    insert_snapshot_events(&tx, &app_session_id, &snapshot.events)?;
+    tx.commit()?;
+
+    Ok((get_session(conn, &app_session_id)?.unwrap(), true))
+}
+
+fn insert_imported_mapping(
+    conn: &rusqlite::Transaction<'_>,
+    app_session_id: &str,
+    agent_kind: AgentKind,
+    agent_session_id: &str,
+    timestamp: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO agent_session_mappings (app_session_id, agent_kind, agent_session_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
+        params![app_session_id, agent_kind.as_str(), agent_session_id, timestamp],
+    )?;
+    Ok(())
+}
+
+fn insert_snapshot_events(
+    conn: &rusqlite::Transaction<'_>,
+    session_id: &str,
+    events: &[Value],
+) -> Result<()> {
+    for (sequence, event) in events.iter().enumerate() {
+        let mut snapshot_event = event.clone();
+        if let Some(object) = snapshot_event.as_object_mut() {
+            object.insert(
+                "session_id".to_string(),
+                Value::String(session_id.to_string()),
+            );
+        }
+        let event_id = snapshot_event
+            .get("event_id")
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| {
+                snapshot_event
+                    .get("uuid")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+            });
+        let timestamp = snapshot_event.get("timestamp").and_then(Value::as_str);
+        conn.execute(
+            "INSERT INTO session_event_snapshots (session_id, sequence, event_id, event_timestamp, event_json) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![session_id, sequence as i64, event_id, timestamp, serde_json::to_string(&snapshot_event).unwrap_or_else(|_| "{}".to_string())],
+        )?;
+    }
+    Ok(())
+}
+
 pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, is_archived, is_pinned, created_at, updated_at FROM sessions WHERE is_archived = 0 ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at FROM sessions WHERE is_archived = 0 ORDER BY updated_at DESC")?;
 
     let sessions = stmt
         .query_map([], |row| {
@@ -205,10 +480,12 @@ pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
                 permission_config: row.get(7)?,
                 plan_mode: row.get(8)?,
                 project_id: row.get(9)?,
-                is_archived: row.get::<_, i32>(10)? != 0,
-                is_pinned: row.get::<_, i32>(11)? != 0,
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
+                origin: row.get(10)?,
+                is_read_only: row.get::<_, i32>(11)? != 0,
+                is_archived: row.get::<_, i32>(12)? != 0,
+                is_pinned: row.get::<_, i32>(13)? != 0,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
             })
         })?
         .collect::<Result<Vec<_>>>()?;
@@ -217,7 +494,7 @@ pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
 }
 
 pub fn get_all_archived_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, is_archived, is_pinned, created_at, updated_at FROM sessions WHERE is_archived = 1 ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at FROM sessions WHERE is_archived = 1 ORDER BY updated_at DESC")?;
 
     let sessions = stmt
         .query_map([], |row| {
@@ -232,10 +509,12 @@ pub fn get_all_archived_sessions(conn: &Connection) -> Result<Vec<Session>> {
                 permission_config: row.get(7)?,
                 plan_mode: row.get(8)?,
                 project_id: row.get(9)?,
-                is_archived: row.get::<_, i32>(10)? != 0,
-                is_pinned: row.get::<_, i32>(11)? != 0,
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
+                origin: row.get(10)?,
+                is_read_only: row.get::<_, i32>(11)? != 0,
+                is_archived: row.get::<_, i32>(12)? != 0,
+                is_pinned: row.get::<_, i32>(13)? != 0,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
             })
         })?
         .collect::<Result<Vec<_>>>()?;
@@ -265,6 +544,18 @@ pub fn set_session_pinned(conn: &Connection, session_id: &str, pinned: bool) -> 
     conn.execute(
         "UPDATE sessions SET is_pinned = ?1 WHERE id = ?2",
         params![if pinned { 1 } else { 0 }, session_id],
+    )?;
+    Ok(())
+}
+
+pub fn set_session_read_only(conn: &Connection, session_id: &str, read_only: bool) -> Result<()> {
+    conn.execute(
+        "UPDATE sessions SET is_read_only = ?1, updated_at = ?2 WHERE id = ?3",
+        params![
+            if read_only { 1 } else { 0 },
+            Utc::now().to_rfc3339(),
+            session_id
+        ],
     )?;
     Ok(())
 }
@@ -531,8 +822,9 @@ mod tests {
     use super::{
         archive_session, delete_agent_session_mapping, get_agent_distribution,
         get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
-        get_model_distribution, get_usage_heatmap, get_usage_overview, set_session_pinned,
-        unarchive_session, update_session_provider, upsert_agent_session_mapping,
+        get_model_distribution, get_session_snapshot, get_usage_heatmap, get_usage_overview,
+        import_session_snapshot, set_session_pinned, set_session_read_only, unarchive_session,
+        update_session_provider, upsert_agent_session_mapping, ImportedSessionSnapshot,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -988,5 +1280,88 @@ mod tests {
             .find(|d| d.model == "未知模型")
             .expect("unknown model group should exist for claude_code");
         assert_eq!(claude_unknown.session_count, 1);
+    }
+
+    #[test]
+    fn imports_snapshot_idempotently_and_rewrites_session_id() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let snapshot = ImportedSessionSnapshot {
+            agent_kind: AgentKind::Codex,
+            agent_session_id: "codex-import-1".to_string(),
+            title: "Imported Codex".to_string(),
+            created_at: "2026-07-30T10:00:00Z".to_string(),
+            updated_at: "2026-07-30T10:05:00Z".to_string(),
+            project_id: None,
+            source_locator: "C:/Users/test/.codex/sessions/one.jsonl".to_string(),
+            source_fingerprint: "one:1".to_string(),
+            source_modified_at: Some("2026-07-30T10:05:00Z".to_string()),
+            cwd: Some("C:/workspace".to_string()),
+            events: vec![serde_json::json!({
+                "type": "user_message",
+                "session_id": "codex-import-1",
+                "event_id": "event-1",
+                "content": [{"type": "text", "text": "hello"}]
+            })],
+        };
+
+        let (created, changed) = import_session_snapshot(&mut conn, &snapshot, false).unwrap();
+        assert!(changed);
+        assert_eq!(created.origin, "imported");
+        assert!(!created.is_read_only);
+        assert_eq!(
+            get_agent_session_mapping(&conn, &created.id, AgentKind::Codex)
+                .unwrap()
+                .unwrap()
+                .agent_session_id,
+            "codex-import-1"
+        );
+
+        let events = get_session_snapshot(&conn, &created.id).unwrap().unwrap();
+        assert_eq!(events[0]["session_id"], created.id);
+        assert_eq!(events[0]["event_id"], "event-1");
+
+        let (same, changed_again) = import_session_snapshot(&mut conn, &snapshot, false).unwrap();
+        assert_eq!(same.id, created.id);
+        assert!(!changed_again);
+        assert_eq!(get_all_sessions(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn refresh_import_restores_a_failed_session_and_keeps_mapping() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let snapshot = ImportedSessionSnapshot {
+            agent_kind: AgentKind::ClaudeCode,
+            agent_session_id: "claude-import-1".to_string(),
+            title: "Imported Claude".to_string(),
+            created_at: "2026-01-01T10:00:00Z".to_string(),
+            updated_at: "2026-01-01T10:05:00Z".to_string(),
+            project_id: None,
+            source_locator: "C:/Users/test/.claude/session.jsonl".to_string(),
+            source_fingerprint: "claude:1".to_string(),
+            source_modified_at: Some("2026-01-01T10:05:00Z".to_string()),
+            cwd: Some("C:/workspace".to_string()),
+            events: vec![serde_json::json!({
+                "type": "user_message",
+                "session_id": "claude-import-1",
+                "event_id": "event-1",
+                "content": [{"type": "text", "text": "hello"}]
+            })],
+        };
+
+        let (created, _) = import_session_snapshot(&mut conn, &snapshot, false).unwrap();
+        set_session_read_only(&conn, &created.id, true).unwrap();
+        let (refreshed, changed) = import_session_snapshot(&mut conn, &snapshot, true).unwrap();
+
+        assert!(changed);
+        assert!(!refreshed.is_read_only);
+        assert_eq!(
+            get_agent_session_mapping(&conn, &created.id, AgentKind::ClaudeCode)
+                .unwrap()
+                .unwrap()
+                .agent_session_id,
+            "claude-import-1"
+        );
     }
 }

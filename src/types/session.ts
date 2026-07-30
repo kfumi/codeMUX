@@ -14,6 +14,9 @@ export interface Session {
   permission_config: string | null;
   plan_mode: AgentPlanMode | null;
   project_id: string | null;
+  /** `native` sessions are managed by CodeMUX; imported sessions are snapshots. */
+  origin?: 'native' | 'imported';
+  is_read_only?: boolean;
   created_at: string;
   updated_at: string;
   is_archived: boolean;

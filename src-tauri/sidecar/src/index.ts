@@ -95,6 +95,7 @@ export function buildOpenCodeSessionMappingEvent(mapping: OpenCodeSessionMapping
 type SessionBootstrap = {
   sessionId?: string;
   agentSessionId?: string;
+  resumeOnly?: boolean;
   runtimeGeneration: number;
   cwd: string;
   apiKey?: string;
@@ -280,6 +281,18 @@ function isMissingClaudeConversationError(err: unknown): boolean {
   return String(err).includes('No conversation found with session ID');
 }
 
+function isNativeResumeFailure(err: unknown): boolean {
+  const message = String(err).toLowerCase();
+  return message.includes('no conversation found with session id')
+    || message.includes('failed to restore opencode session')
+    || message.includes('session not found')
+    || message.includes('session does not exist')
+    || message.includes('thread not found')
+    || message.includes('thread does not exist')
+    || message.includes('unable to resume')
+    || message.includes('failed to resume');
+}
+
 export class SessionRuntime {
   private config: SessionBootstrap | null = null;
   private configFingerprint: string | null = null;
@@ -442,6 +455,7 @@ export class SessionRuntime {
     return {
       sessionId: cmd.sessionId,
       agentSessionId: cmd.agentSessionId,
+      resumeOnly: cmd.resumeOnly,
       runtimeGeneration: cmd.runtimeGeneration ?? 0,
       cwd,
       apiKey: cmd.apiKey,
@@ -519,6 +533,21 @@ export class SessionRuntime {
         return warm;
       })
       .catch(async (startupErr) => {
+        if (this.config?.resumeOnly && this.config.agentSessionId) {
+          process.stderr.write(`[sidecar] External session restore failed: ${startupErr}\n`);
+          if (isNativeResumeFailure(startupErr)) {
+            emit({
+              type: 'session_resume_failed',
+              session_id: this.config.sessionId,
+              agent_kind: 'claude_code',
+              agent_session_id: this.config.agentSessionId,
+              error: String(startupErr),
+            });
+          } else {
+            emit({ type: 'sidecar_error', error: String(startupErr) });
+          }
+          return null;
+        }
         if (configGeneration === this.activeConfigGeneration && this.clearStaleResumeMapping(startupErr)) {
           process.stderr.write('[sidecar] Retrying background startup() without stale resume mapping...\n');
           try {
@@ -1201,6 +1230,8 @@ type SidecarCommandDispatcherOptions = {
 export function createSidecarCommandDispatcher(options: SidecarCommandDispatcherOptions) {
   let activeAgentKind: string | undefined;
   let activeSessionId: string | undefined;
+  let activeResumeOnly = false;
+  let activeAgentSessionId: string | undefined;
   let activeOpenCodeRuntime: SidecarRuntime | undefined;
   let ensureTail: Promise<void> = Promise.resolve();
   const pendingPermissionResponses = new Map<SidecarRuntime, Map<string, Promise<void>>>();
@@ -1227,6 +1258,8 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
     const flavor = getRuntimeFlavor(cmd.agentKind);
     activeAgentKind = cmd.agentKind;
     activeSessionId = cmd.sessionId;
+    activeResumeOnly = cmd.resumeOnly === true;
+    activeAgentSessionId = cmd.agentSessionId;
     if (flavor !== 'opencode') {
       await shutdownOpenCodeRuntime();
       const selectedRuntime = flavor === 'codex' ? options.codexRuntime : options.claudeRuntime;
@@ -1271,7 +1304,17 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         try {
           await dispatchEnsure(cmd);
         } catch (error) {
-          emitError(error);
+          if (cmd.resumeOnly && cmd.agentSessionId && isNativeResumeFailure(error)) {
+            options.emit({
+              type: 'session_resume_failed',
+              session_id: cmd.sessionId,
+              agent_kind: cmd.agentKind,
+              agent_session_id: cmd.agentSessionId,
+              error: String(error),
+            });
+          } else {
+            emitError(error);
+          }
         }
         return;
       case 'update_permissions': {
@@ -1291,6 +1334,7 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         return;
       }
       case 'send_input': {
+        await ensureTail;
         const current = selectedRuntime();
         if (!current) {
           emitError('OpenCode runtime is not initialized');
@@ -1301,7 +1345,17 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           options.emit(buildUserMessageEvent(sessionId, cmd.prompt, cmd.inputPayload, cmd.displayContent));
         }
         void current.sendInput(cmd.prompt, cmd.inputPayload).catch((error) => {
-          if (!isAbortError(error)) emitError(error);
+          if (activeResumeOnly && activeAgentSessionId && isNativeResumeFailure(error)) {
+            options.emit({
+              type: 'session_resume_failed',
+              session_id: activeSessionId,
+              agent_kind: activeAgentKind,
+              agent_session_id: activeAgentSessionId,
+              error: String(error),
+            });
+          } else if (!isAbortError(error)) {
+            emitError(error);
+          }
         });
         return;
       }

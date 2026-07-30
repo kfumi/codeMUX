@@ -22,6 +22,7 @@ interface SessionState {
   archiveSession: (sessionId: string) => Promise<void>;
   unarchiveSession: (sessionId: string) => Promise<void>;
   setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
+  setSessionReadOnly: (sessionId: string, readOnly: boolean) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   updateSessionModel: (sessionId: string, model: string) => void;
@@ -151,17 +152,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     try {
       const session = get().sessions.find((entry) => entry.id === sessionId)
         ?? get().archivedSessions.find((entry) => entry.id === sessionId);
-      if (session?.agent_kind === 'opencode') {
+      if (session && session.origin !== 'imported' && !session.is_read_only && session.agent_kind === 'opencode') {
         await agentApi.deleteOpenCodeSession(sessionId);
       }
       // Clean up agent session files (best-effort, don't block on failure)
-      try {
-        await agentApi.shutdown(sessionId);
-        await agentApi.deleteClaudeSessionFiles(sessionId);
-        await agentApi.deleteCodexSessionFiles(sessionId);
-        await agentApi.resetSession(sessionId);
-      } catch {
-        // Ignore cleanup errors — the session mapping may not exist
+      if (session?.origin !== 'imported' && !session?.is_read_only) {
+        try {
+          await agentApi.shutdown(sessionId);
+          await agentApi.deleteClaudeSessionFiles(sessionId);
+          await agentApi.deleteCodexSessionFiles(sessionId);
+          await agentApi.resetSession(sessionId);
+        } catch {
+          // Ignore cleanup errors — the session mapping may not exist
+        }
       }
       // Clear in-memory agent events
       useAgentStore.getState().clearEvents(sessionId);
@@ -229,6 +232,18 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }));
     } catch (error) {
       set({ error: String(error) });
+    }
+  },
+  setSessionReadOnly: async (sessionId: string, readOnly: boolean) => {
+    try {
+      await sessionApi.setReadOnly(sessionId, readOnly);
+      set((state) => ({
+        sessions: state.sessions.map((session) => session.id === sessionId ? { ...session, is_read_only: readOnly } : session),
+        archivedSessions: state.archivedSessions.map((session) => session.id === sessionId ? { ...session, is_read_only: readOnly } : session),
+      }));
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
     }
   },
   setActiveSession: (sessionId: string | null) => {

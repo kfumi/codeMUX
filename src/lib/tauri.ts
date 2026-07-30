@@ -1,5 +1,6 @@
 import { invoke, Channel } from '@tauri-apps/api/core';
 import type { AgentKind, ReasoningEffort, Session, SessionMode } from '../types/session';
+import type { ImportCandidate, ImportSessionsRequest, ImportSessionsResult } from '../types/historyImport';
 import type { AgentUserMessageLocator } from '../types/agent';
 import type { AgentInputPayload } from '../types/agentInput';
 import type { AgentConfigUpdateMap, AgentProviderProfileUpsert, AppConfig, NotificationSettings, ProfileModel, Provider, Theme } from '../types/provider';
@@ -207,6 +208,7 @@ export const sessionApi = {
   archive: (sessionId: string): Promise<void> => invokeLogged('archive_session', { sessionId }),
   unarchive: (sessionId: string): Promise<void> => invokeLogged('unarchive_session', { sessionId }),
   setPinned: (sessionId: string, pinned: boolean): Promise<void> => invokeLogged('set_session_pinned', { sessionId, pinned }),
+  setReadOnly: (sessionId: string, readOnly: boolean): Promise<void> => invokeLogged('set_session_read_only', { sessionId, readOnly }),
   updateTitle: (sessionId: string, title: string): Promise<void> => invokeLogged('update_session_title', { sessionId, title }),
   touch: (sessionId: string): Promise<void> => invokeLogged('touch_session', { sessionId }),
   updateProvider: (sessionId: string, providerId: string | null, model: string, reasoningEffort?: ReasoningEffort): Promise<void> =>
@@ -276,6 +278,8 @@ export const agentApi = {
     invokeLogged('load_codex_session_events', { appSessionId }),
   loadOpenCodeSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
     invokeLogged('load_opencode_session_events', { appSessionId }),
+  loadSessionEvents: (appSessionId: string): Promise<Record<string, unknown>[]> =>
+    invokeLogged('load_session_events', { appSessionId }),
   deleteOpenCodeSession: (appSessionId: string): Promise<void> =>
     invokeLogged('delete_opencode_session', { appSessionId }),
   /** Load latest token usage snapshot directly from the agent history file. */
@@ -292,6 +296,13 @@ export const agentApi = {
     invokeLogged('get_agent_session_info', { appSessionId, agentKind }),
   stopProxy: (): Promise<void> => invokeLogged('stop_codex_proxy'),
   getProxyPort: (): Promise<number | null> => invokeLogged('get_codex_proxy_port'),
+};
+
+export const historyImportApi = {
+  discover: (agentKind?: AgentKind): Promise<ImportCandidate[]> =>
+    invokeLogged('discover_importable_sessions', { agentKind: agentKind ?? null }),
+  import: (request: ImportSessionsRequest): Promise<ImportSessionsResult> =>
+    invokeLogged('import_sessions', { request }),
 };
 
 export const configApi = {

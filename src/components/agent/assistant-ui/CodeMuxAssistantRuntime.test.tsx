@@ -553,6 +553,14 @@ const mixedFooterStatsEvents: AgentMessage[] = [
       },
     },
   },
+  {
+    kind: 'compact',
+    data: {
+      type: 'system',
+      subtype: 'compact_boundary',
+      compact_metadata: { trigger: 'auto', pre_tokens: 100 },
+    },
+  },
   { kind: 'user', data: { content: 'latest request' } },
   {
     kind: 'assistant',
@@ -929,6 +937,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
           Date.parse('2026-06-29T10:00:00Z'),
           Date.parse('2026-06-29T10:00:05Z'),
           Date.parse('2026-06-29T10:00:05Z'),
+          Date.parse('2026-06-29T10:01:00Z'),
           Date.parse('2026-06-29T10:02:00Z'),
           Date.parse('2026-06-29T10:02:08Z'),
           Date.parse('2026-06-29T10:02:08Z'),
@@ -1065,6 +1074,15 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(latestRow?.textContent).toContain('缓存命中 60%');
     expect(latestRow?.textContent).not.toContain('30+40 token');
     expect(latestRow?.textContent).not.toContain('缓存命中 25%');
+  });
+
+  it('keeps historical footer visible before a compaction boundary', () => {
+    render(<Harness sessionId="session-footer-snapshot" />);
+
+    const earlierRow = screen.getByText('Earlier answer.').closest('[data-message-row]');
+
+    expect(earlierRow?.textContent).toContain('耗时 1.0s');
+    expect(earlierRow?.textContent).toContain('10+20 token');
   });
 
   it('binds final footer stats to trailing text after a same-turn tool-only replay', async () => {

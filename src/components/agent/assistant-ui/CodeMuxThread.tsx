@@ -74,7 +74,6 @@ type CodeMuxThreadRenderContextValue = {
   onToggleExpandedTurn: (turnKey: string) => void;
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
-  lastCompactEventIndex: number;
 };
 
 const EMPTY_EVENTS: AgentMessage[] = [];
@@ -194,14 +193,6 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     [events, eventTimestamps],
   );
 
-  const lastCompactEventIndex = useMemo(() => {
-    for (let i = events.length - 1; i >= 0; i--) {
-      if (events[i].kind === 'compact') {
-        return i;
-      }
-    }
-    return -1;
-  }, [events]);
   const threadRenderContextValue = useMemo(() => ({
     sessionId,
     compactAiOutput,
@@ -212,7 +203,6 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     onToggleExpandedTurn: toggleExpandedTurn,
     toolDurations,
     turnByEventIndex,
-    lastCompactEventIndex,
   }), [
     sessionId,
     compactAiOutput,
@@ -223,7 +213,6 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     toggleExpandedTurn,
     toolDurations,
     turnByEventIndex,
-    lastCompactEventIndex,
   ]);
 
   return (
@@ -320,7 +309,6 @@ function CodeMuxAssistantMessage() {
     onToggleExpandedTurn,
     toolDurations,
     turnByEventIndex,
-    lastCompactEventIndex,
   } = useCodeMuxThreadRenderContext();
   return (
     <AssistantLikeMessage
@@ -332,7 +320,6 @@ function CodeMuxAssistantMessage() {
       onToggleExpandedTurn={onToggleExpandedTurn}
       toolDurations={toolDurations}
       turnByEventIndex={turnByEventIndex}
-      lastCompactEventIndex={lastCompactEventIndex}
     />
   );
 }
@@ -892,7 +879,6 @@ function AssistantLikeMessage({
   onToggleExpandedTurn,
   toolDurations,
   turnByEventIndex,
-  lastCompactEventIndex,
 }: {
   message: MessageState;
   sessionId: string;
@@ -902,13 +888,11 @@ function AssistantLikeMessage({
   onToggleExpandedTurn: (turnKey: string) => void;
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
-  lastCompactEventIndex: number;
 }) {
   if (message.content.length === 0) {
     return null;
   }
 
-  const sourceEventIndex = getSourceEventIndex(message);
   const collapseInfo = compactAiOutput ? getMessageCollapseInfo(message, collapseInfoByEventIndex) : undefined;
   const isCollapseExpanded = collapseInfo ? expandedTurnKeys.has(collapseInfo.turnKey) : false;
   const shouldHideCollapsedContent = collapseInfo && !isCollapseExpanded && !collapseInfo.hideReasoningOnly;
@@ -927,12 +911,10 @@ function AssistantLikeMessage({
   const footerStatus = turn?.status === 'interrupted' || turn?.status === 'failed'
     ? turn.status
     : undefined;
-  const isAfterLastCompact = sourceEventIndex != null && sourceEventIndex > lastCompactEventIndex;
   const shouldRenderFooter =
     isFinal
     && turn?.status !== 'running'
     && message.metadata.custom?.sourceRole !== 'system'
-    && isAfterLastCompact
     && (turn !== undefined || sourceTimestamp !== undefined);
 
   return (

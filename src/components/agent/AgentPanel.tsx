@@ -54,6 +54,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   const session = sessions.find((entry) => entry.id === sessionId);
   const project = session?.project_id ? projects.find((entry) => entry.id === session.project_id) : null;
+  const isReadOnly = Boolean(session?.is_read_only);
   const reasoningEffort = session?.reasoning_effort ?? 'medium';
   const agentKind = session?.agent_kind ?? 'claude_code';
   const isProfileAgent = agentKind === 'claude_code' || agentKind === 'codex' || agentKind === 'opencode';
@@ -147,7 +148,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   }, [sessionId, project?.path]);
 
   useEffect(() => {
-    if (isRunning) {
+    if (isRunning || isReadOnly) {
       return;
     }
 
@@ -168,10 +169,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     agentApi.ensureSession(sessionId, effectiveCwd, undefined, reasoningEffort).catch(() => {
       ensuredSessionsRef.current.delete(ensureKey);
     });
-  }, [sessionId, cwd, project?.path, reasoningEffort, session?.permission_config, planMode, isRunning]);
+  }, [sessionId, cwd, project?.path, reasoningEffort, session?.permission_config, planMode, isRunning, isReadOnly]);
 
   const handleSend = async (input: AgentInputPayload, displayContent = input.text) => {
-    if (!hasUsableProfile) {
+    if (!hasUsableProfile || isReadOnly) {
       return;
     }
     const effectiveCwd = project?.path || cwd;
@@ -198,7 +199,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   };
 
   const handleModelChange = useCallback(async (nextModel: string) => {
-    if (!isProfileAgent || !nextModel || nextModel === selectorModelState) {
+    if (isReadOnly || !isProfileAgent || !nextModel || nextModel === selectorModelState) {
       return;
     }
     userModifiedRef.current = true;
@@ -219,9 +220,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         error: { ...state.error, [sessionId]: String(error) },
       }));
     }
-  }, [activeProfile, agentKind, isProfileAgent, modelSupports1m, sessionId, selectorModelState, runtimeProvider?.context_1m, setActiveAgentProfileModel, updateSessionModel]);
+  }, [activeProfile, agentKind, isProfileAgent, isReadOnly, modelSupports1m, sessionId, selectorModelState, runtimeProvider?.context_1m, setActiveAgentProfileModel, updateSessionModel]);
 
   const handleReasoningEffortChange = useCallback(async (nextEffort: ReasoningEffort) => {
+    if (isReadOnly) return;
     const latestSession = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
     if (!latestSession || latestSession.reasoning_effort === nextEffort) {
       return;
@@ -246,42 +248,46 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         error: { ...state.error, [sessionId]: String(error) },
       }));
     }
-  }, [model, sessionId]);
+  }, [isReadOnly, model, sessionId]);
 
   const handlePermissionConfigChange = useCallback((nextPermissionConfig: AgentPermissionConfig) => {
+    if (isReadOnly) return;
     updateSessionPermissions(sessionId, nextPermissionConfig, planMode).catch((error) => {
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
       }));
     });
-  }, [planMode, sessionId, updateSessionPermissions]);
+  }, [isReadOnly, planMode, sessionId, updateSessionPermissions]);
 
   const handlePlanModeChange = useCallback((nextPlanMode: AgentPlanMode) => {
+    if (isReadOnly) return;
     updateSessionPermissions(sessionId, undefined, nextPlanMode).catch((error) => {
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
       }));
     });
-  }, [sessionId, updateSessionPermissions]);
+  }, [isReadOnly, sessionId, updateSessionPermissions]);
 
   // Atomic mode change — updates both config and plan mode in a single DB write
   // to avoid race conditions from two separate async calls.
   const handleModeChange = useCallback((nextConfig: AgentPermissionConfig, nextPlanMode: AgentPlanMode) => {
+    if (isReadOnly) return;
     updateSessionPermissions(sessionId, nextConfig, nextPlanMode).catch((error) => {
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
       }));
     });
-  }, [sessionId, updateSessionPermissions]);
+  }, [isReadOnly, sessionId, updateSessionPermissions]);
 
   // Migrate legacy Codex configs (e.g. workspace-write) to the current default.
   const handleLegacyConfigMigrate = useCallback((migratedConfig: AgentPermissionConfig) => {
+    if (isReadOnly) return;
     updateSessionPermissions(sessionId, migratedConfig).catch((error) => {
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
       }));
     });
-  }, [sessionId, updateSessionPermissions]);
+  }, [isReadOnly, sessionId, updateSessionPermissions]);
 
   const showInfoDialog = useCallback((title: string, content: string) => {
     setInfoTitle(title);
@@ -325,7 +331,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   return (
     <div ref={containerRef} className="flex h-full flex-col">
       <Profiler id="MessageList" onRender={handleProfilerRender}>
-      <CodeMuxAssistantRuntimeProvider sessionId={sessionId} agentKind={agentKind} onSend={handleSend} onCommand={handleCommand} sendDisabled={!hasUsableProfile}>
+      <CodeMuxAssistantRuntimeProvider sessionId={sessionId} agentKind={agentKind} onSend={handleSend} onCommand={handleCommand} sendDisabled={!hasUsableProfile || isReadOnly}>
         <CodeMuxThread
           sessionId={sessionId}
           footer={(
@@ -335,7 +341,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                 agentKind={agentKind}
                 projectPath={project?.path}
                 modelName={modelNameWithSuffix}
-                disabled={!hasUsableProfile}
+                disabled={!hasUsableProfile || isReadOnly}
                 modelSelector={(
                   <AgentModelSelector
                     agentKind={agentKind}
@@ -346,7 +352,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                     onChange={handleModelChange}
                     reasoningEffort={reasoningEffort}
                     onReasoningEffortChange={handleReasoningEffortChange}
-                    disabled={isRunning}
+                    disabled={isRunning || isReadOnly}
                     compact={compact}
                   />
                 )}
@@ -360,6 +366,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                     onModeChange={handleModeChange}
                     onLegacyConfigMigrate={handleLegacyConfigMigrate}
                     pendingPermission={pendingPermission}
+                    disabled={isReadOnly}
                     onPermissionResponse={(response) => { void respondToPermission(sessionId, response); }}
                     compact={compact}
                   />

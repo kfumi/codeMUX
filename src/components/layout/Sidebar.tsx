@@ -1,5 +1,5 @@
 import { open } from '@tauri-apps/plugin-dialog';
-import { MessageSquarePlus, Search, Settings } from 'lucide-react';
+import { Download, MessageSquarePlus, Search, Settings } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { createLogger, serializeError } from '../../lib/logger';
@@ -8,6 +8,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { SessionList } from '../session/SessionList';
 import { ChatSearchDialog } from './ChatSearchDialog';
+import { ImportSessionsDialog } from './ImportSessionsDialog';
 
 const logger = createLogger('Sidebar');
 
@@ -29,6 +30,7 @@ export function Sidebar({
   const proxyUrl = useSettingsStore((s) => s.proxyUrl);
   const port = proxyUrl?.match(/:(\d+)$/)?.[1];
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     fetchProjects();
@@ -60,6 +62,15 @@ export function Sidebar({
         >
           <MessageSquarePlus className="h-4 w-4" />
           <span className="flex-1 text-left">新对话</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setImportOpen(true)}
+          className="flex w-full items-center gap-2.5 rounded-md border-[hsl(var(--sidebar-border))]/48 px-3 py-2 text-[13px] font-medium text-[hsl(var(--sidebar-fg))]/72 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
+        >
+          <Download className="h-4 w-4" />
+          <span className="flex-1 text-left">导入外部会话</span>
         </button>
 
         <button
@@ -104,6 +115,11 @@ export function Sidebar({
         open={chatSearchOpen}
         onOpenChange={setChatSearchOpen}
         onNavigateHome={onNavigateHome}
+      />
+      <ImportSessionsDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImported={onNavigateHome}
       />
     </div>
   );

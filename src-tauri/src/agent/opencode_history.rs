@@ -837,13 +837,16 @@ fn rewind_opencode_events_from_connection(
     Ok(remaining == 0)
 }
 
-fn find_opencode_database(home: &std::path::Path) -> Option<std::path::PathBuf> {
+pub(crate) fn find_opencode_database(home: &std::path::Path) -> Option<std::path::PathBuf> {
     let mut candidates = Vec::new();
     if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
         candidates.push(std::path::PathBuf::from(data_home).join("opencode/opencode.db"));
     }
     candidates.push(home.join(".local/share/opencode/opencode.db"));
+    candidates.push(home.join(".config/opencode/opencode.db"));
+    candidates.push(home.join("Library/Application Support/opencode/opencode.db"));
     candidates.push(home.join("AppData/Local/opencode/opencode.db"));
+    candidates.push(home.join("AppData/Roaming/opencode/opencode.db"));
     candidates.into_iter().find(|path| path.exists())
 }
 
@@ -882,12 +885,21 @@ fn load_opencode_events_from_connection(
             .and_then(Value::as_str)
             .unwrap_or_default();
         if role != "user" && role != "assistant" {
+            events.push(serde_json::json!({
+                "type": "diagnostic",
+                "subtype": "unknown_opencode_message_role",
+                "role": role,
+                "raw": message,
+                "session_id": session_id,
+                "timestamp": timestamp_string(time_created),
+            }));
             continue;
         }
 
         let parts = load_opencode_parts(connection, session_id, &message_id)?;
         let mut content = Vec::new();
         let mut tool_results = Vec::new();
+        let mut diagnostics = Vec::new();
         for part in parts {
             let part_type = part
                 .data
@@ -991,9 +1003,18 @@ fn load_opencode_events_from_connection(
                         "timestamp": timestamp_string(part.time_created),
                     }));
                 }
-                _ => {}
+                _ => diagnostics.push(serde_json::json!({
+                    "type": "diagnostic",
+                    "subtype": "unknown_opencode_part",
+                    "part_type": part_type,
+                    "raw": part.data,
+                    "session_id": session_id,
+                    "timestamp": timestamp_string(part.time_created),
+                })),
             }
         }
+
+        events.extend(diagnostics);
 
         if content.is_empty() && role == "user" {
             // Even if content is empty, check for summary.diffs on this user message.

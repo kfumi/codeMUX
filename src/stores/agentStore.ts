@@ -51,6 +51,7 @@ import type {
   AgentUserMessageLocator,
   SidecarReadyEvent,
   SidecarErrorEvent,
+  SessionResumeFailedEvent,
   TodoItem,
   ChangedFile,
 } from '../types/agent';
@@ -72,6 +73,7 @@ export type AgentMessage =
   | { kind: 'result'; data: AgentResultMessage }
   | { kind: 'ready'; data: SidecarReadyEvent }
   | { kind: 'error'; data: SidecarErrorEvent }
+  | { kind: 'resume_failed'; data: SessionResumeFailedEvent }
   | { kind: 'stream_status'; data: { message: string; is_reconnecting: boolean; mode_blocked?: ModeBlockedDiagnostic | null } }
   | { kind: 'api_retry'; data: { attempt: number; max_retries: number; retry_delay_ms: number; error_status: number; error: string } }
   | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; allowOther?: boolean }> } }
@@ -547,6 +549,8 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'ready', data };
       case 'sidecar_error':
         return { kind: 'error', data };
+      case 'session_resume_failed':
+        return { kind: 'resume_failed', data };
       case 'sidecar_query_done':
         return { kind: 'done' };
       case 'mcp_status_update':
@@ -1163,6 +1167,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   pendingPermissions: {},
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, reasoningEffort?: ReasoningEffort, displayContent?: string, inputPayload?: AgentInputPayload, modelForVision?: string) => {
+    const targetSession = useSessionStore.getState().sessions.find((session) => session.id === sessionId)
+      ?? useSessionStore.getState().archivedSessions.find((session) => session.id === sessionId);
+    if (targetSession?.is_read_only) {
+      set((state) => ({ error: { ...state.error, [sessionId]: '会话为只读，原生会话无法恢复' } }));
+      return;
+    }
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
     set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: null } }));
@@ -1242,6 +1252,22 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
       const handleEvent = (raw: string) => {
         let event = parseAgentEvent(raw);
         const now = Date.now();
+
+        if (event.kind === 'resume_failed') {
+          const message = `外部会话恢复失败，已切换为只读快照：${event.data.error}`;
+          void useSessionStore.getState().setSessionReadOnly(sessionId, true).catch((error) => {
+            logger.error('Failed to persist imported session read-only state', { sessionId }, serializeError(error));
+          });
+          clearPendingStreaming(sessionId);
+          clearPendingStreamingToolInputs(sessionId);
+          set((s) => ({
+            isRunning: { ...s.isRunning, [sessionId]: false },
+            error: { ...s.error, [sessionId]: message },
+            queryStartTime: Object.fromEntries(Object.entries(s.queryStartTime).filter(([id]) => id !== sessionId)),
+          }));
+          useSessionStore.getState().markSessionUnread(sessionId);
+          return;
+        }
 
         // Skip sub-agent (sidechain) messages from the main thread.
         if (event.kind === 'raw' && isClaudeSubagentEvent(event.data)) {
@@ -2042,11 +2068,13 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     const agentKind = getSessionAgentKind(sessionId);
 
     try {
-      const historyMessages = agentKind === 'codex'
-        ? await agentApi.loadCodexSessionEvents(sessionId)
-        : agentKind === 'opencode'
-          ? await agentApi.loadOpenCodeSessionEvents(sessionId)
-          : await agentApi.loadClaudeSessionEvents(sessionId);
+      const historyMessages = typeof agentApi.loadSessionEvents === 'function'
+        ? await agentApi.loadSessionEvents(sessionId)
+        : agentKind === 'codex'
+          ? await agentApi.loadCodexSessionEvents(sessionId)
+          : agentKind === 'opencode'
+            ? await agentApi.loadOpenCodeSessionEvents(sessionId)
+            : await agentApi.loadClaudeSessionEvents(sessionId);
 
       if (!historyMessages || historyMessages.length === 0) {
         logger.info('No agent history found for session', {
@@ -2139,6 +2167,11 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
 
   rewindLastTurn: async (sessionId: string) => {
     const state = get();
+    const targetSession = useSessionStore.getState().sessions.find((session) => session.id === sessionId)
+      ?? useSessionStore.getState().archivedSessions.find((session) => session.id === sessionId);
+    if (targetSession?.is_read_only) {
+      return null;
+    }
     if (state.isRunning[sessionId]) {
       return null;
     }

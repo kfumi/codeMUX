@@ -170,4 +170,13 @@ describe('SessionHeader', () => {
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('未找到任务路径'));
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
+
+  it('hides the task path action for OpenCode sessions', () => {
+    useSessionStore.setState({ sessions: [makeSession({ agent_kind: 'opencode' })] });
+
+    openMenu();
+
+    expect(screen.queryByText('复制任务路径')).toBeNull();
+    expect(screen.getByText('复制会话ID')).toBeTruthy();
+  });
 });

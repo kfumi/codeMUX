@@ -132,6 +132,14 @@ export interface SidecarErrorEvent {
   error: string;
 }
 
+export interface SessionResumeFailedEvent {
+  type: 'session_resume_failed';
+  session_id?: string;
+  agent_kind?: string;
+  agent_session_id?: string;
+  error: string;
+}
+
 export interface SidecarQueryDoneEvent {
   type: 'sidecar_query_done';
 }

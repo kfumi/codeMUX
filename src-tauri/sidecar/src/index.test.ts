@@ -122,6 +122,37 @@ describe('sidecar command dispatcher', () => {
     expect(claude.sendInput).toHaveBeenCalledWith('claude', undefined);
   });
 
+  it('emits a structured failure when an imported session cannot be restored', async () => {
+    const opencode = createRuntime();
+    opencode.ensure.mockRejectedValue(new Error('Failed to restore OpenCode session "external-1": session not found'));
+    const emit = vi.fn();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: createRuntime(),
+      codexRuntime: createRuntime(),
+      createOpenCodeRuntime: vi.fn(() => opencode),
+      emit,
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({
+      type: 'ensure_session',
+      agentKind: 'opencode',
+      cwd: 'D:\\workspace',
+      sessionId: 'app-session-1',
+      agentSessionId: 'external-1',
+      resumeOnly: true,
+    });
+
+    expect(emit).toHaveBeenCalledWith({
+      type: 'session_resume_failed',
+      session_id: 'app-session-1',
+      agent_kind: 'opencode',
+      agent_session_id: 'external-1',
+      error: 'Error: Failed to restore OpenCode session "external-1": session not found',
+    });
+  });
+
   it('cleans the previous OpenCode runtime before replacing it', async () => {
     const first = createRuntime();
     const second = createRuntime();

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Archive, Loader2, Pencil, Pin, PinOff, Trash2, Undo2 } from 'lucide-react';
+import { Archive, Loader2, LockKeyhole, Pencil, Pin, PinOff, Trash2, Undo2 } from 'lucide-react';
 
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { ConfirmDialog } from '../ui/confirm-dialog';
@@ -171,6 +171,11 @@ export function SessionItem({
                 <span className={cn('flex-1 truncate transition-colors duration-200', isActive && 'font-medium')}>
                   {session.title || '未命名对话'}
                 </span>
+                {session.is_read_only && (
+                  <TooltipHint content="导入的只读快照">
+                    <LockKeyhole className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/42" aria-label="只读会话" />
+                  </TooltipHint>
+                )}
                 <span className="relative h-5 shrink-0">
                   <span className={cn('inline-flex h-5 items-center text-[12px] tabular-nums transition-opacity duration-150', 'text-[hsl(var(--sidebar-fg))]/40', 'group-hover:opacity-0')}>
                     {timeLabel}

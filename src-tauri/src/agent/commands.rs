@@ -38,6 +38,35 @@ pub(crate) fn get_agent_session_id(
         .map_err(|err| err.to_string())
 }
 
+fn is_imported_session(state: &crate::AppState, session_id: &str) -> Result<bool, String> {
+    let db = state.db.lock().unwrap();
+    db.query_row(
+        "SELECT origin FROM sessions WHERE id = ?1 LIMIT 1",
+        [session_id],
+        |row| row.get::<_, String>(0),
+    )
+    .map(|origin| origin == "imported")
+    .map_err(|error| error.to_string())
+}
+
+fn reject_read_only_session(
+    state: &State<'_, crate::AppState>,
+    session_id: &str,
+) -> Result<(), String> {
+    let db = state.db.lock().unwrap();
+    let is_read_only: i32 = db
+        .query_row(
+            "SELECT is_read_only FROM sessions WHERE id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if is_read_only != 0 {
+        return Err("会话为只读，原生会话无法恢复".to_string());
+    }
+    Ok(())
+}
+
 fn resolve_session_agent_kind(state: &crate::AppState, session_id: &str) -> Result<String, String> {
     let db = state.db.lock().unwrap();
     crate::agent_runtime::factory::session_runtime_kind_name(&db, session_id)
@@ -252,7 +281,7 @@ pub(crate) fn find_claude_session_jsonl(
     None
 }
 
-fn should_include_claude_history_event(val: &serde_json::Value) -> bool {
+pub(crate) fn should_include_claude_history_event(val: &serde_json::Value) -> bool {
     if val
         .get("isSidechain")
         .and_then(|entry| entry.as_bool())
@@ -845,6 +874,22 @@ pub async fn get_agent_session_info(
 ) -> Result<AgentSessionInfo, String> {
     let agent_kind = AgentKind::from_str(&agent_kind)?;
     let agent_session_id = get_agent_session_id(state.inner(), &app_session_id, agent_kind)?;
+    if agent_session_id.is_none() {
+        let db = state.db.lock().unwrap();
+        let source = db
+            .query_row(
+                "SELECT agent_session_id, source_locator FROM session_sources WHERE app_session_id = ?1 AND agent_kind = ?2 LIMIT 1",
+                rusqlite::params![app_session_id, agent_kind.as_str()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .ok();
+        if let Some((agent_session_id, source_locator)) = source {
+            return Ok(AgentSessionInfo {
+                agent_session_id: Some(agent_session_id),
+                message_path: Some(source_locator),
+            });
+        }
+    }
     resolve_agent_session_info(&home_dir()?, agent_kind, agent_session_id)
 }
 
@@ -1426,7 +1471,7 @@ fn convert_codex_compacted_to_compact_boundary(
     }))
 }
 
-fn convert_codex_history_values_to_events(
+pub(crate) fn convert_codex_history_values_to_events(
     raw_events: &[serde_json::Value],
     app_session_id: &str,
 ) -> Vec<serde_json::Value> {
@@ -2173,6 +2218,21 @@ fn build_ensure_session_command(
         "cwd": cwd,
         "sessionId": session_id,
     });
+    let (session_origin, imported_cwd) = {
+        let db = state.db.lock().unwrap();
+        db.query_row(
+            "SELECT s.origin, ss.cwd FROM sessions s LEFT JOIN session_sources ss ON ss.app_session_id = s.id WHERE s.id = ?1 LIMIT 1",
+            [session_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .map_err(|error| format!("无法读取会话来源信息: {}", error))?
+    };
+    if session_origin == "imported" {
+        cmd["resumeOnly"] = serde_json::Value::Bool(true);
+        if let Some(imported_cwd) = imported_cwd.filter(|value| !value.trim().is_empty()) {
+            cmd["cwd"] = serde_json::Value::String(imported_cwd);
+        }
+    }
     if agent_kind == "opencode" {
         if let Some(generation) = runtime_generation {
             cmd["runtimeGeneration"] = serde_json::json!(generation);
@@ -2378,6 +2438,8 @@ pub async fn ensure_agent_session(
 ) -> Result<(), String> {
     info!(target: "agent", "Ensuring agent session session_id={} cwd={}", session_id, cwd);
 
+    reject_read_only_session(&state, &session_id)?;
+
     let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
     let _lifecycle_guard = lifecycle_lock.lock().await;
     let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
@@ -2429,12 +2491,14 @@ pub async fn ensure_agent_session(
 
 #[tauri::command]
 pub async fn send_agent_input(
+    state: State<'_, crate::AppState>,
     agent_state: State<'_, AgentState>,
     session_id: String,
     prompt: String,
     input_payload: Option<serde_json::Value>,
     display_content: Option<String>,
 ) -> Result<(), String> {
+    reject_read_only_session(&state, &session_id)?;
     let mut cmd =
         OpenCodeRuntime::send_input_command(&session_id, prompt, display_content.as_deref());
     if let Some(payload) = input_payload {
@@ -2459,6 +2523,7 @@ pub async fn start_agent_session(
     input_payload: Option<serde_json::Value>,
     display_content: Option<String>,
 ) -> Result<(), String> {
+    reject_read_only_session(&state, &session_id)?;
     let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
     crate::log_ctx::with_ctx(ctx, || async {
         crate::log_ctx!(info, target: "agent", "Starting agent session wrapper");
@@ -2503,9 +2568,11 @@ pub async fn start_agent_session(
 
 #[tauri::command]
 pub async fn interrupt_agent_session(
+    state: State<'_, crate::AppState>,
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
+    reject_read_only_session(&state, &session_id)?;
     let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
     crate::log_ctx::with_ctx(ctx, || async {
         crate::log_ctx!(info, target: "agent", "Interrupt requested");
@@ -2536,9 +2603,11 @@ pub async fn interrupt_agent_session(
 
 #[tauri::command]
 pub async fn shutdown_agent(
+    state: State<'_, crate::AppState>,
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
+    reject_read_only_session(&state, &session_id)?;
     let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
     crate::log_ctx::with_ctx(ctx, || async {
         crate::log_ctx!(info, target: "agent", "Shutdown requested");
@@ -2561,11 +2630,13 @@ pub async fn shutdown_agent(
 
 #[tauri::command]
 pub async fn send_tool_response(
+    state: State<'_, crate::AppState>,
     agent_state: State<'_, AgentState>,
     session_id: String,
     tool_use_id: String,
     response: serde_json::Value,
 ) -> Result<(), String> {
+    reject_read_only_session(&state, &session_id)?;
     let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
     crate::log_ctx::with_ctx(ctx, || async {
         crate::log_ctx!(info, target: "agent", "Sending tool response tool_use_id={}", tool_use_id);
@@ -2592,11 +2663,13 @@ pub async fn send_tool_response(
 
 #[tauri::command]
 pub async fn respond_to_agent_permission(
+    state: State<'_, crate::AppState>,
     agent_state: State<'_, AgentState>,
     session_id: String,
     request_id: String,
     response: serde_json::Value,
 ) -> Result<(), String> {
+    reject_read_only_session(&state, &session_id)?;
     let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
     crate::log_ctx::with_ctx(ctx, || async {
         crate::log_ctx!(info, target: "agent", "Respond to permission request_id={}", request_id);
@@ -2613,6 +2686,7 @@ pub async fn reset_agent_session(
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
+    reject_read_only_session(&state, &session_id)?;
     let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
     crate::log_ctx::with_ctx(ctx, || async {
         crate::log_ctx!(info, target: "agent", "Reset requested");
@@ -2635,7 +2709,7 @@ pub async fn reset_agent_session(
             crate::log_ctx!(info, target: "agent", "Reset skipped; no active sidecar");
         }
 
-        if agent_kind == "opencode" {
+        if agent_kind == "opencode" && !is_imported_session(&state, &session_id)? {
             let db = state.db.lock().unwrap();
             operations::delete_agent_session_mapping(&db, &session_id, AgentKind::Opencode)
                 .map_err(|error| {
@@ -2659,6 +2733,7 @@ pub async fn rewind_agent_session(
     agent_kind: String,
     target: Option<RewindTarget>,
 ) -> Result<(), String> {
+    reject_read_only_session(&state, &app_session_id)?;
     let agent_kind = AgentKind::from_str(&agent_kind)?;
     let Some(agent_session_id) = get_agent_session_id(state.inner(), &app_session_id, agent_kind)?
     else {
@@ -2710,7 +2785,7 @@ pub async fn rewind_agent_session(
         (outcome, history_path.display().to_string())
     };
 
-    if rewind_outcome.truncated_to_empty {
+    if rewind_outcome.truncated_to_empty && !is_imported_session(&state, &app_session_id)? {
         {
             let db = state.db.lock().unwrap();
             operations::delete_agent_session_mapping(&db, &app_session_id, agent_kind)

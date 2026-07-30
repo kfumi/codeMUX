@@ -340,6 +340,7 @@ fn copy_history_fields(target: &mut Value, source: &Value) {
         "agent_id",
         "agent_session_id",
         "opencode_session_id",
+        "cwd",
     ] {
         if let Some(value) = source.get(key) {
             target.insert(key.to_string(), value.clone());

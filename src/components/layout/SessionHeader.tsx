@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { Archive, Copy, FolderOpen, Mail, MoreHorizontal, Pencil, Pin, PinOff } from 'lucide-react';
+import { Archive, Copy, Download, FolderOpen, Mail, MoreHorizontal, Pencil, Pin, PinOff } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -69,6 +69,13 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
       <span className="min-w-0 truncate text-[14px] font-semibold text-foreground/88" data-tauri-drag-region>
         {session?.title || '新对话'}
       </span>
+      {session?.origin === 'imported' && (
+        <TooltipHint content={session.is_read_only ? '外部会话恢复失败，当前为只读快照' : '来自外部 CLI，可继续原生会话'}>
+          <span className="flex shrink-0 items-center gap-1 rounded-md border border-amber-500/25 bg-amber-500/8 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+            <Download className="h-3 w-3" /> {session.is_read_only ? '只读' : '外部'}
+          </span>
+        </TooltipHint>
+      )}
       {project && (
         <div className="hidden shrink-0 items-center gap-1.5 rounded-md border border-border/42 bg-[hsl(var(--surface-2))]/88 px-2 py-1 text-[12px] text-foreground/68 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.03)] dark:border-[hsl(var(--surface-edge))]/72 dark:bg-[hsl(var(--surface-3))]/74 dark:text-foreground/76 dark:shadow-[inset_0_1px_0_hsl(var(--foreground)/0.045),0_8px_20px_-18px_hsl(var(--surface-shadow-strong)/0.9)] min-[640px]:flex">
           <FolderOpen className="h-3 w-3 shrink-0 text-foreground/54 dark:text-[hsl(var(--sidebar-accent))]/78" />
@@ -115,9 +122,11 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
               </DropdownMenuItem>
             </>
           )}
-          <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyAgentSessionValue('messagePath')}>
-            复制任务路径
-          </DropdownMenuItem>
+          {session?.agent_kind !== 'opencode' && (
+            <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyAgentSessionValue('messagePath')}>
+              复制任务路径
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyAgentSessionValue('agentSessionId')}>
             复制会话ID
           </DropdownMenuItem>

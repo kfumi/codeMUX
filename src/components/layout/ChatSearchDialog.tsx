@@ -220,9 +220,7 @@ export function ChatSearchDialog({ open, onOpenChange, onNavigateHome }: ChatSea
 
 async function loadFirstUserMessage(session: Session): Promise<string> {
   try {
-    const rawEvents = session.agent_kind === 'codex'
-      ? await agentApi.loadCodexSessionEvents(session.id)
-      : await agentApi.loadClaudeSessionEvents(session.id);
+    const rawEvents = await agentApi.loadSessionEvents(session.id);
 
     for (const raw of rawEvents) {
       const event = mapPersistedClaudeMessage(raw, session.agent_kind);

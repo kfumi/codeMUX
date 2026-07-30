@@ -25,6 +25,8 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             permission_config TEXT NOT NULL DEFAULT '',
             plan_mode TEXT NOT NULL DEFAULT 'off',
             project_id TEXT,
+            origin TEXT NOT NULL DEFAULT 'native',
+            is_read_only INTEGER NOT NULL DEFAULT 0,
             is_archived INTEGER NOT NULL DEFAULT 0,
             is_pinned INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
@@ -41,6 +43,30 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             FOREIGN KEY (app_session_id) REFERENCES sessions(id) ON DELETE CASCADE,
             UNIQUE(app_session_id, agent_kind),
             UNIQUE(agent_kind, agent_session_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS session_sources (
+            app_session_id TEXT PRIMARY KEY,
+            agent_kind TEXT NOT NULL,
+            agent_session_id TEXT NOT NULL,
+            source_locator TEXT NOT NULL,
+            source_fingerprint TEXT NOT NULL,
+            source_modified_at TEXT,
+            cwd TEXT,
+            snapshot_version INTEGER NOT NULL DEFAULT 1,
+            imported_at TEXT NOT NULL,
+            FOREIGN KEY (app_session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+            UNIQUE(agent_kind, agent_session_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS session_event_snapshots (
+            session_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            event_id TEXT NOT NULL,
+            event_timestamp TEXT,
+            event_json TEXT NOT NULL,
+            PRIMARY KEY (session_id, sequence),
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS mcp_servers (
@@ -139,6 +165,24 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         );
     }
 
+    let has_origin: bool = conn.prepare("SELECT origin FROM sessions LIMIT 0").is_ok();
+    if !has_origin {
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN origin TEXT NOT NULL DEFAULT 'native'",
+            [],
+        );
+    }
+
+    let has_is_read_only: bool = conn
+        .prepare("SELECT is_read_only FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_is_read_only {
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN is_read_only INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+    }
+
     // Migration: archived_at → is_archived
     let has_archived_at: bool = conn
         .prepare("SELECT archived_at FROM sessions LIMIT 0")
@@ -229,6 +273,8 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         "
         CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions(project_id);
         CREATE INDEX IF NOT EXISTS idx_agent_session_mappings_app_session_id ON agent_session_mappings(app_session_id);
+        CREATE INDEX IF NOT EXISTS idx_session_sources_app_session_id ON session_sources(app_session_id);
+        CREATE INDEX IF NOT EXISTS idx_session_event_snapshots_session_id ON session_event_snapshots(session_id);
         "
     )?;
 
