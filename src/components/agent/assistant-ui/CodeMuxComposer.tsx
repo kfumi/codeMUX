@@ -7,7 +7,6 @@ import {
   type Unstable_DirectiveSegment,
   type Unstable_TriggerItem,
 } from '@assistant-ui/react';
-import { LexicalComposerInput } from '@assistant-ui/react-lexical';
 import type { DirectiveChipProps } from '@assistant-ui/react-lexical';
 import {
   ArrowUp,
@@ -29,7 +28,7 @@ import {
   Zap,
   Plus,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FC, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FC, type KeyboardEvent, type ReactNode } from 'react';
 
 import type { AgentMessage } from '../../../stores/agentStore';
 import type { SlashCommand } from '../../../lib/slashCommands';
@@ -47,6 +46,10 @@ import { ContextDisplay } from '../../assistant-ui/context-display';
 import { buildContextUsageViewModel } from '../contextUsage';
 import { AskUserQuestionCard, type AskUserQuestion } from '../AskUserQuestionCard';
 import { CodeMuxDirectiveChip, type CodeMuxDirectiveKind } from './CodeMuxDirectiveText';
+import {
+  CodeMuxLexicalComposerInput,
+  type CodeMuxLexicalComposerInputHandle,
+} from './CodeMuxLexicalComposerInput';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 import { parseProposedPlan, getProposedPlanTitle } from './proposedPlan';
 
@@ -166,9 +169,13 @@ export function CodeMuxComposer({
   const aui = useAui();
   const composerRootRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const editorRef = useRef<CodeMuxLexicalComposerInputHandle>(null);
   const [isFocused, setIsFocused] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const composerText = useAuiState((state) => state.composer.text);
+  // Local text state maintained by the Lexical editor; avoids per-keystroke
+  // sync to the runtime composer which caused long-text input jank.
+  const [composerText, setComposerText] = useState('');
+  const cursorOffsetRef = useRef<number>(0);
   const attachmentCount = useAuiState((state) => state.composer.attachments.length);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
@@ -186,51 +193,31 @@ export function CodeMuxComposer({
   const formatter = useMemo(() => createCodeMuxFormatter(agentKind), [agentKind]);
 
   const treeRoot = usePreviewStore((state) => state.treeRoot);
-  const fileItemsRef = useRef<FileEntry[]>([]);
-  if (projectPath && treeRoot) {
-    fileItemsRef.current = flattenFileTree(treeRoot);
-  } else {
-    fileItemsRef.current = [];
-  }
+  // Flatten the file tree once per tree change instead of every render.
+  const allFileEntries = useMemo(
+    () => (projectPath && treeRoot ? flattenFileTree(treeRoot) : []),
+    [projectPath, treeRoot],
+  );
 
   const [manualTrigger, setManualTrigger] = useState<'/' | '@' | null>(null);
   const [suppressedTrigger, setSuppressedTrigger] = useState<ActiveTrigger | null>(null);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
-  // Track cursor position by comparing text changes, so trigger detection only
-  // fires for the trigger near the cursor — not stale triggers elsewhere in the text.
-  const prevTextRef = useRef(composerText);
-  const cursorOffsetRef = useRef<number>(composerText.length);
-  if (composerText !== prevTextRef.current) {
-    const prevText = prevTextRef.current;
-    if (prevText.length === 0) {
-      cursorOffsetRef.current = composerText.length;
-    } else {
-      let prefixLen = 0;
-      const minLen = Math.min(prevText.length, composerText.length);
-      while (prefixLen < minLen && prevText[prefixLen] === composerText[prefixLen]) {
-        prefixLen++;
-      }
-      let suffixLen = 0;
-      while (
-        suffixLen < prevText.length - prefixLen &&
-        suffixLen < composerText.length - prefixLen &&
-        prevText[prevText.length - 1 - suffixLen] === composerText[composerText.length - 1 - suffixLen]
-      ) {
-        suffixLen++;
-      }
-      cursorOffsetRef.current = composerText.length - suffixLen;
-    }
-    prevTextRef.current = composerText;
-  }
+  const handleTextChange = useCallback((text: string) => {
+    setComposerText(text);
+  }, []);
+
+  const handleCursorChange = useCallback((offset: number) => {
+    cursorOffsetRef.current = offset;
+  }, []);
 
   const activeTrigger = useMemo(() => {
     const trigger = detectActiveTrigger(composerText, cursorOffsetRef.current);
     if (!trigger || isSameTrigger(trigger, suppressedTrigger)) {
       return null;
     }
-    return isCompletedTrigger(trigger, commands, fileItemsRef.current) ? null : trigger;
-  }, [commands, composerText, projectPath, suppressedTrigger, treeRoot]);
+    return isCompletedTrigger(trigger, commands, allFileEntries) ? null : trigger;
+  }, [allFileEntries, commands, composerText, suppressedTrigger]);
   const activeChar = activeTrigger?.char ?? manualTrigger;
   const activeQuery = activeTrigger?.query ?? '';
   const slashItemsByCategory = useMemo(() => groupCommands(commands, activeQuery, agentKind), [commands, activeQuery, agentKind]);
@@ -245,14 +232,14 @@ export function CodeMuxComposer({
   );
   const fileItems = useMemo(() => {
     if (activeChar !== '@') return [];
-    const items = fileItemsRef.current;
+    const items = allFileEntries;
     const query = activeQuery.trim();
     if (!query) return items.slice(0, MAX_FILE_RESULTS).map(toFileTriggerItem);
     return items
       .filter((f) => matchFileName(query, f.name) || matchFileName(query, f.relativePath))
       .slice(0, MAX_FILE_RESULTS)
       .map(toFileTriggerItem);
-  }, [activeChar, activeQuery, treeRoot]);
+  }, [activeChar, activeQuery, allFileEntries]);
   const menuItems = activeChar === '/' ? slashItems : fileItems;
   const menuVisible = activeChar !== null && !pendingQuestion && !pendingPlan;
 
@@ -315,7 +302,7 @@ export function CodeMuxComposer({
     if (draft) {
       // Delay to ensure Lexical editor is ready
       setTimeout(() => {
-        aui.composer().setText(draft);
+        editorRef.current?.setText(draft);
         // Clear draft after successful restore
         consumeComposerDraft(sessionId);
       }, 150);
@@ -351,11 +338,12 @@ export function CodeMuxComposer({
   };
 
   const addSelectedFiles = async (files: File[]) => {
+    const currentText = editorRef.current?.getText() ?? composerText;
     await addFilesToComposer(files, {
       addAttachment: (file) => aui.composer().addAttachment(file),
-      insertReference: (reference) => aui.composer().setText(appendComposerReference(composerText, reference)),
+      insertReference: (reference) => editorRef.current?.setText(appendComposerReference(currentText, reference)),
       projectPath,
-      fileItems: fileItemsRef.current,
+      fileItems: allFileEntries,
     });
   };
 
@@ -379,7 +367,7 @@ export function CodeMuxComposer({
     const nextText = replaceActiveTrigger(composerText, activeTrigger, item, formatter);
     setManualTrigger(null);
     setSuppressedTrigger(getSelectedTrigger(activeTrigger, item));
-    aui.composer().setText(nextText);
+    editorRef.current?.setText(nextText);
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -498,12 +486,15 @@ export function CodeMuxComposer({
                 }}
               />
             ) : (
-              <LexicalComposerInput
+              <CodeMuxLexicalComposerInput
+                ref={editorRef}
                 submitMode="enter"
                 placeholder={placeholder}
                 directiveChip={DIRECTIVE_CHIP}
                 formatter={formatter}
                 onPaste={handleComposerPaste}
+                onTextChange={handleTextChange}
+                onCursorChange={handleCursorChange}
                 className="relative min-h-10 max-h-50 w-full overflow-y-auto text-sm leading-6 text-foreground outline-none [&_.aui-lexical-input]:min-h-10 [&_.aui-lexical-input]:max-h-50 [&_.aui-lexical-input]:overflow-y-auto [&_.aui-lexical-input]:border-0 [&_.aui-lexical-input]:bg-transparent [&_.aui-lexical-input]:px-2 [&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:text-sm [&_.aui-lexical-input]:leading-6 [&_.aui-lexical-input]:text-foreground [&_.aui-lexical-input]:shadow-none [&_.aui-lexical-input]:outline-none [&_.aui-lexical-input]:ring-0 [&_.aui-lexical-input]:focus-visible:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:left-2 [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-sm [&_.aui-lexical-placeholder]:leading-6 [&_.aui-lexical-placeholder]:text-muted-foreground/70"
               />
             )}

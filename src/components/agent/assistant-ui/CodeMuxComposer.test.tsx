@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { forwardRef, useEffect, useImperativeHandle } from 'react';
 
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { registerSkillCommands } from '../../../lib/slashCommands';
@@ -21,14 +22,17 @@ const lexicalProps: Array<{
     directiveType: string;
     label: string;
   }>;
+  onTextChange?: (text: string) => void;
+  onCursorChange?: (offset: number) => void;
 }> = [];
 
-const { setComposerTextMock, addAttachmentMock, sendToolResponseMock, composerSendMock, updatePermissionsMock } = vi.hoisted(() => ({
+const { setComposerTextMock, addAttachmentMock, sendToolResponseMock, composerSendMock, updatePermissionsMock, editorSetTextMock } = vi.hoisted(() => ({
   setComposerTextMock: vi.fn(),
   addAttachmentMock: vi.fn(),
   sendToolResponseMock: vi.fn(),
   composerSendMock: vi.fn(),
   updatePermissionsMock: vi.fn(),
+  editorSetTextMock: vi.fn(),
 }));
 
 const capturedPopovers: Array<{
@@ -108,12 +112,48 @@ vi.mock('@assistant-ui/react', () => {
   };
 });
 
-vi.mock('@assistant-ui/react-lexical', () => ({
-  LexicalComposerInput: (props: any) => {
+vi.mock('./CodeMuxLexicalComposerInput', () => ({
+  CodeMuxLexicalComposerInput: forwardRef((props: any, ref: any) => {
     lexicalProps.push(props);
+    const onTextChangeRef = { current: props.onTextChange };
+    onTextChangeRef.current = props.onTextChange;
+    const onCursorChangeRef = { current: props.onCursorChange };
+    onCursorChangeRef.current = props.onCursorChange;
+
+    useImperativeHandle(ref, () => ({
+      getText: () => composerText,
+      setText: (text: string) => {
+        editorSetTextMock(text);
+        composerText = text;
+        onTextChangeRef.current?.(text);
+        onCursorChangeRef.current?.(text.length);
+      },
+      send: () => {
+        setComposerTextMock(composerText);
+        composerSendMock();
+      },
+      focus: () => {},
+      reset: () => {
+        composerText = '';
+        onTextChangeRef.current?.('');
+        onCursorChangeRef.current?.(0);
+      },
+    }));
+
+    useEffect(() => {
+      onTextChangeRef.current?.(composerText);
+      onCursorChangeRef.current?.(composerText.length);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     const Chip = props.directiveChip;
     return (
-      <div className={props.className} data-testid="lexical-composer-input" onPaste={props.onPaste}>
+      <div
+        className={props.className}
+        data-testid="lexical-composer-input"
+        onPaste={props.onPaste}
+        onKeyDownCapture={props.onKeyDownCapture}
+      >
         <div className="aui-lexical-input" />
         <div className="aui-lexical-placeholder">{props.placeholder}</div>
         {Chip ? (
@@ -124,7 +164,7 @@ vi.mock('@assistant-ui/react-lexical', () => ({
         ) : null}
       </div>
     );
-  },
+  }),
 }));
 
 vi.mock('../../../lib/tauri', () => ({
@@ -183,6 +223,7 @@ describe('CodeMuxComposer', () => {
     sendToolResponseMock.mockReset();
     composerSendMock.mockClear();
     updatePermissionsMock.mockReset();
+    editorSetTextMock.mockClear();
     useAgentStore.setState({ events: {}, forceStopped: {} });
     usePreviewStore.setState({ treeRoot: null });
     registerSkillCommands([]);
@@ -403,7 +444,7 @@ describe('CodeMuxComposer', () => {
 
     fireEvent.click(document.querySelector('[data-command-id="review"]') as Element);
 
-    expect(setComposerTextMock).toHaveBeenCalledWith('[$review](review) ');
+    expect(editorSetTextMock).toHaveBeenCalledWith('[$review](review) ');
     expect(document.querySelector('[data-command-id="review"]')).toBeNull();
   });
 
@@ -417,7 +458,7 @@ describe('CodeMuxComposer', () => {
 
     fireEvent.click(document.querySelector('[data-file-id="App.tsx"]') as Element);
 
-    expect(setComposerTextMock).toHaveBeenCalledWith('[App.tsx](App.tsx) ');
+    expect(editorSetTextMock).toHaveBeenCalledWith('[App.tsx](App.tsx) ');
     expect(document.querySelector('[data-file-id="App.tsx"]')).toBeNull();
   });
 
@@ -484,7 +525,7 @@ describe('CodeMuxComposer', () => {
 
     fireEvent.keyDown(screen.getByTestId('lexical-composer-input'), { key: 'Enter' });
 
-    expect(setComposerTextMock).toHaveBeenCalledWith('[$review](review) ');
+    expect(editorSetTextMock).toHaveBeenCalledWith('[$review](review) ');
     expect(bubbleSpy).not.toHaveBeenCalled();
   });
 
@@ -501,7 +542,7 @@ describe('CodeMuxComposer', () => {
 
     fireEvent.click(document.querySelector('[data-command-id="superpowers:brainstorming"]') as Element);
 
-    expect(setComposerTextMock).toHaveBeenCalledWith('[$superpowers:brainstorming](C:\\Users\\94910\\.codex\\superpowers\\skills\\brainstorming\\SKILL.md) ');
+    expect(editorSetTextMock).toHaveBeenCalledWith('[$superpowers:brainstorming](C:\\Users\\94910\\.codex\\superpowers\\skills\\brainstorming\\SKILL.md) ');
   });
 
   it('uses Codex slash commands for Codex sessions', () => {
@@ -514,6 +555,23 @@ describe('CodeMuxComposer', () => {
 
     // When no trigger is active, no commands are rendered.
     expect(commandIds).toHaveLength(0);
+  });
+
+  it('syncs text to the runtime only on send, not on every text change', () => {
+    composerText = 'hello world';
+
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    // After mount, onTextChange is called to set local state,
+    // but the runtime's setText should NOT be called for local text changes.
+    expect(setComposerTextMock).not.toHaveBeenCalled();
+
+    // Trigger a text change via the editor ref (simulating user typing)
+    // The mock's onTextChange updates local state without calling runtime setText
+    composerText = 'hello world updated';
+    lexicalProps[lexicalProps.length - 1]?.onTextChange?.('hello world updated');
+
+    expect(setComposerTextMock).not.toHaveBeenCalled();
   });
 
   it('renders a pending user question inside the composer and submits the selected option', () => {
