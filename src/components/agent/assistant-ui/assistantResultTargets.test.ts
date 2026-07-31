@@ -3,6 +3,32 @@ import type { AgentMessage } from '../../../stores/agentStore';
 import { buildAssistantResultTargetMap, buildAssistantResultTargetSet } from './assistantResultTargets';
 
 describe('assistant result targets', () => {
+  it('does not infer a live result before an explicit terminal signal', () => {
+    const events = [
+      { kind: 'user', data: { content: 'request' } },
+      { kind: 'assistant', data: { message: { content: [{ type: 'text', text: 'streaming answer' }] } } },
+    ] as unknown as AgentMessage[];
+
+    expect(buildAssistantResultTargetMap(events, { allowImplicitResult: false })).toEqual(new Map());
+  });
+
+  it('treats Claude end_turn as an explicit terminal signal', () => {
+    const events = [
+      { kind: 'user', data: { content: 'request' } },
+      {
+        kind: 'assistant',
+        data: {
+          message: {
+            content: [{ type: 'text', text: 'final answer' }],
+            stop_reason: 'end_turn',
+          },
+        },
+      },
+    ] as unknown as AgentMessage[];
+
+    expect(buildAssistantResultTargetMap(events, { allowImplicitResult: false })).toEqual(new Map([[1, 1]]));
+  });
+
   it('does not bind a result to a tool-only assistant without OpenCode routing metadata', () => {
     const events = [
       { kind: 'user', data: { content: 'request' } },

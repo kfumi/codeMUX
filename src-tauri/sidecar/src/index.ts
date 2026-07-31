@@ -1142,9 +1142,11 @@ function toClaudeAssistantMessageEvent(event: Record<string, unknown>): TurnSour
   if (!message || typeof message !== 'object' || Array.isArray(message)) return undefined;
   const content = (message as Record<string, unknown>).content;
   if (!Array.isArray(content)) return undefined;
+  const stopReason = (message as Record<string, unknown>).stop_reason;
   return {
     kind: 'assistant_message',
     content: content.filter((block): block is Record<string, unknown> => typeof block === 'object' && block !== null && !Array.isArray(block)),
+    ...(typeof stopReason === 'string' || stopReason === null ? { stopReason } : {}),
   };
 }
 

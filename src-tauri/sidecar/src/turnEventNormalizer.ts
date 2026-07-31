@@ -1,7 +1,7 @@
 import type { CodeMuxRuntimeEvent, CodeMuxTurnEvent } from './codeMuxProtocol.js';
 
 export type TurnSourceEvent =
-  | { kind: 'assistant_message'; content: Array<Record<string, unknown>> }
+  | { kind: 'assistant_message'; content: Array<Record<string, unknown>>; stopReason?: string | null }
   | { kind: 'user_input_requested'; toolUseId: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; allowOther?: boolean }> }
   | { kind: 'permission_requested'; requestId: string; permissionId?: string; permissionType: string; description: string; metadata?: Record<string, unknown> }
   | { kind: 'content_started'; index: number; contentKind: 'text' | 'reasoning' }
@@ -41,6 +41,7 @@ export class TurnEventNormalizer {
     if (source.kind === 'assistant_message') {
       return [this.withSequence({
         type: 'assistant_message', session_id: this.sessionId, content: source.content,
+        ...(source.stopReason !== undefined ? { stop_reason: source.stopReason } : {}),
         event_id: this.eventIdFactory(), sequence: 0,
       })];
     }

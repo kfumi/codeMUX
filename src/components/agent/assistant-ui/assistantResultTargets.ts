@@ -1,8 +1,15 @@
 import type { AgentMessage } from '../../../stores/agentStore';
 import { isClaudeTaskNotificationUserEvent, isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
 
-export function buildAssistantResultTargetSet(events: AgentMessage[]): Set<number> {
-  return new Set(buildAssistantResultTargetMap(events).keys());
+export type AssistantResultTargetOptions = {
+  allowImplicitResult?: boolean;
+};
+
+export function buildAssistantResultTargetSet(
+  events: AgentMessage[],
+  options: AssistantResultTargetOptions = {},
+): Set<number> {
+  return new Set(buildAssistantResultTargetMap(events, options).keys());
 }
 
 export function isHiddenAssistantThreadUserEvent(
@@ -35,14 +42,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export function buildAssistantResultTargetMap(events: AgentMessage[]): Map<number, number> {
+export function buildAssistantResultTargetMap(
+  events: AgentMessage[],
+  options: AssistantResultTargetOptions = {},
+): Map<number, number> {
   const targets = new Map<number, number>();
+  const allowImplicitResult = options.allowImplicitResult ?? true;
   let preferredAssistantIndex: number | undefined;
   let pendingResultIndex: number | undefined;
   let sawAssistantSinceBoundary = false;
 
   const flushTurn = () => {
-    if (preferredAssistantIndex != null) {
+    if (preferredAssistantIndex != null && (pendingResultIndex != null || allowImplicitResult)) {
       const targetIndex = pendingResultIndex ?? preferredAssistantIndex;
       if (targetIndex != null) {
         targets.set(preferredAssistantIndex, targetIndex);
@@ -70,6 +81,9 @@ export function buildAssistantResultTargetMap(events: AgentMessage[]): Map<numbe
       sawAssistantSinceBoundary = true;
       if (getAssistantResultPriority(event) >= 1) {
         preferredAssistantIndex = index;
+      }
+      if (event.data.message?.stop_reason === 'end_turn') {
+        pendingResultIndex = index;
       }
       continue;
     }

@@ -189,8 +189,10 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
   const latestRewindableUserIndex = useMemo(() => findLatestRewindableUserIndex(events), [events]);
   const collapseInfoByEventIndex = useMemo(
-    () => buildAssistantCollapseInfoMap(events, eventTimestamps),
-    [events, eventTimestamps],
+    () => buildAssistantCollapseInfoMap(events, eventTimestamps, {
+      allowImplicitResult: !isRunning && !stopped,
+    }),
+    [events, eventTimestamps, isRunning, stopped],
   );
 
   const threadRenderContextValue = useMemo(() => ({
@@ -908,14 +910,11 @@ function AssistantLikeMessage({
     .map((eventIndex) => turnByEventIndex.get(eventIndex))
     .find((candidate) => candidate?.footerAnchorEventIndex != null);
   const footerStats = turn ? buildFooterStatsFromTurn(turn) : undefined;
-  const footerStatus = turn?.status === 'interrupted' || turn?.status === 'failed'
-    ? turn.status
-    : undefined;
   const shouldRenderFooter =
     isFinal
-    && turn?.status !== 'running'
+    && turn?.status === 'completed'
     && message.metadata.custom?.sourceRole !== 'system'
-    && (turn !== undefined || sourceTimestamp !== undefined);
+    && turn !== undefined;
 
   return (
     <MessagePrimitive.Root data-message-row className="group/message-row mb-2 flex w-full justify-start">
@@ -999,7 +998,6 @@ function AssistantLikeMessage({
           <MessageFooter
             timestamp={sourceTimestamp}
             stats={footerStats}
-            status={footerStatus}
             statusReason={turn?.termination?.reason}
             revealOnHover
             sessionId={sessionId}
@@ -1218,8 +1216,9 @@ function getMessageText(message: MessageState) {
 function buildAssistantCollapseInfoMap(
   events: AgentMessage[],
   timestamps: number[],
+  options: { allowImplicitResult: boolean },
 ): Map<number, AssistantCollapseInfo> {
-  const resultTargets = buildAssistantResultTargetMap(events);
+  const resultTargets = buildAssistantResultTargetMap(events, options);
   const collapseInfoByEventIndex = new Map<number, AssistantCollapseInfo>();
 
   for (const [finalAssistantIndex, resultIndex] of resultTargets) {
