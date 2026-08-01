@@ -559,7 +559,7 @@ export function CodeMuxComposer({
                   />
                 ) : null}
                 {modelSelector ?? (
-                  <span className="max-w-54 truncate rounded-full border border-border/45 bg-[hsl(var(--surface-2))]/64 px-2.5 py-1 text-[11px] text-muted-foreground/74">
+                  <span className="max-w-54 truncate rounded-full border border-border/45 bg-[hsl(var(--surface-2))]/64 px-2.5 py-1 text-ui-caption text-muted-foreground/74">
                     {modelName ?? ''}
                   </span>
                 )}
@@ -569,7 +569,7 @@ export function CodeMuxComposer({
                       type="button"
                       onClick={() => void onStop?.()}
                       aria-label="停止"
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))] transition-all duration-200 hover:scale-105 hover:bg-[hsl(var(--destructive)/0.18)] active:scale-95"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))] transition-colors duration-150 hover:bg-[hsl(var(--destructive)/0.18)]"
                     >
                       <Square className="h-3.5 w-3.5" fill="currentColor" />
                     </button>
@@ -637,7 +637,7 @@ function ProposedPlanApprovalCard({
   return (
     <div className="space-y-3 rounded-2xl bg-[hsl(var(--surface-2))]/66 p-3">
       <div>
-        <p className="px-1 text-[13px] font-semibold text-foreground">实施此计划？</p>
+        <p className="px-1 text-ui-title font-semibold text-foreground">实施此计划？</p>
         <p className="mt-0.5 line-clamp-1 px-1 text-xs text-muted-foreground/70">{title}</p>
       </div>
       <div className="overflow-hidden rounded-lg border border-border/18 bg-[hsl(var(--surface-3))]/22">

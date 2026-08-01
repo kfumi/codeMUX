@@ -58,7 +58,7 @@ export function Sidebar({
       <div className="space-y-1 px-3 pb-2 pt-11">
         <button
           onClick={onNewSession}
-          className="flex w-full items-center gap-2.5 rounded-md border-[hsl(var(--sidebar-border))]/48 px-3 py-2 text-[13px] font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
+          className="flex w-full items-center gap-2.5 rounded-md border-[hsl(var(--sidebar-border))]/48 px-3 py-2 text-ui-title font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <MessageSquarePlus className="h-4 w-4" />
           <span className="flex-1 text-left">新对话</span>
@@ -67,7 +67,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={() => setImportOpen(true)}
-          className="flex w-full items-center gap-2.5 rounded-md border-[hsl(var(--sidebar-border))]/48 px-3 py-2 text-[13px] font-medium text-[hsl(var(--sidebar-fg))]/72 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
+          className="flex w-full items-center gap-2.5 rounded-md border-[hsl(var(--sidebar-border))]/48 px-3 py-2 text-ui-title font-medium text-[hsl(var(--sidebar-fg))]/72 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <Download className="h-4 w-4" />
           <span className="flex-1 text-left">导入外部会话</span>
@@ -76,7 +76,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={() => setChatSearchOpen(true)}
-          className="flex w-full items-center gap-2.5 rounded-md border-[hsl(var(--sidebar-border))]/48 px-3 py-2 text-[13px] font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
+          className="flex w-full items-center gap-2.5 rounded-md border-[hsl(var(--sidebar-border))]/48 px-3 py-2 text-ui-title font-medium text-[hsl(var(--sidebar-fg))]/86 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/82 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <Search className="h-4 w-4" />
           <span className="flex-1 text-left">搜索</span>
@@ -90,7 +90,7 @@ export function Sidebar({
       <div className="flex items-center gap-1 border-t border-[hsl(var(--sidebar-border))]/45 px-3 py-2.5">
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] text-[hsl(var(--sidebar-fg))]/50">
+            <span className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-ui-caption text-[hsl(var(--sidebar-fg))]/50">
               <span className={proxyRunning ? 'inline-block h-1.5 w-1.5 rounded-full bg-[hsl(var(--success))]' : 'inline-block h-1.5 w-1.5 rounded-full bg-[hsl(var(--sidebar-fg))]/30'} />
               <span>{proxyRunning ? `Proxy :${port ?? '...'}` : 'Proxy'}</span>
             </span>
@@ -104,7 +104,7 @@ export function Sidebar({
         <div className="flex-1" />
         <button
           onClick={onOpenSettings}
-          className="flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-[hsl(var(--sidebar-fg))]/66 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]"
+          className="flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-ui-title text-[hsl(var(--sidebar-fg))]/66 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <Settings className="h-3.5 w-3.5" />
           <span>设置</span>

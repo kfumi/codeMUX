@@ -3,6 +3,7 @@ import { useRef, useState, useCallback, useEffect, useLayoutEffect, type ReactNo
 
 import { cn } from '../../lib/utils';
 import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
+import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
 import { SidePanel } from '../workspace/SidePanel';
 import { TooltipHint } from '../ui/tooltip';
 import { TitleBar } from './TitleBar';
@@ -199,7 +200,7 @@ export function MainLayout({
       {sidebar != null && (
         <aside
           className={cn(
-            'relative shrink-0 overflow-hidden rounded-none bg-[hsl(var(--sidebar-bg))] sidebar-grain shadow-[0.5px_0_0_0_hsl(var(--sidebar-border)/0.5)]',
+            `relative shrink-0 overflow-hidden border-r ${LAYOUT_DIVIDER_CLASS} bg-[hsl(var(--sidebar-bg))]`,
             sidebarResizing ? 'transition-none' : 'transition-[width,opacity] duration-300 ease-in-out',
           )}
           style={{ width: sidebarCollapsed ? 0 : sidebarWidth, opacity: sidebarCollapsed ? 0 : 1, transitionDuration: sidebarInstant ? '0ms' : undefined }}
@@ -216,7 +217,7 @@ export function MainLayout({
         </aside>
       )}
 
-      <section className={cn('flex min-w-0 flex-1 flex-col bg-[hsl(var(--background))]', sidebar != null && !sidebarCollapsed && 'overflow-hidden rounded-l-xl')}>
+      <section className="flex min-w-0 flex-1 flex-col bg-[hsl(var(--background))]">
         <TitleBar
           leftContent={sidebarCollapsed ? sidebarControls : undefined}
           rightContent={headerContent}

@@ -108,11 +108,11 @@ export function ProjectGroup({
               if (event.key === 'Enter') handleRename();
               if (event.key === 'Escape') setRenaming(false);
             }}
-            className="flex-1 rounded-md border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-muted))] px-2 py-1 text-[13px] text-[hsl(var(--sidebar-fg))] outline-none transition-colors focus:border-[hsl(var(--sidebar-glow))]/35"
+            className="flex-1 rounded-md border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-muted))] px-2 py-1 text-ui-title text-[hsl(var(--sidebar-fg))] outline-none transition-colors focus:border-[hsl(var(--sidebar-glow))]/35"
             onClick={(event) => event.stopPropagation()}
           />
         ) : (
-          <span className="flex-1 truncate text-[13px] font-medium">{project.name}</span>
+          <span className="flex-1 truncate text-ui-title font-medium">{project.name}</span>
         )}
         <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100" onClick={(event) => event.stopPropagation()}>
           <DropdownMenu>
@@ -180,7 +180,7 @@ export function ProjectGroup({
                   type="button"
                   aria-label={`展开显示项目 ${project.name} 的更多对话`}
                   onClick={handleExpandSessions}
-                  className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-[hsl(var(--sidebar-fg))]/52 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
+                  className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg))]/52 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
                 >
                   <ChevronDown className="h-3 w-3" />
                   展开显示
@@ -191,7 +191,7 @@ export function ProjectGroup({
                   type="button"
                   aria-label={`折叠显示项目 ${project.name} 的对话`}
                   onClick={handleCollapseSessions}
-                  className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-[hsl(var(--sidebar-fg))]/52 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
+                  className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 text-ui-compact font-medium text-[hsl(var(--sidebar-fg))]/52 transition-colors hover:bg-[hsl(var(--sidebar-muted))]/72 hover:text-[hsl(var(--sidebar-fg))]/82"
                 >
                   <ChevronUp className="h-3 w-3" />
                   折叠显示

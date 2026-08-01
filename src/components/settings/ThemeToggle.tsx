@@ -1,12 +1,29 @@
 import { type ReactNode } from 'react';
-import { Check, Monitor, Moon, RotateCcw, Sun } from 'lucide-react';
+import { Check, Minus, Monitor, Moon, Plus, RotateCcw, Sun } from 'lucide-react';
 
-import { ACCENTS, type AccentKey, type ContentWidthKey, type FontSizeKey, type RadiusKey, RADII } from '../../lib/appearance';
+import {
+  ACCENTS,
+  type AccentKey,
+  type ContentWidthKey,
+  type RadiusKey,
+  type UiFontKey,
+  RADII,
+  UI_FONTS,
+  UI_FONT_SIZE_MAX,
+  UI_FONT_SIZE_MIN,
+} from '../../lib/appearance';
 import { cn } from '../../lib/utils';
 import { useAppearanceStore } from '../../stores/appearanceStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Theme } from '../../types/provider';
 import { Button } from '../ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
 
 interface FormSectionProps {
   label: string;
@@ -16,10 +33,10 @@ interface FormSectionProps {
 
 function FormSection({ label, hint, children }: FormSectionProps) {
   return (
-    <section className="space-y-3">
-      <div className="flex items-baseline gap-2">
-        <h3 className="text-[13px] font-medium text-foreground/70">{label}</h3>
-        {hint && <span className="text-xs text-foreground/38">{hint}</span>}
+    <section className="space-y-2 border-b border-border/45 pb-6 last:border-b-0">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h3 className="text-ui-title font-medium text-foreground">{label}</h3>
+        {hint && <span className="text-ui-caption text-right text-muted-foreground/75">{hint}</span>}
       </div>
       {children}
     </section>
@@ -120,7 +137,7 @@ function ThemePreviewCard({ theme, active, onClick }: { theme: Theme; active: bo
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Icon className={cn('h-3.5 w-3.5', active ? 'text-primary' : 'text-foreground/55')} />
-          <span className={cn('text-[13px] font-medium', active ? 'text-foreground' : 'text-foreground/72')}>
+          <span className={cn('text-ui-title font-medium', active ? 'text-foreground' : 'text-foreground/72')}>
             {THEME_LABELS[theme]}
           </span>
         </div>
@@ -158,7 +175,7 @@ function AccentSwatch({ accent, active, onClick }: { accent: AccentKey; active: 
       >
         {active && <Check className="h-4 w-4 text-white drop-shadow-sm" strokeWidth={3} />}
       </span>
-      <span className={cn('text-[11px]', active ? 'font-medium text-foreground/82' : 'text-foreground/55')}>
+      <span className={cn('text-ui-caption', active ? 'font-medium text-foreground/82' : 'text-foreground/55')}>
         {preset.name}
       </span>
     </button>
@@ -186,16 +203,10 @@ function OptionCard({ label, active, onClick, preview }: OptionCardProps) {
       )}
     >
       {preview}
-      <span className={cn('text-[11px]', active ? 'font-medium text-foreground/82' : 'text-foreground/55')}>{label}</span>
+      <span className={cn('text-ui-caption', active ? 'font-medium text-foreground/82' : 'text-foreground/55')}>{label}</span>
     </button>
   );
 }
-
-const FONT_SIZE_OPTIONS: { value: FontSizeKey; label: string; px: string }[] = [
-  { value: 'compact', label: '紧凑', px: '15px' },
-  { value: 'standard', label: '标准', px: '16px' },
-  { value: 'comfortable', label: '舒适', px: '18px' },
-];
 
 const RADIUS_OPTIONS: { value: RadiusKey; label: string }[] = [
   { value: 'sharp', label: '锐利' },
@@ -217,15 +228,16 @@ export function ThemeToggle() {
 
   const prefs = useAppearanceStore((state) => state.prefs);
   const setAccent = useAppearanceStore((state) => state.setAccent);
-  const setFontSize = useAppearanceStore((state) => state.setFontSize);
+  const setUiFont = useAppearanceStore((state) => state.setUiFont);
+  const setUiFontSize = useAppearanceStore((state) => state.setUiFontSize);
   const setRadius = useAppearanceStore((state) => state.setRadius);
   const setContentWidth = useAppearanceStore((state) => state.setContentWidth);
   const reset = useAppearanceStore((state) => state.reset);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-7">
       <FormSection label="主题模式" hint="选择浅色、深色，或跟随系统偏好">
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-2">
           <ThemePreviewCard theme="Light" active={currentTheme === 'Light'} onClick={() => setTheme('Light')} />
           <ThemePreviewCard theme="Dark" active={currentTheme === 'Dark'} onClick={() => setTheme('Dark')} />
           <ThemePreviewCard theme="System" active={currentTheme === 'System'} onClick={() => setTheme('System')} />
@@ -233,7 +245,7 @@ export function ThemeToggle() {
       </FormSection>
 
       <FormSection label="强调色" hint="应用于按钮、链接与高亮元素">
-        <div className="flex flex-wrap gap-4 rounded-xl bg-muted/30 p-4">
+        <div className="flex flex-wrap gap-x-5 gap-y-3 rounded-lg border border-border/45 bg-muted/20 p-3">
           {ACCENT_KEYS.map((key) => (
             <AccentSwatch
               key={key}
@@ -245,26 +257,52 @@ export function ThemeToggle() {
         </div>
       </FormSection>
 
-      <FormSection label="字体大小" hint="影响界面整体文字密度">
-        <div className="grid grid-cols-3 gap-2">
-          {FONT_SIZE_OPTIONS.map((opt) => (
-            <OptionCard
-              key={opt.value}
-              label={opt.label}
-              active={prefs.fontSize === opt.value}
-              onClick={() => setFontSize(opt.value)}
-              preview={
-                <span
-                  className="font-semibold leading-none text-foreground/85"
-                  style={{ fontSize: opt.px }}
-                >
-                  Aa
+      <FormSection label="界面字体" hint="仅影响界面文字，代码区保持等宽字体">
+        <Select value={prefs.uiFont} onValueChange={(value) => setUiFont(value as UiFontKey)}>
+          <SelectTrigger className="h-10 max-w-md bg-background">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(UI_FONTS) as UiFontKey[]).map((key) => (
+              <SelectItem key={key} value={key}>
+                <span className="flex items-center gap-2">
+                  <span style={{ fontFamily: UI_FONTS[key].previewFamily }}>{UI_FONTS[key].name}</span>
+                  <span className="text-ui-caption text-muted-foreground/70">{UI_FONTS[key].description}</span>
                 </span>
-              }
-            />
-          ))}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FormSection>
+
+      <FormSection label="界面字号" hint="12–18px，按 1px 调整">
+        <div className="flex w-fit items-center rounded-md border border-border bg-background">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="减小界面字号"
+            disabled={prefs.uiFontSize <= UI_FONT_SIZE_MIN}
+            onClick={() => setUiFontSize(prefs.uiFontSize - 1)}
+            className="h-9 w-9 rounded-none rounded-l-md"
+          >
+            <Minus className="h-3.5 w-3.5" />
+          </Button>
+          <output className="w-16 text-center text-ui-body tabular-nums" aria-live="polite">
+            {prefs.uiFontSize}px
+          </output>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="增大界面字号"
+            disabled={prefs.uiFontSize >= UI_FONT_SIZE_MAX}
+            onClick={() => setUiFontSize(prefs.uiFontSize + 1)}
+            className="h-9 w-9 rounded-none rounded-r-md"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
         </div>
-        <p className="text-xs text-foreground/42">设置即时生效，可在编辑器与列表中查看实际效果。</p>
       </FormSection>
 
       <FormSection label="圆角风格" hint="控制按钮、卡片与输入框的边角弧度">

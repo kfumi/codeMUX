@@ -2,6 +2,7 @@ import { ChevronRight, FileSearch, FileCode, FileText, Plus, Terminal, X } from 
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 
 import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
+import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
 import { cn } from '../../lib/utils';
 import { useSidePanelStore, type SidePanelTab } from '../../stores/sidePanelStore';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
@@ -112,7 +113,7 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
     <aside
       ref={panelRef}
       className={cn(
-        'relative h-full shrink-0 overflow-hidden border-l border-border/35 bg-background',
+        `relative h-full shrink-0 overflow-hidden border-l ${LAYOUT_DIVIDER_CLASS} bg-background`,
         isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
       )}
       style={{ width: isOpen ? panelWidth : 0 }}

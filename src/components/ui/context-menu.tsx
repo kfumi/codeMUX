@@ -20,7 +20,7 @@ const ContextMenuContent = React.forwardRef<
       ref={ref}
       collisionPadding={collisionPadding}
       className={cn(
-        'z-50 min-w-32 max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-md border border-border/60 bg-popover/98 p-1 shadow-md backdrop-blur-md animate-in fade-in zoom-in-95 fill-mode-both',
+        'z-50 min-w-32 max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-[0_14px_36px_-24px_hsl(var(--surface-shadow-strong)/0.45)] animate-in fade-in zoom-in-95 fill-mode-both',
         className,
       )}
       {...props}
@@ -41,7 +41,7 @@ const ContextMenuItem = React.forwardRef<
   <ContextMenuPrimitive.Item
     ref={ref}
     className={cn(
-      'outline-none flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-xs text-foreground/82 transition-colors hover:bg-muted/72 hover:text-foreground dark:hover:bg-[hsl(var(--surface-3))/0.9]',
+      'outline-none flex w-full cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-xs text-foreground/82 transition-colors hover:bg-muted hover:text-foreground',
       danger && 'text-destructive hover:bg-[hsl(var(--destructive)/0.1)] hover:text-destructive',
       className,
     )}

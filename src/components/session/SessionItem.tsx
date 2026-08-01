@@ -143,7 +143,7 @@ export function SessionItem({
         <ContextMenuTrigger asChild>
           <div
             className={cn(
-              'group relative flex items-center gap-2.5 rounded-md border border-transparent px-2.5 py-1 text-[13px] transition-colors duration-150',
+              'group relative flex items-center gap-2.5 rounded-md border border-transparent px-2.5 py-1 text-ui-title transition-colors duration-150',
               'cursor-pointer text-[hsl(var(--sidebar-fg))]/80',
               'hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]',
               'dark:hover:border-[hsl(var(--sidebar-glow))]/14 dark:hover:bg-[hsl(var(--surface-3))]/74',
@@ -164,7 +164,7 @@ export function SessionItem({
                   if (event.key === 'Escape') setRenaming(false);
                 }}
                 onClick={(event) => event.stopPropagation()}
-                className="flex-1 min-w-0 rounded-md border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-muted))] px-2 py-1 text-[13px] text-[hsl(var(--sidebar-fg))] outline-none transition-colors focus:border-[hsl(var(--sidebar-glow))]/35"
+                className="flex-1 min-w-0 rounded-md border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-muted))] px-2 py-1 text-ui-title text-[hsl(var(--sidebar-fg))] outline-none transition-colors focus:border-[hsl(var(--sidebar-glow))]/35"
               />
             ) : (
               <>
@@ -177,7 +177,7 @@ export function SessionItem({
                   </TooltipHint>
                 )}
                 <span className="relative h-5 shrink-0">
-                  <span className={cn('inline-flex h-5 items-center text-[12px] tabular-nums transition-opacity duration-150', 'text-[hsl(var(--sidebar-fg))]/40', 'group-hover:opacity-0')}>
+                  <span className={cn('inline-flex h-5 items-center text-ui-compact tabular-nums transition-opacity duration-150', 'text-[hsl(var(--sidebar-fg))]/40', 'group-hover:opacity-0')}>
                     {timeLabel}
                   </span>
                   <span className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
@@ -218,7 +218,7 @@ export function SessionItem({
             )}
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="surface-panel z-180 rounded-xl border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_48px_-28px_hsl(var(--foreground)/0.38),0_0_0_1px_hsl(var(--background)/0.68)] backdrop-blur-md animate-in fade-in blur-in-4 fill-mode-both animation-duration-[180ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] dark:bg-[linear-gradient(180deg,hsl(var(--surface-2))/0.98,hsl(var(--surface-1))/0.95)] dark:shadow-[0_24px_64px_-34px_hsl(var(--surface-shadow-strong)/0.98),0_0_0_1px_hsl(var(--foreground)/0.04)]">
+        <ContextMenuContent className="surface-panel z-180 rounded-lg border border-border/70 bg-popover/98 p-1.5 shadow-[0_18px_48px_-28px_hsl(var(--foreground)/0.38)] backdrop-blur-md animate-in fade-in fill-mode-both animation-duration-[180ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
           <ContextMenuItem icon={<PinIcon className="h-3.5 w-3.5" />} onClick={handleTogglePinned}>
             {session.is_pinned ? '取消置顶' : '置顶'}
           </ContextMenuItem>

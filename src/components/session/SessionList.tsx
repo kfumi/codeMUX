@@ -65,7 +65,7 @@ function SectionHeader({
             expanded && 'rotate-90',
           )}
         />
-        <span className="text-[11px] font-semibold uppercase tracking-normal text-[hsl(var(--sidebar-fg))]/38">
+        <span className="text-ui-caption font-semibold uppercase tracking-normal text-[hsl(var(--sidebar-fg))]/38">
           {title}
         </span>
       </button>
@@ -243,15 +243,15 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
           <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent))]/18 text-[hsl(var(--sidebar-accent))]">
             <MessageSquarePlus className="h-4 w-4" />
           </div>
-          <p className="text-[12px] leading-relaxed text-[hsl(var(--sidebar-fg))]/50">
+          <p className="text-ui-compact leading-relaxed text-[hsl(var(--sidebar-fg))]/50">
             暂无对话
             <br />
-            <span className="text-[11px]">点击上方新建</span>
+            <span className="text-ui-caption">点击上方新建</span>
           </p>
           <button
             type="button"
             onClick={onAddProject}
-            className="mt-4 flex items-center gap-2 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-3 py-1.5 text-[12px] text-[hsl(var(--sidebar-fg))]/56 transition-all duration-200 hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
+            className="mt-4 flex items-center gap-2 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-3 py-1.5 text-ui-compact text-[hsl(var(--sidebar-fg))]/56 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
           >
             <Plus className="h-3.5 w-3.5" />
             添加项目
@@ -263,7 +263,7 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
         <button
           type="button"
           onClick={onAddProject}
-          className="mt-1 flex w-full items-center gap-2.5 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-2.5 py-1.75 text-[12px] text-[hsl(var(--sidebar-fg))]/56 transition-all duration-200 hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
+          className="mt-1 flex w-full items-center gap-2.5 rounded-lg border border-[hsl(var(--sidebar-border))]/60 bg-[hsl(var(--sidebar-bg))]/70 px-2.5 py-1.75 text-ui-compact text-[hsl(var(--sidebar-fg))]/56 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/86 hover:text-[hsl(var(--sidebar-fg))]"
         >
           <Plus className="h-3.5 w-3.5" />
           添加项目

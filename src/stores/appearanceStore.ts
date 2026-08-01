@@ -4,14 +4,15 @@ import {
   type AccentKey,
   type AppearancePrefs,
   type ContentWidthKey,
-  type FontSizeKey,
   type RadiusKey,
+  type UiFontKey,
   ACCENTS,
   CONTENT_WIDTHS,
   DEFAULT_PREFS,
-  FONT_SIZES,
   RADII,
+  UI_FONTS,
   applyAppearance,
+  clampUiFontSize,
   loadPrefs,
   resolveIsDark,
   savePrefs,
@@ -25,7 +26,8 @@ function apply(prefs: AppearancePrefs): void {
 interface AppearanceState {
   prefs: AppearancePrefs;
   setAccent: (accent: AccentKey) => void;
-  setFontSize: (fontSize: FontSizeKey) => void;
+  setUiFont: (uiFont: UiFontKey) => void;
+  setUiFontSize: (uiFontSize: number) => void;
   setRadius: (radius: RadiusKey) => void;
   setContentWidth: (contentWidth: ContentWidthKey) => void;
   reset: () => void;
@@ -39,8 +41,14 @@ export const useAppearanceStore = create<AppearanceState>((set) => ({
     apply(prefs);
     set({ prefs });
   },
-  setFontSize: (fontSize) => {
-    const prefs = { ...useAppearanceStore.getState().prefs, fontSize };
+  setUiFont: (uiFont) => {
+    const prefs = { ...useAppearanceStore.getState().prefs, uiFont };
+    savePrefs(prefs);
+    apply(prefs);
+    set({ prefs });
+  },
+  setUiFontSize: (uiFontSize) => {
+    const prefs = { ...useAppearanceStore.getState().prefs, uiFontSize: clampUiFontSize(uiFontSize) };
     savePrefs(prefs);
     apply(prefs);
     set({ prefs });
@@ -81,4 +89,4 @@ if (typeof window !== 'undefined') {
 
 apply(useAppearanceStore.getState().prefs);
 
-export { ACCENTS, CONTENT_WIDTHS, FONT_SIZES, RADII, DEFAULT_PREFS };
+export { ACCENTS, CONTENT_WIDTHS, RADII, UI_FONTS, DEFAULT_PREFS };
