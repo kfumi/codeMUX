@@ -3,7 +3,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { ToolGroupRoot, ToolGroupTrigger } from './tool-group';
+import { ToolGroupContent, ToolGroupRoot, ToolGroupTrigger } from './tool-group';
 
 function renderTrigger(toolNames: string[]) {
   return render(
@@ -29,5 +29,23 @@ describe('ToolGroupTrigger', () => {
     expect(screen.queryByText(/mcp__/)).toBeNull();
     expect(screen.queryByText(/query_docs/)).toBeNull();
     expect(screen.queryByText(/resolve-library-id/)).toBeNull();
+  });
+
+  it('restores the native collapsible animation for grouped tools', () => {
+    const { container } = render(
+      <ToolGroupRoot defaultOpen>
+        <ToolGroupTrigger count={2} />
+        <ToolGroupContent>
+          <div>工具详情</div>
+        </ToolGroupContent>
+      </ToolGroupRoot>,
+    );
+
+    const root = container.querySelector('[data-slot="tool-group-root"]') as HTMLElement;
+    const content = container.querySelector('[data-slot="tool-group-content"]') as HTMLElement;
+
+    expect(root.style.getPropertyValue('--animation-duration')).toBe('200ms');
+    expect(content.className).toContain('animate-collapsible-down');
+    expect(content.className).toContain('duration-(--animation-duration)');
   });
 });

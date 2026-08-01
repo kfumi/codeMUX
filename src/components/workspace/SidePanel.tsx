@@ -1,6 +1,7 @@
 import { ChevronRight, FileSearch, FileCode, FileText, Plus, Terminal, X } from 'lucide-react';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 
+import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
 import { cn } from '../../lib/utils';
 import { useSidePanelStore, type SidePanelTab } from '../../stores/sidePanelStore';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
@@ -36,6 +37,33 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
     setScope(scopeId);
   }, [scopeId, setScope]);
 
+  useLayoutEffect(() => {
+    const ratio = readLayoutPreferences().sidePanelRatio;
+    const splitContainerWidth = panelRef.current?.parentElement?.getBoundingClientRect().width ?? 0;
+    if (ratio && splitContainerWidth > 0) {
+      setPanelWidth(splitContainerWidth * ratio, splitContainerWidth);
+    }
+  }, [scopeId, setPanelWidth]);
+
+  useLayoutEffect(() => {
+    const restorePanelRatio = () => {
+      if (draggingRef.current) return;
+
+      const splitContainerWidth = panelRef.current?.parentElement?.getBoundingClientRect().width ?? 0;
+      const ratio = readLayoutPreferences().sidePanelRatio;
+      if (!ratio || splitContainerWidth <= 0) return;
+
+      setPanelWidth(splitContainerWidth * ratio, splitContainerWidth);
+    };
+
+    const handleWindowResize = () => {
+      window.requestAnimationFrame(restorePanelRatio);
+    };
+
+    window.addEventListener('resize', handleWindowResize);
+    return () => window.removeEventListener('resize', handleWindowResize);
+  }, [setPanelWidth]);
+
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId) ?? null, [activeTabId, tabs]);
 
   const openReview = useCallback(() => {
@@ -65,6 +93,11 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
     const onUp = () => {
       draggingRef.current = false;
       setResizing(false);
+      if (splitContainerWidth && splitContainerWidth > 0) {
+        updateLayoutPreferences({
+          sidePanelRatio: useSidePanelStore.getState().panelWidth / splitContainerWidth,
+        });
+      }
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       document.removeEventListener('mousemove', onMove);

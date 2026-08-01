@@ -205,28 +205,32 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     <ThreadPrimitive.Root className="flex h-full min-h-0 flex-col text-sm">
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <UnifiedThreadViewport
+          key={sessionId}
           sessionId={sessionId}
           eventCount={events.length}
           isRunning={isRunning}
           viewportRef={viewportRef}
         >
-          <div
-            data-testid="thread-content-shell"
-            className="mx-auto flex w-full flex-1 flex-col px-14 pt-5"
-            style={{ maxWidth: 'var(--content-width, 52rem)' }}
-          >
-            <CodeMuxThreadRenderContext.Provider value={threadRenderContextValue}>
-              <CodeMuxThreadMessages />
-            </CodeMuxThreadRenderContext.Provider>
-            {stopped ? <InterruptBanner /> : null}
-            <StreamingContent sessionId={sessionId} events={events} />
-            <ThreadPrimitive.ViewportFooter
-              data-testid="thread-viewport-footer"
-              className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pt-2 pb-4"
+          {(scrollToBottomButton) => (
+            <div
+              data-testid="thread-content-shell"
+              className="mx-auto flex w-full flex-1 flex-col px-14 pt-5"
+              style={{ maxWidth: 'var(--content-width, 52rem)' }}
             >
-              {footer}
-            </ThreadPrimitive.ViewportFooter>
-          </div>
+              <CodeMuxThreadRenderContext.Provider value={threadRenderContextValue}>
+                <CodeMuxThreadMessages />
+              </CodeMuxThreadRenderContext.Provider>
+              {stopped ? <InterruptBanner /> : null}
+              <StreamingContent sessionId={sessionId} events={events} />
+              <ThreadPrimitive.ViewportFooter
+                data-testid="thread-viewport-footer"
+                className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pt-2 pb-4"
+              >
+                {scrollToBottomButton}
+                {footer}
+              </ThreadPrimitive.ViewportFooter>
+            </div>
+          )}
         </UnifiedThreadViewport>
         {showMessageNav ? <MessageNav items={userNavItems} scrollContainer={viewportRef} disabled={isRunning} /> : null}
       </div>
@@ -245,7 +249,7 @@ function UnifiedThreadViewport({
   eventCount: number;
   isRunning: boolean;
   viewportRef: RefObject<HTMLDivElement>;
-  children: ReactNode;
+  children: (scrollToBottomButton: ReactNode) => ReactNode;
 }) {
   const streamingVersion = useAgentStore((state) => state.streamingVersion[sessionId] ?? 0);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -253,6 +257,8 @@ function UnifiedThreadViewport({
   const lastScrollTopRef = useRef(0);
   const lastScrollHeightRef = useRef(0);
   const scrollFrameRef = useRef<number | null>(null);
+  // 首次非空渲染可能来自已缓存历史，也需要等 assistant-ui 提交消息树。
+  const previousEventCountRef = useRef(0);
 
   const updateScrollState = useCallback(() => {
     const viewport = viewportRef.current;
@@ -288,6 +294,9 @@ function UnifiedThreadViewport({
   }, [updateScrollState, viewportRef]);
 
   useEffect(() => {
+    const isHistoryHydration = previousEventCountRef.current === 0 && eventCount > 0;
+    previousEventCountRef.current = eventCount;
+
     if (!followLatestRef.current) {
       return;
     }
@@ -296,21 +305,30 @@ function UnifiedThreadViewport({
       window.cancelAnimationFrame(scrollFrameRef.current);
     }
 
-    // 让浏览器在本帧合并 DOM 更新后再做一次读写，避免每个流式提交都
-    // 在 useLayoutEffect 中强制同步布局。
-    scrollFrameRef.current = window.requestAnimationFrame(() => {
-      scrollFrameRef.current = null;
-      const viewport = viewportRef.current;
-      if (!viewport || !followLatestRef.current) {
-        return;
-      }
+    // 历史消息会先更新 runtime，再由 assistant-ui 完成消息树提交。
+    // 多等一帧只发生在首次填充历史时，避免流式更新重新引入同步布局。
+    const scrollAfterFrames = (remainingFrames: number) => {
+      scrollFrameRef.current = window.requestAnimationFrame(() => {
+        if (remainingFrames > 1) {
+          scrollAfterFrames(remainingFrames - 1);
+          return;
+        }
 
-      const nextScrollHeight = viewport.scrollHeight;
-      viewport.scrollTop = nextScrollHeight;
-      lastScrollTopRef.current = viewport.scrollTop;
-      lastScrollHeightRef.current = nextScrollHeight;
-      setIsAtBottom(true);
-    });
+        scrollFrameRef.current = null;
+        const viewport = viewportRef.current;
+        if (!viewport || !followLatestRef.current) {
+          return;
+        }
+
+        const nextScrollHeight = viewport.scrollHeight;
+        viewport.scrollTop = nextScrollHeight;
+        lastScrollTopRef.current = viewport.scrollTop;
+        lastScrollHeightRef.current = nextScrollHeight;
+        setIsAtBottom(true);
+      });
+    };
+
+    scrollAfterFrames(isHistoryHydration ? 2 : 1);
 
     return () => {
       if (scrollFrameRef.current !== null) {
@@ -318,7 +336,25 @@ function UnifiedThreadViewport({
         scrollFrameRef.current = null;
       }
     };
-  }, [eventCount, isRunning, streamingVersion, viewportRef]);
+  }, [eventCount, isRunning, sessionId, streamingVersion, viewportRef]);
+
+  const scrollToBottom = useCallback(() => {
+    followLatestRef.current = true;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    if (typeof viewport.scrollTo === 'function') {
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
+    } else {
+      viewport.scrollTop = viewport.scrollHeight;
+    }
+  }, [viewportRef]);
+
+  const scrollToBottomButton = (
+    <ScrollToBottomButton
+      isAtBottom={isAtBottom}
+      onScrollToBottom={scrollToBottom}
+    />
+  );
 
   return (
     <ThreadPrimitive.ViewportProvider>
@@ -327,20 +363,7 @@ function UnifiedThreadViewport({
         data-testid="thread-viewport"
         className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scrollbar-gutter-stable"
       >
-        {children}
-        <ScrollToBottomButton
-          isAtBottom={isAtBottom}
-          onScrollToBottom={() => {
-            followLatestRef.current = true;
-            const viewport = viewportRef.current;
-            if (!viewport) return;
-            if (typeof viewport.scrollTo === 'function') {
-              viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
-            } else {
-              viewport.scrollTop = viewport.scrollHeight;
-            }
-          }}
-        />
+        {children(scrollToBottomButton)}
       </div>
     </ThreadPrimitive.ViewportProvider>
   );
@@ -360,6 +383,7 @@ function ScrollToBottomButton({
         variant="ghost"
         size="icon"
         className="absolute -top-12 left-1/2 z-10 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--surface-shadow-strong)/0.35)] transition-all hover:-translate-y-0.5 hover:text-foreground disabled:invisible"
+        data-testid="scroll-to-bottom"
         aria-label="Scroll to bottom"
         disabled={isAtBottom}
         onClick={onScrollToBottom}

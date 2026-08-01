@@ -14,12 +14,13 @@ const ContextMenuPortal = ContextMenuPrimitive.Portal
 const ContextMenuContent = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Content>
->(({ className, ...props }, ref) => (
+>(({ className, collisionPadding = 8, ...props }, ref) => (
   <ContextMenuPrimitive.Portal>
     <ContextMenuPrimitive.Content
       ref={ref}
+      collisionPadding={collisionPadding}
       className={cn(
-        'z-50 min-w-32 rounded-md border border-border/60 bg-popover/98 p-1 shadow-md backdrop-blur-md animate-in fade-in zoom-in-95 fill-mode-both',
+        'z-50 min-w-32 max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-md border border-border/60 bg-popover/98 p-1 shadow-md backdrop-blur-md animate-in fade-in zoom-in-95 fill-mode-both',
         className,
       )}
       {...props}

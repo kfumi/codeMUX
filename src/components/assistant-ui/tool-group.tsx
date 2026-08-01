@@ -1,13 +1,14 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState, type FC, type PropsWithChildren } from 'react';
+import { memo, useCallback, useMemo, useRef, useState, type FC, type PropsWithChildren } from 'react';
 import { ChevronDownIcon, LoaderIcon } from 'lucide-react';
 import { cva, type VariantProps } from 'class-variance-authority';
+import { useScrollLock } from '@assistant-ui/react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import { getToolDisplayName } from '@/components/agent/toolHeaderSummary';
 
-const ANIMATION_DURATION = 0;
+const ANIMATION_DURATION = 200;
 
 const toolGroupVariants = cva('aui-tool-group-root group/tool-group w-full', {
   variants: {
@@ -39,21 +40,25 @@ function ToolGroupRoot({
   children,
   ...props
 }: ToolGroupRootProps) {
+  const collapsibleRef = useRef<HTMLDivElement>(null);
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
+  const lockScroll = useScrollLock(collapsibleRef, ANIMATION_DURATION);
 
   const isControlled = controlledOpen !== undefined;
   const isOpen = isControlled ? controlledOpen : uncontrolledOpen;
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
+      lockScroll();
       if (!isControlled) setUncontrolledOpen(open);
       controlledOnOpenChange?.(open);
     },
-    [isControlled, controlledOnOpenChange],
+    [lockScroll, isControlled, controlledOnOpenChange],
   );
 
   return (
     <Collapsible
+      ref={collapsibleRef}
       data-slot="tool-group-root"
       data-variant={variant ?? 'outline'}
       open={isOpen}
@@ -142,6 +147,7 @@ function ToolGroupTrigger({
         data-slot="tool-group-trigger-chevron"
         className={cn(
           'size-4 shrink-0 transition-transform',
+          'duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
           'group-data-[state=closed]/trigger:-rotate-90',
           'group-data-[state=open]/trigger:rotate-0',
         )}
@@ -159,8 +165,15 @@ function ToolGroupContent({
     <CollapsibleContent
       data-slot="tool-group-content"
       className={cn(
-        'relative text-sm outline-none',
+        'relative overflow-hidden text-sm outline-none',
         'group/collapsible-content',
+        'ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none',
+        'data-closed:animate-collapsible-up',
+        'data-open:animate-collapsible-down',
+        'data-closed:fill-mode-forwards',
+        'data-closed:pointer-events-none',
+        'data-open:duration-(--animation-duration)',
+        'data-closed:duration-(--animation-duration)',
         className,
       )}
       {...props}
@@ -170,6 +183,10 @@ function ToolGroupContent({
           'mt-2 flex flex-col gap-2',
           'group-data-[variant=outline]/tool-group-root:mt-3 group-data-[variant=outline]/tool-group-root:border-t group-data-[variant=outline]/tool-group-root:px-4 group-data-[variant=outline]/tool-group-root:pt-3',
           'group-data-[variant=muted]/tool-group-root:mt-3 group-data-[variant=muted]/tool-group-root:border-t group-data-[variant=muted]/tool-group-root:px-4 group-data-[variant=muted]/tool-group-root:pt-3',
+          'ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none',
+          'group-data-open/collapsible-content:animate-in group-data-open/collapsible-content:fade-in-0 group-data-open/collapsible-content:blur-in-[2px] group-data-open/collapsible-content:slide-in-from-top-1',
+          'group-data-closed/collapsible-content:animate-out group-data-closed/collapsible-content:fade-out-0 group-data-closed/collapsible-content:blur-out-[2px] group-data-closed/collapsible-content:slide-out-to-top-1',
+          'group-data-open/collapsible-content:duration-(--animation-duration) group-data-closed/collapsible-content:duration-(--animation-duration)',
         )}
       >
         {children}

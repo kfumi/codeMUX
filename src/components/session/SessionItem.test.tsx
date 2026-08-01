@@ -87,6 +87,9 @@ describe('SessionItem', () => {
 
     fireEvent.contextMenu(screen.getByText('Deletable Session'));
     await waitFor(() => expect(screen.getByText('删除')).toBeTruthy());
+    const menu = screen.getByRole('menu');
+    expect(menu.className).toContain('max-h-[calc(100dvh-1rem)]');
+    expect(menu.className).not.toMatch(/(^|\s)fixed(\s|$)/);
     fireEvent.click(screen.getByText('删除'));
 
     await waitFor(() => expect(screen.getByText('删除对话')).toBeTruthy());

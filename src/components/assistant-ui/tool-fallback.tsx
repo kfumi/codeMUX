@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircleIcon,
   CheckIcon,
@@ -13,6 +13,7 @@ import {
   type ToolCallMessagePartProps,
   type ToolCallMessagePartStatus,
   type ToolCallMessagePartComponent,
+  useScrollLock,
 } from '@assistant-ui/react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
@@ -20,7 +21,7 @@ import { Button } from '@/components/ui/button';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-const ANIMATION_DURATION = 0;
+const ANIMATION_DURATION = 200;
 
 export type ToolFallbackRootProps = Omit<
   React.ComponentProps<typeof Collapsible>,
@@ -39,21 +40,25 @@ function ToolFallbackRoot({
   children,
   ...props
 }: ToolFallbackRootProps) {
+  const collapsibleRef = useRef<HTMLDivElement>(null);
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
+  const lockScroll = useScrollLock(collapsibleRef, ANIMATION_DURATION);
 
   const isControlled = controlledOpen !== undefined;
   const isOpen = isControlled ? controlledOpen : uncontrolledOpen;
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
+      lockScroll();
       if (!isControlled) setUncontrolledOpen(open);
       controlledOnOpenChange?.(open);
     },
-    [isControlled, controlledOnOpenChange],
+    [lockScroll, isControlled, controlledOnOpenChange],
   );
 
   return (
     <Collapsible
+      ref={collapsibleRef}
       data-slot="tool-fallback-root"
       open={isOpen}
       onOpenChange={handleOpenChange}
@@ -122,6 +127,7 @@ function ToolFallbackTrigger({
       <ChevronDownIcon
         className={cn(
           'size-3.5 shrink-0 text-muted-foreground/52 transition-transform',
+          'duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
           'group-data-[state=closed]/trigger:-rotate-90',
           'group-data-[state=open]/trigger:rotate-0',
         )}
@@ -141,15 +147,25 @@ function ToolFallbackContent({
     <CollapsibleContent
       data-slot="tool-fallback-content"
       className={cn(
-        'relative text-sm outline-none',
+        'relative overflow-hidden text-sm outline-none',
         'group/collapsible-content',
+        'ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none',
+        'data-closed:animate-collapsible-up',
+        'data-open:animate-collapsible-down',
+        'data-closed:fill-mode-forwards',
+        'data-closed:pointer-events-none',
+        'data-open:duration-(--animation-duration)',
+        'data-closed:duration-(--animation-duration)',
         className,
       )}
       {...props}
     >
       <div
         className={cn(
-          'mt-1 flex flex-col gap-2 text-xs scrollbar-gutter-stable',
+          'mt-1 flex flex-col gap-2 text-xs scrollbar-gutter-stable ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none',
+          'group-data-open/collapsible-content:animate-in group-data-open/collapsible-content:fade-in-0 group-data-open/collapsible-content:blur-in-[2px] group-data-open/collapsible-content:slide-in-from-top-1',
+          'group-data-closed/collapsible-content:animate-out group-data-closed/collapsible-content:fade-out-0 group-data-closed/collapsible-content:blur-out-[2px] group-data-closed/collapsible-content:slide-out-to-top-1',
+          'group-data-open/collapsible-content:duration-(--animation-duration) group-data-closed/collapsible-content:duration-(--animation-duration)',
           scrollable ? 'max-h-40 overflow-y-auto pr-1' : 'overflow-visible',
           bodyClassName,
         )}

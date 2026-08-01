@@ -29,7 +29,7 @@ const ANIMATION_DURATION = 200;
 
 const ReasoningPreviewContext = createContext(false);
 
-const reasoningVariants = cva("aui-reasoning-root mb-4 w-full", {
+const reasoningVariants = cva("aui-reasoning-root w-full", {
   variants: {
     variant: {
       outline: "rounded-lg border px-3 py-2",
@@ -240,6 +240,7 @@ function ReasoningContent({
         "data-closed:pointer-events-none",
         "data-open:duration-(--animation-duration)",
         "data-closed:duration-(--animation-duration)",
+        !isPreview && "max-h-[min(36vh,24rem)] overflow-y-auto overscroll-contain",
         className,
       )}
       {...props}

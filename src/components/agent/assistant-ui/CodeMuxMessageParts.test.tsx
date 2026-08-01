@@ -86,11 +86,16 @@ describe('CodeMuxToolCallMessagePart', () => {
 
     const argsBlock = container.querySelector('[data-slot="tool-fallback-args"]');
     const resultBlock = container.querySelector('[data-slot="tool-fallback-result"]');
+    const toolRoot = container.querySelector('[data-slot="tool-fallback-root"]') as HTMLElement;
+    const toolContent = container.querySelector('[data-slot="tool-fallback-content"]') as HTMLElement;
 
     expect(argsBlock?.className).not.toContain('justify-end');
     expect(resultBlock?.className).not.toContain('justify-start');
     expect(resultBlock?.querySelector('strong')).toBeNull();
     expect(resultBlock?.textContent).toContain('结果包含 **not bold**');
+    expect(toolRoot.style.getPropertyValue('--animation-duration')).toBe('200ms');
+    expect(toolContent.className).toContain('animate-collapsible-down');
+    expect(toolContent.className).toContain('duration-(--animation-duration)');
   });
 
   it('点击 ExitPlanMode 的 planFilePath 后在右侧计划标签中预览 plan 快照，展开区不重复展示整段 plan', () => {

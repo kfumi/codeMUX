@@ -14,7 +14,7 @@ vi.stubGlobal(
 );
 
 describe('ReasoningText', () => {
-  it('使用外层线程面板滚动，不创建嵌套滚动容器', () => {
+  it('正文节点本身不创建滚动容器', () => {
     const { container } = render(<ReasoningText />);
 
     const className = container.firstElementChild?.className ?? '';
@@ -25,7 +25,7 @@ describe('ReasoningText', () => {
 });
 
 describe('ReasoningContent', () => {
-  it('非流式展开时不渲染底部渐变遮罩', () => {
+  it('非流式展开时限制高度并允许面板内部滚动', () => {
     const { container } = render(
       <ReasoningRoot defaultOpen>
         <ReasoningContent>
@@ -33,6 +33,10 @@ describe('ReasoningContent', () => {
         </ReasoningContent>
       </ReasoningRoot>,
     );
+
+    const content = container.querySelector('[data-slot="reasoning-content"]');
+    expect(content?.className).toContain('max-h-[min(36vh,24rem)]');
+    expect(content?.className).toContain('overflow-y-auto');
 
     const fades = [...container.querySelectorAll('[data-slot="reasoning-fade"]')];
     expect(fades.some((fade) => fade.className.includes('bottom-0'))).toBe(false);
@@ -49,7 +53,9 @@ describe('ReasoningRoot', () => {
       </ReasoningRoot>,
     );
 
-    expect(container.querySelector('[data-slot="reasoning-content"]')).not.toBeNull();
+    const content = container.querySelector('[data-slot="reasoning-content"]');
+    expect(content).not.toBeNull();
+    expect(content?.className).not.toContain('max-h-[min(36vh,24rem)]');
     const fades = [...container.querySelectorAll('[data-slot="reasoning-fade"]')];
     expect(fades.some((fade) => fade.className.includes('bottom-0'))).toBe(true);
   });

@@ -1,7 +1,8 @@
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
-import { useRef, useState, useCallback, useLayoutEffect, type ReactNode } from 'react';
+import { useRef, useState, useCallback, useEffect, useLayoutEffect, type ReactNode } from 'react';
 
 import { cn } from '../../lib/utils';
+import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
 import { SidePanel } from '../workspace/SidePanel';
 import { TooltipHint } from '../ui/tooltip';
 import { TitleBar } from './TitleBar';
@@ -9,6 +10,19 @@ import { TitleBar } from './TitleBar';
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 500;
 const SIDEBAR_DEFAULT = 300;
+const WINDOW_MIN_WIDTH = 640;
+const WINDOW_MIN_HEIGHT = 480;
+
+function clampSidebarWidth(width: number): number {
+  return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, width));
+}
+
+function getInitialSidebarWidth(): { width: number; ratio: number } {
+  const viewportWidth = typeof window === 'undefined' ? SIDEBAR_DEFAULT : Math.max(window.innerWidth, 1);
+  const preferences = readLayoutPreferences();
+  const ratio = preferences.sidebarRatio ?? SIDEBAR_DEFAULT / viewportWidth;
+  return { width: clampSidebarWidth(viewportWidth * ratio), ratio };
+}
 
 interface MainLayoutProps {
   sidebar?: ReactNode;
@@ -33,12 +47,82 @@ export function MainLayout({
   sidePanelProjectPath,
   sidePanelScopeId = 'global',
 }: MainLayoutProps) {
-  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
+  const initialSidebar = getInitialSidebarWidth();
+  const [sidebarWidth, setSidebarWidth] = useState(initialSidebar.width);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const sidebarDragging = useRef(false);
+  const sidebarRatioRef = useRef(initialSidebar.ratio);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const sidebarExistsRef = useRef(false);
   const sidebarInstant = sidebar != null && !sidebarExistsRef.current;
+
+  useEffect(() => {
+    const resizeSidebarWithWindow = () => {
+      if (sidebarDragging.current) return;
+      setSidebarWidth(clampSidebarWidth(window.innerWidth * sidebarRatioRef.current));
+    };
+
+    window.addEventListener('resize', resizeSidebarWithWindow);
+    return () => window.removeEventListener('resize', resizeSidebarWithWindow);
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
+    const persistWindowSize = () => {
+      if (window.innerWidth < WINDOW_MIN_WIDTH || window.innerHeight < WINDOW_MIN_HEIGHT) return;
+      updateLayoutPreferences({
+        windowWidth: window.innerWidth,
+        windowHeight: window.innerHeight,
+      });
+    };
+
+    const setupWindowPersistence = async () => {
+      const preferences = readLayoutPreferences();
+      const tauriAvailable = typeof window !== 'undefined'
+        && typeof (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
+
+      if (!tauriAvailable) {
+        persistWindowSize();
+        return;
+      }
+
+      try {
+        const { getCurrentWindow, LogicalSize } = await import('@tauri-apps/api/window');
+        const currentWindow = getCurrentWindow();
+        const maximized = await currentWindow.isMaximized();
+
+        if (!disposed && !maximized && preferences.windowWidth && preferences.windowHeight) {
+          const availableWidth = window.screen?.availWidth ?? preferences.windowWidth;
+          const availableHeight = window.screen?.availHeight ?? preferences.windowHeight;
+          const width = Math.min(Math.max(preferences.windowWidth, WINDOW_MIN_WIDTH), availableWidth);
+          const height = Math.min(Math.max(preferences.windowHeight, WINDOW_MIN_HEIGHT), availableHeight);
+          await currentWindow.setSize(new LogicalSize(width, height));
+        }
+
+        unlisten = await currentWindow.onResized(() => {
+          void currentWindow.isMaximized().then((isMaximized) => {
+            if (!disposed && !isMaximized) persistWindowSize();
+          });
+        });
+
+        if (!maximized) persistWindowSize();
+      } catch {
+        // Browser preview and older Tauri runtimes can lack window APIs.
+        persistWindowSize();
+      }
+    };
+
+    void setupWindowPersistence();
+    window.addEventListener('resize', persistWindowSize);
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+      window.removeEventListener('resize', persistWindowSize);
+    };
+  }, []);
 
   useLayoutEffect(() => {
     sidebarExistsRef.current = sidebar != null;
@@ -53,7 +137,9 @@ export function MainLayout({
 
     const onMove = (moveEvent: MouseEvent) => {
       if (!sidebarDragging.current) return;
-      const width = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, moveEvent.clientX));
+      const width = clampSidebarWidth(moveEvent.clientX);
+      sidebarRatioRef.current = width / Math.max(window.innerWidth, 1);
+      updateLayoutPreferences({ sidebarRatio: sidebarRatioRef.current });
       setSidebarWidth(width);
     };
 

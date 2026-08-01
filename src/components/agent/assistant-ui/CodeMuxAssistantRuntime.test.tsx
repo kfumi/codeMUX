@@ -1682,6 +1682,67 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(viewport.scrollTop).toBe(1000);
   });
 
+  it('scrolls to the bottom after asynchronously hydrated history commits', async () => {
+    const historySessionId = 'session-history-hydration';
+    const { container } = render(<Harness sessionId={historySessionId} />);
+    const viewport = container.querySelector('[data-testid="thread-viewport"]') as HTMLElement;
+
+    Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 256 });
+    viewport.scrollTop = 0;
+
+    act(() => {
+      useAgentStore.setState((state) => ({
+        events: {
+          ...state.events,
+          [historySessionId]: [
+            { kind: 'user', data: { content: '历史用户消息' } },
+            {
+              kind: 'assistant',
+              data: {
+                type: 'assistant',
+                uuid: 'history-hydration-assistant',
+                session_id: historySessionId,
+                message: {
+                  role: 'assistant',
+                  content: [{ type: 'text', text: '历史助手消息' }],
+                },
+                parent_tool_use_id: null,
+              },
+            },
+          ],
+        },
+        eventTimestamps: {
+          ...state.eventTimestamps,
+          [historySessionId]: [1, 2],
+        },
+      }));
+    });
+
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => {
+        requestAnimationFrame(() => resolve());
+      }));
+    });
+
+    expect(viewport.scrollTop).toBe(1000);
+  });
+
+  it('shows the scroll-to-bottom button inside the sticky thread footer when scrolled up', async () => {
+    const { container } = render(<Harness sessionId="session-scroll-button" />);
+    const viewport = container.querySelector('[data-testid="thread-viewport"]') as HTMLElement;
+    const button = container.querySelector('[data-testid="scroll-to-bottom"]') as HTMLButtonElement;
+
+    Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 256 });
+    viewport.scrollTop = 0;
+    fireEvent.scroll(viewport);
+
+    await waitFor(() => expect(button.disabled).toBe(false));
+    expect(button.closest('[data-testid="thread-viewport-footer"]')).not.toBeNull();
+    expect(button.className).toContain('-top-12');
+  });
+
   it('renders live streaming text with markdown parsing using Streamdown', () => {
     const streamingText = '**streaming bold**\n\n```ts\nconst value = 1;\n```';
 
