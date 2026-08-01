@@ -9,6 +9,7 @@ import type { AgentMessage } from '../../../stores/agentStore';
 
 import type { AgentInputPayload } from '../../../types/agentInput';
 import type { AgentKind } from '../../../types/session';
+import type { ConversationTurn } from '../../../types/conversationTurn';
 import {
   convertAgentEventsToAssistantMessages,
   type CodeMuxAssistantMessage,
@@ -27,6 +28,7 @@ type CodeMuxAssistantRuntimeProviderProps = {
 type ThreadMessagePartLike = Exclude<ThreadMessageLike['content'], string>[number];
 
 const EMPTY_EVENTS: AgentMessage[] = [];
+const EMPTY_TURNS: ConversationTurn<AgentMessage>[] = [];
 const EMPTY_TIMESTAMPS: number[] = [];
 
 export function CodeMuxAssistantRuntimeProvider({
@@ -60,6 +62,7 @@ function SessionScopedAssistantRuntime({
   children,
 }: CodeMuxAssistantRuntimeProviderProps) {
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
+  const conversationTurns = useAgentStore((state) => state.turns[sessionId] ?? EMPTY_TURNS);
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const rewindLastTurn = useAgentStore((state) => state.rewindLastTurn);
@@ -68,8 +71,8 @@ function SessionScopedAssistantRuntime({
   eventTimestampsRef.current = eventTimestamps;
 
   const messages = useMemo(() => {
-    return convertAgentEventsToAssistantMessages(events);
-  }, [events, sessionId]);
+    return convertAgentEventsToAssistantMessages(events, conversationTurns);
+  }, [events, conversationTurns]);
 
   const handleMessage = useCallback(
     async (message: AppendMessage) => {

@@ -184,6 +184,26 @@ describe('agent store Codex history loading', () => {
     localStorage.clear();
   });
 
+  it('deduplicates concurrent and empty Claude history loads', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+    let resolveHistory: ((events: Record<string, unknown>[]) => void) | undefined;
+    loadClaudeSessionEventsMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveHistory = resolve;
+    }));
+
+    const first = useAgentStore.getState().loadSessionMessages(session.id);
+    const second = useAgentStore.getState().loadSessionMessages(session.id);
+
+    expect(loadClaudeSessionEventsMock).toHaveBeenCalledTimes(1);
+    resolveHistory?.([]);
+    await Promise.all([first, second]);
+
+    await useAgentStore.getState().loadSessionMessages(session.id);
+    expect(loadClaudeSessionEventsMock).toHaveBeenCalledTimes(1);
+    expect(useAgentStore.getState().events[session.id]).toEqual([]);
+  });
+
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -871,13 +891,50 @@ describe('agent store Codex history loading', () => {
       // Leading edge: first delta is visible immediately.
       expect(useAgentStore.getState().streamingThinking[session.id] ?? '').toBe('chunk-0;');
 
-      await vi.advanceTimersByTimeAsync(40);
+      await vi.advanceTimersByTimeAsync(60);
       expect(useAgentStore.getState().streamingThinking[session.id]).toBe(
         'chunk-0;chunk-1;chunk-2;chunk-3;chunk-4;',
       );
       expect('streamingThinkingDurations' in useAgentStore.getState()).toBe(false);
     } finally {
       requestAnimationFrameMock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses a trailing Claude thinking flush to avoid duplicate render commits', async () => {
+    vi.useFakeTimers();
+
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: { type: 'content_block_start', content_block: { type: 'thinking' } },
+      }));
+      onEvent(JSON.stringify({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: {
+          type: 'content_block_delta',
+          delta: { type: 'thinking_delta', thinking: 'claude-thinking' },
+        },
+      }));
+    });
+
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('claude_code');
+
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'stream Claude thinking', 'D:\\project\\ai-code\\codeMUX');
+
+      expect(useAgentStore.getState().streamingThinking[session.id] ?? '').toBe('');
+      await vi.advanceTimersByTimeAsync(99);
+      expect(useAgentStore.getState().streamingThinking[session.id] ?? '').toBe('');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(useAgentStore.getState().streamingThinking[session.id]).toBe('claude-thinking');
+    } finally {
       vi.useRealTimers();
     }
   });
@@ -1342,7 +1399,7 @@ describe('agent store Codex history loading', () => {
 
     expect(loaderMock).toHaveBeenCalledWith(session.id);
     expect(getEventsMock).not.toHaveBeenCalled();
-    expect(useAgentStore.getState().events[session.id]).toBeUndefined();
+    expect(useAgentStore.getState().events[session.id]).toEqual([]);
   });
 
   it('loads Codex history CodeMUX tool and outcome events through the live adapter', async () => {

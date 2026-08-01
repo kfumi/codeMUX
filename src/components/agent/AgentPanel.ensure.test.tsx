@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore } from '../../stores/agentStore';
@@ -10,7 +11,8 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { AgentPanel } from './AgentPanel';
 import type { AgentModelSelectorProps } from './AgentModelSelector';
 
-const { ensureSessionMock, setActiveAgentProfileModelMock, updateProviderMock } = vi.hoisted(() => ({
+const { codeMuxThreadRenderMock, ensureSessionMock, setActiveAgentProfileModelMock, updateProviderMock } = vi.hoisted(() => ({
+  codeMuxThreadRenderMock: vi.fn(),
   ensureSessionMock: vi.fn(() => Promise.resolve()),
   setActiveAgentProfileModelMock: vi.fn(() => Promise.resolve()),
   updateProviderMock: vi.fn(() => Promise.resolve()),
@@ -50,7 +52,10 @@ vi.mock('./assistant-ui/CodeMuxAssistantRuntime', () => ({
 }));
 
 vi.mock('./assistant-ui/CodeMuxThread', () => ({
-  CodeMuxThread: ({ footer }: { footer?: React.ReactNode }) => <div>{footer}</div>,
+  CodeMuxThread: ({ footer }: { footer?: React.ReactNode }) => {
+    codeMuxThreadRenderMock();
+    return <div>{footer}</div>;
+  },
 }));
 
 vi.mock('./assistant-ui/CodeMuxComposer', () => ({
@@ -81,6 +86,7 @@ describe('AgentPanel session bootstrapping', () => {
       disconnect() {}
     });
     ensureSessionMock.mockClear();
+    codeMuxThreadRenderMock.mockClear();
     setActiveAgentProfileModelMock.mockClear();
     updateProviderMock.mockClear();
 
@@ -194,6 +200,23 @@ describe('AgentPanel session bootstrapping', () => {
     expect(screen.getByRole('button', { name: '变更前确认' })).toHaveProperty('disabled', false);
     expect(screen.getByTestId('model-selector').dataset.model).toBe('claude-sonnet-4-20250514');
   });
+
+  it('does not rerender the chat thread for streaming token updates', () => {
+    render(<AgentPanel sessionId="session-running" />);
+    const initialRenderCount = codeMuxThreadRenderMock.mock.calls.length;
+
+    act(() => {
+      useAgentStore.setState((state) => ({
+        streamingThinking: {
+          ...state.streamingThinking,
+          'session-running': 'new thinking token',
+        },
+      }));
+    });
+
+    expect(codeMuxThreadRenderMock).toHaveBeenCalledTimes(initialRenderCount);
+  });
+
   it('uses global model options while preserving the saved session model for context', async () => {
     useSessionStore.setState((state) => ({
       ...state,

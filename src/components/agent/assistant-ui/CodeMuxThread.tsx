@@ -24,14 +24,12 @@ import {
   ReasoningRoot,
   ReasoningText,
   ReasoningTrigger,
-} from '@/components/assistant-ui/reasoning';
+} from '@/components/reasoning';
 import { cn } from '../../../lib/utils';
-import { createLogger } from '../../../lib/logger';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { buildConversationTurnIndex, buildConversationTurns } from '../../../lib/conversationTurns';
 import type { ConversationTurn } from '../../../types/conversationTurn';
 
-const logger = createLogger('CodeMuxThread');
 import { isInterruptMarker } from '../../../stores/agentEventParsing';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import {
@@ -77,6 +75,7 @@ type CodeMuxThreadRenderContextValue = {
 };
 
 const EMPTY_EVENTS: AgentMessage[] = [];
+const EMPTY_TURNS: ConversationTurn<AgentMessage>[] = [];
 const EMPTY_TIMESTAMPS: number[] = [];
 const INTERRUPT_LABEL = '用户中断请求';
 const COLLAPSED_USER_MESSAGE_CLASS = 'max-h-80 overflow-hidden';
@@ -97,10 +96,10 @@ const MESSAGE_COMPONENTS = {
 
 export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
+  const conversationTurns = useAgentStore((state) => state.turns[sessionId] ?? EMPTY_TURNS);
   const eventTimestamps = useAgentStore((state) => state.eventTimestamps[sessionId] ?? EMPTY_TIMESTAMPS);
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const stopped = useAgentStore((state) => state.forceStopped[sessionId] ?? false);
-  const tokenUsage = useAgentStore((state) => state.tokenUsageBySession[sessionId] ?? null);
   const compactAiOutput = useSettingsStore((state) => state.config?.compact_ai_output ?? false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
@@ -166,21 +165,6 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     return newResult;
   }, [events]);
 
-  const conversationTurns = useMemo(
-    () => buildConversationTurns(events, {
-      isRunning,
-      forceStopped: stopped,
-      sessionId,
-      ...(tokenUsage ? {
-        latestUsage: {
-          inputTokens: tokenUsage.last.inputTokens,
-          outputTokens: tokenUsage.last.outputTokens,
-          cacheReadTokens: tokenUsage.last.cachedInputTokens,
-        },
-      } : {}),
-    }),
-    [events, stopped, isRunning, sessionId, tokenUsage],
-  );
   const turnByEventIndex = useMemo(
     () => buildConversationTurnIndex(conversationTurns),
     [conversationTurns],
@@ -220,11 +204,11 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   return (
     <ThreadPrimitive.Root className="flex h-full min-h-0 flex-col text-sm">
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
-        <ThreadPrimitive.Viewport
-          ref={viewportRef}
-          data-testid="thread-viewport"
-          className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scrollbar-gutter-stable"
-          autoScroll
+        <UnifiedThreadViewport
+          sessionId={sessionId}
+          eventCount={events.length}
+          isRunning={isRunning}
+          viewportRef={viewportRef}
         >
           <div
             data-testid="thread-content-shell"
@@ -240,22 +224,149 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
               data-testid="thread-viewport-footer"
               className="sticky bottom-0 mt-auto z-10 flex flex-col gap-3 overflow-visible bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] pt-2 pb-4"
             >
-              <TooltipHint content="Scroll to bottom">
-                <ThreadPrimitive.ScrollToBottom
-                  className="absolute -top-12 left-1/2 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--surface-shadow-strong)/0.35)] transition-all hover:-translate-y-0.5 hover:text-foreground disabled:invisible"
-                  aria-label="Scroll to bottom"
-                  behavior="smooth"
-                >
-                  <ArrowDown className="h-4 w-4" />
-                </ThreadPrimitive.ScrollToBottom>
-              </TooltipHint>
               {footer}
             </ThreadPrimitive.ViewportFooter>
           </div>
-          </ThreadPrimitive.Viewport>
-      {showMessageNav ? <MessageNav items={userNavItems} scrollContainer={viewportRef} disabled={isRunning} /> : null}
+        </UnifiedThreadViewport>
+        {showMessageNav ? <MessageNav items={userNavItems} scrollContainer={viewportRef} disabled={isRunning} /> : null}
       </div>
     </ThreadPrimitive.Root>
+  );
+}
+
+function UnifiedThreadViewport({
+  sessionId,
+  eventCount,
+  isRunning,
+  viewportRef,
+  children,
+}: {
+  sessionId: string;
+  eventCount: number;
+  isRunning: boolean;
+  viewportRef: RefObject<HTMLDivElement>;
+  children: ReactNode;
+}) {
+  const streamingVersion = useAgentStore((state) => state.streamingVersion[sessionId] ?? 0);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const followLatestRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
+  const lastScrollHeightRef = useRef(0);
+  const scrollFrameRef = useRef<number | null>(null);
+
+  const updateScrollState = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    const atBottom = viewport.scrollHeight <= viewport.clientHeight
+      || Math.abs(viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight) <= 1;
+    if (atBottom) {
+      followLatestRef.current = true;
+    } else if (
+      viewport.scrollTop < lastScrollTopRef.current
+      && viewport.scrollHeight === lastScrollHeightRef.current
+    ) {
+      followLatestRef.current = false;
+    }
+
+    lastScrollTopRef.current = viewport.scrollTop;
+    lastScrollHeightRef.current = viewport.scrollHeight;
+    setIsAtBottom(atBottom);
+  }, [viewportRef]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    updateScrollState();
+    viewport.addEventListener('scroll', updateScrollState, { passive: true });
+    return () => viewport.removeEventListener('scroll', updateScrollState);
+  }, [updateScrollState, viewportRef]);
+
+  useEffect(() => {
+    if (!followLatestRef.current) {
+      return;
+    }
+
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+    }
+
+    // 让浏览器在本帧合并 DOM 更新后再做一次读写，避免每个流式提交都
+    // 在 useLayoutEffect 中强制同步布局。
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      const viewport = viewportRef.current;
+      if (!viewport || !followLatestRef.current) {
+        return;
+      }
+
+      const nextScrollHeight = viewport.scrollHeight;
+      viewport.scrollTop = nextScrollHeight;
+      lastScrollTopRef.current = viewport.scrollTop;
+      lastScrollHeightRef.current = nextScrollHeight;
+      setIsAtBottom(true);
+    });
+
+    return () => {
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
+  }, [eventCount, isRunning, streamingVersion, viewportRef]);
+
+  return (
+    <ThreadPrimitive.ViewportProvider>
+      <div
+        ref={viewportRef}
+        data-testid="thread-viewport"
+        className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scrollbar-gutter-stable"
+      >
+        {children}
+        <ScrollToBottomButton
+          isAtBottom={isAtBottom}
+          onScrollToBottom={() => {
+            followLatestRef.current = true;
+            const viewport = viewportRef.current;
+            if (!viewport) return;
+            if (typeof viewport.scrollTo === 'function') {
+              viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
+            } else {
+              viewport.scrollTop = viewport.scrollHeight;
+            }
+          }}
+        />
+      </div>
+    </ThreadPrimitive.ViewportProvider>
+  );
+}
+
+function ScrollToBottomButton({
+  isAtBottom,
+  onScrollToBottom,
+}: {
+  isAtBottom: boolean;
+  onScrollToBottom: () => void;
+}) {
+  return (
+    <TooltipHint content="Scroll to bottom">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="absolute -top-12 left-1/2 z-10 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-[hsl(var(--surface-2))] text-muted-foreground shadow-[0_8px_30px_-16px_hsl(var(--surface-shadow-strong)/0.35)] transition-all hover:-translate-y-0.5 hover:text-foreground disabled:invisible"
+        aria-label="Scroll to bottom"
+        disabled={isAtBottom}
+        onClick={onScrollToBottom}
+      >
+        <ArrowDown className="h-4 w-4" />
+      </Button>
+    </TooltipHint>
   );
 }
 
@@ -940,7 +1051,10 @@ function AssistantLikeMessage({
                     return null;
                   }
                   return (
-                    <CodeMuxReasoningGroup>
+                    <CodeMuxReasoningGroup
+                      startIndex={part.indices[0] ?? 0}
+                      endIndex={part.indices[part.indices.length - 1] ?? 0}
+                    >
                       {children}
                     </CodeMuxReasoningGroup>
                   );
@@ -1038,12 +1152,25 @@ function AssistantCollapseToggle({
   );
 }
 
-function CodeMuxReasoningGroup({ children }: { children?: ReactNode }) {
-  const isRunning = useAuiState((state) => state.message.status?.type === 'running');
-  const [isOpen, setIsOpen] = useState(false);
+function CodeMuxReasoningGroup({
+  children,
+  startIndex,
+  endIndex,
+}: {
+  children?: ReactNode;
+  startIndex: number;
+  endIndex: number;
+}) {
+  const isRunning = useAuiState((state) => {
+    if (state.message.status?.type !== 'running') return false;
+    for (let index = startIndex; index <= endIndex; index += 1) {
+      if (state.message.parts[index]?.status.type === 'running') return true;
+    }
+    return false;
+  });
 
   return (
-    <ReasoningRoot open={isOpen} onOpenChange={setIsOpen} variant="ghost">
+    <ReasoningRoot streaming={isRunning} variant="ghost">
       <ReasoningTrigger active={isRunning} />
       <ReasoningContent aria-busy={isRunning}>
         <ReasoningText>{children}</ReasoningText>
@@ -1089,27 +1216,6 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
     || visibleThinking.length > 0
   ) ? '' : text;
 
-  useEffect(() => {
-    if (isRunning && thinking.length > 0) {
-      logger.debug('Streaming thinking updated', {
-        sessionId,
-        thinkingLength: thinking.length,
-        isRunning,
-      });
-    }
-  }, [sessionId, thinking, isRunning]);
-
-  useEffect(() => {
-    if (isRunning && text.length > 0) {
-      logger.debug('Streaming text updated', {
-        sessionId,
-        textLength: text.length,
-        isRunning,
-        duplicate: duplicateLiveText,
-      });
-    }
-  }, [sessionId, text, isRunning, duplicateLiveText]);
-
   if (stopped || (!isRunning && !thinking && !visibleText)) {
     return null;
   }
@@ -1119,21 +1225,9 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
   return (
     <div className="mb-5 flex w-full justify-start">
       <div className="w-full min-w-0 space-y-2 text-lg leading-relaxed">
-        {isRunning && !visibleText && !isThinking ? (
-          <div
-            className={cn(
-              'flex items-center gap-2.5 py-1 text-sm text-muted-foreground/60 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
-              'text-muted-foreground',
-            )}
-          >
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
-            <RunningElapsedTimer startTime={queryStartTime} label="思考中" />
-          </div>
-        ) : null}
-
         {isThinking ? (
           <div data-streaming-reasoning="true" className="w-full min-w-0">
-            <ReasoningRoot variant="ghost" defaultOpen={isRunning}>
+            <ReasoningRoot streaming={isRunning} variant="ghost" defaultOpen={isRunning}>
               <ReasoningTrigger active={isRunning} />
               <ReasoningContent aria-busy={isRunning}>
                 <ReasoningText>
@@ -1161,6 +1255,18 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
               {visibleText}
             </Streamdown>
             <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse rounded-full bg-foreground/60 align-text-bottom" />
+          </div>
+        ) : null}
+
+        {isRunning ? (
+          <div
+            className={cn(
+              'flex items-center gap-2.5 py-1 text-sm text-muted-foreground/60 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]',
+              'text-muted-foreground',
+            )}
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
+            <RunningElapsedTimer startTime={queryStartTime} label="思考中" />
           </div>
         ) : null}
       </div>

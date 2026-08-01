@@ -32,4 +32,18 @@ describe('CodeMUX stream protocol', () => {
       event_id: 'event-1',
     });
   });
+
+  it('maps tool input JSON deltas without treating them as unsupported events', () => {
+    expect(toCodeMuxStreamEvent('session-1', {
+      type: 'content_block_delta',
+      index: 3,
+      delta: { type: 'input_json_delta', partial_json: '{"command":' },
+    }, () => 'event-tool-input')).toMatchObject({
+      type: 'tool_input_delta',
+      session_id: 'session-1',
+      index: 3,
+      partial_json: '{"command":',
+      event_id: 'event-tool-input',
+    });
+  });
 });

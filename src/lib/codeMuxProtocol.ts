@@ -3,11 +3,12 @@ import type { AgentMessage } from '@/stores/agentStore';
 import type { AgentAssistantMessage, AgentPermissionRequest, AgentSystemMessage } from '@/types/agent';
 
 type CodeMuxStreamEvent = {
-  type: 'content_started' | 'text_delta' | 'reasoning_delta' | 'content_finished';
+  type: 'content_started' | 'text_delta' | 'reasoning_delta' | 'tool_input_delta' | 'content_finished';
   session_id?: string;
   index?: number;
   content_kind?: 'text' | 'reasoning';
   text?: string;
+  partial_json?: string;
   event_id?: string;
 };
 
@@ -27,6 +28,8 @@ type CodeMuxAssistantMessageEvent = {
   type: 'assistant_message';
   session_id?: string;
   content?: AgentAssistantMessage['message']['content'];
+  provider_message_id?: string;
+  supersedes_provider_message_ids?: string[];
   usage?: AgentAssistantMessage['message']['usage'];
   stop_reason?: string | null;
   event_id?: string;
@@ -105,7 +108,7 @@ type CodeMuxTurnEvent = {
 export function isCodeMuxStreamEvent(value: unknown): value is CodeMuxStreamEvent {
   return Boolean(value)
     && typeof value === 'object'
-    && ['content_started', 'text_delta', 'reasoning_delta', 'content_finished'].includes((value as { type?: unknown }).type as string);
+    && ['content_started', 'text_delta', 'reasoning_delta', 'tool_input_delta', 'content_finished'].includes((value as { type?: unknown }).type as string);
 }
 
 export function isCodeMuxToolEvent(value: unknown): value is CodeMuxToolEvent {
@@ -174,6 +177,19 @@ export function toLegacyStreamingMessage(event: CodeMuxStreamEvent): AgentMessag
   if (event.type === 'content_finished') {
     return { kind: 'streaming', data: { session_id: event.session_id, event: { type: 'content_block_stop', index } } };
   }
+  if (event.type === 'tool_input_delta') {
+    return {
+      kind: 'streaming',
+      data: {
+        session_id: event.session_id,
+        event: {
+          type: 'content_block_delta',
+          index,
+          delta: { type: 'input_json_delta', partial_json: event.partial_json ?? '' },
+        },
+      },
+    };
+  }
   return {
     kind: 'streaming',
     data: {
@@ -223,7 +239,7 @@ export function toLegacyAssistantMessage(event: CodeMuxAssistantMessageEvent): A
     kind: 'assistant',
     data: {
       type: 'assistant',
-      uuid: event.event_id ?? crypto.randomUUID(),
+      uuid: event.provider_message_id ?? event.event_id ?? crypto.randomUUID(),
       session_id: event.session_id ?? '',
       message: {
         role: 'assistant',
@@ -232,6 +248,9 @@ export function toLegacyAssistantMessage(event: CodeMuxAssistantMessageEvent): A
         ...(event.stop_reason !== undefined ? { stop_reason: event.stop_reason } : {}),
       },
       parent_tool_use_id: null,
+      ...(event.supersedes_provider_message_ids?.length
+        ? { supersedes: event.supersedes_provider_message_ids }
+        : {}),
     },
   };
 }

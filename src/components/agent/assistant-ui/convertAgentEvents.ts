@@ -49,6 +49,7 @@ const visibleEventKinds = ['api_retry', 'compact', 'error', 'stream_status', 'se
 
 export function convertAgentEventsToAssistantMessages(
   events: AgentMessage[],
+  conversationTurns?: ReturnType<typeof buildConversationTurns>,
 ): CodeMuxAssistantMessage[] {
   const messages: CodeMuxAssistantMessage[] = [];
   const toolCallLocationById = new Map<string, { messageIndex: number; partIndex: number }>();
@@ -327,7 +328,7 @@ export function convertAgentEventsToAssistantMessages(
     }
   });
 
-  markFinalAssistantMessages(messages, events);
+  markFinalAssistantMessages(messages, events, conversationTurns);
 
   return messages;
 }
@@ -363,9 +364,10 @@ function isCodexCompactSummaryAssistantEvent(
 function markFinalAssistantMessages(
   messages: CodeMuxAssistantMessage[],
   events: AgentMessage[],
+  conversationTurns?: ReturnType<typeof buildConversationTurns>,
 ): void {
   const assistantIndicesWithResult = new Set(
-    buildConversationTurns(events, { isRunning: true })
+    (conversationTurns ?? buildConversationTurns(events, { isRunning: true }))
       .filter((turn) => turn.hasRealUser || turn.status !== 'interrupted')
       .map((turn) => turn.footerAnchorEventIndex)
       .filter((index): index is number => index != null),

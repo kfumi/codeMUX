@@ -21,6 +21,25 @@ describe('CodeMUX frontend protocol adapter', () => {
     });
   });
 
+  it('restores tool input deltas for the existing tool input buffer', () => {
+    expect(toLegacyStreamingMessage({
+      type: 'tool_input_delta',
+      session_id: 'session-1',
+      index: 2,
+      partial_json: '{"command":',
+    })).toEqual({
+      kind: 'streaming',
+      data: {
+        session_id: 'session-1',
+        event: {
+          type: 'content_block_delta',
+          index: 2,
+          delta: { type: 'input_json_delta', partial_json: '{"command":' },
+        },
+      },
+    });
+  });
+
   it('maps tool lifecycle events to the existing assistant and tool result model', () => {
     expect(toLegacyToolMessage({
       type: 'tool_started', session_id: 'session-1', tool_use_id: 'tool-1', name: 'shell_command', input: { command: 'pwd' }, event_id: 'event-1',

@@ -40,7 +40,7 @@ interface PerfState {
 
   recordIpc: (command: string, durationMs: number, failed: boolean) => void;
   pruneIpc: () => void;
-  recordRender: (id: string, actualDurationMs: number, baseDurationMs: number) => void;
+  recordRender: (id: string, actualDurationMs: number, baseDurationMs: number, commitCount?: number) => void;
   setFps: (fps: number) => void;
   setMemoryMb: (mb: number | null) => void;
   setOverlayVisible: (visible: boolean) => void;
@@ -104,7 +104,7 @@ export const usePerfStore = create<PerfState>((set, get) => ({
     }
   },
 
-  recordRender: (id, actualDurationMs, baseDurationMs) => {
+  recordRender: (id, actualDurationMs, baseDurationMs, commitCount = 1) => {
     const now = Date.now();
     const state = get();
     const existing = state.renderAggregates[id];
@@ -112,12 +112,12 @@ export const usePerfStore = create<PerfState>((set, get) => ({
     aggregates[id] = existing
       ? {
           id,
-          commitCount: existing.commitCount + 1,
+          commitCount: existing.commitCount + commitCount,
           totalMs: existing.totalMs + actualDurationMs,
           baseTotalMs: existing.baseTotalMs + baseDurationMs,
           lastSeen: now,
         }
-      : { id, commitCount: 1, totalMs: actualDurationMs, baseTotalMs: baseDurationMs, lastSeen: now };
+      : { id, commitCount, totalMs: actualDurationMs, baseTotalMs: baseDurationMs, lastSeen: now };
 
     let order = state.renderOrder.filter((entry) => entry !== id);
     order.push(id);

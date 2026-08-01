@@ -50,6 +50,13 @@ export function emit(obj: unknown): void {
       return;
     }
 
+    // These are valid Anthropic stream control/signature events. They have no
+    // transcript projection, so turning them into diagnostics would append
+    // one history event per provider frame.
+    if (isExpectedProviderStreamEvent(streamEnvelope.event)) {
+      return;
+    }
+
     flushCodeMuxDeltas();
     writeJsonLine(withCodeMuxEnvelope({
       type: 'diagnostic',
@@ -85,7 +92,24 @@ function flushCodeMuxDeltas(): void {
 function isBatchableCodeMuxDelta(value: unknown): value is CodeMuxStreamEvent {
   return Boolean(value)
     && typeof value === 'object'
-    && ((value as { type?: unknown }).type === 'text_delta' || (value as { type?: unknown }).type === 'reasoning_delta');
+    && ((value as { type?: unknown }).type === 'text_delta'
+      || (value as { type?: unknown }).type === 'reasoning_delta'
+      || (value as { type?: unknown }).type === 'tool_input_delta');
+}
+
+function isExpectedProviderStreamEvent(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const type = (value as { type?: unknown }).type;
+  if (type === 'message_start' || type === 'message_delta' || type === 'message_stop') {
+    return true;
+  }
+
+  // content_block_delta is a known event even when its nested delta is a
+  // signature/citation variant that the UI does not render.
+  return type === 'content_block_delta';
 }
 
 function withCodeMuxEnvelope(value: unknown): unknown {
@@ -131,6 +155,7 @@ function isCodeMuxDomainEvent(type: unknown): boolean {
   return type === 'content_started'
     || type === 'text_delta'
     || type === 'reasoning_delta'
+    || type === 'tool_input_delta'
     || type === 'content_finished'
     || type === 'user_message'
     || type === 'assistant_message'

@@ -576,7 +576,14 @@ export function CodeMuxComposer({
                   </TooltipHint>
                 ) : (
                   <TooltipHint content="发送">
-                    <ComposerPrimitive.Send
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!disabled && hasInput) {
+                          editorRef.current?.send();
+                        }
+                      }}
+                      disabled={disabled || !hasInput}
                       className={cn(
                         'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200 active:scale-95',
                         hasInput && !disabled
@@ -586,7 +593,7 @@ export function CodeMuxComposer({
                       aria-label="发送"
                     >
                       <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
-                    </ComposerPrimitive.Send>
+                    </button>
                   </TooltipHint>
                 )}
               </div>

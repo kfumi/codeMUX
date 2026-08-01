@@ -574,6 +574,17 @@ describe('CodeMuxComposer', () => {
     expect(setComposerTextMock).not.toHaveBeenCalled();
   });
 
+  it('点击发送时先同步本地编辑器文本再提交 runtime', () => {
+    composerText = 'hello world';
+
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    expect(setComposerTextMock).toHaveBeenCalledWith('hello world');
+    expect(composerSendMock).toHaveBeenCalledTimes(1);
+  });
+
   it('renders a pending user question inside the composer and submits the selected option', () => {
     sendToolResponseMock.mockResolvedValue(undefined);
     useAgentStore.setState({ events: { 'session-1': pendingQuestionEvents } });

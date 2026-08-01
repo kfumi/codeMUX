@@ -1,7 +1,13 @@
 import type { CodeMuxRuntimeEvent, CodeMuxTurnEvent } from './codeMuxProtocol.js';
 
 export type TurnSourceEvent =
-  | { kind: 'assistant_message'; content: Array<Record<string, unknown>>; stopReason?: string | null }
+  | {
+      kind: 'assistant_message';
+      content: Array<Record<string, unknown>>;
+      stopReason?: string | null;
+      providerMessageId?: string;
+      supersedesProviderMessageIds?: string[];
+    }
   | { kind: 'user_input_requested'; toolUseId: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; allowOther?: boolean }> }
   | { kind: 'permission_requested'; requestId: string; permissionId?: string; permissionType: string; description: string; metadata?: Record<string, unknown> }
   | { kind: 'content_started'; index: number; contentKind: 'text' | 'reasoning' }
@@ -30,6 +36,7 @@ export class TurnEventNormalizer {
   private readonly finishedToolIds = new Set<string>();
   private readonly requestedInputIds = new Set<string>();
   private readonly requestedPermissionIds = new Set<string>();
+  private readonly assistantMessageIds = new Set<string>();
 
   constructor(
     private readonly sessionId: string,
@@ -39,9 +46,19 @@ export class TurnEventNormalizer {
   accept(source: TurnSourceEvent): CodeMuxRuntimeEvent[] {
     if (this.finished) return [];
     if (source.kind === 'assistant_message') {
+      if (source.providerMessageId && this.assistantMessageIds.has(source.providerMessageId)) {
+        return [];
+      }
+      if (source.providerMessageId) {
+        this.assistantMessageIds.add(source.providerMessageId);
+      }
       return [this.withSequence({
         type: 'assistant_message', session_id: this.sessionId, content: source.content,
         ...(source.stopReason !== undefined ? { stop_reason: source.stopReason } : {}),
+        ...(source.providerMessageId ? { provider_message_id: source.providerMessageId } : {}),
+        ...(source.supersedesProviderMessageIds?.length
+          ? { supersedes_provider_message_ids: source.supersedesProviderMessageIds }
+          : {}),
         event_id: this.eventIdFactory(), sequence: 0,
       })];
     }

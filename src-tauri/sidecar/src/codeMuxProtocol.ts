@@ -16,6 +16,14 @@ export type CodeMuxStreamEvent =
       sequence?: number;
     }
   | {
+      type: 'tool_input_delta';
+      session_id?: string;
+      index: number;
+      partial_json: string;
+      event_id: string;
+      sequence?: number;
+    }
+  | {
       type: 'content_finished';
       session_id?: string;
       index: number;
@@ -47,6 +55,8 @@ export type CodeMuxAssistantMessageEvent = {
   type: 'assistant_message';
   session_id?: string;
   content: Array<Record<string, unknown>>;
+  provider_message_id?: string;
+  supersedes_provider_message_ids?: string[];
   event_id: string;
   sequence: number;
 };
@@ -177,6 +187,9 @@ export function toCodeMuxStreamEvent(
   if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
     return withLegacyProjection({ type: 'reasoning_delta', session_id: sessionId, index, text: delta.thinking, event_id: eventIdFactory() }, value);
   }
+  if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+    return withLegacyProjection({ type: 'tool_input_delta', session_id: sessionId, index, partial_json: delta.partial_json, event_id: eventIdFactory() }, value);
+  }
   return undefined;
 }
 
@@ -192,7 +205,7 @@ function withLegacyProjection<T extends CodeMuxStreamEvent>(event: T, legacyEven
 }
 
 export function isCodeMuxStreamEvent(value: unknown): value is CodeMuxStreamEvent {
-  return Boolean(value) && typeof value === 'object' && ['content_started', 'text_delta', 'reasoning_delta', 'content_finished'].includes((value as { type?: unknown }).type as string);
+  return Boolean(value) && typeof value === 'object' && ['content_started', 'text_delta', 'reasoning_delta', 'tool_input_delta', 'content_finished'].includes((value as { type?: unknown }).type as string);
 }
 
 export function isCodeMuxToolEvent(value: unknown): value is CodeMuxToolEvent {

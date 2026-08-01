@@ -1029,6 +1029,20 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.queryByText('session one assistant')).toBeNull();
   });
 
+  it('renders a session with no computed turns without changing its external-store snapshot', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(() => render(<Harness sessionId="session-without-turns" />)).not.toThrow();
+
+    const messages = consoleError.mock.calls.map(([message]) => String(message));
+    expect(messages.some((message) => (
+      message.includes('getSnapshot should be cached')
+      || message.includes('Maximum update depth exceeded')
+    ))).toBe(false);
+
+    consoleError.mockRestore();
+  });
+
   it('renders failed tool calls as errors instead of leaving them running', () => {
     const { container } = render(<Harness sessionId="session-tool" />);
 
@@ -1608,6 +1622,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     // Thinking content IS rendered during streaming in a reasoning panel
     expect(container.textContent).toContain(shortThinking);
+    // 消息和实时增量位于同一个线程滚动面板内。
+    expect(container.querySelector('[data-testid="thread-viewport"] [data-streaming-reasoning="true"]')).not.toBeNull();
     // Collapsible reasoning block is rendered while thinking is in progress
     const trigger = container.querySelector('[data-slot="reasoning-trigger"]');
     expect(trigger).not.toBeNull();
@@ -1625,6 +1641,45 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(longView.container.querySelector('[data-slot="reasoning-trigger"]')).not.toBeNull();
     expect(longView.container.textContent).toContain('思考');
     expect(longView.container.textContent).not.toContain('tokens');
+  });
+
+  it('keeps the live reasoning viewport pinned to the newest content', async () => {
+    const thinking = 'streaming thinking that grows beyond the viewport';
+
+    useAgentStore.setState((state) => ({
+      isRunning: { ...state.isRunning, 'session-stream-follow': true },
+      queryStartTime: { ...state.queryStartTime, 'session-stream-follow': Date.now() },
+      streamingThinking: {
+        ...state.streamingThinking,
+        'session-stream-follow': thinking,
+      },
+    }));
+
+    const { container } = render(<Harness sessionId="session-stream-follow" />);
+    const viewport = container.querySelector('[data-testid="thread-viewport"]') as HTMLElement;
+
+    Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 256 });
+    viewport.scrollTop = 0;
+
+    act(() => {
+      useAgentStore.setState((state) => ({
+      streamingThinking: {
+        ...state.streamingThinking,
+        'session-stream-follow': `${thinking} plus a newly committed token`,
+      },
+      streamingVersion: {
+        ...state.streamingVersion,
+        'session-stream-follow': (state.streamingVersion['session-stream-follow'] ?? 0) + 1,
+      },
+      }));
+    });
+
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    expect(viewport.scrollTop).toBe(1000);
   });
 
   it('renders live streaming text with markdown parsing using Streamdown', () => {

@@ -38,7 +38,7 @@ export function RunningElapsedTimer({
   useEffect(() => {
     const timer = window.setInterval(() => {
       setElapsed(Date.now() - base);
-    }, 200);
+    }, 1000);
 
     return () => {
       window.clearInterval(timer);

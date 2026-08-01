@@ -30,7 +30,7 @@ describe('stream event transport batching', () => {
     });
   });
 
-  it('converts supported legacy deltas and diagnoses unsupported provider deltas', () => {
+  it('converts tool input deltas into the same batched protocol', () => {
     const writes: string[] = [];
     vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
       writes.push(String(chunk));
@@ -68,16 +68,32 @@ describe('stream event transport batching', () => {
         session_id: 'session-1',
         events: [
           { type: 'text_delta', session_id: 'session-1', index: 0, text: 'hello', event_id: expect.any(String), sequence: expect.any(Number) },
+          { type: 'tool_input_delta', session_id: 'session-1', index: 1, partial_json: '{', event_id: expect.any(String), sequence: expect.any(Number) },
         ],
       },
-      {
-        type: 'diagnostic',
-        subtype: 'unsupported_stream_event',
-        session_id: 'session-1',
-        event_id: expect.any(String),
-        sequence: expect.any(Number),
-      },
     ]);
+  });
+
+  it('does not append expected provider control events as diagnostics', () => {
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      writes.push(String(chunk));
+      return true;
+    });
+
+    emit({
+      type: 'stream_event',
+      session_id: 'session-1',
+      event: { type: 'message_start', message: { id: 'message-1' } },
+    });
+    emit({
+      type: 'stream_event',
+      session_id: 'session-1',
+      event: { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig' } },
+    });
+    flushStreamEvents();
+
+    expect(writes).toEqual([]);
   });
 
   it('assigns a monotonic envelope to non-batched CodeMUX events', () => {

@@ -208,12 +208,12 @@ export function PerfOverlay() {
           <li style={{ opacity: 0.5 }}>无</li>
         ) : (
           slowTop5.map((s, i) => (
-            <TooltipHint content={s.command}>
-              <li key={`${s.command}-${i}`}>
+            <li key={`${s.command}-${i}`}>
+              <TooltipHint content={s.command}>
                 <span>{s.command}</span>
-                <span>{s.durationMs.toFixed(0)}ms</span>
-              </li>
-            </TooltipHint>
+              </TooltipHint>
+              <span>{s.durationMs.toFixed(0)}ms</span>
+            </li>
           ))
         )}
       </ul>
@@ -224,12 +224,12 @@ export function PerfOverlay() {
           <li style={{ opacity: 0.5 }}>无</li>
         ) : (
           topRenders.map((r) => (
-            <TooltipHint content={r.id}>
-              <li key={r.id}>
+            <li key={r.id}>
+              <TooltipHint content={r.id}>
                 <span>{r.id}</span>
-                <span>{r.commitCount}× / {r.totalMs.toFixed(0)}ms</span>
-              </li>
-            </TooltipHint>
+              </TooltipHint>
+              <span>{r.commitCount}× / {r.totalMs.toFixed(0)}ms</span>
+            </li>
           ))
         )}
       </ul>

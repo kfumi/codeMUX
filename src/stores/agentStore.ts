@@ -124,6 +124,8 @@ interface AgentState {
   streamingThinking: Record<string, string>;
   /** Accumulated streaming text per session (from stream_event text deltas) */
   streamingText: Record<string, string>;
+  /** 单调递增的实时流版本，滚动逻辑无需订阅长字符串。 */
+  streamingVersion: Record<string, number>;
   /** Sessions that were force-stopped (interrupt) — suppress streaming UI immediately */
   forceStopped: Record<string, boolean>;
   streamingToolInputs: Record<string, Record<string, string>>;
@@ -168,10 +170,18 @@ type StreamingBuffer = {
 
 // Leading-edge + coalesce: first delta paints immediately; later deltas
 // coalesce into at most one flush per throttle window for UI smoothness.
-const STREAMING_FLUSH_THROTTLE_MS = 32;
+// 与 sidecar 的 50ms stream batch 对齐，避免再次拆分 transport batch。
+const STREAMING_FLUSH_THROTTLE_MS = 50;
+// Claude Code can emit substantially more partial events than the other
+// runtimes. A trailing-only preview keeps the UI responsive while retaining
+// a visibly live stream.
+const CLAUDE_STREAMING_FLUSH_THROTTLE_MS = 100;
+// 实时预览只需要展示最新内容，完整 thinking 由最终 assistant event 保存。
+const STREAMING_PREVIEW_MAX_CHARS = 16_384;
 const logger = createLogger('agentStore');
 const pendingStreamingBuffers = new Map<string, StreamingBuffer>();
 const pendingStreamingFlushHandles = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingSessionMessageLoads = new Map<string, Promise<void>>();
 const sessionsWithLiveTextStream = new Set<string>();
 /** Per-session live stream phase. OpenCode often emits reasoning as text_delta;
  * keep content in the reasoning panel until we explicitly enter the answer phase. */
@@ -190,8 +200,8 @@ function resetSessionStreamPhase(sessionId: string) {
   sessionStreamPhase.delete(sessionId);
 }
 
-function scheduleStreamingFlush(callback: () => void) {
-  return setTimeout(callback, STREAMING_FLUSH_THROTTLE_MS);
+function scheduleStreamingFlush(callback: () => void, delayMs: number) {
+  return setTimeout(callback, delayMs);
 }
 
 function cancelScheduledStreamingFlush(handle: ReturnType<typeof setTimeout>) {
@@ -210,6 +220,24 @@ function logStreamingTelemetry(sessionId: string, reason: string) {
   logger.debug('Streaming flush telemetry', { sessionId, reason, ...stats });
 }
 
+function appendStreamingPreview(previous: string, chunk: string): string {
+  if (!previous) {
+    return chunk.length > STREAMING_PREVIEW_MAX_CHARS
+      ? chunk.slice(-STREAMING_PREVIEW_MAX_CHARS)
+      : chunk;
+  }
+
+  if (previous.length + chunk.length <= STREAMING_PREVIEW_MAX_CHARS) {
+    return previous + chunk;
+  }
+
+  if (chunk.length >= STREAMING_PREVIEW_MAX_CHARS) {
+    return chunk.slice(-STREAMING_PREVIEW_MAX_CHARS);
+  }
+
+  return `${previous.slice(-(STREAMING_PREVIEW_MAX_CHARS - chunk.length))}${chunk}`;
+}
+
 function applyStreamingBuffer(
   sessionId: string,
   buffer: StreamingBuffer,
@@ -226,16 +254,21 @@ function applyStreamingBuffer(
     if (buffer.thinking) {
       updates.streamingThinking = {
         ...state.streamingThinking,
-        [sessionId]: (state.streamingThinking[sessionId] || '') + buffer.thinking,
+        [sessionId]: appendStreamingPreview(state.streamingThinking[sessionId] || '', buffer.thinking),
       };
     }
 
     if (buffer.text) {
       updates.streamingText = {
         ...state.streamingText,
-        [sessionId]: (state.streamingText[sessionId] || '') + buffer.text,
+        [sessionId]: appendStreamingPreview(state.streamingText[sessionId] || '', buffer.text),
       };
     }
+
+    updates.streamingVersion = {
+      ...state.streamingVersion,
+      [sessionId]: (state.streamingVersion[sessionId] ?? 0) + 1,
+    };
 
     return updates;
   });
@@ -310,12 +343,13 @@ function queueStreamingDelta(
     sessionsWithLiveTextStream.add(sessionId);
   }
 
-  // Leading edge: first paint with no pending timer so UI updates immediately.
-  if (!pendingStreamingFlushHandles.has(sessionId)) {
-    recordStreamingTelemetry(sessionId, 'flushes');
-    recordStreamingTelemetry(sessionId, 'uiUpdates');
-    applyStreamingBuffer(sessionId, { thinking: key === 'thinking' ? chunk : '', text: key === 'text' ? chunk : '' }, set);
+  const isClaude = getSessionAgentKind(sessionId) === 'claude_code';
+  const flushDelayMs = isClaude ? CLAUDE_STREAMING_FLUSH_THROTTLE_MS : STREAMING_FLUSH_THROTTLE_MS;
 
+  // Claude's SDK can deliver several transport batches inside a render frame.
+  // Use a trailing flush there so one batch cannot cause both an immediate and
+  // a delayed React commit. Other runtimes retain the leading-edge behavior.
+  if (!pendingStreamingFlushHandles.has(sessionId)) {
     const handle = scheduleStreamingFlush(() => {
       pendingStreamingFlushHandles.delete(sessionId);
       const pending = pendingStreamingBuffers.get(sessionId);
@@ -326,8 +360,18 @@ function queueStreamingDelta(
       pendingStreamingBuffers.delete(sessionId);
       recordStreamingTelemetry(sessionId, 'flushes');
       applyStreamingBuffer(sessionId, pending, set);
-    });
+    }, flushDelayMs);
     pendingStreamingFlushHandles.set(sessionId, handle);
+
+    if (!isClaude) {
+      recordStreamingTelemetry(sessionId, 'flushes');
+      recordStreamingTelemetry(sessionId, 'uiUpdates');
+      pendingStreamingBuffers.delete(sessionId);
+      applyStreamingBuffer(sessionId, { thinking: key === 'thinking' ? chunk : '', text: key === 'text' ? chunk : '' }, set);
+      pendingStreamingBuffers.set(sessionId, { thinking: '', text: '' });
+    } else {
+      pendingStreamingBuffers.set(sessionId, { thinking: chunk, text: key === 'text' ? chunk : '' });
+    }
     return;
   }
 
@@ -1155,6 +1199,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   tokenUsageRefreshRequests: {},
   streamingThinking: {},
   streamingText: {},
+  streamingVersion: {},
   forceStopped: {},
   streamingToolInputs: {},
   streamingToolMeta: {},
@@ -1437,9 +1482,13 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
                   set((s) => ({
                     streamingThinking: {
                       ...s.streamingThinking,
-                      [sessionId]: (s.streamingThinking[sessionId] || '') + misrouted,
+                      [sessionId]: appendStreamingPreview(s.streamingThinking[sessionId] || '', misrouted),
                     },
                     streamingText: { ...s.streamingText, [sessionId]: '' },
+                    streamingVersion: {
+                      ...s.streamingVersion,
+                      [sessionId]: (s.streamingVersion[sessionId] ?? 0) + 1,
+                    },
                   }));
                   sessionsWithLiveTextStream.delete(sessionId);
                 }
@@ -1458,9 +1507,13 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
                     set((s) => ({
                       streamingThinking: {
                         ...s.streamingThinking,
-                        [sessionId]: (s.streamingThinking[sessionId] || '') + misrouted,
+                        [sessionId]: appendStreamingPreview(s.streamingThinking[sessionId] || '', misrouted),
                       },
                       streamingText: { ...s.streamingText, [sessionId]: '' },
+                      streamingVersion: {
+                        ...s.streamingVersion,
+                        [sessionId]: (s.streamingVersion[sessionId] ?? 0) + 1,
+                      },
                     }));
                     sessionsWithLiveTextStream.delete(sessionId);
                   }
@@ -1728,8 +1781,15 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
               // Thread also commits the thinking block. Prefer live panel for open streaming UX.
               setSessionStreamPhase(sessionId, 'answer');
               const fullThinking = thinkingBlock!.thinking;
-              if ((s.streamingThinking[sessionId] || '') !== fullThinking) {
-                updates.streamingThinking = { ...s.streamingThinking, [sessionId]: fullThinking };
+              const fullThinkingPreview = fullThinking.length > STREAMING_PREVIEW_MAX_CHARS
+                ? fullThinking.slice(-STREAMING_PREVIEW_MAX_CHARS)
+                : fullThinking;
+              if ((s.streamingThinking[sessionId] || '') !== fullThinkingPreview) {
+                updates.streamingThinking = { ...s.streamingThinking, [sessionId]: fullThinkingPreview };
+                updates.streamingVersion = {
+                  ...s.streamingVersion,
+                  [sessionId]: (s.streamingVersion[sessionId] ?? 0) + 1,
+                };
               }
               // Do NOT clear streamingThinking here — panel stays until answer text starts.
             } else if (textBlock) {
@@ -1783,22 +1843,28 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
 
         set((s) => {
           const prev = s.events[sessionId] || [];
+          const supersededAssistantIds = event.kind === 'assistant' && Array.isArray(event.data.supersedes)
+            ? new Set(event.data.supersedes)
+            : null;
+          const baseEvents = supersededAssistantIds && supersededAssistantIds.size > 0
+            ? prev.filter((entry) => entry.kind !== 'assistant' || !supersededAssistantIds.has(entry.data.uuid))
+            : prev;
           // Replace the previous reconnecting status instead of stacking
           let newEvents: AgentMessage[];
           if (event.kind === 'stream_status' && event.data.is_reconnecting) {
             let replaceIdx = -1;
-            for (let i = prev.length - 1; i >= 0; i--) {
-              const e = prev[i];
+            for (let i = baseEvents.length - 1; i >= 0; i--) {
+              const e = baseEvents[i];
               if (isReconnectingStreamStatus(e)) {
                 replaceIdx = i;
                 break;
               }
             }
             newEvents = replaceIdx >= 0
-              ? [...prev.slice(0, replaceIdx), event, ...prev.slice(replaceIdx + 1)]
-              : [...prev, event];
+              ? [...baseEvents.slice(0, replaceIdx), event, ...baseEvents.slice(replaceIdx + 1)]
+              : [...baseEvents, event];
           } else {
-            newEvents = [...prev, event];
+            newEvents = [...baseEvents, event];
           }
           if (isTerminalAgentEvent(event.kind, Boolean(event.kind === 'result' && event.data?.is_error))) {
             newEvents = newEvents.filter((entry) => !isReconnectingStreamStatus(entry));
@@ -1975,6 +2041,8 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
       delete newStreaming[sessionId];
       const newStreamingText = { ...state.streamingText };
       delete newStreamingText[sessionId];
+      const newStreamingVersion = { ...state.streamingVersion };
+      delete newStreamingVersion[sessionId];
       const newForceStopped = { ...state.forceStopped };
       delete newForceStopped[sessionId];
       return {
@@ -1988,6 +2056,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         tokenUsageRefreshRequests: newTokenUsageRefreshRequests,
         streamingThinking: newStreaming,
         streamingText: newStreamingText,
+        streamingVersion: newStreamingVersion,
         forceStopped: newForceStopped,
         pendingPermissions: { ...state.pendingPermissions, [sessionId]: null },
       };
@@ -2059,68 +2128,93 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
   },
 
   loadSessionMessages: async (sessionId: string) => {
-    // Don't reload if we already have events for this session
+    // An empty array is also a loaded history. Keeping it in the store avoids
+    // repeating the expensive IPC call for empty sessions after remounts.
     const existing = get().events[sessionId];
-    if (existing && existing.length > 0) {
+    if (existing) {
       return;
     }
 
-    const agentKind = getSessionAgentKind(sessionId);
+    const pending = pendingSessionMessageLoads.get(sessionId);
+    if (pending) {
+      return pending;
+    }
 
-    try {
-      const historyMessages = typeof agentApi.loadSessionEvents === 'function'
-        ? await agentApi.loadSessionEvents(sessionId)
-        : agentKind === 'codex'
-          ? await agentApi.loadCodexSessionEvents(sessionId)
-          : agentKind === 'opencode'
-            ? await agentApi.loadOpenCodeSessionEvents(sessionId)
-            : await agentApi.loadClaudeSessionEvents(sessionId);
+    const loadPromise = (async () => {
+      const agentKind = getSessionAgentKind(sessionId);
 
-      if (!historyMessages || historyMessages.length === 0) {
-        logger.info('No agent history found for session', {
+      try {
+        const historyMessages = typeof agentApi.loadSessionEvents === 'function'
+          ? await agentApi.loadSessionEvents(sessionId)
+          : agentKind === 'codex'
+            ? await agentApi.loadCodexSessionEvents(sessionId)
+            : agentKind === 'opencode'
+              ? await agentApi.loadOpenCodeSessionEvents(sessionId)
+              : await agentApi.loadClaudeSessionEvents(sessionId);
+
+        if (!historyMessages || historyMessages.length === 0) {
+          logger.info('No agent history found for session', {
+            sessionId,
+            agentKind: agentKind ?? 'claude_code',
+          });
+          set((state) => ({
+            events: state.events[sessionId]
+              ? state.events
+              : { ...state.events, [sessionId]: [] },
+            eventTimestamps: state.eventTimestamps[sessionId]
+              ? state.eventTimestamps
+              : { ...state.eventTimestamps, [sessionId]: [] },
+          }));
+          return;
+        }
+
+        const events: AgentMessage[] = [];
+        const timestamps: number[] = [];
+
+        for (const raw of historyMessages) {
+          const rawMsg = raw as Record<string, unknown>;
+          const ts = typeof rawMsg.timestamp === 'string'
+            ? new Date(rawMsg.timestamp).getTime() || 0
+            : 0;
+
+          const event = isCodeMuxToolEvent(rawMsg)
+            || isCodeMuxTurnEvent(rawMsg)
+            || isCodeMuxStreamEvent(rawMsg)
+            || isCodeMuxDiagnosticEvent(rawMsg)
+            ? parseAgentEvent(JSON.stringify(rawMsg))
+            : mapPersistedClaudeMessage(rawMsg, agentKind ?? 'claude_code');
+          if (event) {
+            events.push(event as AgentMessage);
+            timestamps.push(ts);
+          }
+        }
+
+        set((state) => ({
+          events: { ...state.events, [sessionId]: events },
+          eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
+          todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
+        }));
+        await get().refreshLatestTokenUsage(sessionId, 'restored');
+        logger.info('Loaded session events from agent JSONL', {
           sessionId,
           agentKind: agentKind ?? 'claude_code',
+          eventCount: events.length,
         });
-        return;
+      } catch (err) {
+        logger.error('Failed to load session messages from agent JSONL', {
+          sessionId,
+          agentKind: agentKind ?? 'claude_code',
+        }, serializeError(err));
       }
+    })();
 
-      const events: AgentMessage[] = [];
-      const timestamps: number[] = [];
-
-      for (const raw of historyMessages) {
-        const rawMsg = raw as Record<string, unknown>;
-        const ts = typeof rawMsg.timestamp === 'string'
-          ? new Date(rawMsg.timestamp).getTime() || 0
-          : 0;
-
-        const event = isCodeMuxToolEvent(rawMsg)
-          || isCodeMuxTurnEvent(rawMsg)
-          || isCodeMuxStreamEvent(rawMsg)
-          || isCodeMuxDiagnosticEvent(rawMsg)
-          ? parseAgentEvent(JSON.stringify(rawMsg))
-          : mapPersistedClaudeMessage(rawMsg, agentKind ?? 'claude_code');
-        if (event) {
-          events.push(event as AgentMessage);
-          timestamps.push(ts);
-        }
+    pendingSessionMessageLoads.set(sessionId, loadPromise);
+    try {
+      await loadPromise;
+    } finally {
+      if (pendingSessionMessageLoads.get(sessionId) === loadPromise) {
+        pendingSessionMessageLoads.delete(sessionId);
       }
-
-      set((state) => ({
-        events: { ...state.events, [sessionId]: events },
-        eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
-        todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
-      }));
-      await get().refreshLatestTokenUsage(sessionId, 'restored');
-      logger.info('Loaded session events from agent JSONL', {
-        sessionId,
-        agentKind: agentKind ?? 'claude_code',
-        eventCount: events.length,
-      });
-    } catch (err) {
-      logger.error('Failed to load session messages from agent JSONL', {
-        sessionId,
-        agentKind: agentKind ?? 'claude_code',
-      }, serializeError(err));
     }
   },
 
@@ -2212,6 +2306,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
       tokenUsageRefreshRequests: removeSessionEntry(s.tokenUsageRefreshRequests, sessionId),
       streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
       streamingText: { ...s.streamingText, [sessionId]: '' },
+      streamingVersion: removeSessionEntry(s.streamingVersion, sessionId),
       forceStopped: { ...s.forceStopped, [sessionId]: false },
       streamingToolInputs: removeSessionEntry(s.streamingToolInputs, sessionId),
       streamingToolMeta: removeSessionEntry(s.streamingToolMeta, sessionId),

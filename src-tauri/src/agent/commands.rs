@@ -920,9 +920,6 @@ pub async fn load_claude_session_events(
     state: State<'_, crate::AppState>,
     app_session_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    use std::fs;
-    use std::io::{BufRead, BufReader};
-
     debug!(target: "agent", "Loading Claude session events for app_session_id={}", app_session_id);
 
     let mut messages = Vec::new();
@@ -947,33 +944,43 @@ pub async fn load_claude_session_events(
 
     debug!(target: "agent", "Reading JSONL from {}", jsonl_path.display());
 
-    let file = fs::File::open(&jsonl_path).map_err(|e| format!("Failed to open JSONL: {}", e))?;
-    let reader = BufReader::new(file);
+    let normalize_session_id = app_session_id.clone();
+    let normalized =
+        tokio::task::spawn_blocking(move || -> Result<Vec<serde_json::Value>, String> {
+            use std::fs;
+            use std::io::{BufRead, BufReader};
 
-    for (line_index, line_result) in reader.lines().enumerate() {
-        let line = match line_result {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
+            let file =
+                fs::File::open(&jsonl_path).map_err(|e| format!("Failed to open JSONL: {}", e))?;
+            let reader = BufReader::new(file);
 
-        let mut val: serde_json::Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
+            for (line_index, line_result) in reader.lines().enumerate() {
+                let line = match line_result {
+                    Ok(l) => l,
+                    Err(_) => continue,
+                };
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
 
-        if should_include_claude_history_event(&val) {
-            if let Some(obj) = val.as_object_mut() {
-                obj.insert("__lineIndex".to_string(), serde_json::json!(line_index));
+                let mut val: serde_json::Value = match serde_json::from_str(trimmed) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+
+                if should_include_claude_history_event(&val) {
+                    if let Some(obj) = val.as_object_mut() {
+                        obj.insert("__lineIndex".to_string(), serde_json::json!(line_index));
+                    }
+                    messages.push(val);
+                }
             }
-            messages.push(val);
-        }
-    }
 
-    let normalized = normalize_history_events(messages, &app_session_id);
+            Ok(normalize_history_events(messages, &normalize_session_id))
+        })
+        .await
+        .map_err(|error| format!("Failed to join Claude history loader: {}", error))??;
     info!(target: "agent", "Loaded {} CodeMUX events from Claude JSONL for app_session_id={}", normalized.len(), app_session_id);
     Ok(normalized)
 }

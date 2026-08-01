@@ -47,6 +47,8 @@ import {
   type AgentInputPayload,
 } from './agentInputPayload.js';
 import { shouldCaptureClaudeSessionMapping } from './claudeSessionMapping.js';
+import { shouldForwardClaudeSdkMessage } from './claudeSdkMessageFilter.js';
+import { nextWithTimeout } from './claudeQueryTimeout.js';
 import { setLogCtx, writeLog } from './writeLog.js';
 
 // Suppress unhandled abort rejections from child process termination during interrupt.
@@ -871,19 +873,16 @@ export class SessionRuntime {
         return iterator.next();
       }
 
-      return await Promise.race([
-        iterator.next(),
-        new Promise<IteratorResult<unknown>>((resolve, reject) => {
-          const timer = setTimeout(() => {
-            if (this.abortController?.signal.aborted) {
-              resolve({ done: true, value: undefined });
-              return;
-            }
-            reject(new Error(`Query timed out: no message received for ${MESSAGE_TIMEOUT_MS / 1000}s (after msg #${msgCount})`));
-          }, MESSAGE_TIMEOUT_MS);
-          if (timer.unref) timer.unref();
-        }),
-        ...(compacting ? [new Promise<{ done: true; value: undefined }>((resolve) => {
+      return await nextWithTimeout(
+        () => iterator.next(),
+        MESSAGE_TIMEOUT_MS,
+        () => {
+          if (this.abortController?.signal.aborted) {
+            return { done: true, value: undefined };
+          }
+          throw new Error(`Query timed out: no message received for ${MESSAGE_TIMEOUT_MS / 1000}s (after msg #${msgCount})`);
+        },
+        compacting ? [new Promise<IteratorResult<unknown>>((resolve) => {
           compactTimer = setTimeout(() => {
             process.stderr.write(`[sidecar] Compact timeout: no message after ${COMPACT_TIMEOUT_MS}ms, treating turn as complete\n`);
             emit({
@@ -896,8 +895,8 @@ export class SessionRuntime {
             resolve({ done: true, value: undefined });
           }, COMPACT_TIMEOUT_MS);
           if (compactTimer.unref) compactTimer.unref();
-        })] : []),
-      ]);
+        })] : [],
+      );
     };
 
     try {
@@ -951,6 +950,10 @@ export class SessionRuntime {
               agent_session_id: sdkSessionId,
             });
           }
+        }
+
+        if (!shouldForwardClaudeSdkMessage(msg)) {
+          continue;
         }
 
         const eventToEmit = msg.type === 'result'
@@ -1143,10 +1146,18 @@ function toClaudeAssistantMessageEvent(event: Record<string, unknown>): TurnSour
   const content = (message as Record<string, unknown>).content;
   if (!Array.isArray(content)) return undefined;
   const stopReason = (message as Record<string, unknown>).stop_reason;
+  const providerMessageId = typeof event.uuid === 'string' && event.uuid.length > 0
+    ? event.uuid
+    : undefined;
+  const supersedesProviderMessageIds = Array.isArray(event.supersedes)
+    ? event.supersedes.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : undefined;
   return {
     kind: 'assistant_message',
     content: content.filter((block): block is Record<string, unknown> => typeof block === 'object' && block !== null && !Array.isArray(block)),
     ...(typeof stopReason === 'string' || stopReason === null ? { stopReason } : {}),
+    ...(providerMessageId ? { providerMessageId } : {}),
+    ...(supersedesProviderMessageIds?.length ? { supersedesProviderMessageIds } : {}),
   };
 }
 

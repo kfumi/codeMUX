@@ -31,7 +31,11 @@ interface AgentPanelProps {
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, createSession, updateSessionPermissions, updateSessionModel } = useSessionStore();
   const { projects } = useProjectStore();
-  const { startQuery, interrupt, loadSessionMessages, clearEvents, respondToPermission } = useAgentStore();
+  const startQuery = useAgentStore((state) => state.startQuery);
+  const interrupt = useAgentStore((state) => state.interrupt);
+  const loadSessionMessages = useAgentStore((state) => state.loadSessionMessages);
+  const clearEvents = useAgentStore((state) => state.clearEvents);
+  const respondToPermission = useAgentStore((state) => state.respondToPermission);
   const pendingPermission = useAgentStore((state) => state.pendingPermissions[sessionId] ?? null);
   const { config, getActiveProvider, setActiveAgentProfileModel } = useSettingsStore();
   const { setProjectPath } = usePreviewStore();
@@ -319,66 +323,107 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
   }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, agentKind, handleSend]);
 
+  const pendingProfilerRenderRef = useRef<{
+    id: string;
+    commitCount: number;
+    actualDuration: number;
+    baseDuration: number;
+  } | null>(null);
+  const profilerFlushTimerRef = useRef<number | null>(null);
+  const flushProfilerRender = useCallback(() => {
+    profilerFlushTimerRef.current = null;
+    const pending = pendingProfilerRenderRef.current;
+    pendingProfilerRenderRef.current = null;
+    if (!pending) return;
+
+    usePerfStore.getState().recordRender(
+      pending.id,
+      pending.actualDuration,
+      pending.baseDuration,
+      pending.commitCount,
+    );
+  }, []);
+
+  useEffect(() => () => {
+    if (profilerFlushTimerRef.current !== null) {
+      window.clearTimeout(profilerFlushTimerRef.current);
+    }
+    flushProfilerRender();
+  }, [flushProfilerRender]);
+
   const handleProfilerRender = useCallback(
-    (_id: string, _phase: 'mount' | 'update' | 'nested-update', actualDuration: number, baseDuration: number) => {
-      if (import.meta.env.DEV) {
-        usePerfStore.getState().recordRender('MessageList', actualDuration, baseDuration);
+    (id: string, _phase: 'mount' | 'update' | 'nested-update', actualDuration: number, baseDuration: number) => {
+      if (!import.meta.env.DEV) return;
+
+      const pending = pendingProfilerRenderRef.current ?? {
+        id,
+        commitCount: 0,
+        actualDuration: 0,
+        baseDuration: 0,
+      };
+      pending.commitCount += 1;
+      pending.actualDuration += actualDuration;
+      pending.baseDuration += baseDuration;
+      pendingProfilerRenderRef.current = pending;
+
+      if (profilerFlushTimerRef.current === null) {
+        profilerFlushTimerRef.current = window.setTimeout(flushProfilerRender, 250);
       }
     },
-    [],
+    [flushProfilerRender],
   );
 
   return (
     <div ref={containerRef} className="flex h-full flex-col">
-      <Profiler id="MessageList" onRender={handleProfilerRender}>
       <CodeMuxAssistantRuntimeProvider sessionId={sessionId} agentKind={agentKind} onSend={handleSend} onCommand={handleCommand} sendDisabled={!hasUsableProfile || isReadOnly}>
-        <CodeMuxThread
-          sessionId={sessionId}
-          footer={(
-            <div className="flex w-full flex-col gap-3">
-              <CodeMuxComposer
-                sessionId={sessionId}
-                agentKind={agentKind}
-                projectPath={project?.path}
-                modelName={modelNameWithSuffix}
-                disabled={!hasUsableProfile || isReadOnly}
-                modelSelector={(
-                  <AgentModelSelector
-                    agentKind={agentKind}
-                    activeProfile={activeProfile}
-                    activeProfileId={activeProfileId}
-                    value={selectorModelState}
-                    contextModel={sessionProfile ? model : undefined}
-                    onChange={handleModelChange}
-                    reasoningEffort={reasoningEffort}
-                    onReasoningEffortChange={handleReasoningEffortChange}
-                    disabled={isRunning || isReadOnly}
-                    compact={compact}
-                  />
-                )}
-                permissionSelector={(
-                  <AgentPermissionSelector
-                    agentKind={agentKind}
-                    permissionConfig={permissionConfig}
-                    planMode={planMode}
-                    onPermissionConfigChange={handlePermissionConfigChange}
-                    onPlanModeChange={handlePlanModeChange}
-                    onModeChange={handleModeChange}
-                    onLegacyConfigMigrate={handleLegacyConfigMigrate}
-                    pendingPermission={pendingPermission}
-                    disabled={isReadOnly}
-                    onPermissionResponse={(response) => { void respondToPermission(sessionId, response); }}
-                    compact={compact}
-                  />
-                )}
-                onStop={() => interrupt(sessionId)}
-                onActivatePlanMode={() => handleModeChange(mapExecutionModeToPermissionConfig(agentKind, 'plan'), 'on')}
-              />
-            </div>
-          )}
-        />
+        <Profiler id="AgentThread" onRender={handleProfilerRender}>
+          <CodeMuxThread
+            sessionId={sessionId}
+            footer={(
+              <div className="flex w-full flex-col gap-3">
+                <CodeMuxComposer
+                  sessionId={sessionId}
+                  agentKind={agentKind}
+                  projectPath={project?.path}
+                  modelName={modelNameWithSuffix}
+                  disabled={!hasUsableProfile || isReadOnly}
+                  modelSelector={(
+                    <AgentModelSelector
+                      agentKind={agentKind}
+                      activeProfile={activeProfile}
+                      activeProfileId={activeProfileId}
+                      value={selectorModelState}
+                      contextModel={sessionProfile ? model : undefined}
+                      onChange={handleModelChange}
+                      reasoningEffort={reasoningEffort}
+                      onReasoningEffortChange={handleReasoningEffortChange}
+                      disabled={isRunning || isReadOnly}
+                      compact={compact}
+                    />
+                  )}
+                  permissionSelector={(
+                    <AgentPermissionSelector
+                      agentKind={agentKind}
+                      permissionConfig={permissionConfig}
+                      planMode={planMode}
+                      onPermissionConfigChange={handlePermissionConfigChange}
+                      onPlanModeChange={handlePlanModeChange}
+                      onModeChange={handleModeChange}
+                      onLegacyConfigMigrate={handleLegacyConfigMigrate}
+                      pendingPermission={pendingPermission}
+                      disabled={isReadOnly}
+                      onPermissionResponse={(response) => { void respondToPermission(sessionId, response); }}
+                      compact={compact}
+                    />
+                  )}
+                  onStop={() => interrupt(sessionId)}
+                  onActivatePlanMode={() => handleModeChange(mapExecutionModeToPermissionConfig(agentKind, 'plan'), 'on')}
+                />
+              </div>
+            )}
+          />
+        </Profiler>
       </CodeMuxAssistantRuntimeProvider>
-      </Profiler>
 
       <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
         <DialogContent className="sm:max-w-120">
