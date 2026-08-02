@@ -11,8 +11,6 @@ import { TitleBar } from './TitleBar';
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 500;
 const SIDEBAR_DEFAULT = 300;
-const WINDOW_MIN_WIDTH = 640;
-const WINDOW_MIN_HEIGHT = 480;
 
 function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, width));
@@ -58,70 +56,27 @@ export function MainLayout({
   const sidebarInstant = sidebar != null && !sidebarExistsRef.current;
 
   useEffect(() => {
+    let frameId: number | null = null;
     const resizeSidebarWithWindow = () => {
       if (sidebarDragging.current) return;
-      setSidebarWidth(clampSidebarWidth(window.innerWidth * sidebarRatioRef.current));
-    };
-
-    window.addEventListener('resize', resizeSidebarWithWindow);
-    return () => window.removeEventListener('resize', resizeSidebarWithWindow);
-  }, []);
-
-  useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-
-    const persistWindowSize = () => {
-      if (window.innerWidth < WINDOW_MIN_WIDTH || window.innerHeight < WINDOW_MIN_HEIGHT) return;
-      updateLayoutPreferences({
-        windowWidth: window.innerWidth,
-        windowHeight: window.innerHeight,
-      });
-    };
-
-    const setupWindowPersistence = async () => {
-      const preferences = readLayoutPreferences();
-      const tauriAvailable = typeof window !== 'undefined'
-        && typeof (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
-
-      if (!tauriAvailable) {
-        persistWindowSize();
+      if (typeof window.requestAnimationFrame !== 'function') {
+        setSidebarWidth(clampSidebarWidth(window.innerWidth * sidebarRatioRef.current));
         return;
       }
 
-      try {
-        const { getCurrentWindow, LogicalSize } = await import('@tauri-apps/api/window');
-        const currentWindow = getCurrentWindow();
-        const maximized = await currentWindow.isMaximized();
-
-        if (!disposed && !maximized && preferences.windowWidth && preferences.windowHeight) {
-          const availableWidth = window.screen?.availWidth ?? preferences.windowWidth;
-          const availableHeight = window.screen?.availHeight ?? preferences.windowHeight;
-          const width = Math.min(Math.max(preferences.windowWidth, WINDOW_MIN_WIDTH), availableWidth);
-          const height = Math.min(Math.max(preferences.windowHeight, WINDOW_MIN_HEIGHT), availableHeight);
-          await currentWindow.setSize(new LogicalSize(width, height));
+      if (frameId !== null) return;
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null;
+        if (!sidebarDragging.current) {
+          setSidebarWidth(clampSidebarWidth(window.innerWidth * sidebarRatioRef.current));
         }
-
-        unlisten = await currentWindow.onResized(() => {
-          void currentWindow.isMaximized().then((isMaximized) => {
-            if (!disposed && !isMaximized) persistWindowSize();
-          });
-        });
-
-        if (!maximized) persistWindowSize();
-      } catch {
-        // Browser preview and older Tauri runtimes can lack window APIs.
-        persistWindowSize();
-      }
+      });
     };
 
-    void setupWindowPersistence();
-    window.addEventListener('resize', persistWindowSize);
-
+    window.addEventListener('resize', resizeSidebarWithWindow);
     return () => {
-      disposed = true;
-      unlisten?.();
-      window.removeEventListener('resize', persistWindowSize);
+      window.removeEventListener('resize', resizeSidebarWithWindow);
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
     };
   }, []);
 
@@ -140,13 +95,13 @@ export function MainLayout({
       if (!sidebarDragging.current) return;
       const width = clampSidebarWidth(moveEvent.clientX);
       sidebarRatioRef.current = width / Math.max(window.innerWidth, 1);
-      updateLayoutPreferences({ sidebarRatio: sidebarRatioRef.current });
       setSidebarWidth(width);
     };
 
     const onUp = () => {
       sidebarDragging.current = false;
       setSidebarResizing(false);
+      updateLayoutPreferences({ sidebarRatio: sidebarRatioRef.current });
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       document.removeEventListener('mousemove', onMove);

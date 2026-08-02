@@ -16,6 +16,7 @@ use tauri::path::BaseDirectory;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager, Window, WindowEvent};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const NOTIFICATION_CLICKED_EVENT: &str = "agent-notification-clicked";
@@ -341,6 +342,7 @@ fn handle_tray_menu_event<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event_id
 
 fn handle_global_window_event<R: tauri::Runtime>(window: &Window<R>, event: &WindowEvent) {
     if let WindowEvent::CloseRequested { api, .. } = event {
+        let _ = window.app_handle().save_window_state(StateFlags::all());
         if should_hide_to_tray(window.label()) {
             api.prevent_close();
             hide_window_to_tray(window);
@@ -389,6 +391,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .on_tray_icon_event(|app, event| {
             if let TrayIconEvent::DoubleClick { .. } = event {
                 show_main_window(app);

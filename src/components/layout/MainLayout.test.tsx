@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MainLayout } from './MainLayout';
 
@@ -19,6 +19,13 @@ vi.mock('../workspace/SidePanel', () => ({
 }));
 
 describe('MainLayout', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.clearAllMocks();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 820 });
+  });
+
   afterEach(() => {
     titleBarProps.length = 0;
     cleanup();

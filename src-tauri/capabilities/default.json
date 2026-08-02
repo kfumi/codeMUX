@@ -20,6 +20,7 @@
     "notification:default",
     "shell:allow-open",
     "updater:default",
+    "window-state:default",
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-confirm",

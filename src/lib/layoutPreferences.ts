@@ -1,8 +1,6 @@
 export const LAYOUT_PREFERENCES_STORAGE_KEY = 'codemux-layout-preferences';
 
 export interface LayoutPreferences {
-  windowWidth?: number;
-  windowHeight?: number;
   sidebarRatio?: number;
   sidePanelRatio?: number;
 }
@@ -41,8 +39,6 @@ export function readLayoutPreferences(storage: Storage | null = getStorage()): L
 
     const value = parsed as Record<string, unknown>;
     return {
-      windowWidth: finitePositiveNumber(value.windowWidth),
-      windowHeight: finitePositiveNumber(value.windowHeight),
       sidebarRatio: finitePositiveNumber(value.sidebarRatio),
       sidePanelRatio: finitePositiveNumber(value.sidePanelRatio),
     };
@@ -66,4 +62,3 @@ export function updateLayoutPreferences(
     // Storage is optional and can be unavailable in private or restricted webviews.
   }
 }
-
