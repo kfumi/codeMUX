@@ -3,6 +3,7 @@ import type { TurnSourceEvent } from './turnEventNormalizer.js';
 export type ClaudeToolEventProjection = {
   toolEvents: TurnSourceEvent[];
   remainingEvent?: Record<string, unknown>;
+  planModeChange?: 'on';
 };
 
 export function projectClaudeToolEvents(event: Record<string, unknown>): ClaudeToolEventProjection {
@@ -29,6 +30,7 @@ function projectAssistantToolEvents(
 ): ClaudeToolEventProjection {
   const toolEvents: TurnSourceEvent[] = [];
   const remainingContent: unknown[] = [];
+  let planModeChange: 'on' | undefined;
 
   for (const block of content) {
     const value = asRecord(block);
@@ -43,11 +45,15 @@ function projectAssistantToolEvents(
       name: value.name,
       input: asRecord(value.input) ?? {},
     });
+    if (value.name === 'EnterPlanMode') {
+      planModeChange = 'on';
+    }
   }
 
   return {
     toolEvents,
     remainingEvent: buildRemainingEvent(event, message, remainingContent),
+    ...(planModeChange ? { planModeChange } : {}),
   };
 }
 

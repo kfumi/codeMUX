@@ -7,6 +7,7 @@ import { formatCommandDisplay, renderCommandPrompt } from '../../lib/slashComman
 import { mapExecutionModeToPermissionConfig, serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
 import type { ReasoningEffort } from '../../types/session';
 import type { AgentInputPayload } from '../../types/agentInput';
+import type { AgentPermissionResponse } from '../../types/agent';
 import { agentApi, sessionApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
 import { usePreviewStore } from '../../stores/previewStore';
@@ -283,6 +284,22 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     });
   }, [isReadOnly, sessionId, updateSessionPermissions]);
 
+  const handlePermissionResponse = useCallback(async (response: AgentPermissionResponse) => {
+    const request = useAgentStore.getState().pendingPermissions[sessionId];
+    const isExitPlanApproval = agentKind === 'claude_code' && request?.permission_type === 'ExitPlanMode';
+
+    // ExitPlanMode 是原生权限审批，批准后需要同步切换会话下拉到完全访问。
+    if (isExitPlanApproval && response !== 'reject') {
+      await updateSessionPermissions(
+        sessionId,
+        mapExecutionModeToPermissionConfig('claude_code', 'full_access'),
+        'off',
+      );
+    }
+
+    await respondToPermission(sessionId, response);
+  }, [agentKind, respondToPermission, sessionId, updateSessionPermissions]);
+
   // Migrate legacy Codex configs (e.g. workspace-write) to the current default.
   const handleLegacyConfigMigrate = useCallback((migratedConfig: AgentPermissionConfig) => {
     if (isReadOnly) return;
@@ -410,12 +427,12 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                       onPlanModeChange={handlePlanModeChange}
                       onModeChange={handleModeChange}
                       onLegacyConfigMigrate={handleLegacyConfigMigrate}
-                      pendingPermission={pendingPermission}
                       disabled={isReadOnly}
-                      onPermissionResponse={(response) => { void respondToPermission(sessionId, response); }}
                       compact={compact}
                     />
                   )}
+                  pendingPermission={pendingPermission}
+                  onPermissionResponse={handlePermissionResponse}
                   onStop={() => interrupt(sessionId)}
                   onActivatePlanMode={() => handleModeChange(mapExecutionModeToPermissionConfig(agentKind, 'plan'), 'on')}
                 />

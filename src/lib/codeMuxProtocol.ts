@@ -71,6 +71,8 @@ type CodeMuxQuestion = {
   options: Array<{ label: string; description?: string; value?: unknown }>;
   multiSelect?: boolean;
   allowOther?: boolean;
+  presentation?: 'plan-approval';
+  inputPlaceholder?: string;
 };
 
 type CodeMuxUserInputRequestedEvent = {
@@ -90,6 +92,12 @@ type CodeMuxPermissionRequestedEvent = {
   description?: string;
   metadata?: Record<string, unknown>;
   event_id?: string;
+};
+
+type CodeMuxPermissionModeChangedEvent = {
+  type: 'permission_mode_changed';
+  session_id?: string;
+  plan_mode?: 'on' | 'off';
 };
 
 type CodeMuxTurnEvent = {
@@ -255,6 +263,13 @@ export function toLegacyAssistantMessage(event: CodeMuxAssistantMessageEvent): A
   };
 }
 
+export function isCodeMuxPermissionModeChangedEvent(value: unknown): value is CodeMuxPermissionModeChangedEvent {
+  return Boolean(value)
+    && typeof value === 'object'
+    && (value as { type?: unknown }).type === 'permission_mode_changed'
+    && ((value as { plan_mode?: unknown }).plan_mode === 'on' || (value as { plan_mode?: unknown }).plan_mode === 'off');
+}
+
 export function toLegacyUserMessage(event: CodeMuxUserMessageEvent): AgentMessage {
   const raw = {
     type: 'user',
@@ -348,6 +363,13 @@ export function toLegacyPermissionRequestedMessage(event: CodeMuxPermissionReque
     metadata: event.metadata,
   };
   return { kind: 'permission', data };
+}
+
+export function toLegacyPermissionModeChangedMessage(event: CodeMuxPermissionModeChangedEvent): AgentMessage {
+  return {
+    kind: 'permission_mode_changed',
+    data: { session_id: event.session_id, plan_mode: event.plan_mode ?? 'off' },
+  };
 }
 
 export function toLegacyTurnMessage(event: CodeMuxTurnEvent): AgentMessage {

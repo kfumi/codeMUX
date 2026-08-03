@@ -2159,6 +2159,71 @@ pub struct ModelInfo {
     pub owned_by: String,
 }
 
+const OPENCODE_FREE_MODELS_URL: &str = "https://opencode.ai/zen/v1/models";
+
+#[tauri::command]
+pub async fn fetch_opencode_free_models() -> Result<Vec<ModelInfo>, String> {
+    info!(target: "provider", "Fetching OpenCode free models from official catalog");
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|error| format!("HTTP 客户端创建失败: {}", error))?;
+    let response = client
+        .get(OPENCODE_FREE_MODELS_URL)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|error| {
+            if error.is_timeout() {
+                "请求 OpenCode 官方模型目录超时".to_string()
+            } else {
+                format!("请求 OpenCode 官方模型目录失败: {}", error)
+            }
+        })?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "OpenCode 官方模型目录返回 HTTP {}",
+            response.status()
+        ));
+    }
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|error| format!("解析 OpenCode 官方模型目录失败: {}", error))?;
+    let data = body
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "OpenCode 官方模型目录格式无效".to_string())?;
+
+    let mut models: Vec<ModelInfo> = data
+        .iter()
+        .filter_map(|model| {
+            let id = model.get("id").and_then(serde_json::Value::as_str)?;
+            let is_free = id.ends_with("-free") || id == "big-pickle";
+            if !is_free {
+                return None;
+            }
+            Some(ModelInfo {
+                id: id.to_string(),
+                owned_by: model
+                    .get("owned_by")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("opencode")
+                    .to_string(),
+            })
+        })
+        .collect();
+
+    models.sort_by(|left, right| left.id.cmp(&right.id));
+    if models.is_empty() {
+        return Err("OpenCode 官方模型目录中没有免费模型".to_string());
+    }
+    Ok(models)
+}
+
 /// Known compatibility suffixes to strip when building candidate URLs.
 const COMPAT_SUFFIXES: &[&str] = &["/anthropic", "/claudecode", "/coding", "/v1"];
 

@@ -472,6 +472,7 @@ pub fn run() {
             commands::provider::fetch_agent_profile_models,
             commands::provider::test_agent_provider_profile,
             commands::provider::fetch_provider_models,
+            commands::provider::fetch_opencode_free_models,
             commands::provider::test_provider,
             commands::app::get_log_directory,
             commands::app::get_app_data_directory,

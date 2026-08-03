@@ -57,7 +57,7 @@ function SessionStatusIcon({
   if (isRunning) {
     return (
       <span className="flex shrink-0 items-center justify-center h-4 w-4">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--accent))]" />
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--sidebar-glow))]" />
       </span>
     );
   }

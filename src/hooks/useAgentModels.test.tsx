@@ -5,13 +5,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AgentProviderProfile } from '../types/provider';
 
-const { readHomeFile } = vi.hoisted(() => ({ readHomeFile: vi.fn() }));
+const { readHomeFile, fetchOpenCodeFreeModels } = vi.hoisted(() => ({
+  readHomeFile: vi.fn(),
+  fetchOpenCodeFreeModels: vi.fn(),
+}));
 
 vi.mock('../lib/tauri', () => ({
   fileApi: { readHomeFile },
+  configApi: { fetchOpenCodeFreeModels },
 }));
 
-import { useAgentModels } from './useAgentModels';
+import { initializeOpenCodeFreeModels, useAgentModels } from './useAgentModels';
 
 function profile(
   agentKind: AgentProviderProfile['agent_kind'],
@@ -79,9 +83,12 @@ async function loadedModels(
 }
 
 describe('useAgentModels', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     readHomeFile.mockReset();
     readHomeFile.mockRejectedValue(new Error('missing file'));
+    fetchOpenCodeFreeModels.mockReset();
+    fetchOpenCodeFreeModels.mockResolvedValue([]);
+    await initializeOpenCodeFreeModels(true);
   });
 
   it('returns Claude built-ins in the default order without a profile', async () => {
@@ -179,6 +186,25 @@ describe('useAgentModels', () => {
     expect(result.current.models.filter((m) => m.id === '5.5')).toHaveLength(1);
   });
 
+  it('uses the official OpenCode free model catalog when it is available', async () => {
+    fetchOpenCodeFreeModels.mockResolvedValue([
+      { id: 'laguna-s-2.1-free', owned_by: 'opencode' },
+      { id: 'nemotron-3-ultra-free', owned_by: 'opencode' },
+    ]);
+    await initializeOpenCodeFreeModels(true);
+
+    const { result } = await loadedModels('opencode', null);
+
+    expect(result.current.models.map((model) => model.id)).toEqual([
+      'opencode/laguna-s-2.1-free',
+      'opencode/nemotron-3-ultra-free',
+    ]);
+    expect(result.current.models.map((model) => model.name)).toEqual([
+      'Laguna S 2.1 Free',
+      'Nemotron 3 Ultra Free',
+    ]);
+  });
+
   it('includes OpenCode free models, active provider config, and profile models only', async () => {
     readHomeFile.mockResolvedValueOnce(JSON.stringify({
       provider: {
@@ -201,6 +227,7 @@ describe('useAgentModels', () => {
   });
 
   it('falls back to free OpenCode models when the config file is missing', async () => {
+    fetchOpenCodeFreeModels.mockRejectedValue(new Error('official catalog unavailable'));
     const { result } = await loadedModels('opencode', null);
 
     expect(result.current.models.map((model) => model.id)).toEqual([

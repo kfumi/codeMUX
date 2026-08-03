@@ -8,7 +8,7 @@ export type TurnSourceEvent =
       providerMessageId?: string;
       supersedesProviderMessageIds?: string[];
     }
-  | { kind: 'user_input_requested'; toolUseId: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; allowOther?: boolean }> }
+  | { kind: 'user_input_requested'; toolUseId: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; allowOther?: boolean; presentation?: 'plan-approval'; inputPlaceholder?: string }> }
   | { kind: 'permission_requested'; requestId: string; permissionId?: string; permissionType: string; description: string; metadata?: Record<string, unknown> }
   | { kind: 'content_started'; index: number; contentKind: 'text' | 'reasoning' }
   | { kind: 'text_delta' | 'reasoning_delta'; index: number; text: string }

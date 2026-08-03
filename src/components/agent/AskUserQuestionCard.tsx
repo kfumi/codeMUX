@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Check, ChevronDown, ChevronRight } from 'lucide-react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { Check, ChevronDown, ChevronRight, Info } from 'lucide-react';
 import { agentApi } from '../../lib/tauri';
 import { createLogger, serializeError } from '../../lib/logger';
 import { useAgentStore } from '../../stores/agentStore';
@@ -16,6 +16,8 @@ export interface AskUserQuestion {
   options: Array<{ label: string; description?: string; value?: unknown }>;
   multiSelect?: boolean;
   allowOther?: boolean;
+  presentation?: 'plan-approval';
+  inputPlaceholder?: string;
 }
 
 interface AskUserQuestionCardProps {
@@ -106,6 +108,8 @@ export function AskUserQuestionCard({
   const [submittedAnswers, setSubmittedAnswers] = useState<string[]>(
     expired ? questions.map(() => '已超时') : parsedAnswers,
   );
+  const isComposer = variant === 'composer';
+  const optionRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   // Subscribe to forceStopped so interrupted sessions render as non-interactive cancelled cards.
   const forceStopped = useAgentStore((s) => s.forceStopped[sessionId] ?? false);
@@ -156,7 +160,59 @@ export function AskUserQuestionCard({
     }
   };
 
+  const focusOption = (qIdx: number, optionIndex: number) => {
+    const optionCount = questions[qIdx]?.options.length ?? 0;
+    if (optionCount === 0) return;
+    const nextIndex = (optionIndex + optionCount) % optionCount;
+    window.requestAnimationFrame(() => optionRefs.current[`${qIdx}:${nextIndex}`]?.focus());
+  };
+
+  const handleOptionKeyDown = (event: KeyboardEvent<HTMLButtonElement>, qIdx: number, oIdx: number) => {
+    const optionCount = questions[qIdx]?.options.length ?? 0;
+    if (optionCount === 0) return;
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      focusOption(qIdx, oIdx + 1);
+      return;
+    }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+      event.preventDefault();
+      focusOption(qIdx, oIdx - 1);
+      return;
+    }
+    if (event.key === 'Tab') {
+      const nextIndex = event.shiftKey ? oIdx - 1 : oIdx + 1;
+      if (nextIndex >= 0 && nextIndex < optionCount) {
+        event.preventDefault();
+        focusOption(qIdx, nextIndex);
+      }
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggleOption(qIdx, oIdx);
+    }
+  };
+
   const isOtherSelected = (qIdx: number) => selections[qIdx]?.has(OTHER_IDX);
+
+  const focusOtherInput = (qIdx: number) => {
+    if (submitted || expired) return;
+
+    setSelections((prev) => {
+      const next = { ...prev };
+      const question = questions[qIdx];
+      const selection = new Set(prev[qIdx]);
+      if (question.multiSelect) {
+        selection.add(OTHER_IDX);
+        next[qIdx] = selection;
+      } else {
+        next[qIdx] = new Set([OTHER_IDX]);
+      }
+      return next;
+    });
+  };
 
   const handleSubmit = async () => {
     if (expired || !allAnswered || submitting) return;
@@ -164,6 +220,9 @@ export function AskUserQuestionCard({
     setSubmitting(true);
 
     const answers = questions.map((q, i) => {
+      if ((isComposer || q.presentation === 'plan-approval') && selections[i]?.has(OTHER_IDX) && otherTexts[i]?.trim()) {
+        return otherTexts[i].trim();
+      }
       const selected = Array.from(selections[i]).map((idx) => {
         if (idx === OTHER_IDX) return otherTexts[i]?.trim() || '其他';
         return getSelectedOptionValue(q, idx);
@@ -173,6 +232,9 @@ export function AskUserQuestionCard({
     });
 
     const displayAnswers = questions.map((q, i) => {
+      if ((isComposer || q.presentation === 'plan-approval') && selections[i]?.has(OTHER_IDX) && otherTexts[i]?.trim()) {
+        return otherTexts[i].trim();
+      }
       const selected = Array.from(selections[i]).map((idx) => {
         if (idx === OTHER_IDX) return otherTexts[i]?.trim() || '其他';
         return getSelectedOptionLabel(q, idx);
@@ -222,13 +284,18 @@ export function AskUserQuestionCard({
     }
   };
 
-  const isComposer = variant === 'composer';
-
-  const renderQuestion = (q: AskUserQuestion, qIdx: number) => (
+  const renderQuestion = (q: AskUserQuestion, qIdx: number, showQuestion = true) => (
     <div>
-      <p className={cn('mb-2 text-sm', isComposer && 'px-1 text-[13px] font-semibold text-foreground')}>
-        {q.question}
-      </p>
+      {q.presentation === 'plan-approval' && q.header && showQuestion ? (
+        <p className="mb-2 inline-flex rounded-md border border-border/35 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+          {q.header}
+        </p>
+      ) : null}
+      {showQuestion ? (
+        <p className={cn('mb-2 text-sm', isComposer && 'px-1 text-[13px] font-semibold text-foreground')}>
+          {q.question}
+        </p>
+      ) : null}
       <div className={cn('space-y-1.5', isComposer && 'space-y-0 overflow-hidden rounded-lg border border-border/18 bg-[hsl(var(--surface-3))]/22')}>
         {q.options.map((opt, oIdx) => {
           const selected = selections[qIdx]?.has(oIdx);
@@ -236,7 +303,11 @@ export function AskUserQuestionCard({
           return (
             <button
               key={oIdx}
+              ref={(element) => { optionRefs.current[`${qIdx}:${oIdx}`] = element; }}
               onClick={() => toggleOption(qIdx, oIdx)}
+              onKeyDown={(event) => handleOptionKeyDown(event, qIdx, oIdx)}
+              autoFocus={isComposer && qIdx === 0 && oIdx === 0}
+              aria-pressed={selected}
               disabled={expired}
               className={cn(
                 'w-full cursor-pointer border px-3 py-2 text-left text-sm transition-colors',
@@ -244,35 +315,40 @@ export function AskUserQuestionCard({
                 isComposer ? 'rounded-none border-x-0 border-b-0 border-t border-border/12 first:border-t-0' : 'rounded-md',
                 selected
                   ? isComposer
-                    ? 'bg-muted/62 text-foreground'
-                    : 'border-primary/40 bg-primary/10 text-foreground'
+                    ? 'border-border/55 bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28] text-foreground'
+                    : 'border-border/55 bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28] text-foreground'
                   : isComposer
                     ? 'border-transparent text-muted-foreground hover:bg-muted/42 hover:text-foreground'
                     : 'border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/50',
+                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/35',
               )}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center gap-2">
                 <span
                   className={cn(
                     'flex shrink-0 items-center justify-center border text-[11px] font-semibold',
                     isComposer ? 'h-5 w-5 rounded-full' : q.multiSelect ? 'h-4 w-4 rounded-sm' : 'h-4 w-4 rounded-full',
                     selected
-                      ? isComposer ? 'border-foreground bg-foreground text-background' : 'border-primary bg-primary'
+                      ? 'border-foreground bg-foreground text-background'
                       : 'border-muted-foreground/30 text-muted-foreground',
                   )}
                 >
-                  {isComposer ? oIdx + 1 : selected && <Check className="h-3 w-3 text-primary-foreground" />}
+                  {isComposer ? oIdx + 1 : selected && <Check className="h-3 w-3 text-background" />}
                 </span>
-                <span className="font-medium">{opt.label}</span>
+                <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                  <span className="min-w-0 max-w-[58%] truncate whitespace-nowrap font-medium" title={opt.label}>{opt.label}</span>
+                  {opt.description ? (
+                    <span className="min-w-0 flex-1 truncate whitespace-nowrap text-xs text-muted-foreground" title={opt.description}>
+                      {opt.description}
+                    </span>
+                  ) : null}
+                </span>
               </div>
-              {opt.description && (
-                <p className="ml-6 mt-0.5 text-xs text-muted-foreground">{opt.description}</p>
-              )}
             </button>
           );
         })}
 
-        {q.allowOther !== false && (
+        {!isComposer && q.presentation !== 'plan-approval' && q.allowOther !== false && (
           <button
             onClick={() => toggleOption(qIdx, OTHER_IDX)}
             disabled={expired}
@@ -280,9 +356,12 @@ export function AskUserQuestionCard({
               'w-full cursor-pointer border px-3 py-2 text-left text-sm transition-colors',
               expired && 'cursor-not-allowed opacity-65',
               isComposer ? 'rounded-none border-x-0 border-b-0 border-t border-border/12' : 'rounded-md',
-              isOtherSelected(qIdx)
-                ? isComposer ? 'bg-muted/62 text-foreground' : 'border-primary/40 bg-primary/10 text-foreground'
+                isOtherSelected(qIdx)
+                  ? isComposer
+                  ? 'border-border/55 bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28] text-foreground'
+                  : 'border-border/55 bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28] text-foreground'
                 : isComposer ? 'border-transparent text-muted-foreground hover:bg-muted/42 hover:text-foreground' : 'border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/50',
+              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/35',
             )}
           >
             <div className="flex items-center gap-2">
@@ -290,26 +369,50 @@ export function AskUserQuestionCard({
                 className={`flex h-4 w-4 shrink-0 items-center justify-center border ${
                   q.multiSelect ? 'rounded-sm' : 'rounded-full'
                 } ${
-                  isOtherSelected(qIdx) ? 'border-primary bg-primary' : 'border-muted-foreground/30'
+                  isOtherSelected(qIdx) ? 'border-foreground bg-foreground' : 'border-muted-foreground/30'
                 }`}
               >
-                {isOtherSelected(qIdx) && <Check className="h-3 w-3 text-primary-foreground" />}
+                {isOtherSelected(qIdx) && <Check className="h-3 w-3 text-background" />}
               </span>
               <span className="font-medium">其他</span>
             </div>
           </button>
         )}
 
-        {isOtherSelected(qIdx) && (
+        {q.presentation === 'plan-approval' || (isComposer && q.allowOther !== false) ? (
+          <div className="border-t border-border/12 p-2">
+            <div
+              className={cn(
+                'rounded-md border p-0.5 transition-colors focus-within:border-foreground/30 focus-within:bg-muted/24',
+                isOtherSelected(qIdx)
+                  ? 'border-border/55 bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28]'
+                  : 'border-border/35 bg-background/45',
+              )}
+            >
+              <input
+                type="text"
+                value={otherTexts[qIdx] || ''}
+                onChange={(event) => setOtherTexts((prev) => ({ ...prev, [qIdx]: event.target.value }))}
+                onFocus={() => focusOtherInput(qIdx)}
+                placeholder={q.inputPlaceholder || '输入你的回答...'}
+                disabled={expired}
+                className="w-full rounded border-0 bg-transparent px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/55 focus:ring-0"
+              />
+            </div>
+          </div>
+        ) : !isComposer && isOtherSelected(qIdx) && (
           <div className="pl-3">
-            <input
-              type="text"
-              value={otherTexts[qIdx] || ''}
-              onChange={(e) => setOtherTexts((prev) => ({ ...prev, [qIdx]: e.target.value }))}
-              placeholder="请输入..."
-              autoFocus
-              className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-            />
+            <div className="rounded-md border border-border/45 bg-background/45 p-0.5 transition-colors focus-within:border-foreground/30 focus-within:bg-muted/24">
+              <input
+                type="text"
+                value={otherTexts[qIdx] || ''}
+                onChange={(e) => setOtherTexts((prev) => ({ ...prev, [qIdx]: e.target.value }))}
+                onFocus={() => focusOtherInput(qIdx)}
+                placeholder="请输入..."
+                autoFocus
+                className="w-full rounded border-0 bg-transparent px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/55 focus:ring-0"
+              />
+            </div>
           </div>
         )}
       </div>
@@ -329,7 +432,7 @@ export function AskUserQuestionCard({
         <div className="rounded-lg bg-[hsl(var(--surface-2))]/66 p-2">
           {hasMultipleQuestions ? (
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="mb-2 w-full justify-start overflow-x-auto">
+              <TabsList className="mb-2 w-full min-w-0 max-w-full flex-nowrap justify-start overflow-x-auto overflow-y-hidden overscroll-x-contain">
                 {questions.map((q, i) => (
                   <TabsTrigger key={i} value={String(i)} className="relative">
                     {q.header || `问题 ${i + 1}`}
@@ -341,21 +444,38 @@ export function AskUserQuestionCard({
               </TabsList>
               {questions.map((q, qIdx) => (
                 <TabsContent key={qIdx} value={String(qIdx)}>
-                  {renderQuestion(q, qIdx)}
+                  <div className="mb-2 flex items-center gap-2 px-1">
+                    {q.header ? <span className="shrink-0 rounded-md border border-border/35 px-2 py-0.5 text-xs font-medium text-muted-foreground">{q.header}</span> : null}
+                    <span className="min-w-0 text-[13px] font-semibold text-foreground">{q.question}</span>
+                  </div>
+                  {renderQuestion(q, qIdx, false)}
                 </TabsContent>
               ))}
             </Tabs>
           ) : (
-            questions.map((q, qIdx) => <div key={qIdx}>{renderQuestion(q, qIdx)}</div>)
+            questions.map((q, qIdx) => (
+              <div key={qIdx}>
+                <div className="mb-2 flex items-center gap-2 px-1">
+                  {q.header ? <span className="shrink-0 rounded-md border border-border/35 px-2 py-0.5 text-xs font-medium text-muted-foreground">{q.header}</span> : null}
+                  <span className="min-w-0 text-[13px] font-semibold text-foreground">{q.question}</span>
+                </div>
+                {renderQuestion(q, qIdx, false)}
+              </div>
+            ))
           )}
         </div>
-        <div className="flex items-center justify-end gap-2 px-1">
+        <div className="flex items-center justify-between gap-2 px-1">
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground/72">
+            <Info className="h-3.5 w-3.5" />
+            使用 Tab / 上下键选择，回车或空格选中
+          </span>
+          <div className="flex items-center gap-2">
           <button
             onClick={handleCancel}
             disabled={submitting || expired}
             className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground disabled:opacity-60"
           >
-            跳过
+            {questions[0]?.presentation === 'plan-approval' ? '忽略' : '跳过'}
           </button>
           <button
             onClick={handleSubmit}
@@ -369,6 +489,7 @@ export function AskUserQuestionCard({
           >
             {submitting ? '提交中...' : '提交'}
           </button>
+          </div>
         </div>
       </div>
     );

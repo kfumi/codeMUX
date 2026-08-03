@@ -341,6 +341,8 @@ export const configApi = {
     invokeLogged('delete_agent_provider_profile', { profileId }),
   fetchAgentProfileModels: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string): Promise<ProfileModel[]> =>
     invokeLogged('fetch_agent_profile_models', { agentKind, profileId }),
+  fetchOpenCodeFreeModels: (): Promise<Array<{ id: string; owned_by: string }>> =>
+    invokeLogged('fetch_opencode_free_models'),
   testAgentProfile: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string): Promise<string> =>
     invokeLogged('test_agent_provider_profile', { agentKind, profileId }),
 };

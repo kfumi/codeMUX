@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useMemo, useRef, useState, type FC, type PropsWithChildren } from 'react';
-import { ChevronDownIcon, LoaderIcon } from 'lucide-react';
+import { ChevronDownIcon, LoaderIcon, WrenchIcon } from 'lucide-react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { useScrollLock } from '@assistant-ui/react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -103,10 +103,10 @@ function ToolGroupTrigger({
     }
 
     if (parts.length === 1) {
-      return `已执行 ${parts[0]}`;
+      return `执行工具 ${parts[0]}`;
     }
     if (parts.length <= 3) {
-      return `已执行 ${parts.join('、')}`;
+      return `执行工具 ${parts.join('、')}`;
     }
     // Too many types, just show count
     return `工具调用 × ${count}`;
@@ -116,13 +116,18 @@ function ToolGroupTrigger({
     <CollapsibleTrigger
       data-slot="tool-group-trigger"
       className={cn(
-        'aui-tool-group-trigger group/trigger flex items-center gap-2 text-sm text-muted-foreground/74 transition-colors hover:text-foreground/88 pl-1',
+        'aui-tool-group-trigger group/trigger flex items-center gap-2 text-sm text-muted-foreground/74 transition-colors hover:text-foreground/88',
         'group-data-[variant=outline]/tool-group-root:w-full group-data-[variant=outline]/tool-group-root:px-4',
         'group-data-[variant=muted]/tool-group-root:w-full group-data-[variant=muted]/tool-group-root:px-4',
         className,
       )}
       {...props}
     >
+      <WrenchIcon
+        aria-hidden
+        data-slot="tool-group-trigger-icon"
+        className="size-4 shrink-0"
+      />
       {active && <LoaderIcon data-slot="tool-group-trigger-loader" className="size-4 shrink-0 animate-spin" />}
       <span
         data-slot="tool-group-trigger-label"

@@ -101,6 +101,8 @@ export type CodeMuxQuestion = {
   options: Array<{ label: string; description?: string; value?: unknown }>;
   multiSelect?: boolean;
   allowOther?: boolean;
+  presentation?: 'plan-approval';
+  inputPlaceholder?: string;
 };
 
 export type CodeMuxUserInputRequestedEvent = {
@@ -122,6 +124,12 @@ export type CodeMuxPermissionRequestedEvent = {
   metadata?: Record<string, unknown>;
   event_id: string;
   sequence: number;
+};
+
+export type CodeMuxPermissionModeChangedEvent = {
+  type: 'permission_mode_changed';
+  session_id?: string;
+  plan_mode: 'on' | 'off';
 };
 
 export type CodeMuxTurnEvent =
@@ -149,7 +157,7 @@ export type CodeMuxTurnEvent =
       sequence: number;
     };
 
-export type CodeMuxRuntimeEvent = CodeMuxStreamEvent | CodeMuxToolEvent | CodeMuxAssistantMessageEvent | CodeMuxUserMessageEvent | CodeMuxSystemEvent | CodeMuxDiagnosticEvent | CodeMuxUserInputRequestedEvent | CodeMuxPermissionRequestedEvent | CodeMuxTurnEvent;
+export type CodeMuxRuntimeEvent = CodeMuxStreamEvent | CodeMuxToolEvent | CodeMuxAssistantMessageEvent | CodeMuxUserMessageEvent | CodeMuxSystemEvent | CodeMuxDiagnosticEvent | CodeMuxUserInputRequestedEvent | CodeMuxPermissionRequestedEvent | CodeMuxPermissionModeChangedEvent | CodeMuxTurnEvent;
 
 export function toCodeMuxStreamEvent(
   sessionId: string | undefined,

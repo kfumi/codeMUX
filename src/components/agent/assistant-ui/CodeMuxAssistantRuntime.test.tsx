@@ -1046,7 +1046,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
   it('renders failed tool calls as errors instead of leaving them running', () => {
     const { container } = render(<Harness sessionId="session-tool" />);
 
-    expect(screen.getByText('运行命令')).toBeTruthy();
+    expect(screen.getByText(/执行工具 运行命令/)).toBeTruthy();
     expect(screen.queryByText(/Error: Command failed with exit code 1/)).toBeNull();
 
     const trigger = container.querySelector('[data-slot="tool-group-trigger"]');
@@ -1062,6 +1062,9 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('timestamp only assistant')).toBeTruthy();
     // No result event means no isFinalAssistantMessage, so footer (timestamp) should not render.
     expect(screen.queryByText('21:40')).toBeNull();
+
+    const row = screen.getByText('timestamp only assistant').closest('[data-message-row]');
+    expect(row?.className).toContain('mb-5');
   });
 
   it('keeps final message footer hidden until the full message row is hovered', () => {
@@ -1270,6 +1273,10 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     }));
 
     const { container } = render(<Harness sessionId="session-perf-large" />);
+
+    const firstToolGroupTrigger = container.querySelector('[data-slot="tool-group-trigger"]');
+    expect(firstToolGroupTrigger).toBeTruthy();
+    fireEvent.click(firstToolGroupTrigger!);
 
     const firstTrigger = container.querySelector('[data-slot="tool-fallback-trigger"]');
     expect(firstTrigger).toBeTruthy();
@@ -1620,26 +1627,20 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     const { container } = render(<Harness sessionId="session-stream-short" />);
 
-    // Thinking content IS rendered during streaming in a reasoning panel
-    expect(container.textContent).toContain(shortThinking);
-    // 消息和实时增量位于同一个线程滚动面板内。
+    // 流式思考仍显示在思考面板中，但默认保持折叠。
+    expect(container.textContent).not.toContain(shortThinking);
     expect(container.querySelector('[data-testid="thread-viewport"] [data-streaming-reasoning="true"]')).not.toBeNull();
-    // Collapsible reasoning block is rendered while thinking is in progress
     const trigger = container.querySelector('[data-slot="reasoning-trigger"]');
     expect(trigger).not.toBeNull();
-    // Reasoning content shows the thinking text
-    const thinkingContent = container.querySelector('[data-slot="reasoning-text"]');
-    expect(thinkingContent?.textContent).toContain(shortThinking);
-    // Trigger label shows 思考 (with possible duration/time suffix)
+    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
     expect(trigger?.textContent).toContain('思考');
-    // No tokens shown during streaming (only on completed)
     expect(container.textContent).not.toContain('tokens');
 
     cleanup();
     const longView = render(<Harness sessionId="session-stream-long" />);
-    // Long thinking content is also rendered in a reasoning panel
     expect(longView.container.querySelector('[data-slot="reasoning-trigger"]')).not.toBeNull();
     expect(longView.container.textContent).toContain('思考');
+    expect(longView.container.textContent).not.toContain(longThinking);
     expect(longView.container.textContent).not.toContain('tokens');
   });
 
@@ -1862,6 +1863,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
 
+    fireEvent.click(screen.getByRole('button', { name: /执行工具 运行命令/ }));
     expect(screen.getByText('运行命令')).toBeTruthy();
   });
 

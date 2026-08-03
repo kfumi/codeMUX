@@ -34,8 +34,6 @@ import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
 import { buildClaudePermissionOptions, type AgentPlanMode, type SidecarPermissionConfig } from './agentPermissions.js';
 import { getClaudeApprovalTitle } from './claudeApprovalPrompt.js';
 import {
-  applyPermissionElevation,
-  buildPermissionElevationResponse,
   buildClaudeModeBlockedEvent,
   resolveClaudeToolRuntimeDecision,
   setActivePermissionState,
@@ -124,6 +122,12 @@ const pendingToolResponses = new Map<string, {
   onExpired?: () => void;
   resolve: (value: PendingToolResponseResult) => void;
 }>();
+const pendingClaudePermissions = new Map<string, {
+  cwd: string;
+  toolName: string;
+  input: Record<string, unknown>;
+}>();
+const alwaysAllowedClaudePermissions = new Set<string>();
 const SIDECAR_DIST_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 function isSidecarEntrypoint(scriptPath: string | undefined): boolean {
@@ -733,6 +737,16 @@ export class SessionRuntime {
         }],
       },
       canUseTool: async (toolName: string, input: Record<string, unknown>, opts: { toolUseID: string }) => {
+        if (toolName === 'EnterPlanMode') {
+          setActivePermissionState({
+            sessionId: config.sessionId,
+            agentKind: 'claude_code',
+            permissionConfig: { kind: 'claude_code', permissionMode: 'plan' },
+            planMode: 'on',
+          });
+          return { behavior: 'allow', updatedInput: input, toolUseID: opts.toolUseID };
+        }
+
         if (toolName === 'AskUserQuestion') {
           const toolUseId = opts.toolUseID;
           let questions: any[] = [];
@@ -766,7 +780,60 @@ export class SessionRuntime {
         }
 
         const toolUseId = opts.toolUseID;
+        if (toolName === 'ExitPlanMode') {
+          pendingClaudePermissions.set(toolUseId, {
+            cwd: config.cwd,
+            toolName,
+            input,
+          });
+          this.emitTurnSource({
+            kind: 'permission_requested',
+            requestId: toolUseId,
+            permissionId: toolUseId,
+            permissionType: toolName,
+            description: '退出计划模式并开始实施。',
+            metadata: {
+              presentation: 'plan-approval',
+              title: '实施计划',
+              input,
+            },
+          });
+          const response = await waitForClaudeToolResponse(
+            toolUseId,
+            config.sessionId,
+            MESSAGE_TIMEOUT_MS,
+            () => this.emitClaudeInteractionTimeout(toolUseId),
+          );
+          if (response.kind === 'expired') {
+            return { behavior: 'deny', message: ASK_USER_QUESTION_TIMEOUT_MESSAGE, toolUseID: toolUseId };
+          }
+
+          const answer = typeof response.value === 'string'
+            ? response.value
+            : String((response.value as unknown[])[0] ?? '').trim();
+          pendingClaudePermissions.delete(toolUseId);
+          if (answer === 'once' || answer === '批准' || answer.toLowerCase() === 'approve') {
+            setActivePermissionState({
+              sessionId: config.sessionId,
+              agentKind: 'claude_code',
+              permissionConfig: { kind: 'claude_code', permissionMode: 'bypassPermissions' },
+              planMode: 'off',
+            });
+            emit({ type: 'permission_mode_changed', session_id: config.sessionId, plan_mode: 'off' });
+            return { behavior: 'allow', updatedInput: input, toolUseID: toolUseId };
+          }
+
+          return {
+            behavior: 'deny',
+            message: answer || '用户未批准退出计划模式。',
+            toolUseID: toolUseId,
+          };
+        }
+
         const filePath = typeof input.file_path === 'string' ? input.file_path : null;
+        if (isClaudePermissionAlwaysAllowed(config.cwd, toolName, input)) {
+          return { behavior: 'allow', updatedInput: input, toolUseID: toolUseId };
+        }
         const runtimeDecision = resolveClaudeToolRuntimeDecision(toolName, config.sessionId, filePath);
         if (runtimeDecision.behavior === 'allow') {
           return { behavior: 'allow', updatedInput: input, toolUseID: toolUseId };
@@ -786,23 +853,25 @@ export class SessionRuntime {
         }
 
         const title = getClaudeApprovalTitle(toolName, input, opts);
+        pendingClaudePermissions.set(toolUseId, {
+          cwd: config.cwd,
+          toolName,
+          input,
+        });
         this.emitTurnSource({
-          kind: 'user_input_requested',
-          toolUseId,
-          questions: [{
-            header: '审批',
-            question: title,
-            options: [
-              { label: '接受', description: '执行这一次操作。' },
-              {
-                label: '接受并允许编辑',
-                description: '放行本次操作，并将当前会话提升到允许编辑。',
-                value: buildPermissionElevationResponse('claude_code'),
-              },
-              { label: '拒绝', description: '阻止这一次操作。' },
-            ],
-            allowOther: false,
-          }],
+          kind: 'permission_requested',
+          requestId: toolUseId,
+          permissionId: toolUseId,
+          permissionType: toolName,
+          description: title,
+          metadata: {
+            title,
+            toolName,
+            input,
+            command: typeof input.command === 'string' ? input.command : undefined,
+            filePath: typeof input.file_path === 'string' ? input.file_path : undefined,
+            cwd: config.cwd,
+          },
         });
         const response = await waitForClaudeToolResponse(
           toolUseId,
@@ -817,13 +886,12 @@ export class SessionRuntime {
             toolUseID: toolUseId,
           };
         }
-        const userAnswers = response.value as unknown[];
-        const answerValue = userAnswers[0];
-        if (applyPermissionElevation(answerValue, { sessionId: config.sessionId, agentKind: 'claude_code' })) {
-          return { behavior: 'allow', updatedInput: input, toolUseID: toolUseId };
+        const answerValue = response.value;
+        if (answerValue === 'always') {
+          rememberClaudePermission(toolUseId);
         }
-        const answer = String(answerValue ?? '');
-        if (answer === '接受' || answer === '允许') {
+        pendingClaudePermissions.delete(toolUseId);
+        if (answerValue === 'once' || answerValue === 'always') {
           return { behavior: 'allow', updatedInput: input, toolUseID: toolUseId };
         }
         return {
@@ -976,6 +1044,18 @@ export class SessionRuntime {
           this.emitTurnOutcome(toClaudeTurnOutcome(eventToEmit as Record<string, unknown>));
         } else {
           const projection = projectClaudeToolEvents(eventToEmit as Record<string, unknown>);
+          if (projection.planModeChange === 'on') {
+            const sessionId = appSessionId ?? this.config?.sessionId;
+            if (sessionId) {
+              setActivePermissionState({
+                sessionId,
+                agentKind: 'claude_code',
+                permissionConfig: { kind: 'claude_code', permissionMode: 'plan' },
+                planMode: 'on',
+              });
+              emit({ type: 'permission_mode_changed', session_id: sessionId, plan_mode: 'on' });
+            }
+          }
           for (const sourceEvent of projection.toolEvents) {
             for (const normalizedEvent of this.turnEventNormalizer?.accept(sourceEvent) ?? []) {
               emit(normalizedEvent);
@@ -1159,6 +1239,22 @@ function toClaudeAssistantMessageEvent(event: Record<string, unknown>): TurnSour
     ...(providerMessageId ? { providerMessageId } : {}),
     ...(supersedesProviderMessageIds?.length ? { supersedesProviderMessageIds } : {}),
   };
+}
+
+function getClaudePermissionKey(cwd: string, toolName: string, input: Record<string, unknown>): string {
+  const command = typeof input.command === 'string' ? input.command : '';
+  const filePath = typeof input.file_path === 'string' ? input.file_path : '';
+  return `${cwd}:${toolName}:${command || filePath || JSON.stringify(input)}`;
+}
+
+function rememberClaudePermission(toolUseId: string): void {
+  const pending = pendingClaudePermissions.get(toolUseId);
+  if (!pending) return;
+  alwaysAllowedClaudePermissions.add(getClaudePermissionKey(pending.cwd, pending.toolName, pending.input));
+}
+
+function isClaudePermissionAlwaysAllowed(cwd: string, toolName: string, input: Record<string, unknown>): boolean {
+  return alwaysAllowedClaudePermissions.has(getClaudePermissionKey(cwd, toolName, input));
 }
 
 export function buildUserMessageEvent(
@@ -1405,7 +1501,14 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         return;
       }
       case 'respond_to_permission': {
-        const current = getRuntimeFlavor(activeAgentKind) === 'opencode' ? activeOpenCodeRuntime : undefined;
+        const flavor = getRuntimeFlavor(activeAgentKind);
+        if (flavor === 'claude') {
+          if (!resolveClaudeToolResponse(cmd.requestId, cmd.response)) {
+            emitError(`Claude permission request ${cmd.requestId} is no longer pending`);
+          }
+          return;
+        }
+        const current = flavor === 'opencode' ? activeOpenCodeRuntime : undefined;
         if (!current?.respondToPermission) {
           emitError('OpenCode runtime is not initialized');
           return;

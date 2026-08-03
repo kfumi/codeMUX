@@ -23,3 +23,14 @@ export function getClaudeApprovalTitle(
     : toolName;
   return `允许 Claude 使用 ${displayName} 吗？`;
 }
+
+export function buildExitPlanModeQuestion() {
+  return {
+    presentation: 'plan-approval' as const,
+    header: '需要权限',
+    question: '实施计划',
+    options: [{ label: '批准', description: '退出计划模式并开始实施。' }],
+    allowOther: true,
+    inputPlaceholder: '输入你的回答...',
+  };
+}

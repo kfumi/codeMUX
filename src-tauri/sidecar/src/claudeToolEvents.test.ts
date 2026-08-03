@@ -27,6 +27,20 @@ describe('projectClaudeToolEvents', () => {
     });
   });
 
+  it('marks EnterPlanMode as a plan-mode transition even when the SDK skips canUseTool', () => {
+    const projection = projectClaudeToolEvents({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'plan-1', name: 'EnterPlanMode', input: {} },
+        ],
+      },
+    });
+
+    expect(projection.planModeChange).toBe('on');
+  });
+
   it('projects tool results and preserves non-tool user content', () => {
     const projection = projectClaudeToolEvents({
       type: 'user',

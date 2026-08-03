@@ -159,6 +159,129 @@ describe('AskUserQuestionCard', () => {
     expect(screen.queryByText('其他')).toBeNull();
   });
 
+  it('supports keyboard selection with arrows, Tab, Enter, and Space', async () => {
+    sendToolResponse.mockResolvedValue(undefined);
+
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="keyboard-1"
+        questions={[{
+          question: '需要继续吗？',
+          options: [{ label: '继续' }, { label: '停止' }],
+        }]}
+      />,
+    );
+
+    const continueButton = screen.getByText('继续').closest('button');
+    const stopButton = screen.getByText('停止').closest('button');
+    expect(continueButton).toBeTruthy();
+    expect(stopButton).toBeTruthy();
+
+    fireEvent.keyDown(continueButton!, { key: 'ArrowDown' });
+    await waitFor(() => expect(document.activeElement).toBe(stopButton));
+    fireEvent.keyDown(stopButton!, { key: ' ' });
+    expect(stopButton?.getAttribute('aria-pressed')).toBe('true');
+    expect(stopButton?.classList.contains('bg-muted/92')).toBe(true);
+    fireEvent.keyDown(stopButton!, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() => expect(sendToolResponse).toHaveBeenCalledWith('session-1', 'keyboard-1', ['停止']));
+  });
+
+  it('renders the ExitPlanMode approval presentation with an always-visible input', () => {
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="exit-plan-1"
+        variant="composer"
+        questions={[{
+          presentation: 'plan-approval',
+          header: '需要权限',
+          question: '实施计划',
+          options: [{ label: '批准', description: '退出计划模式并开始实施。' }],
+          inputPlaceholder: '输入你的回答...',
+        }]}
+      />,
+    );
+
+    expect(screen.getByText('需要权限')).toBeTruthy();
+    expect(screen.getByText('实施计划')).toBeTruthy();
+    expect(screen.getByText('批准')).toBeTruthy();
+    expect(screen.getByText('退出计划模式并开始实施。')).toBeTruthy();
+    expect(screen.getByPlaceholderText('输入你的回答...')).toBeTruthy();
+    expect(screen.getByText('批准').closest('button')?.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByText('批准').closest('button')?.classList.contains('bg-muted/92')).toBe(false);
+    expect(screen.getByPlaceholderText('输入你的回答...').parentElement?.classList.contains('bg-muted/92')).toBe(false);
+    expect(screen.getByPlaceholderText('输入你的回答...').parentElement?.classList.contains('focus-within:bg-muted/24')).toBe(true);
+
+    fireEvent.focus(screen.getByPlaceholderText('输入你的回答...'));
+    expect(screen.getByText('批准').closest('button')?.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByPlaceholderText('输入你的回答...').parentElement?.classList.contains('bg-muted/92')).toBe(true);
+  });
+
+  it('does not mark composer questions as answered before the user chooses', () => {
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="multi-question-defaults-1"
+        variant="composer"
+        questions={[
+          { header: '音乐', question: '选择音乐', options: [{ label: '轻音乐', description: '安静治愈' }, { label: '摇滚', description: '节奏感强' }] },
+          { header: '键盘', question: '选择键盘', options: [{ label: '机械键盘' }] },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('轻音乐').closest('button')?.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByText('摇滚').closest('button')?.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('tablist').querySelectorAll('svg')).toHaveLength(0);
+  });
+
+  it('submits the plan approval input as the answer when it is focused', async () => {
+    sendToolResponse.mockResolvedValue(undefined);
+
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="exit-plan-input-1"
+        variant="composer"
+        questions={[{
+          presentation: 'plan-approval',
+          question: '实施计划',
+          options: [{ label: '批准' }],
+        }]}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('输入你的回答...');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '请先补充测试' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() => {
+      expect(sendToolResponse).toHaveBeenCalledWith('session-1', 'exit-plan-input-1', ['请先补充测试']);
+    });
+  });
+
+  it('keeps a multi-question tab row horizontally scrollable without vertical overflow', () => {
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="multi-question-1"
+        variant="composer"
+        questions={[
+          { header: '语言', question: '选择语言', options: [{ label: 'Python' }] },
+          { header: '系统', question: '选择系统', options: [{ label: 'Windows' }] },
+        ]}
+      />,
+    );
+
+    const tabList = screen.getByRole('tablist');
+    expect(tabList.classList.contains('overflow-x-auto')).toBe(true);
+    expect(tabList.classList.contains('overflow-y-hidden')).toBe(true);
+  });
+
   it('cancels with a readable submitted answer', async () => {
     sendToolResponse.mockResolvedValue(undefined);
 

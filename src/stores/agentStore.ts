@@ -31,6 +31,7 @@ import {
   isCodeMuxDiagnosticEvent,
   isCodeMuxUserInputRequestedEvent,
   isCodeMuxPermissionRequestedEvent,
+  isCodeMuxPermissionModeChangedEvent,
   isCodeMuxTurnEvent,
   toLegacyStreamingMessage,
   toLegacyToolMessage,
@@ -39,6 +40,7 @@ import {
   toLegacySystemMessage,
   toLegacyUserInputRequestedMessage,
   toLegacyPermissionRequestedMessage,
+  toLegacyPermissionModeChangedMessage,
   toLegacyTurnMessage,
 } from '../lib/codeMuxProtocol';
 import type {
@@ -47,6 +49,7 @@ import type {
   AgentSystemMessage,
   AgentResultMessage,
   AgentPermissionRequest,
+  AgentPermissionModeChanged,
   AgentPermissionResponse,
   AgentUserMessageLocator,
   SidecarReadyEvent,
@@ -76,9 +79,10 @@ export type AgentMessage =
   | { kind: 'resume_failed'; data: SessionResumeFailedEvent }
   | { kind: 'stream_status'; data: { message: string; is_reconnecting: boolean; mode_blocked?: ModeBlockedDiagnostic | null } }
   | { kind: 'api_retry'; data: { attempt: number; max_retries: number; retry_delay_ms: number; error_status: number; error: string } }
-  | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; allowOther?: boolean }> } }
+  | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; allowOther?: boolean; presentation?: 'plan-approval'; inputPlaceholder?: string }> } }
   | { kind: 'ask_user_question_timeout'; data: { tool_use_id: string; timeout_ms: number; message: string } }
   | { kind: 'permission'; data: AgentPermissionRequest }
+  | { kind: 'permission_mode_changed'; data: AgentPermissionModeChanged }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
   | { kind: 'session_summary'; data: SessionSummaryEvent }
   | { kind: 'mcp_status'; data: { servers: Record<string, string>; status?: string } }
@@ -714,6 +718,9 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'raw', data };
       case 'permission_requested':
         if (isCodeMuxPermissionRequestedEvent(data)) return toLegacyPermissionRequestedMessage(data);
+        return { kind: 'raw', data };
+      case 'permission_mode_changed':
+        if (isCodeMuxPermissionModeChangedEvent(data)) return toLegacyPermissionModeChangedMessage(data);
         return { kind: 'raw', data };
       case 'error':
       case 'turn_finished':
@@ -1352,6 +1359,20 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         }
 
         if (event.kind === 'raw' && event.data?.type === 'token_usage_update') {
+          return;
+        }
+
+        if (event.kind === 'permission_mode_changed') {
+          const planMode = (event as Extract<AgentMessage, { kind: 'permission_mode_changed' }>).data.plan_mode;
+          // 先更新本地会话投影，原生模式事件到达后下拉立即反映当前模式。
+          useSessionStore.setState((state) => ({
+            sessions: state.sessions.map((session) => session.id === sessionId
+              ? { ...session, plan_mode: planMode }
+              : session),
+          }));
+          void useSessionStore.getState().updateSessionPermissions(sessionId, undefined, planMode).catch((error) => {
+            logger.warn('Failed to persist Claude plan mode change', { sessionId, planMode }, serializeError(error));
+          });
           return;
         }
 

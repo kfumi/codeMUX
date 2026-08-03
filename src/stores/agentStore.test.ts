@@ -48,6 +48,7 @@ vi.mock('../lib/tauri', () => ({
     delete: vi.fn(),
     updateTitle: vi.fn(),
     updateProvider: vi.fn(),
+    updatePermissions: vi.fn(() => Promise.resolve()),
     touch: vi.fn(() => Promise.resolve()),
     getMessages: vi.fn(),
   },
@@ -255,6 +256,35 @@ describe('agent store Codex history loading', () => {
       .startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX');
 
     expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+  });
+
+  it('updates the session selector when Claude enters plan mode', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'permission_mode_changed',
+        session_id: sessionId,
+        plan_mode: 'on',
+      }));
+      onEvent(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        uuid: 'result-plan-mode',
+        session_id: sessionId,
+        duration_ms: 5,
+        duration_api_ms: 4,
+        num_turns: 1,
+        result: '',
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const { useSessionStore } = await import('./sessionStore');
+    const session = await primeSession('claude_code');
+
+    await useAgentStore.getState().startQuery(session.id, 'Enter plan mode', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useSessionStore.getState().sessions[0]?.plan_mode).toBe('on');
   });
 
   it('refreshes Claude Code token usage from history after a successful result and ignores result usage', async () => {

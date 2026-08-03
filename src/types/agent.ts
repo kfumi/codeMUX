@@ -11,6 +11,11 @@ export interface AgentPermissionRequest {
   description: string;
   metadata?: Record<string, unknown>;
 }
+
+export interface AgentPermissionModeChanged {
+  session_id?: string;
+  plan_mode: 'on' | 'off';
+}
 export interface AgentEvent {
   type: string;
   subtype?: string;

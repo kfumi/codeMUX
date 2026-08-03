@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getClaudeApprovalTitle } from './claudeApprovalPrompt.js';
+import { buildExitPlanModeQuestion, getClaudeApprovalTitle } from './claudeApprovalPrompt.js';
 
 describe('getClaudeApprovalTitle', () => {
   it('describes file edits with readable Chinese copy', () => {
@@ -13,5 +13,16 @@ describe('getClaudeApprovalTitle', () => {
 
   it('describes bash commands with readable Chinese copy', () => {
     expect(getClaudeApprovalTitle('Bash', { command: 'npm test' }, {})).toBe('允许 Claude 运行命令：npm test');
+  });
+
+  it('builds the dedicated ExitPlanMode approval question', () => {
+    expect(buildExitPlanModeQuestion()).toEqual({
+      presentation: 'plan-approval',
+      header: '需要权限',
+      question: '实施计划',
+      options: [{ label: '批准', description: '退出计划模式并开始实施。' }],
+      allowOther: true,
+      inputPlaceholder: '输入你的回答...',
+    });
   });
 });

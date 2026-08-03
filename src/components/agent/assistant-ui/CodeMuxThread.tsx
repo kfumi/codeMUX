@@ -1050,9 +1050,13 @@ function AssistantLikeMessage({
     && turn?.status === 'completed'
     && message.metadata.custom?.sourceRole !== 'system'
     && turn !== undefined;
+  const messageBottomSpacing = shouldRenderFooter ? 'mb-2' : 'mb-5';
 
   return (
-    <MessagePrimitive.Root data-message-row className="group/message-row mb-2 flex w-full justify-start">
+    <MessagePrimitive.Root
+      data-message-row
+      className={cn('group/message-row flex w-full justify-start', messageBottomSpacing)}
+    >
       <div
         className={cn(
           'w-full min-w-0 space-y-2 text-sm leading-relaxed',
@@ -1084,10 +1088,6 @@ function AssistantLikeMessage({
                   );
 
                 case 'group-tool-call':
-                  // 如果分组只有一个工具，直接展示工具，不用 ToolGroup
-                  if (part.indices.length === 1) {
-                    return <>{children}</>;
-                  }
                   // Get tool names from message content
                   const toolNames = part.indices
                     .map((idx) => message.content[idx])
@@ -1251,7 +1251,7 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
       <div className="w-full min-w-0 space-y-2 text-lg leading-relaxed">
         {isThinking ? (
           <div data-streaming-reasoning="true" className="w-full min-w-0">
-            <ReasoningRoot streaming={isRunning} variant="ghost" defaultOpen={isRunning}>
+            <ReasoningRoot streaming={isRunning} variant="ghost">
               <ReasoningTrigger active={isRunning} />
               <ReasoningContent aria-busy={isRunning}>
                 <ReasoningText>

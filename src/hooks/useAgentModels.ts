@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { fileApi } from '../lib/tauri';
+import { configApi, fileApi } from '../lib/tauri';
 import type { AgentKind } from '../types/session';
 import type { AgentProviderProfile, OpenCodeModel } from '../types/provider';
 
@@ -35,6 +35,54 @@ const OPENCODE_FREE_MODELS: ModelOption[] = [
   { id: 'opencode/mimo-v2.5-free', name: 'Mimo V2.5 Free', efforts: true },
   { id: 'opencode/big-pickle', name: 'Big Pickle Free', efforts: true },
 ];
+
+let cachedOpenCodeFreeModels: ModelOption[] | null = null;
+let openCodeFreeModelsRequest: Promise<void> | null = null;
+const openCodeFreeModelsListeners = new Set<() => void>();
+
+function formatOpenCodeFreeModelName(id: string): string {
+  return id
+    .split('-')
+    .map((part) => part ? part[0].toUpperCase() + part.slice(1) : part)
+    .join(' ');
+}
+
+function normalizeOpenCodeFreeModels(catalog: Array<{ id: string }>): ModelOption[] {
+  return catalog
+    .filter((model) => model.id.trim())
+    .map((model) => ({
+      id: `opencode/${model.id.trim()}`,
+      name: formatOpenCodeFreeModelName(model.id.trim()),
+      efforts: true,
+      source: 'catalog' as const,
+    }));
+}
+
+/** Load the stable OpenCode catalog once per application startup. */
+export function initializeOpenCodeFreeModels(forceRefresh = false): Promise<void> {
+  if (!forceRefresh && cachedOpenCodeFreeModels) return Promise.resolve();
+  if (openCodeFreeModelsRequest) return openCodeFreeModelsRequest;
+
+  openCodeFreeModelsRequest = configApi.fetchOpenCodeFreeModels()
+    .then((catalog) => {
+      const normalized = normalizeOpenCodeFreeModels(catalog);
+      cachedOpenCodeFreeModels = normalized.length > 0 ? normalized : [...OPENCODE_FREE_MODELS];
+    })
+    .catch(() => {
+      cachedOpenCodeFreeModels = [...OPENCODE_FREE_MODELS];
+    })
+    .finally(() => {
+      openCodeFreeModelsRequest = null;
+      openCodeFreeModelsListeners.forEach((listener) => listener());
+    });
+
+  return openCodeFreeModelsRequest;
+}
+
+function subscribeOpenCodeFreeModels(listener: () => void): () => void {
+  openCodeFreeModelsListeners.add(listener);
+  return () => openCodeFreeModelsListeners.delete(listener);
+}
 
 function dedupById(models: ModelOption[]): ModelOption[] {
   const seen = new Set<string>();
@@ -129,6 +177,8 @@ async function loadCodexModels(
 async function loadOpenCodeModels(
   activeProfile: AgentProviderProfile | null,
 ): Promise<ModelOption[]> {
+  const freeModels = cachedOpenCodeFreeModels ?? OPENCODE_FREE_MODELS;
+
   let fileModels: ModelOption[] = [];
   try {
     const raw = await fileApi.readHomeFile('.config/opencode/opencode.json');
@@ -151,7 +201,7 @@ async function loadOpenCodeModels(
     console.warn('Failed to load OpenCode config models');
   }
 
-  if (!activeProfile) return dedupById([...OPENCODE_FREE_MODELS, ...fileModels]);
+  if (!activeProfile) return dedupById([...freeModels, ...fileModels]);
 
   const profileModels: ModelOption[] = activeProfile.models
     .filter((m) => m.id.trim())
@@ -162,7 +212,7 @@ async function loadOpenCodeModels(
       source: 'profile' as const,
     }));
 
-  return dedupById([...profileModels, ...OPENCODE_FREE_MODELS, ...fileModels]);
+  return dedupById([...profileModels, ...freeModels, ...fileModels]);
 }
 
 export function useAgentModels(
@@ -172,7 +222,10 @@ export function useAgentModels(
 ): { models: ModelOption[]; isLoading: boolean } {
   const [models, setModels] = useState<ModelOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [openCodeCatalogVersion, setOpenCodeCatalogVersion] = useState(0);
   const activeProfileFingerprint = getActiveProfileFingerprint(activeProfile);
+
+  useEffect(() => subscribeOpenCodeFreeModels(() => setOpenCodeCatalogVersion((version) => version + 1)), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -204,7 +257,7 @@ export function useAgentModels(
     return () => {
       cancelled = true;
     };
-  }, [agentKind, activeProfileId, activeProfileFingerprint]);
+  }, [agentKind, activeProfileId, activeProfileFingerprint, openCodeCatalogVersion]);
 
   return { models, isLoading };
 }

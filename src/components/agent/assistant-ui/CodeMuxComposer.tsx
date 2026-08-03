@@ -45,6 +45,8 @@ import type { AgentKind } from '../../../types/session';
 import { ContextDisplay } from '../../assistant-ui/context-display';
 import { buildContextUsageViewModel } from '../contextUsage';
 import { AskUserQuestionCard, type AskUserQuestion } from '../AskUserQuestionCard';
+import { PermissionApprovalCard } from '../PermissionApprovalCard';
+import type { AgentPermissionRequest, AgentPermissionResponse } from '../../../types/agent';
 import { CodeMuxDirectiveChip, type CodeMuxDirectiveKind } from './CodeMuxDirectiveText';
 import {
   CodeMuxLexicalComposerInput,
@@ -61,6 +63,8 @@ interface CodeMuxComposerProps {
   placeholder?: string;
   modelSelector?: ReactNode;
   permissionSelector?: ReactNode;
+  pendingPermission?: AgentPermissionRequest | null;
+  onPermissionResponse?: (response: AgentPermissionResponse) => void | Promise<void>;
   disabled?: boolean;
   onStop?: () => void | Promise<void>;
   onActivatePlanMode?: () => void;
@@ -162,6 +166,8 @@ export function CodeMuxComposer({
   placeholder = '输入消息... (@ 引用文件, / 命令)',
   modelSelector,
   permissionSelector,
+  pendingPermission,
+  onPermissionResponse,
   disabled = false,
   onStop,
   onActivatePlanMode,
@@ -241,7 +247,7 @@ export function CodeMuxComposer({
       .map(toFileTriggerItem);
   }, [activeChar, activeQuery, allFileEntries]);
   const menuItems = activeChar === '/' ? slashItems : fileItems;
-  const menuVisible = activeChar !== null && !pendingQuestion && !pendingPlan;
+  const menuVisible = activeChar !== null && !pendingPermission && !pendingQuestion && !pendingPlan;
 
   useEffect(() => {
     setHighlightedIndex(0);
@@ -450,7 +456,14 @@ export function CodeMuxComposer({
                 {() => <ComposerAttachmentPreview />}
               </ComposerPrimitive.Attachments>
             </div>
-            {pendingQuestion ? (
+            {pendingPermission ? (
+              <PermissionApprovalCard
+                request={pendingPermission}
+                onResponse={async (response) => {
+                  await onPermissionResponse?.(response);
+                }}
+              />
+            ) : pendingQuestion ? (
               <AskUserQuestionCard
                 key={pendingQuestion.toolUseId}
                 sessionId={sessionId}
@@ -499,7 +512,7 @@ export function CodeMuxComposer({
               />
             )}
 
-            {!pendingQuestion && !pendingPlan && <div className="relative flex items-center justify-between pl-1">
+            {!pendingPermission && !pendingQuestion && !pendingPlan && <div className="relative flex items-center justify-between pl-1">
               <div className="flex items-center gap-2">
                 <Popover open={addMenuOpen} onOpenChange={setAddMenuOpen}>
                   <TooltipProvider delayDuration={300}>
@@ -651,8 +664,11 @@ function ProposedPlanApprovalCard({
           disabled={submitting}
           className={cn(
             'flex w-full items-center gap-2 border-b border-border/12 px-3 py-2 text-left text-sm transition-colors',
-            mode === 'approve' ? 'bg-muted/62 text-foreground' : 'text-muted-foreground hover:bg-muted/42 hover:text-foreground',
+            mode === 'approve'
+              ? 'bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28] text-foreground'
+              : 'text-muted-foreground hover:bg-muted/42 hover:text-foreground',
             submitting && 'cursor-wait opacity-70',
+            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/35',
           )}
         >
           <span className={cn(
@@ -673,8 +689,11 @@ function ProposedPlanApprovalCard({
           disabled={submitting}
           className={cn(
             'flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors',
-            mode === 'adjust' ? 'bg-muted/62 text-foreground' : 'text-muted-foreground hover:bg-muted/42 hover:text-foreground',
+            mode === 'adjust'
+              ? 'bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28] text-foreground'
+              : 'text-muted-foreground hover:bg-muted/42 hover:text-foreground',
             submitting && 'cursor-wait opacity-70',
+            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/35',
           )}
         >
           <span className={cn(
@@ -687,17 +706,19 @@ function ProposedPlanApprovalCard({
         </button>
         {mode === 'adjust' ? (
           <div className="border-t border-border/12 p-2">
-            <input
-              value={adjustment}
-              onChange={(event) => {
-                setAdjustment(event.target.value);
-                setError(null);
-              }}
-              placeholder="告诉 Codex 需要怎样调整计划..."
-              autoFocus
-              disabled={submitting}
-              className="w-full rounded-md border border-border/35 bg-background/80 px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/55 focus:border-primary/45"
-            />
+            <div className="rounded-md border border-border/35 bg-background/45 p-0.5 transition-colors focus-within:border-foreground/30 focus-within:bg-muted/18">
+              <input
+                value={adjustment}
+                onChange={(event) => {
+                  setAdjustment(event.target.value);
+                  setError(null);
+                }}
+                placeholder="告诉 Codex 需要怎样调整计划..."
+                autoFocus
+                disabled={submitting}
+                className="w-full rounded border-0 bg-transparent px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/55 focus:ring-0"
+              />
+            </div>
           </div>
         ) : null}
       </div>
@@ -709,7 +730,7 @@ function ProposedPlanApprovalCard({
           type="button"
           onClick={onDismiss}
           disabled={submitting}
-          className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground"
+          className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/46 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/35"
         >
           忽略
         </button>
@@ -722,6 +743,7 @@ function ProposedPlanApprovalCard({
             canSubmit
               ? 'bg-primary text-primary-foreground hover:bg-primary/92'
               : 'cursor-not-allowed bg-muted/40 text-muted-foreground',
+            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/35',
           )}
         >
           <span>{submitting ? '提交中...' : '提交'}</span>

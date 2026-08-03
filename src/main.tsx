@@ -5,11 +5,13 @@ import "@fontsource-variable/ibm-plex-sans";
 import "@fontsource-variable/noto-sans-sc";
 import "@fontsource-variable/jetbrains-mono";
 import App from "./App";
+import { initializeOpenCodeFreeModels } from "./hooks/useAgentModels";
 import { initLogging } from "./lib/logger";
 import "./styles/globals.css";
 import "./styles/hljs-theme.css";
 
 initLogging();
+void initializeOpenCodeFreeModels();
 
 // In production, block the native browser context menu (refresh, save-as, print, inspect, etc.)
 // Custom React onContextMenu handlers (SessionItem, PreviewPanel, TitleBar) still work —

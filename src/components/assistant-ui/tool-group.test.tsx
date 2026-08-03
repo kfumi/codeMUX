@@ -3,7 +3,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { ToolGroupContent, ToolGroupRoot, ToolGroupTrigger } from './tool-group';
+import { ToolGroup, ToolGroupContent, ToolGroupRoot, ToolGroupTrigger } from './tool-group';
 
 function renderTrigger(toolNames: string[]) {
   return render(
@@ -15,17 +15,32 @@ function renderTrigger(toolNames: string[]) {
 
 describe('ToolGroupTrigger', () => {
   it('uses Chinese names for grouped built-in agent tools', () => {
-    renderTrigger(['Read', 'Read', 'shell_command']);
+    const { container } = renderTrigger(['Read', 'Read', 'shell_command']);
+    const trigger = container.querySelector('[data-slot="tool-group-trigger"]');
 
-    expect(screen.getByText('已执行 读取 × 2、运行命令 × 1')).toBeTruthy();
+    expect(screen.getByText('执行工具 读取 × 2、运行命令 × 1')).toBeTruthy();
     expect(screen.queryByText(/Read/)).toBeNull();
     expect(screen.queryByText(/shell_command/)).toBeNull();
+    expect(trigger?.className).not.toContain('pl-1');
+    expect(container.querySelector('[data-slot="tool-group-trigger-icon"]')).toBeTruthy();
+  });
+
+  it('uses the tool group for a single tool', () => {
+    const { container } = render(
+      <ToolGroup startIndex={0} endIndex={0} toolNames={['Read']}>
+        <div>工具详情</div>
+      </ToolGroup>,
+    );
+
+    expect(screen.getByText('执行工具 读取 × 1')).toBeTruthy();
+    expect(container.querySelector('[data-slot="tool-group-root"]')).toBeTruthy();
+    expect(container.querySelector('[data-slot="tool-group-trigger-icon"]')).toBeTruthy();
   });
 
   it('summarizes MCP grouped tools by server name only', () => {
     renderTrigger(['mcp__context7__resolve-library-id', 'mcp__context7__query_docs']);
 
-    expect(screen.getByText('已执行 context7 × 2')).toBeTruthy();
+    expect(screen.getByText('执行工具 context7 × 2')).toBeTruthy();
     expect(screen.queryByText(/mcp__/)).toBeNull();
     expect(screen.queryByText(/query_docs/)).toBeNull();
     expect(screen.queryByText(/resolve-library-id/)).toBeNull();

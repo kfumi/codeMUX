@@ -112,4 +112,22 @@ describe('stream event transport batching', () => {
     expect(events[1]).toMatchObject({ type: 'diagnostic', event_id: expect.any(String), sequence: expect.any(Number) });
     expect(events[1].sequence).toBe(events[0].sequence + 1);
   });
+
+  it('envelopes permission mode changes as CodeMUX domain events', () => {
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      writes.push(String(chunk));
+      return true;
+    });
+
+    emit({ type: 'permission_mode_changed', session_id: 'session-1', plan_mode: 'on' });
+
+    expect(JSON.parse(writes[0])).toMatchObject({
+      type: 'permission_mode_changed',
+      session_id: 'session-1',
+      plan_mode: 'on',
+      event_id: expect.any(String),
+      sequence: expect.any(Number),
+    });
+  });
 });
