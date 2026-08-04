@@ -151,7 +151,7 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
               onKeyDown={handleKeyDown}
               onInput={handleInput}
               placeholder="输入任务描述... (/ 查看命令, Enter 发送, Shift+Enter 换行)"
-              className="min-h-12 max-h-50 w-full resize-none overflow-y-auto bg-transparent text-[14px] leading-[1.7] text-foreground focus:outline-none placeholder:text-muted-foreground/55"
+              className="min-h-12 max-h-50 w-full resize-none overflow-y-auto bg-transparent text-ui-body leading-[1.7] text-foreground focus:outline-none placeholder:text-muted-foreground/55"
               rows={2}
               disabled={isLoading}
             />
@@ -170,11 +170,10 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
                     }
                   }}
                   className={cn(
-                      'rounded-full px-2.5 py-1 text-[12px] font-medium transition-all duration-200',
+                      'rounded-full px-2.5 py-1 text-ui-meta font-medium transition-all duration-200',
                     'text-muted-foreground/46 hover:bg-muted/55 hover:text-muted-foreground',
                   )}
                   aria-label="斜杠命令"
-                  style={{ fontFamily: "'JetBrains Mono', monospace" }}
                 >
                   /
                 </button>
@@ -184,8 +183,7 @@ export function AgentInput({ onSend, onCommand, onStop, isLoading, modelName }: 
             <div className="flex items-center gap-1.5">
               {modelName && (
                 <span
-                  className="rounded-full border border-border/55 bg-muted/28 px-2.5 py-1 text-[11px] font-medium text-muted-foreground/48"
-                  style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                  className="rounded-full border border-border/55 bg-muted/28 px-2.5 py-1 text-ui-caption font-medium text-muted-foreground/48"
                 >
                   {modelName}
                 </span>

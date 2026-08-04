@@ -24,11 +24,11 @@ export function DiffBlock({ filePath, oldContent, newContent }: DiffBlockProps) 
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         <FileCode className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.5)] shrink-0" />
-        <span className="font-medium text-[13px]">{fileName}</span>
+        <span className="font-medium text-ui-compact">{fileName}</span>
         <span className="text-muted-foreground/40 text-xs truncate">{filePath}</span>
       </button>
       {isExpanded && (
-        <div className="border-t border-border/20 font-mono text-xs overflow-auto max-h-80">
+        <div className="border-t border-border/20 font-mono text-code overflow-auto max-h-80">
           {changes.map((change: Change, i: number) => {
             const lines = splitDiffLines(change.value);
             return lines.map((line, j) => {

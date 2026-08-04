@@ -75,4 +75,19 @@ describe('SettingsView', () => {
     expect(screen.getByText(/请安装 Node.js 18\+/)).toBeTruthy();
     expect(screen.getByRole('button', { name: /重新检测/ })).toBeTruthy();
   });
+
+  it('uses the same layered panel treatment as the main workspace', async () => {
+    const { SettingsView } = await import('./SettingsDialog');
+
+    render(<SettingsView onBack={vi.fn()} />);
+
+    const settingsMain = screen.getByRole('main', { name: '设置' });
+    const sidebar = settingsMain.querySelector('aside');
+    const content = settingsMain.querySelector('section');
+
+    expect(sidebar?.className).toContain('bg-[hsl(var(--surface-2)/0.88)]');
+    expect(sidebar?.className).toContain('backdrop-blur-xl');
+    expect(sidebar?.className).toContain('shadow-[inset_-1px_0_0_hsl(var(--foreground)/0.04)]');
+    expect(content?.className).toContain('bg-[hsl(var(--background))]');
+  });
 });

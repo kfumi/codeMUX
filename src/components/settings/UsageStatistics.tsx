@@ -28,7 +28,7 @@ function FormSection({ label, hint, rightContent, children }: FormSectionProps) 
     <section className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-baseline gap-2">
-          <h3 className="text-[13px] font-medium text-foreground/70">{label}</h3>
+          <h3 className="text-ui-compact font-medium text-foreground/70">{label}</h3>
           {hint && <span className="text-xs text-foreground/38">{hint}</span>}
         </div>
         {rightContent}

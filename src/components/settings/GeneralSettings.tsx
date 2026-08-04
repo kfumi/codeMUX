@@ -119,7 +119,7 @@ export function GeneralSettings() {
           </p>
           {configPath ? (
             <div className="flex items-center gap-2">
-              <code className="flex-1 truncate rounded-lg bg-muted/50 px-3 py-2 text-xs text-foreground/80 font-mono">
+              <code className="flex-1 truncate rounded-lg bg-muted/50 px-3 py-2 text-code text-foreground/80 font-mono">
                 {configPath}
               </code>
               <Button

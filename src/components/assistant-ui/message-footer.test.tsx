@@ -24,10 +24,11 @@ describe('MessageFooter', () => {
     expect(footer?.className).toContain('group-hover/message-row:opacity-100');
   });
 
-  it('renders interruption status without inventing statistics', () => {
-    render(<MessageFooter status="interrupted" />);
+  it('renders statistics without a turn status label', () => {
+    render(<MessageFooter timestamp={Date.parse('2026-06-12T21:40:00+08:00')} stats={{ inputTokens: 100, outputTokens: 20 }} />);
 
-    expect(screen.getByText('Interrupted')).toBeTruthy();
-    expect(screen.queryByText(/耗时/)).toBeNull();
+    expect(screen.getByText(/100\+20 token/)).toBeTruthy();
+    expect(screen.queryByText('Failed')).toBeNull();
+    expect(screen.queryByText('Interrupted')).toBeNull();
   });
 });

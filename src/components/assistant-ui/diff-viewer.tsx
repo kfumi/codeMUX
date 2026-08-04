@@ -26,7 +26,7 @@ interface SplitLinePair {
   right: ParsedLine | null;
 }
 
-const diffViewerVariants = cva('aui-diff-viewer overflow-hidden rounded-lg font-mono text-sm', {
+const diffViewerVariants = cva('aui-diff-viewer overflow-hidden rounded-lg font-mono text-code', {
   variants: {
     variant: {
       default: 'border bg-background',
@@ -34,8 +34,8 @@ const diffViewerVariants = cva('aui-diff-viewer overflow-hidden rounded-lg font-
       muted: 'border border-muted-foreground/20 bg-muted',
     },
     size: {
-      sm: 'text-xs',
-      default: 'text-sm',
+      sm: 'text-code',
+      default: 'text-code',
       lg: 'text-base',
     },
   },

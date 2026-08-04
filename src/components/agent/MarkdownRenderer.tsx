@@ -56,12 +56,11 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
               )}
               <button
                 onClick={() => handleCopy(codeText)}
-                className="absolute top-2 right-2 px-2 py-1 text-[11px] font-medium bg-muted/60 hover:bg-muted text-muted-foreground/60 hover:text-muted-foreground rounded-md opacity-0 group-hover:opacity-100 transition-all duration-200 backdrop-blur-sm"
-                style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                className="absolute top-2 right-2 px-2 py-1 text-ui-caption font-medium bg-muted/60 hover:bg-muted text-muted-foreground/60 hover:text-muted-foreground rounded-md opacity-0 group-hover:opacity-100 transition-all duration-200 backdrop-blur-sm"
               >
                 复制
               </button>
-              <pre {...props} className="overflow-x-auto bg-muted/40 p-4 text-sm leading-relaxed rounded-none! border-0! m-0!">
+              <pre {...props} className="overflow-x-auto bg-muted/40 p-4 text-code leading-relaxed rounded-none! border-0! m-0!">
                 {children}
               </pre>
             </div>
@@ -71,7 +70,7 @@ export function MarkdownRenderer({ content, onFileClick: _onFileClick }: Markdow
           const isInline = !className;
           if (isInline) {
             return (
-              <code className="bg-muted/50 px-1.5 py-0.5 rounded-md text-[13px] font-mono border border-border/20" {...props}>
+              <code className="bg-muted/50 px-1.5 py-0.5 rounded-md text-code font-mono border border-border/20" {...props}>
                 {children}
               </code>
             );

@@ -219,7 +219,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
           <div className="w-full max-w-2xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[360ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
             <div className="mb-10 flex flex-col items-center gap-4">
               <AgentSelector value={selectedAgentKind} onChange={setSelectedAgentKind} variant="hero" />
-              <h1 className="text-center text-[26px] font-semibold leading-tight text-foreground sm:text-[30px]">
+              <h1 className="text-center text-ui-heading-md font-semibold leading-tight text-foreground sm:text-ui-heading-lg">
                 {title}
               </h1>
             </div>

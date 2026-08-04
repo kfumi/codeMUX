@@ -178,8 +178,7 @@ export function UsageBarChart({ data }: UsageBarChartProps) {
                       y={y}
                       textAnchor="end"
                       dominantBaseline="middle"
-                      fontSize={10}
-                      className="fill-muted-foreground"
+                      className="fill-muted-foreground text-ui-micro"
                     >
                       {formatAbbrev(v)}
                     </text>
@@ -279,8 +278,7 @@ export function UsageBarChart({ data }: UsageBarChartProps) {
                     y={labelY}
                     textAnchor="middle"
                     dominantBaseline="middle"
-                    fontSize={10}
-                    className="fill-muted-foreground"
+                    className="fill-muted-foreground text-ui-micro"
                     transform={rotateLabels ? `rotate(-30 ${cx} ${labelY})` : undefined}
                   >
                     {d.date.slice(5)}

@@ -4,8 +4,6 @@ import {
   Minus,
   Monitor,
   Moon,
-  PanelRightClose,
-  PanelRightOpen,
   Sun,
   X,
 } from 'lucide-react';
@@ -17,6 +15,7 @@ import type { Theme } from '../../types/provider';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { ProjectOpenTargetButton } from './ProjectOpenTargetButton';
+import { RoundedPanelIcon } from './RoundedPanelIcon';
 
 type AppWindowLike = {
   isMaximized(): Promise<boolean>;
@@ -164,17 +163,14 @@ export function TitleBar({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                type="button"
+                aria-label={sidePanelOpen ? '收起右侧面板' : '展开右侧面板'}
                 onClick={sidePanelOpen ? closeSidePanel : openSidePanel}
                 className={cn(
-                  'flex h-7 w-8 shrink-0 items-center justify-center rounded-md transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-35',
-                  'text-foreground/45 hover:bg-muted/45 hover:text-foreground',
+                  'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground/52 transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:opacity-35',
                 )}
               >
-                {sidePanelOpen ? (
-                  <PanelRightClose className="h-3.5 w-3.5" />
-                ) : (
-                  <PanelRightOpen className="h-3.5 w-3.5" />
-                )}
+                <RoundedPanelIcon side="right" expanded={sidePanelOpen} className="h-4 w-4" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
@@ -207,7 +203,7 @@ export function TitleBar({
                   void setTheme(value);
                 }}
               >
-                <div className="flex w-full items-center gap-2 rounded-sm px-0.5 py-0.5 text-[12px] -mx-0.5 -my-0.5">
+                <div className="flex w-full items-center gap-2 rounded-sm px-0.5 py-0.5 text-ui-meta -mx-0.5 -my-0.5">
                   <Icon className="h-3.5 w-3.5" />
                   <span className={currentTheme === value ? 'font-medium text-foreground' : 'text-foreground/76'}>
                     {label}

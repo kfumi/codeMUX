@@ -67,7 +67,7 @@ function defaultServerSpec(type: TransportType): McpServerSpec {
 }
 
 const baseTheme = EditorView.theme({
-  '&': { fontSize: '13px', borderRadius: '8px', overflow: 'hidden' },
+  '&': { fontSize: 'var(--code-font-size)', borderRadius: '8px', overflow: 'hidden' },
   '.cm-content': { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", padding: '8px 0' },
   '.cm-gutters': { backgroundColor: 'transparent', border: 'none' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent' },
@@ -647,7 +647,7 @@ export function McpSettingsPanel() {
               <div className="space-y-2">
                 <label className="text-sm font-medium">配置预览</label>
                 <div className="rounded-lg border bg-muted p-3 overflow-x-auto">
-                  <pre className="text-xs font-mono text-muted-foreground whitespace-pre">
+                  <pre className="text-code font-mono text-muted-foreground whitespace-pre">
                     {JSON.stringify(
                       (() => {
                         if (wizType === 'stdio') {

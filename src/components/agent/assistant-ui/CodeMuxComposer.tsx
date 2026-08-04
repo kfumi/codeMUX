@@ -672,7 +672,7 @@ function ProposedPlanApprovalCard({
           )}
         >
           <span className={cn(
-            'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold',
+            'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-ui-caption font-semibold',
             mode === 'approve' ? 'border-foreground bg-foreground text-background' : 'border-muted-foreground/30 text-muted-foreground',
           )}>
             1
@@ -697,7 +697,7 @@ function ProposedPlanApprovalCard({
           )}
         >
           <span className={cn(
-            'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold',
+            'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-ui-caption font-semibold',
             mode === 'adjust' ? 'border-foreground bg-foreground text-background' : 'border-muted-foreground/30 text-muted-foreground',
           )}>
             2
@@ -1032,7 +1032,7 @@ function TriggerMenu({
         ) : char === '/' ? (
           slashGroups.map((group) => (
             <div key={group.category.id}>
-              <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-normal text-muted-foreground/60">
+              <div className="flex items-center gap-2 px-3 py-1.5 text-ui-micro font-semibold uppercase tracking-normal text-muted-foreground/60">
                 {getCategoryIcon(group.category.id)}
                 <span>{group.category.label}</span>
               </div>

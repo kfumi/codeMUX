@@ -151,7 +151,7 @@ export function PreviewPanel() {
                       <ContextMenuTrigger asChild>
                         <div
                           className={cn(
-                            'relative flex cursor-pointer select-none items-center gap-1.5 border-r border-border/20 px-3 py-2 text-xs font-mono whitespace-nowrap transition-all duration-200',
+                            'relative flex cursor-pointer select-none items-center gap-1.5 border-r border-border/20 px-3 py-2 text-code font-mono whitespace-nowrap transition-all duration-200',
                             isActive
                               ? 'bg-background/90 text-foreground/84'
                               : 'text-muted-foreground/52 hover:bg-muted/20 hover:text-muted-foreground',

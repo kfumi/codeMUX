@@ -5,6 +5,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
 
 import { terminalApi, type TerminalEvent } from '../../../lib/tauri';
+import { useAppearanceStore } from '../../../stores/appearanceStore';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
 import { useSettingsStore } from '../../../stores/settingsStore';
 
@@ -49,6 +50,7 @@ export function TerminalPanel({ tabId, projectPath }: { tabId: string; projectPa
   const terminalIdRef = useRef<string | null>(null);
   const setTerminalId = useSidePanelStore((state) => state.setTerminalId);
   const theme = useSettingsStore((state) => state.config?.theme);
+  const codeFontSize = useAppearanceStore((state) => state.prefs.codeFontSize);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -64,7 +66,7 @@ export function TerminalPanel({ tabId, projectPath }: { tabId: string; projectPa
     const terminal = new XTerm({
       cursorBlink: true,
       fontFamily: 'Consolas, "JetBrains Mono", monospace',
-      fontSize: 13,
+      fontSize: codeFontSize,
       lineHeight: 1.35,
       theme: terminalTheme(),
     });
@@ -122,7 +124,7 @@ export function TerminalPanel({ tabId, projectPath }: { tabId: string; projectPa
       fitRef.current = null;
       terminalIdRef.current = null;
     };
-  }, [projectPath, setTerminalId, tabId]);
+  }, [codeFontSize, projectPath, setTerminalId, tabId]);
 
   return (
     <div className="relative h-full bg-white dark:bg-[#111111]">

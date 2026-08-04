@@ -35,7 +35,7 @@ export function DiffView({ oldContent, newContent }: DiffViewProps) {
   }, [changes]);
 
   return (
-    <div className="font-mono text-xs">
+    <div className="font-mono text-code">
       {/* Stats header */}
       <div className="px-4 py-2 border-b border-border/30 text-xs text-muted-foreground/60 flex gap-3">
         <span className="text-[hsl(var(--success))]">+{stats.additions}</span>

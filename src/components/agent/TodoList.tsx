@@ -45,9 +45,7 @@ export function TodoList({ todos, className, dropdownSide = 'up', align = 'left'
         <button className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-border/45 bg-[hsl(var(--card))]/65 hover:bg-muted/40 transition-all duration-200 text-left">
           <ListTodo className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.5)] shrink-0" />
           <span className="text-xs font-medium text-foreground/70">任务</span>
-          <span className="text-xs text-muted-foreground/50 tabular-nums ml-auto"
-            style={{ fontFamily: "'JetBrains Mono', monospace" }}
-          >
+          <span className="text-ui-meta text-muted-foreground/50 tabular-nums ml-auto">
             {completed}/{total}
           </span>
         </button>

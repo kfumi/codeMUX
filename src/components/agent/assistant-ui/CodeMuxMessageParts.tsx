@@ -294,7 +294,7 @@ export function CodeMuxToolCallMessagePart({
           )
         )}
         {codeChangeStats && (
-          <span className="ml-2 inline-flex shrink-0 gap-1.5 font-mono text-[11px] tabular-nums">
+          <span className="ml-2 inline-flex shrink-0 gap-1.5 font-mono text-ui-caption tabular-nums">
             {(codeChangeStats.additions > 0 || codeChangeStats.deletions > 0) && (
               <>
                 <span className="text-green-600 dark:text-green-400">
@@ -308,7 +308,7 @@ export function CodeMuxToolCallMessagePart({
           </span>
         )}
         {durationMs != null && (
-          <span className="inline-flex rounded-md border border-border/16 bg-[hsl(var(--surface-3))]/20 px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground/56">
+          <span className="inline-flex rounded-md border border-border/16 bg-[hsl(var(--surface-3))]/20 px-1.5 py-0.5 text-ui-caption tabular-nums text-muted-foreground/56">
             {formatDuration(durationMs)}
           </span>
         )}
@@ -406,7 +406,7 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
     const tokenText = preTokens >= 1000 ? ` · 节省 ${(preTokens / 1000).toFixed(1)}k tokens` : preTokens > 0 ? ` · 节省 ${preTokens} tokens` : '';
     return (
       <div className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
-        <span className="text-[11px] text-muted-foreground/35 tracking-normal font-medium">
+        <span className="text-ui-caption text-muted-foreground/35 tracking-normal font-medium">
           — 上下文已压缩{tokenText} —
         </span>
       </div>

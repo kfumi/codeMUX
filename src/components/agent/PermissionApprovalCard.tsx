@@ -110,7 +110,7 @@ export function PermissionApprovalCard({ request, onResponse }: PermissionApprov
       </div>
 
       {command ? (
-        <pre className="max-h-36 overflow-auto rounded-xl border border-border/40 bg-background/72 px-3 py-2.5 font-mono text-xs leading-5 text-foreground/88 whitespace-pre-wrap break-words">
+        <pre className="max-h-36 overflow-auto rounded-xl border border-border/40 bg-background/72 px-3 py-2.5 font-mono text-code leading-5 text-foreground/88 whitespace-pre-wrap break-words">
           <code>$ {command}</code>
         </pre>
       ) : null}

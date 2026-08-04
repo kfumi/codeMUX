@@ -210,9 +210,6 @@ function appendEvent(
       if (!turn.pendingToolIds.delete(result.tool_use_id)) {
         addDiagnostic(turn, 'unmatched_tool_result', `No pending tool use for ${result.tool_use_id}.`, index);
       }
-      if (result.is_error === true) {
-        turn.failureReason = stringifyContent(result.content) || 'Tool execution failed.';
-      }
     }
     return;
   }
@@ -389,20 +386,6 @@ function readReason(data: Record<string, unknown>): string | undefined {
     }
   }
   return undefined;
-}
-
-function stringifyContent(content: unknown): string {
-  if (typeof content === 'string') {
-    return content.trim();
-  }
-  if (content == null) {
-    return '';
-  }
-  try {
-    return JSON.stringify(content);
-  } catch {
-    return String(content);
-  }
 }
 
 function finiteNumber(value: unknown): number | undefined {

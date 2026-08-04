@@ -23,11 +23,13 @@ import { useSkillStore } from './stores/skillStore';
 import { UpdaterProvider } from './features/update/UpdaterProvider';
 import { UpdateEntry } from './features/update/components/UpdateEntry';
 import type { TodoItem } from './types/agent';
+import type { SettingsTab } from './components/settings/SettingsDialog';
 
 const logger = createLogger('App');
 const AgentPanel = lazy(async () => ({ default: (await import('./components/agent/AgentPanel')).AgentPanel }));
 const NewSessionPanel = lazy(async () => ({ default: (await import('./components/agent/NewSessionPanel')).NewSessionPanel }));
-const SettingsView = lazy(async () => ({ default: (await import('./components/settings/SettingsDialog')).SettingsView }));
+const SettingsSidebar = lazy(async () => ({ default: (await import('./components/settings/SettingsDialog')).SettingsSidebar }));
+const SettingsContent = lazy(async () => ({ default: (await import('./components/settings/SettingsDialog')).SettingsContent }));
 const SessionHeader = lazy(async () => ({ default: (await import('./components/layout/SessionHeader')).SessionHeader }));
 const PerfOverlay = import.meta.env.DEV
   ? lazy(async () => ({ default: (await import('./components/dev/PerfOverlay')).PerfOverlay }))
@@ -55,6 +57,7 @@ function App() {
   const openDraft = useNewSessionStore((state) => state.openDraft);
   const closeDraft = useNewSessionStore((state) => state.closeDraft);
   const [activeView, setActiveView] = useState<'app' | 'settings'>('app');
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
   const [perfOverlayVisible, setPerfOverlayVisible] = useState(true);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -158,7 +161,15 @@ function App() {
           </Suspense>
         )}
         <MainLayout
-          sidebar={activeView === 'settings' ? undefined : (
+          sidebar={activeView === 'settings' ? (
+            <Suspense fallback={<div className="h-full" />}>
+              <SettingsSidebar
+                activeTab={settingsTab}
+                onTabChange={setSettingsTab}
+                onBack={() => setActiveView('app')}
+              />
+            </Suspense>
+          ) : (
             <Sidebar
               onNewSession={() => handleNewSession()}
               onNewSessionInProject={(projectId) => handleNewSession(projectId)}
@@ -183,7 +194,7 @@ function App() {
           <ErrorBoundary>
             {activeView === 'settings' ? (
               <Suspense fallback={panelFallback}>
-                <SettingsView onBack={() => setActiveView('app')} />
+                <SettingsContent activeTab={settingsTab} />
               </Suspense>
             ) : activeSessionId ? (
               <Suspense fallback={panelFallback}>
@@ -202,7 +213,7 @@ function App() {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <h2 className="text-[15px] font-semibold text-foreground/84">开始新对话</h2>
+                    <h2 className="text-ui-title font-semibold text-foreground/84">开始新对话</h2>
                     <p className="text-sm leading-relaxed text-foreground/70">
                       在左侧创建对话，或选择一个项目开始编码任务
                     </p>

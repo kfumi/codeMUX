@@ -85,7 +85,7 @@ export function SlashCommandMenu({ commands, selectedIndex, onSelect, visible }:
         <div className="py-1.5">
           {grouped.map((group) => (
             <div key={group.category}>
-              <div className="px-3 py-1.5 text-[10px] font-semibold text-muted-foreground/45 uppercase tracking-normal">
+              <div className="px-3 py-1.5 text-ui-micro font-semibold text-muted-foreground/45 uppercase tracking-normal">
                 {CATEGORY_LABELS[group.category] || group.category}
               </div>
               {group.items.map((cmd) => {
@@ -107,32 +107,32 @@ export function SlashCommandMenu({ commands, selectedIndex, onSelect, visible }:
                     </span>
                     <div className="flex-1 min-w-0 flex items-center gap-2">
                       <span
-                        className="text-[13px] font-medium shrink-0"
+                        className="text-ui-compact font-medium shrink-0"
                         style={{ fontFamily: "'JetBrains Mono', monospace" }}
                       >
                         /{cmd.name}
                       </span>
                       {cmd.argsHint && (
-                        <span className="text-[11px] text-muted-foreground/40 shrink-0">
+                        <span className="text-ui-caption text-muted-foreground/40 shrink-0">
                           {cmd.argsHint}
                         </span>
                       )}
-                      <span className="text-[12px] text-muted-foreground/60 truncate">
+                      <span className="text-ui-meta text-muted-foreground/60 truncate">
                         {cmd.description}
                       </span>
                     </div>
                     {cmd.category === 'builtin' && (
-                      <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-[hsl(var(--success)/0.1)] text-[hsl(var(--success))] font-medium">
+                      <span className="shrink-0 text-ui-micro px-1.5 py-0.5 rounded-md bg-[hsl(var(--success)/0.1)] text-[hsl(var(--success))] font-medium">
                         内置
                       </span>
                     )}
                     {cmd.category === 'custom' && (
-                      <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md border border-border/45 bg-muted/45 text-muted-foreground font-medium">
+                      <span className="shrink-0 text-ui-micro px-1.5 py-0.5 rounded-md border border-border/45 bg-muted/45 text-muted-foreground font-medium">
                         自定义
                       </span>
                     )}
                     {cmd.category === 'skill' && (
-                      <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-[hsl(var(--warning)/0.1)] text-[hsl(var(--warning))] font-medium">
+                      <span className="shrink-0 text-ui-micro px-1.5 py-0.5 rounded-md bg-[hsl(var(--warning)/0.1)] text-[hsl(var(--warning))] font-medium">
                         skill
                       </span>
                     )}

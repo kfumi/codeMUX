@@ -58,7 +58,6 @@ export function ContextDisplay({
           <span className="text-sm font-medium text-foreground">上下文</span>
           <span
             className="text-sm font-medium text-foreground"
-            style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             {percentageLabel}
           </span>
@@ -76,7 +75,6 @@ export function ContextDisplay({
           <span className="text-sm font-medium text-foreground">总计</span>
           <span
             className="text-sm font-medium text-foreground"
-            style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             {formatCompactTokens(usedTokens)} / {formatCompactTokens(totalTokens)}
           </span>
@@ -127,7 +125,6 @@ function StatRow({ label, value }: { label: string; value: number }) {
       <span className="text-muted-foreground/82">{label}</span>
       <span
         className={cn('font-medium text-foreground')}
-        style={{ fontFamily: "'JetBrains Mono', monospace" }}
       >
         {formatCompactTokens(value)}
       </span>

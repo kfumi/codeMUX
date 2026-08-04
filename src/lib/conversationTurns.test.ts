@@ -16,6 +16,7 @@ function user(content: string, uuid = `user-${content}`): AgentMessage {
 function assistant(
   content: Array<Record<string, unknown>>,
   stopReason?: string,
+  usage?: Record<string, number>,
 ): AgentMessage {
   return {
     kind: 'assistant',
@@ -27,6 +28,7 @@ function assistant(
         role: 'assistant',
         content,
         ...(stopReason ? { stop_reason: stopReason } : {}),
+        ...(usage ? { usage } : {}),
       },
       parent_tool_use_id: null,
     },
@@ -136,7 +138,7 @@ describe('buildConversationTurns', () => {
     expect(turn?.usage).toBeUndefined();
   });
 
-  it('gives failure precedence over a later successful result', () => {
+  it('does not let a tool error override a later successful result', () => {
     const [turn] = buildConversationTurns([
       user('run it'),
       assistant([{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: {} }]),
@@ -144,8 +146,37 @@ describe('buildConversationTurns', () => {
       result(false),
     ], { isRunning: false });
 
+    expect(turn?.status).toBe('completed');
+    expect(turn?.termination?.kind).toBe('completed');
+    expect(turn?.usage).toEqual({ inputTokens: 100, outputTokens: 20 });
+  });
+
+  it('completes after a tool error when the assistant ends the turn', () => {
+    const [turn] = buildConversationTurns([
+      user('run it'),
+      assistant([{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: {} }]),
+      toolResult('tool-1', true),
+      assistant([{ type: 'text', text: 'The tool failed, but I handled it.' }], 'end_turn', {
+        input_tokens: 99846,
+        output_tokens: 18368,
+      }),
+    ], { isRunning: false });
+
+    expect(turn).toMatchObject({
+      status: 'completed',
+      pendingToolIds: [],
+      usage: { inputTokens: 99846, outputTokens: 18368 },
+      footerAnchorEventIndex: 3,
+    });
+  });
+
+  it('keeps agent-level result errors as failed', () => {
+    const [turn] = buildConversationTurns([
+      user('run it'),
+      result(true),
+    ], { isRunning: false });
+
     expect(turn?.status).toBe('failed');
-    expect(turn?.termination?.reason).toBe('done');
   });
 
   it('starts a new turn at a real user message and interrupts the old one', () => {

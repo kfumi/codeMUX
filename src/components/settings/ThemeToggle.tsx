@@ -4,6 +4,8 @@ import { Check, Minus, Monitor, Moon, Plus, RotateCcw, Sun } from 'lucide-react'
 import {
   ACCENTS,
   type AccentKey,
+  CODE_FONT_SIZE_MAX,
+  CODE_FONT_SIZE_MIN,
   type ContentWidthKey,
   type RadiusKey,
   type UiFontKey,
@@ -230,6 +232,7 @@ export function ThemeToggle() {
   const setAccent = useAppearanceStore((state) => state.setAccent);
   const setUiFont = useAppearanceStore((state) => state.setUiFont);
   const setUiFontSize = useAppearanceStore((state) => state.setUiFontSize);
+  const setCodeFontSize = useAppearanceStore((state) => state.setCodeFontSize);
   const setRadius = useAppearanceStore((state) => state.setRadius);
   const setContentWidth = useAppearanceStore((state) => state.setContentWidth);
   const reset = useAppearanceStore((state) => state.reset);
@@ -298,6 +301,36 @@ export function ThemeToggle() {
             aria-label="增大界面字号"
             disabled={prefs.uiFontSize >= UI_FONT_SIZE_MAX}
             onClick={() => setUiFontSize(prefs.uiFontSize + 1)}
+            className="h-9 w-9 rounded-none rounded-r-md"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </FormSection>
+
+      <FormSection label="代码字体大小" hint="10–20px，按 1px 调整">
+        <div className="flex w-fit items-center rounded-md border border-border bg-background">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="减小代码字体大小"
+            disabled={prefs.codeFontSize <= CODE_FONT_SIZE_MIN}
+            onClick={() => setCodeFontSize(prefs.codeFontSize - 1)}
+            className="h-9 w-9 rounded-none rounded-l-md"
+          >
+            <Minus className="h-3.5 w-3.5" />
+          </Button>
+          <output className="w-16 text-center text-ui-body tabular-nums" aria-live="polite">
+            {prefs.codeFontSize}px
+          </output>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="增大代码字体大小"
+            disabled={prefs.codeFontSize >= CODE_FONT_SIZE_MAX}
+            onClick={() => setCodeFontSize(prefs.codeFontSize + 1)}
             className="h-9 w-9 rounded-none rounded-r-md"
           >
             <Plus className="h-3.5 w-3.5" />

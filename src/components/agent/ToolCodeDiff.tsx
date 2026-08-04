@@ -87,7 +87,7 @@ export function ToolCodeDiff({ toolName, input }: ToolCodeDiffProps) {
       <div className="px-3.5">
         <PatchDiffViewer
           files={diff.files}
-          className="max-h-90 overflow-auto rounded-md border border-border/45 bg-background/70 text-[11px]"
+          className="max-h-90 overflow-auto rounded-md border border-border/45 bg-background/70 text-code"
         />
       </div>
     );
@@ -104,7 +104,7 @@ export function ToolCodeDiff({ toolName, input }: ToolCodeDiffProps) {
         showIcon={false}
         showHunkHeaders={false}
         showNoNewlineMarker={false}
-        className="max-h-90 overflow-auto border-border/45 text-[11px] [--diff-add-bg:rgba(46,160,67,0.16)] [--diff-del-bg:rgba(248,81,73,0.16)]"
+        className="max-h-90 overflow-auto border-border/45 text-code [--diff-add-bg:rgba(46,160,67,0.16)] [--diff-del-bg:rgba(248,81,73,0.16)]"
       />
     </div>
   );
@@ -131,7 +131,7 @@ function PatchDiffViewer({ files, className }: { files: PatchFile[]; className?:
       data-slot="diff-viewer"
       data-view-mode="unified"
       className={cn(
-        'aui-diff-viewer overflow-auto rounded-lg border bg-background font-mono text-sm text-foreground [--diff-add-bg:rgba(46,160,67,0.16)] [--diff-del-bg:rgba(248,81,73,0.16)]',
+        'aui-diff-viewer overflow-auto rounded-lg border bg-background font-mono text-code text-foreground [--diff-add-bg:rgba(46,160,67,0.16)] [--diff-del-bg:rgba(248,81,73,0.16)]',
         className,
       )}
     >

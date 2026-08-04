@@ -292,7 +292,7 @@ export function AskUserQuestionCard({
         </p>
       ) : null}
       {showQuestion ? (
-        <p className={cn('mb-2 text-sm', isComposer && 'px-1 text-[13px] font-semibold text-foreground')}>
+        <p className={cn('mb-2 text-sm', isComposer && 'px-1 text-ui-compact font-semibold text-foreground')}>
           {q.question}
         </p>
       ) : null}
@@ -326,7 +326,7 @@ export function AskUserQuestionCard({
               <div className="flex min-w-0 items-center gap-2">
                 <span
                   className={cn(
-                    'flex shrink-0 items-center justify-center border text-[11px] font-semibold',
+                    'flex shrink-0 items-center justify-center border text-ui-caption font-semibold',
                     isComposer ? 'h-5 w-5 rounded-full' : q.multiSelect ? 'h-4 w-4 rounded-sm' : 'h-4 w-4 rounded-full',
                     selected
                       ? 'border-foreground bg-foreground text-background'
@@ -446,7 +446,7 @@ export function AskUserQuestionCard({
                 <TabsContent key={qIdx} value={String(qIdx)}>
                   <div className="mb-2 flex items-center gap-2 px-1">
                     {q.header ? <span className="shrink-0 rounded-md border border-border/35 px-2 py-0.5 text-xs font-medium text-muted-foreground">{q.header}</span> : null}
-                    <span className="min-w-0 text-[13px] font-semibold text-foreground">{q.question}</span>
+                    <span className="min-w-0 text-ui-compact font-semibold text-foreground">{q.question}</span>
                   </div>
                   {renderQuestion(q, qIdx, false)}
                 </TabsContent>
@@ -457,7 +457,7 @@ export function AskUserQuestionCard({
               <div key={qIdx}>
                 <div className="mb-2 flex items-center gap-2 px-1">
                   {q.header ? <span className="shrink-0 rounded-md border border-border/35 px-2 py-0.5 text-xs font-medium text-muted-foreground">{q.header}</span> : null}
-                  <span className="min-w-0 text-[13px] font-semibold text-foreground">{q.question}</span>
+                  <span className="min-w-0 text-ui-compact font-semibold text-foreground">{q.question}</span>
                 </div>
                 {renderQuestion(q, qIdx, false)}
               </div>

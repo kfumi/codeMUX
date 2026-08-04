@@ -391,7 +391,7 @@ function RuntimeSkeletonCard({
             <div className="h-3 w-32 rounded bg-muted/60" />
           </div>
         </div>
-        <span className="inline-flex items-center gap-1 rounded-full border border-border/40 bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1 rounded-full border border-border/40 bg-muted/40 px-2.5 py-1 text-ui-caption text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
           检测中
         </span>
@@ -474,7 +474,7 @@ export function RuntimeCard({
             <div className="flex items-center gap-2">
               <div className="text-sm font-semibold text-foreground">{runtime.label}</div>
               {isDefault && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-[hsl(var(--primary)/0.14)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-[hsl(var(--primary))]">
+                <span className="inline-flex items-center gap-1 rounded-full bg-[hsl(var(--primary)/0.14)] px-2 py-0.5 text-ui-micro font-medium uppercase tracking-[0.12em] text-[hsl(var(--primary))]">
                   <Check className="h-3 w-3" />
                   默认
                 </span>
@@ -493,7 +493,7 @@ export function RuntimeCard({
         </div>
         <span
           className={cn(
-            'inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium',
+            'inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-ui-caption font-medium',
             meta.className,
           )}
         >
@@ -534,7 +534,7 @@ export function RuntimeCard({
 
       {installationReport && installationReport.installs.length > 1 && (
         <div className="mt-3 border-t border-dashed border-border/55 pt-3">
-          <div className="mb-1.5 text-[11px] text-muted-foreground">
+          <div className="mb-1.5 text-ui-caption text-muted-foreground">
             检测到 {installationReport.installs.length} 处安装
             {installationReport.isConflict && (
               <span className="ml-1 text-amber-600 dark:text-amber-400">· 版本冲突</span>
@@ -609,7 +609,7 @@ interface RuntimeInfoRowProps {
 function RuntimeInfoRow({ label, value, mono, empty, indicator }: RuntimeInfoRowProps) {
   return (
     <div className="flex items-center justify-between gap-2">
-      <span className="shrink-0 text-[11px] text-foreground/45">{label}</span>
+      <span className="shrink-0 text-ui-caption text-foreground/45">{label}</span>
       <div className="flex min-w-0 items-center gap-1">
         {indicator === 'installed' && !empty && (
           <span
@@ -620,7 +620,7 @@ function RuntimeInfoRow({ label, value, mono, empty, indicator }: RuntimeInfoRow
         <TooltipHint content={value}>
           <span
             className={cn(
-              'truncate text-[12px]',
+              'truncate text-ui-meta',
               mono && 'font-mono',
               empty ? 'text-foreground/35' : 'text-foreground/80',
             )}
@@ -734,7 +734,7 @@ function ClaudePermissionSection({ executionMode, onChange }: ClaudePermissionSe
               </span>
               <span className="min-w-0 flex-1 space-y-0.5">
                 <span className="block text-sm font-medium text-foreground">{option.label}</span>
-                <span className="block text-[11px] leading-4 text-muted-foreground">{option.description}</span>
+                <span className="block text-ui-caption leading-4 text-muted-foreground">{option.description}</span>
               </span>
               {active && (
                 <Check className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--primary))]" />

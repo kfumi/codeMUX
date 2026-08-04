@@ -6,7 +6,7 @@ import type { UsageHeatmapDay } from '../../types/usage';
 
 export function UsageHeatmapLegend() {
   return (
-    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+    <div className="flex items-center gap-1.5 text-ui-micro text-muted-foreground">
       <span>少</span>
       {[0, 1, 2, 3, 4].map((level) => (
         <div
@@ -144,7 +144,7 @@ export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
               return (
                 <div
                   key={wi}
-                  className="w-[13px] overflow-visible whitespace-nowrap text-[10px] leading-4 text-muted-foreground"
+                  className="w-[13px] overflow-visible whitespace-nowrap text-ui-micro leading-4 text-muted-foreground"
                 >
                   {label?.label ?? ''}
                 </div>
@@ -155,10 +155,7 @@ export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
           <div className="flex gap-[3px]">
             <div className="flex w-8 flex-col gap-[2px]">
               {DAY_LABELS.map((label, i) => (
-                <div
-                  key={label}
-                  className="h-[13px] text-[10px] leading-[13px] text-muted-foreground"
-                >
+                <div key={label} className="h-[13px] text-ui-micro leading-[13px] text-muted-foreground">
                   {i % 2 === 1 ? label : ''}
                 </div>
               ))}

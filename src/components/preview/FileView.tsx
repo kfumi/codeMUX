@@ -92,7 +92,7 @@ export function FileView({ content, filePath }: FileViewProps) {
   const lines = useMemo(() => highlighted.split('\n'), [highlighted]);
 
   return (
-    <div className="overflow-x-auto font-mono text-xs leading-relaxed">
+    <div className="overflow-x-auto font-mono text-code leading-relaxed">
       {lines.map((line, index) => (
         <div key={index} className="whitespace-pre px-4 transition-colors hover:bg-muted/30">
           <span className="mr-4 inline-block w-8 select-none text-right tabular-nums text-muted-foreground/40">

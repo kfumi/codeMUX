@@ -65,7 +65,7 @@ export function ConfirmDialog({
             )}
             <div className="space-y-1.5">
               <DialogTitle className="text-base leading-tight">{title}</DialogTitle>
-              <DialogDescription className="text-[13px] leading-relaxed text-muted-foreground">
+              <DialogDescription className="text-ui-compact leading-relaxed text-muted-foreground">
                 {description}
               </DialogDescription>
             </div>
@@ -77,7 +77,7 @@ export function ConfirmDialog({
             size="sm"
             onClick={() => onOpenChange(false)}
             disabled={isLoading}
-            className="h-8 px-3.5 text-[13px]"
+            className="h-8 px-3.5 text-ui-compact"
           >
             {cancelLabel}
           </Button>
@@ -86,7 +86,7 @@ export function ConfirmDialog({
             size="sm"
             onClick={() => void handleConfirm()}
             disabled={isLoading}
-            className="h-8 gap-1.5 px-3.5 text-[13px]"
+            className="h-8 gap-1.5 px-3.5 text-ui-compact"
           >
             {isLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {isLoading ? '正在删除…' : confirmLabel}

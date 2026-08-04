@@ -93,7 +93,7 @@ export function UpdateEntry() {
             disabled={entry.disabled}
             onClick={handleClick}
             className={cn(
-              'h-7 gap-1.5 rounded-md px-2.5 text-[12px] shadow-none',
+              'h-7 gap-1.5 rounded-md px-2.5 text-ui-meta shadow-none',
               'border border-transparent',
               entry.tone === 'available' && 'bg-[hsl(var(--sidebar-accent)/0.16)] text-[hsl(var(--sidebar-accent))] hover:bg-[hsl(var(--sidebar-accent)/0.24)] hover:text-[hsl(var(--sidebar-accent))]',
               entry.tone === 'busy' && 'text-foreground/58',

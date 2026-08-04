@@ -18,11 +18,11 @@ export function TerminalBlock({ command, output, isRunning }: TerminalBlockProps
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         <Terminal className="h-3.5 w-3.5 text-[hsl(var(--success)/0.6)] shrink-0" />
-        <span className="truncate text-[13px] font-mono text-[hsl(var(--success)/0.8)]">{command}</span>
-        {isRunning && <span className="ml-auto text-[11px] text-[hsl(var(--warning))] animate-pulse-soft">运行中...</span>}
+        <span className="truncate text-code font-mono text-[hsl(var(--success)/0.8)]">{command}</span>
+        {isRunning && <span className="ml-auto text-ui-caption text-[hsl(var(--warning))] animate-pulse-soft">运行中...</span>}
       </button>
       {isExpanded && output && (
-        <div className="px-3 pb-3 text-foreground/60 whitespace-pre-wrap border-t border-border/20 pt-2.5 max-h-64 overflow-auto text-xs font-mono leading-relaxed animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+        <div className="px-3 pb-3 text-foreground/60 whitespace-pre-wrap border-t border-border/20 pt-2.5 max-h-64 overflow-auto text-code font-mono leading-relaxed animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
           {output}
         </div>
       )}

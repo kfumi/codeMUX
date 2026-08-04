@@ -57,4 +57,18 @@ describe('MainLayout', () => {
     expect(update?.textContent).toBe('更新');
     expect(toggle?.parentElement).toBe(update?.parentElement);
   });
+
+  it('renders the sidebar as a distinct translucent surface', () => {
+    render(
+      <MainLayout sidebar={<div>sidebar</div>}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    const sidebar = document.querySelector('aside');
+
+    expect(sidebar?.className).toContain('bg-[hsl(var(--surface-2)/0.88)]');
+    expect(sidebar?.className).toContain('backdrop-blur-xl');
+    expect(sidebar?.className).toContain('shadow-[inset_-1px_0_0_hsl(var(--foreground)/0.04)]');
+  });
 });

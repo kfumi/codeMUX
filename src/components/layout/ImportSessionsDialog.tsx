@@ -159,7 +159,7 @@ export function ImportSessionsDialog({ open, onOpenChange, onImported }: ImportS
 
         <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.35fr)_auto] items-end gap-3 border-b border-border/45 bg-muted/18 px-6 py-3">
           <label className="min-w-0 space-y-1.5">
-            <span className="block text-[11px] font-medium text-muted-foreground">历史来源</span>
+            <span className="block text-ui-caption font-medium text-muted-foreground">历史来源</span>
             <Select value={filter} onValueChange={handleFilterChange} disabled={loading || importing}>
               <SelectTrigger aria-label="筛选智能体" className="h-9 rounded-lg px-2.5 text-xs">
                 <SelectValue placeholder="选择来源" />
@@ -174,7 +174,7 @@ export function ImportSessionsDialog({ open, onOpenChange, onImported }: ImportS
           </label>
 
           <label className="min-w-0 space-y-1.5">
-            <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+            <span className="flex items-center gap-1.5 text-ui-caption font-medium text-muted-foreground">
               <FolderOpen className="h-3.5 w-3.5" />
               归属项目
             </span>
@@ -241,9 +241,9 @@ export function ImportSessionsDialog({ open, onOpenChange, onImported }: ImportS
 
           {!loading && !error && hasScanned && visibleCandidates.length > 0 && (
             <div className="space-y-2">
-              <div className="flex items-center justify-between px-1 text-[11px] text-muted-foreground">
+              <div className="flex items-center justify-between px-1 text-ui-caption text-muted-foreground">
                 <span>发现 {visibleCandidates.length} 个会话</span>
-                <Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[11px]" onClick={toggleAllVisible}>
+                <Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-ui-caption" onClick={toggleAllVisible}>
                   <Check className="mr-1 h-3 w-3" />
                   全选当前
                 </Button>
@@ -263,13 +263,13 @@ export function ImportSessionsDialog({ open, onOpenChange, onImported }: ImportS
                     <span className="min-w-0">
                       <span className="flex items-center gap-2 truncate text-sm font-medium text-foreground/90">
                         <span className="truncate">{candidate.title}</span>
-                        <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{agentLabels[candidate.agentKind]}</span>
-                        {candidate.alreadyImported && <span className="shrink-0 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-300">已导入</span>}
+                        <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-ui-micro font-medium text-muted-foreground">{agentLabels[candidate.agentKind]}</span>
+                        {candidate.alreadyImported && <span className="shrink-0 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-ui-micro text-emerald-700 dark:text-emerald-300">已导入</span>}
                       </span>
                       <span className="mt-1 block truncate text-xs text-muted-foreground">{candidate.cwd || candidate.sourceLocator}</span>
                       {candidate.warnings.length > 0 && <span className="mt-1 block text-xs text-amber-700 dark:text-amber-300">{candidate.warnings.join('；')}</span>}
                     </span>
-                    <span className="whitespace-nowrap text-right text-[11px] text-muted-foreground">
+                    <span className="whitespace-nowrap text-right text-ui-caption text-muted-foreground">
                       <span className="block">{candidate.eventCount} 条事件</span>
                       <span className="mt-1 block">{formatDate(candidate.updatedAt)}</span>
                     </span>

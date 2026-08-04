@@ -1136,7 +1136,6 @@ function AssistantLikeMessage({
           <MessageFooter
             timestamp={sourceTimestamp}
             stats={footerStats}
-            statusReason={turn?.termination?.reason}
             revealOnHover
             sessionId={sessionId}
             sourceUuid={message.metadata.custom?.sourceUuid as string | undefined}

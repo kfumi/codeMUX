@@ -8,7 +8,7 @@ export function StatusBar() {
   const port = proxyUrl?.match(/:(\d+)$/)?.[1];
 
   return (
-    <div className="flex h-6 shrink-0 items-center justify-between border-t border-border/62 bg-[hsl(var(--surface-1))]/92 px-3 text-[11px] text-muted-foreground/74 select-none">
+    <div className="flex h-6 shrink-0 items-center justify-between border-t border-border/62 bg-[hsl(var(--surface-1))]/92 px-3 text-ui-caption text-muted-foreground/74 select-none">
       {/* 左侧 */}
       <div className="flex items-center gap-3">
         <Tooltip>

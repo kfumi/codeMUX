@@ -63,7 +63,7 @@ export function AgentUpgradeConfirmDialog({
           <div className="space-y-1.5">
             <p className="text-xs text-muted-foreground">将执行的命令</p>
             {report.command ? (
-              <code className="block font-mono text-xs bg-muted/50 rounded px-2 py-1.5 break-all">
+              <code className="block font-mono text-code bg-muted/50 rounded px-2 py-1.5 break-all">
                 {report.command}
               </code>
             ) : (

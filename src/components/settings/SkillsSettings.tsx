@@ -184,7 +184,7 @@ export function SkillsSettingsPanel() {
               {skill.disk_path && (
                 <TooltipHint content={skill.disk_path}>
                   <p
-                    className="text-[10px] text-muted-foreground/60 truncate mt-0.5 font-mono"
+                    className="text-ui-micro text-muted-foreground/60 truncate mt-0.5 font-mono"
                   >
                     {skill.disk_path}
                   </p>
@@ -309,7 +309,7 @@ export function SkillsSettingsPanel() {
                             {skill.disk_path && (
                               <TooltipHint content={skill.disk_path}>
                                 <p
-                                  className="text-[10px] text-muted-foreground/60 truncate mt-0.5 font-mono"
+                                  className="text-ui-micro text-muted-foreground/60 truncate mt-0.5 font-mono"
                                 >
                                   {skill.disk_path}
                                 </p>

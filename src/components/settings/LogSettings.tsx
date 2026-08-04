@@ -117,7 +117,7 @@ export function LogSettings() {
       <div className="rounded-xl bg-muted/40">
         <div
           ref={contentRef}
-          className="h-[60vh] overflow-auto p-4 font-mono text-xs leading-relaxed"
+          className="h-[60vh] overflow-auto p-4 font-mono text-code leading-relaxed"
         >
           {logContent ? (
             logContent.split('\n').map((line, i) => (

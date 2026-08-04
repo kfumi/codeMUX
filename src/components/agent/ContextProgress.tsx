@@ -30,9 +30,7 @@ export function ContextProgress({ usedTokens, totalTokens }: ContextProgressProp
               transform="rotate(-90 9 9)"
             />
           </svg>
-          <span className="text-[11px] text-muted-foreground/50 tabular-nums leading-none"
-            style={{ fontFamily: "'JetBrains Mono', monospace" }}
-          >
+          <span className="text-ui-caption text-muted-foreground/50 tabular-nums leading-none">
             {pctDisplay}%
           </span>
         </div>

@@ -9,6 +9,7 @@ export interface AppearancePrefs {
   accent: AccentKey;
   uiFont: UiFontKey;
   uiFontSize: number;
+  codeFontSize: number;
   radius: RadiusKey;
   contentWidth: ContentWidthKey;
 }
@@ -71,6 +72,8 @@ export const UI_FONTS: Record<UiFontKey, UiFontPreset> = {
 
 export const UI_FONT_SIZE_MIN = 12;
 export const UI_FONT_SIZE_MAX = 18;
+export const CODE_FONT_SIZE_MIN = 10;
+export const CODE_FONT_SIZE_MAX = 20;
 
 export const RADII: Record<RadiusKey, string> = {
   sharp: '0.25rem',
@@ -87,6 +90,7 @@ export const DEFAULT_PREFS: AppearancePrefs = {
   accent: 'azure',
   uiFont: 'inter',
   uiFontSize: 14,
+  codeFontSize: 13,
   radius: 'soft',
   contentWidth: 'fixed',
 };
@@ -103,6 +107,7 @@ export function loadPrefs(): AppearancePrefs {
       accent: isValidAccent(parsed.accent) ? parsed.accent : DEFAULT_PREFS.accent,
       uiFont: isValidUiFont(parsed.uiFont) ? parsed.uiFont : DEFAULT_PREFS.uiFont,
       uiFontSize: resolveStoredUiFontSize(parsed.uiFontSize, parsed.fontSize),
+      codeFontSize: resolveStoredCodeFontSize(parsed.codeFontSize),
       radius: isValidRadius(parsed.radius) ? parsed.radius : DEFAULT_PREFS.radius,
       contentWidth: isValidContentWidth(parsed.contentWidth) ? parsed.contentWidth : DEFAULT_PREFS.contentWidth,
     };
@@ -141,6 +146,7 @@ export function applyAppearance(prefs: AppearancePrefs, isDark: boolean): void {
   root.style.setProperty('--content-width', CONTENT_WIDTHS[prefs.contentWidth]);
   root.style.setProperty('--font-ui', UI_FONTS[prefs.uiFont].family);
   root.style.setProperty('--ui-font-size', `${clampUiFontSize(prefs.uiFontSize)}px`);
+  root.style.setProperty('--code-font-size', `${clampCodeFontSize(prefs.codeFontSize)}px`);
 }
 
 function isValidAccent(v: unknown): v is AccentKey {
@@ -164,6 +170,11 @@ export function clampUiFontSize(value: number): number {
   return Math.min(UI_FONT_SIZE_MAX, Math.max(UI_FONT_SIZE_MIN, Math.round(value)));
 }
 
+export function clampCodeFontSize(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_PREFS.codeFontSize;
+  return Math.min(CODE_FONT_SIZE_MAX, Math.max(CODE_FONT_SIZE_MIN, Math.round(value)));
+}
+
 function resolveStoredUiFontSize(currentValue: unknown, legacyValue: unknown): number {
   if (typeof currentValue === 'number') return clampUiFontSize(currentValue);
 
@@ -172,4 +183,8 @@ function resolveStoredUiFontSize(currentValue: unknown, legacyValue: unknown): n
   if (legacyValue === 'comfortable') return 16;
 
   return DEFAULT_PREFS.uiFontSize;
+}
+
+function resolveStoredCodeFontSize(value: unknown): number {
+  return typeof value === 'number' ? clampCodeFontSize(value) : DEFAULT_PREFS.codeFontSize;
 }

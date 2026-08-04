@@ -162,8 +162,7 @@ export function ChatSearchDialog({ open, onOpenChange, onNavigateHome }: ChatSea
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="top-[18vh] w-[min(46rem,calc(100vw-2rem))] translate-y-0 gap-0 overflow-hidden rounded-2xl border border-[hsl(var(--surface-edge))]/90 bg-[hsl(var(--surface-3))] p-0 shadow-[0_18px_46px_-30px_hsl(var(--surface-shadow-strong)/0.82)] sm:rounded-2xl"
-        overlayClassName="bg-black/18 backdrop-blur-[0.5px] dark:bg-black/28"
+        className="top-[18vh] w-[min(46rem,calc(100vw-2rem))] translate-y-0 gap-0 overflow-hidden rounded-2xl border border-[hsl(var(--surface-edge))]/90 p-0 shadow-[0_18px_46px_-30px_hsl(var(--surface-shadow-strong)/0.82)] sm:rounded-2xl"
       >
         <DialogHeader className="sr-only">
           <DialogTitle>搜索聊天</DialogTitle>
@@ -177,12 +176,12 @@ export function ChatSearchDialog({ open, onOpenChange, onNavigateHome }: ChatSea
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="搜索聊天或运行命令"
-            className="chat-search-input h-8 min-w-0 flex-1 border-0 bg-transparent text-[15px] text-foreground shadow-none outline-none ring-0 placeholder:text-foreground/42 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+            className="chat-search-input h-8 min-w-0 flex-1 border-0 bg-transparent text-ui-title text-foreground shadow-none outline-none ring-0 placeholder:text-foreground/42 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
           />
         </div>
 
         <div className="max-h-[min(28rem,calc(100vh-10rem))] overflow-y-auto px-1.5 py-2">
-          <div className="px-2.5 pb-1.5 text-[12px] font-medium text-foreground/55">聊天</div>
+          <div className="px-2.5 pb-1.5 text-ui-meta font-medium text-foreground/55">聊天</div>
           {visibleItems.length > 0 ? (
             <div className="space-y-0.5">
               {visibleItems.map((item, index) => (
@@ -200,12 +199,12 @@ export function ChatSearchDialog({ open, onOpenChange, onNavigateHome }: ChatSea
                   )}
                 >
                   <div className="min-w-0">
-                    <div className="truncate text-[13px] font-semibold leading-5">{item.session.title || '新对话'}</div>
-                    <div className="truncate text-[12px] leading-5 text-foreground/48">
+                    <div className="truncate text-ui-compact font-semibold leading-5">{item.session.title || '新对话'}</div>
+                    <div className="truncate text-ui-meta leading-5 text-foreground/48">
                       {item.preview || '暂无消息预览'}
                     </div>
                   </div>
-                  <span className="max-w-26 truncate text-[12px] text-foreground/45">{item.projectName}</span>
+                  <span className="max-w-26 truncate text-ui-meta text-foreground/45">{item.projectName}</span>
                 </button>
               ))}
             </div>

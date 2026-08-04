@@ -91,7 +91,7 @@ function ToolCheckRow({ tool }: { tool: EnvironmentToolCheck }) {
           <div className="flex items-center gap-2">
             <Terminal className="h-4 w-4 text-foreground/45" />
             <h4 className="text-sm font-semibold text-foreground/90">{tool.name}</h4>
-            <code className="rounded-md bg-muted/50 px-1.5 py-0.5 text-[11px] text-foreground/60">{tool.command}</code>
+            <code className="rounded-md bg-muted/50 px-1.5 py-0.5 text-ui-caption text-foreground/60">{tool.command}</code>
           </div>
           <p className="mt-2 text-sm text-foreground/70">{tool.message}</p>
         </div>
@@ -112,8 +112,8 @@ function ToolCheckRow({ tool }: { tool: EnvironmentToolCheck }) {
 function InfoPill({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 rounded-lg bg-muted/35 px-3 py-2">
-      <div className="text-[11px] text-foreground/42">{label}</div>
-      <div className="mt-1 truncate font-mono text-[12px] text-foreground/75">{value}</div>
+      <div className="text-ui-caption text-foreground/42">{label}</div>
+      <div className="mt-1 truncate font-mono text-ui-meta text-foreground/75">{value}</div>
     </div>
   );
 }
