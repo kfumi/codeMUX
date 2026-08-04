@@ -55,6 +55,10 @@ export function convertAgentEventsToAssistantMessages(
   const toolCallLocationById = new Map<string, { messageIndex: number; partIndex: number }>();
   const askQuestionToolUseIds = new Set<string>();
   const pendingToolResultsById = new Map<string, { content: string; isError: boolean }>();
+  const pendingSessionSummaries: Array<{
+    event: Extract<AgentMessage, { kind: 'session_summary' }>;
+    sourceIndex: number;
+  }> = [];
   const usedMessageIds = new Set<string>();
 
   const ensureUniqueId = (id: string, index: number): string => {
@@ -63,26 +67,6 @@ export function convertAgentEventsToAssistantMessages(
     }
     usedMessageIds.add(id);
     return id;
-  };
-
-  const attachSessionSummaryToLastAssistant = (summaryEvent: AgentMessage, sourceIndex: number) => {
-    const lastAssistantIndex = messages.reduce<number | undefined>(
-      (acc, message, index) => (message.role === 'assistant' ? index : acc),
-      undefined,
-    );
-    if (lastAssistantIndex != null) {
-      const message = messages[lastAssistantIndex];
-      messages[lastAssistantIndex] = {
-        ...message,
-        content: [...message.content, createEventPart('session_summary', summaryEvent)],
-        metadata: {
-          ...message.metadata,
-          sourceEventIndices: [...message.metadata.sourceEventIndices, sourceIndex],
-        },
-      };
-      return true;
-    }
-    return false;
   };
 
   events.forEach((event, index) => {
@@ -292,21 +276,9 @@ export function convertAgentEventsToAssistantMessages(
 
     if (isVisibleEventKind(event.kind)) {
       if (event.kind === 'session_summary') {
-        // Attach the summary as a footer on the assistant message that
-        // immediately precedes it, rather than rendering standalone.
-        const attached = attachSessionSummaryToLastAssistant(event, index);
-        if (!attached) {
-          // Fallback: render as a standalone system message if no assistant exists.
-          messages.push(
-            createMessage(
-              ensureUniqueId(`session_summary-${index}`, index),
-              'system',
-              [createEventPart('session_summary', event)],
-              event,
-              index,
-            ),
-          );
-        }
+        // OpenCode 可能在最终助手文本前发布 diff，也可能在文件监听器稳定后再次发布。
+        // 在确定本轮最终助手消息前，不把它放进实时工具消息。
+        pendingSessionSummaries.push({ event, sourceIndex: index });
         return;
       }
 
@@ -328,9 +300,95 @@ export function convertAgentEventsToAssistantMessages(
     }
   });
 
+  attachSessionSummariesToFinalAssistants(messages, events, pendingSessionSummaries, conversationTurns);
   markFinalAssistantMessages(messages, events, conversationTurns);
 
   return messages;
+}
+
+type PendingSessionSummary = {
+  event: Extract<AgentMessage, { kind: 'session_summary' }>;
+  sourceIndex: number;
+};
+
+function attachSessionSummariesToFinalAssistants(
+  messages: CodeMuxAssistantMessage[],
+  events: AgentMessage[],
+  pendingSummaries: PendingSessionSummary[],
+  conversationTurns?: ReturnType<typeof buildConversationTurns>,
+): void {
+  if (pendingSummaries.length === 0) {
+    return;
+  }
+
+  const turns = conversationTurns ?? buildConversationTurns(events, { isRunning: true });
+  const summariesByTurnId = new Map<string, PendingSessionSummary[]>();
+
+  for (const summary of pendingSummaries) {
+    const turn = turns.find((candidate) => candidate.eventIndices.includes(summary.sourceIndex));
+    if (!turn) {
+      continue;
+    }
+
+    const turnSummaries = summariesByTurnId.get(turn.id) ?? [];
+    turnSummaries.push(summary);
+    summariesByTurnId.set(turn.id, turnSummaries);
+  }
+
+  for (const turn of turns) {
+    const turnSummaries = summariesByTurnId.get(turn.id);
+    const finalAssistantEventIndex = turn.footerAnchorEventIndex;
+    if (!turnSummaries || turn.status !== 'completed' || finalAssistantEventIndex == null) {
+      continue;
+    }
+
+    const messageIndex = messages.findIndex((message) => (
+      message.role === 'assistant'
+      && message.metadata.sourceEventIndices.includes(finalAssistantEventIndex)
+    ));
+    if (messageIndex < 0) {
+      continue;
+    }
+
+    const summary = coalesceSessionSummaries(turnSummaries);
+    const message = messages[messageIndex];
+    messages[messageIndex] = {
+      ...message,
+      content: [...message.content, createEventPart('session_summary', summary.event)],
+      metadata: {
+        ...message.metadata,
+        sourceEventIndices: [
+          ...message.metadata.sourceEventIndices,
+          ...summary.sourceIndices,
+        ],
+      },
+    };
+  }
+}
+
+function coalesceSessionSummaries(summaries: PendingSessionSummary[]): {
+  event: Extract<AgentMessage, { kind: 'session_summary' }>;
+  sourceIndices: number[];
+} {
+  const latestDiffByFile = new Map<string, Extract<AgentMessage, { kind: 'session_summary' }>['data']['diffs'][number]>();
+  const lastSummary = summaries[summaries.length - 1];
+
+  for (const summary of summaries) {
+    for (const diff of summary.event.data.diffs) {
+      latestDiffByFile.set(diff.file, diff);
+    }
+  }
+
+  return {
+    event: {
+      ...lastSummary.event,
+      data: {
+        ...lastSummary.event.data,
+        diffs: [...latestDiffByFile.values()],
+      },
+    },
+    sourceIndices: summaries.map((summary) => summary.sourceIndex),
+  };
 }
 
 function updatePreviousApiRetryMessage(

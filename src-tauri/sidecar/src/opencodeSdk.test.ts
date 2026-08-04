@@ -9,6 +9,7 @@ const sdkMocks = vi.hoisted(() => {
     session: {
       create: vi.fn().mockResolvedValue({ data: { id: 'opencode-session' } }),
       get: vi.fn().mockResolvedValue({ data: { id: 'opencode-session' } }),
+      delete: vi.fn().mockResolvedValue({ data: true }),
       prompt: vi.fn().mockResolvedValue({ data: { info: {}, parts: [] } }),
       abort: vi.fn().mockResolvedValue({ data: true }),
     },
@@ -28,6 +29,31 @@ vi.mock('@opencode-ai/sdk/server', () => ({
 }));
 
 describe('official OpenCode SDK adapter', () => {
+  it('deletes a session through the official session.delete endpoint', async () => {
+    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'opencode', model: 'default', credentialSource: 'opencode' });
+
+    await resources.client.deleteSession({ cwd: 'D:/workspace/demo', sessionId: 'opencode-session' });
+
+    expect(sdkMocks.client.session.delete).toHaveBeenCalledWith({
+      path: { id: 'opencode-session' },
+      query: { directory: 'D:/workspace/demo' },
+    });
+  });
+
+  it('treats a native 404 as an idempotent delete', async () => {
+    sdkMocks.client.session.delete.mockResolvedValueOnce({ data: undefined, error: { status: 404 }, response: { status: 404 } });
+    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'opencode', model: 'default', credentialSource: 'opencode' });
+
+    await expect(resources.client.deleteSession({ sessionId: 'already-deleted' })).resolves.toBeUndefined();
+  });
+
+  it('propagates non-404 deletion failures', async () => {
+    sdkMocks.client.session.delete.mockResolvedValueOnce({ data: undefined, error: { status: 500, message: 'database unavailable' }, response: { status: 500 } });
+    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'opencode', model: 'default', credentialSource: 'opencode' });
+
+    await expect(resources.client.deleteSession({ sessionId: 'session-with-error' })).rejects.toThrow('database unavailable');
+  });
+
   it('splits the default free model reference into provider and model id', () => {
     expect(normalizeOpenCodeModelReference('opencode/north-mini-code-free')).toEqual({
       provider: 'opencode',

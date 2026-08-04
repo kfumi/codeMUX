@@ -1729,6 +1729,54 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(viewport.scrollTop).toBe(1000);
   });
 
+  it('keeps a historical conversation at the bottom when a new message commits asynchronously', async () => {
+    const historySessionId = 'session-1';
+    const { container } = render(<Harness sessionId={historySessionId} />);
+    const viewport = container.querySelector('[data-testid="thread-viewport"]') as HTMLElement;
+    let scrollHeight = 1000;
+
+    Object.defineProperty(viewport, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 256 });
+    viewport.scrollTop = 0;
+
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      });
+    });
+
+    viewport.scrollTop = 0;
+    fireEvent.scroll(viewport);
+    scrollHeight = 1400;
+
+    act(() => {
+      useAgentStore.setState((state) => ({
+        events: {
+          ...state.events,
+          [historySessionId]: [
+            ...(state.events[historySessionId] ?? []),
+            { kind: 'user', data: { content: '发送到历史会话的新消息' } },
+          ],
+        },
+        eventTimestamps: {
+          ...state.eventTimestamps,
+          [historySessionId]: [...(state.eventTimestamps[historySessionId] ?? []), 3],
+        },
+      }));
+    });
+
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      });
+    });
+
+    expect(viewport.scrollTop).toBe(1400);
+  });
+
   it('shows the scroll-to-bottom button inside the sticky thread footer when scrolled up', async () => {
     const { container } = render(<Harness sessionId="session-scroll-button" />);
     const viewport = container.querySelector('[data-testid="thread-viewport"]') as HTMLElement;

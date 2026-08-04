@@ -1,4 +1,4 @@
-import { parseSdkUserMessage } from '@/stores/agentEventParsing';
+import { parseSdkUserMessage, type SessionSummaryEvent } from '@/stores/agentEventParsing';
 import type { AgentMessage } from '@/stores/agentStore';
 import type { AgentAssistantMessage, AgentPermissionRequest, AgentSystemMessage } from '@/types/agent';
 
@@ -52,6 +52,7 @@ type CodeMuxSystemEvent = {
   subtype?: string;
   content?: string;
   compact_metadata?: Record<string, unknown>;
+  diffs?: Array<Record<string, unknown>>;
   event_id?: string;
   [key: string]: unknown;
 };
@@ -296,9 +297,21 @@ export function toLegacySystemMessage(event: CodeMuxSystemEvent): AgentMessage {
     subtype: event.subtype ?? 'system',
     ...(event.content !== undefined ? { content: event.content } : {}),
     ...(event.compact_metadata ? { compact_metadata: event.compact_metadata } : {}),
+    ...(Array.isArray(event.diffs) ? { diffs: event.diffs } : {}),
     ...(event.session_id ? { session_id: event.session_id } : {}),
     ...(event.event_id ? { uuid: event.event_id } : {}),
   } as Record<string, unknown>;
+  if (event.subtype === 'session_summary' && Array.isArray(event.diffs) && event.diffs.length > 0) {
+    return {
+      kind: 'session_summary',
+      data: {
+        ...data,
+        type: 'system',
+        subtype: 'session_summary',
+        diffs: event.diffs,
+      } as unknown as SessionSummaryEvent,
+    };
+  }
   if (event.subtype === 'api_retry') {
     return {
       kind: 'api_retry',

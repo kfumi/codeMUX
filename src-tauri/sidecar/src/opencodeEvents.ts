@@ -299,6 +299,9 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
             overflow,
           },
         }, context, sessionId));
+      } else if (partType === 'patch') {
+        // This part only carries file names. The authoritative patch is
+        // emitted later in message.updated.info.summary.diffs when available.
       }
       break;
     }
@@ -356,8 +359,34 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       const info = asRecord(properties.info);
       const error = asRecord(info?.error);
       if (error) events.push(...buildFailureEvents(context, error, sessionId));
+      const summary = asRecord(info?.summary);
+      const diffs = normalizeOpenCodeDiffs(summary?.diffs);
+      if (diffs.length > 0) {
+        events.push(buildSessionSummaryEvent(context, sessionId, diffs));
+      }
       break;
     }
+    case 'session.updated': {
+      const info = asRecord(properties.info);
+      const summary = asRecord(info?.summary);
+      const diffs = normalizeOpenCodeDiffs(summary?.diffs);
+      if (diffs.length > 0) {
+        events.push(buildSessionSummaryEvent(context, sessionId, diffs));
+      }
+      break;
+    }
+    case 'session.diff': {
+      const diffs = normalizeOpenCodeDiffs(properties.diff);
+      if (diffs.length > 0) {
+        events.push(buildSessionSummaryEvent(context, sessionId, diffs));
+      }
+      break;
+    }
+    case 'file.edited':
+    case 'file.watcher.updated':
+      // These notifications contain no diff content. The tool input and
+      // session summary carry the artifact shown by the frontend.
+      break;
     case 'session.status': {
       const status = asRecord(properties.status);
       const statusType = readString(status?.type) ?? 'unknown';
@@ -520,6 +549,39 @@ function buildToolStartedEvent(
     input,
     event_id: context.eventIdFactory(),
   };
+}
+
+function buildSessionSummaryEvent(
+  context: OpenCodeEventContext,
+  sessionId: string | undefined,
+  diffs: Array<Record<string, unknown>>,
+): CodeMuxEvent {
+  return buildEnvelope({
+    type: 'system_event',
+    subtype: 'session_summary',
+    diffs,
+  }, context, sessionId);
+}
+
+function normalizeOpenCodeDiffs(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((item) => {
+    const diff = asRecord(item);
+    const file = readString(diff?.file) ?? readString(diff?.path);
+    if (!file) return [];
+    const source = diff ?? {};
+
+    return [{
+      file,
+      ...(readString(source.patch) ? { patch: source.patch } : {}),
+      ...(readString(source.before) ? { before: source.before } : {}),
+      ...(readString(source.after) ? { after: source.after } : {}),
+      ...(readNumber(source.additions) !== undefined ? { additions: source.additions } : {}),
+      ...(readNumber(source.deletions) !== undefined ? { deletions: source.deletions } : {}),
+      ...(readString(source.status) ? { status: source.status } : {}),
+    }];
+  });
 }
 
 function buildToolFinishedEvent(

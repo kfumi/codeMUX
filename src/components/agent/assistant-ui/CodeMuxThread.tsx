@@ -171,6 +171,10 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
   );
 
   const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
+  const userMessageCount = useMemo(
+    () => events.reduce((count, event) => count + (event.kind === 'user' ? 1 : 0), 0),
+    [events],
+  );
   const latestRewindableUserIndex = useMemo(() => findLatestRewindableUserIndex(events), [events]);
   const collapseInfoByEventIndex = useMemo(
     () => buildAssistantCollapseInfoMap(events, eventTimestamps, {
@@ -208,6 +212,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
           key={sessionId}
           sessionId={sessionId}
           eventCount={events.length}
+          userMessageCount={userMessageCount}
           isRunning={isRunning}
           viewportRef={viewportRef}
         >
@@ -241,12 +246,14 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
 function UnifiedThreadViewport({
   sessionId,
   eventCount,
+  userMessageCount,
   isRunning,
   viewportRef,
   children,
 }: {
   sessionId: string;
   eventCount: number;
+  userMessageCount: number;
   isRunning: boolean;
   viewportRef: RefObject<HTMLDivElement>;
   children: (scrollToBottomButton: ReactNode) => ReactNode;
@@ -259,6 +266,7 @@ function UnifiedThreadViewport({
   const scrollFrameRef = useRef<number | null>(null);
   // 首次非空渲染可能来自已缓存历史，也需要等 assistant-ui 提交消息树。
   const previousEventCountRef = useRef(0);
+  const previousUserMessageCountRef = useRef(0);
 
   const updateScrollState = useCallback(() => {
     const viewport = viewportRef.current;
@@ -295,7 +303,14 @@ function UnifiedThreadViewport({
 
   useEffect(() => {
     const isHistoryHydration = previousEventCountRef.current === 0 && eventCount > 0;
+    const hasNewUserMessage = userMessageCount > previousUserMessageCountRef.current;
     previousEventCountRef.current = eventCount;
+    previousUserMessageCountRef.current = userMessageCount;
+
+    // 用户主动发送消息后，即使之前在查看旧历史，也应将新消息带入视口。
+    if (hasNewUserMessage) {
+      followLatestRef.current = true;
+    }
 
     if (!followLatestRef.current) {
       return;
@@ -328,7 +343,7 @@ function UnifiedThreadViewport({
       });
     };
 
-    scrollAfterFrames(isHistoryHydration ? 2 : 1);
+    scrollAfterFrames(isHistoryHydration || hasNewUserMessage ? 2 : 1);
 
     return () => {
       if (scrollFrameRef.current !== null) {
@@ -336,7 +351,7 @@ function UnifiedThreadViewport({
         scrollFrameRef.current = null;
       }
     };
-  }, [eventCount, isRunning, sessionId, streamingVersion, viewportRef]);
+  }, [eventCount, isRunning, sessionId, streamingVersion, userMessageCount, viewportRef]);
 
   const scrollToBottom = useCallback(() => {
     followLatestRef.current = true;

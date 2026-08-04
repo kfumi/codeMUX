@@ -244,6 +244,18 @@ export class OpenCodeRuntime {
     });
   }
 
+  deleteSession(sessionId: string): Promise<void> {
+    return this.enqueueLifecycle(async () => {
+      const client = this.client;
+      if (!client) {
+        throw new Error('OpenCode client is not initialized');
+      }
+      await this.interruptInternal();
+      await this.waitForActiveTaskIfPresent();
+      await client.deleteSession({ cwd: this.config.cwd, sessionId });
+    });
+  }
+
   shutdown(): Promise<void> {
     if (this.shutdownPromise) {
       return this.shutdownPromise;

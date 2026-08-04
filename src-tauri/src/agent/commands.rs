@@ -10,7 +10,7 @@ use crate::provider_profiles::types::NativeProfileConfig;
 use log::{debug, info, warn};
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 
 use super::context_usage::{
     latest_claude_usage_from_values, latest_codex_usage_from_values, ThreadTokenUsageSnapshot,
@@ -1865,21 +1865,90 @@ pub async fn load_opencode_session_events(
 
 #[tauri::command]
 pub async fn delete_opencode_session(
+    app: AppHandle,
     state: State<'_, crate::AppState>,
+    agent_state: State<'_, AgentState>,
     app_session_id: String,
 ) -> Result<(), String> {
-    debug!(target: "agent", "Deleting OpenCode SQLite session for app_session_id={}", app_session_id);
+    debug!(target: "agent", "Deleting OpenCode session through the official SDK for app_session_id={}", app_session_id);
+    let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &app_session_id).await;
+    let _lifecycle_guard = lifecycle_lock.lock().await;
+    invalidate_session_generation(agent_state.inner(), &app_session_id).await;
     let Some(opencode_session_id) =
         get_agent_session_id(state.inner(), &app_session_id, AgentKind::Opencode)?
     else {
         return Ok(());
     };
-    let home = home_dir()?;
-    tokio::task::spawn_blocking(move || {
-        super::opencode_history::delete_opencode_session(&home, &opencode_session_id).map(|_| ())
+
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let command = OpenCodeRuntime::delete_session_command(
+        &app_session_id,
+        &opencode_session_id,
+        &request_id,
+        None,
+    );
+    let active_sender = {
+        let sidecars = agent_state.sidecars.lock().await;
+        sidecars
+            .get(&app_session_id)
+            .map(SidecarHandle::command_sender)
+    };
+
+    if let Some(sender) = active_sender {
+        let (result_sender, result_receiver) = oneshot::channel();
+        agent_state
+            .session_delete_waiters
+            .lock()
+            .await
+            .insert(request_id.clone(), result_sender);
+        if sender.send(command.to_string()).await.is_err() {
+            agent_state
+                .session_delete_waiters
+                .lock()
+                .await
+                .remove(&request_id);
+            return Err("Failed to send OpenCode session deletion command to sidecar".to_string());
+        }
+        return match tokio::time::timeout(std::time::Duration::from_secs(30), result_receiver).await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => {
+                Err("OpenCode sidecar stopped before confirming session deletion".to_string())
+            }
+            Err(_) => {
+                agent_state
+                    .session_delete_waiters
+                    .lock()
+                    .await
+                    .remove(&request_id);
+                Err("Timed out waiting for OpenCode session deletion".to_string())
+            }
+        };
+    }
+
+    // No session sidecar is alive after an app restart. Use a short-lived
+    // sidecar so the cleanup still goes through OpenCode's official SDK.
+    let (mut handle, mut events) =
+        spawn_sidecar(&app, tauri::ipc::Channel::new(|_| Ok(()))).await?;
+    let send_result = handle.send_command(&command.to_string()).await;
+    if let Err(error) = send_result {
+        handle.shutdown().await;
+        return Err(error);
+    }
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while let Some(event) = events.recv().await {
+            if let Some(result) = parse_session_delete_result_event(&event) {
+                if result.request_id == request_id {
+                    return result.result;
+                }
+            }
+        }
+        Err("OpenCode sidecar stopped before confirming session deletion".to_string())
     })
     .await
-    .map_err(|error| format!("Failed to join OpenCode history deletion: {}", error))?
+    .map_err(|_| "Timed out waiting for OpenCode session deletion".to_string())?;
+    handle.shutdown().await;
+    result
 }
 
 #[tauri::command]
@@ -1931,11 +2000,13 @@ pub async fn load_codex_session_events(
 type SessionLifecycleLock = Arc<Mutex<()>>;
 type SessionLifecycleLocks = Arc<Mutex<HashMap<String, SessionLifecycleLock>>>;
 type SessionGenerations = Arc<Mutex<HashMap<String, u64>>>;
+type SessionDeleteWaiters = Arc<Mutex<HashMap<String, oneshot::Sender<Result<(), String>>>>>;
 
 pub struct AgentState {
     pub sidecars: Arc<Mutex<HashMap<String, SidecarHandle>>>,
     pub session_startup_locks: SessionLifecycleLocks,
     pub session_generations: SessionGenerations,
+    pub session_delete_waiters: SessionDeleteWaiters,
     /// Port of the running codex compat proxy, if any.
     pub proxy_port: Arc<Mutex<Option<u16>>>,
 }
@@ -1946,6 +2017,7 @@ impl Default for AgentState {
             sidecars: Arc::new(Mutex::new(HashMap::new())),
             session_startup_locks: Arc::new(Mutex::new(HashMap::new())),
             session_generations: Arc::new(Mutex::new(HashMap::new())),
+            session_delete_waiters: Arc::new(Mutex::new(HashMap::new())),
             proxy_port: Arc::new(Mutex::new(None)),
         }
     }
@@ -2004,10 +2076,21 @@ async fn ensure_sidecar_for_session(
     let shared_channel = handle.channel.clone();
     let session_startup_locks = agent_state.session_startup_locks.clone();
     let session_generations = agent_state.session_generations.clone();
+    let session_delete_waiters = agent_state.session_delete_waiters.clone();
     let session_id_clone = session_id.to_string();
     let app_handle = app.clone();
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
+            if let Some(result) = parse_session_delete_result_event(&event) {
+                if let Some(waiter) = session_delete_waiters
+                    .lock()
+                    .await
+                    .remove(&result.request_id)
+                {
+                    let _ = waiter.send(result.result);
+                }
+                continue;
+            }
             let app_state = app_handle.state::<crate::AppState>();
             match handle_agent_session_mapping_event(
                 app_state.inner(),
@@ -2047,6 +2130,33 @@ struct AgentSessionMappingEvent {
     agent_kind: AgentKind,
     agent_session_id: String,
     runtime_generation: Option<u64>,
+}
+
+struct SessionDeleteResultEvent {
+    request_id: String,
+    result: Result<(), String>,
+}
+
+fn parse_session_delete_result_event(event: &str) -> Option<SessionDeleteResultEvent> {
+    let value = serde_json::from_str::<serde_json::Value>(event).ok()?;
+    if value.get("type").and_then(|entry| entry.as_str()) != Some("session_delete_result") {
+        return None;
+    }
+    let request_id = value.get("request_id")?.as_str()?.to_string();
+    let ok = value
+        .get("ok")
+        .and_then(|entry| entry.as_bool())
+        .unwrap_or(false);
+    let result = if ok {
+        Ok(())
+    } else {
+        Err(value
+            .get("error")
+            .and_then(|entry| entry.as_str())
+            .unwrap_or("OpenCode session deletion failed")
+            .to_string())
+    };
+    Some(SessionDeleteResultEvent { request_id, result })
 }
 
 fn parse_agent_session_mapping_event(

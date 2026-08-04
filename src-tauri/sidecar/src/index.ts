@@ -17,7 +17,7 @@ import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion
 import { projectClaudeToolEvents } from './claudeToolEvents.js';
 import { CodexSessionRuntime, interruptActiveTurn } from './codexRuntime.js';
 import { OpenCodeRuntime } from './opencodeRuntime.js';
-import { normalizeOpenCodeModelReference } from './opencodeSdk.js';
+import { deleteOpenCodeSessionWithOfficialSdk, normalizeOpenCodeModelReference } from './opencodeSdk.js';
 import type { OpenCodePermissionResponse } from './opencodePermissions.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
 import {
@@ -1318,6 +1318,7 @@ type SidecarRuntime = {
   updatePermissions(cmd: UpdatePermissionsCommand): void | Promise<void>;
   sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void>;
   resetSession(sessionId: string): Promise<void>;
+  deleteSession?(agentSessionId: string): Promise<void>;
   interrupt(): Promise<void>;
   shutdown(): Promise<void>;
   respondToPermission?(requestId: string, response: OpenCodePermissionResponse, sessionId: string): Promise<void>;
@@ -1477,6 +1478,31 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           emitError(error);
         }
         return;
+      case 'delete_session': {
+        try {
+          const current = selectedRuntime();
+          if (current?.deleteSession) {
+            await current.deleteSession(cmd.agentSessionId);
+          } else {
+            await deleteOpenCodeSessionWithOfficialSdk({ cwd: cmd.cwd, sessionId: cmd.agentSessionId });
+          }
+          options.emit({
+            type: 'session_delete_result',
+            request_id: cmd.requestId,
+            session_id: cmd.sessionId,
+            ok: true,
+          });
+        } catch (error) {
+          options.emit({
+            type: 'session_delete_result',
+            request_id: cmd.requestId,
+            session_id: cmd.sessionId,
+            ok: false,
+            error: String(error),
+          });
+        }
+        return;
+      }
       case 'interrupt':
         try {
           if (getRuntimeFlavor(activeAgentKind) === 'codex') interruptActiveTurn();
@@ -1609,6 +1635,7 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
     sendInput: (prompt, inputPayload) => openCodeRuntime.sendInput(prompt, inputPayload),
     updatePermissions: (update) => openCodeRuntime.updatePermissions(update),
     resetSession: () => openCodeRuntime.resetSession(),
+    deleteSession: (agentSessionId) => openCodeRuntime.deleteSession(agentSessionId),
     interrupt: () => openCodeRuntime.interrupt(),
     shutdown: () => openCodeRuntime.shutdown(),
     respondToPermission: (requestId, response, sessionId) => openCodeRuntime.respondToPermission(requestId, response, sessionId),

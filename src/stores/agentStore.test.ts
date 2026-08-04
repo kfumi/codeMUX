@@ -604,6 +604,52 @@ describe('agent store Codex history loading', () => {
     expect(changedFile.deletions).toBe(2);
   });
 
+  it('extracts OpenCode lowercase tools and camelCase file arguments', async () => {
+    const { extractChangedFilesFromEvents } = await import('./agentStore');
+    const filePath = 'D:\\project\\ai-code\\codeMUX\\index.html';
+    const changedFiles = extractChangedFilesFromEvents([
+      {
+        kind: 'file_snapshot',
+        data: {
+          file_path: filePath,
+          original_content: '<h3>old</h3>\n',
+          is_new: false,
+          tool_use_id: 'call-edit-1',
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-opencode-edit-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{
+              type: 'tool_use',
+              id: 'call-edit-1',
+              name: 'edit',
+              input: {
+                filePath,
+                oldString: '<h3>old</h3>',
+                newString: '<h3>new</h3>',
+              },
+            }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ] as never);
+
+    expect(changedFiles).toEqual([expect.objectContaining({
+      path: filePath,
+      originalContent: '<h3>old</h3>\n',
+      currentContent: '<h3>new</h3>\n',
+      additions: 1,
+      deletions: 1,
+    })]);
+  });
+
   it('does not expose unused git baseline state', async () => {
     const { useAgentStore } = await import('./agentStore');
 

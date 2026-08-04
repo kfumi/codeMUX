@@ -15,6 +15,8 @@ const CODEX_COLLABORATION_POLICY_RE = /<codemux-codex-collaboration-policy>[\s\S
 export type SessionSummaryDiff = {
   file: string;
   patch?: string;
+  before?: string;
+  after?: string;
   additions?: number;
   deletions?: number;
   status?: string;

@@ -657,64 +657,6 @@ mod tests {
         let summary_event = &events[summary_pos.unwrap()];
         assert_eq!(summary_event["diffs"][0]["file"], "src/foo.ts");
     }
-
-    #[test]
-    fn deletes_only_the_requested_opencode_session_and_children() {
-        let connection = Connection::open_in_memory().unwrap();
-        connection.execute_batch(
-            "CREATE TABLE session (id TEXT PRIMARY KEY);
-             CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL);
-             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL);",
-        ).unwrap();
-        connection.execute_batch(
-            "INSERT INTO session VALUES ('session-1'), ('session-2');
-             INSERT INTO message VALUES ('message-1', 'session-1'), ('message-2', 'session-2');
-             INSERT INTO part VALUES ('part-1', 'message-1', 'session-1'), ('part-2', 'message-2', 'session-2');",
-        ).unwrap();
-
-        assert!(delete_opencode_session_from_connection(&connection, "session-1").unwrap());
-
-        let counts: (i64, i64, i64) = connection
-            .query_row(
-                "SELECT (SELECT COUNT(*) FROM session WHERE id = 'session-1'),
-                    (SELECT COUNT(*) FROM message WHERE session_id = 'session-1'),
-                    (SELECT COUNT(*) FROM part WHERE session_id = 'session-1')",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(counts, (0, 0, 0));
-        assert_eq!(
-            connection
-                .query_row(
-                    "SELECT COUNT(*) FROM session WHERE id = 'session-2'",
-                    [],
-                    |row| row.get::<_, i64>(0)
-                )
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            connection
-                .query_row(
-                    "SELECT COUNT(*) FROM message WHERE session_id = 'session-2'",
-                    [],
-                    |row| row.get::<_, i64>(0)
-                )
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            connection
-                .query_row(
-                    "SELECT COUNT(*) FROM part WHERE session_id = 'session-2'",
-                    [],
-                    |row| row.get::<_, i64>(0)
-                )
-                .unwrap(),
-            1
-        );
-    }
 }
 
 pub fn load_opencode_session_events(
@@ -742,39 +684,6 @@ pub fn load_latest_opencode_token_usage(
     load_latest_opencode_token_usage_from_connection(&connection, session_id, freshness)
 }
 
-pub fn delete_opencode_session(home: &std::path::Path, session_id: &str) -> Result<bool, String> {
-    let Some(path) = find_opencode_database(home) else {
-        return Ok(false);
-    };
-    let connection = Connection::open(path)
-        .map_err(|error| format!("Failed to open OpenCode database for deletion: {}", error))?;
-    delete_opencode_session_from_connection(&connection, session_id)
-}
-
-fn delete_opencode_session_from_connection(
-    connection: &Connection,
-    session_id: &str,
-) -> Result<bool, String> {
-    let transaction = connection
-        .unchecked_transaction()
-        .map_err(|error| format!("Failed to begin OpenCode session deletion: {}", error))?;
-    let mut deleted = false;
-    for (table, column) in [
-        ("part", "session_id"),
-        ("message", "session_id"),
-        ("session", "id"),
-    ] {
-        let statement = format!("DELETE FROM {table} WHERE {column} = ?1");
-        let affected = transaction
-            .execute(&statement, [session_id])
-            .map_err(|error| format!("Failed to delete OpenCode {table} data: {}", error))?;
-        deleted |= affected > 0;
-    }
-    transaction
-        .commit()
-        .map_err(|error| format!("Failed to commit OpenCode session deletion: {}", error))?;
-    Ok(deleted)
-}
 pub fn rewind_opencode_session_to_latest_turn(
     home: &std::path::Path,
     session_id: &str,

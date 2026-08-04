@@ -37,6 +37,7 @@ export type SidecarCommand =
   | { type: 'update_permissions'; sessionId?: string; agentKind?: string; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode }
   | { type: 'send_input'; sessionId?: string; prompt: string; displayContent?: string; inputPayload?: AgentInputPayload }
   | { type: 'reset_session'; sessionId: string }
+  | { type: 'delete_session'; sessionId: string; agentSessionId: string; requestId: string; cwd?: string }
   | { type: 'interrupt' }
   | { type: 'shutdown' }
   | { type: 'tool_response'; toolUseId: string; response: unknown }

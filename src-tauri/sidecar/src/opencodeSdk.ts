@@ -44,6 +44,7 @@ export interface OpenCodeEventSubscription {
 export interface OpenCodeClientPort {
   createSession(input: { cwd: string }): Promise<OpenCodeSessionHandle>;
   restoreSession(input: { cwd: string; sessionId: string }): Promise<OpenCodeSessionHandle>;
+  deleteSession(input: { cwd?: string; sessionId: string }): Promise<void>;
   prompt(input: OpenCodePromptInput): Promise<void>;
   abort(sessionId: string): Promise<boolean | void>;
   respondToPermission(input: { sessionId: string; requestId: string; response: OpenCodeNativePermissionResponse }): Promise<boolean | void>;
@@ -212,6 +213,44 @@ function readResponse<T>(operation: string, response: { data?: T; error?: unknow
   throw new Error(`${operation} failed${response.error ? `: ${formatSdkError(response.error)}` : ''}`);
 }
 
+function isNotFoundResponse(response: { error?: unknown; response?: { status?: number } }): boolean {
+  if (response.response?.status === 404) return true;
+  const error = response.error;
+  if (typeof error !== 'object' || error === null) {
+    const message = String(error ?? '').toLowerCase();
+    return message.includes('404') || message.includes('not found');
+  }
+  const record = error as Record<string, unknown>;
+  const message = JSON.stringify(error).toLowerCase();
+  return record.status === 404 || record.statusCode === 404 || message.includes('404') || message.includes('not found');
+}
+
+async function deleteWithOfficialOpenCodeSdk(input: { cwd?: string; sessionId: string }): Promise<void> {
+  const cwd = input.cwd?.trim() || process.cwd();
+  const resources = await officialOpenCodeSdkPort.start({
+    cwd,
+    provider: 'opencode',
+    model: 'default',
+    credentialSource: 'opencode',
+  });
+  let operationError: unknown;
+  try {
+    await resources.client.deleteSession(input);
+  } catch (error) {
+    operationError = error;
+  }
+  try {
+    await closeOpenCodeServerWithTimeout(resources.server);
+  } catch (closeError) {
+    if (!operationError) operationError = closeError;
+  }
+  if (operationError) throw operationError;
+}
+
+export async function deleteOpenCodeSessionWithOfficialSdk(input: { cwd?: string; sessionId: string }): Promise<void> {
+  return deleteWithOfficialOpenCodeSdk(input);
+}
+
 function formatSdkError(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -262,6 +301,14 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
               `OpenCode session restoration for "${sessionId}"`,
               await client.session.get({ path: { id: sessionId }, query: { directory: sessionCwd } }),
             );
+          },
+          async deleteSession({ cwd: sessionCwd, sessionId }) {
+            const response = await client.session.delete({
+              path: { id: sessionId },
+              ...(sessionCwd ? { query: { directory: sessionCwd } } : {}),
+            });
+            if (response.data === true || isNotFoundResponse(response)) return;
+            throw new Error(`OpenCode session deletion failed${response.error ? `: ${formatSdkError(response.error)}` : ''}`);
           },
           async switchAgent({ sessionId, agent }: { sessionId: string; agent: string }) {
             process.stderr.write(`[opencode-task] switchAgent CALL sessionId=${sessionId} agent=${agent}\n`);

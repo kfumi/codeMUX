@@ -1025,6 +1025,20 @@ describe('convertAgentEventsToAssistantMessages', () => {
           session_id: 'session-1',
         },
       },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'result-1',
+          session_id: 'session-1',
+          duration_ms: 10,
+          duration_api_ms: 10,
+          num_turns: 1,
+          result: '',
+        },
+      },
     ];
 
     const messages = convertAgentEventsToAssistantMessages(events);
@@ -1044,6 +1058,166 @@ describe('convertAgentEventsToAssistantMessages', () => {
       type: 'data-codemux-event',
       eventKind: 'session_summary',
     });
+  });
+
+  it('does not render a summary while the turn is still running', () => {
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: '请修改文件' } },
+      {
+        kind: 'session_summary',
+        data: {
+          type: 'system',
+          subtype: 'session_summary',
+          diffs: [{ file: 'index.html', additions: 1, deletions: 1, status: 'modified' }],
+          uuid: 'summary-running-1',
+          session_id: 'session-1',
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-thinking-1',
+          session_id: 'session-1',
+          message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'Done. The edit was applied successfully.' }] },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+    const summaryParts = messages.flatMap((message) => message.content)
+      .filter((part) => part.type === 'data-codemux-event' && part.eventKind === 'session_summary');
+
+    expect(summaryParts).toHaveLength(0);
+  });
+
+  it('defers a summary that arrives after a tool until the final assistant message', () => {
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: '请修改文件' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-1', name: 'edit', input: { filePath: 'index.html' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'Edit applied successfully.' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'session_summary',
+        data: {
+          type: 'system',
+          subtype: 'session_summary',
+          diffs: [{ file: 'index.html', additions: 1, deletions: 1, status: 'modified' }],
+          uuid: 'summary-1',
+          session_id: 'session-1',
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-final-1',
+          session_id: 'session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: '已完成修改。' }] },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'result-1',
+          session_id: 'session-1',
+          duration_ms: 10,
+          duration_api_ms: 10,
+          num_turns: 1,
+          result: '',
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+    const toolMessage = messages.find((message) => message.content.some((part) => part.type === 'tool-call'));
+    const finalMessage = messages.find((message) => (
+      message.role === 'assistant' && message.content.some((part) => part.type === 'text')
+    ));
+
+    expect(toolMessage?.content).toHaveLength(1);
+    expect(finalMessage?.content.filter((part) => part.type === 'data-codemux-event')).toHaveLength(1);
+    expect(finalMessage?.content.at(-1)).toMatchObject({
+      type: 'data-codemux-event',
+      eventKind: 'session_summary',
+    });
+  });
+
+  it('coalesces repeated summaries into one final summary card per turn', () => {
+    const summary = (uuid: string, file: string): AgentMessage => ({
+      kind: 'session_summary',
+      data: {
+        type: 'system',
+        subtype: 'session_summary',
+        diffs: [{ file, additions: 1, deletions: 0, status: 'modified' }],
+        uuid,
+        session_id: 'session-1',
+      },
+    });
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: '请修改文件' } },
+      summary('summary-1', 'index.html'),
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-final-1',
+          session_id: 'session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: '已完成修改。' }] },
+          parent_tool_use_id: null,
+        },
+      },
+      summary('summary-2', 'index.html'),
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'result-1',
+          session_id: 'session-1',
+          duration_ms: 10,
+          duration_api_ms: 10,
+          num_turns: 1,
+          result: '',
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+    const summaryParts = messages.flatMap((message) => message.content)
+      .filter((part) => part.type === 'data-codemux-event' && part.eventKind === 'session_summary');
+
+    expect(summaryParts).toHaveLength(1);
+    expect(messages.find((message) => message.role === 'system')).toBeUndefined();
   });
 
   it('does not render Claude task notification XML if it reaches the UI converter', () => {

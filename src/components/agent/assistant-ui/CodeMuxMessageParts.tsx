@@ -623,7 +623,7 @@ function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 's
   const totalAdditions = diffs.reduce((sum, d) => sum + (d.additions ?? 0), 0);
   const totalDeletions = diffs.reduce((sum, d) => sum + (d.deletions ?? 0), 0);
 
-  const handleFileClick = (diff: { file: string; patch?: string }) => {
+  const handleFileClick = (diff: { file: string; patch?: string; before?: string; after?: string }) => {
     const patch = diff.patch;
     if (patch) {
       const parsed = parseUnifiedDiffPatch(patch);
@@ -632,41 +632,45 @@ function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 's
         return;
       }
     }
+    if (typeof diff.before === 'string' && typeof diff.after === 'string') {
+      openDiffTab(diff.file, diff.before, diff.after);
+    }
   };
 
   return (
-    <div className="mt-3 rounded-xl border border-border/50 bg-[hsl(var(--surface-3))]/80 shadow-sm overflow-hidden animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+    <div className="mt-3 overflow-hidden rounded-lg border border-border/60 bg-[hsl(var(--surface-2))]/88 shadow-[0_4px_16px_-14px_hsl(var(--surface-shadow-strong)/0.55)] animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
       <button
-        className="flex items-center gap-3 w-full px-3.5 py-3 text-sm hover:bg-[hsl(var(--surface-3))] transition-colors duration-200"
+        className="group flex w-full items-center gap-3 bg-[hsl(var(--surface-2))]/72 px-3.5 py-2.5 text-left text-sm transition-[background-color,border-color] duration-200 hover:bg-[hsl(var(--surface-3))]/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary)/0.35)] focus-visible:ring-inset"
+        aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
       >
         {expanded ? (
-          <ChevronDown className="h-4 w-4 text-muted-foreground/60 shrink-0" />
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/70 transition-colors group-hover:text-foreground/75" />
         ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground/60 shrink-0" />
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70 transition-colors group-hover:text-foreground/75" />
         )}
-        <FileText className="h-4 w-4 text-muted-foreground/50 shrink-0" />
-        <span className="font-medium">{diffs.length} 个文件已更改</span>
-        <span className="ml-auto inline-flex items-center gap-2 tabular-nums">
+        <FileText className="h-4 w-4 shrink-0 text-[hsl(var(--primary)/0.82)]" />
+        <span className="font-medium text-foreground/85">{diffs.length} 个文件已更改</span>
+        <span className="ml-auto inline-flex items-center gap-1.5 tabular-nums">
           {totalAdditions > 0 && (
-            <span className="text-green-600 dark:text-green-400">+{totalAdditions}</span>
+            <span className="rounded-md bg-[hsl(var(--success)/0.11)] px-1.5 py-0.5 text-xs font-medium text-[hsl(var(--success))]">+{totalAdditions}</span>
           )}
           {totalDeletions > 0 && (
-            <span className="text-red-600 dark:text-red-400">−{totalDeletions}</span>
+            <span className="rounded-md bg-[hsl(var(--destructive)/0.11)] px-1.5 py-0.5 text-xs font-medium text-[hsl(var(--destructive))]">−{totalDeletions}</span>
           )}
           {totalAdditions === 0 && totalDeletions === 0 && (
-            <span className="text-muted-foreground/50">0</span>
+            <span className="rounded-md bg-muted/60 px-1.5 py-0.5 text-xs font-medium text-muted-foreground/70">0</span>
           )}
         </span>
       </button>
       {expanded && (
-        <div className="border-t border-border/30 divide-y divide-border/20">
+        <div className="divide-y divide-border/35 border-t border-border/45 bg-[hsl(var(--surface-1))]/38">
           {diffs.map((diff, i) => (
             <div
               key={`${diff.file}-${i}`}
               role="button"
               tabIndex={0}
-              className="flex items-center gap-3 px-4 py-3 text-xs cursor-pointer hover:bg-[hsl(var(--surface-2))]/50 transition-colors duration-150"
+              className="group/row flex cursor-pointer items-center gap-3 px-4 py-2.5 text-xs transition-colors duration-150 hover:bg-[hsl(var(--surface-2))]/72 focus-visible:bg-[hsl(var(--surface-2))]/72 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary)/0.3)] focus-visible:ring-inset"
               onClick={() => handleFileClick(diff)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -675,18 +679,18 @@ function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 's
                 }
               }}
             >
-              <FileCode className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
-              <span className="shrink-0 truncate font-mono text-foreground/85 max-w-[28%]">
+              <FileCode className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--primary)/0.68)]" />
+              <span className="max-w-[28%] shrink-0 truncate font-mono text-foreground/80">
                 {getSummaryFileName(diff.file)}
               </span>
               <TooltipHint content={diff.file}>
-                <span className="flex-1 truncate text-muted-foreground/45 text-left">
+                <span className="flex-1 truncate text-left text-muted-foreground/70">
                   {diff.file}
                 </span>
               </TooltipHint>
-              <span className="shrink-0 inline-flex gap-2 tabular-nums w-[4.5rem] justify-end">
-                <span className="text-green-600 dark:text-green-400 text-right">+{diff.additions ?? 0}</span>
-                <span className="text-red-600 dark:text-red-400 text-right">−{diff.deletions ?? 0}</span>
+              <span className="inline-flex w-[4.5rem] shrink-0 justify-end gap-1.5 tabular-nums">
+                <span className="rounded bg-[hsl(var(--success)/0.09)] px-1 py-0.5 text-right text-[hsl(var(--success))]">+{diff.additions ?? 0}</span>
+                <span className="rounded bg-[hsl(var(--destructive)/0.09)] px-1 py-0.5 text-right text-[hsl(var(--destructive))]">−{diff.deletions ?? 0}</span>
               </span>
             </div>
           ))}

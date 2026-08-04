@@ -102,6 +102,23 @@ describe('CodeMUX frontend protocol adapter', () => {
     });
   });
 
+  it('preserves file diffs from session summary system events', () => {
+    expect(toLegacySystemMessage({
+      type: 'system_event',
+      subtype: 'session_summary',
+      diffs: [{ file: 'index.html', patch: '--- index.html\n+++ index.html\n-old\n+new' }],
+      event_id: 'event-summary',
+    })).toEqual({
+      kind: 'session_summary',
+      data: {
+        type: 'system',
+        subtype: 'session_summary',
+        diffs: [{ file: 'index.html', patch: '--- index.html\n+++ index.html\n-old\n+new' }],
+        uuid: 'event-summary',
+      },
+    });
+  });
+
   it('projects user input requests to the existing question model', () => {
     expect(toLegacyUserInputRequestedMessage({
       type: 'user_input_requested', tool_use_id: 'question-1', questions: [{ question: '继续吗？', options: [] }],

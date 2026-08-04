@@ -1095,8 +1095,10 @@ export function extractChangedFilesFromEvents(
       if (block?.type !== 'tool_use' || !block.name) continue;
       const input = block.input as Record<string, unknown>;
 
-      if (block.name === 'Write') {
-        const rawPath = input?.file_path as string;
+      const toolName = block.name.toLowerCase();
+
+      if (toolName === 'write') {
+        const rawPath = (input?.file_path ?? input?.filePath) as string;
         const fileContent = input?.content as string;
         if (!rawPath || typeof fileContent !== 'string') continue;
         const filePath = normalizeFilePath(rawPath);
@@ -1126,10 +1128,10 @@ export function extractChangedFilesFromEvents(
         }
       }
 
-      if (block.name === 'Edit') {
-        const rawPath = input?.file_path as string;
-        const oldString = input?.old_string as string;
-        const newString = input?.new_string as string;
+      if (toolName === 'edit') {
+        const rawPath = (input?.file_path ?? input?.filePath) as string;
+        const oldString = (input?.old_string ?? input?.oldString) as string;
+        const newString = (input?.new_string ?? input?.newString) as string;
         if (!rawPath || typeof oldString !== 'string' || typeof newString !== 'string') continue;
         const filePath = normalizeFilePath(rawPath);
         const toolUseId = block.id as string | undefined;

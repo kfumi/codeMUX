@@ -14,6 +14,7 @@ const sdkMocks = vi.hoisted(() => {
   const session = {
     create: vi.fn().mockResolvedValue({ data: { id: 'mock-session' } }),
     get: vi.fn().mockResolvedValue({ data: { id: 'mock-session' } }),
+    delete: vi.fn().mockResolvedValue({ data: true }),
     prompt,
     promptAsync,
     abort: vi.fn().mockResolvedValue({ data: true }),
@@ -53,6 +54,7 @@ function createPort() {
   const client = {
     createSession: vi.fn().mockResolvedValue({ id: 'opencode-new' }),
     restoreSession: vi.fn().mockResolvedValue({ id: 'opencode-existing' }),
+    deleteSession: vi.fn().mockResolvedValue(undefined),
     prompt: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(true),
     respondToPermission: vi.fn().mockResolvedValue(true),
@@ -491,6 +493,16 @@ describe('OpenCodeRuntime', () => {
       model: 'gpt-5',
       agent: 'build',
     });
+  });
+
+  it('deletes the native OpenCode session through the client port', async () => {
+    const { port, client } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+
+    await runtime.deleteSession('opencode-new');
+
+    expect(client.deleteSession).toHaveBeenCalledWith({ cwd: 'D:/workspace/demo', sessionId: 'opencode-new' });
   });
 
   it('sends text and image payloads to the adapter without exposing SDK objects', async () => {

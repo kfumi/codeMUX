@@ -58,6 +58,24 @@ impl OpenCodeRuntime {
         })
     }
 
+    pub fn delete_session_command(
+        session_id: &str,
+        agent_session_id: &str,
+        request_id: &str,
+        cwd: Option<&str>,
+    ) -> Value {
+        let mut command = json!({
+            "type": "delete_session",
+            "sessionId": session_id,
+            "agentSessionId": agent_session_id,
+            "requestId": request_id,
+        });
+        if let Some(cwd) = cwd {
+            command["cwd"] = Value::String(cwd.to_string());
+        }
+        command
+    }
+
     pub fn shutdown_command() -> Value {
         json!({ "type": "shutdown" })
     }
@@ -183,6 +201,21 @@ mod tests {
         assert_eq!(
             OpenCodeRuntime::reset_session_command("app-session"),
             json!({ "type": "reset_session", "sessionId": "app-session" })
+        );
+        assert_eq!(
+            OpenCodeRuntime::delete_session_command(
+                "app-session",
+                "opencode-session",
+                "request-1",
+                Some("D:\\workspace"),
+            ),
+            json!({
+                "type": "delete_session",
+                "sessionId": "app-session",
+                "agentSessionId": "opencode-session",
+                "requestId": "request-1",
+                "cwd": "D:\\workspace",
+            })
         );
         assert_eq!(
             OpenCodeRuntime::shutdown_command(),
