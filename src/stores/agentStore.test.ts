@@ -1015,6 +1015,70 @@ describe('agent store Codex history loading', () => {
     }
   });
 
+  it('keeps Claude answer deltas out of the thinking stream', async () => {
+    vi.useFakeTimers();
+    let emitEvent: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      emitEvent = onEvent;
+    });
+
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const session = await primeSession('claude_code');
+      await useAgentStore
+        .getState()
+        .startQuery(session.id, 'stream Claude answer', 'D:\\project\\ai-code\\codeMUX');
+
+      emitEvent?.(JSON.stringify({
+        type: 'stream_event',
+        session_id: session.id,
+        event: { type: 'content_block_start', content_block: { type: 'text' } },
+      }));
+      emitEvent?.(JSON.stringify({
+        type: 'stream_event',
+        session_id: session.id,
+        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'ordinary answer' } },
+      }));
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(useAgentStore.getState().streamingThinking[session.id] ?? '').toBe('');
+      expect(useAgentStore.getState().streamingText[session.id]).toBe('ordinary answer');
+
+      emitEvent?.(JSON.stringify({
+        type: 'stream_event',
+        session_id: session.id,
+        event: { type: 'content_block_start', content_block: { type: 'thinking' } },
+      }));
+      emitEvent?.(JSON.stringify({
+        type: 'stream_event',
+        session_id: session.id,
+        event: {
+          type: 'content_block_delta',
+          delta: { type: 'thinking_delta', thinking: 'final reasoning' },
+        },
+      }));
+      emitEvent?.(JSON.stringify({
+        type: 'stream_event',
+        session_id: session.id,
+        event: { type: 'content_block_start', content_block: { type: 'text' } },
+      }));
+      emitEvent?.(JSON.stringify({
+        type: 'stream_event',
+        session_id: session.id,
+        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'final answer' } },
+      }));
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(useAgentStore.getState().streamingThinking[session.id] ?? '').toBe('');
+      expect(useAgentStore.getState().streamingText[session.id]).toBe('final answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('throttles simulated streaming text instead of updating visible state for every chunk', async () => {
     vi.useFakeTimers();
     const simulatedText = 'simulated-stream-text '.repeat(40);

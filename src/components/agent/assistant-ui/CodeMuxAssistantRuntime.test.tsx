@@ -259,6 +259,103 @@ const completedTurnEvents: AgentMessage[] = [
   },
 ];
 
+const completedTurnWithEmptyThinkingEvents: AgentMessage[] = [
+  { kind: 'user', data: { content: 'ask me another question' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-empty-thinking-start',
+      session_id: 'session-empty-thinking-turn',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: '' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-empty-thinking-process',
+      session_id: 'session-empty-thinking-turn',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'I am preparing the next question.' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-empty-thinking-tool',
+      session_id: 'session-empty-thinking-turn',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'empty-thinking-tool', name: 'AskUserQuestion', input: {} }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'tool_result',
+    data: {
+      type: 'user',
+      uuid: 'assistant-empty-thinking-tool-result',
+      session_id: 'session-empty-thinking-turn',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'empty-thinking-tool', content: 'answered' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-empty-thinking-before-final',
+      session_id: 'session-empty-thinking-turn',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: '' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-empty-thinking-final',
+      session_id: 'session-empty-thinking-turn',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Here is the final answer.' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'result',
+    data: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      uuid: 'empty-thinking-result',
+      session_id: 'session-empty-thinking-turn',
+      duration_ms: 1200,
+      duration_api_ms: 1200,
+      num_turns: 1,
+      result: '',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    },
+  },
+];
+
 const completedClaudeThinkingTurnEvents: AgentMessage[] = [
   { kind: 'user', data: { content: 'say hello' } },
   {
@@ -918,6 +1015,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-image-only': imageOnlyUserEvents,
         'session-image-text': imageAndTextUserEvents,
         'session-completed-turn': completedTurnEvents,
+        'session-empty-thinking-turn': completedTurnWithEmptyThinkingEvents,
         'session-claude-thinking-turn': completedClaudeThinkingTurnEvents,
         'session-claude-split-history': historicalClaudeSplitTurnEvents,
         'session-opencode-tool-turn': completedOpenCodeToolTurnEvents,
@@ -938,6 +1036,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
           Date.parse('2026-06-28T10:01:13Z'),
           Date.parse('2026-06-28T10:01:13Z'),
         ],
+        'session-empty-thinking-turn': [1, 2, 3, 4, 5, 6, 7, 8],
         'session-claude-split-history': [1, 2, 3, 4, 5, 6, 7, 8],
         'session-opencode-tool-turn': [1, 2, 3, 4],
         'session-opencode-history-turn': [1, 2, 3, 4, 5, 6, 7],
@@ -1867,6 +1966,23 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     expect(screen.getByText('I am checking files first.')).toBeTruthy();
     expect(screen.getByRole('button', { name: /鏀惰捣AI杩囩▼|收起AI过程/ })).toBeTruthy();
+  });
+
+  it('keeps the compact process toggle when the turn starts with empty thinking', () => {
+    useSettingsStore.setState((state) => ({
+      config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
+    }));
+
+    render(<Harness sessionId="session-empty-thinking-turn" />);
+
+    expect(screen.getByText('Here is the final answer.')).toBeTruthy();
+    expect(screen.queryByText('I am preparing the next question.')).toBeNull();
+    const toggle = screen.getByRole('button', { name: /展开AI过程/ });
+    expect(toggle.textContent).toContain('已处理');
+
+    fireEvent.click(toggle);
+
+    expect(screen.getByText('I am preparing the next question.')).toBeTruthy();
   });
 
   it('puts completed Claude thinking under the compact process toggle', () => {

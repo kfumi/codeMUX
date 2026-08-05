@@ -374,7 +374,10 @@ function queueStreamingDelta(
       applyStreamingBuffer(sessionId, { thinking: key === 'thinking' ? chunk : '', text: key === 'text' ? chunk : '' }, set);
       pendingStreamingBuffers.set(sessionId, { thinking: '', text: '' });
     } else {
-      pendingStreamingBuffers.set(sessionId, { thinking: chunk, text: key === 'text' ? chunk : '' });
+      pendingStreamingBuffers.set(sessionId, {
+        thinking: key === 'thinking' ? chunk : '',
+        text: key === 'text' ? chunk : '',
+      });
     }
     return;
   }
@@ -1455,6 +1458,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
                 clearStreamingTextField(sessionId, 'streamingThinking', set, get);
               } else if (contentBlock?.type === 'text') {
                 logger.debug('Text block started', { sessionId });
+                flushPendingStreaming(sessionId, set);
                 const hasThinkingContent = Boolean(get().streamingThinking[sessionId]);
                 const hasCommittedThinking = hasCurrentTurnCommittedThinking(get().events[sessionId] || []);
                 if (
@@ -1468,7 +1472,6 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
                     clearStreamingTextField(sessionId, 'streamingThinking', set, get);
                   }
                 }
-                flushPendingStreaming(sessionId, set);
                 clearStreamingTextField(sessionId, 'streamingText', set, get);
               } else if (contentBlock?.type === 'tool_use') {
                 const toolId = contentBlock.id as string;

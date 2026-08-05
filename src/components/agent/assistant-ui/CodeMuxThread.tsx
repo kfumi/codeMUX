@@ -1443,12 +1443,34 @@ function isCollapsibleProcessEvent(event: AgentMessage | undefined): boolean {
     return false;
   }
 
-  return event.kind === 'assistant'
-    || event.kind === 'ask_user_question'
+  if (event.kind === 'assistant') {
+    // 空 thinking 不会转换成 assistant-ui 消息，不能作为折叠入口。
+    return hasRenderableAssistantContent(event);
+  }
+
+  return event.kind === 'ask_user_question'
     || event.kind === 'api_retry'
     || event.kind === 'compact'
     || event.kind === 'error'
     || event.kind === 'stream_status';
+}
+
+function hasRenderableAssistantContent(
+  event: Extract<AgentMessage, { kind: 'assistant' }>,
+): boolean {
+  return event.data.message.content.some((block) => {
+    if (block?.type === 'tool_use') {
+      return true;
+    }
+
+    if (block?.type === 'text' || block?.type === 'thinking') {
+      return typeof block.text === 'string'
+        ? block.text.length > 0
+        : typeof block.thinking === 'string' && block.thinking.length > 0;
+    }
+
+    return false;
+  });
 }
 
 function isOpenCodeToolOnlyAssistantEvent(event: AgentMessage | undefined): boolean {
