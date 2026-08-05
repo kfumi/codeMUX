@@ -138,6 +138,18 @@ fn resolve_active_runtime_config(
             credential_source: None,
         });
     }
+    if profile_id.is_none() && agent_kind == AgentKind::Codex {
+        drop(config);
+        return Ok(ResolvedRuntimeConfig {
+            profile_id: String::new(),
+            api_key: None,
+            base_url: None,
+            model: session_model.map(|model| model.to_string()),
+            codex_needs_proxy: None,
+            provider: None,
+            credential_source: None,
+        });
+    }
     let profile_id =
         profile_id.ok_or_else(|| format!("{} 尚未启用供应商档案", agent_kind.as_str()))?;
     if agent_kind == AgentKind::ClaudeCode && profile_id == CLAUDE_DEFAULT_SUPPLIER_ID {
@@ -3967,6 +3979,43 @@ mod tests {
             )
             .unwrap();
         assert_eq!(snapshot, "codex-profile");
+    }
+
+    #[test]
+    fn codex_default_supplier_resolves_without_active_profile() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, provider_id, model, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                "session-codex-default",
+                "Codex",
+                "codex",
+                None::<String>,
+                "gpt-5.6-sol",
+                "agent",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+        let config = crate::config::types::AppConfig::default();
+        let state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(config),
+            provider_profile_operation_lock: std::sync::Mutex::new(()),
+            app_data_dir: std::path::PathBuf::new(),
+        };
+
+        let resolved = resolve_active_runtime_config(&state, "session-codex-default").unwrap();
+
+        assert_eq!(resolved.profile_id, "");
+        assert_eq!(resolved.api_key, None);
+        assert_eq!(resolved.base_url, None);
+        assert_eq!(resolved.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(resolved.codex_needs_proxy, None);
+        assert_eq!(resolved.provider, None);
+        assert_eq!(resolved.credential_source, None);
     }
 
     #[test]
