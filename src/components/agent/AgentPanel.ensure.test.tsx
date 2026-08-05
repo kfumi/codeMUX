@@ -241,6 +241,22 @@ describe('AgentPanel session bootstrapping', () => {
     });
   });
 
+  it('enables sending for a Codex session using the default supplier (no active profile)', () => {
+    useSessionStore.setState({
+      sessions: [{
+        ...useSessionStore.getState().sessions[0],
+        agent_kind: 'codex',
+        provider_id: null,
+        model: null,
+      }],
+    });
+    useAgentStore.setState({ isRunning: { 'session-running': false } });
+
+    render(<AgentPanel sessionId="session-running" />);
+
+    expect(screen.getByRole('button', { name: 'change model' })).toHaveProperty('disabled', false);
+  });
+
   it('persists reasoning changes for the session provider', async () => {
     useSessionStore.setState((state) => ({
       ...state,

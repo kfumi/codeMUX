@@ -107,7 +107,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const modelNameWithSuffix = useMemo(() => model ? formatSelectedProviderModel(model) : undefined, [model, formatSelectedProviderModel]);
   const usesClaudeDefault = agentKind === 'claude_code' && !runtimeProfile && !activeProfileId;
   const usesOpenCodeFree = agentKind === 'opencode' && !runtimeProfile && !activeProfileId;
-  const hasUsableProfile = usesClaudeDefault || usesOpenCodeFree || !isProfileAgent || Boolean(runtimeProfile && model);
+  const usesCodexDefault = agentKind === 'codex' && !runtimeProfile && !activeProfileId;
+  const hasUsableProfile = usesClaudeDefault || usesOpenCodeFree || usesCodexDefault || !isProfileAgent || Boolean(runtimeProfile && model);
   const rawPermissionConfig = useMemo(() => {
     if (!session?.permission_config) return null;
     try {

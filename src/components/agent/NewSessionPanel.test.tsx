@@ -415,6 +415,29 @@ describe('NewSessionPanel', () => {
     expect(onSubmit).toHaveBeenCalledWith({ text: 'Ship the feature' });
   });
 
+  it('allows a default Codex conversation with default models', async () => {
+    const onSubmit = vi.fn();
+    useNewSessionStore.setState({
+      selectedAgentKind: 'codex',
+    });
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config ? {
+        ...state.config,
+        agent_profile_registry: { profiles: [], active_profile_ids: {} },
+      } : null,
+    }));
+
+    render(<NewSessionPanel onSubmit={onSubmit} />);
+
+    expect(composerProps.at(-1)?.disabled).toBe(false);
+
+    const runtimeSend = [...composerProps].reverse().find((props) => props.onSend)?.onSend;
+    await runtimeSend?.('Ship the feature');
+
+    expect(onSubmit).toHaveBeenCalledWith({ text: 'Ship the feature' });
+  });
+
   it('keeps normal Codex plan mode draft sends as the original user text', async () => {
     const onSubmit = vi.fn();
     useNewSessionStore.setState({ selectedAgentKind: 'codex' });

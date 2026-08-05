@@ -49,6 +49,10 @@ function isCurrentDraftSubmissionAvailable(
       || renderedModels.some((model) => model.id === currentStore.selectedModel)
       || currentStore.selectedModel.startsWith('opencode/');
   }
+  if (currentAgentKind === 'codex' && !activeProfileId) {
+    return !currentStore.selectedModel
+      || renderedModels.some((model) => model.id === currentStore.selectedModel);
+  }
   if (!activeProfileId || !activeProfile || areModelsLoading) return false;
 
   if (!currentStore.selectedModel) {
@@ -102,21 +106,20 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const selectedModelBelongsToActiveProfile = !selectedModel || activeProfile?.models.some((model) => model.id === selectedModel);
   const usesClaudeDefault = selectedAgentKind === 'claude_code' && !activeProfileId;
   const usesOpenCodeFree = selectedAgentKind === 'opencode' && !activeProfileId;
+  const usesCodexDefault = selectedAgentKind === 'codex' && !activeProfileId;
   const hasUsableProfile = !isProfileAgent
-    || (usesClaudeDefault
+    || (usesClaudeDefault || usesOpenCodeFree || usesCodexDefault
       ? Boolean(!selectedModel || (!areModelsLoading && selectedModelIsAvailable))
-      : (usesOpenCodeFree
-        ? Boolean(!selectedModel || (!areModelsLoading && selectedModelIsAvailable))
-        : Boolean(
-          activeProfileId
-            && effectiveModel
-            && !areModelsLoading
-            && selectedModelIsAvailable
-            && (selectedModelBelongsToActiveProfile
-              || selectedAgentKind === 'claude_code' && CLAUDE_CODE_BUILTIN_MODEL_IDS.has(selectedModel ?? '')
-              || selectedAgentKind === 'codex'
-              || selectedAgentKind === 'opencode'),
-        )));
+      : Boolean(
+        activeProfileId
+          && effectiveModel
+          && !areModelsLoading
+          && selectedModelIsAvailable
+          && (selectedModelBelongsToActiveProfile
+            || selectedAgentKind === 'claude_code' && CLAUDE_CODE_BUILTIN_MODEL_IDS.has(selectedModel ?? '')
+            || selectedAgentKind === 'codex'
+            || selectedAgentKind === 'opencode'),
+      ));
 
   const draftProject = useMemo(
     () => projects.find((project) => project.id === draftProjectId) ?? null,
