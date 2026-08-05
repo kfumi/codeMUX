@@ -14,7 +14,7 @@ import {
   CodeMuxAssistantRuntimeProvider,
   resolveSlashCommand,
 } from './CodeMuxAssistantRuntime';
-import { CodeMuxThread, buildToolDurationMap } from './CodeMuxThread';
+import { CodeMuxThread, buildToolDurationMap, extractUserNavTitle } from './CodeMuxThread';
 
 const sessionOneEvents: AgentMessage[] = [
   { kind: 'user', data: { content: 'session one user' } },
@@ -162,6 +162,13 @@ const groupedToolEvents: AgentMessage[] = [
 
 const directiveUserEvents: AgentMessage[] = [
   { kind: 'user', data: { content: '/review @src/App.tsx please check this' } },
+];
+
+const skillDirectiveUserEvents: AgentMessage[] = [
+  {
+    kind: 'user',
+    data: { content: '[$to-spec](C:\\Users\\94910\\.codemux\\skills\\to-spec\\SKILL.md) 下面是我和codex对话得到的计划，生成spec:' },
+  },
 ];
 
 const longUserText = Array.from({ length: 80 }, (_, index) => `line ${index + 1}`).join('\n');
@@ -906,6 +913,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-reasoning': reasoningEvents,
         'session-grouped-tools': groupedToolEvents,
         'session-directives': directiveUserEvents,
+        'session-skill-directive': skillDirectiveUserEvents,
         'session-long-user': longUserEvents,
         'session-image-only': imageOnlyUserEvents,
         'session-image-text': imageAndTextUserEvents,
@@ -1484,6 +1492,15 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(container.querySelector('[data-user-message-bubble]')?.textContent).toContain('please check this');
   });
 
+  it('renders skill-link directives with the visible command treatment in user messages', () => {
+    const { container } = render(<Harness sessionId="session-skill-directive" />);
+    const chip = container.querySelector('[data-user-message-bubble] [data-directive-type="command"]');
+
+    expect(chip).toBeTruthy();
+    expect((chip as HTMLElement).style.color).toBe('hsl(var(--codemux-directive-accent, 221 83% 46%))');
+    expect(chip?.querySelector('.lucide-wand-sparkles')).toBeTruthy();
+  });
+
   it('shows rewind only on the latest user message and rewinds only after inline edit send', async () => {
     const rewindLastTurn = vi.fn().mockResolvedValue({ text: '琛ュ厖娴嬭瘯瑕嗙洊' });
     const onSend = vi.fn(async () => {});
@@ -1729,7 +1746,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(viewport.scrollTop).toBe(1000);
   });
 
-  it('keeps a historical conversation at the bottom when a new message commits asynchronously', async () => {
+  it('scrolls a new message to the bottom after scrolling up in a historical conversation', async () => {
     const historySessionId = 'session-1';
     const { container } = render(<Harness sessionId={historySessionId} />);
     const viewport = container.querySelector('[data-testid="thread-viewport"]') as HTMLElement;
@@ -2007,6 +2024,22 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(within(nav).getByText('修复子智能体展示')).toBeTruthy();
     expect(within(nav).getByText(/已按计划完成这次修复，核心路径都接上了/)).toBeTruthy();
     expect(within(nav).queryByText('我先检查现有实现。')).toBeNull();
+  });
+
+  it('keeps long navigation titles on one line and lets the preview truncate them by width', () => {
+    const title = '我这次项目重构为Electron桌面应用的完整实施计划';
+
+    expect(extractUserNavTitle(title)).toBe(title);
+
+    render(<Harness sessionId="session-nav" />);
+    const nav = screen.getByTestId('message-nav');
+    const firstNavButton = screen.getByRole('button', { name: /跳转到消息 修复子智能体展示/ });
+    fireEvent.mouseEnter(firstNavButton);
+
+    const titleElement = within(nav).getByText('修复子智能体展示');
+    expect(titleElement.className).toContain('truncate');
+    expect(titleElement.className).toContain('whitespace-nowrap');
+    expect(titleElement.className).toContain('w-full');
   });
 
   it('hides the message navigation when the thread viewport becomes narrow', async () => {

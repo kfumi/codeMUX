@@ -108,7 +108,7 @@ export function SlashCommandMenu({ commands, selectedIndex, onSelect, visible }:
                     <div className="flex-1 min-w-0 flex items-center gap-2">
                       <span
                         className="text-ui-compact font-medium shrink-0"
-                        style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                        style={{ fontFamily: 'var(--font-ui)' }}
                       >
                         /{cmd.name}
                       </span>

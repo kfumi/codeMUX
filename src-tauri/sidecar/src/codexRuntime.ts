@@ -54,6 +54,14 @@ type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
 type UpdatePermissionsCommand = Extract<SidecarCommand, { type: 'update_permissions' }>;
 const DEFAULT_SHELL_COMMAND_TIMEOUT_MS = 10000;
 
+// These tools already have a complete lifecycle in the SDK item stream. The
+// JSONL tailer is reserved for native tools that the SDK does not expose.
+const CODEX_SDK_OWNED_TOOL_NAMES = new Set([
+  'shell_command',
+  'apply_patch',
+  'WebSearch',
+]);
+
 // Gate per-event stderr logs for debugging. Enable with CODEMUX_CODEX_DEBUG=1.
 const CODEX_DEBUG_LOGS = process.env.CODEMUX_CODEX_DEBUG === '1';
 
@@ -132,6 +140,13 @@ function emptyUsage(): Usage {
   };
 }
 
+function isCodexSdkOwnedToolName(name: string): boolean {
+  return CODEX_SDK_OWNED_TOOL_NAMES.has(name)
+    || name.startsWith('mcp__')
+    || name.startsWith('list_mcp_')
+    || name.startsWith('read_mcp_');
+}
+
 function normalizeUsage(usage: Partial<Usage>): Usage {
   return {
     input_tokens: readUsageNumber(usage.input_tokens),
@@ -185,6 +200,7 @@ export class CodexSessionRuntime {
   private nativeSessionEventTailer: CodexSessionEventTailer | null = null;
   private nativeSessionEventTailerTimer: ReturnType<typeof setInterval> | null = null;
   private nativeSessionEventTailerThreadId: string | null = null;
+  private ignoredNativeToolUseIds = new Set<string>();
   private blockedPlanMutationItemIds = new Set<string>();
   private activeCompactItemIds = new Set<string>();
   private emittedCompactItemIds = new Set<string>();
@@ -925,7 +941,15 @@ export class CodexSessionRuntime {
 
   private handleNativeSessionTailEvent(sessionId: string, event: CodexSessionTailEvent): void {
     if (event.type === 'tool_use') {
+      if (isCodexSdkOwnedToolName(event.name)) {
+        this.ignoredNativeToolUseIds.add(event.id);
+        return;
+      }
       this.emitTurnEvent(sessionId, { kind: 'tool_started', toolUseId: event.id, name: event.name, input: event.input });
+      return;
+    }
+
+    if (this.ignoredNativeToolUseIds.delete(event.toolUseId)) {
       return;
     }
 
@@ -934,6 +958,7 @@ export class CodexSessionRuntime {
   private async finishTurn(): Promise<void> {
     await this.flushAndStopNativeSessionEventTailer();
     this.streamingItemState.clear();
+    this.ignoredNativeToolUseIds.clear();
     this.blockedPlanMutationItemIds.clear();
     this.activeCompactItemIds.clear();
     emit({ type: 'sidecar_query_done' });
@@ -970,6 +995,7 @@ export class CodexSessionRuntime {
     this.streamingItemState.clear();
     this.todoListState.clear();
     await this.flushAndStopNativeSessionEventTailer();
+    this.ignoredNativeToolUseIds.clear();
     this.blockedPlanMutationItemIds.clear();
     this.activeCompactItemIds.clear();
     this.emittedCompactItemIds.clear();

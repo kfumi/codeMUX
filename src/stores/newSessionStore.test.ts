@@ -9,6 +9,7 @@ describe('new session store', () => {
       selectedModel: null,
       selectedReasoningEffort: 'medium',
       draftProjectId: null,
+      draftRevision: 0,
       isDraftOpen: false,
     });
   });
@@ -40,6 +41,23 @@ describe('new session store', () => {
 
     expect(useNewSessionStore.getState().isDraftOpen).toBe(true);
     expect(useNewSessionStore.getState().draftProjectId).toBeNull();
+    expect(useNewSessionStore.getState().draftRevision).toBe(1);
+  });
+
+  it('increments the draft revision when opening another draft without unmounting the panel', () => {
+    useNewSessionStore.getState().openDraft();
+    useNewSessionStore.getState().openDraft();
+
+    expect(useNewSessionStore.getState().draftRevision).toBe(2);
+  });
+
+  it('uses the configured permission when opening a draft', () => {
+    useNewSessionStore.getState().openDraft(null, { kind: 'claude_code', permissionMode: 'acceptEdits' });
+
+    expect(useNewSessionStore.getState().selectedPermissionConfig).toEqual({
+      kind: 'claude_code',
+      permissionMode: 'acceptEdits',
+    });
   });
 
   it('tracks and clears the project when closing a project draft', () => {

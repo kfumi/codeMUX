@@ -327,7 +327,9 @@ export function AskUserQuestionCard({
                 <span
                   className={cn(
                     'flex shrink-0 items-center justify-center border text-ui-caption font-semibold',
-                    isComposer ? 'h-5 w-5 rounded-full' : q.multiSelect ? 'h-4 w-4 rounded-sm' : 'h-4 w-4 rounded-full',
+                    isComposer
+                      ? cn('h-5 w-5', q.multiSelect ? 'rounded-sm' : 'rounded-full')
+                      : q.multiSelect ? 'h-4 w-4 rounded-sm' : 'h-4 w-4 rounded-full',
                     selected
                       ? 'border-foreground bg-foreground text-background'
                       : 'border-muted-foreground/30 text-muted-foreground',

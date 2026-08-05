@@ -238,6 +238,38 @@ describe('AskUserQuestionCard', () => {
     expect(screen.getByRole('tablist').querySelectorAll('svg')).toHaveLength(0);
   });
 
+  it('uses square controls for composer multi-select options and round controls for single-select options', () => {
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="composer-shapes-1"
+        variant="composer"
+        questions={[
+          { question: '选择多个', multiSelect: true, options: [{ label: '甲' }] },
+          { question: '选择一个', multiSelect: false, options: [{ label: '乙' }] },
+        ]}
+      />,
+    );
+
+    const multiSelectControl = screen.getByText('甲').closest('button')?.firstElementChild?.firstElementChild;
+
+    expect(multiSelectControl?.className).toContain('rounded-sm');
+    expect(multiSelectControl?.className).not.toContain('rounded-full');
+
+    cleanup();
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="composer-shapes-2"
+        variant="composer"
+        questions={[{ question: '选择一个', multiSelect: false, options: [{ label: '乙' }] }]}
+      />,
+    );
+
+    const singleSelectControl = screen.getByText('乙').closest('button')?.firstElementChild?.firstElementChild;
+    expect(singleSelectControl?.className).toContain('rounded-full');
+  });
+
   it('submits the plan approval input as the answer when it is focused', async () => {
     sendToolResponse.mockResolvedValue(undefined);
 

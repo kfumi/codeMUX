@@ -1303,6 +1303,93 @@ describe('CodexSessionRuntime', () => {
       stdoutSpy.mockRestore();
     }
   });
+
+  it('does not duplicate SDK-owned shell commands from native JSONL events', () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      const emitItemEvent = (
+        runtime as unknown as {
+          emitItemEvent: (
+            sessionId: string,
+            eventType: 'item.started' | 'item.updated' | 'item.completed',
+            item: ThreadEvent extends { item: infer T } ? T : never,
+            emitFailure: (message: string) => void,
+          ) => void;
+        }
+      ).emitItemEvent.bind(runtime);
+      const handleNativeSessionTailEvent = (
+        runtime as unknown as {
+          handleNativeSessionTailEvent: (sessionId: string, event: unknown) => void;
+        }
+      ).handleNativeSessionTailEvent.bind(runtime);
+
+      emitItemEvent(
+        'session-1',
+        'item.started',
+        {
+          id: 'item-command-1',
+          type: 'command_execution',
+          command: 'node --version',
+          aggregated_output: '',
+          status: 'in_progress',
+        },
+        () => {},
+      );
+      handleNativeSessionTailEvent('session-1', {
+        type: 'tool_use',
+        id: 'call-command-1',
+        name: 'shell_command',
+        input: { command: 'node --version' },
+      });
+      emitItemEvent(
+        'session-1',
+        'item.completed',
+        {
+          id: 'item-command-1',
+          type: 'command_execution',
+          command: 'node --version',
+          aggregated_output: 'v22.0.0',
+          status: 'completed',
+        },
+        () => {},
+      );
+      handleNativeSessionTailEvent('session-1', {
+        type: 'tool_result',
+        toolUseId: 'call-command-1',
+        content: 'v22.0.0',
+        isError: false,
+      });
+
+      const events = writes
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+
+      expect(events).toEqual([
+        expect.objectContaining({
+          type: 'tool_started',
+          tool_use_id: 'item-command-1',
+          name: 'shell_command',
+        }),
+        expect.objectContaining({
+          type: 'tool_finished',
+          tool_use_id: 'item-command-1',
+          content: 'v22.0.0',
+        }),
+      ]);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
   it('emits Codex todo lists as state events instead of chat tool messages', () => {
     const writes: string[] = [];
     const stdoutSpy = vi

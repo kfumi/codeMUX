@@ -25,6 +25,17 @@ describe('CodeMuxDirectiveText', () => {
 
     expect(chip).toBeTruthy();
     expect(chip?.className).toContain('codemux-directive-command');
+    expect(chip?.querySelector('.lucide-wand-sparkles')).toBeTruthy();
+    expect((chip as HTMLElement).style.color).toBe('hsl(var(--codemux-directive-accent, 221 83% 46%))');
+  });
+
+  it('uses a readable foreground for command chips in the user-message tone', () => {
+    render(<CodeMuxDirectiveText text="/visible-command" tone="inverted" />);
+
+    const chip = screen.getByText('visible-command').closest('[data-directive-type="command"]');
+
+    expect(chip?.className).toContain('text-[hsl(var(--codemux-directive-accent))]');
+    expect(chip?.className).toContain('bg-[hsl(var(--codemux-directive-bg))]');
   });
 
   it('does not parse inline URL separators in logs as file directives', () => {

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { File, Folder, Terminal } from 'lucide-react';
+import { File, Folder, WandSparkles } from 'lucide-react';
 
 import { cn } from '../../../lib/utils';
 
@@ -41,27 +41,33 @@ export function CodeMuxDirectiveChip({
   const isCommand = kind === 'command';
   const isDirectory = kind === 'directory';
 
-  const Icon = isCommand ? Terminal : isDirectory ? Folder : File;
+  const Icon = isCommand ? WandSparkles : isDirectory ? Folder : File;
 
   return (
     <span
       data-directive-type={kind}
       data-directive-value={value}
+      style={isCommand ? {
+        // Keep command chips independent from the user-selected accent color.
+        color: 'hsl(var(--codemux-directive-accent, 221 83% 46%))',
+        borderColor: 'hsl(var(--codemux-directive-border, 214 100% 82%))',
+        backgroundColor: 'hsl(var(--codemux-directive-bg, 214 100% 93%))',
+      } : undefined}
       className={cn(
         'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs font-medium align-baseline',
         tone === 'inverted'
           ? isCommand
-            ? 'codemux-directive-command border-[hsl(var(--accent)/0.42)] bg-[hsl(var(--accent)/0.22)] text-[hsl(var(--accent))]'
+            ? 'codemux-directive-command border-[hsl(var(--codemux-directive-border))] bg-[hsl(var(--codemux-directive-bg))] text-[hsl(var(--codemux-directive-accent))]'
             : 'codemux-directive-file border-[hsl(var(--primary)/0.24)] bg-[hsl(var(--primary)/0.14)] text-[hsl(var(--primary))]'
           : isCommand
-            ? 'codemux-directive-command border-[hsl(var(--accent)/0.26)] bg-[hsl(var(--accent)/0.14)] text-[hsl(var(--accent))]'
+            ? 'codemux-directive-command border-[hsl(var(--codemux-directive-border))] bg-[hsl(var(--codemux-directive-bg))] text-[hsl(var(--codemux-directive-accent))]'
             : 'codemux-directive-file border-[hsl(var(--primary)/0.2)] bg-[hsl(var(--primary)/0.12)] text-[hsl(var(--primary))]',
         className,
       )}
       contentEditable={false}
     >
       <Icon className="h-3 w-3 shrink-0" />
-      <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{label}</span>
+      <span style={{ fontFamily: 'var(--font-ui)' }}>{label}</span>
     </span>
   );
 }

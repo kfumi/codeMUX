@@ -13,6 +13,7 @@ import { createLogger, serializeError } from './lib/logger';
 import type { AgentInputPayload } from './types/agentInput';
 import { getStoredAgentCwd, resolveSessionCwd } from './lib/sessionCwd';
 import { registerSkillCommands } from './lib/slashCommands';
+import { serializePermissionConfig } from './lib/agentPermissions';
 import { useAgentStore } from './stores/agentStore';
 import './stores/appearanceStore';
 import { useNewSessionStore } from './stores/newSessionStore';
@@ -119,7 +120,15 @@ function App() {
     setActiveView('app');
     setActiveSession(null);
     setActiveProject(projectId ?? null);
-    openDraft(projectId);
+    const newSessionState = useNewSessionStore.getState();
+    const settingsConfig = useSettingsStore.getState().config;
+    const configuredPermissionConfig = newSessionState.selectedAgentKind === 'codex'
+      ? settingsConfig?.agent_configs.codex.permission_config
+      : settingsConfig?.agent_configs.claude_code.permission_config;
+    openDraft(
+      projectId,
+      serializePermissionConfig(newSessionState.selectedAgentKind, configuredPermissionConfig),
+    );
   };
 
   const handleStartNewSession = async (input: AgentInputPayload) => {

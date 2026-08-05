@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useNewSessionStore } from '../../stores/newSessionStore';
@@ -90,7 +90,11 @@ describe('NewSessionPanel', () => {
       selectedAgentKind: 'claude_code',
       selectedModel: null,
       selectedReasoningEffort: 'medium',
+      selectedPermissionConfig: { kind: 'claude_code', permissionMode: 'default' },
+      selectedPlanMode: 'off',
       draftProjectId: null,
+      draftRevision: 0,
+      isDraftOpen: false,
     });
     useSettingsStore.setState((state) => ({
       ...state,
@@ -200,6 +204,43 @@ describe('NewSessionPanel', () => {
     });
 
     expect(useNewSessionStore.getState().selectedReasoningEffort).toBe('high');
+  });
+
+  it('reloads the configured permission when a second draft opens in the same panel', async () => {
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config ? {
+        ...state.config,
+        agent_configs: {
+          ...state.config.agent_configs,
+          claude_code: {
+            ...state.config.agent_configs.claude_code,
+            permission_config: { kind: 'claude_code', permissionMode: 'acceptEdits' },
+          },
+        },
+      } : null,
+    }));
+
+    render(<NewSessionPanel onSubmit={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(useNewSessionStore.getState().selectedPermissionConfig).toEqual({
+        kind: 'claude_code',
+        permissionMode: 'acceptEdits',
+      });
+    });
+
+    act(() => {
+      useNewSessionStore.getState().setSelectedPermissionConfig({ kind: 'claude_code', permissionMode: 'default' });
+      useNewSessionStore.getState().openDraft();
+    });
+
+    await waitFor(() => {
+      expect(useNewSessionStore.getState().selectedPermissionConfig).toEqual({
+        kind: 'claude_code',
+        permissionMode: 'acceptEdits',
+      });
+    });
   });
 
   it('does not render provider switching and only exposes the active provider models', () => {

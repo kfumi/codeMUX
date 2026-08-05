@@ -727,7 +727,7 @@ export function extractUserNavTitle(text: string): string {
     .map((line) => cleanNavText(line))
     .find((line) => line.length > 0) ?? '用户消息';
 
-  return truncateNavText(firstLine, 16);
+  return firstLine;
 }
 
 export function extractAssistantNavSummary(
@@ -1004,8 +1004,8 @@ function MessageNav({
               />
             </button>
             {previewEventIndex === item.eventIndex ? (
-              <div className="pointer-events-none absolute left-full top-1/2 ml-3 w-[min(20rem,calc(100vw-6rem))] -translate-y-1/2 overflow-hidden rounded-[10px] border border-border/45 bg-[hsl(var(--popover))]/94 px-3 py-2.5 text-popover-foreground shadow-[0_18px_46px_-26px_hsl(var(--surface-shadow-strong)/0.58),0_0_0_1px_hsl(var(--background)/0.45)] backdrop-blur-md animate-in fade-in fill-mode-forwards animation-duration-[220ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
-                <div className="truncate text-xs font-semibold leading-5 text-foreground">
+              <div className="pointer-events-none absolute left-full top-1/2 ml-3 w-80 max-w-[calc(100vw-6rem)] -translate-y-1/2 overflow-hidden rounded-[10px] border border-border/45 bg-[hsl(var(--popover))]/94 px-3 py-2.5 text-popover-foreground shadow-[0_18px_46px_-26px_hsl(var(--surface-shadow-strong)/0.58),0_0_0_1px_hsl(var(--background)/0.45)] backdrop-blur-md animate-in fade-in fill-mode-forwards animation-duration-[220ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+                <div className="block w-full min-w-0 truncate whitespace-nowrap text-xs font-semibold leading-5 text-foreground">
                   {item.title}
                 </div>
                 {item.summary ? (

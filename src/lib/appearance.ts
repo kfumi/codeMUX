@@ -95,6 +95,19 @@ export const DEFAULT_PREFS: AppearancePrefs = {
   contentWidth: 'fixed',
 };
 
+const DIRECTIVE_CHIP_COLORS = {
+  light: {
+    accent: '221 83% 46%',
+    background: '214 100% 93%',
+    border: '214 100% 82%',
+  },
+  dark: {
+    accent: '211 100% 72%',
+    background: '211 68% 28%',
+    border: '211 68% 43%',
+  },
+} as const;
+
 const STORAGE_KEY = 'codemux:appearance';
 
 export function loadPrefs(): AppearancePrefs {
@@ -142,6 +155,10 @@ export function applyAppearance(prefs: AppearancePrefs, isDark: boolean): void {
   root.style.setProperty('--primary-foreground', accentForeground);
   root.style.setProperty('--ring', accentColor);
   root.style.setProperty('--glow', accentColor);
+  const directiveChipColors = isDark ? DIRECTIVE_CHIP_COLORS.dark : DIRECTIVE_CHIP_COLORS.light;
+  root.style.setProperty('--codemux-directive-accent', directiveChipColors.accent);
+  root.style.setProperty('--codemux-directive-bg', directiveChipColors.background);
+  root.style.setProperty('--codemux-directive-border', directiveChipColors.border);
   root.style.setProperty('--radius', RADII[prefs.radius]);
   root.style.setProperty('--content-width', CONTENT_WIDTHS[prefs.contentWidth]);
   root.style.setProperty('--font-ui', UI_FONTS[prefs.uiFont].family);

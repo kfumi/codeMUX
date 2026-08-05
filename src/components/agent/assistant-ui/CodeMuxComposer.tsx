@@ -1107,7 +1107,7 @@ function TriggerMenuItem({
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium text-foreground" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+          <span className="truncate text-sm font-medium text-foreground" style={{ fontFamily: 'var(--font-ui)' }}>
             {item.label}
           </span>
           {getItemArgsHint(item) && <span className="shrink-0 text-xs text-muted-foreground">{getItemArgsHint(item)}</span>}

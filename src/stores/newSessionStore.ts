@@ -14,8 +14,9 @@ interface NewSessionState {
   selectedPermissionConfig: AgentPermissionConfig;
   selectedPlanMode: AgentPlanMode;
   draftProjectId: string | null;
+  draftRevision: number;
   isDraftOpen: boolean;
-  openDraft: (projectId?: string | null) => void;
+  openDraft: (projectId?: string | null, permissionConfig?: AgentPermissionConfig) => void;
   closeDraft: () => void;
   setSelectedAgentKind: (agentKind: AgentKind) => void;
   setSelectedModel: (model: string | null) => void;
@@ -31,13 +32,15 @@ export const useNewSessionStore = create<NewSessionState>((set) => ({
   selectedPermissionConfig: buildDefaultPermissionConfig('claude_code'),
   selectedPlanMode: 'off',
   draftProjectId: null,
+  draftRevision: 0,
   isDraftOpen: false,
-  openDraft: (draftProjectId = null) => set((state) => ({
+  openDraft: (draftProjectId = null, permissionConfig) => set((state) => ({
     draftProjectId,
+    draftRevision: state.draftRevision + 1,
     isDraftOpen: true,
     selectedModel: null,
     selectedReasoningEffort: 'medium',
-    selectedPermissionConfig: buildDefaultPermissionConfig(state.selectedAgentKind),
+    selectedPermissionConfig: permissionConfig ?? buildDefaultPermissionConfig(state.selectedAgentKind),
     selectedPlanMode: 'off',
   })),
   closeDraft: () => set((state) => ({

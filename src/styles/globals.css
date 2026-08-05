@@ -129,6 +129,9 @@
     --surface-edge: 0 0% 84%;
     --surface-glow: 209 99% 40%;
     --layout-divider: var(--border);
+    --codemux-directive-accent: 221 83% 46%;
+    --codemux-directive-bg: 214 100% 93%;
+    --codemux-directive-border: 214 100% 82%;
   }
 
   .dark {
@@ -170,6 +173,9 @@
     --surface-edge: 0 0% 19%;
     --surface-glow: 209 92% 58%;
     --layout-divider: var(--border);
+    --codemux-directive-accent: 211 100% 72%;
+    --codemux-directive-bg: 211 68% 28%;
+    --codemux-directive-border: 211 68% 43%;
   }
 
   * {

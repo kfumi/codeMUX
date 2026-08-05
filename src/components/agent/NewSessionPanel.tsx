@@ -76,6 +76,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     selectedReasoningEffort,
     selectedPermissionConfig,
     selectedPlanMode,
+    draftRevision,
     setSelectedAgentKind,
     setSelectedModel,
     setSelectedReasoningEffort,
@@ -152,6 +153,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   }, [
     config?.agent_configs.claude_code.permission_config,
     config?.agent_configs.codex.permission_config,
+    draftRevision,
     selectedAgentKind,
     setSelectedPermissionConfig,
     setSelectedPlanMode,
