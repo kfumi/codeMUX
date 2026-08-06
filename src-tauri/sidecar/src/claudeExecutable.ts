@@ -10,6 +10,8 @@ type ResolveClaudeExecutableParams = {
   pathClaude?: string;
   platform?: SupportedPlatform;
   sidecarDir: string;
+  /** 外部 Runtime 路径（来自 ProviderRuntimeRef）。优先于 bundled 和 PATH。 */
+  runtimePath?: string;
 };
 
 function packageNameFor(platform: SupportedPlatform, arch: SupportedArch): string | undefined {
@@ -49,6 +51,13 @@ function bundledClaudePath(sidecarDir: string, platform: SupportedPlatform, arch
   return path.resolve(sidecarDir, '..', 'node_modules', packageName, binaryNameFor(platform));
 }
 
+function runtimeClaudePath(runtimePath: string, platform: SupportedPlatform, arch: SupportedArch): string | undefined {
+  const packageName = packageNameFor(platform, arch);
+  if (!packageName) return undefined;
+
+  return path.resolve(runtimePath, 'node_modules', packageName, binaryNameFor(platform));
+}
+
 export function resolveClaudeExecutable(params: ResolveClaudeExecutableParams): string | undefined {
   const {
     arch = process.arch,
@@ -56,13 +65,24 @@ export function resolveClaudeExecutable(params: ResolveClaudeExecutableParams): 
     pathClaude,
     platform = process.platform,
     sidecarDir,
+    runtimePath,
   } = params;
 
+  // 优先：外部 Runtime 路径
+  if (runtimePath) {
+    const runtimePath_result = runtimeClaudePath(runtimePath, platform, arch);
+    if (runtimePath_result && fileExists(runtimePath_result)) {
+      return runtimePath_result;
+    }
+  }
+
+  // 次选：bundled node_modules（向后兼容，Ticket 07 移除）
   const bundled = bundledClaudePath(sidecarDir, platform, arch);
   if (bundled && fileExists(bundled)) {
     return bundled;
   }
 
+  // 兜底：PATH 上的 claude
   if (pathClaude && fileExists(pathClaude)) {
     return pathClaude;
   }

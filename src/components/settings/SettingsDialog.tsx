@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Archive, ArrowLeft, BarChart3, Bot, FileText, Info, Palette, Plug, Puzzle, Server, Settings, Terminal } from 'lucide-react';
+import { Archive, ArrowLeft, BarChart3, Bot, FileText, Info, Palette, Plug, Puzzle, Server, Settings, Terminal, Zap } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
 import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
@@ -11,6 +11,7 @@ import { GeneralSettings } from './GeneralSettings';
 import { LogSettings } from './LogSettings';
 import { McpSettingsPanel } from './McpSettings';
 import { ProviderConfigPanel } from './ProviderConfig';
+import { RuntimeSettingsPanel } from './RuntimeSettings';
 import { SkillsSettingsPanel } from './SkillsSettings';
 import { ThemeToggle } from './ThemeToggle';
 import { UsageStatistics } from './UsageStatistics';
@@ -19,7 +20,7 @@ interface SettingsViewProps {
   onBack: () => void;
 }
 
-export type SettingsTab = 'general' | 'appearance' | 'provider' | 'agents' | 'mcp' | 'skills' | 'usage' | 'archive' | 'environment' | 'logs' | 'about';
+export type SettingsTab = 'general' | 'appearance' | 'provider' | 'runtime' | 'agents' | 'mcp' | 'skills' | 'usage' | 'archive' | 'environment' | 'logs' | 'about';
 
 interface SettingsSidebarProps {
   activeTab: SettingsTab;
@@ -35,6 +36,7 @@ const primaryTabs = [
   { id: 'general' as const, label: '常规', description: '应用级的通用信息与偏好设置。', icon: Settings },
   { id: 'appearance' as const, label: '外观', description: '自定义应用主题与视觉风格。', icon: Palette },
   { id: 'provider' as const, label: '供应商配置', description: '管理 AI 供应商，激活的供应商将用于智能体。', icon: Plug },
+  { id: 'runtime' as const, label: '运行时环境', description: '管理 CodeMUX 托管的 SDK Runtime，安装、更新、修复和删除 Claude / Codex / OpenCode Runtime。', icon: Zap },
   { id: 'agents' as const, label: '智能体引擎', description: '一键检测本机智能体 CLI、版本与配置文件，设置默认引擎与 Claude Code 默认权限。', icon: Bot },
   { id: 'mcp' as const, label: 'MCP', description: '管理 MCP 服务器，为智能体扩展工具与能力。', icon: Server },
   { id: 'skills' as const, label: 'Skills', description: '查看、卸载已安装的 skills，从各智能体工具导入。', icon: Puzzle },
@@ -114,6 +116,7 @@ export function SettingsContent({ activeTab }: SettingsContentProps) {
         {activeTab === 'general' && <GeneralSettings />}
         {activeTab === 'appearance' && <ThemeToggle />}
         {activeTab === 'provider' && <ProviderConfigPanel />}
+        {activeTab === 'runtime' && <RuntimeSettingsPanel />}
         {activeTab === 'agents' && <AgentSettingsPanel />}
         {activeTab === 'mcp' && <McpSettingsPanel />}
         {activeTab === 'skills' && <SkillsSettingsPanel />}

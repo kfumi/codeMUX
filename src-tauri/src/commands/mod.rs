@@ -6,6 +6,7 @@ pub mod mcp;
 pub mod perf;
 pub mod project;
 pub mod provider;
+pub mod runtime;
 pub mod session;
 pub mod terminal;
 pub mod usage;

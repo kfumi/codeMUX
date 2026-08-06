@@ -1,12 +1,12 @@
-import { createOpencodeClient } from '@opencode-ai/sdk/client';
 import type { Config } from '@opencode-ai/sdk';
-import { createOpencodeServer } from '@opencode-ai/sdk/server';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareOpenCodeExecutable } from './opencodeExecutable.js';
 import type { AgentInputImage, AgentInputPayload } from './agentInputPayload.js';
 import type { OpenCodeNativePermissionResponse } from './opencodePermissions.js';
 import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
+import { loadProviderRuntime, isRuntimeError, type RuntimeLoadOutcome } from './runtimeLoader.js';
+import { loadOpenCodeClientSdk, loadOpenCodeServerSdk } from './sdkLoader.js';
 
 export interface OpenCodeServerHandle {
   close(): void | Promise<void>;
@@ -75,6 +75,8 @@ export interface OpenCodeSdkStartInput {
   baseUrl?: string;
   credentialSource: 'codemux' | 'environment' | 'opencode' | 'none';
   serverCloseTimeoutMs?: number;
+  /** 外部 Runtime 路径（来自 ProviderRuntimeRef）。 */
+  runtimePath?: string;
 }
 
 export function normalizeOpenCodeModelReference(model: string): { provider: string; model: string } {
@@ -272,9 +274,33 @@ function toOpenCodeImage(image: AgentInputImage): OpenCodeImageInput {
   };
 }
 
+/**
+ * 从 runtimePath 加载 Provider Runtime，返回 RuntimeLoadOutcome。
+ * 如果没有 runtimePath（开发模式），返回 null 以触发 sidecar node_modules 回退。
+ */
+function loadRuntimeFromPath(runtimePath?: string): RuntimeLoadOutcome | null {
+  if (!runtimePath) return null;
+  const ref = {
+    provider: 'opencode' as const,
+    runtimeRoot: '',
+    runtimePath,
+    runtimeVersion: '',
+  };
+  return loadProviderRuntime(ref);
+}
+
 export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
-  async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS }) {
-    prepareOpenCodeExecutable({ sidecarDir: SIDECAR_DIST_DIR });
+  async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS, runtimePath }) {
+    prepareOpenCodeExecutable({ sidecarDir: SIDECAR_DIST_DIR, runtimePath });
+
+    // 动态加载 OpenCode SDK（从 Runtime 路径或 sidecar node_modules）。
+    const runtimeLoaded = loadRuntimeFromPath(runtimePath);
+    if (runtimeLoaded && isRuntimeError(runtimeLoaded)) {
+      throw new Error(`OpenCode Runtime 加载失败: ${runtimeLoaded.message}`);
+    }
+    const { createOpencodeServer } = await loadOpenCodeServerSdk(runtimeLoaded);
+    const { createOpencodeClient } = await loadOpenCodeClientSdk(runtimeLoaded);
+
     const existingConfig = await readNativeOpenCodeConfig();
     const server = await createOpencodeServer({
       hostname: '127.0.0.1',

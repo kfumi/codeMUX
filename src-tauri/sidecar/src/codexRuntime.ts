@@ -1,10 +1,11 @@
-import {
-  Codex,
-  type Thread,
-  type ThreadEvent,
-  type ThreadItem,
-  type Usage,
+import type {
+  Thread,
+  ThreadEvent,
+  ThreadItem,
+  Usage,
 } from '@openai/codex-sdk';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 import type { SidecarCommand } from './types.js';
 import { readLatestCodexTotalTokenUsage } from './codexSessionUsage.js';
@@ -47,6 +48,8 @@ import {
   type CodexCollaborationPolicy,
 } from './codexCollaborationPolicy.js';
 import { setLogCtx, writeLog } from './writeLog.js';
+import { loadProviderRuntime, isRuntimeError, type RuntimeLoadResult } from './runtimeLoader.js';
+import { loadCodexSdk, type CodexSdkModule } from './sdkLoader.js';
 
 export { emit } from './streamEventBatcher.js';
 
@@ -79,6 +82,8 @@ type CodexSessionBootstrap = {
   permissionConfig?: SidecarPermissionConfig;
   planMode?: AgentPlanMode;
   collaborationPolicy?: CodexCollaborationPolicy;
+  /** 外部 Runtime 路径（来自 ProviderRuntimeRef）。 */
+  runtimePath?: string;
 };
 
 type UsageBaseline = {
@@ -193,7 +198,7 @@ export class CodexSessionRuntime {
   private config: CodexSessionBootstrap | null = null;
   private configFingerprint: string | null = null;
   private abortController: AbortController | null = null;
-  private client: Codex | null = null;
+  private client: InstanceType<CodexSdkModule['Codex']> | null = null;
   private thread: Thread | null = null;
   private streamingItemState = new Map<string, { kind: 'text' | 'thinking'; text: string }>();
   private todoListState = new Map<string, string>();
@@ -206,6 +211,8 @@ export class CodexSessionRuntime {
   private emittedCompactItemIds = new Set<string>();
   private previousTotalUsage: UsageBaseline | null = null;
   private turnEventNormalizer: CodexTurnEventNormalizer | null = null;
+  /** 动态加载的 Codex SDK 模块（从 Runtime 路径或 sidecar node_modules 加载）。 */
+  private codexSdk: CodexSdkModule | null = null;
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     activeCodexRuntime = this;
@@ -225,6 +232,7 @@ export class CodexSessionRuntime {
       codexNeedsProxy: cmd.codexNeedsProxy,
       permissionConfig: cmd.permissionConfig,
       planMode: normalizeCodexPlanMode(cmd.planMode),
+      runtimePath: cmd.runtimeRef?.runtimePath,
     };
     const collaborationPolicy = resolveCodexCollaborationPolicy({
       planMode: requestedConfig.planMode,
@@ -309,11 +317,27 @@ export class CodexSessionRuntime {
     if (runtimeBaseUrl) {
       codexEnv.OPENAI_BASE_URL = runtimeBaseUrl;
     }
+    // 将外部 Runtime 的 bin 目录前置注入 PATH，确保 Codex SDK spawn 的 CLI 能命中 runtime 版本。
+    if (requestedConfig.runtimePath) {
+      const runtimeBin = path.join(requestedConfig.runtimePath, 'node_modules', '.bin');
+      if (fs.existsSync(runtimeBin)) {
+        const currentPath = codexEnv.PATH ?? process.env.PATH ?? '';
+        codexEnv.PATH = [runtimeBin, ...currentPath.split(path.delimiter).filter(Boolean)].join(path.delimiter);
+      }
+    }
     applyCodexWindowsSandboxPathCompatibility(codexEnv);
 
     const codexConfig = buildCodexCliConfig(runtimeBaseUrl);
 
-    this.client = new Codex({
+    // 动态加载 Codex SDK（从 Runtime 路径或 sidecar node_modules）。
+    const runtimeLoaded = this.loadRuntimeIfNeeded();
+    if (runtimeLoaded && isRuntimeError(runtimeLoaded)) {
+      throw new Error(`Codex Runtime 加载失败: ${runtimeLoaded.message}`);
+    }
+    this.codexSdk = await loadCodexSdk(runtimeLoaded);
+    const CodexConstructor = this.codexSdk.Codex;
+
+    this.client = new CodexConstructor({
       env: codexEnv,
       apiKey: requestedConfig.apiKey,
       baseUrl: runtimeBaseUrl,
@@ -339,6 +363,25 @@ export class CodexSessionRuntime {
       status: 'ready',
     });
     emit({ type: 'proxy_status', ...proxyManager.getStatus() });
+  }
+
+  /**
+   * 使用 runtimeRef 加载 Provider Runtime，返回 RuntimeLoadResult。
+   * 如果没有 runtimeRef（开发模式），返回 null 以触发 sidecar node_modules 回退。
+   */
+  private loadRuntimeIfNeeded(): RuntimeLoadResult | null {
+    if (!this.config?.runtimePath) return null;
+    const ref = {
+      provider: 'codex' as const,
+      runtimeRoot: '',
+      runtimePath: this.config.runtimePath,
+      runtimeVersion: '',
+    };
+    const result = loadProviderRuntime(ref);
+    if (isRuntimeError(result)) {
+      return result as unknown as RuntimeLoadResult;
+    }
+    return result;
   }
 
   updatePermissions(cmd: UpdatePermissionsCommand): void {

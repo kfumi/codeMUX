@@ -176,3 +176,69 @@ jobs:
           releaseDraft: false
           prerelease: false
           releaseCommitish: ${{ needs.ensure-release.outputs.target_branch }}
+
+  publish-runtime-packs:
+    needs: ensure-release
+    name: Publish Runtime Packs (windows-x64)
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [claude_code, codex, opencode]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install sidecar dependencies
+        working-directory: src-tauri/sidecar
+        run: npm ci
+
+      - name: Resolve SDK versions
+        id: sdk-version
+        shell: bash
+        run: |
+          case "${{ matrix.provider }}" in
+            claude_code) VERSION=$(node -p "require('./src-tauri/sidecar/node_modules/@anthropic-ai/claude-agent-sdk/package.json').version") ;;
+            codex) VERSION=$(node -p "require('./src-tauri/sidecar/node_modules/@openai/codex-sdk/package.json').version") ;;
+            opencode) VERSION=$(node -p "require('./src-tauri/sidecar/node_modules/@opencode-ai/sdk/package.json').version") ;;
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "已解析 ${{ matrix.provider }} SDK 版本: $VERSION"
+
+      - name: Write signing key (if available)
+        if: ${{ secrets.CODEMUX_RUNTIME_SIGNING_KEY != '' }}
+        shell: bash
+        run: |
+          printf '%s' '${{ secrets.CODEMUX_RUNTIME_SIGNING_KEY }}' > $RUNNER_TEMP/runtime-signing-key.pem
+
+      - name: Build Runtime Pack
+        shell: bash
+        run: |
+          SIGNING_ARGS=""
+          if [ -f "$RUNNER_TEMP/runtime-signing-key.pem" ]; then
+            SIGNING_ARGS="--signing-key $RUNNER_TEMP/runtime-signing-key.pem"
+          fi
+          node scripts/build-runtime-pack.mjs \
+            ${{ matrix.provider }} \
+            ${{ steps.sdk-version.outputs.version }} \
+            --platform windows \
+            --arch x64 \
+            --sidecar-compat ">=0.2.0" \
+            $SIGNING_ARGS
+
+      - name: Upload Runtime Pack to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.ensure-release.outputs.tag }}
+          files: |
+            dist/runtime-packs/*.tar.gz
+            dist/runtime-packs/*.manifest.json
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

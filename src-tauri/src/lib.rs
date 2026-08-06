@@ -6,6 +6,7 @@ mod db;
 mod log_ctx;
 mod mcp;
 mod provider_profiles;
+mod runtime;
 mod skills;
 
 use log::info;
@@ -35,6 +36,7 @@ pub struct AppState {
     pub config: Mutex<config::types::AppConfig>,
     pub provider_profile_operation_lock: Mutex<()>,
     pub app_data_dir: std::path::PathBuf,
+    pub runtime_resolver: crate::runtime::RuntimeResolver,
 }
 
 fn should_hide_to_tray(window_label: &str) -> bool {
@@ -427,6 +429,7 @@ pub fn run() {
                 config: Mutex::new(config),
                 provider_profile_operation_lock: Mutex::new(()),
                 app_data_dir: app.path().app_data_dir()?,
+                runtime_resolver: crate::runtime::RuntimeResolver::default_root(),
             });
             app.manage(agent::commands::AgentState::default());
             app.manage(commands::terminal::TerminalState::default());
@@ -483,6 +486,12 @@ pub fn run() {
             commands::agent_runtime_check::upgrade_agent_runtime,
             commands::agent_runtime_check::probe_agent_installations,
             commands::agent_runtime_check::get_user_home_directory,
+            commands::runtime::check_managed_runtimes,
+            commands::runtime::refresh_managed_runtime,
+            commands::runtime::install_managed_runtime,
+            commands::runtime::upgrade_managed_runtime,
+            commands::runtime::repair_managed_runtime,
+            commands::runtime::remove_managed_runtime,
             show_main_window_command,
             send_agent_notification_command,
             commands::session::create_session,

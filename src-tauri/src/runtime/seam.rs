@@ -1,0 +1,396 @@
+//! Runtime 领域的可测试边界（seam）。
+//!
+//! 这些 trait 让 Runtime Manager、检测逻辑和测试夹具可以注入可控的 manifest 源、
+//! 下载器、签名校验器和文件系统视图，而不依赖真实 GitHub Release、全局 CLI、真实用户目录
+//! 或固定本地路径。后续 ticket 的 Runtime Manager 实现通过依赖这些 trait 完成生命周期管理。
+
+use std::path::PathBuf;
+
+use async_trait::async_trait;
+
+use super::error::RuntimeError;
+use super::manifest::RuntimeManifest;
+use super::types::{Arch, InstallStage, NodeDetection, Platform, Progress, Provider};
+
+/// manifest 源。生产实现从 GitHub Release 拉取；测试夹具返回可控数据。
+#[async_trait]
+pub trait ManifestSource: Send + Sync {
+    /// 获取指定 Provider、平台、架构的最新可用 manifest。
+    async fn fetch_latest(
+        &self,
+        provider: Provider,
+        platform: Platform,
+        arch: Arch,
+    ) -> Result<RuntimeManifest, RuntimeError>;
+
+    /// 获取指定 Provider 的所有可用版本（按发布时间倒序）。
+    async fn list_versions(
+        &self,
+        provider: Provider,
+        platform: Platform,
+        arch: Arch,
+    ) -> Result<Vec<String>, RuntimeError>;
+
+    /// 获取指定 Provider、版本的 manifest。
+    async fn fetch_version(
+        &self,
+        provider: Provider,
+        platform: Platform,
+        arch: Arch,
+        version: &str,
+    ) -> Result<RuntimeManifest, RuntimeError>;
+}
+
+/// Pack 下载器。生产实现从 `asset.url` 下载到临时文件；测试夹具返回预设字节。
+#[async_trait]
+pub trait PackDownloader: Send + Sync {
+    /// 下载 Pack 资产到临时路径。`progress` 用于汇报下载进度。
+    /// 返回下载完成的本地临时文件路径，由调用方负责解压和清理。
+    async fn download(
+        &self,
+        manifest: &RuntimeManifest,
+        progress: Box<dyn ProgressReporter>,
+    ) -> Result<PathBuf, RuntimeError>;
+}
+
+/// 签名校验器。生产实现使用项目现有签名体系；测试夹具返回固定结果。
+#[async_trait]
+pub trait SignatureVerifier: Send + Sync {
+    /// 校验 Pack 资产签名是否与 manifest 声明一致。
+    async fn verify(
+        &self,
+        manifest: &RuntimeManifest,
+        pack_path: &std::path::Path,
+    ) -> Result<(), RuntimeError>;
+}
+
+/// 进度汇报回调。Runtime Manager 在下载、校验、解压各阶段调用。
+#[async_trait]
+pub trait ProgressReporter: Send + Sync {
+    async fn report(&self, progress: Progress);
+}
+
+/// Pack 归档解压器。生产实现解压 tar.gz；测试夹具直接复制预暂存目录。
+#[async_trait]
+pub trait ArchiveExtractor: Send + Sync {
+    /// 将 `archive_path` 解压到 `dest_dir`。
+    async fn extract(
+        &self,
+        archive_path: &std::path::Path,
+        dest_dir: &std::path::Path,
+    ) -> Result<(), RuntimeError>;
+}
+
+/// 系统 Node.js 解析器。生产实现从 PATH 查找 node 并解析版本；测试夹具返回固定结果。
+#[async_trait]
+pub trait NodeResolver: Send + Sync {
+    /// 检测系统 Node.js，返回版本与可执行路径。
+    async fn detect(&self) -> NodeDetection;
+}
+
+/// 空进度汇报器，用于不关心进度的内部流程。
+pub struct NoopProgressReporter;
+
+#[async_trait]
+impl ProgressReporter for NoopProgressReporter {
+    async fn report(&self, _progress: Progress) {}
+}
+
+/// Runtime 文件系统视图。抽象 Runtime 根目录、Provider 目录、版本目录和当前版本指针，
+/// 使测试夹具可以使用临时目录而非真实用户目录。
+pub trait RuntimeFileSystem: Send + Sync {
+    /// Runtime 根目录（生产实现为 `%LOCALAPPDATA%\CodeMUX\runtimes`）。
+    fn root(&self) -> PathBuf;
+
+    /// 指定 Provider 的目录（例如 `<root>/claude_code`）。
+    fn provider_dir(&self, provider: Provider) -> PathBuf {
+        self.root().join(provider.as_str())
+    }
+
+    /// 指定 Provider、版本的目录（例如 `<root>/claude_code/0.3.169`）。
+    fn version_dir(&self, provider: Provider, version: &str) -> PathBuf {
+        self.provider_dir(provider).join(version)
+    }
+
+    /// 指定 Provider 的当前版本指针文件路径。
+    fn current_version_file(&self, provider: Provider) -> PathBuf {
+        self.provider_dir(provider).join("current")
+    }
+
+    /// 读取当前版本指针。返回 `None` 表示尚未安装。
+    fn read_current_version(&self, provider: Provider) -> Option<String>;
+
+    /// 写入当前版本指针。
+    fn write_current_version(&self, provider: Provider, version: &str) -> Result<(), RuntimeError>;
+
+    /// 列出已安装的版本目录（不含 `current` 指针文件）。
+    fn list_installed_versions(&self, provider: Provider) -> Vec<String>;
+
+    /// 删除指定版本目录。若该版本是当前版本，调用方应先切换。
+    fn remove_version(&self, provider: Provider, version: &str) -> Result<(), RuntimeError>;
+
+    /// 删除指定 Provider 的所有版本和当前版本指针。
+    fn remove_provider(&self, provider: Provider) -> Result<(), RuntimeError>;
+}
+
+/// 当前版本指针的读写抽象，便于在不持有完整 `RuntimeFileSystem` 时操作指针。
+pub trait CurrentVersionStore: Send + Sync {
+    fn read(&self, provider: Provider) -> Option<String>;
+    fn write(&self, provider: Provider, version: &str) -> Result<(), RuntimeError>;
+    fn clear(&self, provider: Provider) -> Result<(), RuntimeError>;
+}
+
+/// 基于真实文件系统的 Runtime 根目录解析。
+///
+/// 生产实现使用用户级目录；测试通过 `RuntimeFileSystem` 的夹具实现注入临时目录。
+/// 本结构仅提供路径解析，不直接执行 IO。
+pub struct FileSystemRuntimeRoots {
+    root: PathBuf,
+}
+
+impl FileSystemRuntimeRoots {
+    pub fn new(root: PathBuf) -> Self {
+        Self { root }
+    }
+
+    /// 生产环境的 Runtime 根目录：`%LOCALAPPDATA%\CodeMUX\runtimes`。
+    /// 在非 Windows 平台回退到 `~/.local/share/CodeMUX/runtimes`。
+    pub fn default_root() -> PathBuf {
+        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+            return PathBuf::from(local_app_data)
+                .join("CodeMUX")
+                .join("runtimes");
+        }
+        if let Some(home) = dirs::home_dir() {
+            return home
+                .join(".local")
+                .join("share")
+                .join("CodeMUX")
+                .join("runtimes");
+        }
+        PathBuf::from("CodeMUX").join("runtimes")
+    }
+
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+}
+
+impl RuntimeFileSystem for FileSystemRuntimeRoots {
+    fn root(&self) -> PathBuf {
+        self.root.clone()
+    }
+
+    fn read_current_version(&self, provider: Provider) -> Option<String> {
+        let path = self.current_version_file(provider);
+        std::fs::read_to_string(&path)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    fn write_current_version(&self, provider: Provider, version: &str) -> Result<(), RuntimeError> {
+        let path = self.current_version_file(provider);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                RuntimeError::io_failed(
+                    Some(provider),
+                    format!("无法创建 Provider 目录 {}: {}", parent.display(), e),
+                )
+            })?;
+        }
+        std::fs::write(&path, version).map_err(|e| {
+            RuntimeError::io_failed(
+                Some(provider),
+                format!("无法写入当前版本指针 {}: {}", path.display(), e),
+            )
+        })
+    }
+
+    fn list_installed_versions(&self, provider: Provider) -> Vec<String> {
+        let dir = self.provider_dir(provider);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return Vec::new();
+        };
+        let mut versions = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name == "current" {
+                    continue;
+                }
+                versions.push(name.to_string());
+            }
+        }
+        versions
+    }
+
+    fn remove_version(&self, provider: Provider, version: &str) -> Result<(), RuntimeError> {
+        let dir = self.version_dir(provider, version);
+        if !dir.exists() {
+            return Ok(());
+        }
+        std::fs::remove_dir_all(&dir).map_err(|e| {
+            RuntimeError::io_failed(
+                Some(provider),
+                format!("无法删除版本目录 {}: {}", dir.display(), e),
+            )
+        })
+    }
+
+    fn remove_provider(&self, provider: Provider) -> Result<(), RuntimeError> {
+        let dir = self.provider_dir(provider);
+        if !dir.exists() {
+            return Ok(());
+        }
+        std::fs::remove_dir_all(&dir).map_err(|e| {
+            RuntimeError::io_failed(
+                Some(provider),
+                format!("无法删除 Provider 目录 {}: {}", dir.display(), e),
+            )
+        })
+    }
+}
+
+/// 进度汇报器的简单实现，将进度写入 `tokio::sync::mpsc::Sender`，供测试断言。
+#[cfg(test)]
+pub mod test_progress {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    pub struct ChannelProgressReporter {
+        tx: mpsc::UnboundedSender<Progress>,
+    }
+
+    impl ChannelProgressReporter {
+        pub fn new() -> (Self, mpsc::UnboundedReceiver<Progress>) {
+            let (tx, rx) = mpsc::unbounded_channel();
+            (Self { tx }, rx)
+        }
+    }
+
+    #[async_trait]
+    impl ProgressReporter for ChannelProgressReporter {
+        async fn report(&self, progress: Progress) {
+            let _ = self.tx.send(progress);
+        }
+    }
+
+    /// 记录所有阶段到 Vec 的同步进度收集器（测试用）。
+    pub struct CollectingProgressReporter {
+        pub stages: std::sync::Mutex<Vec<InstallStage>>,
+    }
+
+    impl CollectingProgressReporter {
+        pub fn new() -> Self {
+            Self {
+                stages: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        pub fn snapshot(&self) -> Vec<InstallStage> {
+            self.stages.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl ProgressReporter for CollectingProgressReporter {
+        async fn report(&self, progress: Progress) {
+            self.stages.lock().unwrap().push(progress.stage);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn fs() -> (TempDir, FileSystemRuntimeRoots) {
+        let tmp = TempDir::new().unwrap();
+        let roots = FileSystemRuntimeRoots::new(tmp.path().to_path_buf());
+        (tmp, roots)
+    }
+
+    #[test]
+    fn version_dir_layout_matches_spec() {
+        let (_tmp, roots) = fs();
+        let dir = roots.version_dir(Provider::ClaudeCode, "0.3.169");
+        // <root>/claude_code/0.3.169
+        assert!(dir.ends_with("0.3.169"));
+        assert!(dir
+            .parent()
+            .map(|p| p.ends_with("claude_code"))
+            .unwrap_or(false));
+        let current = roots.current_version_file(Provider::Codex);
+        // <root>/codex/current
+        assert!(current.ends_with("current"));
+        assert!(current
+            .parent()
+            .map(|p| p.ends_with("codex"))
+            .unwrap_or(false));
+    }
+
+    #[test]
+    fn write_and_read_current_version() {
+        let (_tmp, roots) = fs();
+        assert!(roots.read_current_version(Provider::OpenCode).is_none());
+        roots
+            .write_current_version(Provider::OpenCode, "1.18.3")
+            .unwrap();
+        assert_eq!(
+            roots.read_current_version(Provider::OpenCode),
+            Some("1.18.3".to_string())
+        );
+    }
+
+    #[test]
+    fn list_installed_versions_skips_current_file() {
+        let (_tmp, roots) = fs();
+        // 创建版本目录
+        std::fs::create_dir_all(roots.version_dir(Provider::ClaudeCode, "0.3.169")).unwrap();
+        std::fs::create_dir_all(roots.version_dir(Provider::ClaudeCode, "0.3.170")).unwrap();
+        roots
+            .write_current_version(Provider::ClaudeCode, "0.3.170")
+            .unwrap();
+        let mut versions = roots.list_installed_versions(Provider::ClaudeCode);
+        versions.sort();
+        assert_eq!(versions, vec!["0.3.169".to_string(), "0.3.170".to_string()]);
+    }
+
+    #[test]
+    fn remove_version_deletes_directory() {
+        let (_tmp, roots) = fs();
+        std::fs::create_dir_all(roots.version_dir(Provider::Codex, "0.139.0")).unwrap();
+        roots.remove_version(Provider::Codex, "0.139.0").unwrap();
+        assert!(!roots.version_dir(Provider::Codex, "0.139.0").exists());
+    }
+
+    #[test]
+    fn remove_version_is_idempotent() {
+        let (_tmp, roots) = fs();
+        roots.remove_version(Provider::Codex, "missing").unwrap();
+    }
+
+    #[test]
+    fn remove_provider_clears_versions_and_pointer() {
+        let (_tmp, roots) = fs();
+        std::fs::create_dir_all(roots.version_dir(Provider::OpenCode, "1.18.3")).unwrap();
+        roots
+            .write_current_version(Provider::OpenCode, "1.18.3")
+            .unwrap();
+        roots.remove_provider(Provider::OpenCode).unwrap();
+        assert!(!roots.provider_dir(Provider::OpenCode).exists());
+    }
+
+    #[test]
+    fn default_root_uses_local_app_data_when_set() {
+        // 仅验证路径结构，不依赖具体机器值。
+        let root = FileSystemRuntimeRoots::default_root();
+        assert!(root.ends_with("runtimes"));
+        assert!(root.to_string_lossy().contains("CodeMUX"));
+    }
+}

@@ -4,7 +4,6 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
-import { query, startup } from '@anthropic-ai/claude-agent-sdk';
 import type {
   Query,
   SDKUserMessage,
@@ -13,6 +12,8 @@ import type {
 import type { SidecarCommand } from './types.js';
 import { getProviderMode } from './sessionRuntimeHelpers.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
+import { loadProviderRuntime, isRuntimeError, type RuntimeLoadResult } from './runtimeLoader.js';
+import { loadClaudeSdk, type ClaudeSdkModule } from './sdkLoader.js';
 import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion.js';
 import { projectClaudeToolEvents } from './claudeToolEvents.js';
 import { CodexSessionRuntime, interruptActiveTurn } from './codexRuntime.js';
@@ -105,6 +106,7 @@ type SessionBootstrap = {
   skills?: string[];
   permissionConfig?: SidecarPermissionConfig;
   planMode?: AgentPlanMode;
+  runtimeRef?: import('./runtimeContract.js').ProviderRuntimeRef;
 };
 
 type QueryOptions = Record<string, unknown> & {
@@ -312,6 +314,10 @@ export class SessionRuntime {
   private generation = 0;
   private activeConfigGeneration = 0;
   private claudeExecutablePath: string | undefined;
+  /** 动态加载的 Claude SDK 模块（从 Runtime 路径或 sidecar node_modules 加载）。 */
+  private claudeSdk: ClaudeSdkModule | null = null;
+  /** Runtime 加载结果，用于解析 SDK 路径。 */
+  private runtimeLoaded: RuntimeLoadResult | null = null;
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     const normalized = this.normalizeConfig(cmd);
@@ -329,6 +335,17 @@ export class SessionRuntime {
 
     await this.resetForReconfigure();
 
+    // 从 CodeMUX 托管 Runtime 路径动态加载 Claude SDK（Ticket 04/07）。
+    // 生产安装包不含 node_modules，必须通过 runtimeRef 加载；
+    // 开发模式无 runtimeRef 时回退到 sidecar 自身的 node_modules。
+    this.runtimeLoaded = this.loadRuntimeIfNeeded();
+    if (this.runtimeLoaded && isRuntimeError(this.runtimeLoaded)) {
+      const runtimeError = this.runtimeLoaded;
+      this.runtimeLoaded = null;
+      throw new Error(`Claude Runtime 加载失败: ${runtimeError.message}`);
+    }
+    this.claudeSdk = await loadClaudeSdk(this.runtimeLoaded);
+
     emit({
       type: 'mcp_status_update',
       servers: {},
@@ -336,6 +353,20 @@ export class SessionRuntime {
     });
 
     this.startWarmup(this.activeConfigGeneration);
+  }
+
+  /**
+   * 使用 runtimeRef 加载 Provider Runtime，返回 RuntimeLoadResult。
+   * 如果没有 runtimeRef（开发模式），返回 null 以触发 sidecar node_modules 回退。
+   */
+  private loadRuntimeIfNeeded(): RuntimeLoadResult | null {
+    if (!this.config?.runtimeRef) return null;
+    const result = loadProviderRuntime(this.config.runtimeRef);
+    if (isRuntimeError(result)) {
+      // RuntimeError — 返回错误对象，由调用方检查
+      return result as unknown as RuntimeLoadResult;
+    }
+    return result;
   }
 
   updatePermissions(cmd: UpdatePermissionsCommand): void {
@@ -471,6 +502,7 @@ export class SessionRuntime {
       skills: cmd.skills,
       permissionConfig: cmd.permissionConfig,
       planMode: normalizePlanMode(cmd.planMode),
+      runtimeRef: cmd.runtimeRef,
     };
   }
 
@@ -513,11 +545,16 @@ export class SessionRuntime {
 
   private startWarmup(configGeneration: number): void {
     if (!this.config) return;
+    if (!this.claudeSdk) {
+      process.stderr.write('[sidecar] Claude SDK not loaded, skipping warmup\n');
+      return;
+    }
+    const sdk = this.claudeSdk;
 
     const warmAttempt = (label: string) => {
       const options = this.buildOptions(this.config!);
       process.stderr.write(`[sidecar] ${label}\n`);
-      return startup({
+      return sdk.startup({
         options: options as any,
         initializeTimeoutMs: WARM_START_TIMEOUT_MS,
       });
@@ -610,7 +647,10 @@ export class SessionRuntime {
         servers: {},
         status: this.providerMode.supportsDeferredToolSearch ? 'fallback_live' : 'limited_provider',
       });
-      this.queryHandle = query({
+      if (!this.claudeSdk) {
+        throw new Error('Claude SDK not loaded; cannot start query');
+      }
+      this.queryHandle = this.claudeSdk.query({
         prompt: createPromptStream(prompt, inputPayload, includeImages),
         options: this.buildOptions(this.config) as any,
       });
@@ -642,6 +682,7 @@ export class SessionRuntime {
     const claudePath = resolveClaudeExecutable({
       sidecarDir: SIDECAR_DIST_DIR,
       pathClaude,
+      runtimePath: config.runtimeRef?.runtimePath,
     });
     this.claudeExecutablePath = claudePath ?? pathClaude ?? 'claude';
     const claudeSessionId = config.agentSessionId;
@@ -1622,6 +1663,7 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
     credentialSource: cmd.credentialSource ?? 'none',
     ...(cmd.credentialSource === 'codemux' && cmd.apiKey ? { apiKey: cmd.apiKey } : {}),
     ...(cmd.baseUrl ? { baseUrl: cmd.baseUrl } : {}),
+    ...(cmd.runtimeRef?.runtimePath ? { runtimePath: cmd.runtimeRef.runtimePath } : {}),
   };
   const openCodeRuntime = new OpenCodeRuntime(config);
   if (cmd.planMode === 'on' || cmd.planMode === 'off') {

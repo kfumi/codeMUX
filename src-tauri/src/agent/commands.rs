@@ -2347,6 +2347,15 @@ fn build_ensure_session_command(
         "cwd": cwd,
         "sessionId": session_id,
     });
+
+    // 解析 CodeMUX 托管 Runtime 路径，传给 sidecar 用于动态加载 SDK。
+    if let Some(provider_enum) = crate::runtime::Provider::from_str(agent_kind) {
+        if let Some(runtime_ref) = state.runtime_resolver.resolve_runtime_ref(provider_enum) {
+            cmd["runtimeRef"] =
+                serde_json::to_value(&runtime_ref).unwrap_or(serde_json::Value::Null);
+        }
+    }
+
     let (session_origin, imported_cwd) = {
         let db = state.db.lock().unwrap();
         db.query_row(
@@ -3956,6 +3965,7 @@ mod tests {
             config: std::sync::Mutex::new(config),
             provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
         };
 
         let resolved = resolve_active_runtime_config(&state, "session-codex").unwrap();
@@ -4005,6 +4015,7 @@ mod tests {
             config: std::sync::Mutex::new(config),
             provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
         };
 
         let resolved = resolve_active_runtime_config(&state, "session-codex-default").unwrap();
@@ -4065,6 +4076,7 @@ mod tests {
             config: std::sync::Mutex::new(config),
             provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
         };
 
         let resolved = resolve_active_runtime_config(&state, "session-claude-builtin").unwrap();
@@ -4147,6 +4159,7 @@ mod tests {
             config: std::sync::Mutex::new(config),
             provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
         };
 
         let resolved = resolve_active_runtime_config(&state, "session-codex-switched").unwrap();
@@ -4182,6 +4195,7 @@ mod tests {
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
             provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
         };
 
         let command = build_ensure_session_command(
@@ -4425,6 +4439,7 @@ mod tests {
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
             provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
         };
         let state = AgentState::default();
         let event = r#"{"type":"agent_session_mapping","app_session_id":"missing-session","agent_kind":"opencode","agent_session_id":"opencode-session","runtime_generation":1}"#;
@@ -4455,6 +4470,7 @@ mod tests {
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
             provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
         };
         let state = AgentState::default();
         begin_session_generation(&state, "session-opencode").await;

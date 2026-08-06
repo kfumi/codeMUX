@@ -1,4 +1,4 @@
-﻿import * as fs from 'node:fs';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 export interface OpenCodeExecutableResolution {
@@ -12,6 +12,8 @@ export interface ResolveOpenCodeExecutableParams {
   platform?: NodeJS.Platform;
   pathEnv?: string;
   fileExists?: (candidate: string) => boolean;
+  /** 外部 Runtime 路径（来自 ProviderRuntimeRef）。优先于 bundled 和 PATH。 */
+  runtimePath?: string;
 }
 
 function executableNames(platform: NodeJS.Platform): string[] {
@@ -36,10 +38,28 @@ export function resolveOpenCodeExecutable({
   platform = process.platform,
   pathEnv = process.env.PATH,
   fileExists = fs.existsSync,
+  runtimePath,
 }: ResolveOpenCodeExecutableParams): OpenCodeExecutableResolution | undefined {
   const names = executableNames(platform);
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const delimiter = pathApi.delimiter;
+
+  // 优先：外部 Runtime 路径
+  const runtimeDirectories: string[] = [];
+  if (runtimePath) {
+    runtimeDirectories.push(
+      pathApi.resolve(runtimePath, 'node_modules', 'opencode-ai', 'bin'),
+      pathApi.resolve(runtimePath, 'node_modules', '.bin'),
+    );
+  }
+  for (const directory of runtimeDirectories) {
+    const executablePath = existingCandidate(directory, names, fileExists, pathApi);
+    if (executablePath) {
+      return { executablePath, pathEntry: directory, source: 'bundled' };
+    }
+  }
+
+  // 次选：bundled node_modules（向后兼容，Ticket 07 移除）
   const bundledDirectories = [
     pathApi.resolve(sidecarDir, '..', 'node_modules', '.bin'),
     pathApi.resolve(sidecarDir, '..', 'node_modules', 'opencode-ai', 'bin'),
@@ -66,7 +86,10 @@ export function resolveOpenCodeExecutable({
 export function prepareOpenCodeExecutable(params: ResolveOpenCodeExecutableParams): OpenCodeExecutableResolution {
   const resolution = resolveOpenCodeExecutable(params);
   if (!resolution) {
-    throw new Error('OpenCode executable not found. Install the bundled OpenCode runtime or make `opencode` available on PATH.');
+    const hint = params.runtimePath
+      ? `Runtime 路径 ${params.runtimePath} 中未找到 opencode 可执行文件`
+      : 'Install the bundled OpenCode runtime or make `opencode` available on PATH.';
+    throw new Error(`OpenCode executable not found. ${hint}`);
   }
 
   const currentEntries = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);

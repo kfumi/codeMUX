@@ -37,6 +37,10 @@ portable-pty = "0.8"
 encoding_rs = "0.8"
 sha2 = "0.10"
 dirs = "5"
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "rand_core"] }
+tar = "0.4"
+flate2 = "1"
+tempfile = "3"
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter"] }
 tracing-log = { version = "0.2", optional = true }
@@ -52,3 +56,6 @@ winreg = "0.52"
 default = []
 tokio-console = ["tokio/tracing", "dep:console-subscriber", "dep:tracing", "dep:tracing-subscriber", "dep:tracing-log"]
 cmd-tracing = ["dep:tracing", "dep:tracing-subscriber"]
+
+[dev-dependencies]
+rand = "0.8"
