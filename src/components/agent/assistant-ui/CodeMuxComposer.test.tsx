@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { forwardRef, useEffect, useImperativeHandle } from 'react';
 
@@ -598,6 +598,44 @@ describe('CodeMuxComposer', () => {
     fireEvent.click(screen.getByText('提交'));
 
     expect(sendToolResponseMock).toHaveBeenCalledWith('session-1', 'question-1', ['是']);
+  });
+
+  it('uses tabs for pending permissions and responds with the active tab request id', async () => {
+    const onPermissionResponse = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <CodeMuxComposer
+        sessionId="session-1"
+        pendingPermissions={[
+          {
+            request_id: 'permission-local',
+            permission_type: 'external_directory',
+            description: 'external_directory',
+            metadata: { filepath: 'C:\\Users\\94910\\AppData\\Local' },
+          },
+          {
+            request_id: 'permission-roaming',
+            permission_type: 'external_directory',
+            description: 'external_directory',
+            metadata: { filepath: 'C:\\Users\\94910\\AppData\\Roaming' },
+          },
+        ]}
+        onPermissionResponse={onPermissionResponse}
+      />,
+    );
+
+    expect(screen.getAllByRole('tab')).toHaveLength(2);
+    expect(screen.getByText('C:\\Users\\94910\\AppData\\Local')).toBeTruthy();
+    expect(screen.queryByText('C:\\Users\\94910\\AppData\\Roaming')).toBeNull();
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /Roaming/ }));
+    expect(screen.getByText('C:\\Users\\94910\\AppData\\Roaming')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /确认/ }));
+
+    await waitFor(() => {
+      expect(onPermissionResponse).toHaveBeenCalledWith('permission-roaming', 'once');
+    });
   });
 
   it('restores the normal composer after a user question receives a tool result', () => {

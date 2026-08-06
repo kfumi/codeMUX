@@ -157,6 +157,28 @@ describe('OpenCode event normalization', () => {
       permission_type: 'read', description: 'Read file', metadata: { path: 'a.txt' },
     });
   });
+
+  it('normalizes the permission.asked event emitted by current OpenCode runtimes', () => {
+    const permission = toCodeMuxEvent({
+      type: 'permission.asked',
+      properties: {
+        id: 'permission-asked-1',
+        sessionID: 'opencode-session-1',
+        permission: 'external_directory',
+        metadata: { filepath: 'C:\\Users\\user\\.agents' },
+      },
+    }, context());
+
+    expect(permission).toEqual([expect.objectContaining({
+      type: 'permission_requested',
+      request_id: 'permission-asked-1',
+      permission_id: 'permission-asked-1',
+      permission_type: 'external_directory',
+      description: 'external_directory',
+      metadata: { filepath: 'C:\\Users\\user\\.agents' },
+    })]);
+  });
+
   it('emits an interrupted outcome without an error for explicit session interruption', () => {
     const events = toCodeMuxEvent({ type: 'session.aborted', properties: { sessionID: 'opencode-session-1' } }, context());
     expect(events).toEqual([expect.objectContaining({

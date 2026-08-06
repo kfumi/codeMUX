@@ -244,6 +244,39 @@ describe('NewSessionPanel', () => {
     });
   });
 
+  it('keeps the configured Claude permission when Claude Code is selected again', async () => {
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: state.config ? {
+        ...state.config,
+        agent_configs: {
+          ...state.config.agent_configs,
+          claude_code: {
+            ...state.config.agent_configs.claude_code,
+            permission_config: { kind: 'claude_code', permissionMode: 'acceptEdits' },
+          },
+        },
+      } : null,
+    }));
+
+    render(<NewSessionPanel onSubmit={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(useNewSessionStore.getState().selectedPermissionConfig).toEqual({
+        kind: 'claude_code',
+        permissionMode: 'acceptEdits',
+      });
+    });
+
+    fireEvent.pointerDown(screen.getAllByRole('button', { name: 'Claude Code' }).find((element) => element.tagName === 'BUTTON')!);
+    fireEvent.click(screen.getByText('Claude Code'));
+
+    expect(useNewSessionStore.getState().selectedPermissionConfig).toEqual({
+      kind: 'claude_code',
+      permissionMode: 'acceptEdits',
+    });
+  });
+
   it('does not render provider switching and only exposes the active provider models', () => {
     useSettingsStore.setState((state) => ({
       ...state,

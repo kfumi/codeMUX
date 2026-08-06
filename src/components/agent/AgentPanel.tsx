@@ -8,7 +8,7 @@ import { formatCommandDisplay, renderCommandPrompt } from '../../lib/slashComman
 import { mapExecutionModeToPermissionConfig, serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
 import type { ReasoningEffort } from '../../types/session';
 import type { AgentInputPayload } from '../../types/agentInput';
-import type { AgentPermissionResponse } from '../../types/agent';
+import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
 import { agentApi, sessionApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
 import { usePreviewStore } from '../../stores/previewStore';
@@ -30,6 +30,8 @@ interface AgentPanelProps {
   sessionId: string;
 }
 
+const EMPTY_PENDING_PERMISSIONS: AgentPermissionRequest[] = [];
+
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, createSession, updateSessionPermissions, updateSessionModel } = useSessionStore();
   const { projects } = useProjectStore();
@@ -38,7 +40,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const loadSessionMessages = useAgentStore((state) => state.loadSessionMessages);
   const clearEvents = useAgentStore((state) => state.clearEvents);
   const respondToPermission = useAgentStore((state) => state.respondToPermission);
-  const pendingPermission = useAgentStore((state) => state.pendingPermissions[sessionId] ?? null);
+  const pendingPermissions = useAgentStore((state) => state.pendingPermissions[sessionId] ?? EMPTY_PENDING_PERMISSIONS);
   const { config, getActiveProvider, setActiveAgentProfileModel } = useSettingsStore();
   const { setProjectPath } = usePreviewStore();
 
@@ -287,8 +289,9 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     });
   }, [isReadOnly, sessionId, updateSessionPermissions]);
 
-  const handlePermissionResponse = useCallback(async (response: AgentPermissionResponse) => {
-    const request = useAgentStore.getState().pendingPermissions[sessionId];
+  const handlePermissionResponse = useCallback(async (requestId: string, response: AgentPermissionResponse) => {
+    const request = (useAgentStore.getState().pendingPermissions[sessionId] ?? [])
+      .find((item) => item.request_id === requestId);
     const isExitPlanApproval = agentKind === 'claude_code' && request?.permission_type === 'ExitPlanMode';
 
     // ExitPlanMode 是原生权限审批，批准后需要同步切换会话下拉到完全访问。
@@ -300,7 +303,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       );
     }
 
-    await respondToPermission(sessionId, response);
+    await respondToPermission(sessionId, requestId, response);
   }, [agentKind, respondToPermission, sessionId, updateSessionPermissions]);
 
   // Migrate legacy Codex configs (e.g. workspace-write) to the current default.
@@ -434,7 +437,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                       compact={compact}
                     />
                   )}
-                  pendingPermission={pendingPermission}
+                  pendingPermissions={pendingPermissions}
                   onPermissionResponse={handlePermissionResponse}
                   onStop={() => interrupt(sessionId)}
                   onActivatePlanMode={() => handleModeChange(mapExecutionModeToPermissionConfig(agentKind, 'plan'), 'on')}

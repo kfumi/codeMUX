@@ -51,10 +51,16 @@ export const useNewSessionStore = create<NewSessionState>((set) => ({
     selectedPermissionConfig: buildDefaultPermissionConfig(state.selectedAgentKind),
     selectedPlanMode: 'off',
   })),
-  setSelectedAgentKind: (selectedAgentKind) => set({
-    selectedAgentKind,
-    selectedPermissionConfig: buildDefaultPermissionConfig(selectedAgentKind),
-    selectedPlanMode: 'off',
+  setSelectedAgentKind: (selectedAgentKind) => set((state) => {
+    if (state.selectedAgentKind === selectedAgentKind) {
+      return state;
+    }
+
+    return {
+      selectedAgentKind,
+      selectedPermissionConfig: buildDefaultPermissionConfig(selectedAgentKind),
+      selectedPlanMode: 'off',
+    };
   }),
   setSelectedModel: (selectedModel) => set({ selectedModel }),
   setSelectedReasoningEffort: (selectedReasoningEffort) => set({ selectedReasoningEffort }),

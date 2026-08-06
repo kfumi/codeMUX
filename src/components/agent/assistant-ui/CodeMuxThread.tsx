@@ -1304,7 +1304,7 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
             )}
           >
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--primary)/0.6)]" />
-            <RunningElapsedTimer startTime={queryStartTime} label="思考中" />
+            <RunningElapsedTimer startTime={queryStartTime} label="正在执行" />
           </div>
         ) : null}
       </div>

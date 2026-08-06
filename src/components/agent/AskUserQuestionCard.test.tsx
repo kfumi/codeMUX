@@ -235,6 +235,8 @@ describe('AskUserQuestionCard', () => {
 
     expect(screen.getByText('轻音乐').closest('button')?.getAttribute('aria-pressed')).toBe('false');
     expect(screen.getByText('摇滚').closest('button')?.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByText('轻音乐').closest('button')?.className).toContain('border-0');
+    expect(screen.getByText('摇滚').closest('button')?.className).toContain('border-0');
     expect(screen.getByRole('tablist').querySelectorAll('svg')).toHaveLength(0);
   });
 

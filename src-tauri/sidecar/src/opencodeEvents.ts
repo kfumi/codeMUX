@@ -473,16 +473,19 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       if (context.nextSection) context.nextSection.kind = 'idle';
       break;
     case 'permission.updated':
+    case 'permission.asked': {
+      const permissionType = readString(properties.type) ?? readString(properties.permission) ?? 'unknown';
       events.push(buildEnvelope({
         type: 'permission_requested',
         request_id: readString(properties.id) ?? `permission-${context.sequence}`,
         permission_id: readString(properties.id),
-        permission_type: readString(properties.type) ?? 'unknown',
-        description: readString(properties.title) ?? readString(properties.type) ?? 'Permission request',
+        permission_type: permissionType,
+        description: readString(properties.title) ?? permissionType,
         ...(asRecord(properties.metadata) ? { metadata: asRecord(properties.metadata) } : {}),
         event_id: context.eventIdFactory(),
       }, context, sessionId));
       break;
+    }
     case 'question.asked': {
       const questions = readArray(properties.questions);
       if (questions && questions.length > 0) {

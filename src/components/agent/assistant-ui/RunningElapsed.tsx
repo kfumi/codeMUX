@@ -27,7 +27,7 @@ type RunningElapsedTimerProps = {
 };
 
 export function RunningElapsedTimer({
-  label = '思考中',
+  label = '正在执行',
   startTime,
   active = true,
 }: RunningElapsedTimerProps) {

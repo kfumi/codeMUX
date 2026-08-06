@@ -141,8 +141,8 @@ interface AgentState {
   acknowledgedFiles: Record<string, Set<string>>;
   /** Draft text for each session's composer input (preserved across session switches) */
   composerDrafts: Record<string, string>;
-  pendingPermissions: Record<string, AgentPermissionRequest | null>;
-  respondToPermission: (sessionId: string, response: AgentPermissionResponse) => Promise<void>;
+  pendingPermissions: Record<string, AgentPermissionRequest[]>;
+  respondToPermission: (sessionId: string, requestId: string, response: AgentPermissionResponse) => Promise<void>;
   /** Start a new agent query */
   startQuery: (sessionId: string, prompt: string, cwd: string, reasoningEffort?: ReasoningEffort, displayContent?: string, inputPayload?: AgentInputPayload, modelForVision?: string) => Promise<void>;
   /** Interrupt the current query for a specific session */
@@ -191,6 +191,19 @@ const sessionsWithLiveTextStream = new Set<string>();
  * keep content in the reasoning panel until we explicitly enter the answer phase. */
 const sessionStreamPhase = new Map<string, 'thinking' | 'answer'>();
 const streamingTelemetry = new Map<string, { deltas: number; flushes: number; uiUpdates: number }>();
+
+function enqueuePendingPermission(
+  pendingPermissions: Record<string, AgentPermissionRequest[]>,
+  sessionId: string,
+  request: AgentPermissionRequest,
+): Record<string, AgentPermissionRequest[]> {
+  const current = pendingPermissions[sessionId] ?? [];
+  const existingIndex = current.findIndex((item) => item.request_id === request.request_id);
+  const next = existingIndex === -1
+    ? [...current, request]
+    : current.map((item, index) => index === existingIndex ? request : item);
+  return { ...pendingPermissions, [sessionId]: next };
+}
 
 function getSessionStreamPhase(sessionId: string): 'thinking' | 'answer' {
   return sessionStreamPhase.get(sessionId) ?? 'thinking';
@@ -1232,7 +1245,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
-    set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: null } }));
+    set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: [] } }));
     logger.info('MODEL_TRACE startQuery dispatching to Tauri', {
       sessionId,
       cwd,
@@ -1655,7 +1668,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
                     eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
                     todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
                     changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
-            ...(event.kind === 'permission' ? { pendingPermissions: { ...s.pendingPermissions, [sessionId]: event.data } } : {}),
+                    ...(event.kind === 'permission' ? { pendingPermissions: enqueuePendingPermission(s.pendingPermissions, sessionId, event.data) } : {}),
                     streamingToolInputs: { ...s.streamingToolInputs, [sessionId]: {} },
                     streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
                     streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
@@ -1925,7 +1938,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
             eventTimestamps: { ...s.eventTimestamps, [sessionId]: [...(s.eventTimestamps[sessionId] || []), now] },
             todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
             changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
-            ...(event.kind === 'permission' ? { pendingPermissions: { ...s.pendingPermissions, [sessionId]: event.data } } : {}),
+            ...(event.kind === 'permission' ? { pendingPermissions: enqueuePendingPermission(s.pendingPermissions, sessionId, event.data) } : {}),
             ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
           };
         });
@@ -1992,12 +2005,17 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     }
   },
 
-  respondToPermission: async (sessionId: string, response: AgentPermissionResponse) => {
-    const request = get().pendingPermissions[sessionId];
+  respondToPermission: async (sessionId: string, requestId: string, response: AgentPermissionResponse) => {
+    const request = (get().pendingPermissions[sessionId] ?? []).find((item) => item.request_id === requestId);
     if (!request) return;
     try {
       await agentApi.respondToAgentPermission(sessionId, request.request_id, response);
-      set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: null } }));
+      set((state) => ({
+        pendingPermissions: {
+          ...state.pendingPermissions,
+          [sessionId]: (state.pendingPermissions[sessionId] ?? []).filter((item) => item.request_id !== requestId),
+        },
+      }));
     } catch (error) {
       set((state) => ({ error: { ...state.error, [sessionId]: String(error) } }));
     }
@@ -2005,7 +2023,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
   interrupt: async (sessionId: string) => {
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
-    set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: null } }));
+    set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: [] } }));
     clearSimulatedStream(sessionId);
     const state = get();
     const isRunning = state.isRunning[sessionId] ?? false;
@@ -2085,7 +2103,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         streamingText: newStreamingText,
         streamingVersion: newStreamingVersion,
         forceStopped: newForceStopped,
-        pendingPermissions: { ...state.pendingPermissions, [sessionId]: null },
+        pendingPermissions: { ...state.pendingPermissions, [sessionId]: [] },
       };
     });
   },
@@ -2318,7 +2336,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
 
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);
-    set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: null } }));
+    set((state) => ({ pendingPermissions: { ...state.pendingPermissions, [sessionId]: [] } }));
     clearSimulatedStream(sessionId);
 
     set((s) => ({

@@ -3,13 +3,47 @@ import { useRef, useState, type KeyboardEvent } from 'react';
 
 import { cn } from '../../lib/utils';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 
 interface PermissionApprovalCardProps {
   request: AgentPermissionRequest;
   onResponse: (response: AgentPermissionResponse) => void | Promise<void>;
 }
 
+interface PermissionApprovalBodyProps {
+  request: AgentPermissionRequest;
+  selectedResponse: AgentPermissionResponse;
+  comment: string;
+  submitting: boolean;
+  onSelectResponse: (response: AgentPermissionResponse) => void;
+  onCommentChange: (comment: string) => void;
+  variant?: 'card' | 'tab';
+}
+
+interface PermissionApprovalFooterProps {
+  isPlanApproval: boolean;
+  submitting: boolean;
+  onSubmit: () => void;
+  onIgnore: () => void;
+}
+
+interface PermissionApprovalTabsProps {
+  requests: AgentPermissionRequest[];
+  onResponse: (request: AgentPermissionRequest, response: AgentPermissionResponse) => void | Promise<void>;
+}
+
 type PermissionMetadata = Record<string, unknown>;
+
+type PermissionApprovalOption = {
+  response: AgentPermissionResponse;
+  label: string;
+  description: string;
+};
+
+type PermissionDraft = {
+  selectedResponse: AgentPermissionResponse;
+  comment: string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -30,22 +64,66 @@ function getPermissionCommand(request: AgentPermissionRequest): string | null {
   return cwd ? `cd ${cwd} && ${command}` : command;
 }
 
-export function PermissionApprovalCard({ request, onResponse }: PermissionApprovalCardProps) {
+function getPermissionResource(request: AgentPermissionRequest): string | undefined {
   const metadata = request.metadata ?? {};
-  const isPlanApproval = request.permission_type === 'ExitPlanMode' || metadata.presentation === 'plan-approval';
-  const [selectedResponse, setSelectedResponse] = useState<AgentPermissionResponse>('once');
-  const [comment, setComment] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const optionRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const command = getPermissionCommand(request);
-  const title = getText(metadata, 'title') ?? request.description;
-  const options = isPlanApproval
-    ? [{ response: 'once' as const, label: '批准', description: '退出计划模式并开始实施。' }]
+  const directPath = getText(metadata, 'filepath') ?? getText(metadata, 'path') ?? getText(metadata, 'parentDir');
+  if (directPath) return directPath;
+  const patterns = metadata.patterns;
+  return Array.isArray(patterns) && typeof patterns[0] === 'string' ? patterns[0] : undefined;
+}
+
+function getPermissionTitle(request: AgentPermissionRequest): string {
+  const metadata = request.metadata ?? {};
+  const explicitTitle = getText(metadata, 'title');
+  if (explicitTitle) return explicitTitle;
+
+  const description = request.description.trim();
+  if (description && description !== request.permission_type) return description;
+
+  switch (request.permission_type) {
+    case 'external_directory':
+      return '访问外部目录';
+    case 'read':
+      return '读取文件';
+    case 'write':
+    case 'edit':
+      return '修改文件';
+    case 'execute':
+      return '运行命令';
+    default:
+      return '需要确认权限';
+  }
+}
+
+function isPlanApproval(request: AgentPermissionRequest): boolean {
+  return request.permission_type === 'ExitPlanMode' || request.metadata?.presentation === 'plan-approval';
+}
+
+function getPermissionOptions(planApproval: boolean): PermissionApprovalOption[] {
+  return planApproval
+    ? [{ response: 'once', label: '批准', description: '退出计划模式并开始实施。' }]
     : [
-        { response: 'once' as const, label: '允许', description: '仅允许这一次操作。' },
-        { response: 'always' as const, label: '始终允许本项目', description: '后续相同命令不再询问。' },
-        { response: 'reject' as const, label: '拒绝', description: '这次先拒绝。' },
+        { response: 'once', label: '允许', description: '仅允许这一次操作。' },
+        { response: 'always', label: '始终允许本项目', description: '后续相同命令不再询问。' },
+        { response: 'reject', label: '拒绝', description: '这次先拒绝。' },
       ];
+}
+
+function PermissionApprovalBody({
+  request,
+  selectedResponse,
+  comment,
+  submitting,
+  onSelectResponse,
+  onCommentChange,
+  variant = 'card',
+}: PermissionApprovalBodyProps) {
+  const planApproval = isPlanApproval(request);
+  const command = getPermissionCommand(request);
+  const title = getPermissionTitle(request);
+  const resource = getPermissionResource(request);
+  const options = getPermissionOptions(planApproval);
+  const optionRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   const focusOption = (index: number) => {
     const nextIndex = (index + options.length) % options.length;
@@ -73,40 +151,23 @@ export function PermissionApprovalCard({ request, onResponse }: PermissionApprov
     }
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      setSelectedResponse(options[index].response);
-    }
-  };
-
-  const submit = async () => {
-    if (submitting) return;
-    setSubmitting(true);
-    try {
-      await onResponse(selectedResponse);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const ignore = async () => {
-    if (submitting) return;
-    setSubmitting(true);
-    try {
-      await onResponse('reject');
-    } finally {
-      setSubmitting(false);
+      onSelectResponse(options[index].response);
     }
   };
 
   return (
-    <section className="space-y-3 rounded-2xl border border-border/70 bg-[hsl(var(--surface-2))]/94 p-3 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.035)]" data-testid="permission-approval-card">
-      <div className="flex items-center gap-2 text-sm">
-        <span className="rounded-md border border-border/65 px-2 py-0.5 text-xs font-medium text-foreground/82">需要权限</span>
-        <span className="min-w-0 truncate text-foreground/85">{isPlanApproval ? '实施计划' : title}</span>
+    <section className={cn(variant === 'card' && 'rounded-lg bg-[hsl(var(--surface-2))]/66 p-2')}>
+      <div className="px-1">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="rounded-md border border-border/65 px-2 py-0.5 text-xs font-medium text-foreground/82">需要权限</span>
+          <span className="min-w-0 truncate text-foreground/85">{planApproval ? '实施计划' : title}</span>
+        </div>
+        {resource ? <p className="mt-1 truncate font-mono text-xs text-muted-foreground/72" title={resource}>{resource}</p> : null}
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-muted-foreground/78">
-        {isPlanApproval ? <Terminal className="h-3.5 w-3.5" /> : <Clock3 className="h-3.5 w-3.5" />}
-        <span>{isPlanApproval ? '等待批准' : '等待确认'}</span>
+      <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground/78">
+        {planApproval ? <Terminal className="h-3.5 w-3.5" /> : <Clock3 className="h-3.5 w-3.5" />}
+        <span>{planApproval ? '等待批准' : '等待确认'}</span>
       </div>
 
       {command ? (
@@ -115,7 +176,7 @@ export function PermissionApprovalCard({ request, onResponse }: PermissionApprov
         </pre>
       ) : null}
 
-      <div className="space-y-1">
+      <div data-testid="permission-options" className="space-y-0 overflow-hidden rounded-lg border border-border/18 bg-[hsl(var(--surface-3))]/22">
         {options.map((option, index) => {
           const active = selectedResponse === option.response;
           return (
@@ -124,15 +185,15 @@ export function PermissionApprovalCard({ request, onResponse }: PermissionApprov
               type="button"
               ref={(element) => { optionRefs.current[String(index)] = element; }}
               disabled={submitting}
-              onClick={() => setSelectedResponse(option.response)}
+              onClick={() => onSelectResponse(option.response)}
               onKeyDown={(event) => handleOptionKeyDown(event, index)}
               autoFocus={index === 0}
               aria-pressed={active}
               className={cn(
-                'flex w-full items-start gap-3 rounded-lg border px-2.5 py-2 text-left transition-colors',
+                'flex w-full items-start gap-3 border-0 px-3 py-2 text-left transition-colors',
                 active
-                  ? 'border-border/55 bg-muted/92 dark:bg-[hsl(var(--muted-foreground))/0.28] text-foreground'
-                  : 'border-transparent text-muted-foreground hover:bg-muted/42 hover:text-foreground',
+                  ? 'bg-muted/92 text-foreground dark:bg-[hsl(var(--muted-foreground))/0.28]'
+                  : 'text-muted-foreground hover:bg-muted/42 hover:text-foreground',
                 submitting && 'cursor-wait opacity-70',
                 'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/35',
               )}
@@ -153,45 +214,164 @@ export function PermissionApprovalCard({ request, onResponse }: PermissionApprov
         })}
       </div>
 
-      {isPlanApproval ? (
+      {planApproval ? (
         <div className="rounded-lg border border-border/35 bg-background/45 p-0.5 transition-colors focus-within:border-foreground/30 focus-within:bg-muted/18">
           <input
             value={comment}
-            onChange={(event) => setComment(event.target.value)}
+            onChange={(event) => onCommentChange(event.target.value)}
             placeholder="输入你的回答..."
             disabled={submitting}
             className="w-full rounded-md border-0 bg-transparent px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/55 focus:ring-0"
           />
         </div>
       ) : null}
+    </section>
+  );
+}
 
-      <div className="flex items-center justify-between gap-3 border-t border-border/20 pt-2">
-        <span className="flex items-center gap-1.5 text-xs text-muted-foreground/72">
-          <Info className="h-3.5 w-3.5" />
-          使用 Tab / 上下键选择，回车或空格选中
-        </span>
-        <div className="flex items-center gap-2">
-          {isPlanApproval ? (
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={() => void ignore()}
-              className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/42 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/35 disabled:cursor-wait disabled:opacity-60"
-            >
-              忽略
-            </button>
-          ) : null}
+function PermissionApprovalFooter({ isPlanApproval, submitting, onSubmit, onIgnore }: PermissionApprovalFooterProps) {
+  return (
+    <div data-testid="permission-footer" className="flex items-center justify-between gap-3 px-1">
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground/72">
+        <Info className="h-3.5 w-3.5" />
+        使用 Tab / 上下键选择，回车或空格选中
+      </span>
+      <div className="flex items-center gap-2">
+        {isPlanApproval ? (
           <button
             type="button"
             disabled={submitting}
-            onClick={() => void submit()}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/35 disabled:cursor-wait disabled:opacity-60"
+            onClick={onIgnore}
+            className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/42 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/35 disabled:cursor-wait disabled:opacity-60"
           >
-            {submitting ? '提交中...' : '确认'}
-            <Check className="h-3.5 w-3.5" />
+            忽略
           </button>
-        </div>
+        ) : null}
+        <button
+          type="button"
+          disabled={submitting}
+          onClick={onSubmit}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/35 disabled:cursor-wait disabled:opacity-60"
+        >
+          {submitting ? '提交中...' : '确认'}
+          <Check className="h-3.5 w-3.5" />
+        </button>
       </div>
-    </section>
+    </div>
   );
+}
+
+function PermissionApprovalPanel({ request, onResponse }: PermissionApprovalCardProps) {
+  const planApproval = isPlanApproval(request);
+  const [draft, setDraft] = useState<PermissionDraft>({ selectedResponse: 'once', comment: '' });
+  const [submitting, setSubmitting] = useState(false);
+
+  const respond = async (response: AgentPermissionResponse) => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onResponse(response);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3" data-testid="permission-approval-card">
+      <PermissionApprovalBody
+        request={request}
+        selectedResponse={draft.selectedResponse}
+        comment={draft.comment}
+        submitting={submitting}
+        onSelectResponse={(selectedResponse) => setDraft((current) => ({ ...current, selectedResponse }))}
+        onCommentChange={(comment) => setDraft((current) => ({ ...current, comment }))}
+      />
+      <PermissionApprovalFooter
+        isPlanApproval={planApproval}
+        submitting={submitting}
+        onSubmit={() => void respond(draft.selectedResponse)}
+        onIgnore={() => void respond('reject')}
+      />
+    </div>
+  );
+}
+
+function getPermissionTabLabel(request: AgentPermissionRequest, index: number): string {
+  const resource = getPermissionResource(request);
+  const label = resource?.split(/[\\/]/).filter(Boolean).pop() ?? getPermissionTitle(request);
+  return `${index + 1}. ${label}`;
+}
+
+export function PermissionApprovalTabs({ requests, onResponse }: PermissionApprovalTabsProps) {
+  const [activeRequestId, setActiveRequestId] = useState(requests[0]?.request_id ?? '');
+  const [drafts, setDrafts] = useState<Record<string, PermissionDraft>>({});
+  const [submittingRequestId, setSubmittingRequestId] = useState<string | null>(null);
+  const activeRequest = requests.find((request) => request.request_id === activeRequestId) ?? requests[0];
+  const activeId = activeRequest?.request_id ?? '';
+
+  const getDraft = (requestId: string): PermissionDraft => drafts[requestId] ?? { selectedResponse: 'once', comment: '' };
+  const updateDraft = (requestId: string, patch: Partial<PermissionDraft>) => {
+    setDrafts((current) => ({
+      ...current,
+      [requestId]: { ...getDraftFromState(current, requestId), ...patch },
+    }));
+  };
+
+  const handleResponse = async (request: AgentPermissionRequest, response: AgentPermissionResponse) => {
+    if (submittingRequestId) return;
+    setSubmittingRequestId(request.request_id);
+    try {
+      await onResponse(request, response);
+    } finally {
+      setSubmittingRequestId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-3" data-testid="permission-approval-tabs">
+      <div className="rounded-lg bg-[hsl(var(--surface-2))]/66 p-2">
+        <Tabs value={activeId} onValueChange={setActiveRequestId}>
+          <TabsList className="mb-2 w-full min-w-0 max-w-full flex-nowrap justify-start overflow-x-auto overflow-y-hidden overscroll-x-contain">
+            {requests.map((request, index) => (
+              <TabsTrigger key={request.request_id} value={request.request_id} className="relative min-w-0 max-w-[15rem] flex-1">
+                <span className="truncate">{getPermissionTabLabel(request, index)}</span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          {requests.map((request) => {
+            const draft = getDraft(request.request_id);
+            return (
+              <TabsContent key={request.request_id} value={request.request_id}>
+                <PermissionApprovalBody
+                  request={request}
+                  selectedResponse={draft.selectedResponse}
+                  comment={draft.comment}
+                  submitting={submittingRequestId === request.request_id}
+                  onSelectResponse={(selectedResponse) => updateDraft(request.request_id, { selectedResponse })}
+                  onCommentChange={(comment) => updateDraft(request.request_id, { comment })}
+                  variant="tab"
+                />
+              </TabsContent>
+            );
+          })}
+        </Tabs>
+      </div>
+      {activeRequest ? (
+        <PermissionApprovalFooter
+          isPlanApproval={isPlanApproval(activeRequest)}
+          submitting={submittingRequestId === activeId}
+          onSubmit={() => void handleResponse(activeRequest, getDraft(activeId).selectedResponse)}
+          onIgnore={() => void handleResponse(activeRequest, 'reject')}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function getDraftFromState(drafts: Record<string, PermissionDraft>, requestId: string): PermissionDraft {
+  return drafts[requestId] ?? { selectedResponse: 'once', comment: '' };
+}
+
+export function PermissionApprovalCard({ request, onResponse }: PermissionApprovalCardProps) {
+  return <PermissionApprovalPanel request={request} onResponse={onResponse} />;
 }

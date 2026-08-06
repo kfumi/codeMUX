@@ -46,7 +46,7 @@ import type { AgentKind } from '../../../types/session';
 import { ContextDisplay } from '../../assistant-ui/context-display';
 import { buildContextUsageViewModel } from '../contextUsage';
 import { AskUserQuestionCard, type AskUserQuestion } from '../AskUserQuestionCard';
-import { PermissionApprovalCard } from '../PermissionApprovalCard';
+import { PermissionApprovalCard, PermissionApprovalTabs } from '../PermissionApprovalCard';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../../types/agent';
 import { CodeMuxDirectiveChip, type CodeMuxDirectiveKind } from './CodeMuxDirectiveText';
 import {
@@ -64,8 +64,8 @@ interface CodeMuxComposerProps {
   placeholder?: string;
   modelSelector?: ReactNode;
   permissionSelector?: ReactNode;
-  pendingPermission?: AgentPermissionRequest | null;
-  onPermissionResponse?: (response: AgentPermissionResponse) => void | Promise<void>;
+  pendingPermissions?: AgentPermissionRequest[];
+  onPermissionResponse?: (requestId: string, response: AgentPermissionResponse) => void | Promise<void>;
   disabled?: boolean;
   loading?: boolean;
   onStop?: () => void | Promise<void>;
@@ -168,7 +168,7 @@ export function CodeMuxComposer({
   placeholder = '输入消息... (@ 引用文件, / 命令)',
   modelSelector,
   permissionSelector,
-  pendingPermission,
+  pendingPermissions = [],
   onPermissionResponse,
   disabled = false,
   loading = false,
@@ -250,7 +250,8 @@ export function CodeMuxComposer({
       .map(toFileTriggerItem);
   }, [activeChar, activeQuery, allFileEntries]);
   const menuItems = activeChar === '/' ? slashItems : fileItems;
-  const menuVisible = activeChar !== null && !pendingPermission && !pendingQuestion && !pendingPlan;
+  const hasPendingPermissions = pendingPermissions.length > 0;
+  const menuVisible = activeChar !== null && !hasPendingPermissions && !pendingQuestion && !pendingPlan;
 
   useEffect(() => {
     setHighlightedIndex(0);
@@ -459,13 +460,22 @@ export function CodeMuxComposer({
                 {() => <ComposerAttachmentPreview />}
               </ComposerPrimitive.Attachments>
             </div>
-            {pendingPermission ? (
-              <PermissionApprovalCard
-                request={pendingPermission}
-                onResponse={async (response) => {
-                  await onPermissionResponse?.(response);
-                }}
-              />
+            {hasPendingPermissions ? (
+              pendingPermissions.length === 1 ? (
+                <PermissionApprovalCard
+                  request={pendingPermissions[0]}
+                  onResponse={async (response) => {
+                    await onPermissionResponse?.(pendingPermissions[0].request_id, response);
+                  }}
+                />
+              ) : (
+                <PermissionApprovalTabs
+                  requests={pendingPermissions}
+                  onResponse={async (request, response) => {
+                    await onPermissionResponse?.(request.request_id, response);
+                  }}
+                />
+              )
             ) : pendingQuestion ? (
               <AskUserQuestionCard
                 key={pendingQuestion.toolUseId}
@@ -515,7 +525,7 @@ export function CodeMuxComposer({
               />
             )}
 
-            {!pendingPermission && !pendingQuestion && !pendingPlan && <div className="relative flex items-center justify-between pl-1">
+            {!hasPendingPermissions && !pendingQuestion && !pendingPlan && <div className="relative flex items-center justify-between pl-1">
               <div className="flex items-center gap-2">
                 <Popover open={addMenuOpen} onOpenChange={setAddMenuOpen}>
                   <TooltipProvider delayDuration={300}>

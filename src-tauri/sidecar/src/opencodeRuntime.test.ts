@@ -255,6 +255,45 @@ describe('OpenCodeRuntime', () => {
     await runtime.shutdown();
   });
 
+  it('registers and responds to the permission.asked event emitted by current OpenCode runtimes', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+
+    const rawPermission = {
+      id: 'permission-asked-1',
+      sessionID: 'opencode-new',
+      permission: 'external_directory',
+      metadata: { filepath: 'C:\\Users\\user\\.agents' },
+    };
+    onEvent({ type: 'permission.asked', properties: rawPermission });
+
+    expect(runtime.permissions.get('permission-asked-1')).toMatchObject({
+      permissionType: 'external_directory',
+      raw: rawPermission,
+    });
+    expect(emitted).toContainEqual(expect.objectContaining({
+      type: 'permission_requested',
+      request_id: 'permission-asked-1',
+      permission_type: 'external_directory',
+      description: 'external_directory',
+      metadata: rawPermission.metadata,
+    }));
+    await runtime.respondToPermission('permission-asked-1', 'once');
+    expect(client.respondToPermission).toHaveBeenCalledWith({
+      sessionId: 'opencode-new',
+      requestId: 'permission-asked-1',
+      response: 'once',
+    });
+    await runtime.shutdown();
+  });
+
   it('cancels pending permissions during interrupt without calling native response twice', async () => {
     const { port, client } = createPort();
     const emitted: unknown[] = [];

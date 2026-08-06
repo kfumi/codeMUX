@@ -415,7 +415,7 @@ export class OpenCodeRuntime {
     if (eventLower.includes('cancel') || eventLower.includes('abort') || eventLower.includes('interrupt') || type === 'session.error') {
       writeLog('[opencode-task]', `handleSdkEvent type=${type} eventSessionId=${eventSessionId ?? 'null'} activeSessionId=${activeSessionId ?? 'null'} event=${JSON.stringify(event).slice(0, 500)}`);
     }
-    if (type === 'permission.updated' && this.permissionClosing) {
+    if ((type === 'permission.updated' || type === 'permission.asked') && this.permissionClosing) {
       return;
     }
     const identity = getOpenCodeEventIdentity(event, this.turnId);
@@ -455,7 +455,7 @@ export class OpenCodeRuntime {
 
     // Handle permission and question events from ANY session (including subagents)
     // These must be processed before the session filter below.
-    if (type === 'permission.updated') {
+    if (type === 'permission.updated' || type === 'permission.asked') {
       this.handlePermissionEvent(event, eventSessionId, identity, payloadKey);
       if (identity) {
         this.rememberSeenEventId(identity);
@@ -649,7 +649,7 @@ export class OpenCodeRuntime {
     if (!requestId) {
       return;
     }
-    const permissionType = readString(properties?.type) ?? 'unknown';
+    const permissionType = readString(properties?.type) ?? readString(properties?.permission) ?? 'unknown';
     const description = readString(properties?.title) ?? permissionType;
     const metadata = asRecord(properties?.metadata);
     const openCodeSessionId = eventSessionId ?? readString(properties?.sessionID);

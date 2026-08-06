@@ -43,16 +43,16 @@ describe('RunningElapsedTimer', () => {
 
     render(<RunningElapsedTimer />);
 
-    expect(screen.getAllByText('思考中 · 0s').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('正在执行 · 0s').length).toBeGreaterThan(0);
 
     act(() => {
       vi.advanceTimersByTime(30_000);
     });
-    expect(screen.getAllByText('思考中 · 30s').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('正在执行 · 30s').length).toBeGreaterThan(0);
 
     act(() => {
       vi.advanceTimersByTime(40_000);
     });
-    expect(screen.getAllByText('思考中 · 1m10s').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('正在执行 · 1m10s').length).toBeGreaterThan(0);
   });
 });

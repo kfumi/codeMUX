@@ -84,4 +84,31 @@ describe('PermissionApprovalCard', () => {
 
     await waitFor(() => expect(onResponse).toHaveBeenCalledWith('always'));
   });
+
+  it('presents OpenCode directory permissions with a readable title and keeps actions outside the option list', () => {
+    const onResponse = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <PermissionApprovalCard
+        request={{
+          request_id: 'directory-1',
+          permission_type: 'external_directory',
+          description: 'external_directory',
+          metadata: { filepath: 'C:\\Users\\94910\\.agents' },
+        }}
+        onResponse={onResponse}
+      />,
+    );
+
+    expect(screen.getByText('访问外部目录')).toBeTruthy();
+    expect(screen.getByText('C:\\Users\\94910\\.agents')).toBeTruthy();
+    expect(screen.queryByText('external_directory')).toBeNull();
+    const options = screen.getByTestId('permission-options');
+    const footer = screen.getByTestId('permission-footer');
+    const card = screen.getByTestId('permission-approval-card');
+    expect(options.contains(footer)).toBe(false);
+    expect(footer.parentElement).toBe(card);
+    expect(options.parentElement).not.toBe(card);
+    expect(screen.getByText('允许').closest('button')?.className).toContain('border-0');
+  });
 });

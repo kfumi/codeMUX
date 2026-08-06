@@ -21,6 +21,7 @@ const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Reco
 const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadLatestTokenUsageMock = vi.fn<(appSessionId: string, agentKind: string, freshness: 'live_synced' | 'restored') => Promise<Record<string, unknown> | null>>();
 const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator) => Promise<void>>();
+const respondToAgentPermissionMock = vi.fn();
 
 vi.mock('../lib/tauri', () => ({
   agentApi: {
@@ -31,6 +32,7 @@ vi.mock('../lib/tauri', () => ({
     shutdown: vi.fn(),
     resetSession: vi.fn(),
     sendToolResponse: vi.fn(),
+    respondToAgentPermission: respondToAgentPermissionMock,
     deleteClaudeSessionFiles: vi.fn(),
     saveEvents: saveEventsMock,
     getEvents: getEventsMock,
@@ -135,6 +137,7 @@ describe('agent store Codex history loading', () => {
       changedFiles: {},
       fileOriginals: {},
       acknowledgedFiles: {},
+      pendingPermissions: {},
     });
 
     return session;
@@ -1027,6 +1030,44 @@ describe('agent store Codex history loading', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('queues concurrent native permission requests for the same session', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'permission_requested',
+        session_id: sessionId,
+        request_id: 'permission-local',
+        permission_type: 'external_directory',
+        description: 'external_directory',
+        metadata: { filepath: 'C:\\Users\\94910\\AppData\\Local' },
+      }));
+      onEvent(JSON.stringify({
+        type: 'permission_requested',
+        session_id: sessionId,
+        request_id: 'permission-roaming',
+        permission_type: 'external_directory',
+        description: 'external_directory',
+        metadata: { filepath: 'C:\\Users\\94910\\AppData\\Roaming' },
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('opencode');
+
+    await useAgentStore.getState().startQuery(session.id, '检查目录', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useAgentStore.getState().pendingPermissions[session.id]).toMatchObject([
+      { request_id: 'permission-local' },
+      { request_id: 'permission-roaming' },
+    ]);
+
+    await useAgentStore.getState().respondToPermission(session.id, 'permission-roaming', 'once');
+
+    expect(respondToAgentPermissionMock).toHaveBeenCalledWith(session.id, 'permission-roaming', 'once');
+    expect(useAgentStore.getState().pendingPermissions[session.id]).toMatchObject([
+      { request_id: 'permission-local' },
+    ]);
   });
 
   it('keeps Claude answer deltas out of the thinking stream', async () => {
