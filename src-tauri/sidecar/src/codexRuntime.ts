@@ -48,7 +48,7 @@ import {
   type CodexCollaborationPolicy,
 } from './codexCollaborationPolicy.js';
 import { setLogCtx, writeLog } from './writeLog.js';
-import { loadProviderRuntime, isRuntimeError, type RuntimeLoadResult } from './runtimeLoader.js';
+import { loadProviderRuntime, isRuntimeError, type RuntimeLoadOutcome } from './runtimeLoader.js';
 import { loadCodexSdk, type CodexSdkModule } from './sdkLoader.js';
 
 export { emit } from './streamEventBatcher.js';
@@ -369,7 +369,7 @@ export class CodexSessionRuntime {
    * 使用 runtimeRef 加载 Provider Runtime，返回 RuntimeLoadResult。
    * 如果没有 runtimeRef（开发模式），返回 null 以触发 sidecar node_modules 回退。
    */
-  private loadRuntimeIfNeeded(): RuntimeLoadResult | null {
+  private loadRuntimeIfNeeded(): RuntimeLoadOutcome | null {
     if (!this.config?.runtimePath) return null;
     const ref = {
       provider: 'codex' as const,
@@ -377,11 +377,7 @@ export class CodexSessionRuntime {
       runtimePath: this.config.runtimePath,
       runtimeVersion: '',
     };
-    const result = loadProviderRuntime(ref);
-    if (isRuntimeError(result)) {
-      return result as unknown as RuntimeLoadResult;
-    }
-    return result;
+    return loadProviderRuntime(ref);
   }
 
   updatePermissions(cmd: UpdatePermissionsCommand): void {

@@ -12,7 +12,7 @@ import type {
 import type { SidecarCommand } from './types.js';
 import { getProviderMode } from './sessionRuntimeHelpers.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
-import { loadProviderRuntime, isRuntimeError, type RuntimeLoadResult } from './runtimeLoader.js';
+import { loadProviderRuntime, isRuntimeError, type RuntimeLoadOutcome } from './runtimeLoader.js';
 import { loadClaudeSdk, type ClaudeSdkModule } from './sdkLoader.js';
 import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion.js';
 import { projectClaudeToolEvents } from './claudeToolEvents.js';
@@ -317,7 +317,7 @@ export class SessionRuntime {
   /** 动态加载的 Claude SDK 模块（从 Runtime 路径或 sidecar node_modules 加载）。 */
   private claudeSdk: ClaudeSdkModule | null = null;
   /** Runtime 加载结果，用于解析 SDK 路径。 */
-  private runtimeLoaded: RuntimeLoadResult | null = null;
+  private runtimeLoaded: RuntimeLoadOutcome | null = null;
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     const normalized = this.normalizeConfig(cmd);
@@ -356,17 +356,12 @@ export class SessionRuntime {
   }
 
   /**
-   * 使用 runtimeRef 加载 Provider Runtime，返回 RuntimeLoadResult。
+   * 使用 runtimeRef 加载 Provider Runtime，返回 RuntimeLoadOutcome。
    * 如果没有 runtimeRef（开发模式），返回 null 以触发 sidecar node_modules 回退。
    */
-  private loadRuntimeIfNeeded(): RuntimeLoadResult | null {
+  private loadRuntimeIfNeeded(): RuntimeLoadOutcome | null {
     if (!this.config?.runtimeRef) return null;
-    const result = loadProviderRuntime(this.config.runtimeRef);
-    if (isRuntimeError(result)) {
-      // RuntimeError — 返回错误对象，由调用方检查
-      return result as unknown as RuntimeLoadResult;
-    }
-    return result;
+    return loadProviderRuntime(this.config.runtimeRef);
   }
 
   updatePermissions(cmd: UpdatePermissionsCommand): void {

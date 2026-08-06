@@ -112,6 +112,9 @@ impl ProgressReporter for TauriProgressReporter {
 }
 
 /// 检测所有 Provider 的 CodeMUX 自有 Runtime 状态。
+///
+/// 优先使用 RuntimeManager 的完整检测（含 latest_version / outdated / sidecar 兼容性），
+/// 当 manifest 拉取失败（如离线）时降级为本地完整性检测。
 #[tauri::command]
 pub async fn check_managed_runtimes(
     state: State<'_, AppState>,
@@ -119,9 +122,14 @@ pub async fn check_managed_runtimes(
     let resolver = &state.runtime_resolver;
     let node = detect_node().await;
 
+    let manager = build_runtime_manager(&state).ok();
     let mut runtimes = Vec::new();
     for provider in Provider::all() {
-        let info = check_single_runtime(*provider, resolver, &node);
+        let info = if let Some(ref manager) = manager {
+            check_single_runtime_via_manager(*provider, manager, resolver, &node).await
+        } else {
+            check_single_runtime(*provider, resolver, &node)
+        };
         runtimes.push(info);
     }
 
@@ -142,7 +150,89 @@ pub async fn refresh_managed_runtime(
         Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;
     let resolver = &state.runtime_resolver;
     let node = detect_node().await;
-    Ok(check_single_runtime(provider, resolver, &node))
+
+    if let Ok(manager) = build_runtime_manager(&state) {
+        Ok(check_single_runtime_via_manager(provider, &manager, resolver, &node).await)
+    } else {
+        Ok(check_single_runtime(provider, resolver, &node))
+    }
+}
+
+/// 使用 RuntimeManager 进行完整检测（含 latest_version / outdated / sidecar 兼容性）。
+///
+/// 当 manifest 拉取失败（离线、GitHub 不可达）时降级为本地检测，
+/// 确保用户始终能看到本地 Runtime 状态。
+async fn check_single_runtime_via_manager(
+    provider: Provider,
+    manager: &RuntimeManager<
+        GitHubReleaseManifestSource,
+        HttpPackDownloader,
+        Ed25519SignatureVerifier,
+        TarGzArchiveExtractor,
+        SystemNodeResolver,
+        crate::runtime::seam::FileSystemRuntimeRoots,
+    >,
+    resolver: &crate::runtime::RuntimeResolver,
+    node: &NodeInfo,
+) -> ManagedRuntimeInfo {
+    match manager.check_status(provider).await {
+        Ok(status_info) => {
+            let message = build_status_message(provider, status_info.status, &status_info);
+            ManagedRuntimeInfo {
+                provider: provider.as_str().to_string(),
+                label: provider.label().to_string(),
+                status: status_info.status,
+                current_version: status_info.current_version,
+                installed_versions: resolver.list_installed_versions(provider),
+                install_path: status_info
+                    .install_path
+                    .map(|p| p.to_string_lossy().to_string()),
+                runtime_root: resolver.root().to_string_lossy().to_string(),
+                integrity_ok: status_info
+                    .integrity
+                    .as_ref()
+                    .map(|i| i.ok)
+                    .unwrap_or(true),
+                message,
+            }
+        }
+        Err(_) => {
+            // manifest 拉取失败等情况下，降级为纯本地检测
+            check_single_runtime(provider, resolver, node)
+        }
+    }
+}
+
+fn build_status_message(
+    provider: Provider,
+    status: RuntimeStatus,
+    info: &crate::runtime::manager::RuntimeStatusInfo,
+) -> String {
+    match status {
+        RuntimeStatus::NodeUnavailable => format!(
+            "Node.js 不可用或版本低于 18{}",
+            info.node
+                .error
+                .as_ref()
+                .map(|e| format!("：{}", e))
+                .unwrap_or_default()
+        ),
+        RuntimeStatus::Missing => format!("{} 尚未安装，点击安装按钮获取", provider.label()),
+        RuntimeStatus::Corrupted => format!("{} Runtime 损坏，需要修复", provider.label()),
+        RuntimeStatus::Outdated => format!(
+            "{} {} 可更新到 {}",
+            provider.label(),
+            info.current_version.as_deref().unwrap_or("未知版本"),
+            info.latest_version.as_deref().unwrap_or("最新版本")
+        ),
+        RuntimeStatus::Ready => format!(
+            "{} {} 已就绪",
+            provider.label(),
+            info.current_version.as_deref().unwrap_or("未知版本")
+        ),
+        RuntimeStatus::Installing => format!("{} 正在安装中", provider.label()),
+        RuntimeStatus::Error => format!("{} Runtime 状态异常", provider.label()),
+    }
 }
 
 /// 安装指定 Provider 的最新版本 Runtime。

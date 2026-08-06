@@ -677,15 +677,15 @@ export const appApi = {
     invokeLogged('probe_agent_installations', { agentKind }),
   checkManagedRuntimes: (): Promise<ManagedRuntimeCheckResult> =>
     invokeLogged('check_managed_runtimes'),
-  refreshManagedRuntime: (provider: string): Promise<ManagedRuntimeInfo> =>
+  refreshManagedRuntime: (provider: RuntimeProvider): Promise<ManagedRuntimeInfo> =>
     invokeLogged('refresh_managed_runtime', { provider }),
-  installManagedRuntime: (provider: string): Promise<ManagedRuntimeOperationResult> =>
+  installManagedRuntime: (provider: RuntimeProvider): Promise<ManagedRuntimeOperationResult> =>
     invokeLogged('install_managed_runtime', { provider }),
-  upgradeManagedRuntime: (provider: string): Promise<ManagedRuntimeOperationResult | null> =>
+  upgradeManagedRuntime: (provider: RuntimeProvider): Promise<ManagedRuntimeOperationResult | null> =>
     invokeLogged('upgrade_managed_runtime', { provider }),
-  repairManagedRuntime: (provider: string): Promise<ManagedRuntimeOperationResult | null> =>
+  repairManagedRuntime: (provider: RuntimeProvider): Promise<ManagedRuntimeOperationResult | null> =>
     invokeLogged('repair_managed_runtime', { provider }),
-  removeManagedRuntime: (provider: string): Promise<void> =>
+  removeManagedRuntime: (provider: RuntimeProvider): Promise<void> =>
     invokeLogged('remove_managed_runtime', { provider }),
 };
 

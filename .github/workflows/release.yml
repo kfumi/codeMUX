@@ -213,10 +213,13 @@ jobs:
           echo "已解析 ${{ matrix.provider }} SDK 版本: $VERSION"
 
       - name: Write signing key (if available)
-        if: ${{ secrets.CODEMUX_RUNTIME_SIGNING_KEY != '' }}
         shell: bash
+        env:
+          SIGNING_KEY: ${{ secrets.CODEMUX_RUNTIME_SIGNING_KEY }}
         run: |
-          printf '%s' '${{ secrets.CODEMUX_RUNTIME_SIGNING_KEY }}' > $RUNNER_TEMP/runtime-signing-key.pem
+          if [ -n "$SIGNING_KEY" ]; then
+            printf '%s' "$SIGNING_KEY" > "$RUNNER_TEMP/runtime-signing-key.pem"
+          fi
 
       - name: Build Runtime Pack
         shell: bash

@@ -27,9 +27,9 @@ import {
   type RuntimeInstallProgress,
   type RuntimeInstallProgressEvent,
   type RuntimeProvider,
-} from '../../lib/tauri';
-import { cn } from '../../lib/utils';
-import { Button } from '../ui/button';
+} from '@/lib/tauri';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 
 export const RUNTIME_STATUS_META: Record<
   ManagedRuntimeStatus,
@@ -181,7 +181,7 @@ export function RuntimeSettingsPanel() {
 
   const runOperation = useCallback(
     async (
-      provider: string,
+      provider: RuntimeProvider,
       label: string,
       kind: OperationKind,
       executor: () => Promise<ManagedRuntimeOperationResult | null>,
@@ -221,25 +221,25 @@ export function RuntimeSettingsPanel() {
   );
 
   const handleInstall = useCallback(
-    (provider: string, label: string) =>
+    (provider: RuntimeProvider, label: string) =>
       runOperation(provider, label, 'install', () => appApi.installManagedRuntime(provider)),
     [runOperation],
   );
 
   const handleUpgrade = useCallback(
-    (provider: string, label: string) =>
+    (provider: RuntimeProvider, label: string) =>
       runOperation(provider, label, 'upgrade', () => appApi.upgradeManagedRuntime(provider)),
     [runOperation],
   );
 
   const handleRepair = useCallback(
-    (provider: string, label: string) =>
+    (provider: RuntimeProvider, label: string) =>
       runOperation(provider, label, 'repair', () => appApi.repairManagedRuntime(provider)),
     [runOperation],
   );
 
   const handleRemove = useCallback(
-    async (provider: string, label: string) => {
+    async (provider: RuntimeProvider, label: string) => {
       setOperations((prev) => ({
         ...prev,
         [provider]: { kind: 'remove', progress: null },

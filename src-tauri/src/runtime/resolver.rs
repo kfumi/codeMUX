@@ -77,7 +77,10 @@ impl RuntimeResolver {
         self.roots.list_installed_versions(provider)
     }
 
-    /// 检查指定 Provider 的当前版本目录是否存在且包含关键文件。
+    /// 检查指定 Provider 的当前版本目录是否存在且包含关键文件与关键二进制。
+    ///
+    /// 这是纯本地检测，不依赖网络拉取 manifest。关键二进制路径基于 Provider
+    /// 和当前平台推断，与 Runtime Pack manifest 的 `key_binaries` 保持一致。
     pub fn check_integrity(&self, provider: Provider) -> bool {
         let Some(version) = self.roots.read_current_version(provider) else {
             return false;
@@ -86,7 +89,52 @@ impl RuntimeResolver {
         if !dir.exists() {
             return false;
         }
-        dir.join("package.json").exists()
+        if !dir.join("package.json").exists() {
+            return false;
+        }
+        // 校验关键二进制存在（spec L17/L63：检查关键二进制以提前发现不完整安装）
+        for binary_rel in self.local_key_binaries(provider) {
+            let binary_path = dir.join(&binary_rel);
+            if !binary_path.exists() {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// 返回指定 Provider 在当前平台下的关键二进制相对路径（本地推断，不依赖 manifest）。
+    ///
+    /// 与 `scripts/lib/runtime-pack-builder.mjs` 的 `keyBinariesByTarget` 保持一致：
+    /// - ClaudeCode: `@anthropic-ai/claude-agent-sdk-{platform}-{arch}/claude[.exe]`
+    /// - Codex: 无平台二进制（纯 SDK）
+    /// - OpenCode: `opencode-ai/bin/opencode[.exe|.cmd]`
+    fn local_key_binaries(&self, provider: Provider) -> Vec<String> {
+        match provider {
+            Provider::ClaudeCode => {
+                let (platform_name, arch_suffix, binary_name) = if cfg!(target_os = "windows") {
+                    ("win32", "x64", "claude.exe")
+                } else if cfg!(target_os = "macos") {
+                    ("darwin", "x64", "claude")
+                } else {
+                    ("linux", "x64", "claude")
+                };
+                vec![format!(
+                    "node_modules/@anthropic-ai/claude-agent-sdk-{}-{}/{}",
+                    platform_name, arch_suffix, binary_name
+                )]
+            }
+            Provider::Codex => Vec::new(),
+            Provider::OpenCode => {
+                if cfg!(target_os = "windows") {
+                    vec![
+                        "node_modules/opencode-ai/bin/opencode.exe".to_string(),
+                        "node_modules/opencode-ai/bin/opencode.cmd".to_string(),
+                    ]
+                } else {
+                    vec!["node_modules/opencode-ai/bin/opencode".to_string()]
+                }
+            }
+        }
     }
 }
 
@@ -101,6 +149,20 @@ mod tests {
         std::fs::write(dir.join("package.json"), b"{}").unwrap();
         // 写入 current 指针
         std::fs::write(root.join(provider.as_str()).join("current"), version).unwrap();
+    }
+
+    /// 创建包含关键二进制的完整 Runtime Pack（用于完整性校验测试）。
+    fn create_full_runtime_pack(root: &std::path::Path, provider: Provider, version: &str) {
+        create_runtime_pack(root, provider, version);
+        let dir = root.join(provider.as_str()).join(version);
+        let resolver = RuntimeResolver::new(root.to_path_buf());
+        for binary_rel in resolver.local_key_binaries(provider) {
+            let binary_path = dir.join(&binary_rel);
+            if let Some(parent) = binary_path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(&binary_path, b"fake-binary").unwrap();
+        }
     }
 
     #[test]
@@ -164,7 +226,41 @@ mod tests {
     #[test]
     fn check_integrity_returns_true_when_pack_valid() {
         let tmp = TempDir::new().unwrap();
+        // Codex 无关键二进制，仅校验 package.json
+        create_runtime_pack(tmp.path(), Provider::Codex, "0.139.0");
+        let resolver = RuntimeResolver::new(tmp.path().to_path_buf());
+        assert!(resolver.check_integrity(Provider::Codex));
+    }
+
+    #[test]
+    fn check_integrity_returns_true_when_key_binaries_present() {
+        let tmp = TempDir::new().unwrap();
+        create_full_runtime_pack(tmp.path(), Provider::ClaudeCode, "0.3.170");
+        let resolver = RuntimeResolver::new(tmp.path().to_path_buf());
+        assert!(resolver.check_integrity(Provider::ClaudeCode));
+    }
+
+    #[test]
+    fn check_integrity_returns_false_when_key_binary_missing() {
+        let tmp = TempDir::new().unwrap();
+        // 仅创建 package.json，不创建关键二进制
+        create_runtime_pack(tmp.path(), Provider::ClaudeCode, "0.3.170");
+        let resolver = RuntimeResolver::new(tmp.path().to_path_buf());
+        assert!(!resolver.check_integrity(Provider::ClaudeCode));
+    }
+
+    #[test]
+    fn check_integrity_returns_false_when_opencode_binary_missing() {
+        let tmp = TempDir::new().unwrap();
         create_runtime_pack(tmp.path(), Provider::OpenCode, "1.18.3");
+        let resolver = RuntimeResolver::new(tmp.path().to_path_buf());
+        assert!(!resolver.check_integrity(Provider::OpenCode));
+    }
+
+    #[test]
+    fn check_integrity_returns_true_for_opencode_with_binaries() {
+        let tmp = TempDir::new().unwrap();
+        create_full_runtime_pack(tmp.path(), Provider::OpenCode, "1.18.3");
         let resolver = RuntimeResolver::new(tmp.path().to_path_buf());
         assert!(resolver.check_integrity(Provider::OpenCode));
     }

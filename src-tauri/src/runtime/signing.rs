@@ -62,11 +62,6 @@ impl SignatureVerifier for Ed25519SignatureVerifier {
         manifest: &RuntimeManifest,
         pack_path: &Path,
     ) -> Result<(), RuntimeError> {
-        if self.skip_verification {
-            // 开发期公钥未配置，跳过签名校验。生产构建必须配置有效公钥。
-            return Ok(());
-        }
-
         // 读取 Pack 文件并计算 SHA-256
         let pack_bytes = std::fs::read(pack_path).map_err(|e| {
             RuntimeError::io_failed(
@@ -77,7 +72,8 @@ impl SignatureVerifier for Ed25519SignatureVerifier {
         let sha256 = Sha256::digest(&pack_bytes);
         let sha256_hex = hex_encode(&sha256);
 
-        // 校验 SHA-256 与 manifest 声明一致
+        // SHA-256 校验始终执行，与签名公钥是否配置无关。
+        // spec L23/L57/L62/L104：校验签名和 SHA-256 以避免损坏或被篡改的 Runtime 被启用。
         if sha256_hex != manifest.asset.sha256.to_lowercase() {
             return Err(RuntimeError::hash_mismatch(
                 Some(manifest.provider),
@@ -86,6 +82,11 @@ impl SignatureVerifier for Ed25519SignatureVerifier {
                     manifest.asset.sha256, sha256_hex
                 ),
             ));
+        }
+
+        if self.skip_verification {
+            // 开发期公钥未配置，跳过签名校验。生产构建必须配置有效公钥。
+            return Ok(());
         }
 
         // 解码 base64 签名
@@ -397,14 +398,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn embedded_key_verifier_skips_when_key_is_zero() {
+    async fn embedded_key_verifier_skips_signature_but_still_checks_sha256_when_key_is_zero() {
+        // 公钥未配置时跳过签名校验，但 SHA-256 仍然必须校验通过。
+        let verifier = Ed25519SignatureVerifier::with_embedded_key();
+        let fs = TempRuntimeFileSystem::new();
+        let pack_path = fs.root_path().join("pack.tar.gz");
+        std::fs::write(&pack_path, b"content").unwrap();
+        let sha256 = Sha256::digest(b"content");
+        let sha256_hex = hex_encode(&sha256);
+        let manifest =
+            sample_manifest_with_sha(Provider::ClaudeCode, &sha256_hex, "placeholder-signature");
+        verifier.verify(&manifest, &pack_path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn embedded_key_verifier_fails_on_sha_mismatch_even_when_signature_skipped() {
+        // 公钥未配置跳过签名校验时，SHA-256 不匹配仍应失败。
         let verifier = Ed25519SignatureVerifier::with_embedded_key();
         let fs = TempRuntimeFileSystem::new();
         let pack_path = fs.root_path().join("pack.tar.gz");
         std::fs::write(&pack_path, b"content").unwrap();
         let manifest =
             sample_manifest_with_sha(Provider::ClaudeCode, &"0".repeat(64), "placeholder");
-        verifier.verify(&manifest, &pack_path).await.unwrap();
+        let err = verifier.verify(&manifest, &pack_path).await.unwrap_err();
+        assert_eq!(err.kind, crate::runtime::RuntimeErrorKind::HashMismatch);
     }
 
     #[test]

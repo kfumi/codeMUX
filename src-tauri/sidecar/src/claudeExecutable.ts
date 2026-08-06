@@ -70,9 +70,9 @@ export function resolveClaudeExecutable(params: ResolveClaudeExecutableParams): 
 
   // 优先：外部 Runtime 路径
   if (runtimePath) {
-    const runtimePath_result = runtimeClaudePath(runtimePath, platform, arch);
-    if (runtimePath_result && fileExists(runtimePath_result)) {
-      return runtimePath_result;
+    const runtimeClaude = runtimeClaudePath(runtimePath, platform, arch);
+    if (runtimeClaude && fileExists(runtimeClaude)) {
+      return runtimeClaude;
     }
   }
 
