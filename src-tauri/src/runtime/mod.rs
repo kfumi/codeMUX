@@ -8,8 +8,8 @@
 //! - `runtime` 模块描述 SDK Runtime 的安装、版本、完整性和检测契约，是 Runtime Manager、
 //!   sidecar loader 和设置页共享的领域语言。
 //!
-//! 本模块只定义契约和可测试边界，不实现具体下载、解压或签名逻辑；这些由 `infra` 和
-//! `manager` 子模块通过实现 `seam` 中的 trait 注入。
+//! npm 查询、安装和切换逻辑集中在 `npm` 子模块；`infra` 只负责检测 Node.js，
+//! `seam` 提供可测试的进度与文件系统边界。
 
 // 契约类型在 Ticket 01 阶段尚未被其他模块消费，后续 ticket 会引入引用。
 #![allow(dead_code)]
@@ -17,28 +17,24 @@
 
 pub mod error;
 pub mod infra;
-pub mod manager;
-pub mod manifest;
+pub mod npm;
 pub mod resolver;
 pub mod seam;
-pub mod signing;
 pub mod types;
 
 #[cfg(test)]
 pub mod fixtures;
 
 pub use error::{RuntimeError, RuntimeErrorKind};
-pub use infra::{
-    GitHubReleaseManifestSource, HttpPackDownloader, SystemNodeResolver, TarGzArchiveExtractor,
+pub use infra::{detect_system_node, detect_system_npm, SystemNodeResolver};
+pub use npm::{
+    InstallOutcome, NpmRuntimeInstaller, NpmRuntimeManager, NpmRuntimeSource, NpmRuntimeSpec,
 };
-pub use manager::{InstallOutcome, RuntimeManager};
-pub use manifest::{RuntimeManifest, RuntimeManifestAsset};
 pub use resolver::{ProviderRuntimeRef, RuntimeResolver};
 pub use seam::{
-    ArchiveExtractor, CurrentVersionStore, FileSystemRuntimeRoots, ManifestSource, NodeResolver,
-    PackDownloader, ProgressReporter, RuntimeFileSystem, SignatureVerifier,
+    CurrentVersionStore, FileSystemRuntimeRoots, NodeResolver, ProgressReporter, RuntimeFileSystem,
 };
 pub use types::{
-    Arch, InstallStage, NodeDetection, Platform, Progress, Provider, RuntimeIntegrityResult,
-    RuntimeStatus, RuntimeVersionInfo, SemverVersion, SidecarCompatibility,
+    Arch, InstallStage, NodeDetection, NpmDetection, Platform, Progress, Provider,
+    RuntimeIntegrityResult, RuntimeStatus, RuntimeVersionInfo, SemverVersion, SidecarCompatibility,
 };

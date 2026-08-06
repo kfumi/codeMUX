@@ -7,12 +7,6 @@
 /** CodeMUX 托管的 Provider Runtime 种类。值与 Rust `Provider::as_str()` 对齐。 */
 export type Provider = 'claude_code' | 'codex' | 'opencode';
 
-/** 目标平台。 */
-export type RuntimePlatform = 'windows' | 'macos' | 'linux';
-
-/** CPU 架构。 */
-export type RuntimeArch = 'x64' | 'arm64';
-
 /** Runtime 状态。描述 CodeMUX 自有 Runtime，不得由外部 CLI 缺失推导为不可用。 */
 export type RuntimeStatus =
   | 'missing'
@@ -27,9 +21,6 @@ export type RuntimeStatus =
 export type InstallStage =
   | 'resolving'
   | 'downloading'
-  | 'verifying_signature'
-  | 'verifying_hash'
-  | 'extracting'
   | 'verifying_integrity'
   | 'switching'
   | 'cleaning'
@@ -40,9 +31,6 @@ export type InstallStage =
 export type RuntimeErrorKind =
   | 'manifest_failed'
   | 'download_failed'
-  | 'signature_error'
-  | 'hash_mismatch'
-  | 'extract_failed'
   | 'integrity_failed'
   | 'compatibility_failed'
   | 'permission_failed'
@@ -71,28 +59,6 @@ export interface RuntimeProgress {
   message?: string;
 }
 
-/** Runtime Pack manifest 中的下载资产描述。 */
-export interface RuntimeManifestAsset {
-  url: string;
-  sizeBytes: number;
-  sha256: string;
-  signature: string;
-}
-
-/** Runtime Pack manifest。 */
-export interface RuntimeManifest {
-  schemaVersion: number;
-  provider: Provider;
-  version: string;
-  platform: RuntimePlatform;
-  arch: RuntimeArch;
-  asset: RuntimeManifestAsset;
-  sidecarCompat: string;
-  keyFiles: string[];
-  keyBinaries: string[];
-  createdAt: string;
-}
-
 /**
  * Rust 启动 sidecar 时通过 ensure_session 命令传入的 Runtime 解析结果。
  * sidecar 据此从显式路径加载 SDK，不再读取用户全局 npm 目录。
@@ -106,7 +72,7 @@ export interface ProviderRuntimeRef {
   runtimePath: string;
   /** 当前 Runtime 版本。 */
   runtimeVersion: string;
-  /** 兼容的 sidecar 版本范围（来自 manifest，仅用于诊断展示）。 */
+  /** 可选的 sidecar 兼容范围，仅用于诊断展示。 */
   sidecarCompat?: string;
 }
 

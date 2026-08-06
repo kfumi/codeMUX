@@ -37,9 +37,6 @@ portable-pty = "0.8"
 encoding_rs = "0.8"
 sha2 = "0.10"
 dirs = "5"
-ed25519-dalek = { version = "2", default-features = false, features = ["std", "rand_core"] }
-tar = "0.4"
-flate2 = "1"
 tempfile = "3"
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter"] }

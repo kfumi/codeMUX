@@ -47,7 +47,7 @@
 
 - `Claude Code`
 - `Codex`
-- `OpenCode`（基于官方 `@opencode-ai/sdk`，随应用分发，无需单独安装）
+- `OpenCode`（基于官方 `@opencode-ai/sdk`，可在运行时设置中按版本安装）
 
 `Gemini CLI` 已完成接入位与 MCP 适配位，运行时仍处于预留阶段。
 
@@ -57,9 +57,9 @@
 
 ### 三大 Agent 运行时完整可用
 
-- `Claude Code`：基于 `@anthropic-ai/claude-agent-sdk`，主力运行时，支持最完整
-- `Codex`：基于 `@openai/codex-sdk`，包含本地代理兼容链路
-- `OpenCode`：基于官方 `@opencode-ai/sdk`，随应用分发独立 Server，支持会话持久化与恢复、原生权限桥接、Plan/Build 双 Agent 切换、图片附件输入
+- `Claude Code`：基于官方 `@anthropic-ai/claude-agent-sdk`，可在运行时设置中选择版本安装
+- `Codex`：基于官方 `@openai/codex-sdk`，包含本地代理兼容链路
+- `OpenCode`：基于官方 `@opencode-ai/sdk`，运行时同时安装 `opencode-ai` CLI，支持会话持久化与恢复、原生权限桥接、Plan/Build 双 Agent 切换、图片附件输入
 - 三种 Agent 共用统一事件模型、工具卡片、权限审批 UI 和会话管理
 
 ### 面向真实编码流程，而不是单纯聊天
@@ -359,7 +359,7 @@ OpenCode 通过 `plan` / `build` 双 Agent 切换支持计划模式，并在会�
 | 后端 | Rust 2021, Tokio, Reqwest, Rusqlite |
 | 本地数据库 | SQLite |
 | Sidecar | Node.js + TypeScript |
-| Agent SDK | `@anthropic-ai/claude-agent-sdk`, `@openai/codex-sdk`, `@opencode-ai/sdk` |
+| Agent SDK | 由 CodeMUX 使用本机 npm 安装到托管 Runtime 目录：`@anthropic-ai/claude-agent-sdk`、`@openai/codex-sdk`、`@opencode-ai/sdk` |
 | OpenCode AI Adapter | `@ai-sdk/openai`, `@ai-sdk/anthropic`, `@ai-sdk/openai-compatible`, `@ai-sdk/google`, `@ai-sdk/amazon-bedrock` |
 
 ---
@@ -449,7 +449,7 @@ codeMUX/
 
 - `Claude Code`：主力运行时，支持最完整
 - `Codex`：已集成并可用，包含本地代理兼容链路
-- `OpenCode`：已集成并可用，基于官方 `@opencode-ai/sdk`，随应用分发独立 Server
+- `OpenCode`：已集成并可用，基于官方 `@opencode-ai/sdk`，从托管 Runtime 目录启动独立 Server
 - `Gemini CLI`：界面与适配位已预留，运行时待继续完善
 
 ---

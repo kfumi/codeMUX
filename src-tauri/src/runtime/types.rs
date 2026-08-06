@@ -265,6 +265,29 @@ pub struct NodeDetection {
     pub error: Option<String>,
 }
 
+/// 系统 npm 检测结果。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NpmDetection {
+    pub available: bool,
+    pub version: Option<String>,
+    pub executable_path: Option<String>,
+    pub matches_node: bool,
+    pub error: Option<String>,
+}
+
+impl NpmDetection {
+    pub fn unavailable(error: impl Into<String>, executable_path: Option<String>) -> Self {
+        Self {
+            available: false,
+            version: None,
+            executable_path,
+            matches_node: false,
+            error: Some(error.into()),
+        }
+    }
+}
+
 impl NodeDetection {
     /// Node 最低主版本号。
     pub const MINIMUM_MAJOR: u64 = 18;
@@ -344,16 +367,10 @@ impl RuntimeIntegrityResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallStage {
-    /// 解析 manifest、选择版本。
+    /// 查询 npm registry 并选择版本。
     Resolving,
-    /// 下载 Pack 资产。
+    /// 执行 npm 安装。
     Downloading,
-    /// 校验 Pack 签名。
-    VerifyingSignature,
-    /// 校验 Pack SHA-256。
-    VerifyingHash,
-    /// 解压到版本目录。
-    Extracting,
     /// 校验关键文件与二进制完整性。
     VerifyingIntegrity,
     /// 切换当前版本指针。
@@ -371,9 +388,6 @@ impl InstallStage {
         match self {
             Self::Resolving => "resolving",
             Self::Downloading => "downloading",
-            Self::VerifyingSignature => "verifying_signature",
-            Self::VerifyingHash => "verifying_hash",
-            Self::Extracting => "extracting",
             Self::VerifyingIntegrity => "verifying_integrity",
             Self::Switching => "switching",
             Self::Cleaning => "cleaning",
@@ -385,11 +399,8 @@ impl InstallStage {
     /// 用户可读的阶段名。
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Resolving => "解析版本",
-            Self::Downloading => "下载 Runtime",
-            Self::VerifyingSignature => "校验签名",
-            Self::VerifyingHash => "校验哈希",
-            Self::Extracting => "解压安装",
+            Self::Resolving => "查询 npm 版本",
+            Self::Downloading => "执行 npm 安装",
             Self::VerifyingIntegrity => "校验完整性",
             Self::Switching => "切换版本",
             Self::Cleaning => "清理旧版本",
@@ -567,8 +578,7 @@ mod tests {
 
     #[test]
     fn install_stage_labels_are_localized() {
-        assert_eq!(InstallStage::Downloading.label(), "下载 Runtime");
-        assert_eq!(InstallStage::VerifyingHash.label(), "校验哈希");
+        assert_eq!(InstallStage::Downloading.label(), "执行 npm 安装");
         assert_eq!(InstallStage::Done.label(), "完成");
         assert_eq!(InstallStage::Failed.as_str(), "failed");
     }

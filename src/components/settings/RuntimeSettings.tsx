@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import {
   CheckCircle2,
+  ChevronDown,
   CircleDot,
   Download,
   Loader2,
@@ -30,6 +31,8 @@ import {
 } from '@/lib/tauri';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export const RUNTIME_STATUS_META: Record<
   ManagedRuntimeStatus,
@@ -87,10 +90,7 @@ const CLI_STATUS_LABEL: Record<AgentRuntimeStatus, string> = {
 
 const STAGE_LABEL: Record<RuntimeInstallProgress['stage'], string> = {
   resolving: '解析版本',
-  downloading: '下载 Runtime',
-  verifying_signature: '校验签名',
-  verifying_hash: '校验哈希',
-  extracting: '解压安装',
+  downloading: '执行 npm 安装',
   verifying_integrity: '校验完整性',
   switching: '切换版本',
   cleaning: '清理旧版本',
@@ -98,12 +98,36 @@ const STAGE_LABEL: Record<RuntimeInstallProgress['stage'], string> = {
   failed: '失败',
 };
 
-function formatCheckedAt(value: string): string {
-  const date = new Date(value);
+export function formatCheckedAt(value: string): string {
+  const numericValue = Number(value);
+  const date = Number.isFinite(numericValue) && /^\d+(?:\.\d+)?$/.test(value.trim())
+    ? new Date(numericValue * 1000)
+    : new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
   return date.toLocaleString();
+}
+
+function compareVersions(left: string, right: string): number {
+  const parse = (value: string) =>
+    value
+      .replace(/^v/i, '')
+      .split(/[+-]/, 1)[0]
+      .split('.')
+      .map((part) => Number.parseInt(part, 10) || 0);
+  const leftParts = parse(left);
+  const rightParts = parse(right);
+  for (let index = 0; index < 3; index += 1) {
+    if (leftParts[index] !== rightParts[index]) {
+      return leftParts[index] > rightParts[index] ? 1 : -1;
+    }
+  }
+  return 0;
+}
+
+function isStableVersion(version: string): boolean {
+  return /^v?\d+\.\d+\.\d+(?:\+[0-9A-Za-z.-]+)?$/.test(version);
 }
 
 type OperationKind = 'install' | 'upgrade' | 'repair' | 'remove';
@@ -113,23 +137,94 @@ interface ProviderOperationState {
   progress: RuntimeInstallProgress | null;
 }
 
-export function RuntimeSettingsPanel() {
+export function RuntimeSettingsPanel({
+  onOpenSystemTools,
+}: {
+  onOpenSystemTools?: () => void;
+}) {
   const [checkResult, setCheckResult] = useState<ManagedRuntimeCheckResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [operations, setOperations] = useState<Record<string, ProviderOperationState>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [versionLoading, setVersionLoading] = useState<Record<string, boolean>>({});
+  const [versionErrors, setVersionErrors] = useState<Record<string, string>>({});
+  const versionLoadId = useRef(0);
+
+  const loadVersionLists = useCallback(async (providers: RuntimeProvider[]) => {
+    const requestId = versionLoadId.current + 1;
+    versionLoadId.current = requestId;
+    setVersionLoading(() => Object.fromEntries(providers.map((provider) => [provider, true])));
+    setVersionErrors((prev) => {
+      const next = { ...prev };
+      providers.forEach((provider) => delete next[provider]);
+      return next;
+    });
+
+    await Promise.all(
+      providers.map(async (provider) => {
+        try {
+          const versions = (await appApi.listManagedRuntimeVersions(provider)).filter(isStableVersion);
+          if (versionLoadId.current !== requestId) return;
+          setCheckResult((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              runtimes: prev.runtimes.map((runtime) => {
+                if (runtime.provider !== provider) return runtime;
+                const latest = versions[0];
+                const isOutdated =
+                  runtime.status !== 'corrupted' &&
+                  runtime.currentVersion !== null &&
+                  latest !== undefined &&
+                  compareVersions(latest, runtime.currentVersion) > 0;
+                const status: ManagedRuntimeStatus =
+                  runtime.status === 'corrupted' || runtime.status === 'node_unavailable'
+                    ? runtime.status
+                    : runtime.currentVersion === null
+                      ? 'missing'
+                      : isOutdated
+                        ? 'outdated'
+                        : 'ready';
+                return {
+                  ...runtime,
+                  availableVersions: versions,
+                  status,
+                  message:
+                    status === 'outdated' && latest
+                      ? `${runtime.label} ${runtime.currentVersion} 可更新到 ${latest}`
+                      : runtime.message,
+                };
+              }),
+            };
+          });
+        } catch (error) {
+          if (versionLoadId.current !== requestId) return;
+          setVersionErrors((prev) => ({
+            ...prev,
+            [provider]: error instanceof Error ? error.message : String(error),
+          }));
+        } finally {
+          if (versionLoadId.current !== requestId) return;
+          setVersionLoading((prev) => ({ ...prev, [provider]: false }));
+        }
+      }),
+    );
+  }, []);
 
   const runCheck = useCallback(async () => {
     setLoading(true);
     try {
       const result = await appApi.checkManagedRuntimes();
       setCheckResult(result);
+      if (canInstallManagedRuntime(result.node)) {
+        void loadVersionLists(result.runtimes.map((runtime) => runtime.provider));
+      }
     } catch (err) {
       toast.error(`检测失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadVersionLists]);
 
   useEffect(() => {
     void runCheck();
@@ -158,13 +253,16 @@ export function RuntimeSettingsPanel() {
     try {
       const result = await appApi.checkManagedRuntimes();
       setCheckResult(result);
+      if (canInstallManagedRuntime(result.node)) {
+        void loadVersionLists(result.runtimes.map((runtime) => runtime.provider));
+      }
       toast.success('Runtime 检测已更新', { id: toastId });
     } catch (err) {
       toast.error(`检测失败：${err instanceof Error ? err.message : String(err)}`, { id: toastId });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadVersionLists]);
 
   const clearOperation = useCallback((provider: string) => {
     setOperations((prev) => {
@@ -209,6 +307,9 @@ export function RuntimeSettingsPanel() {
         // 操作完成后刷新整体状态
         const refreshed = await appApi.checkManagedRuntimes();
         setCheckResult(refreshed);
+        if (canInstallManagedRuntime(refreshed.node)) {
+          void loadVersionLists(refreshed.runtimes.map((runtime) => runtime.provider));
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         setErrors((prev) => ({ ...prev, [provider]: message }));
@@ -217,18 +318,12 @@ export function RuntimeSettingsPanel() {
         clearOperation(provider);
       }
     },
-    [clearOperation],
+    [clearOperation, loadVersionLists],
   );
 
   const handleInstall = useCallback(
-    (provider: RuntimeProvider, label: string) =>
-      runOperation(provider, label, 'install', () => appApi.installManagedRuntime(provider)),
-    [runOperation],
-  );
-
-  const handleUpgrade = useCallback(
-    (provider: RuntimeProvider, label: string) =>
-      runOperation(provider, label, 'upgrade', () => appApi.upgradeManagedRuntime(provider)),
+    (provider: RuntimeProvider, label: string, version?: string) =>
+      runOperation(provider, label, 'install', () => appApi.installManagedRuntime(provider, version)),
     [runOperation],
   );
 
@@ -274,7 +369,7 @@ export function RuntimeSettingsPanel() {
         </Button>
       </div>
 
-      {checkResult && <NodeStatusCard node={checkResult.node} />}
+      {checkResult && <NodeStatusCard node={checkResult.node} onOpenSystemTools={onOpenSystemTools} />}
 
       <div className="space-y-3">
         {loading && !checkResult ? (
@@ -288,8 +383,9 @@ export function RuntimeSettingsPanel() {
               runtime={runtime}
               operation={operations[runtime.provider]}
               errorMessage={errors[runtime.provider]}
-              onInstall={() => handleInstall(runtime.provider, runtime.label)}
-              onUpgrade={() => handleUpgrade(runtime.provider, runtime.label)}
+              versionLoading={versionLoading[runtime.provider] === true}
+              versionError={versionErrors[runtime.provider]}
+              onInstall={(version) => handleInstall(runtime.provider, runtime.label, version)}
               onRepair={() => handleRepair(runtime.provider, runtime.label)}
               onRemove={() => handleRemove(runtime.provider, runtime.label)}
             />
@@ -319,9 +415,19 @@ function describeOperation(kind: OperationKind): string {
   }
 }
 
+function canInstallManagedRuntime(node: ManagedNodeInfo): boolean {
+  return node.satisfiesMinimum && node.npm.available && node.npm.matchesNode;
+}
+
 /* ------------------------------- Node 状态区 ------------------------------- */
 
-function NodeStatusCard({ node }: { node: ManagedNodeInfo }) {
+function NodeStatusCard({
+  node,
+  onOpenSystemTools,
+}: {
+  node: ManagedNodeInfo;
+  onOpenSystemTools?: () => void;
+}) {
   const ok = node.available && node.satisfiesMinimum;
   const Icon = ok ? CheckCircle2 : TriangleAlert;
 
@@ -353,10 +459,33 @@ function NodeStatusCard({ node }: { node: ManagedNodeInfo }) {
           <span className="shrink-0 text-foreground/45">路径</span>
           <span className="truncate font-mono text-foreground/80">{node.executablePath ?? '-'}</span>
         </div>
+        <div className="flex items-center gap-1.5">
+          <span className="shrink-0 text-foreground/45">npm</span>
+          <span className={cn('truncate font-mono', node.npm.available && node.npm.matchesNode ? 'text-foreground/80' : 'text-red-600 dark:text-red-400')}>
+            {node.npm.version ?? (node.npm.available ? '未知' : '未检测到')}
+          </span>
+        </div>
       </div>
+      {onOpenSystemTools && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="mt-2 h-7 gap-1.5 px-0 text-ui-caption text-foreground/55 hover:text-foreground"
+          onClick={onOpenSystemTools}
+        >
+          <Terminal className="h-3.5 w-3.5" />
+          在系统工具中查看 Node.js 与 npm
+        </Button>
+      )}
       {!ok && (
         <p className="mt-2 text-ui-caption text-red-600 dark:text-red-400">
           {node.error ?? 'Node.js 不可用或版本低于 18，请安装 Node 18+ 后重试。'}
+        </p>
+      )}
+      {ok && (!node.npm.available || !node.npm.matchesNode) && (
+        <p className="mt-2 text-ui-caption text-amber-600 dark:text-amber-300">
+          {node.npm.error ?? 'npm 不可用，Runtime 安装可能失败。'}
         </p>
       )}
     </div>
@@ -369,8 +498,9 @@ interface ProviderRuntimeCardProps {
   runtime: ManagedRuntimeInfo;
   operation: ProviderOperationState | undefined;
   errorMessage: string | undefined;
-  onInstall: () => void;
-  onUpgrade: () => void;
+  versionLoading: boolean;
+  versionError: string | undefined;
+  onInstall: (version?: string) => void;
   onRepair: () => void;
   onRemove: () => void;
 }
@@ -379,8 +509,9 @@ function ProviderRuntimeCard({
   runtime,
   operation,
   errorMessage,
+  versionLoading,
+  versionError,
   onInstall,
-  onUpgrade,
   onRepair,
   onRemove,
 }: ProviderRuntimeCardProps) {
@@ -390,10 +521,20 @@ function ProviderRuntimeCard({
   const effectiveStatus: ManagedRuntimeStatus = isOperating ? 'installing' : runtime.status;
   const meta = RUNTIME_STATUS_META[effectiveStatus];
   const StatusIcon = meta.icon;
+  const [selectedVersion, setSelectedVersion] = useState('');
 
-  const showInstall = runtime.status === 'missing' && !isOperating;
-  const showUpgrade = runtime.status === 'outdated' && !isOperating;
+  useEffect(() => {
+    setSelectedVersion((previous) =>
+      previous && runtime.availableVersions.includes(previous)
+        ? previous
+        : runtime.availableVersions[0] ?? runtime.currentVersion ?? '',
+    );
+  }, [runtime.availableVersions, runtime.currentVersion, selectedVersion]);
+
   const showRepair = runtime.status === 'corrupted' && !isOperating;
+  const hasSelectedVersion = Boolean(selectedVersion);
+  const selectedIsCurrent = hasSelectedVersion && selectedVersion === runtime.currentVersion;
+  const showVersionAction = !isOperating && !versionLoading && hasSelectedVersion;
   const showRemove =
     (runtime.status === 'ready' ||
       runtime.status === 'outdated' ||
@@ -437,6 +578,41 @@ function ProviderRuntimeCard({
             </div>
           </div>
 
+          {(versionLoading || runtime.availableVersions.length > 0) && (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="shrink-0 text-ui-caption text-foreground/45">目标版本</span>
+              <Select
+                value={selectedVersion || undefined}
+                onValueChange={setSelectedVersion}
+                disabled={isOperating || versionLoading}
+              >
+                <SelectTrigger className="h-8 w-56 text-ui-compact">
+                  <SelectValue placeholder="选择 SDK 版本" />
+                </SelectTrigger>
+                <SelectContent>
+                  {runtime.availableVersions.map((version) => (
+                    <SelectItem key={version} value={version}>
+                      {version}{version === runtime.currentVersion ? '（当前）' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {versionLoading && (
+            <div className="flex items-center gap-2 rounded-md border border-blue-500/25 bg-blue-500/5 px-3 py-2 text-ui-caption text-blue-600 dark:text-blue-300">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              版本列表加载中
+            </div>
+          )}
+
+          {versionError && !versionLoading && (
+            <p className="text-ui-caption leading-5 text-amber-600 dark:text-amber-300">
+              暂时无法加载 npm 版本列表：{versionError}
+            </p>
+          )}
+
           {progress && (
             <ProgressBar progress={progress} />
           )}
@@ -453,16 +629,26 @@ function ProviderRuntimeCard({
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-          {showInstall && (
-            <Button variant="default" size="sm" className="gap-1.5" onClick={onInstall}>
-              <Download className="h-3.5 w-3.5" />
-              安装
-            </Button>
-          )}
-          {showUpgrade && (
-            <Button variant="default" size="sm" className="gap-1.5" onClick={onUpgrade}>
-              <RefreshCw className="h-3.5 w-3.5" />
-              更新
+          {showVersionAction && (
+            <Button
+              variant={selectedIsCurrent ? 'outline' : 'default'}
+              size="sm"
+              className="gap-1.5"
+              disabled={selectedIsCurrent}
+              onClick={() => onInstall(selectedVersion)}
+            >
+              {selectedIsCurrent ? (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              ) : runtime.currentVersion ? (
+                <RefreshCw className="h-3.5 w-3.5" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
+              {selectedIsCurrent
+                ? '当前版本'
+                : runtime.currentVersion
+                  ? `更新到 ${selectedVersion}`
+                  : `安装 ${selectedVersion}`}
             </Button>
           )}
           {showRepair && (
@@ -483,15 +669,9 @@ function ProviderRuntimeCard({
             </Button>
           )}
           {showRetry && retryKind === 'install' && (
-            <Button variant="default" size="sm" className="gap-1.5" onClick={onInstall}>
+            <Button variant="default" size="sm" className="gap-1.5" onClick={() => onInstall(selectedVersion || undefined)}>
               <RefreshCw className="h-3.5 w-3.5" />
               重试安装
-            </Button>
-          )}
-          {showRetry && retryKind === 'upgrade' && (
-            <Button variant="default" size="sm" className="gap-1.5" onClick={onUpgrade}>
-              <RefreshCw className="h-3.5 w-3.5" />
-              重试更新
             </Button>
           )}
           {showRetry && retryKind === 'repair' && (
@@ -572,6 +752,7 @@ function formatBytes(bytes: number): string {
 function ExternalCliSection() {
   const [result, setResult] = useState<AgentRuntimeCheckResult | null>(null);
   const [checking, setChecking] = useState(false);
+  const [open, setOpen] = useState(false);
 
   const handleCheck = useCallback(async () => {
     setChecking(true);
@@ -586,26 +767,39 @@ function ExternalCliSection() {
   }, []);
 
   return (
-    <section className="space-y-4 border-t border-border/40 pt-6">
-      <div className="space-y-1">
-        <h3 className="text-ui-heading-sm font-semibold text-foreground">外部 CLI 环境</h3>
-        <p className="text-ui-compact leading-relaxed text-muted-foreground">
-          以下为 PATH 中的全局 CLI 诊断，与 CodeMUX 自有 Runtime 独立。外部 CLI 未安装不影响 CodeMUX 会话。
-        </p>
-      </div>
-
-      <Button variant="outline" size="sm" className="gap-1.5" onClick={handleCheck} disabled={checking}>
-        {checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Terminal className="h-3.5 w-3.5" />}
-        检测外部 CLI
-      </Button>
-
-      {result && (
-        <div className="space-y-2">
-          {result.runtimes.map((check) => (
-            <ExternalCliRow key={check.agentKind} check={check} />
-          ))}
-        </div>
-      )}
+    <section className="border-t border-border/40 pt-6">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-4 rounded-lg px-1 py-1 text-left hover:bg-muted/25"
+          >
+            <span className="space-y-1">
+              <span className="block text-ui-heading-sm font-semibold text-foreground">外部 CLI 诊断</span>
+              <span className="block text-ui-compact leading-relaxed text-muted-foreground">
+                只读查看系统 PATH 中的 CLI，与 CodeMUX 托管 Runtime 独立。
+              </span>
+            </span>
+            <ChevronDown className={cn('h-4 w-4 shrink-0 text-foreground/45 transition-transform', open && 'rotate-180')} />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-4 pt-4">
+          <p className="text-ui-caption text-muted-foreground">
+            外部 CLI 未安装或版本异常，不影响 CodeMUX 使用已安装的托管 Runtime。
+          </p>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={handleCheck} disabled={checking}>
+            {checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Terminal className="h-3.5 w-3.5" />}
+            检测外部 CLI
+          </Button>
+          {result && (
+            <div className="space-y-2">
+              {result.runtimes.map((check) => (
+                <ExternalCliRow key={check.agentKind} check={check} />
+              ))}
+            </div>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
     </section>
   );
 }

@@ -1,12 +1,12 @@
 import type { Config } from '@opencode-ai/sdk';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { prepareOpenCodeExecutable } from './opencodeExecutable.js';
 import type { AgentInputImage, AgentInputPayload } from './agentInputPayload.js';
 import type { OpenCodeNativePermissionResponse } from './opencodePermissions.js';
 import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
-import { loadProviderRuntime, isRuntimeError, type RuntimeLoadOutcome } from './runtimeLoader.js';
+import { loadProviderRuntime, isRuntimeError, type RuntimeLoadResult } from './runtimeLoader.js';
 import { loadOpenCodeClientSdk, loadOpenCodeServerSdk } from './sdkLoader.js';
+import type { ProviderRuntimeRef } from './runtimeContract.js';
 
 export interface OpenCodeServerHandle {
   close(): void | Promise<void>;
@@ -75,8 +75,8 @@ export interface OpenCodeSdkStartInput {
   baseUrl?: string;
   credentialSource: 'codemux' | 'environment' | 'opencode' | 'none';
   serverCloseTimeoutMs?: number;
-  /** 外部 Runtime 路径（来自 ProviderRuntimeRef）。 */
-  runtimePath?: string;
+  /** 外部托管 Runtime 引用。 */
+  runtimeRef?: ProviderRuntimeRef;
 }
 
 export function normalizeOpenCodeModelReference(model: string): { provider: string; model: string } {
@@ -92,7 +92,6 @@ export interface OpenCodeSdkPort {
 }
 
 export const DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS = 10_000;
-const SIDECAR_DIST_DIR = path.dirname(fileURLToPath(import.meta.url));
 export interface OpenCodeServerConfigInput {
   provider: string;
   model: string;
@@ -227,13 +226,14 @@ function isNotFoundResponse(response: { error?: unknown; response?: { status?: n
   return record.status === 404 || record.statusCode === 404 || message.includes('404') || message.includes('not found');
 }
 
-async function deleteWithOfficialOpenCodeSdk(input: { cwd?: string; sessionId: string }): Promise<void> {
+async function deleteWithOfficialOpenCodeSdk(input: { cwd?: string; sessionId: string; runtimeRef: ProviderRuntimeRef }): Promise<void> {
   const cwd = input.cwd?.trim() || process.cwd();
   const resources = await officialOpenCodeSdkPort.start({
     cwd,
     provider: 'opencode',
     model: 'default',
     credentialSource: 'opencode',
+    runtimeRef: input.runtimeRef,
   });
   let operationError: unknown;
   try {
@@ -249,7 +249,7 @@ async function deleteWithOfficialOpenCodeSdk(input: { cwd?: string; sessionId: s
   if (operationError) throw operationError;
 }
 
-export async function deleteOpenCodeSessionWithOfficialSdk(input: { cwd?: string; sessionId: string }): Promise<void> {
+export async function deleteOpenCodeSessionWithOfficialSdk(input: { cwd?: string; sessionId: string; runtimeRef: ProviderRuntimeRef }): Promise<void> {
   return deleteWithOfficialOpenCodeSdk(input);
 }
 
@@ -275,29 +275,29 @@ function toOpenCodeImage(image: AgentInputImage): OpenCodeImageInput {
 }
 
 /**
- * 从 runtimePath 加载 Provider Runtime，返回 RuntimeLoadOutcome。
- * 如果没有 runtimePath（开发模式），返回 null 以触发 sidecar node_modules 回退。
+ * 从 runtimeRef 加载 Provider Runtime。
  */
-function loadRuntimeFromPath(runtimePath?: string): RuntimeLoadOutcome | null {
-  if (!runtimePath) return null;
-  const ref = {
-    provider: 'opencode' as const,
-    runtimeRoot: '',
-    runtimePath,
-    runtimeVersion: '',
-  };
-  return loadProviderRuntime(ref);
+function loadRuntime(runtimeRef?: ProviderRuntimeRef): RuntimeLoadResult {
+  if (!runtimeRef) {
+    throw new Error('OpenCode Runtime is required before starting a session');
+  }
+  const result = loadProviderRuntime(runtimeRef);
+  if (isRuntimeError(result)) {
+    throw new Error(`OpenCode Runtime 加载失败: ${result.message}`);
+  }
+  return result;
 }
 
 export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
-  async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS, runtimePath }) {
-    prepareOpenCodeExecutable({ sidecarDir: SIDECAR_DIST_DIR, runtimePath });
+  async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS, runtimeRef }) {
+    const runtimeLoaded = loadRuntime(runtimeRef);
+    const executable = prepareOpenCodeExecutable({ runtimePath: runtimeLoaded.ref.runtimePath });
+    const cliPath = executable?.executablePath ?? '(托管 Runtime CLI 路径未解析)';
+    process.stderr.write(
+      `[runtime] provider=opencode cli=${cliPath} runtime=${runtimeLoaded.ref.runtimePath} version=${runtimeLoaded.ref.runtimeVersion} node=${process.execPath}\n`,
+    );
 
-    // 动态加载 OpenCode SDK（从 Runtime 路径或 sidecar node_modules）。
-    const runtimeLoaded = loadRuntimeFromPath(runtimePath);
-    if (runtimeLoaded && isRuntimeError(runtimeLoaded)) {
-      throw new Error(`OpenCode Runtime 加载失败: ${runtimeLoaded.message}`);
-    }
+    // 仅从 CodeMUX 托管 Runtime 动态加载 OpenCode SDK。
     const { createOpencodeServer } = await loadOpenCodeServerSdk(runtimeLoaded);
     const { createOpencodeClient } = await loadOpenCodeClientSdk(runtimeLoaded);
 

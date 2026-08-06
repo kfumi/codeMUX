@@ -8,6 +8,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import type { SidecarCommand } from './types.js';
+import type { ProviderRuntimeRef } from './runtimeContract.js';
 import { readLatestCodexTotalTokenUsage } from './codexSessionUsage.js';
 import { CodexSessionEventTailer, type CodexSessionTailEvent } from './codexSessionEventTailer.js';
 import {
@@ -48,7 +49,7 @@ import {
   type CodexCollaborationPolicy,
 } from './codexCollaborationPolicy.js';
 import { setLogCtx, writeLog } from './writeLog.js';
-import { loadProviderRuntime, isRuntimeError, type RuntimeLoadOutcome } from './runtimeLoader.js';
+import { loadProviderRuntime, isRuntimeError, type RuntimeLoadResult } from './runtimeLoader.js';
 import { loadCodexSdk, type CodexSdkModule } from './sdkLoader.js';
 
 export { emit } from './streamEventBatcher.js';
@@ -82,8 +83,8 @@ type CodexSessionBootstrap = {
   permissionConfig?: SidecarPermissionConfig;
   planMode?: AgentPlanMode;
   collaborationPolicy?: CodexCollaborationPolicy;
-  /** 外部 Runtime 路径（来自 ProviderRuntimeRef）。 */
-  runtimePath?: string;
+  /** 外部托管 Runtime 引用。 */
+  runtimeRef?: ProviderRuntimeRef;
 };
 
 type UsageBaseline = {
@@ -211,7 +212,7 @@ export class CodexSessionRuntime {
   private emittedCompactItemIds = new Set<string>();
   private previousTotalUsage: UsageBaseline | null = null;
   private turnEventNormalizer: CodexTurnEventNormalizer | null = null;
-  /** 动态加载的 Codex SDK 模块（从 Runtime 路径或 sidecar node_modules 加载）。 */
+  /** 动态加载的 Codex SDK 模块（仅从托管 Runtime 加载）。 */
   private codexSdk: CodexSdkModule | null = null;
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
@@ -232,7 +233,7 @@ export class CodexSessionRuntime {
       codexNeedsProxy: cmd.codexNeedsProxy,
       permissionConfig: cmd.permissionConfig,
       planMode: normalizeCodexPlanMode(cmd.planMode),
-      runtimePath: cmd.runtimeRef?.runtimePath,
+      runtimeRef: cmd.runtimeRef,
     };
     const collaborationPolicy = resolveCodexCollaborationPolicy({
       planMode: requestedConfig.planMode,
@@ -318,8 +319,8 @@ export class CodexSessionRuntime {
       codexEnv.OPENAI_BASE_URL = runtimeBaseUrl;
     }
     // 将外部 Runtime 的 bin 目录前置注入 PATH，确保 Codex SDK spawn 的 CLI 能命中 runtime 版本。
-    if (requestedConfig.runtimePath) {
-      const runtimeBin = path.join(requestedConfig.runtimePath, 'node_modules', '.bin');
+    if (requestedConfig.runtimeRef?.runtimePath) {
+      const runtimeBin = path.join(requestedConfig.runtimeRef.runtimePath, 'node_modules', '.bin');
       if (fs.existsSync(runtimeBin)) {
         const currentPath = codexEnv.PATH ?? process.env.PATH ?? '';
         codexEnv.PATH = [runtimeBin, ...currentPath.split(path.delimiter).filter(Boolean)].join(path.delimiter);
@@ -329,12 +330,12 @@ export class CodexSessionRuntime {
 
     const codexConfig = buildCodexCliConfig(runtimeBaseUrl);
 
-    // 动态加载 Codex SDK（从 Runtime 路径或 sidecar node_modules）。
+    // 仅从 CodeMUX 托管 Runtime 动态加载 Codex SDK。
     const runtimeLoaded = this.loadRuntimeIfNeeded();
-    if (runtimeLoaded && isRuntimeError(runtimeLoaded)) {
-      throw new Error(`Codex Runtime 加载失败: ${runtimeLoaded.message}`);
-    }
     this.codexSdk = await loadCodexSdk(runtimeLoaded);
+    process.stderr.write(
+      `[runtime] provider=codex cli-bin=${path.join(runtimeLoaded.nodeModulesPath, '.bin')} runtime=${runtimeLoaded.ref.runtimePath} version=${runtimeLoaded.ref.runtimeVersion} node=${process.execPath}\n`,
+    );
     const CodexConstructor = this.codexSdk.Codex;
 
     this.client = new CodexConstructor({
@@ -366,18 +367,18 @@ export class CodexSessionRuntime {
   }
 
   /**
-   * 使用 runtimeRef 加载 Provider Runtime，返回 RuntimeLoadResult。
-   * 如果没有 runtimeRef（开发模式），返回 null 以触发 sidecar node_modules 回退。
+   * 使用 runtimeRef 加载 Provider Runtime。
    */
-  private loadRuntimeIfNeeded(): RuntimeLoadOutcome | null {
-    if (!this.config?.runtimePath) return null;
-    const ref = {
-      provider: 'codex' as const,
-      runtimeRoot: '',
-      runtimePath: this.config.runtimePath,
-      runtimeVersion: '',
-    };
-    return loadProviderRuntime(ref);
+  private loadRuntimeIfNeeded(): RuntimeLoadResult {
+    const runtimeRef = this.config?.runtimeRef;
+    if (!runtimeRef) {
+      throw new Error('Codex Runtime is required before starting a session');
+    }
+    const result = loadProviderRuntime(runtimeRef);
+    if (isRuntimeError(result)) {
+      throw new Error(`Codex Runtime 加载失败: ${result.message}`);
+    }
+    return result;
   }
 
   updatePermissions(cmd: UpdatePermissionsCommand): void {

@@ -62,11 +62,7 @@ describe('sdkLoader', () => {
   });
 
   describe('loadClaudeSdk', () => {
-    it('returns null module when loaded is null (dev fallback via import)', async () => {
-      // In test environment, import('@anthropic-ai/claude-agent-sdk') resolves to the real package
-      // which may not be installed. We just verify the function doesn't throw synchronously
-      // when loaded is null — the actual import will resolve or reject at runtime.
-      // For this test, we verify the runtime path branch works.
+    it('loads Claude SDK from the managed runtime path', async () => {
       const runtimePath = path.join(tmpDir, 'claude_code', '0.3.170');
       createRuntimePack(runtimePath);
       createMockSdkModule(runtimePath, '@anthropic-ai/claude-agent-sdk', {
@@ -109,6 +105,30 @@ describe('sdkLoader', () => {
       // Verify it can be instantiated
       const instance = new sdk.Codex({});
       expect(instance).toBeDefined();
+    });
+
+    it('loads an ESM-only SDK through the managed Runtime import fallback', async () => {
+      const runtimePath = path.join(tmpDir, 'codex', '0.139.0-esm');
+      createRuntimePack(runtimePath);
+      const pkgDir = path.join(runtimePath, 'node_modules', '@openai', 'codex-sdk');
+      fs.mkdirSync(path.join(pkgDir, 'dist'), { recursive: true });
+      fs.writeFileSync(
+        path.join(pkgDir, 'package.json'),
+        JSON.stringify({
+          name: '@openai/codex-sdk',
+          version: '0.139.0',
+          type: 'module',
+          exports: { '.': { import: './dist/index.js' } },
+        }),
+      );
+      fs.writeFileSync(
+        path.join(pkgDir, 'dist', 'index.js'),
+        'export class Codex { constructor() {} }',
+      );
+
+      const loaded = loadProviderRuntime(makeRef(runtimePath)) as RuntimeLoadResult;
+      const sdk = await loadCodexSdk(loaded);
+      expect(typeof sdk.Codex).toBe('function');
     });
   });
 
@@ -189,19 +209,9 @@ describe('sdkLoader', () => {
     });
   });
 
-  describe('dev fallback (loaded is null)', () => {
-    it('loadClaudeSdk falls back to dynamic import when loaded is null', async () => {
-      // When loaded is null, the loader uses dynamic import().
-      // In the test environment, @anthropic-ai/claude-agent-sdk is a devDependency,
-      // so it should be resolvable. We just verify no synchronous throw.
-      try {
-        const sdk = await loadClaudeSdk(null);
-        expect(sdk).toBeDefined();
-        expect(typeof sdk.query).toBe('function') ;
-      } catch {
-        // If the package isn't installed in test env, that's acceptable —
-        // the important thing is the function signature works.
-      }
+  describe('managed runtime requirement', () => {
+    it('rejects when no managed runtime is supplied', async () => {
+      await expect(loadClaudeSdk(null)).rejects.toThrow('Claude Code Runtime is required');
     });
   });
 });

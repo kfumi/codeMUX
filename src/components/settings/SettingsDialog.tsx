@@ -1,17 +1,16 @@
 import { useState } from 'react';
-import { Archive, ArrowLeft, BarChart3, Bot, FileText, Info, Palette, Plug, Puzzle, Server, Settings, Terminal, Zap } from 'lucide-react';
+import { Archive, ArrowLeft, BarChart3, Bot, FileText, Info, Palette, Plug, Puzzle, Server, Settings, Terminal } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
 import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
 import { AboutSettings } from './AboutSettings';
-import { AgentSettingsPanel } from './AgentSettings';
+import { AgentRuntimeSettingsPanel } from './AgentRuntimeSettings';
 import { ArchivedSessionsPanel } from './ArchivedSessionsPanel';
 import { EnvironmentSettings } from './EnvironmentSettings';
 import { GeneralSettings } from './GeneralSettings';
 import { LogSettings } from './LogSettings';
 import { McpSettingsPanel } from './McpSettings';
 import { ProviderConfigPanel } from './ProviderConfig';
-import { RuntimeSettingsPanel } from './RuntimeSettings';
 import { SkillsSettingsPanel } from './SkillsSettings';
 import { ThemeToggle } from './ThemeToggle';
 import { UsageStatistics } from './UsageStatistics';
@@ -20,7 +19,7 @@ interface SettingsViewProps {
   onBack: () => void;
 }
 
-export type SettingsTab = 'general' | 'appearance' | 'provider' | 'runtime' | 'agents' | 'mcp' | 'skills' | 'usage' | 'archive' | 'environment' | 'logs' | 'about';
+export type SettingsTab = 'general' | 'appearance' | 'provider' | 'agent-runtime' | 'mcp' | 'skills' | 'usage' | 'archive' | 'system-tools' | 'logs' | 'about';
 
 interface SettingsSidebarProps {
   activeTab: SettingsTab;
@@ -30,14 +29,14 @@ interface SettingsSidebarProps {
 
 interface SettingsContentProps {
   activeTab: SettingsTab;
+  onTabChange: (tab: SettingsTab) => void;
 }
 
 const primaryTabs = [
   { id: 'general' as const, label: '常规', description: '应用级的通用信息与偏好设置。', icon: Settings },
   { id: 'appearance' as const, label: '外观', description: '自定义应用主题与视觉风格。', icon: Palette },
   { id: 'provider' as const, label: '供应商配置', description: '管理 AI 供应商，激活的供应商将用于智能体。', icon: Plug },
-  { id: 'runtime' as const, label: '运行时环境', description: '管理 CodeMUX 托管的 SDK Runtime，安装、更新、修复和删除 Claude / Codex / OpenCode Runtime。', icon: Zap },
-  { id: 'agents' as const, label: '智能体引擎', description: '一键检测本机智能体 CLI、版本与配置文件，设置默认引擎与 Claude Code 默认权限。', icon: Bot },
+  { id: 'agent-runtime' as const, label: '智能体与运行时', description: '统一管理默认智能体、会话权限、托管 SDK Runtime 和外部 CLI 诊断。', icon: Bot },
   { id: 'mcp' as const, label: 'MCP', description: '管理 MCP 服务器，为智能体扩展工具与能力。', icon: Server },
   { id: 'skills' as const, label: 'Skills', description: '查看、卸载已安装的 skills，从各智能体工具导入。', icon: Puzzle },
   { id: 'usage' as const, label: '使用统计', description: '查看会话活跃度、Token 用量与模型分布。', icon: BarChart3 },
@@ -45,7 +44,7 @@ const primaryTabs = [
 ];
 
 const secondaryTabs = [
-  { id: 'environment' as const, label: '环境检测', description: '检查 CodeMUX 运行智能体和 Git 功能所需的本机开发环境。', icon: Terminal },
+  { id: 'system-tools' as const, label: '系统工具', description: '检查 CodeMUX 所需的 Node.js、npm 和 Git 本机环境。', icon: Terminal },
   { id: 'logs' as const, label: '日志', description: '实时查看应用运行日志（codemux.log），每 3 秒自动刷新。', icon: FileText },
   { id: 'about' as const, label: '关于', description: '应用信息与系统环境。', icon: Info },
 ];
@@ -97,7 +96,7 @@ export function SettingsSidebar({ activeTab, onTabChange, onBack }: SettingsSide
   );
 }
 
-export function SettingsContent({ activeTab }: SettingsContentProps) {
+export function SettingsContent({ activeTab, onTabChange }: SettingsContentProps) {
   const activeTabDef = allTabs.find((tab) => tab.id === activeTab);
   const activeLabel = activeTabDef?.label ?? '设置';
   const activeDescription = activeTabDef?.description;
@@ -116,13 +115,14 @@ export function SettingsContent({ activeTab }: SettingsContentProps) {
         {activeTab === 'general' && <GeneralSettings />}
         {activeTab === 'appearance' && <ThemeToggle />}
         {activeTab === 'provider' && <ProviderConfigPanel />}
-        {activeTab === 'runtime' && <RuntimeSettingsPanel />}
-        {activeTab === 'agents' && <AgentSettingsPanel />}
+        {activeTab === 'agent-runtime' && (
+          <AgentRuntimeSettingsPanel onOpenSystemTools={() => onTabChange('system-tools')} />
+        )}
         {activeTab === 'mcp' && <McpSettingsPanel />}
         {activeTab === 'skills' && <SkillsSettingsPanel />}
         {activeTab === 'usage' && <UsageStatistics />}
         {activeTab === 'archive' && <ArchivedSessionsPanel />}
-        {activeTab === 'environment' && <EnvironmentSettings />}
+        {activeTab === 'system-tools' && <EnvironmentSettings />}
         {activeTab === 'logs' && <LogSettings />}
         {activeTab === 'about' && <AboutSettings />}
       </div>
@@ -138,7 +138,7 @@ export function SettingsView({ onBack }: SettingsViewProps) {
       <aside className={`flex w-[300px] shrink-0 flex-col border-r ${LAYOUT_DIVIDER_CLASS} bg-[hsl(var(--surface-2)/0.88)] shadow-[inset_-1px_0_0_hsl(var(--foreground)/0.04)] backdrop-blur-xl`}>
         <SettingsSidebar activeTab={activeTab} onTabChange={setActiveTab} onBack={onBack} />
       </aside>
-      <SettingsContent activeTab={activeTab} />
+      <SettingsContent activeTab={activeTab} onTabChange={setActiveTab} />
     </div>
   );
 }

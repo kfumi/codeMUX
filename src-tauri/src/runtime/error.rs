@@ -1,7 +1,7 @@
 //! Runtime 领域的结构化错误。
 //!
-//! Runtime Manager 必须区分下载失败、签名错误、哈希不匹配、解压失败、完整性失败、
-//! 兼容性失败、权限失败、Node 不可用和回滚失败，并返回结构化错误。
+//! npm Runtime Manager 返回结构化错误，区分 registry 查询、npm 安装、完整性、权限、
+//! Node 不可用和回滚失败等情况。
 
 use serde::{Deserialize, Serialize};
 
@@ -11,16 +11,10 @@ use super::types::{InstallStage, Provider};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeErrorKind {
-    /// manifest 拉取或解析失败。
+    /// npm registry 查询或版本解析失败。
     ManifestFailed,
-    /// 下载失败（网络、HTTP 非 2xx、超时、中断）。
+    /// npm 安装失败（网络、registry、依赖或 postinstall 失败）。
     DownloadFailed,
-    /// Pack 签名校验失败。
-    SignatureError,
-    /// Pack SHA-256 不匹配。
-    HashMismatch,
-    /// 解压失败（zip 损坏、磁盘空间不足等）。
-    ExtractFailed,
     /// 关键文件或二进制完整性校验失败。
     IntegrityFailed,
     /// sidecar 兼容性不匹配。
@@ -46,9 +40,6 @@ impl RuntimeErrorKind {
         match self {
             Self::ManifestFailed => "manifest_failed",
             Self::DownloadFailed => "download_failed",
-            Self::SignatureError => "signature_error",
-            Self::HashMismatch => "hash_mismatch",
-            Self::ExtractFailed => "extract_failed",
             Self::IntegrityFailed => "integrity_failed",
             Self::CompatibilityFailed => "compatibility_failed",
             Self::PermissionFailed => "permission_failed",
@@ -64,16 +55,9 @@ impl RuntimeErrorKind {
     /// 错误是否可由用户重试恢复。
     pub fn is_recoverable(&self) -> bool {
         match self {
-            Self::ManifestFailed
-            | Self::DownloadFailed
-            | Self::ExtractFailed
-            | Self::IoFailed
-            | Self::Unknown => true,
+            Self::ManifestFailed | Self::DownloadFailed | Self::IoFailed | Self::Unknown => true,
             // 签名、哈希、完整性、兼容性失败通常需要更换 manifest 或版本。
-            Self::SignatureError
-            | Self::HashMismatch
-            | Self::IntegrityFailed
-            | Self::CompatibilityFailed => true,
+            Self::IntegrityFailed | Self::CompatibilityFailed => true,
             // 权限失败需要用户介入调整目录权限后重试。
             Self::PermissionFailed => true,
             // Node 不可用需要用户安装 Node，恢复后重试。
@@ -90,11 +74,8 @@ impl RuntimeErrorKind {
     /// 用户可读的错误类别名。
     pub fn label(&self) -> &'static str {
         match self {
-            Self::ManifestFailed => "Runtime 清单获取失败",
-            Self::DownloadFailed => "Runtime 下载失败",
-            Self::SignatureError => "Runtime 签名校验失败",
-            Self::HashMismatch => "Runtime 哈希校验失败",
-            Self::ExtractFailed => "Runtime 解压失败",
+            Self::ManifestFailed => "npm registry 查询失败",
+            Self::DownloadFailed => "npm 安装失败",
             Self::IntegrityFailed => "Runtime 完整性校验失败",
             Self::CompatibilityFailed => "Runtime 兼容性不匹配",
             Self::PermissionFailed => "文件系统权限不足",
@@ -153,33 +134,6 @@ impl RuntimeError {
             RuntimeErrorKind::DownloadFailed,
             provider,
             Some(InstallStage::Downloading),
-            message,
-        )
-    }
-
-    pub fn signature_error(provider: Option<Provider>, message: impl Into<String>) -> Self {
-        Self::new(
-            RuntimeErrorKind::SignatureError,
-            provider,
-            Some(InstallStage::VerifyingSignature),
-            message,
-        )
-    }
-
-    pub fn hash_mismatch(provider: Option<Provider>, message: impl Into<String>) -> Self {
-        Self::new(
-            RuntimeErrorKind::HashMismatch,
-            provider,
-            Some(InstallStage::VerifyingHash),
-            message,
-        )
-    }
-
-    pub fn extract_failed(provider: Option<Provider>, message: impl Into<String>) -> Self {
-        Self::new(
-            RuntimeErrorKind::ExtractFailed,
-            provider,
-            Some(InstallStage::Extracting),
             message,
         )
     }
@@ -255,9 +209,6 @@ mod tests {
         for kind in [
             RuntimeErrorKind::ManifestFailed,
             RuntimeErrorKind::DownloadFailed,
-            RuntimeErrorKind::SignatureError,
-            RuntimeErrorKind::HashMismatch,
-            RuntimeErrorKind::ExtractFailed,
             RuntimeErrorKind::IntegrityFailed,
             RuntimeErrorKind::CompatibilityFailed,
             RuntimeErrorKind::PermissionFailed,
@@ -297,9 +248,6 @@ mod tests {
         let err = RuntimeError::download_failed(Some(Provider::OpenCode), "timeout");
         assert_eq!(err.stage, Some(InstallStage::Downloading));
 
-        let err = RuntimeError::hash_mismatch(Some(Provider::OpenCode), "sha mismatch");
-        assert_eq!(err.stage, Some(InstallStage::VerifyingHash));
-
         let err = RuntimeError::integrity_failed(Some(Provider::OpenCode), "missing binary");
         assert_eq!(err.stage, Some(InstallStage::VerifyingIntegrity));
     }
@@ -314,9 +262,9 @@ mod tests {
 
     #[test]
     fn display_includes_provider_stage_and_message() {
-        let err = RuntimeError::signature_error(Some(Provider::ClaudeCode), "invalid signature");
+        let err = RuntimeError::integrity_failed(Some(Provider::ClaudeCode), "missing SDK package");
         let rendered = err.to_string();
         assert!(rendered.contains("Claude Code"));
-        assert!(rendered.contains("invalid signature"));
+        assert!(rendered.contains("missing SDK package"));
     }
 }

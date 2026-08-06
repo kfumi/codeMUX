@@ -25,7 +25,22 @@ const sdkMocks = vi.hoisted(() => {
     url: 'http://127.0.0.1:4097',
     close: vi.fn().mockResolvedValue(undefined),
   });
-  return { prompt, promptAsync, createClient, createServer, client };
+  const runtimeRef = {
+    provider: 'opencode',
+    runtimeRoot: 'D:/runtimes',
+    runtimePath: 'D:/runtimes/opencode/1.18.3',
+    runtimeVersion: '1.18.3',
+  };
+  const runtimeLoaded = {
+    ref: runtimeRef,
+    nodeModulesPath: 'D:/runtimes/opencode/1.18.3/node_modules',
+    runtimeRequire: vi.fn((packageName: string) => {
+      if (packageName === '@opencode-ai/sdk/client') return { createOpencodeClient: createClient };
+      if (packageName === '@opencode-ai/sdk/server') return { createOpencodeServer: createServer };
+      throw new Error(`unexpected runtime package: ${packageName}`);
+    }),
+  };
+  return { prompt, promptAsync, createClient, createServer, client, runtimeRef, runtimeLoaded };
 });
 
 vi.mock('@opencode-ai/sdk/client', () => ({
@@ -33,6 +48,13 @@ vi.mock('@opencode-ai/sdk/client', () => ({
 }));
 vi.mock('@opencode-ai/sdk/server', () => ({
   createOpencodeServer: sdkMocks.createServer,
+}));
+vi.mock('./runtimeLoader.js', () => ({
+  loadProviderRuntime: vi.fn().mockReturnValue(sdkMocks.runtimeLoaded),
+  isRuntimeError: vi.fn().mockReturnValue(false),
+}));
+vi.mock('./opencodeExecutable.js', () => ({
+  prepareOpenCodeExecutable: vi.fn(),
 }));
 
 function createConfig(agentSessionId?: string): OpenCodeSessionConfig {
@@ -46,6 +68,7 @@ function createConfig(agentSessionId?: string): OpenCodeSessionConfig {
     credentialSource: 'codemux',
     apiKey: 'secret-key',
     baseUrl: 'https://provider.example/v1',
+    runtimeRef: sdkMocks.runtimeRef,
   };
 }
 
@@ -400,7 +423,7 @@ describe('OpenCodeRuntime', () => {
 
     const mapping = await runtime.start();
 
-    expect(port.start).toHaveBeenCalledWith({ cwd: 'D:/workspace/demo', provider: 'codemux-openai', model: 'gpt-5', apiKey: 'secret-key', baseUrl: 'https://provider.example/v1', credentialSource: 'codemux', serverCloseTimeoutMs: 10_000 });
+    expect(port.start).toHaveBeenCalledWith({ cwd: 'D:/workspace/demo', provider: 'codemux-openai', model: 'gpt-5', apiKey: 'secret-key', baseUrl: 'https://provider.example/v1', credentialSource: 'codemux', runtimeRef: sdkMocks.runtimeRef, serverCloseTimeoutMs: 10_000 });
     expect(client.createSession).toHaveBeenCalledWith({ cwd: 'D:/workspace/demo' });
     expect(mapping).toEqual<OpenCodeSessionMapping>({
       sessionId: 'codemux-session-1',
@@ -551,7 +574,7 @@ describe('OpenCodeRuntime', () => {
   });
   it('maps the official adapter prompt body and images to OpenCode SDK parts', async () => {
     sdkMocks.promptAsync.mockClear();
-    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'codemux-openai', model: 'model-1', credentialSource: 'none' });
+    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'codemux-openai', model: 'model-1', credentialSource: 'none', runtimeRef: sdkMocks.runtimeRef });
 
     await resources.client.prompt({
       sessionId: 'opencode-new',
@@ -579,7 +602,7 @@ describe('OpenCodeRuntime', () => {
     sdkMocks.client.session.create.mockResolvedValueOnce({
       error: { code: 404, message: 'session unavailable' },
     });
-    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'codemux-openai', model: 'model-1', credentialSource: 'none' });
+    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'codemux-openai', model: 'model-1', credentialSource: 'none', runtimeRef: sdkMocks.runtimeRef });
 
     await expect(resources.client.createSession({ cwd: 'D:/workspace/demo' })).rejects.toThrow(
       'OpenCode session creation failed: {"code":404,"message":"session unavailable"}',

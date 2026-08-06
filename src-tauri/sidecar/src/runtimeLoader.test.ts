@@ -77,6 +77,7 @@ describe('runtimeLoader', () => {
       const loaded = result as RuntimeLoadResult;
       expect(loaded.nodeModulesPath).toBe(path.join(runtimePath, 'node_modules'));
       expect(typeof loaded.runtimeRequire).toBe('function');
+      expect(typeof loaded.runtimeImport).toBe('function');
     });
 
     it('supports paths with spaces and non-ASCII characters', () => {

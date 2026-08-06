@@ -1,11 +1,5 @@
-// SDK 动态加载器：从 CodeMUX 托管 Runtime 路径加载 Provider SDK 模块。
-//
-// 生产安装包只打包 sidecar/dist/，不包含 node_modules（spec L54/L68）。
-// 因此生产环境必须通过 runtimeRef 从外部 Runtime 路径加载 SDK。
-//
-// 当 ensure_session 命令携带 runtimeRef 时，从 Runtime 路径的 node_modules 加载 SDK；
-// 否则（仅开发模式 / vitest mock 场景）回退到 sidecar 自身的 node_modules。
-// 生产构建中该回退路径不可达（node_modules 不打包），符合 spec "不保留安装包内 SDK fallback"。
+// SDK 动态加载器：只从 CodeMUX 托管 Runtime 路径加载 Provider SDK 模块。
+// sidecar 本身不包含 SDK，也不允许从 PATH 或自身 node_modules 回退加载。
 
 import type { RuntimeLoadResult } from './runtimeLoader.js';
 
@@ -30,41 +24,51 @@ export interface OpenCodeServerSdkModule {
   createOpencodeServer: typeof import('@opencode-ai/sdk/server').createOpencodeServer;
 }
 
-/**
- * 从 Runtime 加载结果加载指定 SDK 模块的共享实现。
- *
- * 生产路径：通过 `loaded.runtimeRequire(pkg)` 从外部 Runtime 的 node_modules 加载。
- * 开发/测试回退：当 `loaded` 为 null 时，回退到 sidecar 自身的 `import(pkg)`，
- *   供 `npm run dev` 和 vitest mock 使用。生产构建不含 node_modules，此分支不可达。
- */
-async function loadSdkModule<T>(loaded: RuntimeLoadResult | null, pkg: string): Promise<T> {
-  if (loaded) {
-    return loaded.runtimeRequire(pkg) as T;
+/** 从托管 Runtime 加载指定 SDK 模块。 */
+async function loadSdkModule<T>(
+  loaded: RuntimeLoadResult | null,
+  pkg: string,
+  providerLabel: string,
+): Promise<T> {
+  if (!loaded) {
+    throw new Error(`${providerLabel} Runtime is required before loading ${pkg}`);
   }
-  const mod = await import(pkg);
-  return mod as unknown as T;
+  process.stderr.write(
+    `[runtime] provider=${loaded.ref.provider} sdk=${pkg} runtime=${loaded.ref.runtimePath} version=${loaded.ref.runtimeVersion} node=${process.execPath}\n`,
+  );
+  try {
+    return loaded.runtimeRequire(pkg) as T;
+  } catch (requireError) {
+    try {
+      return (await loaded.runtimeImport(pkg)) as T;
+    } catch (importError) {
+      const requireMessage = requireError instanceof Error ? requireError.message : String(requireError);
+      const importMessage = importError instanceof Error ? importError.message : String(importError);
+      throw new Error(`${providerLabel} Runtime 加载 ${pkg} 失败（require: ${requireMessage}; import: ${importMessage}）`);
+    }
+  }
 }
 
-/** 从 Runtime 加载结果或 sidecar 自身加载 Claude Agent SDK。 */
+/** 从托管 Runtime 加载 Claude Agent SDK。 */
 export function loadClaudeSdk(loaded: RuntimeLoadResult | null): Promise<ClaudeSdkModule> {
-  return loadSdkModule<ClaudeSdkModule>(loaded, '@anthropic-ai/claude-agent-sdk');
+  return loadSdkModule<ClaudeSdkModule>(loaded, '@anthropic-ai/claude-agent-sdk', 'Claude Code');
 }
 
-/** 从 Runtime 加载结果或 sidecar 自身加载 Codex SDK。 */
+/** 从托管 Runtime 加载 Codex SDK。 */
 export function loadCodexSdk(loaded: RuntimeLoadResult | null): Promise<CodexSdkModule> {
-  return loadSdkModule<CodexSdkModule>(loaded, '@openai/codex-sdk');
+  return loadSdkModule<CodexSdkModule>(loaded, '@openai/codex-sdk', 'Codex');
 }
 
-/** 从 Runtime 加载结果或 sidecar 自身加载 OpenCode SDK client。 */
+/** 从托管 Runtime 加载 OpenCode SDK client。 */
 export function loadOpenCodeClientSdk(
   loaded: RuntimeLoadResult | null,
 ): Promise<OpenCodeClientSdkModule> {
-  return loadSdkModule<OpenCodeClientSdkModule>(loaded, '@opencode-ai/sdk/client');
+  return loadSdkModule<OpenCodeClientSdkModule>(loaded, '@opencode-ai/sdk/client', 'OpenCode');
 }
 
-/** 从 Runtime 加载结果或 sidecar 自身加载 OpenCode SDK server。 */
+/** 从托管 Runtime 加载 OpenCode SDK server。 */
 export function loadOpenCodeServerSdk(
   loaded: RuntimeLoadResult | null,
 ): Promise<OpenCodeServerSdkModule> {
-  return loadSdkModule<OpenCodeServerSdkModule>(loaded, '@opencode-ai/sdk/server');
+  return loadSdkModule<OpenCodeServerSdkModule>(loaded, '@opencode-ai/sdk/server', 'OpenCode');
 }

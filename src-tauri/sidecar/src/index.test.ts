@@ -73,7 +73,18 @@ describe('sidecar command dispatcher', () => {
     await dispatcher.dispatch({ type: 'update_permissions', agentKind: 'opencode', sessionId: 'session-1', permissionConfig: { mode: 'default' } });
     await dispatcher.dispatch({ type: 'send_input', sessionId: 'session-1', prompt: 'hello' });
     await dispatcher.dispatch({ type: 'reset_session', sessionId: 'session-1' });
-    await dispatcher.dispatch({ type: 'delete_session', sessionId: 'session-1', agentSessionId: 'opencode-session-1', requestId: 'request-1' });
+    await dispatcher.dispatch({
+      type: 'delete_session',
+      sessionId: 'session-1',
+      agentSessionId: 'opencode-session-1',
+      requestId: 'request-1',
+      runtimeRef: {
+        provider: 'opencode',
+        runtimeRoot: 'D:\\runtimes',
+        runtimePath: 'D:\\runtimes\\opencode\\1.18.3',
+        runtimeVersion: '1.18.3',
+      },
+    });
     await dispatcher.dispatch({ type: 'interrupt' });
     await dispatcher.dispatch({ type: 'tool_response', toolUseId: 'tool-1', response: { approved: true } });
     await dispatcher.dispatch({ type: 'respond_to_permission', requestId: 'permission-1', sessionId: 'session-1', response: { approved: true } });

@@ -269,7 +269,7 @@ export function buildCodexTodoListEvent({
   return {
     type: 'codex_todo_list',
     session_id: sessionId,
-    todos: item.items.map((todo) => ({
+    todos: item.items.map((todo: { text: string; completed: boolean }) => ({
       content: todo.text,
       status: todo.completed ? 'completed' : 'pending',
     })),
@@ -304,7 +304,7 @@ export function buildCodexToolResultContent(
       return `Search completed for: ${item.query}`;
     case 'file_change':
       return item.changes.length > 0
-        ? `Patch ${item.status}: ${item.changes.map((change) => `${change.kind} ${change.path}`).join(', ')}`
+        ? `Patch ${item.status}: ${item.changes.map((change: { kind: string; path: string }) => `${change.kind} ${change.path}`).join(', ')}`
         : `Patch ${item.status}`;
     default:
       return null;

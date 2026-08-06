@@ -18,6 +18,14 @@ vi.mock('../../lib/tauri', () => ({
           message: '未找到 Node.js，请安装 Node.js 18+ 并确认 PATH 已生效。',
         },
         {
+          name: 'npm',
+          command: 'npm',
+          status: 'missing',
+          version: null,
+          path: null,
+          message: '未找到 npm，请确认 Node.js 安装包含 npm 且 PATH 已生效。',
+        },
+        {
           name: 'Git',
           command: 'git',
           status: 'ok',
@@ -36,6 +44,11 @@ vi.mock('./ProviderConfig', () => ({
 
 vi.mock('./AgentSettings', () => ({
   AgentSettingsPanel: () => <div>Agent settings</div>,
+  AgentPreferencesPanel: () => <div>Agent preferences</div>,
+}));
+
+vi.mock('./AgentRuntimeSettings', () => ({
+  AgentRuntimeSettingsPanel: () => <div>Agent runtime settings</div>,
 }));
 
 vi.mock('./McpSettings', () => ({
@@ -65,15 +78,26 @@ describe('SettingsView', () => {
     expect(screen.getByRole('button', { name: '返回应用' })).toBeTruthy();
   });
 
-  it('renders the environment check tab and reports missing Node.js', async () => {
+  it('renders the system tools tab and reports missing Node.js/npm', async () => {
     const { SettingsView } = await import('./SettingsDialog');
 
     render(<SettingsView onBack={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: /环境检测/ }));
+    fireEvent.click(screen.getByRole('button', { name: /系统工具/ }));
 
     expect(await screen.findByText('Node.js')).toBeTruthy();
+    expect(screen.getAllByText('npm').length).toBeGreaterThan(0);
     expect(screen.getByText(/请安装 Node.js 18\+/)).toBeTruthy();
     expect(screen.getByRole('button', { name: /重新检测/ })).toBeTruthy();
+  });
+
+  it('uses one combined entry for agent preferences and managed Runtime', async () => {
+    const { SettingsView } = await import('./SettingsDialog');
+
+    render(<SettingsView onBack={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: '智能体与运行时' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '运行时环境' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '智能体引擎' })).toBeNull();
   });
 
   it('uses the same layered panel treatment as the main workspace', async () => {

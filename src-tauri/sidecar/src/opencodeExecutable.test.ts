@@ -9,61 +9,45 @@ afterEach(() => {
 });
 
 describe('OpenCode executable resolution', () => {
-  it('finds the bundled Windows shim before PATH', () => {
+  it('does not search sidecar node_modules when no managed runtime is supplied', () => {
     const result = resolveOpenCodeExecutable({
-      sidecarDir: 'C:/app/sidecar/dist',
       platform: 'win32',
-      pathEnv: 'C:/global/bin',
       fileExists: (candidate) => candidate === 'C:\\app\\sidecar\\node_modules\\.bin\\opencode.cmd',
     });
 
-    expect(result).toMatchObject({
-      executablePath: 'C:\\app\\sidecar\\node_modules\\.bin\\opencode.cmd',
-      source: 'bundled',
-    });
+    expect(result).toBeUndefined();
   });
 
-  it('finds an existing POSIX executable on PATH when no bundled binary exists', () => {
+  it('does not use a global OpenCode executable from PATH', () => {
     const result = resolveOpenCodeExecutable({
-      sidecarDir: '/opt/codemux/sidecar/dist',
       platform: 'linux',
-      pathEnv: '/usr/local/bin:/usr/bin',
       fileExists: (candidate) => candidate === '/usr/local/bin/opencode',
     });
 
-    expect(result).toEqual({
-      executablePath: '/usr/local/bin/opencode',
-      pathEntry: '/usr/local/bin',
-      source: 'path',
-    });
+    expect(result).toBeUndefined();
   });
 
   it('returns a credential-free diagnostic when no executable is available', () => {
     expect(() => prepareOpenCodeExecutable({
-      sidecarDir: '/opt/codemux/sidecar/dist',
       platform: 'linux',
-      pathEnv: '',
       fileExists: () => false,
     })).toThrow('OpenCode executable not found');
     expect(() => prepareOpenCodeExecutable({
-      sidecarDir: '/opt/codemux/sidecar/dist',
       platform: 'linux',
-      pathEnv: '',
       fileExists: () => false,
-    })).toThrow(/PATH/);
+    })).toThrow(/托管 OpenCode Runtime/);
   });
 
-  it('prepends the bundled executable directory to PATH for the official SDK spawn', () => {
+  it('prepends the managed runtime executable directory to PATH for the official SDK spawn', () => {
     process.env.PATH = '/usr/bin';
     const result = prepareOpenCodeExecutable({
-      sidecarDir: '/opt/codemux/sidecar/dist',
       platform: 'linux',
-      pathEnv: '/usr/bin',
-      fileExists: (candidate) => candidate === '/opt/codemux/sidecar/node_modules/opencode-ai/bin/opencode',
+      runtimePath: '/opt/codemux/runtimes/opencode/1.18.3',
+      fileExists: (candidate) => candidate === '/opt/codemux/runtimes/opencode/1.18.3/node_modules/opencode-ai/bin/opencode',
     });
 
-    expect(result.source).toBe('bundled');
-    expect(process.env.PATH?.split(path.delimiter)[0]).toBe('/opt/codemux/sidecar/node_modules/opencode-ai/bin');
+    expect(result.source).toBe('runtime');
+    expect(process.env.PATH?.split(path.delimiter)[0]).toBe('/opt/codemux/runtimes/opencode/1.18.3/node_modules/opencode-ai/bin');
   });
 });
 

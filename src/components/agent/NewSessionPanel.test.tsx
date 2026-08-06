@@ -26,6 +26,7 @@ const composerProps: Array<{
   placeholder?: string;
   projectPath?: string | null;
   disabled?: boolean;
+  loading?: boolean;
   disabledMessage?: string;
   onSend?: (content: string) => Promise<void>;
   onCommand?: (command: SlashCommand, args: string) => Promise<void>;
@@ -273,6 +274,35 @@ describe('NewSessionPanel', () => {
     await composerProps[0]?.onSend?.('Ship the feature');
 
     expect(onSubmit).toHaveBeenCalledWith({ text: 'Ship the feature' });
+  });
+
+  it('检测 Runtime 期间将发送按钮置为 loading 并阻止重复提交', async () => {
+    let resolveSubmit: (() => void) | undefined;
+    const onSubmit = vi.fn(() => new Promise<void>((resolve) => {
+      resolveSubmit = resolve;
+    }));
+
+    render(<NewSessionPanel onSubmit={onSubmit} />);
+
+    const runtimeSend = [...composerProps].reverse().find((props) => props.onSend)?.onSend;
+    const firstSend = runtimeSend?.('Ship the feature');
+
+    await waitFor(() => {
+      const latestComposer = [...composerProps].reverse().find((props) => props.loading !== undefined);
+      expect(latestComposer?.loading).toBe(true);
+      expect(latestComposer?.disabled).toBe(true);
+    });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+
+    await runtimeSend?.('Ship it again');
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+
+    resolveSubmit?.();
+    await firstSend;
+    await waitFor(() => {
+      const latestComposer = [...composerProps].reverse().find((props) => props.loading !== undefined);
+      expect(latestComposer?.loading).toBe(false);
+    });
   });
 
   it('does not submit a model left over from a different active profile', async () => {

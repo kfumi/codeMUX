@@ -1892,12 +1892,18 @@ pub async fn delete_opencode_session(
         return Ok(());
     };
 
+    let runtime_ref = state
+        .runtime_resolver
+        .resolve_runtime_ref(crate::runtime::Provider::OpenCode)
+        .ok_or_else(|| "OpenCode Runtime 未安装或不可用，请先在设置中安装".to_string())?;
+
     let request_id = uuid::Uuid::new_v4().to_string();
     let command = OpenCodeRuntime::delete_session_command(
         &app_session_id,
         &opencode_session_id,
         &request_id,
         None,
+        &runtime_ref,
     );
     let active_sender = {
         let sidecars = agent_state.sidecars.lock().await;
@@ -2348,13 +2354,25 @@ fn build_ensure_session_command(
         "sessionId": session_id,
     });
 
-    // 解析 CodeMUX 托管 Runtime 路径，传给 sidecar 用于动态加载 SDK。
-    if let Some(provider_enum) = crate::runtime::Provider::from_str(agent_kind) {
-        if let Some(runtime_ref) = state.runtime_resolver.resolve_runtime_ref(provider_enum) {
-            cmd["runtimeRef"] =
-                serde_json::to_value(&runtime_ref).unwrap_or(serde_json::Value::Null);
-        }
-    }
+    // 会话必须使用 CodeMUX 托管 Runtime，禁止省略引用后由 sidecar 回退到内置 SDK。
+    let runtime_provider = crate::runtime::Provider::from_str(agent_kind)
+        .ok_or_else(|| format!("不支持的 Agent Runtime: {}", agent_kind))?;
+    let runtime_ref = state
+        .runtime_resolver
+        .resolve_runtime_ref(runtime_provider)
+        .ok_or_else(|| {
+            format!(
+                "{} Runtime 未安装或不可用，请先在设置中安装",
+                runtime_provider.label()
+            )
+        })?;
+    cmd["runtimeRef"] = serde_json::to_value(runtime_ref).map_err(|error| {
+        format!(
+            "无法序列化 {} Runtime 引用: {}",
+            runtime_provider.label(),
+            error
+        )
+    })?;
 
     let (session_origin, imported_cwd) = {
         let db = state.db.lock().unwrap();
@@ -2588,13 +2606,6 @@ pub async fn ensure_agent_session(
         None
     };
 
-    ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
-
-    let stderr_lines = {
-        let sidecars = agent_state.sidecars.lock().await;
-        sidecars.get(&session_id).map(|h| h.stderr_lines.clone())
-    };
-
     let cmd = build_ensure_session_command(
         &state,
         &session_id,
@@ -2609,6 +2620,13 @@ pub async fn ensure_agent_session(
         runtime_config.credential_source,
         runtime_generation,
     )?;
+
+    ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
+
+    let stderr_lines = {
+        let sidecars = agent_state.sidecars.lock().await;
+        sidecars.get(&session_id).map(|h| h.stderr_lines.clone())
+    };
 
     send_command_to_session(&agent_state, &session_id, cmd).await?;
     info!(target: "agent", "Agent ensure command sent for session_id={} agent_kind={}", session_id, agent_kind);
@@ -2676,7 +2694,6 @@ pub async fn start_agent_session(
             None
         };
 
-        ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
         let ensure_cmd = build_ensure_session_command(
             &state,
             &session_id,
@@ -2691,6 +2708,8 @@ pub async fn start_agent_session(
             runtime_config.credential_source,
             runtime_generation,
         )?;
+
+        ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
 
         send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 
@@ -4184,6 +4203,13 @@ mod tests {
     #[test]
     fn builds_opencode_command_with_provider_credentials() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let runtime_root = tempfile::tempdir().unwrap();
+        for (provider, version) in [("opencode", "1.18.3"), ("claude_code", "0.3.170")] {
+            let version_dir = runtime_root.path().join(provider).join(version);
+            std::fs::create_dir_all(&version_dir).unwrap();
+            std::fs::write(version_dir.join("package.json"), b"{}").unwrap();
+            std::fs::write(runtime_root.path().join(provider).join("current"), version).unwrap();
+        }
         crate::db::schema::initialize_database(&conn).unwrap();
         conn.execute(
             "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -4195,7 +4221,9 @@ mod tests {
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
             provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
-            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(
+                runtime_root.path().to_path_buf(),
+            ),
         };
 
         let command = build_ensure_session_command(
@@ -4238,6 +4266,44 @@ mod tests {
         assert!(claude_command.get("provider").is_none());
         assert!(claude_command.get("credentialSource").is_none());
     }
+
+    #[test]
+    fn refuses_to_build_ensure_command_when_managed_runtime_is_missing() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-missing-runtime", "Claude", "claude_code", "chat", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        let app_state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
+            provider_profile_operation_lock: std::sync::Mutex::new(()),
+            app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
+        };
+
+        let error = build_ensure_session_command(
+            &app_state,
+            "session-missing-runtime",
+            "claude_code",
+            "D:/workspace/demo".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect_err("missing managed Runtime must block session startup");
+
+        assert!(error.contains("Claude Code Runtime"));
+        assert!(error.contains("安装"));
+    }
+
     #[test]
     fn builds_runtime_permission_update_command_from_session_snapshot() {
         let cmd = build_update_permissions_command_from_snapshot(

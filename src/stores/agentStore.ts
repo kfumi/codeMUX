@@ -1988,6 +1988,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         };
       });
       useSessionStore.getState().markSessionUnread(sessionId);
+      throw err;
     }
   },
 

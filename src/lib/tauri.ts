@@ -450,9 +450,11 @@ export interface LogFileInfo {
 
 export type EnvironmentCheckStatus = 'ok' | 'warning' | 'missing' | 'error';
 
+export type EnvironmentToolName = 'node' | 'npm' | 'git';
+
 export interface EnvironmentToolCheck {
-  name: 'Node.js' | 'Git';
-  command: 'node' | 'git';
+  name: 'Node.js' | 'npm' | 'Git';
+  command: EnvironmentToolName;
   status: EnvironmentCheckStatus;
   version: string | null;
   path: string | null;
@@ -553,9 +555,6 @@ export type ManagedRuntimeStatus =
 export type RuntimeInstallStage =
   | 'resolving'
   | 'downloading'
-  | 'verifying_signature'
-  | 'verifying_hash'
-  | 'extracting'
   | 'verifying_integrity'
   | 'switching'
   | 'cleaning'
@@ -566,9 +565,6 @@ export type RuntimeInstallStage =
 export type RuntimeErrorKind =
   | 'manifest_failed'
   | 'download_failed'
-  | 'signature_error'
-  | 'hash_mismatch'
-  | 'extract_failed'
   | 'integrity_failed'
   | 'compatibility_failed'
   | 'permission_failed'
@@ -621,6 +617,7 @@ export interface ManagedRuntimeInfo {
   status: ManagedRuntimeStatus;
   currentVersion: string | null;
   installedVersions: string[];
+  availableVersions: string[];
   installPath: string | null;
   runtimeRoot: string;
   integrityOk: boolean;
@@ -633,6 +630,15 @@ export interface ManagedNodeInfo {
   satisfiesMinimum: boolean;
   version: string | null;
   executablePath: string | null;
+  error: string | null;
+  npm: ManagedNpmInfo;
+}
+
+export interface ManagedNpmInfo {
+  available: boolean;
+  version: string | null;
+  executablePath: string | null;
+  matchesNode: boolean;
   error: string | null;
 }
 
@@ -677,10 +683,12 @@ export const appApi = {
     invokeLogged('probe_agent_installations', { agentKind }),
   checkManagedRuntimes: (): Promise<ManagedRuntimeCheckResult> =>
     invokeLogged('check_managed_runtimes'),
+  listManagedRuntimeVersions: (provider: RuntimeProvider): Promise<string[]> =>
+    invokeLogged('list_managed_runtime_versions', { provider }),
   refreshManagedRuntime: (provider: RuntimeProvider): Promise<ManagedRuntimeInfo> =>
     invokeLogged('refresh_managed_runtime', { provider }),
-  installManagedRuntime: (provider: RuntimeProvider): Promise<ManagedRuntimeOperationResult> =>
-    invokeLogged('install_managed_runtime', { provider }),
+  installManagedRuntime: (provider: RuntimeProvider, version?: string): Promise<ManagedRuntimeOperationResult> =>
+    invokeLogged('install_managed_runtime', { provider, version: version ?? null }),
   upgradeManagedRuntime: (provider: RuntimeProvider): Promise<ManagedRuntimeOperationResult | null> =>
     invokeLogged('upgrade_managed_runtime', { provider }),
   repairManagedRuntime: (provider: RuntimeProvider): Promise<ManagedRuntimeOperationResult | null> =>

@@ -3,7 +3,6 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { execSync } from 'node:child_process';
 import type {
   Query,
   SDKUserMessage,
@@ -12,7 +11,7 @@ import type {
 import type { SidecarCommand } from './types.js';
 import { getProviderMode } from './sessionRuntimeHelpers.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
-import { loadProviderRuntime, isRuntimeError, type RuntimeLoadOutcome } from './runtimeLoader.js';
+import { loadProviderRuntime, isRuntimeError, type RuntimeLoadResult } from './runtimeLoader.js';
 import { loadClaudeSdk, type ClaudeSdkModule } from './sdkLoader.js';
 import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion.js';
 import { projectClaudeToolEvents } from './claudeToolEvents.js';
@@ -225,17 +224,6 @@ function isQueryIdleTimeout(errorText: string): boolean {
   return errorText.includes('Query timed out: no message received');
 }
 
-function findClaudeExecutable(): string | undefined {
-  try {
-    if (process.platform === 'win32') {
-      return execSync('where claude', { encoding: 'utf-8' }).trim().split('\n')[0]?.trim();
-    }
-    return execSync('which claude', { encoding: 'utf-8' }).trim();
-  } catch {
-    return undefined;
-  }
-}
-
 /** Load env vars from ~/.claude/settings.json and apply to process.env */
 function loadClaudeSettingsEnv(): void {
   try {
@@ -314,10 +302,10 @@ export class SessionRuntime {
   private generation = 0;
   private activeConfigGeneration = 0;
   private claudeExecutablePath: string | undefined;
-  /** 动态加载的 Claude SDK 模块（从 Runtime 路径或 sidecar node_modules 加载）。 */
+  /** 动态加载的 Claude SDK 模块（仅从托管 Runtime 加载）。 */
   private claudeSdk: ClaudeSdkModule | null = null;
-  /** Runtime 加载结果，用于解析 SDK 路径。 */
-  private runtimeLoaded: RuntimeLoadOutcome | null = null;
+  /** 托管 Runtime 加载结果，用于解析 SDK 路径。 */
+  private runtimeLoaded: RuntimeLoadResult | null = null;
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     const normalized = this.normalizeConfig(cmd);
@@ -335,15 +323,8 @@ export class SessionRuntime {
 
     await this.resetForReconfigure();
 
-    // 从 CodeMUX 托管 Runtime 路径动态加载 Claude SDK（Ticket 04/07）。
-    // 生产安装包不含 node_modules，必须通过 runtimeRef 加载；
-    // 开发模式无 runtimeRef 时回退到 sidecar 自身的 node_modules。
+    // 生产与开发环境都必须从 CodeMUX 托管 Runtime 路径动态加载 Claude SDK。
     this.runtimeLoaded = this.loadRuntimeIfNeeded();
-    if (this.runtimeLoaded && isRuntimeError(this.runtimeLoaded)) {
-      const runtimeError = this.runtimeLoaded;
-      this.runtimeLoaded = null;
-      throw new Error(`Claude Runtime 加载失败: ${runtimeError.message}`);
-    }
     this.claudeSdk = await loadClaudeSdk(this.runtimeLoaded);
 
     emit({
@@ -356,12 +337,18 @@ export class SessionRuntime {
   }
 
   /**
-   * 使用 runtimeRef 加载 Provider Runtime，返回 RuntimeLoadOutcome。
-   * 如果没有 runtimeRef（开发模式），返回 null 以触发 sidecar node_modules 回退。
+   * 使用 runtimeRef 加载 Provider Runtime。
    */
-  private loadRuntimeIfNeeded(): RuntimeLoadOutcome | null {
-    if (!this.config?.runtimeRef) return null;
-    return loadProviderRuntime(this.config.runtimeRef);
+  private loadRuntimeIfNeeded(): RuntimeLoadResult {
+    const runtimeRef = this.config?.runtimeRef;
+    if (!runtimeRef) {
+      throw new Error('Claude Code Runtime is required before starting a session');
+    }
+    const result = loadProviderRuntime(runtimeRef);
+    if (isRuntimeError(result)) {
+      throw new Error(`Claude Runtime 加载失败: ${result.message}`);
+    }
+    return result;
   }
 
   updatePermissions(cmd: UpdatePermissionsCommand): void {
@@ -556,7 +543,7 @@ export class SessionRuntime {
     };
 
     this.warmPromise = warmAttempt('Calling startup() to pre-warm MCP connections in the background...')
-      .then((warm) => {
+      .then((warm: WarmQuery) => {
         if (configGeneration !== this.activeConfigGeneration) {
           warm.close();
           return null;
@@ -570,7 +557,7 @@ export class SessionRuntime {
         process.stderr.write('[sidecar] Background startup() complete\n');
         return warm;
       })
-      .catch(async (startupErr) => {
+      .catch(async (startupErr: unknown) => {
         if (this.config?.resumeOnly && this.config.agentSessionId) {
           process.stderr.write(`[sidecar] External session restore failed: ${startupErr}\n`);
           if (isNativeResumeFailure(startupErr)) {
@@ -673,13 +660,15 @@ export class SessionRuntime {
       process.env.ANTHROPIC_BASE_URL = config.baseUrl;
     }
 
-    const pathClaude = findClaudeExecutable();
-    const claudePath = resolveClaudeExecutable({
-      sidecarDir: SIDECAR_DIST_DIR,
-      pathClaude,
-      runtimePath: config.runtimeRef?.runtimePath,
-    });
-    this.claudeExecutablePath = claudePath ?? pathClaude ?? 'claude';
+    const runtimePath = config.runtimeRef?.runtimePath;
+    if (!runtimePath) {
+      throw new Error('Claude Code Runtime is required before resolving its executable');
+    }
+    const claudePath = resolveClaudeExecutable({ runtimePath });
+    if (!claudePath) {
+      throw new Error(`Claude Runtime 路径中未找到 Claude 可执行文件: ${runtimePath}`);
+    }
+    this.claudeExecutablePath = claudePath;
     const claudeSessionId = config.agentSessionId;
     const envKey = process.env.ANTHROPIC_API_KEY;
     const envUrl = process.env.ANTHROPIC_BASE_URL;
@@ -689,10 +678,9 @@ export class SessionRuntime {
     const anthropicVars = Object.keys(process.env).filter((key) => key.startsWith('ANTHROPIC_'));
     process.stderr.write(`[sidecar] All ANTHROPIC_* env vars: ${anthropicVars.join(', ') || '(none)'}\n`);
     process.stderr.write(`[sidecar] Session: app=${config.sessionId || 'none'}, claude=${claudeSessionId || 'new'}\n`);
-    process.stderr.write(`[sidecar] Claude executable=${claudePath || 'NOT FOUND'}\n`);
-    if (pathClaude && claudePath !== pathClaude) {
-      process.stderr.write(`[sidecar] Ignoring PATH Claude shim in favor of bundled binary: ${pathClaude}\n`);
-    }
+    process.stderr.write(
+      `[runtime] provider=claude_code cli=${claudePath} runtime=${runtimePath} version=${config.runtimeRef?.runtimeVersion ?? 'unknown'} node=${process.execPath}\n`,
+    );
 
     const subprocessEnv: Record<string, string | undefined> = { ...process.env };
     if (config.apiKey) subprocessEnv.ANTHROPIC_API_KEY = config.apiKey;
@@ -1209,7 +1197,7 @@ export class SessionRuntime {
           statusMap[status.name] = status.status;
         }
         emit({ type: 'mcp_status_update', servers: statusMap });
-        const allDone = statuses.every((status) => status.status === 'connected' || status.status === 'failed');
+        const allDone = statuses.every((status: { status: string }) => status.status === 'connected' || status.status === 'failed');
         if (allDone) break;
       }
     } catch (err) {
@@ -1520,7 +1508,10 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           if (current?.deleteSession) {
             await current.deleteSession(cmd.agentSessionId);
           } else {
-            await deleteOpenCodeSessionWithOfficialSdk({ cwd: cmd.cwd, sessionId: cmd.agentSessionId });
+            if (!cmd.runtimeRef) {
+              throw new Error('OpenCode Runtime is required before deleting a session');
+            }
+            await deleteOpenCodeSessionWithOfficialSdk({ cwd: cmd.cwd, sessionId: cmd.agentSessionId, runtimeRef: cmd.runtimeRef });
           }
           options.emit({
             type: 'session_delete_result',
@@ -1658,7 +1649,7 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
     credentialSource: cmd.credentialSource ?? 'none',
     ...(cmd.credentialSource === 'codemux' && cmd.apiKey ? { apiKey: cmd.apiKey } : {}),
     ...(cmd.baseUrl ? { baseUrl: cmd.baseUrl } : {}),
-    ...(cmd.runtimeRef?.runtimePath ? { runtimePath: cmd.runtimeRef.runtimePath } : {}),
+    ...(cmd.runtimeRef ? { runtimeRef: cmd.runtimeRef } : {}),
   };
   const openCodeRuntime = new OpenCodeRuntime(config);
   if (cmd.planMode === 'on' || cmd.planMode === 'off') {

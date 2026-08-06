@@ -14,7 +14,24 @@ const sdkMocks = vi.hoisted(() => {
       abort: vi.fn().mockResolvedValue({ data: true }),
     },
   };
-  return { client, eventSubscribe };
+  const createOpencodeClient = vi.fn().mockReturnValue(client);
+  const createOpencodeServer = vi.fn().mockResolvedValue({ url: 'http://127.0.0.1:4097', close: vi.fn() });
+  const runtimeRef = {
+    provider: 'opencode',
+    runtimeRoot: 'D:/runtimes',
+    runtimePath: 'D:/runtimes/opencode/1.18.3',
+    runtimeVersion: '1.18.3',
+  };
+  const runtimeLoaded = {
+    ref: runtimeRef,
+    nodeModulesPath: 'D:/runtimes/opencode/1.18.3/node_modules',
+    runtimeRequire: vi.fn((packageName: string) => {
+      if (packageName === '@opencode-ai/sdk/client') return { createOpencodeClient };
+      if (packageName === '@opencode-ai/sdk/server') return { createOpencodeServer };
+      throw new Error(`unexpected runtime package: ${packageName}`);
+    }),
+  };
+  return { client, eventSubscribe, createOpencodeClient, createOpencodeServer, runtimeRef, runtimeLoaded };
 });
 
 vi.mock('@opencode-ai/sdk/client', () => ({
@@ -24,13 +41,18 @@ vi.mock('./opencodeExecutable.js', () => ({
   prepareOpenCodeExecutable: vi.fn(),
 }));
 
+vi.mock('./runtimeLoader.js', () => ({
+  loadProviderRuntime: vi.fn().mockReturnValue(sdkMocks.runtimeLoaded),
+  isRuntimeError: vi.fn().mockReturnValue(false),
+}));
+
 vi.mock('@opencode-ai/sdk/server', () => ({
   createOpencodeServer: vi.fn().mockResolvedValue({ url: 'http://127.0.0.1:4097', close: vi.fn() }),
 }));
 
 describe('official OpenCode SDK adapter', () => {
   it('deletes a session through the official session.delete endpoint', async () => {
-    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'opencode', model: 'default', credentialSource: 'opencode' });
+    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'opencode', model: 'default', credentialSource: 'opencode', runtimeRef: sdkMocks.runtimeRef });
 
     await resources.client.deleteSession({ cwd: 'D:/workspace/demo', sessionId: 'opencode-session' });
 
@@ -42,14 +64,14 @@ describe('official OpenCode SDK adapter', () => {
 
   it('treats a native 404 as an idempotent delete', async () => {
     sdkMocks.client.session.delete.mockResolvedValueOnce({ data: undefined, error: { status: 404 }, response: { status: 404 } });
-    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'opencode', model: 'default', credentialSource: 'opencode' });
+    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'opencode', model: 'default', credentialSource: 'opencode', runtimeRef: sdkMocks.runtimeRef });
 
     await expect(resources.client.deleteSession({ sessionId: 'already-deleted' })).resolves.toBeUndefined();
   });
 
   it('propagates non-404 deletion failures', async () => {
     sdkMocks.client.session.delete.mockResolvedValueOnce({ data: undefined, error: { status: 500, message: 'database unavailable' }, response: { status: 500 } });
-    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'opencode', model: 'default', credentialSource: 'opencode' });
+    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'opencode', model: 'default', credentialSource: 'opencode', runtimeRef: sdkMocks.runtimeRef });
 
     await expect(resources.client.deleteSession({ sessionId: 'session-with-error' })).rejects.toThrow('database unavailable');
   });
@@ -219,7 +241,7 @@ describe('official OpenCode SDK adapter', () => {
     const disconnects: unknown[] = [];
     const retries: unknown[] = [];
     const received: unknown[] = [];
-    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'codemux-openai', model: 'model-1', credentialSource: 'none' });
+    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'codemux-openai', model: 'model-1', credentialSource: 'none', runtimeRef: sdkMocks.runtimeRef });
     expect(resources.client.respondToTool).toBeUndefined();
     const subscription = await resources.client.subscribe!({ cwd: 'D:/workspace/demo', onEvent: (event) => received.push(event), onError: vi.fn(), onRetry: (error) => retries.push(error), onDisconnect: (error) => disconnects.push(error) });
 

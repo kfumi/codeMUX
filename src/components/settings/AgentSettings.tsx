@@ -289,6 +289,45 @@ export function AgentSettingsPanel() {
   );
 }
 
+/**
+ * 智能体与 Runtime 合并页使用的偏好设置区。
+ *
+ * 全局 CLI 的检测与托管 Runtime 管理由 RuntimeSettingsPanel 负责，
+ * 这里仅保留会话真正使用的默认引擎、权限和代理配置。
+ */
+export function AgentPreferencesPanel() {
+  const config = useSettingsStore((state) => state.config);
+  const getDefaultAgentKind = useSettingsStore((state) => state.getDefaultAgentKind);
+  const setDefaultAgentKind = useSettingsStore((state) => state.setDefaultAgentKind);
+  const updateAgentConfig = useSettingsStore((state) => state.updateAgentConfig);
+  const proxyRunning = useSettingsStore((state) => state.proxyRunning);
+  const proxyUrl = useSettingsStore((state) => state.proxyUrl);
+  const selectedKind = config?.agent_defaults.default_agent_kind ?? getDefaultAgentKind();
+  const claudePermissionMode: ClaudePermissionMode =
+    config?.agent_configs.claude_code.permission_config?.permissionMode ?? 'default';
+
+  const handleClaudePermissionChange = useCallback(
+    (mode: AgentExecutionMode) => {
+      const nextConfig: AgentPermissionConfig = mapExecutionModeToPermissionConfig('claude_code', mode);
+      if (nextConfig.kind === 'claude_code') {
+        updateAgentConfig('claude_code', { permission_config: nextConfig });
+      }
+    },
+    [updateAgentConfig],
+  );
+
+  return (
+    <div className="space-y-8">
+      <DefaultAgentSection selectedKind={selectedKind} onSelect={setDefaultAgentKind} />
+      <ClaudePermissionSection
+        executionMode={claudePermissionModeToExecutionMode(claudePermissionMode)}
+        onChange={handleClaudePermissionChange}
+      />
+      <ProxyRouteSection proxyRunning={proxyRunning} proxyUrl={proxyUrl} />
+    </div>
+  );
+}
+
 /* ----------------------------- 运行时检测区 ----------------------------- */
 
 interface RuntimeDetectionSectionProps {
@@ -630,6 +669,57 @@ function RuntimeInfoRow({ label, value, mono, empty, indicator }: RuntimeInfoRow
         </TooltipHint>
       </div>
     </div>
+  );
+}
+
+/* ----------------------------- 默认智能体区 ----------------------------- */
+
+function DefaultAgentSection({
+  selectedKind,
+  onSelect,
+}: {
+  selectedKind: AgentKind;
+  onSelect: (kind: AgentKind) => void;
+}) {
+  return (
+    <section className="space-y-3">
+      <div className="space-y-1">
+        <h3 className="text-sm font-semibold text-foreground">默认智能体</h3>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          新建对话默认使用的智能体。可在会话中单独切换，托管 Runtime 状态不会改变此选择。
+        </p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {RUNTIME_AGENTS.map((entry) => {
+          const active = selectedKind === entry.kind;
+          const definition = getAgentDefinition(entry.kind);
+          const agent = definition ?? {
+            kind: entry.kind,
+            label: entry.label,
+            description: '',
+            icon: entry.icon,
+            capabilities: [],
+          };
+          return (
+            <button
+              key={entry.kind}
+              type="button"
+              onClick={() => onSelect(entry.kind)}
+              className={cn(
+                'flex items-center gap-2.5 rounded-xl border px-3 py-3 text-left transition-colors',
+                active
+                  ? 'border-[hsl(var(--primary)/0.32)] bg-[hsl(var(--primary)/0.06)]'
+                  : 'border-border/55 bg-background hover:border-border hover:bg-muted/25',
+              )}
+            >
+              <AgentBrandIcon agent={agent} size="sm" />
+              <span className="min-w-0 flex-1 text-sm font-medium text-foreground">{entry.label}</span>
+              {active && <Check className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--primary))]" />}
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

@@ -1,84 +1,19 @@
 //! Runtime 领域的可测试边界（seam）。
 //!
-//! 这些 trait 让 Runtime Manager、检测逻辑和测试夹具可以注入可控的 manifest 源、
-//! 下载器、签名校验器和文件系统视图，而不依赖真实 GitHub Release、全局 CLI、真实用户目录
-//! 或固定本地路径。后续 ticket 的 Runtime Manager 实现通过依赖这些 trait 完成生命周期管理。
+//! 这些 trait 为 npm Runtime Manager、检测逻辑和测试夹具提供可替换的 Node、进度和
+//! 文件系统边界。
 
 use std::path::PathBuf;
 
 use async_trait::async_trait;
 
 use super::error::RuntimeError;
-use super::manifest::RuntimeManifest;
-use super::types::{Arch, InstallStage, NodeDetection, Platform, Progress, Provider};
+use super::types::{InstallStage, NodeDetection, Progress, Provider};
 
-/// manifest 源。生产实现从 GitHub Release 拉取；测试夹具返回可控数据。
-#[async_trait]
-pub trait ManifestSource: Send + Sync {
-    /// 获取指定 Provider、平台、架构的最新可用 manifest。
-    async fn fetch_latest(
-        &self,
-        provider: Provider,
-        platform: Platform,
-        arch: Arch,
-    ) -> Result<RuntimeManifest, RuntimeError>;
-
-    /// 获取指定 Provider 的所有可用版本（按发布时间倒序）。
-    async fn list_versions(
-        &self,
-        provider: Provider,
-        platform: Platform,
-        arch: Arch,
-    ) -> Result<Vec<String>, RuntimeError>;
-
-    /// 获取指定 Provider、版本的 manifest。
-    async fn fetch_version(
-        &self,
-        provider: Provider,
-        platform: Platform,
-        arch: Arch,
-        version: &str,
-    ) -> Result<RuntimeManifest, RuntimeError>;
-}
-
-/// Pack 下载器。生产实现从 `asset.url` 下载到临时文件；测试夹具返回预设字节。
-#[async_trait]
-pub trait PackDownloader: Send + Sync {
-    /// 下载 Pack 资产到临时路径。`progress` 用于汇报下载进度。
-    /// 返回下载完成的本地临时文件路径，由调用方负责解压和清理。
-    async fn download(
-        &self,
-        manifest: &RuntimeManifest,
-        progress: Box<dyn ProgressReporter>,
-    ) -> Result<PathBuf, RuntimeError>;
-}
-
-/// 签名校验器。生产实现使用项目现有签名体系；测试夹具返回固定结果。
-#[async_trait]
-pub trait SignatureVerifier: Send + Sync {
-    /// 校验 Pack 资产签名是否与 manifest 声明一致。
-    async fn verify(
-        &self,
-        manifest: &RuntimeManifest,
-        pack_path: &std::path::Path,
-    ) -> Result<(), RuntimeError>;
-}
-
-/// 进度汇报回调。Runtime Manager 在下载、校验、解压各阶段调用。
+/// 进度汇报回调。Runtime Manager 在 npm 查询、安装和校验阶段调用。
 #[async_trait]
 pub trait ProgressReporter: Send + Sync {
     async fn report(&self, progress: Progress);
-}
-
-/// Pack 归档解压器。生产实现解压 tar.gz；测试夹具直接复制预暂存目录。
-#[async_trait]
-pub trait ArchiveExtractor: Send + Sync {
-    /// 将 `archive_path` 解压到 `dest_dir`。
-    async fn extract(
-        &self,
-        archive_path: &std::path::Path,
-        dest_dir: &std::path::Path,
-    ) -> Result<(), RuntimeError>;
 }
 
 /// 系统 Node.js 解析器。生产实现从 PATH 查找 node 并解析版本；测试夹具返回固定结果。
@@ -199,10 +134,22 @@ impl RuntimeFileSystem for FileSystemRuntimeRoots {
                 )
             })?;
         }
-        std::fs::write(&path, version).map_err(|e| {
+        let temp_path = path.with_extension(format!("tmp-{}", std::process::id()));
+        std::fs::write(&temp_path, version).map_err(|e| {
             RuntimeError::io_failed(
                 Some(provider),
-                format!("无法写入当前版本指针 {}: {}", path.display(), e),
+                format!(
+                    "无法写入当前版本指针临时文件 {}: {}",
+                    temp_path.display(),
+                    e
+                ),
+            )
+        })?;
+        replace_file_atomically(&temp_path, &path).map_err(|e| {
+            let _ = std::fs::remove_file(&temp_path);
+            RuntimeError::io_failed(
+                Some(provider),
+                format!("无法原子切换当前版本指针 {}: {}", path.display(), e),
             )
         })
     }
@@ -252,6 +199,48 @@ impl RuntimeFileSystem for FileSystemRuntimeRoots {
                 format!("无法删除 Provider 目录 {}: {}", dir.display(), e),
             )
         })
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn replace_file_atomically(
+    source: &std::path::Path,
+    target: &std::path::Path,
+) -> std::io::Result<()> {
+    std::fs::rename(source, target)
+}
+
+#[cfg(target_os = "windows")]
+fn replace_file_atomically(
+    source: &std::path::Path,
+    target: &std::path::Path,
+) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source: Vec<u16> = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let target: Vec<u16> = target
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            target.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }
 

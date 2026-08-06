@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { renderCommandPrompt } from '../../lib/slashCommands';
@@ -70,6 +70,8 @@ interface NewSessionPanelProps {
 }
 
 export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
+  const [isCheckingRuntime, setIsCheckingRuntime] = useState(false);
+  const checkingRuntimeRef = useRef(false);
   const {
     selectedAgentKind,
     selectedModel,
@@ -171,6 +173,9 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
 
   const handleSend = async (input: AgentInputPayload | string) => {
     const currentStore = useNewSessionStore.getState();
+    if (checkingRuntimeRef.current) {
+      return;
+    }
     if (currentStore.selectedAgentKind !== selectedAgentKind
       || !isCurrentDraftSubmissionAvailable(activeProfileId, models, areModelsLoading)) {
       return;
@@ -179,7 +184,14 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
       setSelectedModel(effectiveModel);
     }
     const payload = typeof input === 'string' ? { text: input } : input;
-    await onSubmit(payload);
+    checkingRuntimeRef.current = true;
+    setIsCheckingRuntime(true);
+    try {
+      await onSubmit(payload);
+    } finally {
+      checkingRuntimeRef.current = false;
+      setIsCheckingRuntime(false);
+    }
   };
 
   const handleCommand = async (command: SlashCommand, args: string) => {
@@ -218,7 +230,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
         agentKind={selectedAgentKind}
         onSend={handleSend}
         onCommand={handleCommand}
-        sendDisabled={!hasUsableProfile}
+        sendDisabled={!hasUsableProfile || isCheckingRuntime}
       >
         <div className="mx-auto flex min-h-full w-full flex-col items-center justify-center px-6 py-10">
           <div className="w-full max-w-2xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[360ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
@@ -234,7 +246,8 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               agentKind={selectedAgentKind}
               projectPath={draftProject?.path}
               placeholder={placeholder}
-              disabled={!hasUsableProfile}
+              disabled={!hasUsableProfile || isCheckingRuntime}
+              loading={isCheckingRuntime}
               modelSelector={(
                 <AgentModelSelector
                   agentKind={selectedAgentKind}

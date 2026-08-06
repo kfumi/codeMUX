@@ -17,6 +17,7 @@ import {
   FolderPlus,
   Info,
   Layers,
+  Loader2,
   ListTodo,
   Search,
   Sparkles,
@@ -66,6 +67,7 @@ interface CodeMuxComposerProps {
   pendingPermission?: AgentPermissionRequest | null;
   onPermissionResponse?: (response: AgentPermissionResponse) => void | Promise<void>;
   disabled?: boolean;
+  loading?: boolean;
   onStop?: () => void | Promise<void>;
   onActivatePlanMode?: () => void;
 }
@@ -169,6 +171,7 @@ export function CodeMuxComposer({
   pendingPermission,
   onPermissionResponse,
   disabled = false,
+  loading = false,
   onStop,
   onActivatePlanMode,
 }: CodeMuxComposerProps) {
@@ -592,20 +595,24 @@ export function CodeMuxComposer({
                     <button
                       type="button"
                       onClick={() => {
-                        if (!disabled && hasInput) {
+                        if (!disabled && !loading && hasInput) {
                           editorRef.current?.send();
                         }
                       }}
-                      disabled={disabled || !hasInput}
+                      disabled={disabled || loading || !hasInput}
                       className={cn(
                         'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200 active:scale-95',
-                        hasInput && !disabled
+                        hasInput && !disabled && !loading
                           ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-15px_hsl(var(--primary)/0.58)] hover:bg-primary/94'
                           : 'cursor-not-allowed bg-[hsl(var(--surface-3))] text-muted-foreground/42',
                       )}
                       aria-label="发送"
                     >
-                      <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+                      {loading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+                      )}
                     </button>
                   </TooltipHint>
                 )}

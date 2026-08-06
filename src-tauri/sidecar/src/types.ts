@@ -16,8 +16,8 @@ export interface OpenCodeSessionConfig {
   credentialSource: OpenCodeCredentialSource;
   apiKey?: string;
   baseUrl?: string;
-  /** 外部 Runtime 路径（来自 ProviderRuntimeRef）。 */
-  runtimePath?: string;
+  /** 外部托管 Runtime 引用。 */
+  runtimeRef?: ProviderRuntimeRef;
 }
 
 export interface OpenCodeSessionMapping {
@@ -40,7 +40,7 @@ export type SidecarCommand =
   | { type: 'update_permissions'; sessionId?: string; agentKind?: string; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode }
   | { type: 'send_input'; sessionId?: string; prompt: string; displayContent?: string; inputPayload?: AgentInputPayload }
   | { type: 'reset_session'; sessionId: string }
-  | { type: 'delete_session'; sessionId: string; agentSessionId: string; requestId: string; cwd?: string }
+  | { type: 'delete_session'; sessionId: string; agentSessionId: string; requestId: string; cwd?: string; runtimeRef: ProviderRuntimeRef }
   | { type: 'interrupt' }
   | { type: 'shutdown' }
   | { type: 'tool_response'; toolUseId: string; response: unknown }

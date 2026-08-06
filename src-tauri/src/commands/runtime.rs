@@ -5,18 +5,13 @@
 //!
 //! 前端通过这些命令管理 CodeMUX 自有 Runtime，不依赖 PATH 中的全局 CLI。
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::runtime::infra::{
-    GitHubReleaseManifestSource, HttpPackDownloader, SystemNodeResolver, TarGzArchiveExtractor,
-};
-use crate::runtime::manager::RuntimeManager;
+use crate::runtime::infra::{detect_system_node, detect_system_npm, SystemNodeResolver};
+use crate::runtime::npm::NpmRuntimeManager;
 use crate::runtime::seam::{NodeResolver, ProgressReporter};
-use crate::runtime::signing::Ed25519SignatureVerifier;
 use crate::runtime::types::{Provider, RuntimeStatus};
 use crate::AppState;
 
@@ -34,6 +29,8 @@ pub struct ManagedRuntimeInfo {
     pub current_version: Option<String>,
     /// 所有已安装版本。
     pub installed_versions: Vec<String>,
+    /// npm registry 中可安装的所有版本，按新到旧排序。
+    pub available_versions: Vec<String>,
     /// 安装路径（当前版本目录）。
     pub install_path: Option<String>,
     /// Runtime 根目录。
@@ -52,6 +49,17 @@ pub struct NodeInfo {
     pub satisfies_minimum: bool,
     pub version: Option<String>,
     pub executable_path: Option<String>,
+    pub error: Option<String>,
+    pub npm: NpmInfo,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct NpmInfo {
+    pub available: bool,
+    pub version: Option<String>,
+    pub executable_path: Option<String>,
+    pub matches_node: bool,
     pub error: Option<String>,
 }
 
@@ -113,8 +121,7 @@ impl ProgressReporter for TauriProgressReporter {
 
 /// 检测所有 Provider 的 CodeMUX 自有 Runtime 状态。
 ///
-/// 优先使用 RuntimeManager 的完整检测（含 latest_version / outdated / sidecar 兼容性），
-/// 当 manifest 拉取失败（如离线）时降级为本地完整性检测。
+/// 快速返回本地 Runtime 状态；npm 版本列表由前端进入页面后异步加载。
 #[tauri::command]
 pub async fn check_managed_runtimes(
     state: State<'_, AppState>,
@@ -122,22 +129,34 @@ pub async fn check_managed_runtimes(
     let resolver = &state.runtime_resolver;
     let node = detect_node().await;
 
-    let manager = build_runtime_manager(&state).ok();
-    let mut runtimes = Vec::new();
-    for provider in Provider::all() {
-        let info = if let Some(ref manager) = manager {
-            check_single_runtime_via_manager(*provider, manager, resolver, &node).await
-        } else {
-            check_single_runtime(*provider, resolver, &node)
-        };
-        runtimes.push(info);
-    }
+    let runtimes = Provider::all()
+        .iter()
+        .map(|provider| check_single_runtime(*provider, resolver, &node))
+        .collect();
 
     Ok(ManagedRuntimeCheckResult {
         checked_at: chrono_now(),
         node,
         runtimes,
     })
+}
+
+/// 查询指定 Provider 的稳定 npm Runtime 版本。
+///
+/// 这个命令与本地状态检测分开，避免首次打开设置页被 registry 请求阻塞；
+/// 前端会在页面加载后并行调用三个 Provider，并把结果填入对应卡片。
+#[tauri::command]
+pub async fn list_managed_runtime_versions(
+    state: State<'_, AppState>,
+    provider: String,
+) -> Result<Vec<String>, String> {
+    let provider =
+        Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;
+    let manager = build_runtime_manager(&state)?;
+    manager
+        .list_available_versions(provider)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 /// 重新检测指定 Provider 的 Runtime 状态。
@@ -158,20 +177,13 @@ pub async fn refresh_managed_runtime(
     }
 }
 
-/// 使用 RuntimeManager 进行完整检测（含 latest_version / outdated / sidecar 兼容性）。
+/// 使用 npm Runtime Manager 进行完整检测（含最新版本 / 可用版本 / 本地完整性）。
 ///
-/// 当 manifest 拉取失败（离线、GitHub 不可达）时降级为本地检测，
+/// 当 npm 查询失败（离线、registry 不可达）时降级为本地检测，
 /// 确保用户始终能看到本地 Runtime 状态。
 async fn check_single_runtime_via_manager(
     provider: Provider,
-    manager: &RuntimeManager<
-        GitHubReleaseManifestSource,
-        HttpPackDownloader,
-        Ed25519SignatureVerifier,
-        TarGzArchiveExtractor,
-        SystemNodeResolver,
-        crate::runtime::seam::FileSystemRuntimeRoots,
-    >,
+    manager: &NpmRuntimeManager,
     resolver: &crate::runtime::RuntimeResolver,
     node: &NodeInfo,
 ) -> ManagedRuntimeInfo {
@@ -184,20 +196,17 @@ async fn check_single_runtime_via_manager(
                 status: status_info.status,
                 current_version: status_info.current_version,
                 installed_versions: resolver.list_installed_versions(provider),
+                available_versions: status_info.available_versions,
                 install_path: status_info
                     .install_path
                     .map(|p| p.to_string_lossy().to_string()),
                 runtime_root: resolver.root().to_string_lossy().to_string(),
-                integrity_ok: status_info
-                    .integrity
-                    .as_ref()
-                    .map(|i| i.ok)
-                    .unwrap_or(true),
+                integrity_ok: status_info.integrity_ok,
                 message,
             }
         }
         Err(_) => {
-            // manifest 拉取失败等情况下，降级为纯本地检测
+            // npm registry 查询失败等情况下，降级为纯本地检测
             check_single_runtime(provider, resolver, node)
         }
     }
@@ -206,7 +215,7 @@ async fn check_single_runtime_via_manager(
 fn build_status_message(
     provider: Provider,
     status: RuntimeStatus,
-    info: &crate::runtime::manager::RuntimeStatusInfo,
+    info: &crate::runtime::npm::NpmRuntimeStatusInfo,
 ) -> String {
     match status {
         RuntimeStatus::NodeUnavailable => format!(
@@ -241,15 +250,21 @@ pub async fn install_managed_runtime(
     app: AppHandle,
     state: State<'_, AppState>,
     provider: String,
+    version: Option<String>,
 ) -> Result<ManagedRuntimeOperationResult, String> {
     let provider =
         Provider::from_str(&provider).ok_or_else(|| format!("未知的 Provider: {}", provider))?;
     let manager = build_runtime_manager(&state)?;
     let progress = Box::new(TauriProgressReporter::new(app.clone(), provider));
-    let outcome = manager
-        .install(provider, Some(progress))
-        .await
-        .map_err(|e| e.to_string())?;
+    let outcome = match version.as_deref() {
+        Some(version) => {
+            manager
+                .install_version(provider, version, progress.as_ref())
+                .await
+        }
+        None => manager.install(provider, progress.as_ref()).await,
+    }
+    .map_err(|e| e.to_string())?;
     Ok(to_operation_result(provider, &outcome))
 }
 
@@ -265,7 +280,7 @@ pub async fn upgrade_managed_runtime(
     let manager = build_runtime_manager(&state)?;
     let progress = Box::new(TauriProgressReporter::new(app.clone(), provider));
     let outcome = manager
-        .upgrade(provider, Some(progress))
+        .upgrade(provider, progress.as_ref())
         .await
         .map_err(|e| e.to_string())?;
     Ok(outcome.map(|o| to_operation_result(provider, &o)))
@@ -283,7 +298,7 @@ pub async fn repair_managed_runtime(
     let manager = build_runtime_manager(&state)?;
     let progress = Box::new(TauriProgressReporter::new(app.clone(), provider));
     let outcome = manager
-        .repair(provider, Some(progress))
+        .repair(provider, progress.as_ref())
         .await
         .map_err(|e| e.to_string())?;
     Ok(outcome.map(|o| to_operation_result(provider, &o)))
@@ -308,42 +323,33 @@ pub async fn remove_managed_runtime(
     Ok(())
 }
 
-/// 构造生产 Runtime Manager，注入 GitHub Release manifest 源、HTTP 下载器、
-/// ed25519 签名校验器、tar.gz 解压器、系统 Node 解析器和默认 Runtime 文件系统。
-fn build_runtime_manager(
-    state: &AppState,
-) -> Result<
-    RuntimeManager<
-        GitHubReleaseManifestSource,
-        HttpPackDownloader,
-        Ed25519SignatureVerifier,
-        TarGzArchiveExtractor,
-        SystemNodeResolver,
-        crate::runtime::seam::FileSystemRuntimeRoots,
-    >,
-    String,
-> {
+/// 构造生产 Runtime Manager：版本和安装均通过官方 npm CLI 完成。
+fn build_runtime_manager(state: &AppState) -> Result<NpmRuntimeManager, String> {
+    let node = detect_system_node();
+    if !node.satisfies_minimum {
+        return Err(node
+            .error
+            .unwrap_or_else(|| "Node.js 18+ 不可用".to_string()));
+    }
+    let npm = detect_system_npm(&node);
+    if !npm.available {
+        return Err(npm.error.unwrap_or_else(|| "npm 不可用".to_string()));
+    }
+    if !npm.matches_node {
+        return Err(npm
+            .error
+            .unwrap_or_else(|| "npm 与 Node.js 安装不匹配".to_string()));
+    }
     let root = state.runtime_resolver.root().to_path_buf();
-    let fs = Arc::new(crate::runtime::seam::FileSystemRuntimeRoots::new(root));
-    let manifest_source = Arc::new(GitHubReleaseManifestSource::default_repo());
-    let pack_downloader = Arc::new(HttpPackDownloader::with_default_client());
-    let signature_verifier = Arc::new(Ed25519SignatureVerifier::with_embedded_key());
-    let archive_extractor = Arc::new(TarGzArchiveExtractor::new());
-    let node_resolver = Arc::new(SystemNodeResolver::new());
-    Ok(RuntimeManager::new(
-        manifest_source,
-        pack_downloader,
-        signature_verifier,
-        archive_extractor,
-        node_resolver,
-        fs,
+    Ok(NpmRuntimeManager::production(
+        root,
         env!("CARGO_PKG_VERSION"),
     ))
 }
 
 fn to_operation_result(
     provider: Provider,
-    outcome: &crate::runtime::manager::InstallOutcome,
+    outcome: &crate::runtime::npm::InstallOutcome,
 ) -> ManagedRuntimeOperationResult {
     ManagedRuntimeOperationResult {
         provider: provider.as_str().to_string(),
@@ -358,12 +364,20 @@ fn to_operation_result(
 async fn detect_node() -> NodeInfo {
     let resolver = SystemNodeResolver;
     let detection = resolver.detect().await;
+    let npm = detect_system_npm(&detection);
     NodeInfo {
         available: detection.satisfies_minimum || detection.version.is_some(),
         satisfies_minimum: detection.satisfies_minimum,
         version: detection.version.map(|v| v.to_string()),
         executable_path: detection.executable_path,
         error: detection.error,
+        npm: NpmInfo {
+            available: npm.available,
+            version: npm.version,
+            executable_path: npm.executable_path,
+            matches_node: npm.matches_node,
+            error: npm.error,
+        },
     }
 }
 
@@ -419,6 +433,7 @@ fn check_single_runtime(
         status,
         current_version,
         installed_versions,
+        available_versions: Vec::new(),
         install_path,
         runtime_root: resolver.root().to_string_lossy().to_string(),
         integrity_ok,
@@ -427,10 +442,16 @@ fn check_single_runtime(
 }
 
 fn chrono_now() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format!("{}", secs)
+    chrono::Local::now().to_rfc3339()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::chrono_now;
+
+    #[test]
+    fn check_timestamp_is_human_readable_rfc3339() {
+        let timestamp = chrono_now();
+        assert!(chrono::DateTime::parse_from_rfc3339(&timestamp).is_ok());
+    }
 }

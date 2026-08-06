@@ -220,6 +220,20 @@ describe('agent store Codex history loading', () => {
     expect(saveEventsMock).not.toHaveBeenCalled();
   });
 
+  it('重新抛出 Runtime 启动失败，让新建会话流程可以回滚并提示用户', async () => {
+    startSessionMock.mockRejectedValueOnce('Claude Code Runtime 未安装或不可用，请先在设置中安装');
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+
+    await expect(
+      useAgentStore.getState().startQuery(session.id, 'Explain the fix', 'D:\\project\\ai-code\\codeMUX'),
+    ).rejects.toBe('Claude Code Runtime 未安装或不可用，请先在设置中安装');
+
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(false);
+    expect(useAgentStore.getState().error[session.id]).toBe('Claude Code Runtime 未安装或不可用，请先在设置中安装');
+  });
+
   it('stops running after a successful result even if sidecar_query_done never arrives', async () => {
     startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
       onEvent(JSON.stringify({

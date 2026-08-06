@@ -1,6 +1,6 @@
 import { Sparkles } from 'lucide-react';
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Toaster } from 'sonner';
+import { toast, Toaster } from 'sonner';
 
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { MainLayout } from './components/layout/MainLayout';
@@ -14,6 +14,7 @@ import type { AgentInputPayload } from './types/agentInput';
 import { getStoredAgentCwd, resolveSessionCwd } from './lib/sessionCwd';
 import { registerSkillCommands } from './lib/slashCommands';
 import { serializePermissionConfig } from './lib/agentPermissions';
+import { appApi, type RuntimeProvider } from './lib/tauri';
 import { useAgentStore } from './stores/agentStore';
 import './stores/appearanceStore';
 import { useNewSessionStore } from './stores/newSessionStore';
@@ -45,6 +46,7 @@ const panelFallback = (
 
 function App() {
   const createSession = useSessionStore((state) => state.createSession);
+  const deleteSession = useSessionStore((state) => state.deleteSession);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const sessions = useSessionStore((state) => state.sessions);
   const setActiveSession = useSessionStore((state) => state.setActiveSession);
@@ -142,7 +144,16 @@ function App() {
     } = useNewSessionStore.getState();
     const cwd = resolveSessionCwd(projects, draftProjectId, getStoredAgentCwd());
 
+    let createdSessionId: string | null = null;
+
     try {
+      if (selectedAgentKind === 'claude_code' || selectedAgentKind === 'codex' || selectedAgentKind === 'opencode') {
+        const runtime = await appApi.refreshManagedRuntime(selectedAgentKind as RuntimeProvider);
+        if (runtime.status !== 'ready' && runtime.status !== 'outdated') {
+          throw new Error(`${runtime.label} Runtime 未安装或不可用，请先在设置中安装`);
+        }
+      }
+
       const session = await createSession(
         '新对话',
         selectedAgentKind,
@@ -152,12 +163,16 @@ function App() {
         selectedPlanMode,
         selectedModel ?? undefined,
       );
+      createdSessionId = session.id;
 
       await startQuery(session.id, input.text, cwd, selectedReasoningEffort, undefined, input, selectedModel ?? undefined);
       closeDraft();
     } catch (error) {
+      if (createdSessionId) {
+        await deleteSession(createdSessionId);
+      }
       logger.error('Failed to start a new session from empty state', undefined, serializeError(error));
-      throw error;
+      toast.error(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -203,7 +218,7 @@ function App() {
           <ErrorBoundary>
             {activeView === 'settings' ? (
               <Suspense fallback={panelFallback}>
-                <SettingsContent activeTab={settingsTab} />
+              <SettingsContent activeTab={settingsTab} onTabChange={setSettingsTab} />
               </Suspense>
             ) : activeSessionId ? (
               <Suspense fallback={panelFallback}>

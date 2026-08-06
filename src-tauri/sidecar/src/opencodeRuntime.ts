@@ -318,7 +318,7 @@ export class OpenCodeRuntime {
           baseUrl: this.config.baseUrl,
           credentialSource: this.config.credentialSource,
           serverCloseTimeoutMs: this.serverCloseTimeoutMs,
-          runtimePath: this.config.runtimePath,
+          runtimeRef: this.config.runtimeRef,
         });
       } catch (error) {
         this.retainStartResources(getStartFailureResources(error));

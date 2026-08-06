@@ -487,6 +487,7 @@ pub fn run() {
             commands::agent_runtime_check::probe_agent_installations,
             commands::agent_runtime_check::get_user_home_directory,
             commands::runtime::check_managed_runtimes,
+            commands::runtime::list_managed_runtime_versions,
             commands::runtime::refresh_managed_runtime,
             commands::runtime::install_managed_runtime,
             commands::runtime::upgrade_managed_runtime,

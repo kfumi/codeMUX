@@ -63,6 +63,7 @@ impl OpenCodeRuntime {
         agent_session_id: &str,
         request_id: &str,
         cwd: Option<&str>,
+        runtime_ref: &crate::runtime::ProviderRuntimeRef,
     ) -> Value {
         let mut command = json!({
             "type": "delete_session",
@@ -73,6 +74,7 @@ impl OpenCodeRuntime {
         if let Some(cwd) = cwd {
             command["cwd"] = Value::String(cwd.to_string());
         }
+        command["runtimeRef"] = serde_json::to_value(runtime_ref).unwrap_or(Value::Null);
         command
     }
 
@@ -208,6 +210,13 @@ mod tests {
                 "opencode-session",
                 "request-1",
                 Some("D:\\workspace"),
+                &crate::runtime::ProviderRuntimeRef {
+                    provider: "opencode".to_string(),
+                    runtime_root: "D:\\runtimes".to_string(),
+                    runtime_path: "D:\\runtimes\\opencode\\1.18.3".to_string(),
+                    runtime_version: "1.18.3".to_string(),
+                    sidecar_compat: None,
+                },
             ),
             json!({
                 "type": "delete_session",
@@ -215,6 +224,12 @@ mod tests {
                 "agentSessionId": "opencode-session",
                 "requestId": "request-1",
                 "cwd": "D:\\workspace",
+                "runtimeRef": {
+                    "provider": "opencode",
+                    "runtimeRoot": "D:\\runtimes",
+                    "runtimePath": "D:\\runtimes\\opencode\\1.18.3",
+                    "runtimeVersion": "1.18.3",
+                },
             })
         );
         assert_eq!(

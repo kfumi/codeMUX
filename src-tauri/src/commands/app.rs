@@ -7,6 +7,8 @@ use serde::Serialize;
 use tauri::AppHandle;
 use tauri::Manager;
 
+use crate::runtime::infra::{detect_system_node, detect_system_npm};
+
 #[tauri::command]
 pub fn get_log_directory(app: AppHandle) -> Result<String, String> {
     let log_dir = app
@@ -125,6 +127,7 @@ pub enum EnvironmentCheckStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(test)]
 pub enum NodeVersionStatus {
     Ok,
     Warning,
@@ -154,54 +157,52 @@ pub fn check_development_environment() -> DevelopmentEnvironmentCheck {
     let checked_at = chrono::Local::now().to_rfc3339();
     DevelopmentEnvironmentCheck {
         checked_at,
-        tools: vec![check_node(), check_git()],
+        tools: vec![check_node(), check_npm(), check_git()],
     }
 }
 
 fn check_node() -> EnvironmentToolCheck {
-    match run_version_command("node", "--version") {
-        Ok(output) => match classify_node_version(&output) {
-            NodeVersionStatus::Ok => EnvironmentToolCheck {
-                name: "Node.js".into(),
-                command: "node".into(),
-                status: EnvironmentCheckStatus::Ok,
-                version: parse_node_version(&output),
-                path: find_command_path("node"),
-                message: "Node.js 可用。".into(),
-            },
-            NodeVersionStatus::Warning => EnvironmentToolCheck {
-                name: "Node.js".into(),
-                command: "node".into(),
-                status: EnvironmentCheckStatus::Warning,
-                version: parse_node_version(&output),
-                path: find_command_path("node"),
-                message: "Node.js 版本低于 18.0.0，请升级到 Node.js 18+。".into(),
-            },
-            NodeVersionStatus::Invalid => EnvironmentToolCheck {
-                name: "Node.js".into(),
-                command: "node".into(),
-                status: EnvironmentCheckStatus::Error,
-                version: None,
-                path: find_command_path("node"),
-                message: format!("无法解析 Node.js 版本输出：{}", output.trim()),
-            },
+    let detection = detect_system_node();
+    let status = if !detection.available {
+        EnvironmentCheckStatus::Missing
+    } else if detection.satisfies_minimum {
+        EnvironmentCheckStatus::Ok
+    } else {
+        EnvironmentCheckStatus::Warning
+    };
+    let is_ok = status == EnvironmentCheckStatus::Ok;
+    EnvironmentToolCheck {
+        name: "Node.js".into(),
+        command: "node".into(),
+        status,
+        version: detection.version,
+        path: detection.executable_path,
+        message: if is_ok {
+            "Node.js 可用。".into()
+        } else {
+            detection
+                .error
+                .unwrap_or_else(|| "Node.js 版本低于 18，请升级到 Node.js 18+。".into())
         },
-        Err(EnvironmentCommandError::Missing) => EnvironmentToolCheck {
-            name: "Node.js".into(),
-            command: "node".into(),
-            status: EnvironmentCheckStatus::Missing,
-            version: None,
-            path: None,
-            message: "未找到 Node.js，请安装 Node.js 18+ 并确认 PATH 已生效。".into(),
-        },
-        Err(EnvironmentCommandError::Failed(message)) => EnvironmentToolCheck {
-            name: "Node.js".into(),
-            command: "node".into(),
-            status: EnvironmentCheckStatus::Error,
-            version: None,
-            path: find_command_path("node"),
-            message,
-        },
+    }
+}
+
+fn check_npm() -> EnvironmentToolCheck {
+    let detection = detect_system_npm(&detect_system_node());
+    let status = if !detection.available {
+        EnvironmentCheckStatus::Missing
+    } else if detection.matches_node {
+        EnvironmentCheckStatus::Ok
+    } else {
+        EnvironmentCheckStatus::Warning
+    };
+    EnvironmentToolCheck {
+        name: "npm".into(),
+        command: "npm".into(),
+        status,
+        version: detection.version,
+        path: detection.executable_path,
+        message: detection.error.unwrap_or_else(|| "npm 可用。".into()),
     }
 }
 
@@ -284,6 +285,7 @@ fn run_version_command(command: &str, arg: &str) -> Result<String, EnvironmentCo
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+#[cfg(test)]
 pub fn classify_node_version(output: &str) -> NodeVersionStatus {
     let Some(version) = parse_node_version(output) else {
         return NodeVersionStatus::Invalid;
@@ -300,6 +302,7 @@ pub fn classify_node_version(output: &str) -> NodeVersionStatus {
     }
 }
 
+#[cfg(test)]
 fn parse_node_version(output: &str) -> Option<String> {
     let trimmed = output.trim();
     let version = trimmed.strip_prefix('v').unwrap_or(trimmed);

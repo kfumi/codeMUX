@@ -7,10 +7,8 @@ type SupportedArch = NodeJS.Architecture;
 type ResolveClaudeExecutableParams = {
   arch?: SupportedArch;
   fileExists?: (candidate: string) => boolean;
-  pathClaude?: string;
   platform?: SupportedPlatform;
-  sidecarDir: string;
-  /** 外部 Runtime 路径（来自 ProviderRuntimeRef）。优先于 bundled 和 PATH。 */
+  /** 外部托管 Runtime 路径（来自 ProviderRuntimeRef）。 */
   runtimePath?: string;
 };
 
@@ -44,13 +42,6 @@ function binaryNameFor(platform: SupportedPlatform): string {
   return platform === 'win32' ? 'claude.exe' : 'claude';
 }
 
-function bundledClaudePath(sidecarDir: string, platform: SupportedPlatform, arch: SupportedArch): string | undefined {
-  const packageName = packageNameFor(platform, arch);
-  if (!packageName) return undefined;
-
-  return path.resolve(sidecarDir, '..', 'node_modules', packageName, binaryNameFor(platform));
-}
-
 function runtimeClaudePath(runtimePath: string, platform: SupportedPlatform, arch: SupportedArch): string | undefined {
   const packageName = packageNameFor(platform, arch);
   if (!packageName) return undefined;
@@ -62,29 +53,15 @@ export function resolveClaudeExecutable(params: ResolveClaudeExecutableParams): 
   const {
     arch = process.arch,
     fileExists = fs.existsSync,
-    pathClaude,
     platform = process.platform,
-    sidecarDir,
     runtimePath,
   } = params;
 
-  // 优先：外部 Runtime 路径
-  if (runtimePath) {
-    const runtimeClaude = runtimeClaudePath(runtimePath, platform, arch);
-    if (runtimeClaude && fileExists(runtimeClaude)) {
-      return runtimeClaude;
-    }
-  }
+  if (!runtimePath) return undefined;
 
-  // 次选：bundled node_modules（向后兼容，Ticket 07 移除）
-  const bundled = bundledClaudePath(sidecarDir, platform, arch);
-  if (bundled && fileExists(bundled)) {
-    return bundled;
-  }
-
-  // 兜底：PATH 上的 claude
-  if (pathClaude && fileExists(pathClaude)) {
-    return pathClaude;
+  const runtimeClaude = runtimeClaudePath(runtimePath, platform, arch);
+  if (runtimeClaude && fileExists(runtimeClaude)) {
+    return runtimeClaude;
   }
 
   return undefined;

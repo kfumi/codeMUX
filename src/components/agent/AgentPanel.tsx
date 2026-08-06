@@ -1,4 +1,5 @@
 import { Profiler, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 
 import { getStoredAgentCwd } from '../../lib/sessionCwd';
 import { getProfilePrimaryModel, profileToSelectorProvider } from '../../lib/agentProfileSelector';
@@ -198,6 +199,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
         latestSession?.model ?? model,
       );
     } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
       }));
