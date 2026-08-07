@@ -142,17 +142,6 @@ export class OpenCodeRuntime {
     }
 
     this.beginTurnEventState();
-    this.idleTimedOut = false;
-    this.turnIdleGuard = createTurnIdleGuard({
-      idleTimeoutMs: this.timeouts.idle_timeout_ms,
-      onExpired: () => {
-        this.idleTimedOut = true;
-        writeLog('[opencode-task]', `turn idle timeout after ${this.timeouts.idle_timeout_ms}ms; aborting session`);
-        void this.client?.abort(sessionId).catch(() => undefined);
-        this.handleSdkEvent({ type: 'session.error', properties: { sessionID: sessionId, error: { name: 'OpenCodeIdleTimeoutError', data: { message: `No progress events for ${this.timeouts.idle_timeout_ms}ms; turn idle timed out` } } } });
-      },
-    });
-    this.turnIdleGuard.reset();
     const normalizedPayload = normalizeAgentInputPayload(prompt, inputPayload);
     const normalizedPrompt = normalizedPayload.text;
     setLogCtx({ sessionId: this.config.sessionId });
@@ -202,6 +191,17 @@ export class OpenCodeRuntime {
     });
     this.activeTask = handledTask;
     try {
+      this.idleTimedOut = false;
+      this.turnIdleGuard = createTurnIdleGuard({
+        idleTimeoutMs: this.timeouts.idle_timeout_ms,
+        onExpired: () => {
+          this.idleTimedOut = true;
+          writeLog('[opencode-task]', `turn idle timeout after ${this.timeouts.idle_timeout_ms}ms; aborting session`);
+          void this.client?.abort(sessionId).catch(() => undefined);
+          this.handleSdkEvent({ type: 'session.error', properties: { sessionID: sessionId, error: { name: 'OpenCodeIdleTimeoutError', data: { message: `No progress events for ${this.timeouts.idle_timeout_ms}ms; turn idle timed out` } } } });
+        },
+      });
+      this.turnIdleGuard.reset();
       await handledTask;
       writeLog('[opencode-task]', 'sendInput COMPLETE');
     } finally {
@@ -432,7 +432,7 @@ export class OpenCodeRuntime {
     if (hasPendingInteraction) {
       this.turnIdleGuard?.suspend();
     } else {
-      this.turnIdleGuard?.reset();
+      this.turnIdleGuard?.resume();
     }
   }
 
@@ -847,6 +847,10 @@ export class OpenCodeRuntime {
 
       this.pendingTurnCompletion = undefined;
       this.pendingTaskToolCallIds.clear();
+      for (const timer of this.questionTimeouts.values()) {
+        clearTimeout(timer);
+      }
+      this.questionTimeouts.clear();
 
       await this.closeEventSubscription(errors);
       await this.permissions.cancelAll(this.config.sessionId);

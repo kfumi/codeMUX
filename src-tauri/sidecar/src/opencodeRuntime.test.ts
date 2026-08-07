@@ -240,6 +240,44 @@ describe('OpenCodeRuntime', () => {
       vi.useRealTimers();
     }
   });
+  it('re-arms the idle guard after an answered permission expires the turn', async () => {
+    vi.useFakeTimers();
+    try {
+      const { port, client } = createPort();
+      client.prompt.mockResolvedValue(undefined);
+      client.respondToPermission.mockResolvedValue(true);
+      let onEvent: (event: unknown) => void = () => undefined;
+      client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+        onEvent = input.onEvent;
+        return { close: vi.fn() };
+      });
+      const emitted: unknown[] = [];
+      const runtime = new OpenCodeRuntime(createConfig({ timeouts: { idle_timeout_ms: 25, approval_timeout_ms: 0 } }), port, {
+        emitEvent: (event) => emitted.push(event),
+        eventIdFactory: () => 'event-rearm',
+      } as any);
+
+      await runtime.start();
+      const sendPromise = runtime.sendInput('hello');
+      onEvent({
+        type: 'permission.asked',
+        properties: { id: 'perm-1', sessionID: 'opencode-new', type: 'write', title: 'edit file' },
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(client.abort).not.toHaveBeenCalled();
+
+      await runtime.respondToPermission('perm-1', 'once', 'codemux-session-1');
+
+      await vi.advanceTimersByTimeAsync(26);
+      expect(client.abort).toHaveBeenCalledWith('opencode-new');
+      expect(emitted.some((event) => (event as { type?: string }).type === 'turn_finished')).toBe(true);
+
+      await sendPromise;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('does not emit a user message part as assistant output in the live runtime path', async () => {
     const { port, client } = createPort();
     const emitted: unknown[] = [];
