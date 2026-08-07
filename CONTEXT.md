@@ -30,8 +30,16 @@ _Avoid_: runtime error
 _Avoid_: conversation event
 
 ### Turn Outcome
-一轮对话最终的完成状态，表示已完成、失败、中断或取消。它与描述中途原因的错误事件分开。
+一轮对话最终的完成状态，表示已完成、失败、中断或取消；其中由空闲守卫触发的超时是一种可恢复的完成状态（中止当前轮、保留会话供重试），而非失败。它与描述中途原因的错误事件分开。
 _Avoid_: result status, error status
+
+### Interactive Request
+暂停当前 turn、等待人类决策的请求，包括权限审批与问题作答。挂起期间 turn 处于"等待人类"而非"引擎停滞"，因此空闲守卫不得触发。
+_Avoid_: permission prompt, approval dialog, user input tool
+
+### Engine Stall
+当前轮既无进展事件、也无未决交互请求的状态；该状态持续超过空闲窗口即由空闲守卫判定并触发可恢复超时。它与引擎正常完成（如 session.idle）不同。
+_Avoid_: idle, timeout
 
 ### Event Sequence
 同一会话内 CodeMUX Event 的有序位置。它用于保证增量事件顺序、识别事件缺口，并使结束事件具备幂等语义。
