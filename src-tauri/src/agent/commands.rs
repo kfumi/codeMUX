@@ -3,10 +3,12 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::commands::provider::CLAUDE_DEFAULT_SUPPLIER_ID;
 use crate::config::types::AgentKind;
 use crate::db::operations;
-use crate::provider_profiles::types::{AgentTimeouts, NativeProfileConfig};
+use crate::model_providers::{
+    effective_api_key, is_provider_usable, required_protocol, select_endpoint, Protocol,
+};
+use crate::provider_profiles::types::AgentTimeouts;
 use log::{debug, info, warn};
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
@@ -74,6 +76,7 @@ fn resolve_session_agent_kind(state: &crate::AppState, session_id: &str) -> Resu
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ResolvedRuntimeConfig {
+    /// Model Provider id (sessions.provider_id).
     profile_id: String,
     api_key: Option<String>,
     base_url: Option<String>,
@@ -84,11 +87,15 @@ struct ResolvedRuntimeConfig {
     timeouts: Option<AgentTimeouts>,
 }
 
-fn profile_timeouts(profile: &NativeProfileConfig) -> Option<AgentTimeouts> {
-    match profile {
-        NativeProfileConfig::ClaudeCode { timeouts, .. } => timeouts.clone(),
-        NativeProfileConfig::Codex { timeouts, .. } => timeouts.clone(),
-        NativeProfileConfig::OpenCode { timeouts, .. } => timeouts.clone(),
+fn agent_timeouts(
+    config: &crate::config::types::AppConfig,
+    agent_kind: AgentKind,
+) -> Option<AgentTimeouts> {
+    match agent_kind {
+        AgentKind::ClaudeCode => config.agent_configs.claude_code.timeouts.clone(),
+        AgentKind::Codex => config.agent_configs.codex.timeouts.clone(),
+        AgentKind::Opencode => config.agent_configs.opencode.timeouts.clone(),
+        AgentKind::GeminiCli => None,
     }
 }
 
@@ -99,8 +106,16 @@ fn resolve_active_runtime_config(
     let agent_kind = resolve_session_agent_kind(state, session_id)?
         .parse::<AgentKind>()
         .map_err(|error| format!("无法解析会话智能体类型: {}", error))?;
+
+    let protocol = required_protocol(agent_kind).ok_or_else(|| {
+        format!(
+            "智能体 {} 暂不支持 Model Provider 运行时注入",
+            agent_kind.as_str()
+        )
+    })?;
+
     let config = state.config.lock().unwrap();
-    let (persisted_profile_id, persisted_model): (Option<String>, Option<String>) = {
+    let (persisted_provider_id, persisted_model): (Option<String>, Option<String>) = {
         let db = state.db.lock().unwrap();
         db.query_row(
             "SELECT provider_id, model FROM sessions WHERE id = ?1 LIMIT 1",
@@ -111,153 +126,98 @@ fn resolve_active_runtime_config(
                 Ok((pid, model))
             },
         )
-        .map_err(|error| format!("无法读取会话档案快照: {}", error))?
+        .map_err(|error| format!("无法读取会话供应商快照: {}", error))?
     };
     let session_model = persisted_model
         .as_deref()
         .map(str::trim)
         .filter(|model| !model.is_empty());
-    let profile_id = persisted_profile_id.as_deref().or_else(|| {
-        if session_model.is_some() && agent_kind == AgentKind::ClaudeCode {
-            return Some(CLAUDE_DEFAULT_SUPPLIER_ID);
-        }
-        config
-            .agent_profile_registry
-            .active_profile_ids
-            .get(&agent_kind)
-            .map(String::as_str)
-    });
-    if profile_id.is_none() && agent_kind == AgentKind::ClaudeCode && session_model.is_none() {
-        let resolved = resolve_default_claude_runtime_config();
-        drop(config);
-        let db = state.db.lock().unwrap();
-        operations::update_session_provider(&db, session_id, Some(&resolved.profile_id), "", None)
-            .map_err(|error| format!("无法保存会话默认供应商快照: {}", error))?;
-        return Ok(resolved);
-    }
-    if profile_id.is_none() && agent_kind == AgentKind::Opencode {
-        drop(config);
-        return Ok(ResolvedRuntimeConfig {
-            profile_id: String::new(),
-            api_key: None,
-            base_url: None,
-            model: session_model.map(|model| model.to_string()),
-            codex_needs_proxy: None,
-            provider: None,
-            credential_source: None,
-            timeouts: None,
-        });
-    }
-    if profile_id.is_none() && agent_kind == AgentKind::Codex {
-        drop(config);
-        return Ok(ResolvedRuntimeConfig {
-            profile_id: String::new(),
-            api_key: None,
-            base_url: None,
-            model: session_model.map(|model| model.to_string()),
-            codex_needs_proxy: None,
-            provider: None,
-            credential_source: None,
-            timeouts: None,
-        });
-    }
-    let profile_id =
-        profile_id.ok_or_else(|| format!("{} 尚未启用供应商档案", agent_kind.as_str()))?;
-    if agent_kind == AgentKind::ClaudeCode && profile_id == CLAUDE_DEFAULT_SUPPLIER_ID {
-        drop(config);
-        return Ok(ResolvedRuntimeConfig {
-            profile_id: CLAUDE_DEFAULT_SUPPLIER_ID.to_string(),
-            api_key: None,
-            base_url: None,
-            model: session_model.map(|model| model.to_string()),
-            codex_needs_proxy: None,
-            provider: None,
-            credential_source: None,
-            timeouts: None,
-        });
-    }
-    let profile = config
-        .agent_profile_registry
-        .profiles
+
+    let provider_id = persisted_provider_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .or(config.active_provider_id.as_deref())
+        .ok_or_else(|| "尚未配置可用的模型供应商".to_string())?;
+
+    let provider = config
+        .model_providers
         .iter()
-        .find(|profile| profile.id == profile_id && profile.agent_kind == agent_kind)
-        .ok_or_else(|| "已启用供应商档案不存在或智能体不匹配".to_string())?;
+        .find(|item| item.id == provider_id)
+        .ok_or_else(|| {
+            format!("会话绑定的供应商不存在，请重新选择供应商（id={provider_id}）")
+        })?;
+
+    if !is_provider_usable(provider, agent_kind) {
+        let hint = match protocol {
+            Protocol::Anthropic => "缺少可用的 Anthropic 端点或 API Key / 默认模型",
+            Protocol::OpenaiCompatible => "缺少可用的 OpenAI 兼容端点或 API Key / 默认模型",
+        };
+        return Err(format!(
+            "供应商「{}」对 {} 不可用：{}（或已禁用）",
+            provider.name,
+            agent_kind.as_str(),
+            hint
+        ));
+    }
+
+    let endpoint = select_endpoint(provider, protocol).ok_or_else(|| {
+        format!(
+            "供应商「{}」缺少 {} 协议端点",
+            provider.name,
+            protocol.as_str()
+        )
+    })?;
+
+    let api_key = effective_api_key(provider, endpoint);
+    if api_key.is_empty() {
+        return Err(format!("供应商「{}」未配置 API Key", provider.name));
+    }
 
     let model = session_model
         .map(str::to_string)
         .or_else(|| {
-            let default_model = profile.default_model.trim();
+            let default_model = provider.default_model.trim();
             (!default_model.is_empty()).then(|| default_model.to_string())
         })
-        .or_else(|| {
-            profile
-                .models
-                .iter()
-                .map(|model| model.id.trim())
-                .find(|model| !model.is_empty())
-                .map(str::to_string)
-        })
-        .ok_or_else(|| "已启用供应商档案没有可用模型".to_string())?;
+        .ok_or_else(|| format!("供应商「{}」没有可用模型", provider.name))?;
 
-    let (api_key, base_url, codex_needs_proxy, provider, credential_source) =
-        match &profile.native_config {
-            NativeProfileConfig::ClaudeCode { .. } => (
-                profile
-                    .native_config
-                    .claude_env_value("ANTHROPIC_AUTH_TOKEN")
-                    .filter(|value| !value.trim().is_empty())
-                    .map(ToOwned::to_owned),
-                profile
-                    .native_config
-                    .claude_env_value("ANTHROPIC_BASE_URL")
-                    .filter(|value| !value.trim().is_empty())
-                    .map(ToOwned::to_owned),
-                None,
-                None,
-                None,
+    if !provider
+        .models
+        .iter()
+        .any(|entry| entry.id.trim() == model.trim())
+    {
+        return Err(format!(
+            "模型 `{model}` 不在供应商「{}」的模型列表中",
+            provider.name
+        ));
+    }
+
+    let (opencode_provider, credential_source) = match agent_kind {
+        AgentKind::Opencode => (
+            Some(
+                provider
+                    .opencode_provider_key
+                    .clone()
+                    .unwrap_or_else(|| "codemux-openai".to_string()),
             ),
-            NativeProfileConfig::Codex {
-                api_key,
-                openai_base_url,
-                codex_needs_proxy,
-                ..
-            } => (
-                (!api_key.trim().is_empty()).then(|| api_key.clone()),
-                (!openai_base_url.trim().is_empty()).then(|| openai_base_url.clone()),
-                *codex_needs_proxy,
-                None,
-                None,
-            ),
-            NativeProfileConfig::OpenCode {
-                api_key,
-                openai_base_url,
-                provider_key,
-                ..
-            } => {
-                let pk = provider_key.as_deref().unwrap_or("codemux-openai");
-                (
-                    (!api_key.trim().is_empty()).then(|| api_key.clone()),
-                    (!openai_base_url.trim().is_empty()).then(|| openai_base_url.clone()),
-                    None,
-                    Some(pk.to_string()),
-                    Some("codemux".to_string()),
-                )
-            }
-        };
+            Some("codemux".to_string()),
+        ),
+        _ => (None, None),
+    };
 
     let resolved = ResolvedRuntimeConfig {
-        profile_id: profile.id.clone(),
-        api_key,
-        base_url,
+        profile_id: provider.id.clone(),
+        api_key: Some(api_key),
+        base_url: Some(endpoint.base_url.clone()),
         model: Some(model),
-        codex_needs_proxy,
-        provider,
+        codex_needs_proxy: endpoint.codex_needs_proxy,
+        provider: opencode_provider,
         credential_source,
-        timeouts: profile_timeouts(&profile.native_config),
+        timeouts: agent_timeouts(&config, agent_kind),
     };
     drop(config);
 
-    if persisted_profile_id.is_none() && session_model.is_none() {
+    if persisted_provider_id.is_none() {
         let db = state.db.lock().unwrap();
         operations::update_session_provider(
             &db,
@@ -266,23 +226,10 @@ fn resolve_active_runtime_config(
             resolved.model.as_deref().unwrap_or_default(),
             None,
         )
-        .map_err(|error| format!("无法保存会话供应商档案快照: {}", error))?;
+        .map_err(|error| format!("无法保存会话供应商快照: {}", error))?;
     }
 
     Ok(resolved)
-}
-
-fn resolve_default_claude_runtime_config() -> ResolvedRuntimeConfig {
-    ResolvedRuntimeConfig {
-        profile_id: CLAUDE_DEFAULT_SUPPLIER_ID.to_string(),
-        api_key: None,
-        base_url: None,
-        model: None,
-        codex_needs_proxy: None,
-        provider: None,
-        credential_source: None,
-        timeouts: None,
-    }
 }
 
 pub(crate) fn find_claude_session_jsonl(
@@ -3956,8 +3903,43 @@ mod tests {
         assert_eq!(converted["__lineIndex"], 4);
     }
 
+
+    fn test_model_provider(
+        id: &str,
+        protocol: crate::model_providers::Protocol,
+        base_url: &str,
+        api_key: &str,
+        default_model: &str,
+        models: &[&str],
+        codex_needs_proxy: Option<bool>,
+    ) -> crate::model_providers::ModelProvider {
+        crate::model_providers::ModelProvider {
+            id: id.to_string(),
+            name: id.to_string(),
+            enabled: true,
+            api_key: api_key.to_string(),
+            endpoints: vec![crate::model_providers::ProtocolEndpoint {
+                protocol,
+                base_url: base_url.to_string(),
+                api_key_override: None,
+                codex_needs_proxy,
+            }],
+            models: models
+                .iter()
+                .map(|model| crate::model_providers::ProviderModel {
+                    id: (*model).to_string(),
+                    name: None,
+                })
+                .collect(),
+            default_model: default_model.to_string(),
+            builtin_template_id: None,
+            opencode_provider_key: None,
+            opencode_npm: None,
+        }
+    }
+
     #[test]
-    fn resolves_codex_runtime_config_from_the_active_profile() {
+    fn resolves_codex_runtime_config_from_the_active_provider() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::schema::initialize_database(&conn).unwrap();
         conn.execute(
@@ -3966,52 +3948,26 @@ mod tests {
         )
         .unwrap();
         let mut config = crate::config::types::AppConfig::default();
-        let profile = crate::provider_profiles::types::AgentProviderProfile {
-            id: "codex-profile".to_string(),
-            agent_kind: AgentKind::Codex,
-            name: "Codex 测试档案".to_string(),
-            note: String::new(),
-            models: vec![
-                crate::provider_profiles::types::ProfileModel {
-                    id: "gpt-first".to_string(),
-                    name: None,
-                    context_window: None,
-                },
-                crate::provider_profiles::types::ProfileModel {
-                    id: "gpt-test".to_string(),
-                    name: None,
-                    context_window: None,
-                },
-            ],
-            default_model: "gpt-test".to_string(),
-            native_config: crate::provider_profiles::types::NativeProfileConfig::Codex {
-                api_key: "internal-secret".to_string(),
-                openai_base_url: "https://provider.example/v1".to_string(),
-                codex_needs_proxy: Some(true),
-                advanced_config: None,
-                auth_json: None,
-                config_toml: None,
-                model_catalog: None,
-                requires_review: false,
-                timeouts: None,
-            },
-        };
-        config.agent_profile_registry.profiles.push(profile);
-        config
-            .agent_profile_registry
-            .active_profile_ids
-            .insert(AgentKind::Codex, "codex-profile".to_string());
+        config.model_providers.push(test_model_provider(
+            "codex-provider",
+            crate::model_providers::Protocol::OpenaiCompatible,
+            "https://provider.example/v1",
+            "internal-secret",
+            "gpt-test",
+            &["gpt-first", "gpt-test"],
+            Some(true),
+        ));
+        config.active_provider_id = Some("codex-provider".to_string());
         let state = crate::AppState {
             db: std::sync::Mutex::new(conn),
             config: std::sync::Mutex::new(config),
-            provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
             runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
         };
 
         let resolved = resolve_active_runtime_config(&state, "session-codex").unwrap();
 
-        assert_eq!(resolved.profile_id, "codex-profile");
+        assert_eq!(resolved.profile_id, "codex-provider");
         assert_eq!(resolved.api_key.as_deref(), Some("internal-secret"));
         assert_eq!(
             resolved.base_url.as_deref(),
@@ -4029,11 +3985,11 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(snapshot, "codex-profile");
+        assert_eq!(snapshot, "codex-provider");
     }
 
     #[test]
-    fn codex_default_supplier_resolves_without_active_profile() {
+    fn codex_without_active_provider_returns_configuration_error() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::schema::initialize_database(&conn).unwrap();
         conn.execute(
@@ -4050,31 +4006,21 @@ mod tests {
             ],
         )
         .unwrap();
-        let config = crate::config::types::AppConfig::default();
         let state = crate::AppState {
             db: std::sync::Mutex::new(conn),
-            config: std::sync::Mutex::new(config),
-            provider_profile_operation_lock: std::sync::Mutex::new(()),
+            config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
             app_data_dir: std::path::PathBuf::new(),
             runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
         };
 
-        let resolved = resolve_active_runtime_config(&state, "session-codex-default").unwrap();
-
-        assert_eq!(resolved.profile_id, "");
-        assert_eq!(resolved.api_key, None);
-        assert_eq!(resolved.base_url, None);
-        assert_eq!(resolved.model.as_deref(), Some("gpt-5.6-sol"));
-        assert_eq!(resolved.codex_needs_proxy, None);
-        assert_eq!(resolved.provider, None);
-        assert_eq!(resolved.credential_source, None);
+        let err = resolve_active_runtime_config(&state, "session-codex-default").unwrap_err();
+        assert!(err.contains("尚未配置可用的模型供应商"), "{err}");
     }
 
     #[test]
-    fn claude_code_keeps_builtin_model_when_session_model_is_set() {
+    fn claude_code_without_active_provider_returns_configuration_error() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::schema::initialize_database(&conn).unwrap();
-        // 模拟"从自定义切到内置"后的 DB 状态：provider_id=NULL, model=sonnet
         conn.execute(
             "INSERT INTO sessions (id, title, agent_kind, provider_id, model, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![
@@ -4089,71 +4035,28 @@ mod tests {
             ],
         )
         .unwrap();
-        // 全局仍有一个激活的自定义 claude_code profile（bug 场景：会被错误回退）
-        let mut config = crate::config::types::AppConfig::default();
-        let profile = crate::provider_profiles::types::AgentProviderProfile {
-            id: "claude-custom".to_string(),
-            agent_kind: AgentKind::ClaudeCode,
-            name: "自定义 Claude".to_string(),
-            note: String::new(),
-            models: vec![crate::provider_profiles::types::ProfileModel {
-                id: "custom-model".to_string(),
-                name: None,
-                context_window: None,
-            }],
-            default_model: "custom-model".to_string(),
-            native_config: crate::provider_profiles::types::NativeProfileConfig::ClaudeCode {
-                settings: serde_json::json!({}),
-                requires_review: false,
-                timeouts: None,
-            },
-        };
-        config.agent_profile_registry.profiles.push(profile);
-        config
-            .agent_profile_registry
-            .active_profile_ids
-            .insert(AgentKind::ClaudeCode, "claude-custom".to_string());
         let state = crate::AppState {
             db: std::sync::Mutex::new(conn),
-            config: std::sync::Mutex::new(config),
-            provider_profile_operation_lock: std::sync::Mutex::new(()),
+            config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
             app_data_dir: std::path::PathBuf::new(),
             runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
         };
 
-        let resolved = resolve_active_runtime_config(&state, "session-claude-builtin").unwrap();
-
-        // 应使用内置 sonnet，而不是回退到激活的自定义 profile
-        assert_eq!(resolved.profile_id, "__claude_default__");
-        assert_eq!(resolved.model.as_deref(), Some("sonnet"));
-        assert_eq!(resolved.api_key, None);
-        assert_eq!(resolved.base_url, None);
-        // session.model 不应被覆写
-        let snapshot_model: Option<String> = state
-            .db
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT model FROM sessions WHERE id = 'session-claude-builtin'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(snapshot_model.as_deref(), Some("sonnet"));
+        let err = resolve_active_runtime_config(&state, "session-claude-builtin").unwrap_err();
+        assert!(err.contains("尚未配置可用的模型供应商"), "{err}");
     }
 
     #[test]
-    fn respects_persisted_session_model_within_profile() {
+    fn respects_persisted_session_model_within_provider() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::schema::initialize_database(&conn).unwrap();
-        // session 已绑定 profile，且保存了用户选择的具体模型（非 models[0]）
         conn.execute(
             "INSERT INTO sessions (id, title, agent_kind, provider_id, model, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![
                 "session-codex-switched",
                 "Codex",
                 "codex",
-                "codex-profile",
+                "codex-provider",
                 "gpt-test",
                 "agent",
                 "2026-01-01T00:00:00Z",
@@ -4162,55 +4065,26 @@ mod tests {
         )
         .unwrap();
         let mut config = crate::config::types::AppConfig::default();
-        let profile = crate::provider_profiles::types::AgentProviderProfile {
-            id: "codex-profile".to_string(),
-            agent_kind: AgentKind::Codex,
-            name: "Codex 测试档案".to_string(),
-            note: String::new(),
-            models: vec![
-                crate::provider_profiles::types::ProfileModel {
-                    id: "gpt-first".to_string(),
-                    name: None,
-                    context_window: None,
-                },
-                crate::provider_profiles::types::ProfileModel {
-                    id: "gpt-test".to_string(),
-                    name: None,
-                    context_window: None,
-                },
-            ],
-            default_model: String::new(),
-            native_config: crate::provider_profiles::types::NativeProfileConfig::Codex {
-                api_key: "internal-secret".to_string(),
-                openai_base_url: "https://provider.example/v1".to_string(),
-                codex_needs_proxy: Some(true),
-                advanced_config: None,
-                auth_json: None,
-                config_toml: None,
-                model_catalog: None,
-                requires_review: false,
-                timeouts: None,
-            },
-        };
-        config.agent_profile_registry.profiles.push(profile);
-        config
-            .agent_profile_registry
-            .active_profile_ids
-            .insert(AgentKind::Codex, "codex-profile".to_string());
+        config.model_providers.push(test_model_provider(
+            "codex-provider",
+            crate::model_providers::Protocol::OpenaiCompatible,
+            "https://provider.example/v1",
+            "internal-secret",
+            "gpt-first",
+            &["gpt-first", "gpt-test"],
+            Some(true),
+        ));
         let state = crate::AppState {
             db: std::sync::Mutex::new(conn),
             config: std::sync::Mutex::new(config),
-            provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
             runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
         };
 
         let resolved = resolve_active_runtime_config(&state, "session-codex-switched").unwrap();
 
-        // 应使用 session 保存的 gpt-test，而不是 models[0]（gpt-first）
-        assert_eq!(resolved.profile_id, "codex-profile");
+        assert_eq!(resolved.profile_id, "codex-provider");
         assert_eq!(resolved.model.as_deref(), Some("gpt-test"));
-        // provider_id 已存在，不应触发覆写
         let snapshot_model: Option<String> = state
             .db
             .lock()
@@ -4243,7 +4117,6 @@ mod tests {
         let app_state = crate::AppState {
             db: std::sync::Mutex::new(conn),
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
-            provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
             runtime_resolver: crate::runtime::RuntimeResolver::new(
                 runtime_root.path().to_path_buf(),
@@ -4312,7 +4185,6 @@ mod tests {
         let app_state = crate::AppState {
             db: std::sync::Mutex::new(conn),
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
-            provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
             runtime_resolver: crate::runtime::RuntimeResolver::new(
                 runtime_root.path().to_path_buf(),
@@ -4376,7 +4248,6 @@ mod tests {
         let app_state = crate::AppState {
             db: std::sync::Mutex::new(conn),
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
-            provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
             runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
         };
@@ -4601,7 +4472,6 @@ mod tests {
         let app_state = crate::AppState {
             db: std::sync::Mutex::new(conn),
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
-            provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
             runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
         };
@@ -4632,7 +4502,6 @@ mod tests {
         let app_state = crate::AppState {
             db: std::sync::Mutex::new(conn),
             config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
-            provider_profile_operation_lock: std::sync::Mutex::new(()),
             app_data_dir: std::path::PathBuf::new(),
             runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
         };

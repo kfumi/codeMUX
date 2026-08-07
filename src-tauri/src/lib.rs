@@ -5,6 +5,7 @@ mod config;
 mod db;
 mod log_ctx;
 mod mcp;
+mod model_providers;
 mod provider_profiles;
 mod runtime;
 mod skills;
@@ -34,7 +35,6 @@ struct AgentNotificationClickPayload {
 pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
     pub config: Mutex<config::types::AppConfig>,
-    pub provider_profile_operation_lock: Mutex<()>,
     pub app_data_dir: std::path::PathBuf,
     pub runtime_resolver: crate::runtime::RuntimeResolver,
 }
@@ -427,7 +427,6 @@ pub fn run() {
             app.manage(AppState {
                 db: Mutex::new(conn),
                 config: Mutex::new(config),
-                provider_profile_operation_lock: Mutex::new(()),
                 app_data_dir: app.path().app_data_dir()?,
                 runtime_resolver: crate::runtime::RuntimeResolver::default_root(),
             });
@@ -465,6 +464,14 @@ pub fn run() {
             commands::provider::set_compact_ai_output,
             commands::provider::set_notification_settings,
             commands::provider::set_default_open_target,
+            commands::model_provider::list_builtin_provider_templates,
+            commands::model_provider::instantiate_builtin_provider_template,
+            commands::model_provider::upsert_model_provider,
+            commands::model_provider::delete_model_provider,
+            commands::model_provider::set_active_model_provider,
+            commands::model_provider::set_model_provider_enabled,
+            commands::model_provider::test_model_provider,
+            commands::model_provider::provider_usable_for_agent,
             commands::provider::upsert_agent_provider_profile,
             commands::provider::activate_agent_provider_profile,
             commands::provider::activate_default_claude_supplier,

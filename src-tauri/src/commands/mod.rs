@@ -3,6 +3,7 @@ pub mod app;
 pub mod file;
 pub mod git;
 pub mod mcp;
+pub mod model_provider;
 pub mod perf;
 pub mod project;
 pub mod provider;

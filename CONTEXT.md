@@ -45,11 +45,45 @@ _Avoid_: idle, timeout
 同一会话内 CodeMUX Event 的有序位置。它用于保证增量事件顺序、识别事件缺口，并使结束事件具备幂等语义。
 _Avoid_: event index, provider sequence
 
+### Model Provider
+CodeMUX 自有的模型服务供应商配置单元：标识一家厂商或中转，并持有共享凭据与一份模型目录（含默认模型）。它与具体智能体种类无关；生命周期内不读写智能体原生配置文件，对话凭据仅经运行时注入 SDK。一家供应商可挂多个协议端点；端点可可选覆盖凭据。
+_Avoid_: Agent Provider Profile, provider profile, 智能体配置档（当指供应商时）
+
+### Protocol Endpoint
+某一 Model Provider 下的一条协议访问入口。第一版协议类型仅为 `anthropic` 与 `openai_compatible`，并包含 base URL 与该入口所需的连接附属项（例如 Codex 是否需要兼容代理）。对话时按当前智能体所需协议从供应商中选取匹配端点。
+_Avoid_: base URL（单独当作供应商）, Anthropic/OpenAI URL（当作互斥的两个供应商）；按智能体命名协议
+
+### Active Provider
+应用级当前默认选用的 Model Provider，用作新建会话的默认。切换智能体种类时不自动更换。会话可另行选定供应商与模型并持久化，发送时以会话选定为准。
+_Avoid_: active profile（按智能体分别激活的供应商配置档）
+
+### Built-in Provider Template
+由应用预置的 Model Provider 模板：预填厂商名称、协议端点 URL 与常用模型，用户补齐凭据后即可使用。它不是独立配置实体，实例化后仍是普通 Model Provider。OpenCode Go 属于此类模板，与智能体种类 OpenCode 不同。
+_Avoid_: 把内置目录做成与自定义供应商不同的第二套配置模型；用 OpenCode 兼指 Go 订阅供应商与智能体
+
+### Provider Credentials
+Model Provider 用于调用模型服务的密钥与端点信息。缺少可用凭据（如 API Key 为空）即视为未配置，不能靠空值隐式回落智能体 CLI 登录或原生配置文件。
+_Avoid_: 空 API Key 表示使用 CLI 认证
+
+### Provider Enabled
+Model Provider 是否对会话可选。禁用后配置保留，但不可被选为可用供应商；已绑定该供应商的会话在改选前不可发送。
+_Avoid_: 用删除表达临时停用；禁用后仍允许已绑会话继续调用
+
 ## Preferred Terms
 
 
 | Use | Avoid |
 |-----|-------|
+| Model Provider / 供应商 | Agent Provider Profile（指供应商配置时） |
+| Protocol Endpoint / 协议端点 | 把双协议拆成两个供应商 |
+| Active Provider | 按智能体分别激活的 profile |
+| Built-in Provider Template / 内置供应商模板 | 与自定义供应商分叉的第二套模型 |
+| Provider Credentials（显式配置） | 空 key 魔法回落 CLI |
+| Provider Enabled / 启用 | 用删除代替停用 |
+
+## Notes
+
+- 从 AgentProviderProfile 升级到 Model Provider 时不做自动迁移；旧 registry 丢弃，用户按内置模板重新配置。
 
 ## Out of Scope (for this feature's first cut)
 

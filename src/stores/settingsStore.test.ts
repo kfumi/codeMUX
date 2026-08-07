@@ -1,22 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AppConfig, Provider } from '../types/provider';
+import type { AppConfig, ModelProvider } from '../types/provider';
 
 const setDefaultAgentKindMock = vi.fn<(agentKind: string) => Promise<void>>();
 const updateAgentConfigMock = vi.fn<(agentKind: string, config: Record<string, unknown>) => Promise<void>>();
-const deleteProviderMock = vi.fn<(providerId: string) => Promise<void>>();
+const deleteModelProviderMock = vi.fn<(providerId: string) => Promise<void>>();
 const setCompactAiOutputMock = vi.fn<(enabled: boolean) => Promise<void>>();
 const setNotificationSettingsMock = vi.fn<(settings: Record<string, unknown>) => Promise<void>>();
 const setDefaultOpenTargetMock = vi.fn<(target: string) => Promise<void>>();
+const getConfigMock = vi.fn(async () => structuredClone(baseConfig));
 
 vi.mock('../lib/tauri', () => ({
   configApi: {
-    get: vi.fn(),
-    updateProvider: vi.fn(),
-    deleteProvider: deleteProviderMock,
+    get: (...args: unknown[]) => getConfigMock(...args),
+    upsertModelProvider: vi.fn(),
+    deleteModelProvider: deleteModelProviderMock,
     setActiveProvider: vi.fn(),
+    setModelProviderEnabled: vi.fn(),
+    instantiateBuiltinProviderTemplate: vi.fn(),
+    testModelProvider: vi.fn(),
     setTheme: vi.fn(),
-    fetchModels: vi.fn(),
     testProvider: vi.fn(),
     setDefaultAgentKind: setDefaultAgentKindMock,
     updateAgentConfig: updateAgentConfigMock,
@@ -24,10 +27,30 @@ vi.mock('../lib/tauri', () => ({
     setNotificationSettings: setNotificationSettingsMock,
     setDefaultOpenTarget: setDefaultOpenTargetMock,
   },
+  agentApi: {
+    stopProxy: vi.fn(),
+  },
 }));
 
+const sampleProvider = (id: string): ModelProvider => ({
+  id,
+  name: `Provider ${id}`,
+  enabled: true,
+  api_key: 'sk-test',
+  endpoints: [
+    {
+      protocol: 'openai_compatible',
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key_override: null,
+      codex_needs_proxy: false,
+    },
+  ],
+  models: [{ id: 'gpt-5', name: 'GPT-5' }],
+  default_model: 'gpt-5',
+});
+
 const baseConfig: AppConfig = {
-  providers: [],
+  model_providers: [],
   active_provider_id: null,
   agent_defaults: {
     default_agent_kind: 'claude_code',
@@ -56,6 +79,8 @@ const baseConfig: AppConfig = {
 describe('settings store agent config actions', () => {
   beforeEach(async () => {
     vi.resetAllMocks();
+    getConfigMock.mockResolvedValue(structuredClone(baseConfig));
+    deleteModelProviderMock.mockImplementation(async () => undefined);
     const { useSettingsStore } = await import('./settingsStore');
     useSettingsStore.setState({
       config: structuredClone(baseConfig),
@@ -108,48 +133,38 @@ describe('settings store agent config actions', () => {
 
   it('keeps the active provider consistent when the active provider is deleted', async () => {
     const { useSettingsStore } = await import('./settingsStore');
-    const provider: Provider = {
-      id: 'provider-1',
-      name: 'Provider 1',
-      api_key: '',
-      anthropic_base_url: '',
-      openai_base_url: '',
-      default_model: '',
-    };
+    const provider = sampleProvider('provider-1');
 
     useSettingsStore.setState((state) => ({
       config: state.config
         ? {
             ...state.config,
-            providers: [provider],
+            model_providers: [provider],
             active_provider_id: 'provider-1',
           }
         : null,
     }));
+    getConfigMock.mockResolvedValue({
+      ...structuredClone(baseConfig),
+      model_providers: [],
+      active_provider_id: null,
+    });
 
-    await useSettingsStore.getState().deleteProvider('provider-1');
+    await useSettingsStore.getState().deleteModelProvider('provider-1');
 
-    expect(deleteProviderMock).toHaveBeenCalledWith('provider-1');
+    expect(deleteModelProviderMock).toHaveBeenCalledWith('provider-1');
     expect(useSettingsStore.getState().config?.active_provider_id).toBeNull();
   });
 
   it('uses provider Codex proxy override when deciding if proxy is needed', async () => {
     const { useSettingsStore } = await import('./settingsStore');
-    const provider: Provider = {
-      id: 'provider-1',
-      name: 'Provider 1',
-      api_key: 'key',
-      anthropic_base_url: '',
-      openai_base_url: 'https://openrouter.ai/api/v1',
-      default_model: 'gpt-5',
-      codex_needs_proxy: false,
-    };
+    const provider = sampleProvider('provider-1');
 
     useSettingsStore.setState((state) => ({
       config: state.config
         ? {
             ...state.config,
-            providers: [provider],
+            model_providers: [provider],
             active_provider_id: 'provider-1',
           }
         : null,

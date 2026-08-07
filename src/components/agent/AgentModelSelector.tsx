@@ -4,12 +4,12 @@ import { ModelSelector } from '@/components/model-selector';
 import { useAgentModels } from '../../hooks/useAgentModels';
 import { formatModelDisplayName } from './modelDisplay';
 import type { AgentKind, ReasoningEffort } from '../../types/session';
-import type { AgentProviderProfile } from '../../types/provider';
+import type { ModelProvider } from '../../types/provider';
 
 export interface AgentModelSelectorProps {
   agentKind: AgentKind;
-  activeProfile: AgentProviderProfile | null;
-  activeProfileId: string | null;
+  activeProvider: ModelProvider | null;
+  activeProviderId: string | null;
   value: string;
   contextModel?: string;
   onChange: (modelId: string) => void;
@@ -21,8 +21,8 @@ export interface AgentModelSelectorProps {
 
 export function AgentModelSelector({
   agentKind,
-  activeProfile,
-  activeProfileId,
+  activeProvider,
+  activeProviderId,
   value,
   contextModel,
   onChange,
@@ -32,7 +32,7 @@ export function AgentModelSelector({
   compact,
 }: AgentModelSelectorProps) {
   const api = useAui();
-  const { models, isLoading } = useAgentModels(agentKind, activeProfile, activeProfileId);
+  const { models, isLoading } = useAgentModels(agentKind, activeProvider, activeProviderId);
   const effectiveValue = value || models[0]?.id || '';
   const contextModelSupportsEfforts = models.find((model) => model.id === (contextModel ?? effectiveValue))?.efforts;
 
@@ -78,15 +78,9 @@ export function AgentModelSelector({
     >
       <ModelSelector.Trigger
         variant="ghost"
-        size="sm"
-        disabled={disabled || isLoading}
-        className={compact ? 'min-w-0 max-w-32' : undefined}
-      >
-        <ModelSelector.Value
-          showEffort={!compact}
-          className={compact ? 'max-w-24' : undefined}
-        />
-      </ModelSelector.Trigger>
+        size={compact ? 'sm' : 'default'}
+        disabled={disabled || isLoading || models.length === 0}
+      />
       <ModelSelector.Content />
     </ModelSelector.Root>
   );

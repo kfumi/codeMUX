@@ -3,7 +3,16 @@ import type { AgentKind, ReasoningEffort, Session, SessionMode } from '../types/
 import type { ImportCandidate, ImportSessionsRequest, ImportSessionsResult } from '../types/historyImport';
 import type { AgentUserMessageLocator } from '../types/agent';
 import type { AgentInputPayload } from '../types/agentInput';
-import type { AgentConfigUpdateMap, AgentProviderProfileUpsert, AppConfig, NotificationSettings, ProfileModel, Provider, Theme } from '../types/provider';
+import type {
+  AgentConfigUpdateMap,
+  AppConfig,
+  BuiltinProviderTemplate,
+  ModelProvider,
+  NotificationSettings,
+  Protocol,
+  Provider,
+  Theme,
+} from '../types/provider';
 import type { OpenTarget } from './openTargets';
 import type { AgentPermissionConfig, AgentPlanMode } from './agentPermissions';
 import type { Project } from '../types/project';
@@ -309,7 +318,22 @@ export const configApi = {
   get: (): Promise<AppConfig> => invokeLogged('get_config'),
   updateProvider: (provider: Provider): Promise<void> => invokeLogged('update_provider', { provider }),
   deleteProvider: (providerId: string): Promise<void> => invokeLogged('delete_provider', { providerId }),
-  setActiveProvider: (providerId: string): Promise<void> => invokeLogged('set_active_provider', { providerId }),
+  setActiveProvider: (providerId: string): Promise<void> =>
+    invokeLogged('set_active_model_provider', { providerId }),
+  listBuiltinProviderTemplates: (): Promise<BuiltinProviderTemplate[]> =>
+    invokeLogged('list_builtin_provider_templates'),
+  instantiateBuiltinProviderTemplate: (templateId: string): Promise<ModelProvider> =>
+    invokeLogged('instantiate_builtin_provider_template', { templateId }),
+  upsertModelProvider: (provider: ModelProvider): Promise<void> =>
+    invokeLogged('upsert_model_provider', { provider }),
+  deleteModelProvider: (providerId: string): Promise<void> =>
+    invokeLogged('delete_model_provider', { providerId }),
+  setModelProviderEnabled: (providerId: string, enabled: boolean): Promise<void> =>
+    invokeLogged('set_model_provider_enabled', { providerId, enabled }),
+  testModelProvider: (providerId: string, protocol?: Protocol): Promise<string> =>
+    invokeLogged('test_model_provider', { providerId, protocol: protocol ?? null }),
+  providerUsableForAgent: (providerId: string, agentKind: AgentKind): Promise<boolean> =>
+    invokeLogged('provider_usable_for_agent', { providerId, agentKind }),
   setDefaultAgentKind: (agentKind: AgentKind): Promise<void> =>
     invokeLogged('set_default_agent_kind', { agentKind }),
   updateAgentConfig: <T extends keyof AgentConfigUpdateMap>(
@@ -324,27 +348,11 @@ export const configApi = {
   setDefaultOpenTarget: (target: OpenTarget): Promise<void> =>
     invokeLogged('set_default_open_target', { target }),
   testProvider: (providerId: string): Promise<string> =>
-    invokeLogged('test_provider', { providerId }),
-  upsertAgentProfile: (profile: AgentProviderProfileUpsert): Promise<void> =>
-    invokeLogged('upsert_agent_provider_profile', { profile }),
-  activateAgentProfile: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string): Promise<void> =>
-    invokeLogged('activate_agent_provider_profile', { agentKind, profileId }),
-  activateDefaultClaudeSupplier: (): Promise<void> =>
-    invokeLogged('activate_default_claude_supplier'),
-  activateDefaultCodexSupplier: (): Promise<void> =>
-    invokeLogged('activate_default_codex_supplier'),
-  activateDefaultOpenCodeSupplier: (): Promise<void> =>
-    invokeLogged('activate_default_opencode_supplier'),
-  setActiveAgentProfileModel: (agentKind: 'claude_code' | 'codex' | 'opencode', defaultModel: string): Promise<void> =>
-    invokeLogged('set_active_agent_profile_model', { agentKind, defaultModel }),
-  deleteAgentProfile: (profileId: string): Promise<void> =>
-    invokeLogged('delete_agent_provider_profile', { profileId }),
-  fetchAgentProfileModels: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string): Promise<ProfileModel[]> =>
-    invokeLogged('fetch_agent_profile_models', { agentKind, profileId }),
+    invokeLogged('test_model_provider', { providerId, protocol: null }),
+  fetchProviderModels: (apiKey: string, baseUrl: string): Promise<string[]> =>
+    invokeLogged('fetch_provider_models', { apiKey, baseUrl }),
   fetchOpenCodeFreeModels: (): Promise<Array<{ id: string; owned_by: string }>> =>
     invokeLogged('fetch_opencode_free_models'),
-  testAgentProfile: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string): Promise<string> =>
-    invokeLogged('test_agent_provider_profile', { agentKind, profileId }),
 };
 
 export const fileApi = {

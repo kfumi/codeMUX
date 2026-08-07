@@ -1,1156 +1,408 @@
-import { Download, Eye, EyeOff, Loader2, Plus, Trash2, Wand, Zap, ChevronDown, ChevronRight } from 'lucide-react';
-import CodeMirror from '@uiw/react-codemirror';
-import { json } from '@codemirror/lang-json';
-import { StreamLanguage } from '@codemirror/language';
-import { toml } from '@codemirror/legacy-modes/mode/toml';
-import { EditorView } from '@codemirror/view';
+import { useEffect, useMemo, useState } from 'react';
+import { Check, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import claudeSvg from '@lobehub/icons-static-svg/icons/claude-color.svg?raw';
-import openAiSvg from '@lobehub/icons-static-svg/icons/openai.svg?raw';
-import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { cn } from '@/lib/utils';
+import { configApi } from '@/lib/tauri';
+import { isProviderUsable, providerUnusableReason } from '@/lib/modelProviders';
+import { useSettingsStore } from '@/stores/settingsStore';
+import type {
+  BuiltinProviderTemplate,
+  ModelProvider,
+  Protocol,
+  ProtocolEndpoint,
+  ProviderModel,
+} from '@/types/provider';
 
-import { extractCodexBaseUrl, extractCodexModelName, generateCodexDefaultConfigToml, setCodexBaseUrl, setCodexModelName } from '../../lib/codexTomlUtils';
-import { modelsFromText, modelsToText } from '../../lib/providerModels';
-import { applyClaudeFormToSettings, CLAUDE_SETTINGS_DEFAULT, parseClaudeSettingsDraft, type ClaudeCustomModel, type ClaudeRoleMapping, type ClaudeSettings, type ClaudeSettingsForm } from '../../lib/claudeSettingsConfig';
-import { OPENCODE_NPM_PACKAGES, OPENCODE_DEFAULT_NPM } from '../../lib/opencodePresets';
-import { cn } from '../../lib/utils';
-import { useSettingsStore } from '../../stores/settingsStore';
-import type { AgentProviderProfile, AgentProviderProfileUpsert, CodexCatalogModel, OpenCodeModel } from '../../types/provider';
-import { Button } from '../ui/button';
-import { ConfirmDialog } from '../ui/confirm-dialog';
-import { Input } from '../ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger } from '../ui/select';
-import { Switch } from '../ui/switch';
-import { TooltipHint } from '../ui/tooltip';
-
-const baseTheme = EditorView.theme({
-  '&': { fontSize: 'var(--code-font-size)', borderRadius: '8px', overflow: 'hidden' },
-  '.cm-content': { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", padding: '8px 0' },
-  '.cm-gutters': { backgroundColor: 'transparent', border: 'none' },
-  '.cm-activeLineGutter': { backgroundColor: 'transparent' },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': { backgroundColor: 'rgba(99, 179, 237, 0.3) !important' },
-  '.cm-content ::selection': { backgroundColor: 'rgba(99, 179, 237, 0.3) !important' },
-});
-
-type ProfileAgentKind = 'claude_code' | 'codex' | 'opencode';
-type ProfileDraft = { id: string; name: string; note: string; models: string; apiKey: string; baseUrl: string; defaultModel: string; context1m: boolean; codexNeedsProxy: boolean; advancedConfig: string; authJson: string; configToml: string; modelCatalog: CodexCatalogModel[]; claudeForm: ClaudeSettingsForm; providerKey: string; npmPackage: string; modelsConfig: Record<string, OpenCodeModel>; extraOptions: Record<string, string> };
-
-const AGENT_SVGS: Record<ProfileAgentKind, string> = {
-  claude_code: claudeSvg,
-  codex: openAiSvg,
-  opencode: opencodeSvg,
-};
-
-function AgentTabIcon({ kind, size = 16 }: { kind: ProfileAgentKind; size?: number }) {
-  const svg = AGENT_SVGS[kind];
-  const cleaned = svg
-    .replace(/(<svg\b[^>]*\bstyle=")[^"]*(")/, '$1display:block$2')
-    .replace(/(<svg\b[^>]*) width="[^"]*"/, '$1')
-    .replace(/(<svg\b[^>]*) height="[^"]*"/, '$1')
-    .replace(/<svg\b/, `<svg width="${size}" height="${size}"`);
-  return <span className="inline-flex shrink-0 items-center justify-center" aria-hidden="true" dangerouslySetInnerHTML={{ __html: cleaned }} />;
-}
-
-const AGENTS: Array<{ id: ProfileAgentKind; label: string; description: string; baseUrlLabel: string; placeholder: string }> = [
-  { id: 'claude_code', label: 'Claude Code', description: '写入 Claude Code 的 settings.json 配置。', baseUrlLabel: 'Anthropic Base URL', placeholder: 'https://api.anthropic.com' },
-  { id: 'codex', label: 'Codex', description: '写入 Codex 的 auth.json 和 config.toml 配置。', baseUrlLabel: 'OpenAI Base URL', placeholder: 'https://api.openai.com/v1' },
-  { id: 'opencode', label: 'OpenCode', description: '写入 OpenCode 的 opencode.json 配置。', baseUrlLabel: 'Base URL', placeholder: 'https://api.openai.com/v1' },
-];
-
-function emptyDraft(agentKind: ProfileAgentKind): ProfileDraft {
-  const settings = structuredClone(CLAUDE_SETTINGS_DEFAULT);
-  const { form } = parseClaudeSettingsDraft(JSON.stringify(settings));
-  const configToml = generateCodexDefaultConfigToml();
-  const claudeAdvanced = JSON.stringify(settings, null, 2);
-  const opencodeAdvanced = JSON.stringify({ npm: OPENCODE_DEFAULT_NPM, options: { baseURL: '', apiKey: '', setCacheKey: true }, models: {} }, null, 2);
-  const advancedConfig = agentKind === 'claude_code' ? claudeAdvanced : agentKind === 'opencode' ? opencodeAdvanced : '{}';
-  return { id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2), name: '', note: '', models: '', apiKey: '', baseUrl: '', defaultModel: extractCodexModelName(configToml) || 'gpt-5.6', context1m: false, codexNeedsProxy: false, advancedConfig, authJson: JSON.stringify({ OPENAI_API_KEY: '' }, null, 2), configToml, modelCatalog: [], claudeForm: form, providerKey: '', npmPackage: OPENCODE_DEFAULT_NPM, modelsConfig: {}, extraOptions: {} };
-}
-
-function toDraft(profile: AgentProviderProfile): ProfileDraft {
-  const native = profile.native_config;
-  const claudeEnv = native.type === 'claude_code' && native.settings.env && typeof native.settings.env === 'object'
-    ? native.settings.env as Record<string, unknown>
-    : {};
-  const claudeSettings = native.type === 'claude_code' ? native.settings : CLAUDE_SETTINGS_DEFAULT;
-  const parsedClaude = parseClaudeSettingsDraft(JSON.stringify(claudeSettings));
-  const modelCatalog = native.type === 'codex' && native.model_catalog ? (typeof native.model_catalog === 'string' ? JSON.parse(native.model_catalog) : native.model_catalog) : [];
-  const models = native.type === 'codex' && modelCatalog.length > 0
-    ? modelsToText(modelCatalog.map((m: CodexCatalogModel) => m.model))
-    : modelsToText(profile.models.map((model) => model.id));
-  const configToml = native.type === 'codex' ? (native.config_toml ?? '') : '';
+function emptyCustomProvider(): ModelProvider {
   return {
-    id: profile.id, name: profile.name, note: profile.note, models,
-    apiKey: native.type === 'codex' ? (native.api_key ?? '') : (native.type === 'opencode' ? (native.api_key ?? '') : (typeof claudeEnv.ANTHROPIC_AUTH_TOKEN === 'string' ? claudeEnv.ANTHROPIC_AUTH_TOKEN : '')),
-    baseUrl: native.type === 'claude_code' ? (typeof claudeEnv.ANTHROPIC_BASE_URL === 'string' ? claudeEnv.ANTHROPIC_BASE_URL : '') : native.openai_base_url,
-    defaultModel: native.type === 'codex' ? (extractCodexModelName(configToml) || '') : '',
-    context1m: false,
-    codexNeedsProxy: native.type === 'codex' && Boolean(native.codex_needs_proxy),
-    advancedConfig: native.type === 'opencode' ? JSON.stringify({ npm: native.npm ?? OPENCODE_DEFAULT_NPM, options: { baseURL: native.openai_base_url, apiKey: native.api_key ?? '', ...Object.fromEntries(Object.entries(native.extra_options ?? {}).filter(([k]) => !['baseURL', 'apiKey'].includes(k))) }, models: native.models_config ?? {} }, null, 2) : JSON.stringify(parsedClaude.settings, null, 2),
-    authJson: native.type === 'codex' ? (native.auth_json ?? '') : '',
-    configToml,
-    modelCatalog,
-    claudeForm: parsedClaude.form,
-    providerKey: native.type === 'opencode' ? (native.provider_key ?? '') : '',
-    npmPackage: native.type === 'opencode' ? (native.npm ?? OPENCODE_DEFAULT_NPM) : OPENCODE_DEFAULT_NPM,
-    modelsConfig: native.type === 'opencode' ? (native.models_config ?? {}) : {},
-    extraOptions: native.type === 'opencode' ? (native.extra_options ?? {}) : {},
+    id: crypto.randomUUID(),
+    name: '自定义供应商',
+    enabled: true,
+    api_key: '',
+    endpoints: [
+      {
+        protocol: 'openai_compatible',
+        base_url: '',
+        api_key_override: null,
+        codex_needs_proxy: true,
+      },
+    ],
+    models: [{ id: 'default-model', name: 'Default Model' }],
+    default_model: 'default-model',
+    builtin_template_id: null,
+    opencode_provider_key: 'codemux-openai',
+    opencode_npm: '@ai-sdk/openai-compatible',
   };
 }
 
-function profileModelsFromClaudeForm(form: ClaudeSettingsForm): { id: string; name: string }[] {
-  const entries: { id: string; name: string }[] = [];
-  const add = (requestModel: string, displayName: string) => {
-    const id = requestModel.trim();
-    if (id) {
-      const name = displayName.trim() || id;
-      entries.push({ id, name });
-    }
-  };
-  add(form.fallbackModel, form.fallbackModel);
-  add(form.sonnet.requestModel, form.sonnet.displayName);
-  add(form.opus.requestModel, form.opus.displayName);
-  add(form.fable.requestModel, form.fable.displayName);
-  add(form.haiku.requestModel, form.haiku.displayName);
-  for (const m of form.customModels) {
-    add(m.requestModel, m.displayName);
+function endpointLabel(protocol: Protocol): string {
+  return protocol === 'anthropic' ? 'Anthropic' : 'OpenAI 兼容';
+}
+
+function ensureEndpoint(
+  endpoints: ProtocolEndpoint[],
+  protocol: Protocol,
+  baseUrl: string,
+): ProtocolEndpoint[] {
+  const existing = endpoints.find((item) => item.protocol === protocol);
+  if (existing) {
+    return endpoints.map((item) =>
+      item.protocol === protocol ? { ...item, base_url: baseUrl } : item,
+    );
   }
-  const seen = new Set<string>();
-  return entries.filter((e) => { if (seen.has(e.id)) return false; seen.add(e.id); return true; });
-}
-
-function profileToUpsert(agentKind: ProfileAgentKind, draft: ProfileDraft): AgentProviderProfileUpsert {
-  const models = agentKind === 'codex' && draft.modelCatalog.length > 0
-    ? draft.modelCatalog.map((m) => ({ id: m.model, name: m.displayName || m.model }))
-    : agentKind === 'opencode'
-      ? Object.entries(draft.modelsConfig).filter(([id]) => id.trim()).map(([id, m]) => ({ id, name: m.name || id }))
-      : modelsFromText(draft.models).map((id) => ({ id, name: id }));
-  const common = { id: draft.id, agent_kind: agentKind, name: draft.name.trim(), note: draft.note.trim(), models, default_model: agentKind === 'codex' ? (draft.defaultModel.trim() || '') : '' };
-  const advanced = draft.advancedConfig.trim() ? JSON.parse(draft.advancedConfig) : undefined;
-  if (agentKind === 'claude_code') {
-    const parsed = parseClaudeSettingsDraft(draft.advancedConfig);
-    const claudeModels = profileModelsFromClaudeForm(parsed.form);
-    return {
-      ...common,
-      models: claudeModels,
-      default_model: parsed.form.fallbackModel,
-      native_config: { type: 'claude_code', settings: parsed.settings },
-    };
-  }
-  if (agentKind === 'codex') return { ...common, native_config: { type: 'codex', api_key: draft.apiKey || undefined, openai_base_url: draft.baseUrl.trim(), codex_needs_proxy: draft.codexNeedsProxy, advanced_config: advanced, auth_json: draft.authJson.trim() || undefined, config_toml: draft.configToml.trim() || undefined, model_catalog: draft.modelCatalog.length > 0 ? draft.modelCatalog : undefined } };
-  return { ...common, native_config: { type: 'opencode', api_key: draft.apiKey || undefined, openai_base_url: draft.baseUrl.trim(), provider_key: draft.providerKey.trim() || undefined, npm: draft.npmPackage || undefined, models_config: Object.keys(draft.modelsConfig).length > 0 ? draft.modelsConfig : undefined, extra_options: Object.keys(draft.extraOptions).length > 0 ? draft.extraOptions : undefined, advanced_config: advanced } };
-}
-
-function ModelDropdown({ models, onSelect }: { models: string[]; onSelect: (model: string) => void }) {
-  if (models.length === 0) {
-    return <div className="w-9 shrink-0" />;
-  }
-  return (
-    <Select value="" onValueChange={onSelect}>
-      <SelectTrigger className="h-9 w-9 shrink-0 justify-center px-1.5" aria-label="选择模型" />
-      <SelectContent>
-        {models.map((m) => (
-          <SelectItem key={m} value={m}>{m}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
-type CodexAdvancedOptionsProps = {
-  editing: ProfileDraft;
-  setEditing: React.Dispatch<React.SetStateAction<ProfileDraft | null>>;
-  baseUrl: string;
-  apiKey: string;
-};
-
-function CodexAdvancedOptions({ editing, setEditing, baseUrl, apiKey }: CodexAdvancedOptionsProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [fetching, setFetching] = useState(false);
-  const [fetchedModels, setFetchedModels] = useState<string[]>([]);
-
-  const handleFetchModels = useCallback(async () => {
-    if (!baseUrl || !apiKey) {
-      toast.error('请先填写 API Key 和 Base URL。');
-      return;
-    }
-    setFetching(true);
-    try {
-      const base = baseUrl.replace(/\/$/, '');
-      let res = await fetch(`${base}/v1/models`, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${apiKey}` },
-      });
-      if (res.status === 404 || res.status === 405) {
-        res = await fetch(`${base}/models`, {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${apiKey}` },
-        });
-      }
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
-      }
-      const data = await res.json();
-      const models = (data.data ?? data.models ?? []).map((m: { id: string }) => m.id).filter(Boolean) as string[];
-      setFetchedModels(models);
-      toast.success(`已获取 ${models.length} 个模型。`);
-    } catch (e) {
-      toast.error(`获取模型列表失败: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setFetching(false);
-    }
-  }, [baseUrl, apiKey]);
-
-  const handleAddRow = useCallback(() => {
-    setEditing((prev) => prev ? { ...prev, modelCatalog: [...prev.modelCatalog, { model: '', displayName: '', contextWindow: undefined }] } : prev);
-  }, [setEditing]);
-
-  const handleUpdateRow = useCallback((index: number, patch: Partial<CodexCatalogModel>) => {
-    setEditing((prev) => prev ? { ...prev, modelCatalog: prev.modelCatalog.map((row, i) => i === index ? { ...row, ...patch } : row) } : prev);
-  }, [setEditing]);
-
-  const handleRemoveRow = useCallback((index: number) => {
-    setEditing((prev) => prev ? { ...prev, modelCatalog: prev.modelCatalog.filter((_, i) => i !== index) } : prev);
-  }, [setEditing]);
-
-  return (
-    <div className="rounded-lg border border-border/55 bg-muted/20 p-4 space-y-4">
-      <button type="button" onClick={() => setExpanded(!expanded)} className="flex items-center gap-1.5 text-sm font-medium text-foreground hover:opacity-70">
-        {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        高级选项
-      </button>
-      {expanded && (
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-foreground">上游格式</label>
-            <Select value={editing.codexNeedsProxy ? 'chat' : 'responses'} onValueChange={(v) => setEditing((prev) => prev ? { ...prev, codexNeedsProxy: v === 'chat' } : prev)}>
-              <SelectTrigger className="w-full"><span className="text-sm">{editing.codexNeedsProxy ? 'Chat Completions（需开启路由）' : 'Responses（原生）'}</span></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="responses">Responses（原生）</SelectItem>
-                <SelectItem value="chat">Chat Completions（需开启路由）</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              {editing.codexNeedsProxy
-                ? '供应商使用 Chat Completions 协议或非 GPT 模型时，需要通过本地兼容代理路由转换。'
-                : '供应商原生为 Responses API 时选择此项，直连不转换格式。'}
-            </p>
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-foreground">模型映射</label>
-              <div className="flex gap-1">
-                <Button type="button" variant="outline" size="sm" onClick={handleFetchModels} disabled={fetching || !baseUrl || !apiKey} className="h-7 gap-1">
-                  {fetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                  获取模型列表
-                </Button>
-                <Button type="button" variant="outline" size="sm" onClick={handleAddRow} className="h-7 gap-1">
-                  <Plus className="h-3.5 w-3.5" />添加模型
-                </Button>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">生成 Codex model_catalog_json，让 /model 命令显示这些第三方模型名；表中条目按填写内容原样保存。修改后需要重启 Codex 才能刷新模型列表。</p>
-            {editing.modelCatalog.length > 0 && (
-              <div className="space-y-2">
-                <div className="hidden grid-cols-[1fr_1fr_120px_36px] gap-2 px-1 text-xs font-medium text-muted-foreground md:grid">
-                  <span>菜单显示名</span><span>实际请求模型</span><span>上下文窗口</span><span />
-                </div>
-                {editing.modelCatalog.map((row, index) => (
-                  <div key={index} className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_120px_36px]">
-                    <Input value={row.displayName ?? ''} onChange={(e) => handleUpdateRow(index, { displayName: e.target.value })} placeholder="例如: DeepSeek V4 Flash" />
-                    <div className="flex gap-1">
-                      <Input value={row.model} onChange={(e) => handleUpdateRow(index, { model: e.target.value })} placeholder="例如: deepseek-v4-flash" className="flex-1" />
-                      {fetchedModels.length > 0 && (
-                        <Select value="" onValueChange={(v) => handleUpdateRow(index, { model: v, displayName: row.displayName?.trim() ? row.displayName : v })}>
-                          <SelectTrigger className="h-9 w-9 shrink-0 justify-center px-1.5" aria-label="选择模型" />
-                          <SelectContent>
-                            {fetchedModels.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </div>
-                    <Input type="number" min={1} inputMode="numeric" value={row.contextWindow ?? ''} onChange={(e) => handleUpdateRow(index, { contextWindow: e.target.value.replace(/[^\d]/g, '') ? Number(e.target.value.replace(/[^\d]/g, '')) : undefined })} placeholder="例如: 128000" />
-                    <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-destructive" onClick={() => handleRemoveRow(index)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-type ClaudeAdvancedOptionsProps = {
-  editing: ProfileDraft;
-  updateClaudeForm: (form: ClaudeSettingsForm) => void;
-  fetchedModels: string[];
-  fetchingModels: boolean;
-  fetchModels: () => void;
-};
-
-function ClaudeAdvancedOptions({ editing, updateClaudeForm, fetchedModels, fetchingModels, fetchModels }: ClaudeAdvancedOptionsProps) {
-  const [expanded, setExpanded] = useState(false);
-
-  const handleAddCustomModel = useCallback(() => {
-    updateClaudeForm({
-      ...editing.claudeForm,
-      customModels: [
-        ...editing.claudeForm.customModels,
-        { displayName: '', requestModel: '' },
-      ],
-    });
-  }, [editing.claudeForm, updateClaudeForm]);
-
-  const handleUpdateCustomModel = useCallback((index: number, patch: Partial<ClaudeCustomModel>) => {
-    updateClaudeForm({
-      ...editing.claudeForm,
-      customModels: editing.claudeForm.customModels.map((m, i) =>
-        i === index ? { ...m, ...patch } : m
-      ),
-    });
-  }, [editing.claudeForm, updateClaudeForm]);
-
-  const handleRemoveCustomModel = useCallback((index: number) => {
-    updateClaudeForm({
-      ...editing.claudeForm,
-      customModels: editing.claudeForm.customModels.filter((_, i) => i !== index),
-    });
-  }, [editing.claudeForm, updateClaudeForm]);
-
-  return (
-    <div className="rounded-lg border border-border/55 bg-muted/20 p-4 space-y-4">
-      <button type="button" onClick={() => setExpanded(!expanded)} className="flex items-center gap-1.5 text-sm font-medium text-foreground hover:opacity-70">
-        {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        高级选项
-      </button>
-      {expanded && (
-        <div className="space-y-4">
-          <div className="space-y-3 border-b border-border/55 pb-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="text-sm font-semibold">模型映射</h4>
-                <p className="mt-1 text-xs text-foreground/55">显示名称只影响 /model 菜单；1M 只是给 Claude Code 的上下文能力声明。</p>
-              </div>
-              <Button type="button" variant="outline" size="sm" onClick={fetchModels} disabled={fetchingModels || !editing.claudeForm.apiKey}>
-                {fetchingModels ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
-                获取模型列表
-              </Button>
-            </div>
-            <div className={`grid gap-2 text-xs text-foreground ${fetchedModels.length > 0 ? 'grid-cols-[90px_minmax(0,1fr)_minmax(0,1fr)_40px_92px]' : 'grid-cols-[90px_minmax(0,1fr)_minmax(0,1fr)_92px]'}`}>
-              <span>模型角色</span>
-              <span>显示名称</span>
-              <span>实际请求模型</span>
-              {fetchedModels.length > 0 && <span />}
-              <span>声明支持 1M</span>
-              {(['sonnet', 'opus', 'fable', 'haiku'] as const).map((role) => {
-                const roleLabel = role === 'sonnet' ? 'Sonnet' : role === 'opus' ? 'Opus' : role === 'fable' ? 'Fable' : 'Haiku';
-                const isHaiku = role === 'haiku';
-                const form = isHaiku
-                  ? editing.claudeForm.haiku
-                  : editing.claudeForm[role];
-                const handleModelSelect = (model: string) => {
-                  if (isHaiku) {
-                    updateClaudeForm({ ...editing.claudeForm, haiku: { ...editing.claudeForm.haiku, displayName: model, requestModel: model } });
-                  } else {
-                    const patch = { displayName: model, requestModel: model } as Partial<typeof form>;
-                    updateClaudeForm({ ...editing.claudeForm, [role]: { ...form, ...patch } });
-                  }
-                };
-                return (
-                  <>
-                    <span className="self-center text-sm text-foreground">{roleLabel}</span>
-                    {isHaiku ? (
-                      <Input aria-label={`${roleLabel} 显示名称`} value={editing.claudeForm.haiku.displayName} onChange={(e) => updateClaudeForm({ ...editing.claudeForm, haiku: { ...editing.claudeForm.haiku, displayName: e.target.value } })} />
-                    ) : (
-                      <Input aria-label={`${roleLabel} 显示名称`} value={form.displayName} onChange={(e) => updateClaudeForm({ ...editing.claudeForm, [role]: { ...form, displayName: e.target.value } })} />
-                    )}
-                    {isHaiku ? (
-                      <Input aria-label={`${roleLabel} 实际请求模型`} value={editing.claudeForm.haiku.requestModel} onChange={(e) => updateClaudeForm({ ...editing.claudeForm, haiku: { ...editing.claudeForm.haiku, requestModel: e.target.value } })} />
-                    ) : (
-                      <Input aria-label={`${roleLabel} 实际请求模型`} value={form.requestModel} onChange={(e) => updateClaudeForm({ ...editing.claudeForm, [role]: { ...form, requestModel: e.target.value } })} />
-                    )}
-                    {fetchedModels.length > 0 && <ModelDropdown models={fetchedModels} onSelect={handleModelSelect} />}
-                    {!isHaiku && (
-                      <label className="flex items-center gap-2">
-                        <Switch checked={(form as ClaudeRoleMapping).supports1m} onCheckedChange={(c) => updateClaudeForm({ ...editing.claudeForm, [role]: { ...form, supports1m: c } } as typeof editing.claudeForm)} />
-                        1M
-                      </label>
-                    )}
-                  </>
-                );
-              })}
-            </div>
-          </div>
-          <div className="space-y-2 border-b border-border/55 pb-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="text-sm font-semibold">自定义模型</h4>
-                <p className="mt-1 text-xs text-foreground/55">添加额外的模型用于对话框选择，不与配置文件联动。</p>
-              </div>
-              <Button type="button" variant="outline" size="sm" onClick={handleAddCustomModel} className="h-7 gap-1">
-                <Plus className="h-3.5 w-3.5" />添加模型
-              </Button>
-            </div>
-            {editing.claudeForm.customModels.length > 0 && (
-              <div className="space-y-2">
-                <div className={`grid gap-2 text-xs text-foreground ${fetchedModels.length > 0 ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px_92px_36px]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_92px_36px]'}`}>
-                  <span>显示名称</span>
-                  <span>实际请求模型</span>
-                  {fetchedModels.length > 0 && <span />}
-                  <span>声明支持 1M</span>
-                  <span />
-                </div>
-                {editing.claudeForm.customModels.map((model, index) => (
-                  <div key={index} className={`grid gap-2 items-center ${fetchedModels.length > 0 ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px_92px_36px]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_92px_36px]'}`}>
-                    <Input
-                      aria-label={`自定义模型 ${index + 1} 显示名称`}
-                      value={model.displayName}
-                      onChange={(e) => handleUpdateCustomModel(index, { displayName: e.target.value })}
-                      placeholder="例如: DeepSeek V4 Flash"
-                    />
-                    <Input
-                      aria-label={`自定义模型 ${index + 1} 实际请求模型`}
-                      value={model.requestModel}
-                      onChange={(e) => handleUpdateCustomModel(index, { requestModel: e.target.value })}
-                      placeholder="例如: deepseek-v4-flash"
-                    />
-                    {fetchedModels.length > 0 && (
-                      <ModelDropdown
-                        models={fetchedModels}
-                        onSelect={(m) => handleUpdateCustomModel(index, {
-                          requestModel: m,
-                          displayName: model.displayName?.trim() ? model.displayName : m,
-                        })}
-                      />
-                    )}
-                    <label className="flex items-center gap-2">
-                      <Switch
-                        checked={model.supports1m ?? false}
-                        onCheckedChange={(c) => handleUpdateCustomModel(index, { supports1m: c })}
-                      />
-                      1M
-                    </label>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 text-muted-foreground hover:text-destructive"
-                      onClick={() => handleRemoveCustomModel(index)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="space-y-1.5">
-            <div className={`grid gap-2 text-xs text-foreground items-center ${fetchedModels.length > 0 ? 'grid-cols-[90px_minmax(0,1fr)_40px_92px]' : 'grid-cols-[90px_minmax(0,1fr)_92px]'}`}>
-              <span>默认兜底模型</span>
-              <Input
-                aria-label="默认兜底模型"
-                value={editing.claudeForm.fallbackModel}
-                onChange={(e) => updateClaudeForm({ ...editing.claudeForm, fallbackModel: e.target.value })}
-              />
-              {fetchedModels.length > 0 && (
-                <ModelDropdown
-                  models={fetchedModels}
-                  onSelect={(model) => updateClaudeForm({ ...editing.claudeForm, fallbackModel: model })}
-                />
-              )}
-              <label className="flex items-center gap-2">
-                <Switch checked={editing.claudeForm.fallbackSupports1m ?? false} onCheckedChange={(c) => updateClaudeForm({ ...editing.claudeForm, fallbackSupports1m: c })} />
-                1M
-              </label>
-            </div>
-            <p className="text-xs text-foreground/55">用于未明确落到 Sonnet、Opus、Fable、Haiku 角色的请求。</p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-type OpenCodeAdvancedOptionsProps = {
-  editing: ProfileDraft;
-  setEditing: React.Dispatch<React.SetStateAction<ProfileDraft | null>>;
-};
-
-function OpenCodeAdvancedOptions({ editing, setEditing }: OpenCodeAdvancedOptionsProps) {
-  const [fetching, setFetching] = useState(false);
-  const [fetchedModels, setFetchedModels] = useState<string[]>([]);
-
-  const handleFetchModels = useCallback(async () => {
-    if (!editing.baseUrl.trim() || !editing.apiKey.trim()) {
-      toast.error('请先填写 API Key 和 Base URL。');
-      return;
-    }
-    setFetching(true);
-    try {
-      const base = editing.baseUrl.replace(/\/$/, '');
-      let res = await fetch(`${base}/v1/models`, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${editing.apiKey}` },
-      });
-      if (res.status === 404 || res.status === 405) {
-        res = await fetch(`${base}/models`, {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${editing.apiKey}` },
-        });
-      }
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
-      }
-      const data = await res.json();
-      const models = (data.data ?? data.models ?? []).map((m: { id: string }) => m.id).filter(Boolean) as string[];
-      setFetchedModels(models);
-      toast.success(`已获取 ${models.length} 个模型。`);
-    } catch (e) {
-      toast.error(`获取模型列表失败: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setFetching(false);
-    }
-  }, [editing.baseUrl, editing.apiKey]);
-
-  const handleAddModelWithSync = useCallback(() => {
-    const newKey = `model-${Date.now()}`;
-    setEditing((prev) => {
-      if (!prev) return prev;
-      const newModelsConfig = { ...prev.modelsConfig, [newKey]: { name: '' } };
-      const config = JSON.parse(prev.advancedConfig || '{}');
-      config.models = newModelsConfig;
-      return { ...prev, modelsConfig: newModelsConfig, advancedConfig: JSON.stringify(config, null, 2) };
-    });
-  }, [setEditing]);
-
-  const handleRemoveModelWithSync = useCallback((key: string) => {
-    setEditing((prev) => {
-      if (!prev) return prev;
-      const newModelsConfig = { ...prev.modelsConfig };
-      delete newModelsConfig[key];
-      const config = JSON.parse(prev.advancedConfig || '{}');
-      config.models = newModelsConfig;
-      return { ...prev, modelsConfig: newModelsConfig, advancedConfig: JSON.stringify(config, null, 2) };
-    });
-  }, [setEditing]);
-
-  const handleModelIdChangeWithSync = useCallback((oldKey: string, newKey: string) => {
-    if (oldKey === newKey) return;
-    setEditing((prev) => {
-      if (!prev) return prev;
-      const next: Record<string, OpenCodeModel> = {};
-      for (const [k, v] of Object.entries(prev.modelsConfig)) {
-        next[k === oldKey ? newKey : k] = v;
-      }
-      const config = JSON.parse(prev.advancedConfig || '{}');
-      config.models = next;
-      return { ...prev, modelsConfig: next, advancedConfig: JSON.stringify(config, null, 2) };
-    });
-  }, [setEditing]);
-
-  const handleModelNameChangeWithSync = useCallback((key: string, name: string) => {
-    setEditing((prev) => {
-      if (!prev) return prev;
-      const newModelsConfig = { ...prev.modelsConfig, [key]: { ...prev.modelsConfig[key], name } };
-      const config = JSON.parse(prev.advancedConfig || '{}');
-      config.models = newModelsConfig;
-      return { ...prev, modelsConfig: newModelsConfig, advancedConfig: JSON.stringify(config, null, 2) };
-    });
-  }, [setEditing]);
-
-  const handleSelectModelFromDropdownWithSync = useCallback((key: string, modelId: string) => {
-    setEditing((prev) => {
-      if (!prev) return prev;
-      const next: Record<string, OpenCodeModel> = {};
-      for (const [k, v] of Object.entries(prev.modelsConfig)) {
-        if (k === key) {
-          next[modelId] = { name: modelId };
-        } else {
-          next[k] = v;
-        }
-      }
-      const config = JSON.parse(prev.advancedConfig || '{}');
-      config.models = next;
-      return { ...prev, modelsConfig: next, advancedConfig: JSON.stringify(config, null, 2) };
-    });
-  }, [setEditing]);
-
-  const handleExtraOptionKeyChangeWithSync = useCallback((oldKey: string, newKey: string) => {
-    if (oldKey === newKey) return;
-    setEditing((prev) => {
-      if (!prev) return prev;
-      const next: Record<string, string> = {};
-      for (const [k, v] of Object.entries(prev.extraOptions)) {
-        next[k === oldKey ? (newKey.trim() || oldKey) : k] = v;
-      }
-      const config = JSON.parse(prev.advancedConfig || '{}');
-      if (!config.options) config.options = {};
-      for (const [k, v] of Object.entries(next)) {
-        const trimmedKey = k.trim();
-        if (trimmedKey && !trimmedKey.startsWith('option-')) {
-          try { config.options[trimmedKey] = JSON.parse(v); } catch { config.options[trimmedKey] = v; }
-        }
-      }
-      return { ...prev, extraOptions: next, advancedConfig: JSON.stringify(config, null, 2) };
-    });
-  }, [setEditing]);
-
-  const handleExtraOptionValueChangeWithSync = useCallback((key: string, value: string) => {
-    setEditing((prev) => {
-      if (!prev) return prev;
-      const newExtraOptions = { ...prev.extraOptions, [key]: value };
-      const config = JSON.parse(prev.advancedConfig || '{}');
-      if (!config.options) config.options = {};
-      const trimmedKey = key.trim();
-      if (trimmedKey && !trimmedKey.startsWith('option-')) {
-        try { config.options[trimmedKey] = JSON.parse(value); } catch { config.options[trimmedKey] = value; }
-      }
-      return { ...prev, extraOptions: newExtraOptions, advancedConfig: JSON.stringify(config, null, 2) };
-    });
-  }, [setEditing]);
-
-  const handleAddExtraOptionWithSync = useCallback(() => {
-    const newKey = `option-${Date.now()}`;
-    setEditing((prev) => {
-      if (!prev) return prev;
-      const newExtraOptions = { ...prev.extraOptions, [newKey]: '' };
-      return { ...prev, extraOptions: newExtraOptions };
-    });
-  }, [setEditing]);
-
-  const handleRemoveExtraOptionWithSync = useCallback((key: string) => {
-    setEditing((prev) => {
-      if (!prev) return prev;
-      const newExtraOptions = { ...prev.extraOptions };
-      delete newExtraOptions[key];
-      const config = JSON.parse(prev.advancedConfig || '{}');
-      if (config.options) {
-        const trimmedKey = key.trim();
-        if (trimmedKey && !trimmedKey.startsWith('option-')) {
-          delete config.options[trimmedKey];
-        }
-      }
-      return { ...prev, extraOptions: newExtraOptions, advancedConfig: JSON.stringify(config, null, 2) };
-    });
-  }, [setEditing]);
-
-  return (
-    <div className="space-y-4">
-      {/* Models Editor */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-medium text-foreground">模型配置 <span className="text-destructive">*</span></label>
-          <div className="flex gap-1">
-            <Button type="button" variant="outline" size="sm" onClick={handleFetchModels} disabled={fetching || !editing.baseUrl.trim() || !editing.apiKey.trim()} className="h-7 gap-1">
-              {fetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-              获取模型
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={handleAddModelWithSync} className="h-7 gap-1">
-              <Plus className="h-3.5 w-3.5" />添加模型
-            </Button>
-          </div>
-        </div>
-        {Object.keys(editing.modelsConfig).length === 0 ? (
-          <p className="text-xs text-destructive py-2">至少需要配置一个模型。</p>
-        ) : (
-          <div className="space-y-2">
-            <div className={`grid gap-2 text-xs font-medium text-muted-foreground ${fetchedModels.length > 0 ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px_36px]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_36px]'}`}>
-              <span>显示名称</span>
-              <span>实际请求模型</span>
-              {fetchedModels.length > 0 && <span />}
-              <span />
-            </div>
-            {Object.entries(editing.modelsConfig).map(([key, model], index) => (
-              <div key={index} className={`grid gap-2 items-center ${fetchedModels.length > 0 ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px_36px]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_36px]'}`}>
-                <Input value={model.name ?? ''} onChange={(e) => handleModelNameChangeWithSync(key, e.target.value)} placeholder="显示名称" />
-                <div className="flex gap-1">
-                  <Input value={key} onChange={(e) => handleModelIdChangeWithSync(key, e.target.value)} placeholder="模型 ID" className="flex-1" />
-                  {fetchedModels.length > 0 && <ModelDropdown models={fetchedModels} onSelect={(id) => handleSelectModelFromDropdownWithSync(key, id)} />}
-                </div>
-                <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-destructive" onClick={() => handleRemoveModelWithSync(key)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-        <p className="text-xs text-muted-foreground">模型 ID 是 API 标识符，显示名称用于 UI 展示。</p>
-      </div>
-
-      {/* Extra Options */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-medium text-foreground">额外选项</label>
-          <Button type="button" variant="outline" size="sm" onClick={handleAddExtraOptionWithSync} className="h-7 gap-1">
-            <Plus className="h-3.5 w-3.5" />添加
-          </Button>
-        </div>
-        {Object.keys(editing.extraOptions).length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
-              <span className="flex-1">键名</span>
-              <span className="flex-1">值</span>
-              <span className="w-9" />
-            </div>
-            {Object.entries(editing.extraOptions).map(([key, value]) => (
-              <div key={key} className="flex items-center gap-2">
-                <Input value={key.startsWith('option-') ? '' : key} onChange={(e) => { const v = e.target.value.trim(); if (v && v !== key) handleExtraOptionKeyChangeWithSync(key, v); }} placeholder="timeout" className="flex-1" />
-                <Input value={value} onChange={(e) => handleExtraOptionValueChangeWithSync(key, e.target.value)} placeholder="600000" className="flex-1" />
-                <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-destructive" onClick={() => handleRemoveExtraOptionWithSync(key)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-        <p className="text-xs text-muted-foreground">配置额外的 SDK 选项，如 timeout、setCacheKey 等。值会自动解析类型。</p>
-      </div>
-    </div>
-  );
+  return [
+    ...endpoints,
+    {
+      protocol,
+      base_url: baseUrl,
+      api_key_override: null,
+      codex_needs_proxy: protocol === 'openai_compatible' ? true : null,
+    },
+  ];
 }
 
 export function ProviderConfigPanel() {
-  const { config, upsertAgentProfile, activateAgentProfile, activateDefaultClaudeSupplier, activateDefaultCodexSupplier, activateDefaultOpenCodeSupplier, deleteAgentProfile, testAgentProfile } = useSettingsStore();
-  const [agentKind, setAgentKind] = useState<ProfileAgentKind>('claude_code');
-  const [editing, setEditing] = useState<ProfileDraft | null>(null);
-  const [showKey, setShowKey] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [jsonError, setJsonError] = useState('');
-  const [fetchedModels, setFetchedModels] = useState<string[]>([]);
-  const [fetchingModels, setFetchingModels] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
-  const profiles = useMemo(() => (config?.agent_profile_registry?.profiles ?? []).filter((profile) => profile.agent_kind === agentKind), [agentKind, config?.agent_profile_registry?.profiles]);
-  const activeId = config?.agent_profile_registry?.active_profile_ids?.[agentKind] ?? null;
-  const agent = AGENTS.find((item) => item.id === agentKind)!;
+  const {
+    config,
+    fetchConfig,
+    upsertModelProvider,
+    deleteModelProvider,
+    setActiveProvider,
+    setModelProviderEnabled,
+    instantiateBuiltinTemplate,
+    testModelProvider,
+  } = useSettingsStore();
 
-  const isUpdatingBaseUrlRef = useRef(false);
-  const isUpdatingModelNameRef = useRef(false);
+  const providers = config?.model_providers ?? [];
+  const activeId = config?.active_provider_id ?? null;
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ModelProvider | null>(null);
+  const [templates, setTemplates] = useState<BuiltinProviderTemplate[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState('');
 
-  // API Key → auth.json sync
-  const handleCodexApiKeyChange = useCallback((key: string) => {
-    if (!editing) return;
-    const trimmed = key.trim();
-    try {
-      const auth = JSON.parse(editing.authJson || '{}');
-      auth.OPENAI_API_KEY = trimmed;
-      setEditing({ ...editing, apiKey: trimmed, authJson: JSON.stringify(auth, null, 2) });
-    } catch {
-      setEditing({ ...editing, apiKey: trimmed });
-    }
-  }, [editing, setEditing]);
-
-  // Base URL → config.toml sync
-  const handleCodexBaseUrlChange = useCallback((url: string) => {
-    if (!editing) return;
-    const sanitized = url.trim();
-    isUpdatingBaseUrlRef.current = true;
-    setEditing({ ...editing, baseUrl: sanitized, configToml: setCodexBaseUrl(editing.configToml, sanitized) });
-    setTimeout(() => { isUpdatingBaseUrlRef.current = false; }, 0);
-  }, [editing, setEditing]);
-
-  // Default model → config.toml sync
-  const handleCodexDefaultModelChange = useCallback((model: string) => {
-    if (!editing) return;
-    const sanitized = model.trim();
-    isUpdatingModelNameRef.current = true;
-    setEditing({ ...editing, defaultModel: sanitized, configToml: setCodexModelName(editing.configToml, sanitized) });
-    setTimeout(() => { isUpdatingModelNameRef.current = false; }, 0);
-  }, [editing, setEditing]);
-
-  // Fetch models for Codex default model dropdown
-  const fetchCodexModels = useCallback(async () => {
-    if (!editing) return;
-    if (!editing.baseUrl.trim() || !editing.apiKey.trim()) {
-      toast.error('请先填写 API Key 和 Base URL。');
-      return;
-    }
-    setFetchingModels(true);
-    try {
-      const base = editing.baseUrl.replace(/\/$/, '');
-      let res = await fetch(`${base}/v1/models`, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${editing.apiKey}` },
-      });
-      if (res.status === 404 || res.status === 405) {
-        res = await fetch(`${base}/models`, {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${editing.apiKey}` },
-        });
-      }
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
-      }
-      const data = await res.json();
-      const models = (data.data ?? data.models ?? []).map((m: { id: string }) => m.id).filter(Boolean) as string[];
-      setFetchedModels(models);
-      toast.success(`已获取 ${models.length} 个模型。`);
-    } catch (e) {
-      toast.error(`获取模型列表失败: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setFetchingModels(false);
-    }
-  }, [editing]);
-
-  // config.toml editor change → extract Base URL and model name back to form
-  const handleCodexConfigTomlChange = useCallback((value: string) => {
-    if (!editing) return;
-    setEditing({ ...editing, configToml: value });
-    if (!isUpdatingBaseUrlRef.current) {
-      const extracted = extractCodexBaseUrl(value) || '';
-      if (extracted !== editing.baseUrl) {
-        setEditing((prev) => prev ? { ...prev, baseUrl: extracted } : prev);
-      }
-    }
-    if (!isUpdatingModelNameRef.current) {
-      const extractedModel = extractCodexModelName(value) || '';
-      if (extractedModel !== editing.defaultModel) {
-        setEditing((prev) => prev ? { ...prev, defaultModel: extractedModel } : prev);
-      }
-    }
-  }, [editing, setEditing]);
-
-  // OpenCode: API Key → advancedConfig.options.apiKey sync
-  const handleOpenCodeApiKeyChange = useCallback((key: string) => {
-    if (!editing) return;
-    try {
-      const config = JSON.parse(editing.advancedConfig || '{}');
-      if (!config.options) config.options = {};
-      config.options.apiKey = key;
-      setEditing({ ...editing, apiKey: key, advancedConfig: JSON.stringify(config, null, 2) });
-    } catch {
-      setEditing({ ...editing, apiKey: key });
-    }
-  }, [editing, setEditing]);
-
-  // OpenCode: Base URL → advancedConfig.options.baseURL sync
-  const handleOpenCodeBaseUrlChange = useCallback((url: string) => {
-    if (!editing) return;
-    try {
-      const config = JSON.parse(editing.advancedConfig || '{}');
-      if (!config.options) config.options = {};
-      config.options.baseURL = url;
-      setEditing({ ...editing, baseUrl: url, advancedConfig: JSON.stringify(config, null, 2) });
-    } catch {
-      setEditing({ ...editing, baseUrl: url });
-    }
-  }, [editing, setEditing]);
-
-  // OpenCode: advancedConfig JSON change → extract apiKey, baseUrl, modelsConfig, etc.
-  const handleOpenCodeJsonChange = useCallback((value: string) => {
-    if (!editing) return;
-    try {
-      const parsed = JSON.parse(value);
-      const options = parsed.options || {};
-      const models = parsed.models || {};
-      const extra: Record<string, string> = {};
-      for (const [k, v] of Object.entries(options)) {
-        if (k === 'apiKey' || k === 'baseURL') continue;
-        extra[k] = typeof v === 'string' ? v : JSON.stringify(v);
-      }
-      const npm = parsed.npm || OPENCODE_DEFAULT_NPM;
-      const apiKey = typeof options.apiKey === 'string' ? options.apiKey : '';
-      const baseUrl = typeof options.baseURL === 'string' ? options.baseURL : '';
-      setEditing((prev) => prev ? {
-        ...prev,
-        advancedConfig: value,
-        apiKey,
-        baseUrl,
-        npmPackage: npm,
-        modelsConfig: models,
-        extraOptions: extra,
-      } : prev);
-    } catch {
-      setEditing((prev) => prev ? { ...prev, advancedConfig: value } : prev);
-    }
-  }, [editing, setEditing]);
-
-  // On load: extract Base URL from config.toml if editing an existing profile
   useEffect(() => {
-    if (!editing || agentKind !== 'codex') return;
-    const extracted = extractCodexBaseUrl(editing.configToml);
-    if (extracted && extracted !== editing.baseUrl) {
-      setEditing((prev) => prev ? { ...prev, baseUrl: extracted } : prev);
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    void fetchConfig();
+    void configApi.listBuiltinProviderTemplates().then(setTemplates).catch(() => setTemplates([]));
+  }, [fetchConfig]);
 
-  const run = async (action: () => Promise<void>, success: string) => {
-    setBusy(true);
+  useEffect(() => {
+    if (!selectedId && providers[0]) {
+      setSelectedId(providers[0].id);
+    }
+  }, [providers, selectedId]);
+
+  useEffect(() => {
+    const selected = providers.find((provider) => provider.id === selectedId) ?? null;
+    setDraft(selected ? structuredClone(selected) : null);
+  }, [providers, selectedId]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return providers;
+    return providers.filter((provider) => provider.name.toLowerCase().includes(q));
+  }, [providers, search]);
+
+  const anthropicUrl =
+    draft?.endpoints.find((endpoint) => endpoint.protocol === 'anthropic')?.base_url ?? '';
+  const openaiUrl =
+    draft?.endpoints.find((endpoint) => endpoint.protocol === 'openai_compatible')?.base_url ?? '';
+  const modelsText = (draft?.models ?? []).map((model) => model.id).join('\n');
+
+  async function handleSave() {
+    if (!draft) return;
+    const cleaned: ModelProvider = {
+      ...draft,
+      endpoints: draft.endpoints.filter((endpoint) => endpoint.base_url.trim().length > 0),
+    };
+    if (cleaned.endpoints.length === 0) {
+      toast.error('至少填写一个协议端点 URL');
+      return;
+    }
+    setSaving(true);
     try {
-      await action();
-      toast.success(success);
+      await upsertModelProvider(cleaned);
+      toast.success('供应商已保存');
+      setSelectedId(cleaned.id);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(String(error));
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
-  };
-  const updateClaudeForm = (nextForm: ClaudeSettingsForm) => {
-    if (!editing) return;
-    let current: ClaudeSettings;
+  }
+
+  async function handleAddCustom() {
+    const provider = emptyCustomProvider();
+    setSelectedId(provider.id);
+    setDraft(provider);
+  }
+
+  async function handleInstantiate(templateId: string) {
     try {
-      current = parseClaudeSettingsDraft(editing.advancedConfig).settings;
-    } catch {
-      current = structuredClone(CLAUDE_SETTINGS_DEFAULT);
+      const provider = await instantiateBuiltinTemplate(templateId);
+      setSelectedId(provider.id);
+      toast.success(`已添加 ${provider.name}，请填写 API Key`);
+    } catch (error) {
+      toast.error(String(error));
     }
-    const settings = applyClaudeFormToSettings(current, nextForm);
-    setEditing({
-      ...editing,
-      apiKey: nextForm.apiKey,
-      baseUrl: nextForm.baseUrl,
-      models: [nextForm.fallbackModel, nextForm.sonnet.requestModel, nextForm.opus.requestModel, nextForm.fable.requestModel, nextForm.haiku.requestModel, ...nextForm.customModels.map((m) => m.requestModel)].filter(Boolean).join('\n'),
-      claudeForm: nextForm,
-      advancedConfig: JSON.stringify(settings, null, 2),
-    });
-  };
-  const formatJson = useCallback(() => {
-    if (!editing) return;
+  }
+
+  async function handleDelete() {
+    if (!draft) return;
+    if (!window.confirm(`确认删除供应商「${draft.name}」？`)) return;
     try {
-      const parsed = JSON.parse(editing.advancedConfig);
-      const formatted = JSON.stringify(parsed, null, 2);
-      setEditing({ ...editing, advancedConfig: formatted });
-      setJsonError('');
-    } catch (e) {
-      setJsonError(`JSON 格式错误: ${e instanceof Error ? e.message : String(e)}`);
+      await deleteModelProvider(draft.id);
+      setSelectedId(null);
+      toast.success('已删除');
+    } catch (error) {
+      toast.error(String(error));
     }
-  }, [editing, setEditing]);
-  const handleJsonChange = useCallback((value: string) => {
-    setEditing((prev) => {
-      if (!prev) return prev;
-      try {
-        const parsed = parseClaudeSettingsDraft(value);
-        setJsonError('');
-        return { ...prev, advancedConfig: value, claudeForm: parsed.form };
-      } catch {
-        return { ...prev, advancedConfig: value };
-      }
-    });
-  }, [setEditing]);
-  const fetchModels = useCallback(async () => {
-    if (!editing) return;
-    const baseUrl = editing.claudeForm.baseUrl || 'https://api.anthropic.com';
-    const apiKey = editing.claudeForm.apiKey;
-    if (!apiKey) {
-      toast.error('请先填写 API Key。');
-      return;
-    }
-    setFetchingModels(true);
-    try {
-      const base = baseUrl.replace(/\/$/, '');
-      // Try /v1/models first (Anthropic official), then /models (common proxy pattern)
-      let res = await fetch(`${base}/v1/models`, {
-        method: 'GET',
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-      });
-      if (res.status === 404 || res.status === 405) {
-        res = await fetch(`${base}/models`, {
-          method: 'GET',
-          headers: {
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-          },
-        });
-      }
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
-      }
-      const data = await res.json();
-      const models = (data.data ?? data.models ?? []).map((m: { id: string }) => m.id).filter(Boolean) as string[];
-      setFetchedModels(models);
-      toast.success(`已获取 ${models.length} 个模型。`);
-    } catch (e) {
-      toast.error(`获取模型列表失败: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setFetchingModels(false);
-    }
-  }, [editing]);
-  const save = async () => {
-    if (!editing) return;
-    if (!editing.name.trim()) {
-      toast.error('请填写供应商名称。');
-      return;
-    }
-    if (agentKind !== 'claude_code' && !editing.baseUrl.trim()) {
-      toast.error('请填写 Base URL。');
-      return;
-    }
-    if (agentKind === 'opencode') {
-      if (!editing.providerKey.trim()) {
-        toast.error('请填写供应商标识。');
-        return;
-      }
-      if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(editing.providerKey.trim())) {
-        toast.error('供应商标识只能包含小写字母、数字和连字符，且不能以连字符开头或结尾。');
-        return;
-      }
-      const isDuplicate = profiles.some((p) => p.id !== editing.id && p.native_config.type === 'opencode' && (p.native_config as { provider_key?: string }).provider_key === editing.providerKey.trim());
-      if (isDuplicate) {
-        toast.error('供应商标识已存在，请使用其他标识。');
-        return;
-      }
-    }
-    if (agentKind === 'opencode' && Object.keys(editing.modelsConfig).length === 0) {
-      toast.error('请至少配置一个模型。');
-      return;
-    }
-    let draftToSave = editing;
-    if (agentKind === 'opencode') {
-      const filtered = Object.fromEntries(
-        Object.entries(draftToSave.modelsConfig).filter(([id]) => id.trim())
-      );
-      if (Object.keys(filtered).length !== Object.keys(draftToSave.modelsConfig).length) {
-        draftToSave = { ...draftToSave, modelsConfig: filtered };
-        setEditing(draftToSave);
-      }
-    }
-    if (agentKind === 'claude_code') {
-      const updatedCustomModels = draftToSave.claudeForm.customModels
-        .filter((m) => m.requestModel.trim())
-        .map((m) => ({ ...m, displayName: m.displayName.trim() || m.requestModel.trim() }));
-      if (JSON.stringify(updatedCustomModels) !== JSON.stringify(draftToSave.claudeForm.customModels)) {
-        const nextForm = { ...draftToSave.claudeForm, customModels: updatedCustomModels };
-        const currentSettings = parseClaudeSettingsDraft(draftToSave.advancedConfig).settings;
-        const updatedSettings = applyClaudeFormToSettings(currentSettings, nextForm);
-        draftToSave = { ...draftToSave, claudeForm: nextForm, advancedConfig: JSON.stringify(updatedSettings, null, 2) };
-        setEditing(draftToSave);
-      }
-    }
-    if (agentKind === 'codex') {
-      const filteredCatalog = draftToSave.modelCatalog.filter((m) => m.model.trim());
-      if (filteredCatalog.length !== draftToSave.modelCatalog.length) {
-        draftToSave = { ...draftToSave, modelCatalog: filteredCatalog };
-        setEditing(draftToSave);
-      }
-    }
-    try {
-      profileToUpsert(agentKind, draftToSave);
-    } catch {
-      toast.error(agentKind === 'claude_code' ? '配置 JSON 必须有效，且 env 必须是对象。' : '高级配置必须是有效的 JSON。');
-      return;
-    }
-    await run(async () => { await upsertAgentProfile(profileToUpsert(agentKind, draftToSave)); setEditing(null); }, '供应商已保存。');
-  };
-  const test = async (profile: AgentProviderProfile) => {
-    await run(async () => { await testAgentProfile(agentKind, profile.id); }, `“${profile.name}”连接正常。`);
-  };
+  }
 
   return (
-    <div className="space-y-6">
-      <div role="tablist" aria-label="智能体供应商" className="inline-flex h-11 w-full items-center justify-start gap-1 rounded-xl bg-muted/55 p-1">
-        {AGENTS.map((item) => <button key={item.id} type="button" role="tab" aria-selected={agentKind === item.id} onClick={() => { setAgentKind(item.id); setEditing(null); }} className={cn('inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors', agentKind === item.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}><AgentTabIcon kind={item.id} />{item.label}</button>)}
-      </div>
-      <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-foreground/65">{agent.description} 切换供应商或模型会影响之后新建或重新启动的会话，不会热更新正在运行的会话。</div>
-      {editing ? (
-        <div className="space-y-5 rounded-2xl border border-border/55 bg-card/35 p-5">
-          <div className="flex items-center justify-between gap-3"><h3 className="text-lg font-semibold">{profiles.some((profile) => profile.id === editing.id) ? '编辑供应商' : '新建供应商'}</h3><Button variant="ghost" size="sm" onClick={() => setEditing(null)}>返回列表</Button></div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="space-y-1.5 text-xs text-foreground">供应商名称<Input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} placeholder="如：Claude 官方" /></label>
-            <label className="space-y-1.5 text-xs text-foreground">备注（可选）<Input value={editing.note} onChange={(event) => setEditing({ ...editing, note: event.target.value })} placeholder="此供应商的用途说明" /></label>
+    <div className="flex h-full min-h-0 gap-4">
+      <div className="flex w-64 shrink-0 flex-col gap-3 border-r border-border/60 pr-3">
+        <Input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="搜索供应商"
+        />
+        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+          {filtered.map((provider) => {
+            const active = provider.id === activeId;
+            const selected = provider.id === selectedId;
+            return (
+              <button
+                key={provider.id}
+                type="button"
+                onClick={() => setSelectedId(provider.id)}
+                className={cn(
+                  'flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm',
+                  selected ? 'bg-primary/10 text-foreground' : 'hover:bg-muted/50 text-muted-foreground',
+                )}
+              >
+                <span className="truncate font-medium text-foreground">{provider.name}</span>
+                <span className="flex items-center gap-1">
+                  {active && <Check className="h-3.5 w-3.5 text-primary" />}
+                  <span
+                    className={cn(
+                      'h-2 w-2 rounded-full',
+                      provider.enabled && provider.api_key.trim() ? 'bg-emerald-500' : 'bg-muted-foreground/40',
+                    )}
+                  />
+                </span>
+              </button>
+            );
+          })}
+          {filtered.length === 0 && (
+            <div className="px-2 py-6 text-center text-xs text-muted-foreground">暂无供应商</div>
+          )}
+        </div>
+        <div className="space-y-2 border-t border-border/60 pt-3">
+          <Button variant="outline" className="w-full justify-start" onClick={() => void handleAddCustom()}>
+            <Plus className="mr-2 h-4 w-4" />
+            添加自定义
+          </Button>
+          <div className="max-h-40 space-y-1 overflow-y-auto">
+            {templates.map((template) => (
+              <Button
+                key={template.id}
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start text-xs"
+                onClick={() => void handleInstantiate(template.id)}
+              >
+                + {template.name}
+              </Button>
+            ))}
           </div>
-          {agentKind === 'claude_code' ? <>
-            <label className="block space-y-1.5 text-xs text-foreground">API Key<div className="relative"><Input aria-label="API Key" type={showKey ? 'text' : 'password'} value={editing.claudeForm.apiKey} onChange={(event) => updateClaudeForm({ ...editing.claudeForm, apiKey: event.target.value })} className="pr-10" /><button type="button" aria-label={showKey ? '隐藏 API Key' : '显示 API Key'} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></label>
-            <label className="block space-y-1.5 text-xs text-foreground">Anthropic Base URL<Input value={editing.claudeForm.baseUrl} onChange={(event) => updateClaudeForm({ ...editing.claudeForm, baseUrl: event.target.value })} placeholder="https://api.anthropic.com" /></label>
-            <ClaudeAdvancedOptions editing={editing} updateClaudeForm={updateClaudeForm} fetchedModels={fetchedModels} fetchingModels={fetchingModels} fetchModels={fetchModels} />
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-foreground">配置 JSON</label>
-                <Button type="button" variant="ghost" size="sm" onClick={formatJson}>
-                  <Wand className="h-4 w-4 mr-1" />
-                  格式化
-                </Button>
+        </div>
+      </div>
+
+      <div className="min-w-0 flex-1 overflow-y-auto pr-1">
+        {!draft ? (
+          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+            从左侧选择或添加供应商
+          </div>
+        ) : (
+          <div className="mx-auto flex max-w-2xl flex-col gap-5 pb-8">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">{draft.name}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  CodeMUX 自维护配置；对话时动态注入 SDK，不写入智能体原生配置文件。
+                </p>
               </div>
-              <div className="rounded-lg border overflow-hidden">
-                <CodeMirror
-                  value={editing.advancedConfig}
-                  minHeight="120px"
-                  extensions={[json(), EditorView.lineWrapping]}
-                  theme={baseTheme}
-                  onChange={handleJsonChange}
+              <div className="flex items-center gap-2">
+                <label htmlFor="provider-enabled" className="text-xs text-muted-foreground">
+                  启用
+                </label>
+                <Switch
+                  id="provider-enabled"
+                  checked={draft.enabled}
+                  onCheckedChange={(enabled) => {
+                    setDraft({ ...draft, enabled });
+                    if (providers.some((item) => item.id === draft.id)) {
+                      void setModelProviderEnabled(draft.id, enabled).catch((error) =>
+                        toast.error(String(error)),
+                      );
+                    }
+                  }}
                 />
               </div>
-              {jsonError && <p className="text-xs text-destructive">{jsonError}</p>}
             </div>
-          </> : agentKind === 'codex' ? <>
-            <label className="block space-y-1.5 text-xs text-foreground">API Key<div className="relative"><Input aria-label="API Key" type={showKey ? 'text' : 'password'} value={editing.apiKey} onChange={(event) => handleCodexApiKeyChange(event.target.value)} placeholder="输入 API Key" className="pr-10" /><button type="button" aria-label={showKey ? '隐藏 API Key' : '显示 API Key'} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></label>
-            <label className="block space-y-1.5 text-xs text-foreground">{agent.baseUrlLabel}<Input value={editing.baseUrl} onChange={(event) => handleCodexBaseUrlChange(event.target.value)} placeholder={agent.placeholder} /></label>
-            <label className="block space-y-1.5 text-xs text-foreground">默认模型<div className="flex gap-1"><Input value={editing.defaultModel} onChange={(event) => handleCodexDefaultModelChange(event.target.value)} placeholder="如：gpt-5.6" className="flex-1" /><Button type="button" variant="outline" size="sm" onClick={fetchCodexModels} disabled={fetchingModels || !editing.baseUrl.trim() || !editing.apiKey.trim()} className="h-9 shrink-0 gap-1">{fetchingModels ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}获取模型</Button>{fetchedModels.length > 0 && <Select value="" onValueChange={(v) => handleCodexDefaultModelChange(v)}><SelectTrigger className="h-9 w-9 shrink-0 justify-center px-1.5" aria-label="选择模型" /><SelectContent>{fetchedModels.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent></Select>}</div></label>
-            <CodexAdvancedOptions editing={editing} setEditing={setEditing} baseUrl={editing.baseUrl} apiKey={editing.apiKey} />
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-foreground">auth.json (JSON) <span className="text-destructive">*</span></label>
-                <Button type="button" variant="ghost" size="sm" onClick={() => { if (!editing) return; try { const formatted = JSON.stringify(JSON.parse(editing.authJson), null, 2); setEditing({ ...editing, authJson: formatted }); } catch { /* ignore */ } }}>
-                  <Wand className="h-4 w-4 mr-1" />格式化
-                </Button>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">名称</label>
+              <Input
+                value={draft.name}
+                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">API Key</label>
+              <Input
+                type="password"
+                value={draft.api_key}
+                onChange={(event) => setDraft({ ...draft, api_key: event.target.value })}
+                placeholder="必填；空值视为未配置"
+              />
+            </div>
+
+            <div className="grid gap-3 rounded-xl border border-border/60 p-4">
+              <div className="text-sm font-medium">协议端点</div>
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">{endpointLabel('anthropic')} URL</label>
+                <Input
+                  value={anthropicUrl}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      endpoints: ensureEndpoint(draft.endpoints, 'anthropic', event.target.value),
+                    })
+                  }
+                  placeholder="https://api.example.com/anthropic"
+                />
               </div>
-              <div className="rounded-lg border overflow-hidden">
-                <CodeMirror value={editing.authJson} minHeight="80px" extensions={[json(), EditorView.lineWrapping]} theme={baseTheme} onChange={(value) => setEditing({ ...editing, authJson: value })} />
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">{endpointLabel('openai_compatible')} URL</label>
+                <Input
+                  value={openaiUrl}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      endpoints: ensureEndpoint(
+                        draft.endpoints,
+                        'openai_compatible',
+                        event.target.value,
+                      ),
+                    })
+                  }
+                  placeholder="https://api.example.com/v1"
+                />
+              </div>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={Boolean(
+                    draft.endpoints.find((item) => item.protocol === 'openai_compatible')
+                      ?.codex_needs_proxy,
+                  )}
+                  onChange={(event) => {
+                    setDraft({
+                      ...draft,
+                      endpoints: draft.endpoints.map((endpoint) =>
+                        endpoint.protocol === 'openai_compatible'
+                          ? { ...endpoint, codex_needs_proxy: event.target.checked }
+                          : endpoint,
+                      ),
+                    });
+                  }}
+                />
+                Codex 需要兼容代理（codex_needs_proxy）
+              </label>
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">模型列表（每行一个 model id）</label>
+              <textarea
+                className="min-h-28 rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+                value={modelsText}
+                onChange={(event) => {
+                  const models: ProviderModel[] = event.target.value
+                    .split('\n')
+                    .map((line) => line.trim())
+                    .filter(Boolean)
+                    .map((id) => ({ id, name: id }));
+                  const default_model =
+                    models.some((model) => model.id === draft.default_model)
+                      ? draft.default_model
+                      : models[0]?.id ?? '';
+                  setDraft({ ...draft, models, default_model });
+                }}
+              />
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">默认模型</label>
+                <select
+                  className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                  value={draft.default_model}
+                  onChange={(event) => setDraft({ ...draft, default_model: event.target.value })}
+                >
+                  {draft.models.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name || model.id}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-foreground">config.toml (TOML)</label>
-              <div className="rounded-lg border overflow-hidden">
-                <CodeMirror value={editing.configToml} minHeight="80px" extensions={[StreamLanguage.define(toml), EditorView.lineWrapping]} theme={baseTheme} onChange={handleCodexConfigTomlChange} />
-              </div>
+
+            <div className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              <div>Claude Code：{isProviderUsable(draft, 'claude_code') ? '可用' : providerUnusableReason(draft, 'claude_code')}</div>
+              <div>Codex：{isProviderUsable(draft, 'codex') ? '可用' : providerUnusableReason(draft, 'codex')}</div>
+              <div>OpenCode：{isProviderUsable(draft, 'opencode') ? '可用' : providerUnusableReason(draft, 'opencode')}</div>
             </div>
-          </> : <>
-            <label className="block space-y-1.5 text-xs text-foreground">供应商标识<Input value={editing.providerKey} onChange={(event) => setEditing({ ...editing, providerKey: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })} placeholder="如：my-provider" disabled={!!editing.id && profiles.some((p) => p.id === editing.id)} /></label>
-            <div className="space-y-1.5">
-              <label className="text-xs text-foreground">接口格式</label>
-              <Select value={editing.npmPackage} onValueChange={(v) => setEditing({ ...editing, npmPackage: v })}>
-                <SelectTrigger className="w-full"><span className="text-sm">{OPENCODE_NPM_PACKAGES.find((p) => p.value === editing.npmPackage)?.label ?? editing.npmPackage}</span></SelectTrigger>
-                <SelectContent>
-                  {OPENCODE_NPM_PACKAGES.map((pkg) => <SelectItem key={pkg.value} value={pkg.value}>{pkg.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">选择与供应商匹配的 AI SDK 包。</p>
+
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => void handleSave()} disabled={saving}>
+                保存
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={!providers.some((item) => item.id === draft.id)}
+                onClick={() => void setActiveProvider(draft.id).then(() => toast.success('已设为 Active Provider')).catch((error) => toast.error(String(error)))}
+              >
+                设为当前供应商
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!providers.some((item) => item.id === draft.id)}
+                onClick={() =>
+                  void testModelProvider(draft.id)
+                    .then((message) => toast.success(message))
+                    .catch((error) => toast.error(String(error)))
+                }
+              >
+                测试连接
+              </Button>
+              <Button
+                variant="ghost"
+                className="text-destructive"
+                disabled={!providers.some((item) => item.id === draft.id)}
+                onClick={() => void handleDelete()}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                删除
+              </Button>
             </div>
-            <label className="block space-y-1.5 text-xs text-foreground">API Key<div className="relative"><Input aria-label="API Key" type={showKey ? 'text' : 'password'} value={editing.apiKey} onChange={(event) => handleOpenCodeApiKeyChange(event.target.value)} placeholder="输入 API Key" className="pr-10" /><button type="button" aria-label={showKey ? '隐藏 API Key' : '显示 API Key'} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></label>
-            <label className="block space-y-1.5 text-xs text-foreground">{agent.baseUrlLabel}<Input value={editing.baseUrl} onChange={(event) => handleOpenCodeBaseUrlChange(event.target.value)} placeholder={agent.placeholder} /></label>
-            <OpenCodeAdvancedOptions editing={editing} setEditing={setEditing} />
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-foreground">配置 JSON</label>
-                <Button type="button" variant="ghost" size="sm" onClick={() => { if (!editing) return; try { const formatted = JSON.stringify(JSON.parse(editing.advancedConfig), null, 2); setEditing({ ...editing, advancedConfig: formatted }); } catch { /* ignore */ } }}>
-                  <Wand className="h-4 w-4 mr-1" />格式化
-                </Button>
-              </div>
-              <div className="rounded-lg border overflow-hidden">
-                <CodeMirror value={editing.advancedConfig} minHeight="120px" extensions={[json(), EditorView.lineWrapping]} theme={baseTheme} onChange={handleOpenCodeJsonChange} />
-              </div>
-            </div>
-          </>}
-          <div className="flex justify-end gap-2 border-t border-border/45 pt-4"><Button variant="outline" onClick={() => setEditing(null)}>取消</Button><Button disabled={busy} onClick={save}>{busy && <Loader2 className="mr-2 size-4 animate-spin" />}保存供应商</Button></div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(235px,1fr))] gap-3">
-          {agentKind === 'claude_code' && <div className={cn('flex min-h-42 flex-col gap-3 rounded-xl border p-4', !activeId ? 'border-primary/45 bg-primary/5' : 'border-border/55 bg-muted/20')}><div><div className="font-medium">默认供应商</div><p className="mt-1 text-xs text-muted-foreground">直接使用 ~/.claude/settings.json</p></div>{!activeId && <span className="w-fit rounded-full bg-primary/12 px-2 py-0.5 text-ui-caption text-primary">当前使用</span>}<div className="mt-auto"><Button size="sm" variant="outline" disabled={busy || !activeId} onClick={() => run(() => activateDefaultClaudeSupplier(), '已切换到默认供应商。')}>切换</Button></div></div>}
-          {agentKind === 'codex' && <div className={cn('flex min-h-42 flex-col gap-3 rounded-xl border p-4', !activeId ? 'border-primary/45 bg-primary/5' : 'border-border/55 bg-muted/20')}><div><div className="font-medium">默认供应商</div><p className="mt-1 text-xs text-muted-foreground">直接使用 ~/.codex/ 配置</p></div>{!activeId && <span className="w-fit rounded-full bg-primary/12 px-2 py-0.5 text-ui-caption text-primary">当前使用</span>}<div className="mt-auto"><Button size="sm" variant="outline" disabled={busy || !activeId} onClick={() => run(() => activateDefaultCodexSupplier(), '已切换到默认供应商。')}>切换</Button></div></div>}
-          {agentKind === 'opencode' && <div className={cn('flex min-h-42 flex-col gap-3 rounded-xl border p-4', !activeId ? 'border-primary/45 bg-primary/5' : 'border-border/55 bg-muted/20')}><div><div className="font-medium">默认供应商</div><p className="mt-1 text-xs text-muted-foreground">直接使用 ~/.config/opencode/opencode.json</p></div>{!activeId && <span className="w-fit rounded-full bg-primary/12 px-2 py-0.5 text-ui-caption text-primary">当前使用</span>}<div className="mt-auto"><Button size="sm" variant="outline" disabled={busy || !activeId} onClick={() => run(() => activateDefaultOpenCodeSupplier(), '已切换到默认供应商。')}>切换</Button></div></div>}
-          {profiles.map((profile) => { const active = profile.id === activeId; const requiresReview = Boolean(profile.native_config.requires_review); const nativeCfg = profile.native_config; const profileUrl = nativeCfg.type === 'claude_code' ? (typeof nativeCfg.settings?.env === 'object' && nativeCfg.settings.env !== null ? (nativeCfg.settings.env as Record<string, unknown>).ANTHROPIC_BASE_URL : undefined) : nativeCfg.openai_base_url; return <div key={profile.id} className={cn('flex min-h-42 flex-col gap-3 rounded-xl border p-4', active ? 'border-primary/45 bg-primary/5' : 'border-border/55 bg-muted/20')}><div className="flex items-start justify-between gap-2"><div className="min-w-0"><div className="truncate font-medium">{profile.name}</div><div className="mt-1 truncate font-mono text-xs text-muted-foreground">{(typeof profileUrl === 'string' ? profileUrl : '') || '未设置 URL'}</div></div>{active && <span className="shrink-0 whitespace-nowrap rounded-full bg-primary/12 px-2 py-0.5 text-ui-caption text-primary">当前使用</span>}</div>{profile.note && <p className="line-clamp-2 text-xs text-muted-foreground">{profile.note}</p>}{requiresReview && <p className="text-xs text-amber-700 dark:text-amber-300">由旧供应商迁移而来，请核对高级原生配置。</p>}<div className="mt-auto flex flex-wrap gap-1.5"><Button size="sm" variant="outline" onClick={() => setEditing(toDraft(profile))}>编辑</Button><Button size="sm" variant="outline" disabled={busy || active} onClick={() => run(() => activateAgentProfile(agentKind, profile.id), `已切换到“${profile.name}”。`)}>切换</Button><TooltipHint content="测试连接"><Button size="sm" variant="ghost" aria-label={`测试“${profile.name}”连接`} disabled={busy} onClick={() => test(profile)}><Zap className="size-3.5" /></Button></TooltipHint><TooltipHint content="删除供应商"><Button size="sm" variant="ghost" aria-label={`删除供应商“${profile.name}”`} disabled={busy} onClick={() => setDeleteTarget({ id: profile.id, name: profile.name })}><Trash2 className="size-3.5 text-destructive" /></Button></TooltipHint></div></div>; })}
-          <button type="button" onClick={() => setEditing(emptyDraft(agentKind))} className="flex min-h-42 items-center justify-center gap-2 rounded-xl border border-dashed border-border/65 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"><Plus className="size-4" />新建 {agent.label} 供应商</button>
-        </div>
-      )}
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
-        title="删除供应商"
-        description={`确定要删除供应商"${deleteTarget?.name ?? ''}"吗？此操作不可撤销。`}
-        confirmLabel="删除"
-        variant="destructive"
-        onConfirm={async () => { if (deleteTarget) { await deleteAgentProfile(deleteTarget.id); setDeleteTarget(null); toast.success('供应商已删除。'); } }}
-      />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

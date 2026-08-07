@@ -1,263 +1,54 @@
-import { useState, useEffect } from 'react';
-import { configApi, fileApi } from '../lib/tauri';
+import { useEffect, useMemo, useState } from 'react';
 import type { AgentKind } from '../types/session';
-import type { AgentProviderProfile, OpenCodeModel } from '../types/provider';
+import type { ModelProvider } from '../types/provider';
+import { isProviderUsable } from '../lib/modelProviders';
 
 export interface ModelOption {
   id: string;
   name: string;
   description?: string;
   efforts?: boolean;
-  source?: 'profile' | 'catalog' | 'config' | 'builtin';
+  source?: 'provider' | 'catalog' | 'config' | 'builtin';
 }
 
-const CLAUDE_CODE_BUILTINS: ModelOption[] = [
-  { id: 'sonnet', name: 'Sonnet 5', efforts: true },
-  { id: 'opus', name: 'Opus 4.8', efforts: true },
-  { id: 'fable', name: 'Fable 5', efforts: true },
-  { id: 'haiku', name: 'Haiku 4.5', efforts: true },
-];
-
-const CODEX_DEFAULT_MODELS: ModelOption[] = [
-  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', efforts: true },
-  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', efforts: true },
-  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', efforts: true },
-  { id: 'gpt-5.5', name: 'GPT-5.5', efforts: true },
-  { id: 'gpt-5.4', name: 'GPT-5.4', efforts: true },
-  { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', efforts: true },
-  { id: 'gpt-5.2', name: 'GPT-5.2', efforts: true },
-];
-
-const OPENCODE_FREE_MODELS: ModelOption[] = [
-  { id: 'opencode/nemotron-3-ultra-free', name: 'Nemotron 3 Ultra Free', efforts: true },
-  { id: 'opencode/north-mini-code-free', name: 'North Mini Code Free', efforts: true },
-  { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash Free', efforts: true },
-  { id: 'opencode/mimo-v2.5-free', name: 'Mimo V2.5 Free', efforts: true },
-  { id: 'opencode/big-pickle', name: 'Big Pickle Free', efforts: true },
-];
-
-let cachedOpenCodeFreeModels: ModelOption[] | null = null;
-let openCodeFreeModelsRequest: Promise<void> | null = null;
-const openCodeFreeModelsListeners = new Set<() => void>();
-
-function formatOpenCodeFreeModelName(id: string): string {
-  return id
-    .split('-')
-    .map((part) => part ? part[0].toUpperCase() + part.slice(1) : part)
-    .join(' ');
-}
-
-function normalizeOpenCodeFreeModels(catalog: Array<{ id: string }>): ModelOption[] {
-  return catalog
-    .filter((model) => model.id.trim())
-    .map((model) => ({
-      id: `opencode/${model.id.trim()}`,
-      name: formatOpenCodeFreeModelName(model.id.trim()),
-      efforts: true,
-      source: 'catalog' as const,
-    }));
-}
-
-/** Load the stable OpenCode catalog once per application startup. */
-export function initializeOpenCodeFreeModels(forceRefresh = false): Promise<void> {
-  if (!forceRefresh && cachedOpenCodeFreeModels) return Promise.resolve();
-  if (openCodeFreeModelsRequest) return openCodeFreeModelsRequest;
-
-  openCodeFreeModelsRequest = configApi.fetchOpenCodeFreeModels()
-    .then((catalog) => {
-      const normalized = normalizeOpenCodeFreeModels(catalog);
-      cachedOpenCodeFreeModels = normalized.length > 0 ? normalized : [...OPENCODE_FREE_MODELS];
-    })
-    .catch(() => {
-      cachedOpenCodeFreeModels = [...OPENCODE_FREE_MODELS];
-    })
-    .finally(() => {
-      openCodeFreeModelsRequest = null;
-      openCodeFreeModelsListeners.forEach((listener) => listener());
-    });
-
-  return openCodeFreeModelsRequest;
-}
-
-function subscribeOpenCodeFreeModels(listener: () => void): () => void {
-  openCodeFreeModelsListeners.add(listener);
-  return () => openCodeFreeModelsListeners.delete(listener);
-}
-
-function dedupById(models: ModelOption[]): ModelOption[] {
-  const seen = new Set<string>();
-  return models.filter((m) => {
-    if (seen.has(m.id)) return false;
-    seen.add(m.id);
-    return true;
-  });
-}
-
-function getActiveProfileFingerprint(activeProfile: AgentProviderProfile | null): string {
-  if (!activeProfile) return 'none';
-
+function providerFingerprint(provider: ModelProvider | null): string {
+  if (!provider) return 'none';
   return JSON.stringify({
-    id: activeProfile.id,
-    agent_kind: activeProfile.agent_kind,
-    default_model: activeProfile.default_model,
-    models: activeProfile.models.map(({ id, name }) => ({ id, name })),
-    provider_key: activeProfile.native_config.type === 'opencode'
-      ? activeProfile.native_config.provider_key
-      : undefined,
+    id: provider.id,
+    default_model: provider.default_model,
+    models: provider.models.map((model) => model.id),
   });
-}
-
-async function loadClaudeCodeModels(
-  activeProfile: AgentProviderProfile | null,
-): Promise<ModelOption[]> {
-  if (!activeProfile) return [...CLAUDE_CODE_BUILTINS];
-
-  const builtins = [...CLAUDE_CODE_BUILTINS];
-
-  const settings = activeProfile.native_config.type === 'claude_code'
-    ? activeProfile.native_config.settings
-    : null;
-  const rawCustomModels = settings && Array.isArray(settings.custom_models)
-    ? settings.custom_models as Array<{ displayName: string; requestModel: string }>
-    : [];
-
-  const customModels: ModelOption[] = rawCustomModels
-    .filter((m) => m.requestModel?.trim())
-    .map((m) => ({
-      id: m.requestModel.trim(),
-      name: m.displayName?.trim() || m.requestModel.trim(),
-      efforts: true,
-      source: 'profile' as const,
-    }));
-
-  return dedupById([...builtins, ...customModels]);
-}
-
-interface CodexCatalogEntry {
-  model?: string;
-  displayName?: string;
-}
-
-function normalizeCatalogModels(entries: CodexCatalogEntry[]): ModelOption[] {
-  return entries
-    .filter((m) => m.model)
-    .map((m) => ({
-      id: m.model!,
-      name: m.displayName ?? m.model!,
-      efforts: true,
-      source: 'catalog' as const,
-    }));
-}
-
-async function loadCodexModels(
-  activeProfile: AgentProviderProfile | null,
-): Promise<ModelOption[]> {
-  if (!activeProfile) return [...CODEX_DEFAULT_MODELS];
-
-  let models: ModelOption[] = [];
-
-  if (activeProfile.native_config.type === 'codex' && activeProfile.native_config.model_catalog) {
-    try {
-      const raw = activeProfile.native_config.model_catalog;
-      const entries: CodexCatalogEntry[] = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      models = normalizeCatalogModels(entries);
-    } catch {
-      // ignore parse errors
-    }
-  }
-
-  const defaultModel = activeProfile.default_model.trim();
-  if (defaultModel && !models.some((m) => m.id === defaultModel)) {
-    models.unshift({ id: defaultModel, name: defaultModel, efforts: true, source: 'profile' });
-  }
-
-  return dedupById([...models, ...CODEX_DEFAULT_MODELS]);
-}
-
-async function loadOpenCodeModels(
-  activeProfile: AgentProviderProfile | null,
-): Promise<ModelOption[]> {
-  const freeModels = cachedOpenCodeFreeModels ?? OPENCODE_FREE_MODELS;
-
-  let fileModels: ModelOption[] = [];
-  try {
-    const raw = await fileApi.readHomeFile('.config/opencode/opencode.json');
-    const config = JSON.parse(raw) as { provider?: Record<string, { models?: Record<string, OpenCodeModel> }> };
-    const providerKey = activeProfile?.native_config.type === 'opencode'
-      ? activeProfile.native_config.provider_key
-      : undefined;
-    const providerConfig = config.provider?.[providerKey || 'codemux-openai'];
-    if (providerConfig?.models) {
-      for (const [modelId, modelDef] of Object.entries(providerConfig.models)) {
-        fileModels.push({
-          id: modelId,
-          name: modelDef.name ?? modelId,
-          efforts: true,
-          source: 'config',
-        });
-      }
-    }
-  } catch {
-    console.warn('Failed to load OpenCode config models');
-  }
-
-  if (!activeProfile) return dedupById([...freeModels, ...fileModels]);
-
-  const profileModels: ModelOption[] = activeProfile.models
-    .filter((m) => m.id.trim())
-    .map((m) => ({
-      id: m.id.trim(),
-      name: m.name?.trim() || m.id.trim(),
-      efforts: true,
-      source: 'profile' as const,
-    }));
-
-  return dedupById([...profileModels, ...freeModels, ...fileModels]);
 }
 
 export function useAgentModels(
   agentKind: AgentKind,
-  activeProfile: AgentProviderProfile | null,
-  activeProfileId: string | null,
+  activeProvider: ModelProvider | null,
+  _activeProviderId: string | null = null,
 ): { models: ModelOption[]; isLoading: boolean } {
-  const [models, setModels] = useState<ModelOption[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [openCodeCatalogVersion, setOpenCodeCatalogVersion] = useState(0);
-  const activeProfileFingerprint = getActiveProfileFingerprint(activeProfile);
-
-  useEffect(() => subscribeOpenCodeFreeModels(() => setOpenCodeCatalogVersion((version) => version + 1)), []);
-
+  const [tick, setTick] = useState(0);
   useEffect(() => {
-    let cancelled = false;
-    setIsLoading(true);
+    setTick((value) => value + 1);
+  }, [agentKind, providerFingerprint(activeProvider)]);
 
-    async function load() {
-      let result: ModelOption[];
-      switch (agentKind) {
-        case 'claude_code':
-          result = await loadClaudeCodeModels(activeProfile);
-          break;
-        case 'codex':
-          result = await loadCodexModels(activeProfile);
-          break;
-        case 'opencode':
-          result = await loadOpenCodeModels(activeProfile);
-          break;
-        default:
-          result = [];
-      }
-      if (!cancelled) {
-        setModels(result);
-        setIsLoading(false);
-      }
+  const models = useMemo(() => {
+    void tick;
+    if (!activeProvider || !isProviderUsable(activeProvider, agentKind)) {
+      return [] as ModelOption[];
     }
+    return activeProvider.models
+      .filter((model) => model.id.trim())
+      .map((model) => ({
+        id: model.id.trim(),
+        name: (model.name ?? model.id).trim() || model.id.trim(),
+        efforts: true,
+        source: 'provider' as const,
+      }));
+  }, [activeProvider, agentKind, tick]);
 
-    load();
+  return { models, isLoading: false };
+}
 
-    return () => {
-      cancelled = true;
-    };
-  }, [agentKind, activeProfileId, activeProfileFingerprint, openCodeCatalogVersion]);
-
-  return { models, isLoading };
+/** @deprecated Free catalog is no longer a default send path (ADR 0005). */
+export function initializeOpenCodeFreeModels(_forceRefresh = false): Promise<void> {
+  return Promise.resolve();
 }

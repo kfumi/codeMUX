@@ -741,25 +741,62 @@ pub fn build_commit_message_prompt_in_project(project_path: &Path) -> Result<Str
 }
 
 fn select_commit_message_provider(config: &AppConfig) -> Result<Provider, String> {
-    let provider = config
+    use crate::model_providers::{effective_api_key, select_endpoint, Protocol};
+
+    let model_provider = config
         .active_provider_id
         .as_deref()
-        .and_then(|id| config.providers.iter().find(|provider| provider.id == id))
-        .or_else(|| config.providers.first())
-        .cloned()
+        .and_then(|id| {
+            config
+                .model_providers
+                .iter()
+                .find(|provider| provider.id == id)
+        })
+        .or_else(|| config.model_providers.first())
         .ok_or_else(|| "请先配置 AI 供应商".to_string())?;
 
-    if provider.api_key.trim().is_empty() {
+    if !model_provider.enabled {
+        return Err("当前供应商已禁用".to_string());
+    }
+
+    let anthropic = select_endpoint(model_provider, Protocol::Anthropic);
+    let openai = select_endpoint(model_provider, Protocol::OpenaiCompatible);
+    let api_key = anthropic
+        .or(openai)
+        .map(|endpoint| effective_api_key(model_provider, endpoint))
+        .unwrap_or_else(|| model_provider.api_key.trim().to_string());
+
+    if api_key.is_empty() {
         return Err("请先配置 AI 供应商 API Key".to_string());
     }
-    if provider.default_model.trim().is_empty() {
+    if model_provider.default_model.trim().is_empty() {
         return Err("请先配置 AI 供应商默认模型".to_string());
     }
-    if provider.anthropic_base_url.trim().is_empty() && provider.openai_base_url.trim().is_empty() {
+    let anthropic_base_url = anthropic
+        .map(|endpoint| endpoint.base_url.clone())
+        .unwrap_or_default();
+    let openai_base_url = openai
+        .map(|endpoint| endpoint.base_url.clone())
+        .unwrap_or_default();
+    if anthropic_base_url.trim().is_empty() && openai_base_url.trim().is_empty() {
         return Err("请先配置 AI 供应商 Base URL".to_string());
     }
 
-    Ok(provider)
+    Ok(Provider {
+        id: model_provider.id.clone(),
+        name: model_provider.name.clone(),
+        api_key,
+        anthropic_base_url,
+        openai_base_url,
+        default_model: model_provider.default_model.clone(),
+        models: model_provider
+            .models
+            .iter()
+            .map(|model| model.id.clone())
+            .collect(),
+        context_1m: None,
+        codex_needs_proxy: openai.and_then(|endpoint| endpoint.codex_needs_proxy),
+    })
 }
 
 fn clean_commit_message(raw: &str) -> Result<String, String> {
@@ -1207,7 +1244,7 @@ mod tests {
         select_commit_message_provider, stage_git_status_changes_for_paths,
         unstage_git_status_changes_for_paths, GitStatusArea,
     };
-    use crate::config::types::{AppConfig, Provider};
+    use crate::config::types::AppConfig;
     use std::fs;
     use std::process::Command;
 
@@ -1580,30 +1617,48 @@ mod tests {
 
     #[test]
     fn git_commit_message_provider_uses_active_provider() {
-        let active = Provider {
+        let active = crate::model_providers::ModelProvider {
             id: "active".to_string(),
             name: "Active".to_string(),
+            enabled: true,
             api_key: "key".to_string(),
-            anthropic_base_url: String::new(),
-            openai_base_url: "https://api.openai.com".to_string(),
+            endpoints: vec![crate::model_providers::ProtocolEndpoint {
+                protocol: crate::model_providers::Protocol::OpenaiCompatible,
+                base_url: "https://api.openai.com".to_string(),
+                api_key_override: None,
+                codex_needs_proxy: None,
+            }],
+            models: vec![crate::model_providers::ProviderModel {
+                id: "gpt-test".to_string(),
+                name: None,
+            }],
             default_model: "gpt-test".to_string(),
-            models: Vec::new(),
-            context_1m: None,
-            codex_needs_proxy: None,
+            builtin_template_id: None,
+            opencode_provider_key: None,
+            opencode_npm: None,
         };
-        let fallback = Provider {
+        let fallback = crate::model_providers::ModelProvider {
             id: "fallback".to_string(),
             name: "Fallback".to_string(),
+            enabled: true,
             api_key: "key".to_string(),
-            anthropic_base_url: "https://api.anthropic.com".to_string(),
-            openai_base_url: String::new(),
+            endpoints: vec![crate::model_providers::ProtocolEndpoint {
+                protocol: crate::model_providers::Protocol::Anthropic,
+                base_url: "https://api.anthropic.com".to_string(),
+                api_key_override: None,
+                codex_needs_proxy: None,
+            }],
+            models: vec![crate::model_providers::ProviderModel {
+                id: "claude-test".to_string(),
+                name: None,
+            }],
             default_model: "claude-test".to_string(),
-            models: Vec::new(),
-            context_1m: None,
-            codex_needs_proxy: None,
+            builtin_template_id: None,
+            opencode_provider_key: None,
+            opencode_npm: None,
         };
         let config = AppConfig {
-            providers: vec![fallback, active],
+            model_providers: vec![fallback, active],
             active_provider_id: Some("active".to_string()),
             ..AppConfig::default()
         };

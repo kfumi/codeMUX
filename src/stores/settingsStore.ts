@@ -1,11 +1,19 @@
 import { create } from 'zustand';
-import type { AgentConfigMap, AgentConfigUpdateMap, AgentProviderProfileUpsert, AppConfig, NotificationSettings, Provider, Theme } from '../types/provider';
+import type {
+  AgentConfigMap,
+  AgentConfigUpdateMap,
+  AppConfig,
+  ModelProvider,
+  NotificationSettings,
+  Theme,
+} from '../types/provider';
 import { configApi, agentApi } from '../lib/tauri';
 import { useNewSessionStore } from './newSessionStore';
 import { getDefaultAgentKind } from '../types/agentRegistry';
 import type { AgentKind } from '../types/session';
 import { normalizeNotificationSettings } from '../lib/notificationSettings';
 import { normalizeOpenTarget, type OpenTarget } from '../lib/openTargets';
+import { getActiveModelProvider, selectEndpoint } from '../lib/modelProviders';
 
 function applyThemeLocally(theme: Theme) {
   if (typeof document === 'undefined') {
@@ -43,18 +51,12 @@ interface SettingsState {
   setDefaultOpenTarget: (target: OpenTarget) => Promise<void>;
   setNotificationSettings: (settings: NotificationSettings) => Promise<void>;
   setActiveProvider: (providerId: string) => Promise<void>;
-  updateProvider: (provider: Provider) => Promise<void>;
-  deleteProvider: (providerId: string) => Promise<void>;
-  testProvider: (providerId: string) => Promise<string>;
-  upsertAgentProfile: (profile: AgentProviderProfileUpsert) => Promise<void>;
-  activateAgentProfile: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string) => Promise<void>;
-  activateDefaultClaudeSupplier: () => Promise<void>;
-  activateDefaultCodexSupplier: () => Promise<void>;
-  activateDefaultOpenCodeSupplier: () => Promise<void>;
-  setActiveAgentProfileModel: (agentKind: 'claude_code' | 'codex' | 'opencode', model: string) => Promise<void>;
-  deleteAgentProfile: (profileId: string) => Promise<void>;
-  testAgentProfile: (agentKind: 'claude_code' | 'codex' | 'opencode', profileId: string) => Promise<string>;
-  getActiveProvider: () => Provider | null;
+  upsertModelProvider: (provider: ModelProvider) => Promise<void>;
+  deleteModelProvider: (providerId: string) => Promise<void>;
+  setModelProviderEnabled: (providerId: string, enabled: boolean) => Promise<void>;
+  instantiateBuiltinTemplate: (templateId: string) => Promise<ModelProvider>;
+  testModelProvider: (providerId: string) => Promise<string>;
+  getActiveProvider: () => ModelProvider | null;
   getNeedsProxy: () => boolean;
   getDefaultAgentKind: () => AgentKind;
   setDefaultAgentKind: (agentKind: AgentKind) => Promise<void>;
@@ -75,8 +77,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const rawConfig = await configApi.get();
-      const config = {
+      const config: AppConfig = {
         ...rawConfig,
+        model_providers: rawConfig.model_providers ?? [],
         default_open_target: normalizeOpenTarget(rawConfig.default_open_target),
         notifications: normalizeNotificationSettings(rawConfig.notifications),
       };
@@ -107,44 +110,40 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   setCompactAiOutput: async (enabled: boolean) => {
-    const previousValue = get().config?.compact_ai_output ?? false;
+    const previous = get().config?.compact_ai_output ?? false;
     set((state) => ({
       config: state.config ? { ...state.config, compact_ai_output: enabled } : state.config,
       error: null,
     }));
-
     try {
       await configApi.setCompactAiOutput(enabled);
     } catch (error) {
       set((state) => ({
-        config: state.config ? { ...state.config, compact_ai_output: previousValue } : state.config,
+        config: state.config ? { ...state.config, compact_ai_output: previous } : state.config,
         error: String(error),
       }));
     }
   },
 
   setDefaultOpenTarget: async (target: OpenTarget) => {
-    const previousTarget = normalizeOpenTarget(get().config?.default_open_target);
-    const nextTarget = normalizeOpenTarget(target);
+    const previous = get().config?.default_open_target ?? 'file_explorer';
     set((state) => ({
-      config: state.config ? { ...state.config, default_open_target: nextTarget } : state.config,
+      config: state.config ? { ...state.config, default_open_target: target } : state.config,
       error: null,
     }));
-
     try {
-      await configApi.setDefaultOpenTarget(nextTarget);
+      await configApi.setDefaultOpenTarget(target);
     } catch (error) {
       set((state) => ({
-        config: state.config ? { ...state.config, default_open_target: previousTarget } : state.config,
+        config: state.config ? { ...state.config, default_open_target: previous } : state.config,
         error: String(error),
       }));
     }
   },
 
   setNotificationSettings: async (settings: NotificationSettings) => {
-    const previousConfig = get().config;
+    const previousNotifications = get().config?.notifications;
     const nextSettings = normalizeNotificationSettings(settings);
-    const previousNotifications = normalizeNotificationSettings(previousConfig?.notifications);
     set((state) => ({
       config: state.config ? { ...state.config, notifications: nextSettings } : state.config,
       error: null,
@@ -154,7 +153,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await configApi.setNotificationSettings(nextSettings);
     } catch (error) {
       set((state) => ({
-        config: state.config ? { ...state.config, notifications: previousNotifications } : state.config,
+        config: state.config && previousNotifications
+          ? { ...state.config, notifications: previousNotifications }
+          : state.config,
         error: String(error),
       }));
     }
@@ -168,55 +169,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       }));
     } catch (error) {
       set({ error: String(error) });
+      throw error;
     }
   },
 
-  updateProvider: async (provider: Provider) => {
+  upsertModelProvider: async (provider: ModelProvider) => {
     try {
-      await configApi.updateProvider(provider);
-      set((state) => {
-        if (!state.config) return { config: null };
-        const exists = state.config.providers.some((entry) => entry.id === provider.id);
-        const providers = exists
-          ? state.config.providers.map((entry) => (entry.id === provider.id ? provider : entry))
-          : [...state.config.providers, provider];
-        return { config: { ...state.config, providers } };
-      });
-    } catch (error) {
-      set({ error: String(error) });
-    }
-  },
-
-  deleteProvider: async (providerId: string) => {
-    try {
-      await configApi.deleteProvider(providerId);
-      set((state) => {
-        if (!state.config) return { config: null };
-        const providers = state.config.providers.filter((entry) => entry.id !== providerId);
-        const active_provider_id =
-          state.config.active_provider_id === providerId
-            ? providers[0]?.id ?? null
-            : state.config.active_provider_id;
-        return {
-          config: {
-            ...state.config,
-            providers,
-            active_provider_id,
-          },
-        };
-      });
-    } catch (error) {
-      set({ error: String(error) });
-    }
-  },
-
-  testProvider: async (providerId: string) => {
-    return configApi.testProvider(providerId);
-  },
-
-  upsertAgentProfile: async (profile) => {
-    try {
-      await configApi.upsertAgentProfile(profile);
+      await configApi.upsertModelProvider(provider);
       await get().fetchConfig();
     } catch (error) {
       set({ error: String(error) });
@@ -224,27 +183,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
-  activateAgentProfile: async (agentKind, profileId) => {
+  deleteModelProvider: async (providerId: string) => {
     try {
-      await configApi.activateAgentProfile(agentKind, profileId);
-      await get().fetchConfig();
-    } catch (error) {
-      set({ error: String(error) });
-      throw error;
-    }
-  },
-  activateDefaultClaudeSupplier: async () => {
-    try {
-      await configApi.activateDefaultClaudeSupplier();
-      await get().fetchConfig();
-    } catch (error) {
-      set({ error: String(error) });
-      throw error;
-    }
-  },
-  activateDefaultCodexSupplier: async () => {
-    try {
-      await configApi.activateDefaultCodexSupplier();
+      await configApi.deleteModelProvider(providerId);
       await get().fetchConfig();
     } catch (error) {
       set({ error: String(error) });
@@ -252,9 +193,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
-  activateDefaultOpenCodeSupplier: async () => {
+  setModelProviderEnabled: async (providerId: string, enabled: boolean) => {
     try {
-      await configApi.activateDefaultOpenCodeSupplier();
+      await configApi.setModelProviderEnabled(providerId, enabled);
       await get().fetchConfig();
     } catch (error) {
       set({ error: String(error) });
@@ -262,41 +203,27 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
-  setActiveAgentProfileModel: async (agentKind, model) => {
-    try {
-      await configApi.setActiveAgentProfileModel(agentKind, model);
-      await get().fetchConfig();
-    } catch (error) {
-      set({ error: String(error) });
-      throw error;
-    }
+  instantiateBuiltinTemplate: async (templateId: string) => {
+    const provider = await configApi.instantiateBuiltinProviderTemplate(templateId);
+    await get().fetchConfig();
+    return provider;
   },
 
-  deleteAgentProfile: async (profileId) => {
-    try {
-      await configApi.deleteAgentProfile(profileId);
-      await get().fetchConfig();
-    } catch (error) {
-      set({ error: String(error) });
-      throw error;
-    }
-  },
-
-  testAgentProfile: async (agentKind, profileId) => {
-    return configApi.testAgentProfile(agentKind, profileId);
+  testModelProvider: async (providerId: string) => {
+    return configApi.testModelProvider(providerId);
   },
 
   getActiveProvider: () => {
     const config = get().config;
     if (!config) return null;
-    return config.providers.find((provider) => provider.id === config.active_provider_id) ?? null;
+    return getActiveModelProvider(config.model_providers, config.active_provider_id);
   },
 
   getNeedsProxy: () => {
-    const config = get().config;
-    const profileId = config?.agent_profile_registry?.active_profile_ids?.codex;
-    const profile = config?.agent_profile_registry?.profiles.find((entry) => entry.id === profileId);
-    return profile?.native_config.type === 'codex' && Boolean(profile.native_config.codex_needs_proxy);
+    const provider = get().getActiveProvider();
+    if (!provider) return false;
+    const endpoint = selectEndpoint(provider, 'openai_compatible');
+    return Boolean(endpoint?.codex_needs_proxy);
   },
 
   getDefaultAgentKind: () => {

@@ -2,7 +2,8 @@ import { Profiler, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { toast } from 'sonner';
 
 import { getStoredAgentCwd } from '../../lib/sessionCwd';
-import { getProfilePrimaryModel, profileToSelectorProvider } from '../../lib/agentProfileSelector';
+import { getProviderPrimaryModel } from '../../lib/agentProfileSelector';
+import { getActiveModelProvider, isProviderUsable } from '../../lib/modelProviders';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { formatCommandDisplay, renderCommandPrompt } from '../../lib/slashCommands';
 import { mapExecutionModeToPermissionConfig, serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
@@ -41,7 +42,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const clearEvents = useAgentStore((state) => state.clearEvents);
   const respondToPermission = useAgentStore((state) => state.respondToPermission);
   const pendingPermissions = useAgentStore((state) => state.pendingPermissions[sessionId] ?? EMPTY_PENDING_PERMISSIONS);
-  const { config, getActiveProvider, setActiveAgentProfileModel } = useSettingsStore();
+  const { config, getActiveProvider } = useSettingsStore();
   const { setProjectPath } = usePreviewStore();
 
   // 检测容器宽度，窄屏时启用紧凑模式
@@ -65,53 +66,45 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const isReadOnly = Boolean(session?.is_read_only);
   const reasoningEffort = session?.reasoning_effort ?? 'medium';
   const agentKind = session?.agent_kind ?? 'claude_code';
-  const isProfileAgent = agentKind === 'claude_code' || agentKind === 'codex' || agentKind === 'opencode';
-  const profileRegistry = config?.agent_profile_registry;
-  const availableProfiles = useMemo(
-    () => isProfileAgent ? (profileRegistry?.profiles ?? []).filter((profile) => profile.agent_kind === agentKind) : [],
-    [agentKind, isProfileAgent, profileRegistry?.profiles],
+  const isProviderAgent = agentKind === 'claude_code' || agentKind === 'codex' || agentKind === 'opencode';
+  const modelProviders = config?.model_providers ?? [];
+  const activeProviderId = config?.active_provider_id ?? null;
+  const activeProvider = useMemo(
+    () => getActiveModelProvider(modelProviders, activeProviderId),
+    [activeProviderId, modelProviders],
   );
-  const activeProfileId = isProfileAgent ? profileRegistry?.active_profile_ids?.[agentKind] ?? null : null;
-  const activeProfile = useMemo(
-    () => availableProfiles.find((profile) => profile.id === activeProfileId) ?? null,
-    [activeProfileId, availableProfiles],
+  const sessionProvider = useMemo(
+    () => modelProviders.find((provider) => provider.id === session?.provider_id) ?? null,
+    [modelProviders, session?.provider_id],
   );
-  const sessionProfile = useMemo(
-    () => availableProfiles.find((profile) => profile.id === session?.provider_id) ?? null,
-    [availableProfiles, session?.provider_id],
-  );
-  const runtimeProfile = sessionProfile ?? activeProfile;
-  const runtimeProvider = useMemo(() => runtimeProfile ? profileToSelectorProvider(runtimeProfile) : null, [runtimeProfile]);
+  const runtimeProvider = sessionProvider ?? activeProvider;
   const stripSuffix = (s: string) => s.replace(/\[1m\]/gi, '').trim();
-  const model = stripSuffix(session?.model ?? '') || runtimeProfile?.default_model.trim() || getProfilePrimaryModel(runtimeProfile) || activeProfile?.models[0]?.id.trim() || '';
-  const [selectorModelState, setSelectorModelState] = useState(() => stripSuffix(session?.model ?? '') || activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '');
+  const model = stripSuffix(session?.model ?? '') || runtimeProvider?.default_model.trim() || getProviderPrimaryModel(runtimeProvider) || '';
+  const [selectorModelState, setSelectorModelState] = useState(() => stripSuffix(session?.model ?? '') || activeProvider?.default_model.trim() || getProviderPrimaryModel(activeProvider) || '');
   const prevSessionIdRef = useRef<string | null>(null);
   const userModifiedRef = useRef(false);
   useEffect(() => {
     if (prevSessionIdRef.current !== sessionId) {
       prevSessionIdRef.current = sessionId;
       userModifiedRef.current = false;
-      setSelectorModelState(stripSuffix(session?.model ?? '') || activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '');
+      setSelectorModelState(stripSuffix(session?.model ?? '') || activeProvider?.default_model.trim() || getProviderPrimaryModel(activeProvider) || '');
     } else if (!userModifiedRef.current) {
-      const next = stripSuffix(session?.model ?? '') || activeProfile?.default_model.trim() || getProfilePrimaryModel(activeProfile) || '';
+      const next = stripSuffix(session?.model ?? '') || activeProvider?.default_model.trim() || getProviderPrimaryModel(activeProvider) || '';
       if (next) {
         setSelectorModelState(next);
       }
     }
-  }, [sessionId, session?.model, activeProfile]);
+  }, [sessionId, session?.model, activeProvider]);
   const modelSupports1m = useCallback((modelId: string) => {
-    return checkProfileModelSupports1m(runtimeProfile, modelId);
-  }, [runtimeProfile]);
+    return checkProfileModelSupports1m(runtimeProvider, modelId);
+  }, [runtimeProvider]);
   const formatSelectedProviderModel = useCallback((item: string) => formatModelDisplayName({
     model: item,
     agentKind,
-    usesLargeContext: runtimeProvider?.context_1m || modelSupports1m(item),
-  }), [agentKind, runtimeProvider?.context_1m, modelSupports1m]);
+    usesLargeContext: modelSupports1m(item),
+  }), [agentKind, modelSupports1m]);
   const modelNameWithSuffix = useMemo(() => model ? formatSelectedProviderModel(model) : undefined, [model, formatSelectedProviderModel]);
-  const usesClaudeDefault = agentKind === 'claude_code' && !runtimeProfile && !activeProfileId;
-  const usesOpenCodeFree = agentKind === 'opencode' && !runtimeProfile && !activeProfileId;
-  const usesCodexDefault = agentKind === 'codex' && !runtimeProfile && !activeProfileId;
-  const hasUsableProfile = usesClaudeDefault || usesOpenCodeFree || usesCodexDefault || !isProfileAgent || Boolean(runtimeProfile && model);
+  const hasUsableProvider = !isProviderAgent || Boolean(runtimeProvider && isProviderUsable(runtimeProvider, agentKind) && model);
   const rawPermissionConfig = useMemo(() => {
     if (!session?.permission_config) return null;
     try {
@@ -181,7 +174,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   }, [sessionId, cwd, project?.path, reasoningEffort, session?.permission_config, planMode, isRunning, isReadOnly]);
 
   const handleSend = async (input: AgentInputPayload, displayContent = input.text) => {
-    if (!hasUsableProfile || isReadOnly) {
+    if (!hasUsableProvider || isReadOnly) {
       return;
     }
     const effectiveCwd = project?.path || cwd;
@@ -209,28 +202,26 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   };
 
   const handleModelChange = useCallback(async (nextModel: string) => {
-    if (isReadOnly || !isProfileAgent || !nextModel || nextModel === selectorModelState) {
+    if (isReadOnly || !isProviderAgent || !nextModel || nextModel === selectorModelState) {
       return;
     }
     userModifiedRef.current = true;
     setSelectorModelState(nextModel);
-    const suffixedModel = (runtimeProvider?.context_1m || modelSupports1m(nextModel))
+    const suffixedModel = modelSupports1m(nextModel)
       ? `${nextModel}[1m]`
       : nextModel;
     updateSessionModel(sessionId, suffixedModel);
     try {
-      const isProfileModel = Boolean(activeProfile?.models.some((m) => m.id.trim() === nextModel));
-      if (isProfileModel) {
-        await setActiveAgentProfileModel(agentKind, nextModel);
-      }
-      await sessionApi.updateProvider(sessionId, isProfileModel ? (activeProfile?.id ?? null) : null, suffixedModel);
+      const providerId = runtimeProvider?.id ?? activeProviderId;
+      const isProviderModel = Boolean(runtimeProvider?.models.some((m) => m.id.trim() === nextModel));
+      await sessionApi.updateProvider(sessionId, isProviderModel ? providerId : providerId, suffixedModel);
     } catch (error) {
       console.warn('[AgentPanel] handleModelChange failed:', error);
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
       }));
     }
-  }, [activeProfile, agentKind, isProfileAgent, isReadOnly, modelSupports1m, sessionId, selectorModelState, runtimeProvider?.context_1m, setActiveAgentProfileModel, updateSessionModel]);
+  }, [activeProviderId, isProviderAgent, isReadOnly, modelSupports1m, runtimeProvider, sessionId, selectorModelState, updateSessionModel]);
 
   const handleReasoningEffortChange = useCallback(async (nextEffort: ReasoningEffort) => {
     if (isReadOnly) return;
@@ -398,7 +389,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   return (
     <div ref={containerRef} className="flex h-full flex-col">
-      <CodeMuxAssistantRuntimeProvider sessionId={sessionId} agentKind={agentKind} onSend={handleSend} onCommand={handleCommand} sendDisabled={!hasUsableProfile || isReadOnly}>
+      <CodeMuxAssistantRuntimeProvider sessionId={sessionId} agentKind={agentKind} onSend={handleSend} onCommand={handleCommand} sendDisabled={!hasUsableProvider || isReadOnly}>
         <Profiler id="AgentThread" onRender={handleProfilerRender}>
           <CodeMuxThread
             sessionId={sessionId}
@@ -409,14 +400,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                   agentKind={agentKind}
                   projectPath={project?.path}
                   modelName={modelNameWithSuffix}
-                  disabled={!hasUsableProfile || isReadOnly}
+                  disabled={!hasUsableProvider || isReadOnly}
                   modelSelector={(
                     <AgentModelSelector
                       agentKind={agentKind}
-                      activeProfile={activeProfile}
-                      activeProfileId={activeProfileId}
+                      activeProvider={runtimeProvider}
+                      activeProviderId={runtimeProvider?.id ?? activeProviderId}
                       value={selectorModelState}
-                      contextModel={sessionProfile ? model : undefined}
+                      contextModel={sessionProvider ? model : undefined}
                       onChange={handleModelChange}
                       reasoningEffort={reasoningEffort}
                       onReasoningEffortChange={handleReasoningEffortChange}

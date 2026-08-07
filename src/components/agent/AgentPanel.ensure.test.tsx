@@ -8,13 +8,13 @@ import { useAgentStore } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import type { ModelProvider } from '../../types/provider';
 import { AgentPanel } from './AgentPanel';
 import type { AgentModelSelectorProps } from './AgentModelSelector';
 
-const { codeMuxThreadRenderMock, ensureSessionMock, setActiveAgentProfileModelMock, updateProviderMock } = vi.hoisted(() => ({
+const { codeMuxThreadRenderMock, ensureSessionMock, updateProviderMock } = vi.hoisted(() => ({
   codeMuxThreadRenderMock: vi.fn(),
   ensureSessionMock: vi.fn(() => Promise.resolve()),
-  setActiveAgentProfileModelMock: vi.fn(() => Promise.resolve()),
   updateProviderMock: vi.fn(() => Promise.resolve()),
 }));
 
@@ -59,7 +59,15 @@ vi.mock('./assistant-ui/CodeMuxThread', () => ({
 }));
 
 vi.mock('./assistant-ui/CodeMuxComposer', () => ({
-  CodeMuxComposer: ({ modelName, modelSelector, permissionSelector }: { modelName?: string; modelSelector?: React.ReactNode; permissionSelector?: React.ReactNode }) => (
+  CodeMuxComposer: ({
+    modelName,
+    modelSelector,
+    permissionSelector,
+  }: {
+    modelName?: string;
+    modelSelector?: React.ReactNode;
+    permissionSelector?: React.ReactNode;
+  }) => (
     <div data-testid="composer">
       <span data-testid="composer-model">{modelName}</span>
       {modelSelector}
@@ -69,15 +77,50 @@ vi.mock('./assistant-ui/CodeMuxComposer', () => ({
 }));
 
 vi.mock('./AgentModelSelector', () => ({
-  AgentModelSelector: ({ agentKind, activeProfile, activeProfileId, value, contextModel, reasoningEffort, onChange, onReasoningEffortChange, disabled }: AgentModelSelectorProps) => (
-    <div data-testid="model-selector" data-agent-kind={agentKind} data-has-profile={activeProfile ? 'true' : 'false'} data-provider-id={activeProfileId ?? ''} data-model={value}>
+  AgentModelSelector: ({
+    agentKind,
+    activeProvider,
+    activeProviderId,
+    value,
+    contextModel,
+    reasoningEffort,
+    onChange,
+    onReasoningEffortChange,
+    disabled,
+  }: AgentModelSelectorProps) => (
+    <div
+      data-testid="model-selector"
+      data-agent-kind={agentKind}
+      data-has-provider={activeProvider ? 'true' : 'false'}
+      data-provider-id={activeProviderId ?? ''}
+      data-model={value}
+    >
       <span data-testid="model-context">{contextModel}</span>
-      <button type="button" disabled={disabled} onClick={() => onChange('claude-sonnet-4-20250514')}>change model</button>
-      <button type="button" disabled={disabled} onClick={() => onReasoningEffortChange('high')}>change reasoning</button>
+      <button type="button" disabled={disabled} onClick={() => onChange('claude-sonnet-4-20250514')}>
+        change model
+      </button>
+      <button type="button" disabled={disabled} onClick={() => onReasoningEffortChange('high')}>
+        change reasoning
+      </button>
       <span data-testid="reasoning-effort">{reasoningEffort}</span>
     </div>
   ),
 }));
+
+function provider(id: string, models: string[]): ModelProvider {
+  return {
+    id,
+    name: id,
+    enabled: true,
+    api_key: 'sk-test',
+    endpoints: [
+      { protocol: 'anthropic', base_url: 'https://api.anthropic.com' },
+      { protocol: 'openai_compatible', base_url: 'https://api.openai.com/v1', codex_needs_proxy: false },
+    ],
+    models: models.map((modelId) => ({ id: modelId })),
+    default_model: models[0] ?? '',
+  };
+}
 
 describe('AgentPanel session bootstrapping', () => {
   beforeEach(() => {
@@ -87,7 +130,6 @@ describe('AgentPanel session bootstrapping', () => {
     });
     ensureSessionMock.mockClear();
     codeMuxThreadRenderMock.mockClear();
-    setActiveAgentProfileModelMock.mockClear();
     updateProviderMock.mockClear();
 
     useSessionStore.setState({
@@ -117,23 +159,10 @@ describe('AgentPanel session bootstrapping', () => {
     useSettingsStore.setState((state) => ({
       ...state,
       config: {
-        providers: [{
-          id: 'provider-1',
-          name: 'Provider',
-          api_key: 'key',
-          anthropic_base_url: 'https://api.anthropic.com',
-          openai_base_url: 'https://api.openai.com/v1',
-          default_model: 'claude-sonnet-4-20250514',
-          models: ['claude-sonnet-4-20250514'],
-        }, {
-          id: 'provider-2',
-          name: 'Provider 2',
-          api_key: 'key-2',
-          anthropic_base_url: 'https://provider-2.example',
-          openai_base_url: 'https://provider-2.example/v1',
-          default_model: 'claude-opus-4-1',
-          models: ['claude-opus-4-1'],
-        }],
+        model_providers: [
+          provider('provider-1', ['claude-sonnet-4-20250514', 'claude-opus-4-1']),
+          provider('provider-2', ['claude-opus-4-1']),
+        ],
         active_provider_id: 'provider-1',
         agent_defaults: { default_agent_kind: 'claude_code' },
         agent_configs: {
@@ -145,20 +174,13 @@ describe('AgentPanel session bootstrapping', () => {
         theme: 'System',
         compact_ai_output: false,
         default_open_target: 'file_explorer',
-        agent_profile_registry: {
-          profiles: [{
-            id: 'profile-1', agent_kind: 'claude_code', name: 'Provider', note: '', models: [{ id: 'claude-sonnet-4-20250514' }, { id: 'claude-opus-4-1' }], default_model: 'claude-opus-4-1',
-            native_config: { type: 'claude_code', api_key: '', anthropic_base_url: 'https://api.anthropic.com' },
-          }, {
-            id: 'profile-2', agent_kind: 'claude_code', name: 'Provider 2', note: '', models: [{ id: 'claude-opus-4-1' }], default_model: 'claude-opus-4-1',
-            native_config: { type: 'claude_code', api_key: '', anthropic_base_url: 'https://provider-2.example' },
-          }],
-          active_profile_ids: { claude_code: 'profile-1' },
+        notifications: {
+          system_enabled: true,
+          sound_enabled: false,
+          sound: 'ding',
         },
       },
     }));
-
-    useSettingsStore.setState({ setActiveAgentProfileModel: setActiveAgentProfileModelMock });
 
     useAgentStore.setState({
       events: { 'session-running': [{ kind: 'user', data: { content: 'first prompt' } }] },
@@ -188,7 +210,6 @@ describe('AgentPanel session bootstrapping', () => {
 
   it('does not re-ensure a session that is already running from a new-session send', async () => {
     render(<AgentPanel sessionId="session-running" />);
-
     await waitFor(() => {
       expect(ensureSessionMock).not.toHaveBeenCalled();
     });
@@ -196,7 +217,6 @@ describe('AgentPanel session bootstrapping', () => {
 
   it('keeps the permission selector enabled while the session is running', () => {
     render(<AgentPanel sessionId="session-running" />);
-
     expect(screen.getByRole('button', { name: '变更前确认' })).toHaveProperty('disabled', false);
     expect(screen.getByTestId('model-selector').dataset.model).toBe('claude-sonnet-4-20250514');
   });
@@ -217,12 +237,12 @@ describe('AgentPanel session bootstrapping', () => {
     expect(codeMuxThreadRenderMock).toHaveBeenCalledTimes(initialRenderCount);
   });
 
-  it('uses global model options while preserving the saved session model for context', async () => {
+  it('uses session provider when bound and updates provider on model change', async () => {
     useSessionStore.setState((state) => ({
       ...state,
       sessions: state.sessions.map((session) => ({
         ...session,
-        provider_id: 'profile-2',
+        provider_id: 'provider-2',
         model: 'claude-opus-4-1',
       })),
     }));
@@ -230,51 +250,13 @@ describe('AgentPanel session bootstrapping', () => {
 
     render(<AgentPanel sessionId="session-running" />);
 
-    expect(screen.getByTestId('model-selector').dataset.providerId).toBe('profile-1');
+    expect(screen.getByTestId('model-selector').dataset.providerId).toBe('provider-2');
     expect(screen.getByTestId('model-selector').dataset.model).toBe('claude-opus-4-1');
     expect(screen.getByTestId('model-context').textContent).toBe('claude-opus-4-1');
-    expect(screen.getByTestId('composer-model').textContent).toBe('claude-opus-4-1');
 
     fireEvent.click(screen.getByRole('button', { name: 'change model' }));
     await waitFor(() => {
-      expect(setActiveAgentProfileModelMock).toHaveBeenCalledWith('claude_code', 'claude-sonnet-4-20250514');
+      expect(updateProviderMock).toHaveBeenCalled();
     });
-  });
-
-  it('enables sending for a Codex session using the default supplier (no active profile)', () => {
-    useSessionStore.setState({
-      sessions: [{
-        ...useSessionStore.getState().sessions[0],
-        agent_kind: 'codex',
-        provider_id: null,
-        model: null,
-      }],
-    });
-    useAgentStore.setState({ isRunning: { 'session-running': false } });
-
-    render(<AgentPanel sessionId="session-running" />);
-
-    expect(screen.getByRole('button', { name: 'change model' })).toHaveProperty('disabled', false);
-  });
-
-  it('persists reasoning changes for the session provider', async () => {
-    useSessionStore.setState((state) => ({
-      ...state,
-      sessions: state.sessions.map((session) => ({ ...session, provider_id: 'profile-1' })),
-    }));
-    useAgentStore.setState({ isRunning: { 'session-running': false } });
-    render(<AgentPanel sessionId="session-running" />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'change reasoning' }));
-
-    await waitFor(() => {
-      expect(updateProviderMock).toHaveBeenCalledWith(
-        'session-running',
-        'profile-1',
-        'claude-sonnet-4-20250514',
-        'high',
-      );
-    });
-    expect(useSessionStore.getState().sessions[0].reasoning_effort).toBe('high');
   });
 });

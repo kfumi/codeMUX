@@ -1,9 +1,7 @@
-use crate::config::types::{AgentKind, Provider};
+use crate::config::types::AgentKind;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
-
-const MIGRATION_REVIEW_NOTE: &str = "需要检查原生高级配置";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -378,16 +376,6 @@ pub struct ProfileModel {
     pub context_window: Option<u64>,
 }
 
-impl ProfileModel {
-    fn from_legacy_model(id: &str) -> Self {
-        Self {
-            id: id.to_string(),
-            name: Some(id.to_string()),
-            context_window: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct AgentProviderProfile {
     pub id: String,
@@ -505,193 +493,14 @@ impl AgentProfileRegistry {
     }
 }
 
-pub fn migrate_legacy_providers(
-    providers: &[Provider],
-    active_provider_id: Option<&str>,
-) -> Result<Option<AgentProfileRegistry>, String> {
-    let mut registry = AgentProfileRegistry::default();
-
-    for provider in providers {
-        let is_active = active_provider_id == Some(provider.id.as_str());
-        let models = legacy_profile_models(provider);
-        let default_model = legacy_default_model(provider, &models);
-
-        if !provider.anthropic_base_url.trim().is_empty() {
-            let profile = AgentProviderProfile {
-                id: legacy_profile_id(provider, AgentKind::ClaudeCode),
-                agent_kind: AgentKind::ClaudeCode,
-                name: provider.name.clone(),
-                note: MIGRATION_REVIEW_NOTE.to_string(),
-                models: models.clone(),
-                default_model: default_model.clone(),
-                native_config: NativeProfileConfig::ClaudeCode {
-                    settings: legacy_claude_settings(
-                        &provider.api_key,
-                        &provider.anthropic_base_url,
-                        provider.context_1m.unwrap_or(false),
-                        None,
-                        &default_model,
-                    ),
-                    requires_review: true,
-                    timeouts: None,
-                },
-            };
-            add_migrated_profile(&mut registry, profile, false)?;
-        }
-
-        if !provider.openai_base_url.trim().is_empty() {
-            let codex_profile = AgentProviderProfile {
-                id: legacy_profile_id(provider, AgentKind::Codex),
-                agent_kind: AgentKind::Codex,
-                name: provider.name.clone(),
-                note: MIGRATION_REVIEW_NOTE.to_string(),
-                models: models.clone(),
-                default_model: default_model.clone(),
-                native_config: NativeProfileConfig::Codex {
-                    api_key: provider.api_key.clone(),
-                    openai_base_url: provider.openai_base_url.clone(),
-                    codex_needs_proxy: provider.codex_needs_proxy,
-                    advanced_config: None,
-                    auth_json: None,
-                    config_toml: None,
-                    model_catalog: None,
-                    requires_review: true,
-                    timeouts: None,
-                },
-            };
-            add_migrated_profile(&mut registry, codex_profile, is_active)?;
-
-            let opencode_profile = AgentProviderProfile {
-                id: legacy_profile_id(provider, AgentKind::Opencode),
-                agent_kind: AgentKind::Opencode,
-                name: provider.name.clone(),
-                note: MIGRATION_REVIEW_NOTE.to_string(),
-                models: models.clone(),
-                default_model: default_model.clone(),
-                native_config: NativeProfileConfig::OpenCode {
-                    api_key: provider.api_key.clone(),
-                    openai_base_url: provider.openai_base_url.clone(),
-                    provider_key: None,
-                    npm: None,
-                    models_config: None,
-                    extra_options: None,
-                    advanced_config: None,
-                    requires_review: true,
-                    timeouts: None,
-                },
-            };
-            add_migrated_profile(&mut registry, opencode_profile, is_active)?;
-        }
-    }
-
-    if registry.is_empty() {
-        return Ok(None);
-    }
-
-    for profile in &registry.profiles {
-        if profile.agent_kind != AgentKind::ClaudeCode && !profile.default_model.trim().is_empty() {
-            registry
-                .active_profile_ids
-                .entry(profile.agent_kind)
-                .or_insert_with(|| profile.id.clone());
-        }
-    }
-
-    registry
-        .validate()
-        .map_err(|error| format!("迁移生成的智能体供应商档案无效: {}", error))?;
-    Ok(Some(registry))
-}
-
-fn legacy_profile_id(provider: &Provider, agent_kind: AgentKind) -> String {
-    format!("{}-{}", provider.id, agent_kind.as_str())
-}
-
-fn legacy_profile_models(provider: &Provider) -> Vec<ProfileModel> {
-    let mut models: Vec<ProfileModel> = provider
-        .models
-        .iter()
-        .map(|model| ProfileModel::from_legacy_model(model))
-        .collect();
-
-    if !provider.default_model.is_empty()
-        && !models
-            .iter()
-            .any(|model| model.id == provider.default_model)
-    {
-        models.push(ProfileModel::from_legacy_model(&provider.default_model));
-    }
-
-    models
-}
-
-fn legacy_default_model(provider: &Provider, models: &[ProfileModel]) -> String {
-    if models.is_empty() {
-        String::new()
-    } else if provider.default_model.is_empty() {
-        models[0].id.clone()
-    } else {
-        provider.default_model.clone()
-    }
-}
-
-fn set_active_profile_if_needed(
-    registry: &mut AgentProfileRegistry,
-    agent_kind: AgentKind,
-    profile_id: &str,
-    is_active: bool,
-    has_default_model: bool,
-) {
-    if is_active && has_default_model {
-        registry
-            .active_profile_ids
-            .insert(agent_kind, profile_id.to_string());
-    }
-}
-
-fn add_migrated_profile(
-    registry: &mut AgentProfileRegistry,
-    profile: AgentProviderProfile,
-    is_active: bool,
-) -> Result<(), String> {
-    profile
-        .validate()
-        .map_err(|error| format!("无法迁移供应商档案 {}: {}", profile.name, error))?;
-
-    set_active_profile_if_needed(
-        registry,
-        profile.agent_kind,
-        &profile.id,
-        is_active,
-        !profile.default_model.trim().is_empty(),
-    );
-    registry.profiles.push(profile);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
     use super::{
-        migrate_legacy_providers, AgentProfileRegistry, AgentProviderProfile, NativeProfileConfig,
-        ProfileModel,
+        AgentProfileRegistry, AgentProviderProfile, NativeProfileConfig, ProfileModel,
     };
-    use crate::config::types::{AgentKind, Provider};
-
-    fn legacy_provider() -> Provider {
-        Provider {
-            id: "legacy".to_string(),
-            name: "旧供应商".to_string(),
-            api_key: "legacy-token".to_string(),
-            anthropic_base_url: "https://claude.example.test".to_string(),
-            openai_base_url: "https://openai.example.test/v1".to_string(),
-            default_model: "legacy-model".to_string(),
-            models: vec!["legacy-model".to_string()],
-            context_1m: Some(true),
-            codex_needs_proxy: None,
-        }
-    }
+    use crate::config::types::AgentKind;
 
     #[test]
     fn 旧版_claude_档案会规范化为完整_settings_json() {
@@ -745,25 +554,6 @@ mod tests {
         assert_eq!(config["settings"]["includeCoAuthoredBy"], false);
         assert_eq!(config["settings"]["autoUpdatesChannel"], "latest");
         assert!(config.get("api_key").is_none());
-    }
-
-    #[test]
-    fn 旧供应商迁移不设置_claude_活动档案且保留其他智能体活动档案() {
-        let registry = migrate_legacy_providers(&[legacy_provider()], Some("legacy"))
-            .unwrap()
-            .unwrap();
-
-        assert!(!registry
-            .active_profile_ids
-            .contains_key(&AgentKind::ClaudeCode));
-        assert_eq!(
-            registry.active_profile_ids.get(&AgentKind::Codex),
-            Some(&"legacy-codex".to_string())
-        );
-        assert_eq!(
-            registry.active_profile_ids.get(&AgentKind::Opencode),
-            Some(&"legacy-opencode".to_string())
-        );
     }
 
     #[test]

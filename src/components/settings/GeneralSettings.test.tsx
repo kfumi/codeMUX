@@ -24,7 +24,7 @@ vi.mock('./NotificationSettingsSection', () => ({
 }));
 
 const baseConfig: AppConfig = {
-  providers: [],
+  model_providers: [],
   active_provider_id: null,
   agent_defaults: { default_agent_kind: 'claude_code' },
   agent_configs: {

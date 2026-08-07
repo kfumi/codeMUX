@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { renderCommandPrompt } from '../../lib/slashCommands';
-import { mapExecutionModeToPermissionConfig, serializePermissionConfig } from '../../lib/agentPermissions';
+import { serializePermissionConfig } from '../../lib/agentPermissions';
+import { getActiveModelProvider, isProviderUsable } from '../../lib/modelProviders';
+import { getProviderPrimaryModel } from '../../lib/agentProfileSelector';
 import { agentApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
 import { useNewSessionStore } from '../../stores/newSessionStore';
@@ -10,7 +12,6 @@ import { usePreviewStore } from '../../stores/previewStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useAgentModels } from '../../hooks/useAgentModels';
-import type { ModelOption } from '../../hooks/useAgentModels';
 import { getAgentDefinition } from '../../types/agentRegistry';
 import type { AgentInputPayload } from '../../types/agentInput';
 import { AgentSelector } from './AgentSelector';
@@ -18,52 +19,6 @@ import { AgentPermissionSelector } from './AgentPermissionSelector';
 import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 import { AgentModelSelector } from './AgentModelSelector';
-
-const CLAUDE_CODE_BUILTIN_MODEL_IDS = new Set(['sonnet', 'opus', 'fable', 'haiku']);
-
-function isCurrentDraftSubmissionAvailable(
-  renderedProfileId: string | null,
-  renderedModels: ModelOption[],
-  areModelsLoading: boolean,
-): boolean {
-  const currentStore = useNewSessionStore.getState();
-  const currentConfig = useSettingsStore.getState().config;
-  const currentAgentKind = currentStore.selectedAgentKind;
-  const isProfileAgent = currentAgentKind === 'claude_code'
-    || currentAgentKind === 'codex'
-    || currentAgentKind === 'opencode';
-
-  if (!isProfileAgent) return true;
-
-  const activeProfileId = currentConfig?.agent_profile_registry?.active_profile_ids?.[currentAgentKind] ?? null;
-  if (activeProfileId !== renderedProfileId) return false;
-  const activeProfile = currentConfig?.agent_profile_registry?.profiles.find(
-    (profile) => profile.id === activeProfileId && profile.agent_kind === currentAgentKind,
-  ) ?? null;
-
-  if (currentAgentKind === 'claude_code' && !activeProfileId) {
-    return !currentStore.selectedModel || CLAUDE_CODE_BUILTIN_MODEL_IDS.has(currentStore.selectedModel);
-  }
-  if (currentAgentKind === 'opencode' && !activeProfileId) {
-    return !currentStore.selectedModel
-      || renderedModels.some((model) => model.id === currentStore.selectedModel)
-      || currentStore.selectedModel.startsWith('opencode/');
-  }
-  if (currentAgentKind === 'codex' && !activeProfileId) {
-    return !currentStore.selectedModel
-      || renderedModels.some((model) => model.id === currentStore.selectedModel);
-  }
-  if (!activeProfileId || !activeProfile || areModelsLoading) return false;
-
-  if (!currentStore.selectedModel) {
-    return activeProfile.models.some((model) => model.id.trim());
-  }
-
-  return activeProfile.models.some((model) => model.id === currentStore.selectedModel)
-    || (currentAgentKind === 'claude_code'
-      ? CLAUDE_CODE_BUILTIN_MODEL_IDS.has(currentStore.selectedModel)
-      : renderedModels.some((model) => model.id === currentStore.selectedModel && model.source !== 'profile'));
-}
 
 interface NewSessionPanelProps {
   onSubmit: (input: AgentInputPayload) => Promise<void> | void;
@@ -93,36 +48,24 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const clearEvents = useAgentStore((state) => state.clearEvents);
 
   const selectedAgent = getAgentDefinition(selectedAgentKind);
-  const isProfileAgent = selectedAgentKind === 'claude_code' || selectedAgentKind === 'codex' || selectedAgentKind === 'opencode';
-  const profileRegistry = config?.agent_profile_registry;
-  const availableProfiles = useMemo(
-    () => isProfileAgent ? (profileRegistry?.profiles ?? []).filter((profile) => profile.agent_kind === selectedAgentKind) : [],
-    [isProfileAgent, profileRegistry?.profiles, selectedAgentKind],
+  const isProviderAgent = selectedAgentKind === 'claude_code' || selectedAgentKind === 'codex' || selectedAgentKind === 'opencode';
+  const modelProviders = config?.model_providers ?? [];
+  const activeProviderId = config?.active_provider_id ?? null;
+  const activeProvider = useMemo(
+    () => getActiveModelProvider(modelProviders, activeProviderId),
+    [activeProviderId, modelProviders],
   );
-  const activeProfileId = isProfileAgent ? profileRegistry?.active_profile_ids?.[selectedAgentKind] ?? null : null;
-  const activeProfile = availableProfiles.find((profile) => profile.id === activeProfileId) ?? null;
-  const { models, isLoading: areModelsLoading } = useAgentModels(selectedAgentKind, activeProfile, activeProfileId);
-  const effectiveModel = selectedModel || activeProfile?.models.find((model) => model.id.trim())?.id.trim() || models[0]?.id || '';
-  const selectedModelIsAvailable = !selectedModel
-    || models.some((model) => model.id === selectedModel)
-    || (selectedAgentKind === 'claude_code' && CLAUDE_CODE_BUILTIN_MODEL_IDS.has(selectedModel));
-  const selectedModelBelongsToActiveProfile = !selectedModel || activeProfile?.models.some((model) => model.id === selectedModel);
-  const usesClaudeDefault = selectedAgentKind === 'claude_code' && !activeProfileId;
-  const usesOpenCodeFree = selectedAgentKind === 'opencode' && !activeProfileId;
-  const usesCodexDefault = selectedAgentKind === 'codex' && !activeProfileId;
-  const hasUsableProfile = !isProfileAgent
-    || (usesClaudeDefault || usesOpenCodeFree || usesCodexDefault
-      ? Boolean(!selectedModel || (!areModelsLoading && selectedModelIsAvailable))
-      : Boolean(
-        activeProfileId
-          && effectiveModel
-          && !areModelsLoading
-          && selectedModelIsAvailable
-          && (selectedModelBelongsToActiveProfile
-            || selectedAgentKind === 'claude_code' && CLAUDE_CODE_BUILTIN_MODEL_IDS.has(selectedModel ?? '')
-            || selectedAgentKind === 'codex'
-            || selectedAgentKind === 'opencode'),
-      ));
+  const { models, isLoading: areModelsLoading } = useAgentModels(selectedAgentKind, activeProvider, activeProviderId);
+  const effectiveModel = selectedModel || getProviderPrimaryModel(activeProvider) || models[0]?.id || '';
+  const selectedModelIsAvailable = !selectedModel || models.some((model) => model.id === selectedModel);
+  const hasUsableProvider = !isProviderAgent
+    || Boolean(
+      activeProvider
+        && isProviderUsable(activeProvider, selectedAgentKind)
+        && effectiveModel
+        && !areModelsLoading
+        && selectedModelIsAvailable,
+    );
 
   const draftProject = useMemo(
     () => projects.find((project) => project.id === draftProjectId) ?? null,
@@ -162,25 +105,23 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   ]);
 
   useEffect(() => {
-    if (!isProfileAgent) return;
-    const active = availableProfiles.find((profile) => profile.id === activeProfileId);
-    if (!active) {
+    if (!isProviderAgent) return;
+    if (!activeProvider || !isProviderUsable(activeProvider, selectedAgentKind)) {
       setSelectedModel(null);
       return;
     }
-    setSelectedModel(active.models.find((model) => model.id.trim())?.id.trim() || null);
-  }, [activeProfileId, availableProfiles, isProfileAgent, setSelectedModel]);
+    setSelectedModel(getProviderPrimaryModel(activeProvider) || null);
+  }, [activeProvider, isProviderAgent, selectedAgentKind, setSelectedModel]);
 
   const handleSend = async (input: AgentInputPayload | string) => {
     const currentStore = useNewSessionStore.getState();
     if (checkingRuntimeRef.current) {
       return;
     }
-    if (currentStore.selectedAgentKind !== selectedAgentKind
-      || !isCurrentDraftSubmissionAvailable(activeProfileId, models, areModelsLoading)) {
+    if (currentStore.selectedAgentKind !== selectedAgentKind || !hasUsableProvider) {
       return;
     }
-    if (isProfileAgent && effectiveModel !== selectedModel) {
+    if (isProviderAgent && effectiveModel !== selectedModel) {
       setSelectedModel(effectiveModel);
     }
     const payload = typeof input === 'string' ? { text: input } : input;
@@ -230,7 +171,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
         agentKind={selectedAgentKind}
         onSend={handleSend}
         onCommand={handleCommand}
-        sendDisabled={!hasUsableProfile || isCheckingRuntime}
+        sendDisabled={!hasUsableProvider || isCheckingRuntime}
       >
         <div className="mx-auto flex min-h-full w-full flex-col items-center justify-center px-6 py-10">
           <div className="w-full max-w-2xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 fill-mode-both animation-duration-[360ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
@@ -239,6 +180,11 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               <h1 className="text-center text-ui-heading-md font-semibold leading-tight text-foreground sm:text-ui-heading-lg">
                 {title}
               </h1>
+              {!hasUsableProvider && isProviderAgent && (
+                <p className="text-center text-sm text-muted-foreground">
+                  请先在设置 → 供应商配置中添加并激活可用的模型供应商（需 API Key 与匹配协议端点）。
+                </p>
+              )}
             </div>
 
             <CodeMuxComposer
@@ -246,13 +192,13 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               agentKind={selectedAgentKind}
               projectPath={draftProject?.path}
               placeholder={placeholder}
-              disabled={!hasUsableProfile || isCheckingRuntime}
+              disabled={!hasUsableProvider || isCheckingRuntime}
               loading={isCheckingRuntime}
               modelSelector={(
                 <AgentModelSelector
                   agentKind={selectedAgentKind}
-                  activeProfile={activeProfile}
-                  activeProfileId={activeProfileId}
+                  activeProvider={activeProvider}
+                  activeProviderId={activeProviderId}
                   value={effectiveModel}
                   onChange={setSelectedModel}
                   reasoningEffort={selectedReasoningEffort}
@@ -268,12 +214,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                   onPlanModeChange={setSelectedPlanMode}
                 />
               )}
-              onActivatePlanMode={selectedAgentKind === 'opencode' ? undefined : () => {
-                setSelectedPermissionConfig(mapExecutionModeToPermissionConfig(selectedAgentKind, 'plan'));
-                setSelectedPlanMode('on');
-              }}
             />
-
           </div>
         </div>
       </CodeMuxAssistantRuntimeProvider>

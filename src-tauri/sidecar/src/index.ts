@@ -1,7 +1,6 @@
 import * as readline from 'node:readline';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type {
   Query,
@@ -229,27 +228,6 @@ function clearClaudeToolResponses(sessionId?: string): number {
 
 function isQueryIdleTimeout(errorText: string): boolean {
   return errorText.includes('Query timed out: no message received');
-}
-
-/** Load env vars from ~/.claude/settings.json and apply to process.env */
-function loadClaudeSettingsEnv(): void {
-  try {
-    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
-    if (!fs.existsSync(settingsPath)) return;
-    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-    if (settings.env && typeof settings.env === 'object') {
-      const keys = Object.keys(settings.env);
-      process.stderr.write(`[sidecar] Settings env keys: ${keys.join(', ')}\n`);
-      for (const [key, value] of Object.entries(settings.env)) {
-        if (typeof value === 'string' && !process.env[key]) {
-          process.env[key] = value;
-        }
-      }
-      process.stderr.write(`[sidecar] Loaded ${keys.length} env vars from ~/.claude/settings.json\n`);
-    }
-  } catch (err) {
-    process.stderr.write(`[sidecar] Warning: failed to load Claude settings: ${err}\n`);
-  }
 }
 
 async function* createPromptStream(prompt: string, inputPayload?: AgentInputPayload, includeImages = true): AsyncGenerator<SDKUserMessage, void, void> {
@@ -1708,7 +1686,8 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
 }
 
 async function main(): Promise<void> {
-  loadClaudeSettingsEnv();
+  // ADR 0005: CodeMUX sessions inject credentials via ensure_session.
+  // Do not preload ~/.claude/settings.json into process.env for hosted chats.
 
   emit({ type: 'sidecar_ready' });
 

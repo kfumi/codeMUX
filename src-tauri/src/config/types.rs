@@ -169,6 +169,8 @@ pub struct ClaudeCodeAgentConfig {
     pub resume_sessions: bool,
     #[serde(default)]
     pub permission_config: ClaudePermissionConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeouts: Option<crate::provider_profiles::types::AgentTimeouts>,
 }
 
 impl Default for ClaudeCodeAgentConfig {
@@ -177,6 +179,7 @@ impl Default for ClaudeCodeAgentConfig {
             executable_mode: default_claude_executable_mode(),
             resume_sessions: true,
             permission_config: ClaudePermissionConfig::default(),
+            timeouts: None,
         }
     }
 }
@@ -187,6 +190,8 @@ pub struct CodexAgentConfig {
     pub sdk_mode: String,
     #[serde(default)]
     pub permission_config: CodexPermissionConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeouts: Option<crate::provider_profiles::types::AgentTimeouts>,
 }
 
 impl Default for CodexAgentConfig {
@@ -194,6 +199,7 @@ impl Default for CodexAgentConfig {
         Self {
             sdk_mode: default_codex_sdk_mode(),
             permission_config: CodexPermissionConfig::default(),
+            timeouts: None,
         }
     }
 }
@@ -212,6 +218,12 @@ pub struct CodexAgentConfigUpdate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OpenCodeAgentConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeouts: Option<crate::provider_profiles::types::AgentTimeouts>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentConfigs {
     #[serde(default)]
     pub claude_code: ClaudeCodeAgentConfig,
@@ -220,12 +232,18 @@ pub struct AgentConfigs {
     #[serde(default)]
     pub gemini_cli: std::collections::HashMap<String, String>,
     #[serde(default)]
-    pub opencode: std::collections::HashMap<String, String>,
+    pub opencode: OpenCodeAgentConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
+    /// CodeMUX-owned model providers (ADR 0005).
     #[serde(default)]
+    pub model_providers: Vec<crate::model_providers::ModelProvider>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_provider_id: Option<String>,
+    /// Legacy field retained only so old config.json can deserialize; cleared on load (no migration).
+    #[serde(default, skip_serializing)]
     pub agent_profile_registry: crate::provider_profiles::AgentProfileRegistry,
     /// 仅存在于内存中，表示当前档案注册表由旧版供应商配置临时派生。
     #[serde(skip)]
@@ -233,12 +251,9 @@ pub struct AppConfig {
     /// 仅存在于内存中，用于阻止无效的持久档案被无关设置覆盖。
     #[serde(skip)]
     pub profile_registry_validation_error: Option<String>,
-    /// 仅用于读取尚未迁移的旧版统一供应商配置。
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Legacy unified providers; cleared on load (no migration).
+    #[serde(default, skip_serializing)]
     pub providers: Vec<Provider>,
-    /// 仅用于读取尚未迁移的旧版统一供应商配置。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub active_provider_id: Option<String>,
     #[serde(default)]
     pub agent_defaults: AgentDefaults,
     #[serde(default)]
@@ -262,11 +277,12 @@ pub enum Theme {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            model_providers: Vec::new(),
+            active_provider_id: None,
             agent_profile_registry: crate::provider_profiles::AgentProfileRegistry::default(),
             profile_registry_is_derived: false,
             profile_registry_validation_error: None,
             providers: Vec::new(),
-            active_provider_id: None,
             agent_defaults: AgentDefaults::default(),
             agent_configs: AgentConfigs::default(),
             compact_ai_output: false,
