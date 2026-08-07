@@ -115,6 +115,34 @@ describe('sidecar command dispatcher', () => {
     expect(opencode.respondToPermission).toHaveBeenCalledWith('permission-1', { approved: true }, 'session-1');
   });
 
+  it('forwards timeouts to the OpenCode runtime factory on ensure_session', async () => {
+    const opencode = createRuntime();
+    const createOpenCodeRuntime = vi.fn(() => opencode);
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: createRuntime(),
+      codexRuntime: createRuntime(),
+      createOpenCodeRuntime,
+      emit: vi.fn(),
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({
+      type: 'ensure_session',
+      agentKind: 'opencode',
+      cwd: 'D:\\workspace',
+      sessionId: 'session-timeouts',
+      provider: 'codemux-openai',
+      model: 'gpt-5',
+      timeouts: { idle_timeout_ms: 60_000, approval_timeout_ms: 0, question_timeout_ms: 15_000 },
+    });
+
+    expect(createOpenCodeRuntime).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-timeouts',
+      timeouts: { idle_timeout_ms: 60_000, approval_timeout_ms: 0, question_timeout_ms: 15_000 },
+    }));
+  });
+
   it('keeps Codex and Claude commands on their existing runtime paths', async () => {
     const claude = createRuntime();
     const codex = createRuntime();

@@ -1,6 +1,7 @@
 import type { AgentInputPayload } from './agentInputPayload.js';
 import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
+import type { TurnTimeouts } from './turnTimeouts.js';
 
 export type RuntimeFlavor = 'claude' | 'codex' | 'opencode';
 
@@ -18,6 +19,7 @@ export interface OpenCodeSessionConfig {
   baseUrl?: string;
   /** 外部托管 Runtime 引用。 */
   runtimeRef?: ProviderRuntimeRef;
+  timeouts?: TurnTimeouts;
 }
 
 export interface OpenCodeSessionMapping {
@@ -36,7 +38,7 @@ export interface RuntimeEventContext {
 
 // Commands from Rust to sidecar (via stdin)
 export type SidecarCommand =
-  | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; resumeOnly?: boolean; runtimeGeneration?: number; apiKey?: string; baseUrl?: string; provider?: string; credentialSource?: OpenCodeCredentialSource; model?: string; reasoningEffort?: string; codexNeedsProxy?: boolean; skills?: string[]; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode; runtimeRef?: ProviderRuntimeRef }
+  | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; resumeOnly?: boolean; runtimeGeneration?: number; apiKey?: string; baseUrl?: string; provider?: string; credentialSource?: OpenCodeCredentialSource; model?: string; reasoningEffort?: string; codexNeedsProxy?: boolean; skills?: string[]; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode; runtimeRef?: ProviderRuntimeRef; timeouts?: TurnTimeouts }
   | { type: 'update_permissions'; sessionId?: string; agentKind?: string; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode }
   | { type: 'send_input'; sessionId?: string; prompt: string; displayContent?: string; inputPayload?: AgentInputPayload }
   | { type: 'reset_session'; sessionId: string }

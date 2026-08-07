@@ -48,6 +48,8 @@ import { shouldCaptureClaudeSessionMapping } from './claudeSessionMapping.js';
 import { shouldForwardClaudeSdkMessage } from './claudeSdkMessageFilter.js';
 import { nextWithTimeout } from './claudeQueryTimeout.js';
 import { setLogCtx, writeLog } from './writeLog.js';
+import { resolveTurnTimeouts, type ResolvedTurnTimeouts, type TurnTimeouts } from './turnTimeouts.js';
+import { createTurnIdleGuard, type TurnIdleGuard } from './turnIdleGuard.js';
 
 // Suppress unhandled abort rejections from child process termination during interrupt.
 // These are expected when the user cancels a running Codex turn.
@@ -106,6 +108,7 @@ type SessionBootstrap = {
   permissionConfig?: SidecarPermissionConfig;
   planMode?: AgentPlanMode;
   runtimeRef?: import('./runtimeContract.js').ProviderRuntimeRef;
+  timeouts?: TurnTimeouts;
 };
 
 type QueryOptions = Record<string, unknown> & {
@@ -292,6 +295,8 @@ function isNativeResumeFailure(err: unknown): boolean {
 export class SessionRuntime {
   private config: SessionBootstrap | null = null;
   private configFingerprint: string | null = null;
+  private timeouts: ResolvedTurnTimeouts = resolveTurnTimeouts();
+  private turnIdleGuard: TurnIdleGuard | undefined;
   private providerMode = getProviderMode(undefined);
   private abortController: AbortController | null = null;
   private queryHandle: Query | null = null;
@@ -309,6 +314,7 @@ export class SessionRuntime {
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     const normalized = this.normalizeConfig(cmd);
+    this.timeouts = resolveTurnTimeouts(normalized.timeouts);
     const nextFingerprint = JSON.stringify(normalized);
     if (this.configFingerprint === nextFingerprint && this.config) {
       this.applyActivePermissionState(normalized);
@@ -485,6 +491,7 @@ export class SessionRuntime {
       permissionConfig: cmd.permissionConfig,
       planMode: normalizePlanMode(cmd.planMode),
       runtimeRef: cmd.runtimeRef,
+      timeouts: cmd.timeouts,
     };
   }
 
@@ -1650,6 +1657,7 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
     ...(cmd.credentialSource === 'codemux' && cmd.apiKey ? { apiKey: cmd.apiKey } : {}),
     ...(cmd.baseUrl ? { baseUrl: cmd.baseUrl } : {}),
     ...(cmd.runtimeRef ? { runtimeRef: cmd.runtimeRef } : {}),
+    ...(cmd.timeouts ? { timeouts: cmd.timeouts } : {}),
   };
   const openCodeRuntime = new OpenCodeRuntime(config);
   if (cmd.planMode === 'on' || cmd.planMode === 'off') {

@@ -51,6 +51,8 @@ import {
 import { setLogCtx, writeLog } from './writeLog.js';
 import { loadProviderRuntime, isRuntimeError, type RuntimeLoadResult } from './runtimeLoader.js';
 import { loadCodexSdk, type CodexSdkModule } from './sdkLoader.js';
+import { resolveTurnTimeouts, type ResolvedTurnTimeouts, type TurnTimeouts } from './turnTimeouts.js';
+import { createTurnIdleGuard, type TurnIdleGuard } from './turnIdleGuard.js';
 
 export { emit } from './streamEventBatcher.js';
 
@@ -85,6 +87,7 @@ type CodexSessionBootstrap = {
   collaborationPolicy?: CodexCollaborationPolicy;
   /** 外部托管 Runtime 引用。 */
   runtimeRef?: ProviderRuntimeRef;
+  timeouts?: TurnTimeouts;
 };
 
 type UsageBaseline = {
@@ -214,6 +217,9 @@ export class CodexSessionRuntime {
   private turnEventNormalizer: CodexTurnEventNormalizer | null = null;
   /** 动态加载的 Codex SDK 模块（仅从托管 Runtime 加载）。 */
   private codexSdk: CodexSdkModule | null = null;
+  private timeouts: ResolvedTurnTimeouts = resolveTurnTimeouts();
+  private turnIdleGuard: TurnIdleGuard | undefined;
+  private idleTimedOut = false;
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     activeCodexRuntime = this;
@@ -233,8 +239,10 @@ export class CodexSessionRuntime {
       codexNeedsProxy: cmd.codexNeedsProxy,
       permissionConfig: cmd.permissionConfig,
       planMode: normalizeCodexPlanMode(cmd.planMode),
+      timeouts: cmd.timeouts,
       runtimeRef: cmd.runtimeRef,
     };
+    this.timeouts = resolveTurnTimeouts(requestedConfig.timeouts);
     const collaborationPolicy = resolveCodexCollaborationPolicy({
       planMode: requestedConfig.planMode,
       permissionConfig: requestedConfig.permissionConfig,
