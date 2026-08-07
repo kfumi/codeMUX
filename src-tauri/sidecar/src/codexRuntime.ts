@@ -59,6 +59,7 @@ export { emit } from './streamEventBatcher.js';
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
 type UpdatePermissionsCommand = Extract<SidecarCommand, { type: 'update_permissions' }>;
 const DEFAULT_SHELL_COMMAND_TIMEOUT_MS = 10000;
+const TURN_IDLE_TIMEOUT_MESSAGE = 'Turn idle timeout: no progress events received';
 
 // These tools already have a complete lifecycle in the SDK item stream. The
 // JSONL tailer is reserved for native tools that the SDK does not expose.
@@ -99,6 +100,23 @@ type UsageBaseline = {
 export let activeSessionId = '';
 let activeCodexRuntime: CodexSessionRuntime | null = null;
 const fallbackProxyTurnNormalizers = new Map<string, CodexTurnEventNormalizer>();
+
+let activeTurnGuard: TurnIdleGuard | null = null;
+
+/** Suspends the active turn idle guard while an interactive wait is pending. */
+export function suspendActiveTurnGuard(): void {
+  activeTurnGuard?.suspend();
+}
+
+/** Resumes the active turn idle guard after an interactive wait resolves. */
+export function resumeActiveTurnGuard(): void {
+  activeTurnGuard?.resume();
+}
+
+/** Question timeout for the compat-proxy interactive path (0 = infinite). */
+export function getActiveCodexQuestionTimeoutMs(): number {
+  return (activeCodexRuntime as unknown as { timeouts: ResolvedTurnTimeouts } | null)?.timeouts.question_timeout_ms ?? 0;
+}
 
 export function emitActiveCodexTurnEvent(source: CodexTurnSourceEvent): void {
   if (activeCodexRuntime) {
@@ -462,6 +480,16 @@ export class CodexSessionRuntime {
 
     this.abortController = new AbortController();
     activeAbortController = this.abortController;
+    this.idleTimedOut = false;
+    this.turnIdleGuard = createTurnIdleGuard({
+      idleTimeoutMs: this.timeouts.idle_timeout_ms,
+      onExpired: () => {
+        this.idleTimedOut = true;
+        process.stderr.write('[codex] Turn idle timeout fired; aborting stream\n');
+        this.abortController?.abort();
+      },
+    });
+    activeTurnGuard = this.turnIdleGuard;
 
     if (this.config.agentSessionId && !this.config.usesCompatProxy) {
       await this.startNativeSessionEventTailer(sessionId, this.config.agentSessionId, true);
@@ -531,6 +559,7 @@ export class CodexSessionRuntime {
             process.stderr.write(`[codex-debug] handleSdkEvent type=${event.type} preview=${eventPreview}\n`);
           }
           if (this.abortController?.signal.aborted || forceBreak) break;
+          this.turnIdleGuard?.reset();
 
           if (event.type === 'turn.completed') {
             usage = event.usage;
@@ -581,6 +610,10 @@ export class CodexSessionRuntime {
         process.stderr.write('[codex] SDK turn aborted\n');
       }
     } finally {
+      this.turnIdleGuard?.dispose();
+      this.turnIdleGuard = undefined;
+      activeTurnGuard = null;
+
       if (!retryingWithoutImages && !this.abortController?.signal.aborted && !turnCompleted && !turnFailed && pendingStreamError) {
         emitFailure(pendingStreamError);
       }
@@ -599,6 +632,9 @@ export class CodexSessionRuntime {
           },
           durationMs: Date.now() - startedAt,
         });
+      } else if (!retryingWithoutImages && this.idleTimedOut) {
+        this.emitTurnOutcome({ outcome: 'interrupted', reason: TURN_IDLE_TIMEOUT_MESSAGE });
+        process.stderr.write('[codex] Turn ended by idle timeout\n');
       } else if (!retryingWithoutImages && !this.abortController?.signal.aborted) {
         this.emitTurnOutcome({ outcome: turnFailed ? 'failed' : 'interrupted', reason: pendingStreamError ?? undefined });
         process.stderr.write(

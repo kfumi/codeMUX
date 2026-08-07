@@ -19,7 +19,6 @@ import {
 } from './codexCollaborationPolicy.js';
 import { getActivePermissionState } from './activePermissionState.js';
 
-const INTERACTIVE_USER_INPUT_TIMEOUT_MS = 300_000;
 const INTERACTIVE_USER_INPUT_TIMEOUT_MESSAGE = '等待用户回复超时，请重新发送消息继续';
 
 export type ProxyConfig = {
@@ -662,7 +661,7 @@ async function resolveInteractiveUserInputToolCalls(
   collaborationPolicy: CodexCollaborationPolicy,
 ): Promise<unknown[]> {
   const responses: unknown[] = [];
-  const { emit: emitEvent, emitActiveCodexTurnEvent, activeSessionId } = await import('./codexRuntime.js');
+  const { emit: emitEvent, emitActiveCodexTurnEvent, activeSessionId, getActiveCodexQuestionTimeoutMs, suspendActiveTurnGuard, resumeActiveTurnGuard } = await import('./codexRuntime.js');
 
   for (const toolCall of interactiveToolCalls) {
     const currentPolicy = getCurrentCodexCollaborationPolicy(activeSessionId) ?? collaborationPolicy;
@@ -680,10 +679,15 @@ async function resolveInteractiveUserInputToolCalls(
       const input = parseJsonObject(toolCall.arguments);
       const questions = parseInteractiveQuestions(input.questions);
       emitActiveCodexTurnEvent({ kind: 'user_input_requested', toolUseId: toolCall.id, questions });
-      response = await waitForInteractiveToolResponse(toolCall.id, {
-        sessionId: activeSessionId,
-        timeoutMs: INTERACTIVE_USER_INPUT_TIMEOUT_MS,
-      });
+      suspendActiveTurnGuard();
+      try {
+        response = await waitForInteractiveToolResponse(toolCall.id, {
+          sessionId: activeSessionId,
+          timeoutMs: getActiveCodexQuestionTimeoutMs(),
+        });
+      } finally {
+        resumeActiveTurnGuard();
+      }
       if (isInteractiveToolTimeoutResponse(response)) {
         isError = true;
         emitActiveCodexTurnEvent({

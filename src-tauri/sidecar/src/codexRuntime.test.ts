@@ -1786,4 +1786,72 @@ describe('CodexSessionRuntime', () => {
       stdoutSpy.mockRestore();
     }
   });
+
+  it('aborts an idle Codex turn after the configured idle timeout', async () => {
+    vi.useFakeTimers();
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      const internal = runtime as unknown as {
+        config: { sessionId: string; cwd: string; model: string; usesCompatProxy?: boolean };
+        thread: {
+          id: string;
+          runStreamed: () => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+        timeouts: { idle_timeout_ms: number };
+        abortController: AbortController | null;
+      };
+      internal.config = { sessionId: 'session-1', cwd: 'D:/repo', model: 'gpt-5' };
+      internal.timeouts = { idle_timeout_ms: 25 };
+
+      let released!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        released = resolve;
+      });
+      let yields = 0;
+      const events = {
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+        async next() {
+          if (yields === 0) {
+            yields += 1;
+            return { done: false, value: { type: 'turn.started' } as ThreadEvent };
+          }
+          await gate;
+          return { done: true, value: undefined };
+        },
+        async return() {
+          return { done: true, value: undefined };
+        },
+        async throw(error?: unknown) {
+          throw error;
+        },
+      } as AsyncGenerator<ThreadEvent>;
+      internal.thread = {
+        id: 'codex-thread-1',
+        runStreamed: async () => ({ events }),
+      };
+
+      const runPromise = (runtime as unknown as {
+        runInput: (prompt: string, inputPayload: undefined, includeImages: boolean) => Promise<void>;
+      }).runInput('hello', undefined, false);
+
+      await vi.advanceTimersByTimeAsync(40);
+      expect(internal.abortController?.signal.aborted).toBe(true);
+      released();
+      await runPromise;
+      expect(writes.some((line) => line.includes('Turn idle timeout'))).toBe(true);
+    } finally {
+      stdoutSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });
