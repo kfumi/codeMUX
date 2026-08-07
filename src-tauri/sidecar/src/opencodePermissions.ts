@@ -83,7 +83,7 @@ export class OpenCodePermissionError extends Error {
 }
 
 export class OpenCodePermissionRegistry {
-  private readonly timeoutMs: number;
+  private readonly timeoutMs: number | undefined;
   private readonly nativeResponseTimeoutMs: number;
   private readonly expiredTombstoneTtlMs: number;
   private readonly maxExpiredTombstones: number;
@@ -93,11 +93,13 @@ export class OpenCodePermissionRegistry {
   private nextResponseToken = 0;
 
   constructor(options: OpenCodePermissionRegistryOptions = {}) {
-    this.timeoutMs = options.timeoutMs ?? 5 * 60_000;
+    this.timeoutMs = options.timeoutMs;
     this.nativeResponseTimeoutMs = options.nativeResponseTimeoutMs ?? 30_000;
-    this.expiredTombstoneTtlMs = options.expiredTombstoneTtlMs ?? Math.max(this.timeoutMs, 60_000);
+    this.expiredTombstoneTtlMs =
+      options.expiredTombstoneTtlMs
+      ?? (this.timeoutMs === undefined ? 60_000 : Math.max(this.timeoutMs, 60_000));
     this.maxExpiredTombstones = options.maxExpiredTombstones ?? 1_024;
-    if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) {
+    if (this.timeoutMs !== undefined && (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0)) {
       throw new RangeError('OpenCode permission timeout must be a positive finite number');
     }
     if (!Number.isFinite(this.expiredTombstoneTtlMs) || this.expiredTombstoneTtlMs <= 0) {
@@ -191,7 +193,7 @@ export class OpenCodePermissionRegistry {
       nativeRequestIdentity: request.nativeRequestIdentity,
       nativePayloadFingerprint: request.nativePayloadFingerprint,
       createdAt: now,
-      deadline: now + this.timeoutMs,
+      deadline: this.timeoutMs === undefined ? Infinity : now + this.timeoutMs,
       state: 'pending',
       respond: request.respond,
     };
@@ -204,6 +206,15 @@ export class OpenCodePermissionRegistry {
   get(requestId: string): OpenCodePermissionRecord | undefined {
     const entry = this.entries.get(requestId);
     return entry ? this.toRecord(entry) : undefined;
+  }
+
+  hasPending(codeMuxSessionId: string): boolean {
+    for (const entry of this.entries.values()) {
+      if (entry.codeMuxSessionId === codeMuxSessionId && entry.state !== 'cancelled') {
+        return true;
+      }
+    }
+    return false;
   }
 
   async respond(requestId: string, codeMuxSessionId: string, response: OpenCodePermissionResponse): Promise<void> {
@@ -358,6 +369,9 @@ export class OpenCodePermissionRegistry {
   }
 
   private scheduleTimeout(entry: PermissionEntry): void {
+    if (!Number.isFinite(entry.deadline)) {
+      return;
+    }
     const remainingMs = entry.deadline - Date.now();
     if (remainingMs <= 0) {
       void this.expireEntry(entry, 'expired');

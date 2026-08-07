@@ -17,11 +17,12 @@ import {
   type OpenCodeServerHandle,
 } from './opencodeSdk.js';
 import { setLogCtx, writeLog } from './writeLog.js';
+import { resolveTurnTimeouts, type ResolvedTurnTimeouts } from './turnTimeouts.js';
+import { createTurnIdleGuard, type TurnIdleGuard } from './turnIdleGuard.js';
 
 type RuntimeState = 'idle' | 'starting' | 'started' | 'disposing' | 'cleanup_failed' | 'disposed';
 
 export const DEFAULT_ACTIVE_TASK_TIMEOUT_MS = 30_000;
-export const DEFAULT_PROMPT_TIMEOUT_MS = 600_000;
 export const DEFAULT_SERVER_CLOSE_TIMEOUT_MS = 10_000;
 const MAX_SEEN_EVENT_IDS = 2_048;
 const MAX_SEEN_PAYLOAD_KEYS = 2_048;
@@ -29,7 +30,6 @@ const MAX_SEEN_PAYLOAD_CACHE_BYTES = 512 * 1024;
 
 export interface OpenCodeRuntimeOptions {
   activeTaskTimeoutMs?: number;
-  promptTimeoutMs?: number;
   serverCloseTimeoutMs?: number;
   agentId?: string;
   emitEvent?: (event: unknown) => void;
@@ -42,12 +42,15 @@ export class OpenCodeRuntime {
   private readonly config: OpenCodeSessionConfig;
   private readonly sdk: OpenCodeSdkPort;
   private readonly activeTaskTimeoutMs: number;
-  private readonly promptTimeoutMs: number;
   private readonly serverCloseTimeoutMs: number;
   private readonly agentId: string;
   private readonly emitEvent: (event: unknown) => void;
   private readonly eventIdFactory: () => string;
   readonly permissions: OpenCodePermissionRegistry;
+  private readonly timeouts: ResolvedTurnTimeouts;
+  private turnIdleGuard: TurnIdleGuard | undefined;
+  private idleTimedOut = false;
+  private readonly questionTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
   private server: OpenCodeServerHandle | undefined;
   private client: OpenCodeClientPort | undefined;
   private agentSessionId: string | undefined;
@@ -88,17 +91,19 @@ export class OpenCodeRuntime {
     this.sdk = sdk;
     setLogCtx({ sessionId: config.sessionId });
     this.activeTaskTimeoutMs = options.activeTaskTimeoutMs ?? DEFAULT_ACTIVE_TASK_TIMEOUT_MS;
-    this.promptTimeoutMs = options.promptTimeoutMs ?? DEFAULT_PROMPT_TIMEOUT_MS;
     this.serverCloseTimeoutMs = options.serverCloseTimeoutMs ?? DEFAULT_SERVER_CLOSE_TIMEOUT_MS;
     this.agentId = options.agentId ?? config.sessionId;
     this.emitEvent = options.emitEvent ?? emit;
     this.eventIdFactory = options.eventIdFactory ?? (() => crypto.randomUUID());
-    this.permissions = new OpenCodePermissionRegistry({ timeoutMs: options.permissionTimeoutMs, nativeResponseTimeoutMs: options.nativeResponseTimeoutMs });
+    this.timeouts = resolveTurnTimeouts(config.timeouts);
+    this.permissions = new OpenCodePermissionRegistry({
+      timeoutMs:
+        options.permissionTimeoutMs
+        ?? (this.timeouts.approval_timeout_ms > 0 ? this.timeouts.approval_timeout_ms : undefined),
+      nativeResponseTimeoutMs: options.nativeResponseTimeoutMs,
+    });
     if (!Number.isFinite(this.activeTaskTimeoutMs) || this.activeTaskTimeoutMs <= 0) {
       throw new RangeError('OpenCode active task timeout must be a positive finite number');
-    }
-    if (!Number.isFinite(this.promptTimeoutMs) || this.promptTimeoutMs <= 0) {
-      throw new RangeError('OpenCode prompt timeout must be a positive finite number');
     }
     if (!Number.isFinite(this.serverCloseTimeoutMs) || this.serverCloseTimeoutMs <= 0) {
       throw new RangeError('OpenCode server close timeout must be a positive finite number');
@@ -137,6 +142,17 @@ export class OpenCodeRuntime {
     }
 
     this.beginTurnEventState();
+    this.idleTimedOut = false;
+    this.turnIdleGuard = createTurnIdleGuard({
+      idleTimeoutMs: this.timeouts.idle_timeout_ms,
+      onExpired: () => {
+        this.idleTimedOut = true;
+        writeLog('[opencode-task]', `turn idle timeout after ${this.timeouts.idle_timeout_ms}ms; aborting session`);
+        void this.client?.abort(sessionId).catch(() => undefined);
+        this.handleSdkEvent({ type: 'session.error', properties: { sessionID: sessionId, error: { name: 'OpenCodeIdleTimeoutError', data: { message: `No progress events for ${this.timeouts.idle_timeout_ms}ms; turn idle timed out` } } } });
+      },
+    });
+    this.turnIdleGuard.reset();
     const normalizedPayload = normalizeAgentInputPayload(prompt, inputPayload);
     const normalizedPrompt = normalizedPayload.text;
     setLogCtx({ sessionId: this.config.sessionId });
@@ -176,9 +192,9 @@ export class OpenCodeRuntime {
         // turn completed externally (abort/timeout/error)
       }
     })();
-    const handledTask = this.awaitPromptWithTimeout(task, sessionId).catch((error) => {
-      if (isAbortError(error)) {
-        writeLog('[opencode-task]', `sendInput ABORT_ERROR swallowed: ${errorMessage(error)}`);
+    const handledTask = task.catch((error) => {
+      if (isAbortError(error) || this.idleTimedOut) {
+        writeLog('[opencode-task]', `sendInput settled (abort or idle timeout): ${errorMessage(error)}`);
         return;
       }
       writeLog('[opencode-task]', `sendInput ERROR propagating: ${errorMessage(error)}`);
@@ -189,6 +205,9 @@ export class OpenCodeRuntime {
       await handledTask;
       writeLog('[opencode-task]', 'sendInput COMPLETE');
     } finally {
+      this.turnIdleGuard?.dispose();
+      this.turnIdleGuard = undefined;
+      this.idleTimedOut = false;
       if (this.pendingTurnCompletion?.sessionId === sessionId) {
         this.pendingTurnCompletion = undefined;
       }
@@ -213,16 +232,23 @@ export class OpenCodeRuntime {
   }
 
   respondToPermission(requestId: string, response: OpenCodePermissionResponse, codeMuxSessionId = this.config.sessionId): Promise<void> {
-    return this.permissions.respond(requestId, codeMuxSessionId, response);
+    return this.permissions.respond(requestId, codeMuxSessionId, response)
+      .finally(() => this.syncGuardWithInteractiveState());
   }
 
   async respondToQuestion(requestId: string, answers: string[][]): Promise<void> {
     this.pendingQuestionIds.delete(requestId);
+    const timer = this.questionTimeouts.get(requestId);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.questionTimeouts.delete(requestId);
+    }
     const client = this.client;
     if (client?.respondToQuestion) {
       await client.respondToQuestion({ requestId, answers, directory: this.config.cwd });
       this.emitToolFinished(requestId, JSON.stringify({ answers }));
     }
+    this.syncGuardWithInteractiveState();
   }
 
   isPendingQuestion(requestId: string): boolean {
@@ -400,6 +426,16 @@ export class OpenCodeRuntime {
     }
   }
 
+  private syncGuardWithInteractiveState(): void {
+    const hasPendingInteraction =
+      this.pendingQuestionIds.size > 0 || this.permissions.hasPending(this.config.sessionId);
+    if (hasPendingInteraction) {
+      this.turnIdleGuard?.suspend();
+    } else {
+      this.turnIdleGuard?.reset();
+    }
+  }
+
   private handleSdkEvent(event: unknown): void {
     const eventSessionId = getOpenCodeEventSessionId(event);
     const activeSessionId = this.agentSessionId;
@@ -418,6 +454,7 @@ export class OpenCodeRuntime {
     if ((type === 'permission.updated' || type === 'permission.asked') && this.permissionClosing) {
       return;
     }
+    this.syncGuardWithInteractiveState();
     const identity = getOpenCodeEventIdentity(event, this.turnId);
     const payloadKey = identity ? undefined : getOpenCodePayloadKey(event);
     if ((identity && this.seenEventIds.has(identity)) || (payloadKey && this.seenPayloadKeys.has(payloadKey))) {
@@ -574,28 +611,6 @@ export class OpenCodeRuntime {
     }
   }
 
-  private async awaitPromptWithTimeout(task: Promise<void>, sessionId: string): Promise<void> {
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        const timeoutError = new Error(`OpenCode prompt timed out after ${this.promptTimeoutMs}ms`);
-        timeoutError.name = 'OpenCodePromptTimeoutError';
-        reject(timeoutError);
-      }, this.promptTimeoutMs);
-    });
-    try {
-      await Promise.race([task, timeout]);
-        writeLog('[opencode-task]', 'awaitPromptWithTimeout RESOLVED');
-    } catch (error) {
-        writeLog('[opencode-task]', `awaitPromptWithTimeout ERROR error=${errorMessage(error)} isTimeout=${isPromptTimeoutError(error)}`);
-      if (!isPromptTimeoutError(error)) throw error;
-      void this.client?.abort(sessionId).catch(() => undefined);
-      this.handleSdkEvent({ type: 'session.error', properties: { sessionID: sessionId, error: { name: 'OpenCodePromptTimeoutError', data: { message: errorMessage(error) } } } });
-    } finally {
-      if (timeoutHandle) clearTimeout(timeoutHandle);
-    }
-  }
-
   private beginTurnEventState(): void {
     this.turnId += 1;
     this.terminalSessionIds.clear();
@@ -632,6 +647,10 @@ export class OpenCodeRuntime {
   }
 
   private clearEventState(): void {
+    for (const timer of this.questionTimeouts.values()) {
+      clearTimeout(timer);
+    }
+    this.questionTimeouts.clear();
     this.seenEventIds.clear();
     this.seenPayloadKeys.clear();
     this.seenPayloadKeyBytes = 0;
@@ -689,6 +708,7 @@ export class OpenCodeRuntime {
       event_id: this.eventIdFactory(),
     });
     this.eventSequence += 1;
+    this.syncGuardWithInteractiveState();
   }
 
   private handleQuestionEvent(event: unknown, eventSessionId: string | undefined, nativeRequestIdentity: string | undefined, nativePayloadFingerprint: string | undefined): void {
@@ -723,6 +743,15 @@ export class OpenCodeRuntime {
       event_id: this.eventIdFactory(),
     });
     this.eventSequence += 1;
+    if (this.timeouts.question_timeout_ms > 0) {
+      const timer = setTimeout(() => {
+        this.questionTimeouts.delete(requestId);
+        void this.respondToQuestion(requestId, []).catch(() => undefined);
+      }, this.timeouts.question_timeout_ms);
+      timer.unref?.();
+      this.questionTimeouts.set(requestId, timer);
+    }
+    this.syncGuardWithInteractiveState();
   }
 
   private emitToolStarted(
@@ -933,10 +962,6 @@ function errorMessage(error: unknown): string {
   } catch {
     return String(error);
   }
-}
-
-function isPromptTimeoutError(error: unknown): boolean {
-  return readString(asRecord(error)?.name) === 'OpenCodePromptTimeoutError';
 }
 
 function isAbortError(error: unknown): boolean {

@@ -57,18 +57,18 @@ vi.mock('./opencodeExecutable.js', () => ({
   prepareOpenCodeExecutable: vi.fn(),
 }));
 
-function createConfig(agentSessionId?: string): OpenCodeSessionConfig {
+function createConfig(overrides: Partial<OpenCodeSessionConfig> = {}): OpenCodeSessionConfig {
   return {
     cwd: 'D:/workspace/demo',
     sessionId: 'codemux-session-1',
     runtimeGeneration: 1,
-    ...(agentSessionId ? { agentSessionId } : {}),
     provider: 'codemux-openai',
     model: 'gpt-5',
     credentialSource: 'codemux',
     apiKey: 'secret-key',
     baseUrl: 'https://provider.example/v1',
     runtimeRef: sdkMocks.runtimeRef,
+    ...overrides,
   };
 }
 
@@ -180,15 +180,14 @@ describe('OpenCodeRuntime', () => {
     await runtime.shutdown();
   });
 
-  it('aborts and emits a terminal error when the provider prompt exceeds its timeout', async () => {
+  it('aborts and emits a terminal timeout error when no progress events arrive before the idle timeout', async () => {
     vi.useFakeTimers();
     try {
       const { port, client } = createPort();
       client.prompt.mockResolvedValue(undefined);
       client.subscribe = vi.fn().mockResolvedValue({ close: vi.fn() });
       const emitted: unknown[] = [];
-      const runtime = new OpenCodeRuntime(createConfig(), port, {
-        promptTimeoutMs: 25,
+      const runtime = new OpenCodeRuntime(createConfig({ timeouts: { idle_timeout_ms: 25 } }), port, {
         emitEvent: (event) => emitted.push(event),
         eventIdFactory: () => 'event-timeout',
       } as any);
@@ -203,6 +202,40 @@ describe('OpenCodeRuntime', () => {
         expect.objectContaining({ type: 'error', subtype: 'timeout' }),
         expect.objectContaining({ type: 'turn_finished', outcome: 'failed' }),
       ]));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('does not expire the turn while a permission is awaiting approval', async () => {
+    vi.useFakeTimers();
+    try {
+      const { port, client } = createPort();
+      client.prompt.mockResolvedValue(undefined);
+      client.respondToPermission.mockResolvedValue(true);
+      let onEvent: (event: unknown) => void = () => undefined;
+      client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+        onEvent = input.onEvent;
+        return { close: vi.fn() };
+      });
+      const emitted: unknown[] = [];
+      const runtime = new OpenCodeRuntime(createConfig({ timeouts: { idle_timeout_ms: 25, approval_timeout_ms: 0 } }), port, {
+        emitEvent: (event) => emitted.push(event),
+        eventIdFactory: () => 'event-id',
+      } as any);
+
+      await runtime.start();
+      const sendPromise = runtime.sendInput('hello');
+      onEvent({
+        type: 'permission.asked',
+        properties: { id: 'perm-1', sessionID: 'opencode-new', type: 'write', title: 'edit file' },
+      });
+
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(client.abort).not.toHaveBeenCalled();
+      expect(emitted.some((event) => (event as { type?: string }).type === 'turn_finished')).toBe(false);
+
+      onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
+      await sendPromise;
     } finally {
       vi.useRealTimers();
     }
@@ -528,7 +561,7 @@ describe('OpenCodeRuntime', () => {
   it('restores an existing session and never creates a replacement when restoration fails', async () => {
     const { port, client } = createPort();
     client.restoreSession.mockRejectedValue(new Error('session not found'));
-    const runtime = new OpenCodeRuntime(createConfig('opencode-missing'), port);
+    const runtime = new OpenCodeRuntime(createConfig({ agentSessionId: 'opencode-missing' }), port);
 
     await expect(runtime.start()).rejects.toThrow(
       'Failed to restore OpenCode session "opencode-missing": session not found',

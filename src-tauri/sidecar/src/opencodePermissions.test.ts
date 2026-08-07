@@ -306,4 +306,41 @@ describe('OpenCodePermissionRegistry', () => {
       vi.useRealTimers();
     }
   });
+
+  it('waits indefinitely when no timeoutMs is provided (approval default)', async () => {
+    const registry = new OpenCodePermissionRegistry({ nativeResponseTimeoutMs: 1_000 });
+    const record = registry.upsert({
+      requestId: 'perm-infinite',
+      codeMuxSessionId: 'session-1',
+      permissionType: 'write',
+      raw: {},
+      respond: async () => true,
+    });
+    expect(record.record?.deadline).toBe(Infinity);
+    await registry.respond('perm-infinite', 'session-1', 'once');
+    expect(registry.hasPending('session-1')).toBe(false);
+  });
+
+  it('hasPending reports only pending entries for the given session', async () => {
+    const registry = new OpenCodePermissionRegistry({ timeoutMs: 1_000 });
+    registry.upsert({
+      requestId: 'perm-a',
+      codeMuxSessionId: 'session-1',
+      permissionType: 'write',
+      raw: {},
+      respond: async () => true,
+    });
+    registry.upsert({
+      requestId: 'perm-b',
+      codeMuxSessionId: 'session-2',
+      permissionType: 'bash',
+      raw: {},
+      respond: async () => true,
+    });
+    expect(registry.hasPending('session-1')).toBe(true);
+    expect(registry.hasPending('session-2')).toBe(true);
+    await registry.respond('perm-a', 'session-1', 'once');
+    expect(registry.hasPending('session-1')).toBe(false);
+    expect(registry.hasPending('session-2')).toBe(true);
+  });
 });
