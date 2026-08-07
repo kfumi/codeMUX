@@ -40,14 +40,32 @@ describe('nextWithTimeout', () => {
   });
 
   it('waits indefinitely when timeoutMs is 0 (disabled idle timeout)', async () => {
-    const next = vi.fn().mockResolvedValueOnce('later');
+    vi.useFakeTimers();
+    let resolveNext!: (value: string) => void;
+    const next = vi.fn().mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveNext = resolve;
+      }),
+    );
     const promise = nextWithTimeout(next, 0, () => 'timeout');
     expect(next).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    resolveNext('later');
     await expect(promise).resolves.toBe('later');
   });
 
   it('waits indefinitely when timeoutMs is Infinity (suspended idle guard)', async () => {
-    const next = vi.fn().mockResolvedValueOnce('later');
-    await expect(nextWithTimeout(next, Infinity, () => 'timeout')).resolves.toBe('later');
+    vi.useFakeTimers();
+    let resolveNext!: (value: string) => void;
+    const next = vi.fn().mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveNext = resolve;
+      }),
+    );
+    const promise = nextWithTimeout(next, Infinity, () => 'timeout');
+    expect(next).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    resolveNext('later');
+    await expect(promise).resolves.toBe('later');
   });
 });
