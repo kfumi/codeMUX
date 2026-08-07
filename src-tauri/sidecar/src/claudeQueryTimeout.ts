@@ -4,6 +4,10 @@ export async function nextWithTimeout<T>(
   onTimeout: () => T | never,
   additionalPromises: Promise<T>[] = [],
 ): Promise<T> {
+  if (timeoutMs <= 0 || !Number.isFinite(timeoutMs)) {
+    return await next();
+  }
+
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   try {
