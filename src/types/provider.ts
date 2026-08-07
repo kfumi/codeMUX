@@ -76,11 +76,18 @@ export interface OpenCodeModel {
   [key: string]: unknown;
 }
 
+export interface AgentTimeouts {
+  idle_timeout_ms?: number;
+  approval_timeout_ms?: number;
+  question_timeout_ms?: number;
+}
+
 export type NativeProfileConfig =
   | {
       type: 'claude_code';
       settings: Record<string, unknown>;
       requires_review?: boolean;
+      timeouts?: AgentTimeouts | null;
     }
   | {
       type: 'codex';
@@ -92,6 +99,7 @@ export type NativeProfileConfig =
       config_toml?: string | null;
       model_catalog?: string | null;
       requires_review?: boolean;
+      timeouts?: AgentTimeouts | null;
     }
   | {
       type: 'opencode';
@@ -103,6 +111,7 @@ export type NativeProfileConfig =
       extra_options?: Record<string, string> | null;
       advanced_config?: unknown | null;
       requires_review?: boolean;
+      timeouts?: AgentTimeouts | null;
     };
 
 export interface AgentProviderProfile {
@@ -122,9 +131,9 @@ export interface AgentProfileRegistry {
 
 export type AgentProviderProfileUpsert = Omit<AgentProviderProfile, 'native_config'> & {
   native_config:
-    | { type: 'claude_code'; settings: Record<string, unknown>; requires_review?: boolean }
-    | { type: 'codex'; api_key?: string; openai_base_url: string; codex_needs_proxy?: boolean | null; advanced_config?: unknown; auth_json?: string | null; config_toml?: string | null; model_catalog?: CodexCatalogModel[] | null; requires_review?: boolean }
-    | { type: 'opencode'; api_key?: string; openai_base_url: string; provider_key?: string; npm?: string; models_config?: Record<string, OpenCodeModel> | null; extra_options?: Record<string, string> | null; advanced_config?: unknown; requires_review?: boolean };
+    | { type: 'claude_code'; settings: Record<string, unknown>; requires_review?: boolean; timeouts?: AgentTimeouts | null }
+    | { type: 'codex'; api_key?: string; openai_base_url: string; codex_needs_proxy?: boolean | null; advanced_config?: unknown; auth_json?: string | null; config_toml?: string | null; model_catalog?: CodexCatalogModel[] | null; requires_review?: boolean; timeouts?: AgentTimeouts | null }
+    | { type: 'opencode'; api_key?: string; openai_base_url: string; provider_key?: string; npm?: string; models_config?: Record<string, OpenCodeModel> | null; extra_options?: Record<string, string> | null; advanced_config?: unknown; requires_review?: boolean; timeouts?: AgentTimeouts | null };
 };
 
 export interface AppConfig {
