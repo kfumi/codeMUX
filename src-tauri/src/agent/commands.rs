@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::commands::provider::CLAUDE_DEFAULT_SUPPLIER_ID;
 use crate::config::types::AgentKind;
 use crate::db::operations;
-use crate::provider_profiles::types::NativeProfileConfig;
+use crate::provider_profiles::types::{AgentTimeouts, NativeProfileConfig};
 use log::{debug, info, warn};
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
@@ -81,6 +81,15 @@ struct ResolvedRuntimeConfig {
     codex_needs_proxy: Option<bool>,
     provider: Option<String>,
     credential_source: Option<String>,
+    timeouts: Option<AgentTimeouts>,
+}
+
+fn profile_timeouts(profile: &NativeProfileConfig) -> Option<AgentTimeouts> {
+    match profile {
+        NativeProfileConfig::ClaudeCode { timeouts, .. } => timeouts.clone(),
+        NativeProfileConfig::Codex { timeouts, .. } => timeouts.clone(),
+        NativeProfileConfig::OpenCode { timeouts, .. } => timeouts.clone(),
+    }
 }
 
 fn resolve_active_runtime_config(
@@ -136,6 +145,7 @@ fn resolve_active_runtime_config(
             codex_needs_proxy: None,
             provider: None,
             credential_source: None,
+            timeouts: None,
         });
     }
     if profile_id.is_none() && agent_kind == AgentKind::Codex {
@@ -148,6 +158,7 @@ fn resolve_active_runtime_config(
             codex_needs_proxy: None,
             provider: None,
             credential_source: None,
+            timeouts: None,
         });
     }
     let profile_id =
@@ -162,6 +173,7 @@ fn resolve_active_runtime_config(
             codex_needs_proxy: None,
             provider: None,
             credential_source: None,
+            timeouts: None,
         });
     }
     let profile = config
@@ -241,6 +253,7 @@ fn resolve_active_runtime_config(
         codex_needs_proxy,
         provider,
         credential_source,
+        timeouts: profile_timeouts(&profile.native_config),
     };
     drop(config);
 
@@ -268,6 +281,7 @@ fn resolve_default_claude_runtime_config() -> ResolvedRuntimeConfig {
         codex_needs_proxy: None,
         provider: None,
         credential_source: None,
+        timeouts: None,
     }
 }
 
@@ -2346,6 +2360,7 @@ fn build_ensure_session_command(
     provider: Option<String>,
     credential_source: Option<String>,
     runtime_generation: Option<u64>,
+    timeouts: Option<AgentTimeouts>,
 ) -> Result<serde_json::Value, String> {
     let mut cmd = serde_json::json!({
         "type": "ensure_session",
@@ -2415,6 +2430,10 @@ fn build_ensure_session_command(
     }
     if let Some(needs_proxy) = codex_needs_proxy {
         cmd["codexNeedsProxy"] = serde_json::Value::Bool(needs_proxy);
+    }
+    if let Some(timeouts) = timeouts {
+        cmd["timeouts"] = serde_json::to_value(timeouts)
+            .map_err(|error| format!("无法序列化 Agent 超时配置: {}", error))?;
     }
     let permission_snapshot = {
         let db = state.db.lock().unwrap();
@@ -2619,6 +2638,7 @@ pub async fn ensure_agent_session(
         runtime_config.provider,
         runtime_config.credential_source,
         runtime_generation,
+        runtime_config.timeouts,
     )?;
 
     ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
@@ -2707,6 +2727,7 @@ pub async fn start_agent_session(
             runtime_config.provider,
             runtime_config.credential_source,
             runtime_generation,
+            runtime_config.timeouts,
         )?;
 
         ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
@@ -3972,6 +3993,7 @@ mod tests {
                 config_toml: None,
                 model_catalog: None,
                 requires_review: false,
+                timeouts: None,
             },
         };
         config.agent_profile_registry.profiles.push(profile);
@@ -4083,6 +4105,7 @@ mod tests {
             native_config: crate::provider_profiles::types::NativeProfileConfig::ClaudeCode {
                 settings: serde_json::json!({}),
                 requires_review: false,
+                timeouts: None,
             },
         };
         config.agent_profile_registry.profiles.push(profile);
@@ -4166,6 +4189,7 @@ mod tests {
                 config_toml: None,
                 model_catalog: None,
                 requires_review: false,
+                timeouts: None,
             },
         };
         config.agent_profile_registry.profiles.push(profile);
@@ -4239,6 +4263,7 @@ mod tests {
             Some("codemux-openai".to_string()),
             Some("codemux".to_string()),
             Some(1),
+            None,
         )
         .unwrap();
 
@@ -4261,10 +4286,82 @@ mod tests {
             Some("codemux-openai".to_string()),
             Some("codemux".to_string()),
             None,
+            None,
         )
         .unwrap();
         assert!(claude_command.get("provider").is_none());
         assert!(claude_command.get("credentialSource").is_none());
+    }
+
+    #[test]
+    fn builds_ensure_command_with_timeouts() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let runtime_root = tempfile::tempdir().unwrap();
+        for (provider, version) in [("opencode", "1.18.3"), ("claude_code", "0.3.170")] {
+            let version_dir = runtime_root.path().join(provider).join(version);
+            std::fs::create_dir_all(&version_dir).unwrap();
+            std::fs::write(version_dir.join("package.json"), b"{}").unwrap();
+            std::fs::write(runtime_root.path().join(provider).join("current"), version).unwrap();
+        }
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-timeouts", "Claude", "claude_code", "chat", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        let app_state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(crate::config::types::AppConfig::default()),
+            provider_profile_operation_lock: std::sync::Mutex::new(()),
+            app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(
+                runtime_root.path().to_path_buf(),
+            ),
+        };
+
+        let timeouts = crate::provider_profiles::types::AgentTimeouts {
+            idle_timeout_ms: Some(300_000),
+            approval_timeout_ms: Some(0),
+            question_timeout_ms: Some(120_000),
+        };
+        let command = build_ensure_session_command(
+            &app_state,
+            "session-timeouts",
+            "claude_code",
+            "D:/workspace/demo".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(timeouts),
+        )
+        .unwrap();
+
+        assert_eq!(command["timeouts"]["idle_timeout_ms"], 300_000);
+        assert_eq!(command["timeouts"]["approval_timeout_ms"], 0);
+        assert_eq!(command["timeouts"]["question_timeout_ms"], 120_000);
+
+        let without = build_ensure_session_command(
+            &app_state,
+            "session-timeouts",
+            "claude_code",
+            "D:/workspace/demo".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(without.get("timeouts").is_none());
     }
 
     #[test]
@@ -4289,6 +4386,7 @@ mod tests {
             "session-missing-runtime",
             "claude_code",
             "D:/workspace/demo".to_string(),
+            None,
             None,
             None,
             None,

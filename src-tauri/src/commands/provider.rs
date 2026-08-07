@@ -182,6 +182,7 @@ impl AgentProviderProfileUpsert {
             ) => NativeProfileConfig::ClaudeCode {
                 settings,
                 requires_review,
+                timeouts: None,
             },
             (
                 AgentKind::Codex,
@@ -224,6 +225,7 @@ impl AgentProviderProfileUpsert {
                     config_toml: config_toml.or(prev_config_toml),
                     model_catalog: model_catalog.map(|v| v.to_string()),
                     requires_review,
+                    timeouts: None,
                 }
             }
             (
@@ -262,6 +264,7 @@ impl AgentProviderProfileUpsert {
                         advanced_config,
                     )?,
                     requires_review,
+                    timeouts: None,
                 }
             }
             _ => return Err("档案智能体类型与原生配置类型不一致".to_string()),
@@ -1319,6 +1322,7 @@ mod tests {
                 config_toml: None,
                 model_catalog: None,
                 requires_review: false,
+                timeouts: None,
             },
         }
     }
@@ -1543,6 +1547,7 @@ mod tests {
                     "ANTHROPIC_BASE_URL": "https://api.example.test"
                 }}),
                 requires_review: false,
+                timeouts: None,
             },
         };
 
@@ -1927,6 +1932,7 @@ mod tests {
                     "ANTHROPIC_BASE_URL": "https://claude.example.test"
                 }}),
                 requires_review: false,
+                timeouts: None,
             },
         };
 
@@ -1960,6 +1966,7 @@ mod tests {
                 extra_options: None,
                 advanced_config: None,
                 requires_review: false,
+                timeouts: None,
             },
         };
 

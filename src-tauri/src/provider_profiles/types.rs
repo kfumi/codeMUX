@@ -5,6 +5,17 @@ use std::collections::BTreeMap;
 
 const MIGRATION_REVIEW_NOTE: &str = "需要检查原生高级配置";
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AgentTimeouts {
+    #[serde(default)]
+    pub idle_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub approval_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub question_timeout_ms: Option<u64>,
+}
+
 #[derive(Clone, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NativeProfileConfig {
@@ -12,6 +23,8 @@ pub enum NativeProfileConfig {
         settings: Value,
         #[serde(default)]
         requires_review: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeouts: Option<AgentTimeouts>,
     },
     Codex {
         api_key: String,
@@ -28,6 +41,8 @@ pub enum NativeProfileConfig {
         model_catalog: Option<String>,
         #[serde(default)]
         requires_review: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeouts: Option<AgentTimeouts>,
     },
     #[serde(rename = "opencode")]
     OpenCode {
@@ -45,6 +60,8 @@ pub enum NativeProfileConfig {
         advanced_config: Option<serde_json::Value>,
         #[serde(default)]
         requires_review: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeouts: Option<AgentTimeouts>,
     },
 }
 
@@ -54,10 +71,12 @@ impl std::fmt::Debug for NativeProfileConfig {
             Self::ClaudeCode {
                 settings: _,
                 requires_review,
+                timeouts,
             } => formatter
                 .debug_struct("ClaudeCode")
                 .field("settings", &"[已脱敏]")
                 .field("requires_review", requires_review)
+                .field("timeouts", timeouts)
                 .finish(),
             Self::Codex {
                 openai_base_url,
@@ -142,6 +161,8 @@ enum NativeProfileConfigRaw {
         advanced_config: Option<Value>,
         #[serde(default)]
         requires_review: bool,
+        #[serde(default)]
+        timeouts: Option<AgentTimeouts>,
     },
     Codex {
         api_key: String,
@@ -158,6 +179,8 @@ enum NativeProfileConfigRaw {
         model_catalog: Option<String>,
         #[serde(default)]
         requires_review: bool,
+        #[serde(default)]
+        timeouts: Option<AgentTimeouts>,
     },
     #[serde(rename = "opencode")]
     OpenCode {
@@ -175,6 +198,8 @@ enum NativeProfileConfigRaw {
         advanced_config: Option<Value>,
         #[serde(default)]
         requires_review: bool,
+        #[serde(default)]
+        timeouts: Option<AgentTimeouts>,
     },
 }
 
@@ -189,10 +214,12 @@ fn deserialize_native_profile_config(
         NativeProfileConfigRaw::ClaudeCode {
             settings: Some(settings),
             requires_review,
+            timeouts,
             ..
         } => NativeProfileConfig::ClaudeCode {
             settings,
             requires_review,
+            timeouts,
         },
         NativeProfileConfigRaw::ClaudeCode {
             api_key,
@@ -210,6 +237,7 @@ fn deserialize_native_profile_config(
                 default_model,
             ),
             requires_review,
+            timeouts: None,
         },
         NativeProfileConfigRaw::Codex {
             api_key,
@@ -220,6 +248,7 @@ fn deserialize_native_profile_config(
             config_toml,
             model_catalog,
             requires_review,
+            timeouts,
         } => NativeProfileConfig::Codex {
             api_key,
             openai_base_url,
@@ -229,6 +258,7 @@ fn deserialize_native_profile_config(
             config_toml,
             model_catalog,
             requires_review,
+            timeouts,
         },
         NativeProfileConfigRaw::OpenCode {
             api_key,
@@ -239,6 +269,7 @@ fn deserialize_native_profile_config(
             extra_options,
             advanced_config,
             requires_review,
+            timeouts,
         } => NativeProfileConfig::OpenCode {
             api_key,
             openai_base_url,
@@ -248,6 +279,7 @@ fn deserialize_native_profile_config(
             extra_options,
             advanced_config,
             requires_review,
+            timeouts,
         },
     })
 }
@@ -501,6 +533,7 @@ pub fn migrate_legacy_providers(
                         &default_model,
                     ),
                     requires_review: true,
+                    timeouts: None,
                 },
             };
             add_migrated_profile(&mut registry, profile, false)?;
@@ -523,6 +556,7 @@ pub fn migrate_legacy_providers(
                     config_toml: None,
                     model_catalog: None,
                     requires_review: true,
+                    timeouts: None,
                 },
             };
             add_migrated_profile(&mut registry, codex_profile, is_active)?;
@@ -543,6 +577,7 @@ pub fn migrate_legacy_providers(
                     extra_options: None,
                     advanced_config: None,
                     requires_review: true,
+                    timeouts: None,
                 },
             };
             add_migrated_profile(&mut registry, opencode_profile, is_active)?;
@@ -749,6 +784,7 @@ mod tests {
                 config_toml: None,
                 model_catalog: None,
                 requires_review: true,
+                timeouts: None,
             },
         };
 
@@ -780,6 +816,7 @@ mod tests {
                 config_toml: None,
                 model_catalog: None,
                 requires_review: true,
+                timeouts: None,
             },
         };
 
@@ -804,6 +841,7 @@ mod tests {
                 config_toml: None,
                 model_catalog: None,
                 requires_review: true,
+                timeouts: None,
             },
         };
         let registry = AgentProfileRegistry {

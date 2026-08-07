@@ -791,6 +791,7 @@ mod tests {
                     "ANTHROPIC_MODEL": "claude-model"
                 }}),
                 requires_review: false,
+                timeouts: None,
             },
         );
         let codex = profile(
@@ -805,6 +806,7 @@ mod tests {
                 config_toml: None,
                 model_catalog: None,
                 requires_review: false,
+                timeouts: None,
             },
         );
         let opencode = profile(
@@ -819,6 +821,7 @@ mod tests {
                 extra_options: None,
                 advanced_config: None,
                 requires_review: false,
+                timeouts: None,
             },
         );
 
@@ -856,6 +859,7 @@ mod tests {
                     "ANTHROPIC_BASE_URL": "https://claude.example"
                 }}),
                 requires_review: false,
+                timeouts: None,
             },
         };
         let codex = AgentProviderProfile {
@@ -874,6 +878,7 @@ mod tests {
                 config_toml: None,
                 model_catalog: None,
                 requires_review: false,
+                timeouts: None,
             },
         };
         let opencode = AgentProviderProfile {
@@ -892,6 +897,7 @@ mod tests {
                 extra_options: None,
                 advanced_config: None,
                 requires_review: false,
+                timeouts: None,
             },
         };
         let existing = NativeConfigContents {
@@ -933,6 +939,7 @@ mod tests {
                 config_toml: None,
                 model_catalog: None,
                 requires_review: false,
+                timeouts: None,
             },
         );
         let before =
@@ -967,6 +974,7 @@ mod tests {
                 "ANTHROPIC_BASE_URL": "https://new.example/v1"
             }}),
             requires_review: false,
+            timeouts: None,
         };
 
         let merged = merge_claude_settings(existing, &profile).unwrap();
@@ -1013,6 +1021,7 @@ mod tests {
             config_toml: None,
             model_catalog: None,
             requires_review: false,
+            timeouts: None,
         };
         let existing = NativeConfigContents {
             codex_auth: Some(r#"{"OPENAI_API_KEY":"old-key","keep":"yes"}"#.to_string()),
@@ -1068,6 +1077,7 @@ name = "Other"
             extra_options: None,
             advanced_config: None,
             requires_review: false,
+            timeouts: None,
         };
         let existing = NativeConfigContents {
             opencode_config: Some(
@@ -1121,6 +1131,7 @@ name = "Other"
             config_toml: None,
             model_catalog: None,
             requires_review: false,
+            timeouts: None,
         };
         let invalid_json = NativeConfigContents {
             codex_auth: Some("{ invalid json }".to_string()),
@@ -1152,6 +1163,7 @@ name = "Other"
                 "customSetting": true
             }),
             requires_review: false,
+            timeouts: None,
         };
         let existing = serde_json::json!({
             "env": { "KEEP": "old-value" },
@@ -1188,6 +1200,7 @@ name = "Other"
             config_toml: None,
             model_catalog: None,
             requires_review: false,
+            timeouts: None,
         };
         let existing = NativeConfigContents {
             codex_auth: Some(r#"{"account_id":"account-1"}"#.to_string()),
@@ -1236,6 +1249,7 @@ custom_existing = true
                 "mcp": { "advanced": { "type": "local" } }
             })),
             requires_review: false,
+            timeouts: None,
         };
         let existing = NativeConfigContents {
             opencode_config: Some(
@@ -1277,6 +1291,7 @@ custom_existing = true
         let invalid_claude = NativeProfileConfig::ClaudeCode {
             settings: serde_json::json!(["not-an-object"]),
             requires_review: false,
+            timeouts: None,
         };
         let error = merge_claude_settings(serde_json::json!({}), &invalid_claude).unwrap_err();
         assert_eq!(error, "Claude Code settings 必须为对象");
@@ -1284,6 +1299,7 @@ custom_existing = true
         let conflicting_claude = NativeProfileConfig::ClaudeCode {
             settings: serde_json::json!({ "mcpServers": [] }),
             requires_review: false,
+            timeouts: None,
         };
         let error = merge_claude_settings(
             serde_json::json!({ "mcpServers": { "filesystem": {} } }),
@@ -1301,6 +1317,7 @@ custom_existing = true
             config_toml: None,
             model_catalog: None,
             requires_review: false,
+            timeouts: None,
         };
         let error = render_native_config(
             &test_paths(),
@@ -1322,6 +1339,7 @@ custom_existing = true
             extra_options: None,
             advanced_config: Some(serde_json::json!({ "nested_key": "super-secret-key" })),
             requires_review: false,
+            timeouts: None,
         };
 
         let debug = format!("{profile:?}");
