@@ -1004,6 +1004,7 @@ export class SessionRuntime {
           }, COMPACT_TIMEOUT_MS);
           if (compactTimer.unref) compactTimer.unref();
         })] : [],
+        () => this.turnIdleGuard?.remainingIdleMs() === Infinity,
       );
     };
 

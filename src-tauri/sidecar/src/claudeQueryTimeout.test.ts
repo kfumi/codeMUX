@@ -83,4 +83,22 @@ describe('nextWithTimeout', () => {
     await expect(promise).resolves.toBe('compact');
     resolveNext('later');
   });
+
+  it('re-arms the timer while keepWaiting is true (suspended interactive wait)', async () => {
+    vi.useFakeTimers();
+    let keepWaiting = true;
+    let settled = false;
+    const next = () => new Promise<string>(() => undefined); // never resolves
+    const promise = nextWithTimeout(next, 25, () => 'timeout', [], () => keepWaiting);
+    promise.then(
+      () => { settled = true; },
+      () => { settled = true; },
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    // still pending because keepWaiting re-armed the timer
+    expect(settled).toBe(false);
+    keepWaiting = false;
+    await vi.advanceTimersByTimeAsync(26);
+    await expect(promise).resolves.toBe('timeout');
+  });
 });
