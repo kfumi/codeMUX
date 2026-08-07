@@ -115,7 +115,7 @@ export function resumeActiveTurnGuard(): void {
 
 /** Question timeout for the compat-proxy interactive path (0 = infinite). */
 export function getActiveCodexQuestionTimeoutMs(): number {
-  return (activeCodexRuntime as unknown as { timeouts: ResolvedTurnTimeouts } | null)?.timeouts.question_timeout_ms ?? 0;
+  return activeCodexRuntime?.getQuestionTimeoutMs() ?? 0;
 }
 
 export function emitActiveCodexTurnEvent(source: CodexTurnSourceEvent): void {
@@ -238,6 +238,11 @@ export class CodexSessionRuntime {
   private timeouts: ResolvedTurnTimeouts = resolveTurnTimeouts();
   private turnIdleGuard: TurnIdleGuard | undefined;
   private idleTimedOut = false;
+
+  /** Question timeout for the compat-proxy interactive path (0 = infinite). */
+  getQuestionTimeoutMs(): number {
+    return this.timeouts.question_timeout_ms;
+  }
 
   async ensure(cmd: EnsureSessionCommand): Promise<void> {
     activeCodexRuntime = this;

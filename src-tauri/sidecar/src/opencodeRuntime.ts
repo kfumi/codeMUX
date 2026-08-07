@@ -237,18 +237,21 @@ export class OpenCodeRuntime {
   }
 
   async respondToQuestion(requestId: string, answers: string[][]): Promise<void> {
-    this.pendingQuestionIds.delete(requestId);
     const timer = this.questionTimeouts.get(requestId);
     if (timer !== undefined) {
       clearTimeout(timer);
       this.questionTimeouts.delete(requestId);
     }
     const client = this.client;
-    if (client?.respondToQuestion) {
-      await client.respondToQuestion({ requestId, answers, directory: this.config.cwd });
-      this.emitToolFinished(requestId, JSON.stringify({ answers }));
+    try {
+      if (client?.respondToQuestion) {
+        await client.respondToQuestion({ requestId, answers, directory: this.config.cwd });
+        this.emitToolFinished(requestId, JSON.stringify({ answers }));
+      }
+    } finally {
+      this.pendingQuestionIds.delete(requestId);
+      this.syncGuardWithInteractiveState();
     }
-    this.syncGuardWithInteractiveState();
   }
 
   isPendingQuestion(requestId: string): boolean {
