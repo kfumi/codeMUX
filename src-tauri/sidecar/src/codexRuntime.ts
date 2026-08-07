@@ -480,16 +480,6 @@ export class CodexSessionRuntime {
 
     this.abortController = new AbortController();
     activeAbortController = this.abortController;
-    this.idleTimedOut = false;
-    this.turnIdleGuard = createTurnIdleGuard({
-      idleTimeoutMs: this.timeouts.idle_timeout_ms,
-      onExpired: () => {
-        this.idleTimedOut = true;
-        process.stderr.write('[codex] Turn idle timeout fired; aborting stream\n');
-        this.abortController?.abort();
-      },
-    });
-    activeTurnGuard = this.turnIdleGuard;
 
     if (this.config.agentSessionId && !this.config.usesCompatProxy) {
       await this.startNativeSessionEventTailer(sessionId, this.config.agentSessionId, true);
@@ -537,6 +527,18 @@ export class CodexSessionRuntime {
     };
 
     try {
+      this.idleTimedOut = false;
+      this.turnIdleGuard = createTurnIdleGuard({
+        idleTimeoutMs: this.timeouts.idle_timeout_ms,
+        onExpired: () => {
+          this.idleTimedOut = true;
+          process.stderr.write('[codex] Turn idle timeout fired; aborting stream\n');
+          this.abortController?.abort();
+        },
+      });
+      activeTurnGuard = this.turnIdleGuard;
+      this.turnIdleGuard?.reset();
+
       const codexInput = applyCodexCollaborationPolicyToInput(
         buildCodexInputEntries(payload, imagePaths, includeImages) as unknown[],
         collaborationPolicy,

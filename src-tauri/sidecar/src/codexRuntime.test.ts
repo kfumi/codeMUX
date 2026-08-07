@@ -1854,4 +1854,40 @@ describe('CodexSessionRuntime', () => {
       vi.useRealTimers();
     }
   });
+
+  it('aborts a Codex turn that never emits a first stream event', async () => {
+    vi.useFakeTimers();
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((() => true) as typeof process.stdout.write);
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      const internal = runtime as unknown as {
+        config: { sessionId: string; cwd: string; model: string; usesCompatProxy?: boolean };
+        thread: {
+          id: string;
+          runStreamed: () => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+        };
+        timeouts: { idle_timeout_ms: number };
+        abortController: AbortController | null;
+      };
+      internal.config = { sessionId: 'session-1', cwd: 'D:/repo', model: 'gpt-5' };
+      internal.timeouts = { idle_timeout_ms: 25 };
+      internal.thread = {
+        id: 'codex-thread-1',
+        runStreamed: async () => new Promise(() => {}),
+      };
+
+      (runtime as unknown as {
+        runInput: (prompt: string, inputPayload: undefined, includeImages: boolean) => Promise<void>;
+      }).runInput('hello', undefined, false);
+
+      await vi.advanceTimersByTimeAsync(40);
+      expect(internal.abortController?.signal.aborted).toBe(true);
+    } finally {
+      stdoutSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });
