@@ -119,13 +119,15 @@ type PendingToolResponseResult =
   | { kind: 'answered'; value: unknown }
   | { kind: 'expired' };
 
-/** Pending tool responses waiting for user input */
-const pendingToolResponses = new Map<string, {
+type PendingClaudeToolResponse = {
   sessionId?: string;
   timeoutTimer?: ReturnType<typeof setTimeout>;
   onExpired?: () => void;
   resolve: (value: PendingToolResponseResult) => void;
-}>();
+};
+
+/** Pending tool responses waiting for user input */
+const pendingToolResponses = new Map<string, PendingClaudeToolResponse>();
 const pendingClaudePermissions = new Map<string, {
   cwd: string;
   toolName: string;
@@ -145,27 +147,29 @@ function isSidecarEntrypoint(scriptPath: string | undefined): boolean {
   }
 }
 
-function waitForClaudeToolResponse(
+export function waitForClaudeToolResponse(
   toolUseId: string,
   sessionId?: string,
   timeoutMs = MESSAGE_TIMEOUT_MS,
   onExpired?: () => void,
 ): Promise<PendingToolResponseResult> {
   return new Promise((resolve) => {
-    const timeoutTimer = setTimeout(() => {
-      expireClaudeToolResponse(toolUseId);
-    }, timeoutMs);
-    if (timeoutTimer.unref) timeoutTimer.unref();
-    pendingToolResponses.set(toolUseId, {
+    const pending: PendingClaudeToolResponse = {
       sessionId,
-      timeoutTimer,
       onExpired,
       resolve,
-    });
+    };
+    if (timeoutMs > 0) {
+      pending.timeoutTimer = setTimeout(() => {
+        expireClaudeToolResponse(toolUseId);
+      }, timeoutMs);
+      if (pending.timeoutTimer.unref) pending.timeoutTimer.unref();
+    }
+    pendingToolResponses.set(toolUseId, pending);
   });
 }
 
-function resolveClaudeToolResponse(toolUseId: string, response: unknown): boolean {
+export function resolveClaudeToolResponse(toolUseId: string, response: unknown): boolean {
   const pending = pendingToolResponses.get(toolUseId);
   if (!pending) {
     return false;
@@ -194,7 +198,7 @@ function expireClaudeToolResponse(toolUseId: string): boolean {
   return true;
 }
 
-function expireClaudeToolResponses(sessionId?: string): number {
+export function expireClaudeToolResponses(sessionId?: string): number {
   let expired = 0;
   for (const [toolUseId, pending] of Array.from(pendingToolResponses.entries())) {
     if (sessionId && pending.sessionId !== sessionId) {
@@ -645,6 +649,11 @@ export class SessionRuntime {
       });
     }
 
+    this.turnIdleGuard?.dispose();
+    this.turnIdleGuard = createTurnIdleGuard({
+      idleTimeoutMs: this.timeouts.idle_timeout_ms,
+    });
+
     void this.consumeQuery(this.queryHandle, this.config.sessionId, prompt, inputPayload, includeImages);
   }
 
@@ -768,6 +777,7 @@ export class SessionRuntime {
         }],
       },
       canUseTool: async (toolName: string, input: Record<string, unknown>, opts: { toolUseID: string }) => {
+        this.turnIdleGuard?.reset();
         if (toolName === 'EnterPlanMode') {
           setActivePermissionState({
             sessionId: config.sessionId,
@@ -788,10 +798,9 @@ export class SessionRuntime {
             questions = rawQ;
           }
           this.emitTurnSource({ kind: 'user_input_requested', toolUseId, questions });
-          const response = await waitForClaudeToolResponse(
+          const response = await this.waitForInteractiveResponse(
             toolUseId,
-            config.sessionId,
-            MESSAGE_TIMEOUT_MS,
+            this.timeouts.question_timeout_ms,
             () => this.emitClaudeInteractionTimeout(toolUseId),
           );
           if (response.kind === 'expired') {
@@ -829,10 +838,9 @@ export class SessionRuntime {
               input,
             },
           });
-          const response = await waitForClaudeToolResponse(
+          const response = await this.waitForInteractiveResponse(
             toolUseId,
-            config.sessionId,
-            MESSAGE_TIMEOUT_MS,
+            this.timeouts.approval_timeout_ms,
             () => this.emitClaudeInteractionTimeout(toolUseId),
           );
           if (response.kind === 'expired') {
@@ -904,10 +912,9 @@ export class SessionRuntime {
             cwd: config.cwd,
           },
         });
-        const response = await waitForClaudeToolResponse(
+        const response = await this.waitForInteractiveResponse(
           toolUseId,
-          config.sessionId,
-          MESSAGE_TIMEOUT_MS,
+          this.timeouts.approval_timeout_ms,
           () => this.emitClaudeInteractionTimeout(toolUseId),
         );
         if (response.kind === 'expired') {
@@ -971,15 +978,17 @@ export class SessionRuntime {
       if (!this.turnActive) {
         return iterator.next();
       }
-
+      if (this.turnIdleGuard?.isExpired()) {
+        throw new Error(`Query timed out: no message received for ${this.timeouts.idle_timeout_ms / 1000}s (after msg #${msgCount})`);
+      }
       return await nextWithTimeout(
         () => iterator.next(),
-        MESSAGE_TIMEOUT_MS,
+        this.turnIdleGuard?.remainingIdleMs() ?? MESSAGE_TIMEOUT_MS,
         () => {
           if (this.abortController?.signal.aborted) {
             return { done: true, value: undefined };
           }
-          throw new Error(`Query timed out: no message received for ${MESSAGE_TIMEOUT_MS / 1000}s (after msg #${msgCount})`);
+          throw new Error(`Query timed out: no message received for ${this.timeouts.idle_timeout_ms / 1000}s (after msg #${msgCount})`);
         },
         compacting ? [new Promise<IteratorResult<unknown>>((resolve) => {
           compactTimer = setTimeout(() => {
@@ -1005,6 +1014,8 @@ export class SessionRuntime {
         if (result.done) {
           break;
         }
+
+        this.turnIdleGuard?.reset();
 
         msgCount += 1;
         const msg = result.value as Record<string, unknown>;
@@ -1217,6 +1228,8 @@ export class SessionRuntime {
       return;
     }
     this.turnActive = false;
+    this.turnIdleGuard?.dispose();
+    this.turnIdleGuard = undefined;
     emit({ type: 'sidecar_query_done' });
     this.turnEventNormalizer = null;
   }
@@ -1241,6 +1254,19 @@ export class SessionRuntime {
       content: ASK_USER_QUESTION_TIMEOUT_MESSAGE,
       isError: true,
     });
+  }
+
+  private async waitForInteractiveResponse(
+    toolUseId: string,
+    timeoutMs: number,
+    onExpired?: () => void,
+  ): Promise<PendingToolResponseResult> {
+    this.turnIdleGuard?.suspend();
+    try {
+      return await waitForClaudeToolResponse(toolUseId, this.config?.sessionId, timeoutMs, onExpired);
+    } finally {
+      this.turnIdleGuard?.resume();
+    }
   }
 
   private emitTurnOutcome(outcome: TurnOutcome): void {
