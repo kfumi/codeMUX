@@ -5,7 +5,7 @@ export async function nextWithTimeout<T>(
   additionalPromises: Promise<T>[] = [],
 ): Promise<T> {
   if (timeoutMs <= 0 || !Number.isFinite(timeoutMs)) {
-    return await next();
+    return await Promise.race([next(), ...additionalPromises]);
   }
 
   let timer: ReturnType<typeof setTimeout> | undefined;

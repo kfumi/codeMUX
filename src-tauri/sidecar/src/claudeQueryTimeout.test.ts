@@ -68,4 +68,19 @@ describe('nextWithTimeout', () => {
     resolveNext('later');
     await expect(promise).resolves.toBe('later');
   });
+
+  it('still races additionalPromises when timeoutMs is 0 (compact timeout preserved)', async () => {
+    vi.useFakeTimers();
+    let resolveNext!: (value: string) => void;
+    const next = vi.fn().mockReturnValue(new Promise<string>((resolve) => {
+      resolveNext = resolve;
+    }));
+    const compact = new Promise<string>((resolve) => {
+      setTimeout(() => resolve('compact'), 30);
+    });
+    const promise = nextWithTimeout(next, 0, () => 'timeout', [compact]);
+    await vi.advanceTimersByTimeAsync(40);
+    await expect(promise).resolves.toBe('compact');
+    resolveNext('later');
+  });
 });
