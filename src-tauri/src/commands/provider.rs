@@ -179,11 +179,17 @@ impl AgentProviderProfileUpsert {
                     settings,
                     requires_review,
                 },
-            ) => NativeProfileConfig::ClaudeCode {
-                settings,
-                requires_review,
-                timeouts: None,
-            },
+            ) => {
+                let prev_timeouts = existing.and_then(|profile| match &profile.native_config {
+                    NativeProfileConfig::ClaudeCode { timeouts, .. } => timeouts.clone(),
+                    _ => None,
+                });
+                NativeProfileConfig::ClaudeCode {
+                    settings,
+                    requires_review,
+                    timeouts: prev_timeouts,
+                }
+            }
             (
                 AgentKind::Codex,
                 NativeProfileConfigUpsert::Codex {
@@ -197,25 +203,27 @@ impl AgentProviderProfileUpsert {
                     requires_review,
                 },
             ) => {
-                let (prev_api_key, prev_advanced, prev_auth_json, prev_config_toml) = match existing
-                    .and_then(|profile| match &profile.native_config {
+                let (prev_api_key, prev_advanced, prev_auth_json, prev_config_toml, prev_timeouts) =
+                    match existing.and_then(|profile| match &profile.native_config {
                         NativeProfileConfig::Codex {
                             api_key,
                             advanced_config,
                             auth_json,
                             config_toml,
+                            timeouts,
                             ..
                         } => Some((
                             api_key.as_str(),
                             advanced_config.clone(),
                             auth_json.clone(),
                             config_toml.clone(),
+                            timeouts.clone(),
                         )),
                         _ => None,
                     }) {
-                    Some((a, b, c, d)) => (Some(a), b, c, d),
-                    None => (None, None, None, None),
-                };
+                        Some((a, b, c, d, e)) => (Some(a), b, c, d, e),
+                        None => (None, None, None, None, None),
+                    };
                 NativeProfileConfig::Codex {
                     api_key: resolve_api_key(prev_api_key, api_key)?,
                     openai_base_url,
@@ -225,7 +233,7 @@ impl AgentProviderProfileUpsert {
                     config_toml: config_toml.or(prev_config_toml),
                     model_catalog: model_catalog.map(|v| v.to_string()),
                     requires_review,
-                    timeouts: None,
+                    timeouts: prev_timeouts,
                 }
             }
             (
@@ -245,13 +253,14 @@ impl AgentProviderProfileUpsert {
                     NativeProfileConfig::OpenCode {
                         api_key,
                         advanced_config,
+                        timeouts,
                         ..
-                    } => Some((api_key.as_str(), advanced_config.clone())),
+                    } => Some((api_key.as_str(), advanced_config.clone(), timeouts.clone())),
                     _ => None,
                 });
                 NativeProfileConfig::OpenCode {
                     api_key: resolve_api_key(
-                        previous.as_ref().map(|(api_key, _)| *api_key),
+                        previous.as_ref().map(|(api_key, _, _)| *api_key),
                         api_key,
                     )?,
                     openai_base_url,
@@ -260,11 +269,15 @@ impl AgentProviderProfileUpsert {
                     models_config,
                     extra_options,
                     advanced_config: resolve_advanced_config(
-                        previous.and_then(|(_, advanced_config)| advanced_config),
+                        previous
+                            .as_ref()
+                            .and_then(|(_, advanced_config, _)| advanced_config.clone()),
                         advanced_config,
                     )?,
                     requires_review,
-                    timeouts: None,
+                    timeouts: previous
+                        .as_ref()
+                        .and_then(|(_, _, timeouts)| timeouts.clone()),
                 }
             }
             _ => return Err("档案智能体类型与原生配置类型不一致".to_string()),
@@ -1297,7 +1310,7 @@ mod tests {
     use crate::config::types::{AgentKind, AppConfig, Provider};
     use crate::provider_profiles::native_config::NativeConfigPaths;
     use crate::provider_profiles::types::{
-        AgentProviderProfile, NativeProfileConfig, ProfileModel,
+        AgentProviderProfile, AgentTimeouts, NativeProfileConfig, ProfileModel,
     };
     use std::{sync::mpsc, sync::Arc, sync::Mutex, thread, time::Duration};
 
@@ -1405,6 +1418,89 @@ mod tests {
             assert_eq!(
                 advanced_config,
                 Some(serde_json::json!({ "auth": { "token": "secret" } }))
+            );
+        }
+    }
+
+    #[test]
+    fn upsert_preserves_timeouts_from_existing_profile_for_each_agent() {
+        let timeouts = AgentTimeouts {
+            idle_timeout_ms: Some(300_000),
+            approval_timeout_ms: Some(0),
+            question_timeout_ms: Some(120_000),
+        };
+        let mut claude = codex_profile("claude", "claude-model");
+        claude.agent_kind = AgentKind::ClaudeCode;
+        claude.native_config = NativeProfileConfig::ClaudeCode {
+            settings: serde_json::json!({ "env": {} }),
+            requires_review: false,
+            timeouts: Some(timeouts.clone()),
+        };
+        let mut opencode = codex_profile("opencode", "opencode-model");
+        opencode.agent_kind = AgentKind::Opencode;
+        opencode.native_config = NativeProfileConfig::OpenCode {
+            api_key: "test-key".to_string(),
+            openai_base_url: "https://api.example.test/v1".to_string(),
+            provider_key: None,
+            npm: None,
+            models_config: None,
+            extra_options: None,
+            advanced_config: None,
+            requires_review: false,
+            timeouts: Some(timeouts.clone()),
+        };
+        let mut codex = codex_profile("codex", "model-a");
+        if let NativeProfileConfig::Codex {
+            timeouts: codex_timeouts,
+            ..
+        } = &mut codex.native_config
+        {
+            *codex_timeouts = Some(timeouts.clone());
+        }
+
+        let cases = [
+            (
+                claude,
+                serde_json::json!({ "type": "claude_code", "settings": {} }),
+            ),
+            (
+                opencode,
+                serde_json::json!({
+                    "type": "opencode",
+                    "openai_base_url": "https://api.example.test/v1"
+                }),
+            ),
+            (
+                codex,
+                serde_json::json!({
+                    "type": "codex",
+                    "openai_base_url": "https://api.example.test/v1"
+                }),
+            ),
+        ];
+        for (existing, native_config) in cases {
+            let type_name = serde_json::to_string(&native_config["type"]).unwrap();
+            let base = serde_json::json!({
+                "id": existing.id,
+                "agent_kind": native_config["type"],
+                "name": existing.name,
+                "models": [{ "id": existing.default_model }],
+                "default_model": existing.default_model,
+                "native_config": native_config
+            });
+            let upsert: AgentProviderProfileUpsert = serde_json::from_value(base).unwrap();
+            let profile = upsert.into_profile(Some(&existing)).unwrap();
+
+            let preserved = match &profile.native_config {
+                NativeProfileConfig::ClaudeCode { timeouts, .. } => timeouts,
+                NativeProfileConfig::Codex { timeouts, .. } => timeouts,
+                NativeProfileConfig::OpenCode { timeouts, .. } => timeouts,
+            };
+            assert_eq!(
+                preserved,
+                &Some(timeouts.clone()),
+                "upsert 必须保留 {} 档案的超时配置",
+                type_name
             );
         }
     }
