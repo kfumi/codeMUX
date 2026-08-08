@@ -55,6 +55,8 @@ import {
 } from './CodeMuxLexicalComposerInput';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 import { parseProposedPlan, getProposedPlanTitle } from './proposedPlan';
+import { QueuedMessages } from './QueuedMessages';
+import type { QueuedAgentQuery } from '../../../types/agentQueue';
 
 interface CodeMuxComposerProps {
   sessionId: string;
@@ -189,6 +191,7 @@ export function CodeMuxComposer({
   const isRunning = useAgentStore((state) => state.isRunning[sessionId] ?? false);
   const events = useAgentStore((state) => state.events[sessionId] ?? EMPTY_EVENTS);
   const tokenUsage = useAgentStore((state) => state.tokenUsageBySession[sessionId] ?? null);
+  const removeQueuedQuery = useAgentStore((state) => state.removeQueuedQuery);
   const updateSessionPermissions = useSessionStore((state) => state.updateSessionPermissions);
   const [dismissedQuestionIds, setDismissedQuestionIds] = useState<Set<string>>(() => new Set());
   const [dismissedPlanKeys, setDismissedPlanKeys] = useState<Set<string>>(() => new Set());
@@ -285,6 +288,27 @@ export function CodeMuxComposer({
   }, [activeTrigger, menuVisible]);
 
   const hasInput = composerText.trim().length > 0 || attachmentCount > 0;
+
+  const handleEditQueuedQuery = useCallback(async (query: QueuedAgentQuery) => {
+    removeQueuedQuery(sessionId, query.id);
+    editorRef.current?.setText(query.displayContent ?? query.prompt);
+    for (const image of query.inputPayload?.images ?? []) {
+      try {
+        const response = await fetch(image.dataUrl);
+        const blob = await response.blob();
+        const file = new File([blob], image.name, {
+          type: image.mediaType || blob.type || 'image/png',
+        });
+        await aui.composer().addAttachment(file);
+      } catch (error) {
+        logger.warn('Failed to restore queued image attachment while editing', {
+          sessionId,
+          fileName: image.name,
+        }, serializeError(error));
+      }
+    }
+    editorRef.current?.focus();
+  }, [aui, removeQueuedQuery, sessionId]);
 
   // Save composer draft on text change (debounced)
   const saveComposerDraft = useAgentStore((s) => s.saveComposerDraft);
@@ -430,6 +454,8 @@ export function CodeMuxComposer({
           onSelect={selectTriggerItem}
         />
       )}
+
+      <QueuedMessages sessionId={sessionId} onEdit={handleEditQueuedQuery} />
 
       {/* ── Composer ── */}
       <ComposerPrimitive.Root className="relative flex w-full flex-col">
@@ -590,11 +616,11 @@ export function CodeMuxComposer({
                   </span>
                 )}
                 {isRunning ? (
-                  <TooltipHint content="停止">
+                  <TooltipHint content="停止当前任务">
                     <button
                       type="button"
                       onClick={() => void onStop?.()}
-                      aria-label="停止"
+                      aria-label="停止当前任务"
                       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))] transition-colors duration-150 hover:bg-[hsl(var(--destructive)/0.18)]"
                     >
                       <Square className="h-3.5 w-3.5" fill="currentColor" />

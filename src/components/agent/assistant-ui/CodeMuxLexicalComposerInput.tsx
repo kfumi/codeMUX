@@ -105,9 +105,6 @@ function KeyboardPlugin({
 
           if (submitMode === 'none') return false;
 
-          const isRunning = aui.thread().getState().isRunning;
-          if (isRunning) return false;
-
           let shouldSubmit = false;
           if (submitMode === 'ctrlEnter') {
             shouldSubmit = event.ctrlKey || event.metaKey;

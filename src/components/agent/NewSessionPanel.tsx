@@ -14,6 +14,7 @@ import { getAgentDefinition } from '../../types/agentRegistry';
 import type { AgentInputPayload } from '../../types/agentInput';
 import { AgentSelector } from './AgentSelector';
 import { AgentPermissionSelector } from './AgentPermissionSelector';
+import { AgentSetupChecklist } from './AgentSetupChecklist';
 import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 import { AgentModelSelector } from './AgentModelSelector';
@@ -21,6 +22,12 @@ import { AgentModelSelector } from './AgentModelSelector';
 interface NewSessionPanelProps {
   onSubmit: (input: AgentInputPayload) => Promise<void> | void;
 }
+
+const STARTER_PROMPTS: Record<string, string[]> = {
+  claude_code: ['先检查项目结构', '帮我定位一个问题', '制定实现计划'],
+  codex: ['审查当前改动', '运行测试并修复失败', '分析这个项目的入口'],
+  opencode: ['先了解项目结构', '实现一个小功能', '检查最近的代码改动'],
+};
 
 export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const [isCheckingRuntime, setIsCheckingRuntime] = useState(false);
@@ -227,6 +234,26 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                   请先在设置 → 模型配置中配置并启用可用的模型供应商（需 API Key 与匹配协议端点）。
                 </p>
               )}
+              <AgentSetupChecklist
+                agentLabel={selectedAgent?.label ?? '智能体'}
+                hasUsableProvider={hasUsableProvider}
+                isLoadingModel={areModelsLoading}
+                hasModel={Boolean(effectiveModel)}
+                hasWorkspace={Boolean(draftProject?.path)}
+              />
+              <div className="flex flex-wrap justify-center gap-2">
+                {(STARTER_PROMPTS[selectedAgentKind] ?? STARTER_PROMPTS.claude_code).map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    disabled={!hasUsableProvider || isCheckingRuntime}
+                    onClick={() => void handleSend({ text: prompt })}
+                    className="rounded-full border border-border/55 bg-[hsl(var(--surface-1))]/70 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/35 hover:bg-primary/6 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <CodeMuxComposer

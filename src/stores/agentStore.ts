@@ -60,6 +60,7 @@ import type {
 } from '../types/agent';
 import type { AgentKind, ReasoningEffort } from '../types/session';
 import type { AgentInputPayload, UserAttachmentPreview } from '../types/agentInput';
+import type { QueuedAgentQuery } from '../types/agentQueue';
 import { inferModelSupportsVision, markModelVisionUnsupported } from '../lib/modelVisionCapabilities';
 import {
   normalizeThreadTokenUsage,
@@ -141,12 +142,24 @@ interface AgentState {
   acknowledgedFiles: Record<string, Set<string>>;
   /** Draft text for each session's composer input (preserved across session switches) */
   composerDrafts: Record<string, string>;
+  /** Messages submitted while a turn is active, kept out of provider history until dispatched. */
+  queuedQueries: Record<string, QueuedAgentQuery[]>;
+  /** Queue is paused after an interruption or failed dispatch. */
+  queuePaused: Record<string, boolean>;
   pendingPermissions: Record<string, AgentPermissionRequest[]>;
   respondToPermission: (sessionId: string, requestId: string, response: AgentPermissionResponse) => Promise<void>;
   /** Start a new agent query */
-  startQuery: (sessionId: string, prompt: string, cwd: string, reasoningEffort?: ReasoningEffort, displayContent?: string, inputPayload?: AgentInputPayload, modelForVision?: string) => Promise<void>;
+  startQuery: (sessionId: string, prompt: string, cwd: string, reasoningEffort?: ReasoningEffort, displayContent?: string, inputPayload?: AgentInputPayload, modelForVision?: string, fromQueue?: boolean) => Promise<void>;
   /** Interrupt the current query for a specific session */
   interrupt: (sessionId: string) => Promise<void>;
+  /** Remove one message from the session queue. */
+  removeQueuedQuery: (sessionId: string, queryId: string) => void;
+  /** Reorder one message in the session queue. */
+  reorderQueuedQuery: (sessionId: string, queryId: string, targetIndex: number) => void;
+  /** Resume dispatching queued messages after a stop or failure. */
+  resumeQueuedQueries: (sessionId: string) => void;
+  /** Clear all queued messages for a session. */
+  clearQueuedQueries: (sessionId: string) => void;
   /** Clear events for a session */
   clearEvents: (sessionId: string) => void;
   /** Store the latest normalized token/context usage snapshot for a session */
@@ -1211,7 +1224,90 @@ export function extractChangedFilesFromEvents(
   return allFiles;
 }
 
-export const useAgentStore = create<AgentState>((set, get) => ({
+export const useAgentStore = create<AgentState>((set, get) => {
+  const queuedDispatches = new Map<string, Promise<void>>();
+
+  const createQueuedQuery = (
+    prompt: string,
+    cwd: string,
+    reasoningEffort?: ReasoningEffort,
+    displayContent?: string,
+    inputPayload?: AgentInputPayload,
+    modelForVision?: string,
+  ): QueuedAgentQuery => ({
+    id: `queued-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    prompt,
+    cwd,
+    reasoningEffort,
+    displayContent,
+    inputPayload,
+    modelForVision,
+    createdAt: Date.now(),
+  });
+
+  const dispatchNextQueuedQuery = (sessionId: string): void => {
+    if (queuedDispatches.has(sessionId)) {
+      return;
+    }
+
+    const dispatch = Promise.resolve().then(async () => {
+      const state = get();
+      if (state.isRunning[sessionId] || state.queuePaused[sessionId]) {
+        return;
+      }
+
+      const next = state.queuedQueries[sessionId]?.[0];
+      if (!next) {
+        return;
+      }
+
+      set((current) => ({
+        queuedQueries: {
+          ...current.queuedQueries,
+          [sessionId]: (current.queuedQueries[sessionId] ?? []).slice(1),
+        },
+      }));
+
+      try {
+        await get().startQuery(
+          sessionId,
+          next.prompt,
+          next.cwd,
+          next.reasoningEffort,
+          next.displayContent,
+          next.inputPayload,
+          next.modelForVision,
+          true,
+        );
+      } catch (error) {
+        logger.error('Failed to dispatch queued agent query', { sessionId, queryId: next.id }, serializeError(error));
+        set((current) => ({
+          queuedQueries: {
+            ...current.queuedQueries,
+            [sessionId]: [next, ...(current.queuedQueries[sessionId] ?? [])],
+          },
+          queuePaused: { ...current.queuePaused, [sessionId]: true },
+        }));
+      }
+    });
+
+    queuedDispatches.set(sessionId, dispatch);
+    void dispatch.finally(() => {
+      if (queuedDispatches.get(sessionId) === dispatch) {
+        queuedDispatches.delete(sessionId);
+        const state = get();
+        if (
+          !state.isRunning[sessionId]
+          && !state.queuePaused[sessionId]
+          && (state.queuedQueries[sessionId]?.length ?? 0) > 0
+        ) {
+          dispatchNextQueuedQuery(sessionId);
+        }
+      }
+    });
+  };
+
+  return ({
   events: {},
   turns: {},
   eventTimestamps: {},
@@ -1234,13 +1330,42 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   fileOriginals: {},
   acknowledgedFiles: {},
   composerDrafts: {},
+  queuedQueries: {},
+  queuePaused: {},
   pendingPermissions: {},
 
-  startQuery: async (sessionId: string, prompt: string, cwd: string, reasoningEffort?: ReasoningEffort, displayContent?: string, inputPayload?: AgentInputPayload, modelForVision?: string) => {
+  startQuery: async (sessionId: string, prompt: string, cwd: string, reasoningEffort?: ReasoningEffort, displayContent?: string, inputPayload?: AgentInputPayload, modelForVision?: string, fromQueue = false) => {
     const targetSession = useSessionStore.getState().sessions.find((session) => session.id === sessionId)
       ?? useSessionStore.getState().archivedSessions.find((session) => session.id === sessionId);
     if (targetSession?.is_read_only) {
       set((state) => ({ error: { ...state.error, [sessionId]: '会话为只读，原生会话无法恢复' } }));
+      return;
+    }
+    const currentState = get();
+    const hasQueuedQueries = (currentState.queuedQueries[sessionId]?.length ?? 0) > 0;
+    const shouldQueue =
+      !fromQueue
+      && (
+        Boolean(currentState.isRunning[sessionId])
+        || Boolean(currentState.queuePaused[sessionId])
+        || hasQueuedQueries
+        || queuedDispatches.has(sessionId)
+      );
+    if (shouldQueue) {
+      const queuedQuery = createQueuedQuery(
+        prompt,
+        cwd,
+        reasoningEffort,
+        displayContent,
+        inputPayload,
+        modelForVision,
+      );
+      set((state) => ({
+        queuedQueries: {
+          ...state.queuedQueries,
+          [sessionId]: [...(state.queuedQueries[sessionId] ?? []), queuedQuery],
+        },
+      }));
       return;
     }
     clearPendingStreaming(sessionId);
@@ -1310,6 +1435,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
       isRunning: { ...s.isRunning, [sessionId]: true },
       queryStartTime: { ...s.queryStartTime, [sessionId]: Date.now() },
       error: { ...s.error, [sessionId]: null },
+      queuePaused: { ...s.queuePaused, [sessionId]: false },
     }));
     try {
       if (droppedImages) {
@@ -1700,6 +1826,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
                 streamingToolMeta: { ...s.streamingToolMeta, [sessionId]: {} },
                 streamingToolIndexMap: { ...s.streamingToolIndexMap, [sessionId]: {} },
                 streamedToolUseIds: { ...s.streamedToolUseIds, [sessionId]: new Set() },
+                queuePaused: { ...s.queuePaused, [sessionId]: true },
                 ...(resultData.is_error
                   ? { error: { ...s.error, [sessionId]: resultData.result || 'Request interrupted' } }
                   : {}),
@@ -1966,6 +2093,8 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         if (isTerminalEvent) {
           clearPendingStreaming(sessionId);
           clearPendingStreamingToolInputs(sessionId);
+          const terminalFailed = event.kind === 'error'
+            || (event.kind === 'result' && Boolean(event.data?.is_error));
           set((s) => {
             const { [sessionId]: _removed, ...rest } = s.queryStartTime;
             return {
@@ -1973,6 +2102,9 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
               queryStartTime: rest,
               streamingText: { ...s.streamingText, [sessionId]: '' },
               streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
+              queuePaused: terminalFailed
+                ? { ...s.queuePaused, [sessionId]: true }
+                : s.queuePaused,
               error: event.kind === 'error'
               ? { ...s.error, [sessionId]: event.data.error }
               : s.error,
@@ -1986,6 +2118,9 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
           });
           if (event.kind === 'result' && !event.data?.is_error) {
             void get().refreshLatestTokenUsage(sessionId, 'live_synced');
+          }
+          if (!terminalFailed) {
+            dispatchNextQueuedQuery(sessionId);
           }
         }
       };
@@ -2051,6 +2186,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         queryStartTime: rest,
         streamingThinking: { ...s.streamingThinking, [sessionId]: '' },
         streamingText: { ...s.streamingText, [sessionId]: '' },
+        queuePaused: { ...s.queuePaused, [sessionId]: true },
       };
     });
 
@@ -2060,6 +2196,54 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     } catch {
       // Sidecar may already be gone — UI is already stopped.
     }
+  },
+
+  removeQueuedQuery: (sessionId: string, queryId: string) => {
+    set((state) => ({
+      queuedQueries: {
+        ...state.queuedQueries,
+        [sessionId]: (state.queuedQueries[sessionId] ?? []).filter((query) => query.id !== queryId),
+      },
+    }));
+  },
+
+  reorderQueuedQuery: (sessionId: string, queryId: string, targetIndex: number) => {
+    set((state) => {
+      const current = state.queuedQueries[sessionId] ?? [];
+      const sourceIndex = current.findIndex((query) => query.id === queryId);
+      if (sourceIndex < 0 || current.length < 2) {
+        return {};
+      }
+
+      const boundedIndex = Math.max(0, Math.min(targetIndex, current.length - 1));
+      if (sourceIndex === boundedIndex) {
+        return {};
+      }
+
+      const next = [...current];
+      const [moved] = next.splice(sourceIndex, 1);
+      next.splice(boundedIndex, 0, moved);
+      return {
+        queuedQueries: { ...state.queuedQueries, [sessionId]: next },
+      };
+    });
+  },
+
+  resumeQueuedQueries: (sessionId: string) => {
+    set((state) => ({
+      queuePaused: { ...state.queuePaused, [sessionId]: false },
+      error: state.error[sessionId]
+        ? { ...state.error, [sessionId]: null }
+        : state.error,
+    }));
+    dispatchNextQueuedQuery(sessionId);
+  },
+
+  clearQueuedQueries: (sessionId: string) => {
+    set((state) => ({
+      queuedQueries: { ...state.queuedQueries, [sessionId]: [] },
+      queuePaused: { ...state.queuePaused, [sessionId]: false },
+    }));
   },
 
   clearEvents: (sessionId: string) => {
@@ -2090,6 +2274,10 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
       delete newStreamingVersion[sessionId];
       const newForceStopped = { ...state.forceStopped };
       delete newForceStopped[sessionId];
+      const newQueuedQueries = { ...state.queuedQueries };
+      delete newQueuedQueries[sessionId];
+      const newQueuePaused = { ...state.queuePaused };
+      delete newQueuePaused[sessionId];
       return {
         events: newEvents,
         eventTimestamps: newTimestamps,
@@ -2103,6 +2291,8 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         streamingText: newStreamingText,
         streamingVersion: newStreamingVersion,
         forceStopped: newForceStopped,
+        queuedQueries: newQueuedQueries,
+        queuePaused: newQueuePaused,
         pendingPermissions: { ...state.pendingPermissions, [sessionId]: [] },
       };
     });
@@ -2369,7 +2559,8 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
 
     return payload;
   },
-}));
+});
+});
 
 // Keep the lifecycle projection in the store so renderers do not independently
 // infer terminal state from the last assistant message. The listener only reacts

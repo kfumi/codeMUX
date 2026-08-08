@@ -130,6 +130,8 @@ describe('agent store Codex history loading', () => {
       streamingThinking: {},
       streamingText: {},
       forceStopped: {},
+      queuedQueries: {},
+      queuePaused: {},
       streamingToolInputs: {},
       streamingToolMeta: {},
       streamingToolIndexMap: {},
@@ -186,6 +188,41 @@ describe('agent store Codex history loading', () => {
     loadLatestTokenUsageMock.mockResolvedValue(null);
     rewindSessionMock.mockResolvedValue();
     localStorage.clear();
+  });
+
+  it('queues messages submitted during a running turn and dispatches them in order', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+    let finishFirstTurn: ((event: string) => void) | undefined;
+
+    startSessionMock.mockImplementationOnce(async (_sessionId, _prompt, _cwd, onEvent) => {
+      finishFirstTurn = onEvent;
+    });
+
+    await useAgentStore.getState().startQuery(session.id, 'first message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'second message', 'D:\\workspace');
+    await useAgentStore.getState().startQuery(session.id, 'third message', 'D:\\workspace');
+
+    expect(useAgentStore.getState().isRunning[session.id]).toBe(true);
+    expect(useAgentStore.getState().queuedQueries[session.id]?.map((query) => query.prompt)).toEqual([
+      'second message',
+      'third message',
+    ]);
+
+    finishFirstTurn?.(JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: '',
+      session_id: session.id,
+    }));
+
+    await vi.waitFor(() => {
+      expect(startSessionMock).toHaveBeenCalledTimes(3);
+      expect(startSessionMock.mock.calls[1]?.[1]).toBe('second message');
+      expect(startSessionMock.mock.calls[2]?.[1]).toBe('third message');
+    });
+    expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
   });
 
   it('deduplicates concurrent and empty Claude history loads', async () => {
