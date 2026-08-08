@@ -237,7 +237,7 @@ export function CodeMuxComposer({
     if (!trigger || isSameTrigger(trigger, suppressedTrigger)) {
       return null;
     }
-    return isCompletedTrigger(trigger, commands, allFileEntries) ? null : trigger;
+    return isCompletedTrigger(trigger, allFileEntries) ? null : trigger;
   }, [allFileEntries, commands, composerText, suppressedTrigger]);
   const activeChar = activeTrigger?.char ?? manualTrigger;
   const activeQuery = activeTrigger?.query ?? '';
@@ -409,7 +409,7 @@ export function CodeMuxComposer({
   const selectTriggerItem = (item: Unstable_TriggerItem) => {
     const nextText = replaceActiveTrigger(composerText, activeTrigger, item, formatter);
     setManualTrigger(null);
-    setSuppressedTrigger(getSelectedTrigger(activeTrigger, item));
+    setSuppressedTrigger(activeTrigger);
     editorRef.current?.setText(nextText);
   };
 
@@ -1210,23 +1210,13 @@ function isSameTrigger(a: ActiveTrigger, b: ActiveTrigger | null) {
   return b !== null && a.char === b.char && a.start === b.start && a.query === b.query;
 }
 
-function getSelectedTrigger(active: ActiveTrigger | null, item: Unstable_TriggerItem): ActiveTrigger {
-  const isFile = item.type === 'file' || item.type === 'directory';
-  return {
-    char: isFile ? '@' : '/',
-    start: active?.start ?? 0,
-    query: item.id,
-  };
-}
-
-function isCompletedTrigger(trigger: ActiveTrigger, commands: SlashCommand[], files: FileEntry[]): boolean {
+function isCompletedTrigger(trigger: ActiveTrigger, files: FileEntry[]): boolean {
   if (!trigger.query) {
     return false;
   }
 
   if (trigger.char === '/') {
-    const query = trigger.query.toLowerCase();
-    return commands.some((command) => command.name.toLowerCase() === query);
+    return false;
   }
 
   return files.some((file) => file.relativePath === trigger.query || file.name === trigger.query);

@@ -429,6 +429,26 @@ describe('CodeMuxComposer', () => {
     expect(document.querySelector('[data-command-id="review"]')).toBeTruthy();
   });
 
+  it('keeps slash suggestions visible when the command name is complete', () => {
+    composerText = '/review';
+
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    expect(document.querySelector('[data-command-id="review"]')).toBeTruthy();
+  });
+
+  it('selects a complete slash command with Enter without sending it', () => {
+    composerText = '/review';
+
+    render(<CodeMuxComposer sessionId="session-1" />);
+
+    fireEvent.keyDown(screen.getByTestId('lexical-composer-input'), { key: 'Enter' });
+
+    expect(editorSetTextMock).toHaveBeenCalledWith('[$review](review) ');
+    expect(composerSendMock).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-command-id="review"]')).toBeNull();
+  });
+
   it('does not open slash suggestions when cursor is away from trigger', () => {
     composerText = '/rev 已有文本';
 
@@ -446,6 +466,31 @@ describe('CodeMuxComposer', () => {
 
     expect(editorSetTextMock).toHaveBeenCalledWith('[$review](review) ');
     expect(document.querySelector('[data-command-id="review"]')).toBeNull();
+  });
+
+  it('closes project Skill suggestions after selecting the complete command', () => {
+    composerText = '/grill-me';
+
+    render(
+      <CodeMuxComposer
+        sessionId="session-1"
+        projectSkills={[{
+          name: 'grill-me',
+          displayName: 'Grill Me',
+          description: 'A relentless interview',
+          diskPath: 'C:\\project\\.claude\\skills\\grill-me',
+          source: '.claude',
+          relativePath: '.claude/skills/grill-me',
+        }]}
+      />,
+    );
+
+    const item = document.querySelector('[data-command-id="grill-me"]');
+    expect(item).toBeTruthy();
+    fireEvent.click(item as Element);
+
+    expect(editorSetTextMock).toHaveBeenCalledWith('[$grill-me](grill-me) ');
+    expect(document.querySelector('[data-command-id="grill-me"]')).toBeNull();
   });
 
   it('closes file suggestions after selecting a file reference', () => {
