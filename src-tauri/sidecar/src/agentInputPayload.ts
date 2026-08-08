@@ -3,6 +3,17 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+export type AgentInputAttachmentType = 'image';
+
+export interface AgentInputAttachment {
+  type: AgentInputAttachmentType;
+  name: string;
+  mediaType: string;
+  dataUrl: string;
+  size?: number;
+}
+
+/** @deprecated Prefer AgentInputAttachment. */
 export interface AgentInputImage {
   name: string;
   mediaType: string;
@@ -12,7 +23,11 @@ export interface AgentInputImage {
 
 export interface AgentInputPayload {
   text: string;
+  /** @deprecated Prefer attachments. */
   images?: AgentInputImage[];
+  attachments?: AgentInputAttachment[];
+  /** UI/history-only attachments when the model payload omits images (e.g. enrichment). */
+  historyAttachments?: AgentInputAttachment[];
 }
 
 type ClaudeContentBlock =
@@ -23,10 +38,34 @@ type CodexInputEntry =
   | { type: 'text'; text: string }
   | { type: 'local_image'; path: string };
 
+export function getPayloadAttachments(payload?: AgentInputPayload): AgentInputAttachment[] {
+  if (payload?.attachments?.length) {
+    return payload.attachments;
+  }
+  return (payload?.images ?? []).map((image) => ({
+    type: 'image' as const,
+    name: image.name,
+    mediaType: image.mediaType,
+    dataUrl: image.dataUrl,
+    size: image.size,
+  }));
+}
+
+export function getDisplayPayloadAttachments(payload?: AgentInputPayload): AgentInputAttachment[] {
+  const attachments = getPayloadAttachments(payload);
+  if (attachments.length > 0) {
+    return attachments;
+  }
+  return payload?.historyAttachments ?? [];
+}
+
 export function normalizeAgentInputPayload(prompt: string, payload?: AgentInputPayload): AgentInputPayload {
+  const attachments = getPayloadAttachments(payload);
   return {
     text: payload?.text ?? prompt,
-    images: Array.isArray(payload?.images) ? payload.images : [],
+    attachments,
+    images: attachments.map(({ name, mediaType, dataUrl, size }) => ({ name, mediaType, dataUrl, size })),
+    ...(payload?.historyAttachments?.length ? { historyAttachments: payload.historyAttachments } : {}),
   };
 }
 
@@ -38,7 +77,8 @@ export function buildClaudeUserMessageContent(payload: AgentInputPayload, includ
   }
 
   if (includeImages) {
-    for (const image of payload.images ?? []) {
+    for (const image of getPayloadAttachments(payload)) {
+      if (image.type !== 'image') continue;
       const parsed = parseImageDataUrl(image.dataUrl, image.mediaType);
       if (!parsed) continue;
       content.push({
@@ -80,7 +120,7 @@ export function buildCodexInputEntries(payload: AgentInputPayload, imagePaths: s
 }
 
 export async function writePayloadImagesToTempFiles(payload: AgentInputPayload): Promise<string[]> {
-  const images = payload.images ?? [];
+  const images = getPayloadAttachments(payload).filter((attachment) => attachment.type === 'image');
   if (images.length === 0) return [];
 
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'codemux-images-'));

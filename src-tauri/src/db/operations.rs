@@ -549,6 +549,47 @@ fn insert_snapshot_events(
     Ok(())
 }
 
+pub fn save_session_message_attachments(
+    conn: &Connection,
+    session_id: &str,
+    user_index: i64,
+    attachments: &[serde_json::Value],
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO session_message_attachments (session_id, user_index, attachments_json)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(session_id, user_index) DO UPDATE SET attachments_json = excluded.attachments_json",
+        rusqlite::params![
+            session_id,
+            user_index,
+            serde_json::to_string(attachments).unwrap_or_else(|_| "[]".to_string())
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_session_message_attachments(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<std::collections::HashMap<i64, Vec<serde_json::Value>>> {
+    let mut stmt = conn.prepare(
+        "SELECT user_index, attachments_json FROM session_message_attachments WHERE session_id = ?1 ORDER BY user_index ASC",
+    )?;
+    let rows = stmt.query_map([session_id], |row| {
+        let user_index: i64 = row.get(0)?;
+        let attachments_json: String = row.get(1)?;
+        let attachments: Vec<serde_json::Value> =
+            serde_json::from_str(&attachments_json).unwrap_or_default();
+        Ok((user_index, attachments))
+    })?;
+    let mut map = std::collections::HashMap::new();
+    for row in rows {
+        let (user_index, attachments) = row?;
+        map.insert(user_index, attachments);
+    }
+    Ok(map)
+}
+
 pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
     let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at, (SELECT parent_session_id FROM session_lineage WHERE child_session_id = sessions.id) FROM sessions WHERE is_archived = 0 ORDER BY updated_at DESC")?;
 

@@ -1,0 +1,13 @@
+{
+  "catalogCount": 408,
+  "overrideCount": 418,
+  "byProvider": {
+    "anthropic": 0,
+    "openai": 0,
+    "deepseek": 4,
+    "openrouter": 337,
+    "siliconflow": 49,
+    "zhipu": 4,
+    "opencode-go": 24
+  }
+}

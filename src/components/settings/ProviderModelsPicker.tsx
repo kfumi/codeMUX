@@ -10,20 +10,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { formatModelDisplayName } from '@/lib/providerModels';
+import { resolveModelDisplayName } from '@/lib/providerModels';
+import { inferDefaultInputModalities } from '@/lib/inputModalities';
 import { cn } from '@/lib/utils';
-import type { ProviderModel } from '@/types/provider';
+import type { InputModality, ProviderModel } from '@/types/provider';
 
 export type PickerModel = {
   id: string;
   name: string;
+  input_modalities?: InputModality[] | null;
 };
-
-function resolvePickerDisplayName(model: PickerModel): string {
-  const name = model.name?.trim();
-  if (name && name !== model.id) return name;
-  return formatModelDisplayName(model.id);
-}
 
 type ProviderModelsPickerProps = {
   open: boolean;
@@ -65,7 +61,11 @@ export function ProviderModelsPicker({
     if (selectedIds.has(model.id)) return;
     onChangeSelected([
       ...selected,
-      { id: model.id, name: resolvePickerDisplayName(model) },
+      {
+        id: model.id,
+        name: resolveModelDisplayName(model),
+        input_modalities: inferDefaultInputModalities(model.id, model.input_modalities),
+      },
     ]);
   }
 
@@ -83,7 +83,8 @@ export function ProviderModelsPicker({
       if (!merged.has(model.id)) {
         merged.set(model.id, {
           id: model.id,
-          name: resolvePickerDisplayName(model),
+          name: resolveModelDisplayName(model),
+          input_modalities: inferDefaultInputModalities(model.id, model.input_modalities),
         });
       }
     }
@@ -174,7 +175,7 @@ export function ProviderModelsPicker({
                   >
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium text-foreground">
-                        {resolvePickerDisplayName(model)}
+                        {resolveModelDisplayName(model)}
                       </div>
                       <div className="truncate text-[11px] text-muted-foreground">{model.id}</div>
                     </div>

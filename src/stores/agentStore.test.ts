@@ -15,6 +15,9 @@ const startSessionMock = vi.fn<
     inputPayload?: { text: string },
   ) => Promise<void>
 >();
+const enrichAttachmentsMock = vi.fn<
+  (attachments: Array<{ type: string; name: string; mediaType: string; dataUrl: string }>) => Promise<{ blocks: Array<{ attachment_name: string; markdown: string; ok: boolean; error?: string }> }>
+>();
 const saveEventsMock = vi.fn<(sessionId: string, eventsJson: string) => Promise<void>>();
 const getEventsMock = vi.fn<(sessionId: string) => Promise<string>>();
 const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
@@ -23,10 +26,18 @@ const loadLatestTokenUsageMock = vi.fn<(appSessionId: string, agentKind: string,
 const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator) => Promise<void>>();
 const respondToAgentPermissionMock = vi.fn();
 
+vi.mock('sonner', () => ({
+  toast: {
+    info: vi.fn(),
+    warning: vi.fn(),
+  },
+}));
+
 vi.mock('../lib/tauri', () => ({
   agentApi: {
     ensureSession: vi.fn(),
     sendInput: vi.fn(),
+    enrichAttachments: enrichAttachmentsMock,
     startSession: startSessionMock,
     interrupt: vi.fn(),
     shutdown: vi.fn(),
@@ -147,6 +158,34 @@ describe('agent store Codex history loading', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    enrichAttachmentsMock.mockResolvedValue({
+      blocks: [{ attachment_name: 'screen.png', markdown: 'Visible terminal error.', ok: true }],
+    });
+
+    const { useSettingsStore } = await import('./settingsStore');
+    useSettingsStore.setState({
+      config: {
+        model_providers: [],
+        active_provider_id: null,
+        agent_defaults: { default_agent_kind: 'codex' },
+        agent_configs: {
+          claude_code: {},
+          codex: {},
+          gemini_cli: {},
+          opencode: {},
+        },
+        compact_ai_output: false,
+        default_open_target: 'cursor',
+        notifications: { system_enabled: true, sound_enabled: true, sound: 'ding' },
+        theme: 'System',
+        attachment_enrichment: { enabled: false, api_key: '', base_url: '', model: '' },
+      },
+      isLoading: false,
+      error: null,
+      proxyRunning: false,
+      proxyUrl: null,
+      proxyToggling: false,
+    });
 
     startSessionMock.mockImplementation(async (sessionId, _prompt, _cwd, onEvent) => {
       onEvent(JSON.stringify({
@@ -1977,6 +2016,47 @@ describe('agent store Codex history loading', () => {
         attachments: [{ type: 'image', name: 'screen.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
       },
     });
+  });
+
+  it('enriches image payloads when enrichment is enabled for a no-vision model', async () => {
+    const { useSettingsStore } = await import('./settingsStore');
+    useSettingsStore.setState((state) => ({
+      config: state.config
+        ? {
+            ...state.config,
+            attachment_enrichment: {
+              enabled: true,
+              api_key: 'sk-test',
+              base_url: 'https://example.com/v1',
+              model: 'glm-4.6v-flash',
+            },
+          }
+        : state.config,
+    }));
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+    const inputPayload = {
+      text: 'inspect this',
+      images: [{ name: 'screen.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
+    };
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, inputPayload.text, 'D:\\project\\ai-code\\codeMUX', undefined, undefined, inputPayload, 'deepseek-v4-flash');
+
+    expect(enrichAttachmentsMock).toHaveBeenCalledWith([
+      expect.objectContaining({ type: 'image', name: 'screen.png' }),
+    ]);
+    expect(startSessionMock).toHaveBeenCalledWith(
+      session.id,
+      expect.stringContaining('<attachment_context>'),
+      'D:\\project\\ai-code\\codeMUX',
+      expect.any(Function),
+      undefined,
+      expect.objectContaining({ text: expect.stringContaining('inspect this') }),
+      'inspect this',
+    );
   });
 
   it('restores image previews directly from agent JSONL image blocks', async () => {

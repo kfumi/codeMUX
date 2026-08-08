@@ -433,6 +433,62 @@ mod tests {
     }
 
     #[test]
+    fn restores_user_image_file_parts_from_opencode_history() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);",
+        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?3, ?4)",
+                rusqlite::params![
+                    "user-1",
+                    "session-1",
+                    1000_i64,
+                    r#"{"role":"user","time":{"created":1000}}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![
+                    "part-text",
+                    "user-1",
+                    "session-1",
+                    1001_i64,
+                    r#"{"type":"text","text":"describe this"}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![
+                    "part-image",
+                    "user-1",
+                    "session-1",
+                    1002_i64,
+                    r#"{"type":"file","mime":"image/png","filename":"screen.png","url":"data:image/png;base64,ZmFrZQ=="}"#
+                ],
+            )
+            .unwrap();
+
+        let events = load_opencode_events_from_connection(&connection, "session-1").unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["type"], "user");
+        let content = events[0]["message"]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["name"], "screen.png");
+        assert_eq!(content[1]["source"]["media_type"], "image/png");
+        assert_eq!(content[1]["source"]["data"], "ZmFrZQ==");
+    }
+
+    #[test]
     fn emits_session_summary_event_from_opencode_summary_message() {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch(
@@ -824,6 +880,20 @@ fn load_opencode_events_from_connection(
                         .filter(|text| !text.is_empty())
                     {
                         content.push(serde_json::json!({ "type": "text", "text": text }));
+                    }
+                }
+                "file" => {
+                    if let Some(image_block) = opencode_file_part_to_image_block(&part.data) {
+                        content.push(image_block);
+                    } else {
+                        diagnostics.push(serde_json::json!({
+                            "type": "diagnostic",
+                            "subtype": "unknown_opencode_part",
+                            "part_type": part_type,
+                            "raw": part.data,
+                            "session_id": session_id,
+                            "timestamp": timestamp_string(part.time_created),
+                        }));
                     }
                 }
                 "reasoning" => {
@@ -1267,6 +1337,46 @@ fn load_opencode_parts(
         .map_err(|error| format!("Failed to read OpenCode parts: {}", error))?;
     rows.map(|row| row.map_err(|error| format!("Failed to decode OpenCode part: {}", error)))
         .collect()
+}
+
+fn opencode_file_part_to_image_block(part: &Value) -> Option<Value> {
+    let mime = part.get("mime").and_then(Value::as_str).unwrap_or("");
+    if !mime.starts_with("image/") {
+        return None;
+    }
+    let url = part.get("url").and_then(Value::as_str).unwrap_or("");
+    let (media_type, data) = parse_data_image_url(url)?;
+    let filename = part
+        .get("filename")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("image");
+    Some(serde_json::json!({
+        "type": "image",
+        "name": filename,
+        "source": {
+            "type": "base64",
+            "media_type": media_type,
+            "data": data,
+        }
+    }))
+}
+
+fn parse_data_image_url(url: &str) -> Option<(String, String)> {
+    let trimmed = url.trim();
+    let rest = trimmed.strip_prefix("data:")?;
+    let (meta, data) = rest.split_once(',')?;
+    if !meta.ends_with("base64") {
+        return None;
+    }
+    let media_type = meta
+        .trim_end_matches(";base64")
+        .trim()
+        .to_string();
+    if media_type.is_empty() || data.is_empty() {
+        return None;
+    }
+    Some((media_type, data.to_string()))
 }
 
 fn opencode_error_message(error: &Value) -> String {

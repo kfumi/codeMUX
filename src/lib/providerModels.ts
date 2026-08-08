@@ -1,14 +1,34 @@
 import type { Provider } from '../types/provider';
+import {
+  deriveResolvedModelName,
+  enrichFetchedModels,
+  resolveModelDisplayName as resolveWithRegistry,
+} from './modelRegistry';
 
-/** Turn model ids like `deepseek-v4-flash` / `deepseek_v4_flash` into `Deepseek V4 Flash`. */
+/**
+ * Model display-name helpers aligned with Cherry Studio + CodeMUX lightweight registry.
+ * See docs/research/cherry-studio-model-display-name-rules.md
+ */
+
+/** Format a raw model id (unmatched registry path / prettify). */
 export function formatModelDisplayName(modelId: string): string {
-  return modelId
-    .trim()
-    .split(/[-_/.\s]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(' ');
+  return deriveResolvedModelName(modelId.trim(), null, null);
 }
+
+/**
+ * Resolve display name for a fetched or stored model.
+ * Optional `providerTemplateId` enables catalog / provider-override curated names.
+ */
+export function resolveModelDisplayName(model: {
+  id: string;
+  name?: string | null;
+  providerTemplateId?: string | null;
+}): string {
+  return resolveWithRegistry(model);
+}
+
+/** Enrich a fetched `/models` list with registry names (Cherry enrichFetchedModels). */
+export { enrichFetchedModels };
 
 export function modelsFromText(value: string): string[] {
   const seen = new Set<string>();

@@ -4,6 +4,7 @@ import {
   getCachedVisionSupport,
   inferModelSupportsVision,
   markModelVisionUnsupported,
+  resolveVisionCapability,
 } from './modelVisionCapabilities';
 
 describe('modelVisionCapabilities', () => {
@@ -26,5 +27,15 @@ describe('modelVisionCapabilities', () => {
 
     expect(getCachedVisionSupport('future-model-7')).toBe(false);
     expect(inferModelSupportsVision('future-model-7')).toBe(false);
+  });
+
+  it('uses conservative enrichment default for unknown models when enrichment is enabled', () => {
+    expect(resolveVisionCapability('future-model-8', undefined, true)).toBe(false);
+    expect(resolveVisionCapability('future-model-8', undefined, false)).toBe(true);
+  });
+
+  it('prefers explicit input modalities over enrichment default', () => {
+    expect(resolveVisionCapability('gpt-4.1', { id: 'gpt-4.1', input_modalities: ['text', 'image'] }, true)).toBe(true);
+    expect(resolveVisionCapability('deepseek-v4-flash', { id: 'deepseek-v4-flash', input_modalities: ['text'] }, false)).toBe(false);
   });
 });

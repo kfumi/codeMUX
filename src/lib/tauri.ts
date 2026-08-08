@@ -2,9 +2,10 @@ import { invoke, Channel } from '@tauri-apps/api/core';
 import type { AgentKind, ReasoningEffort, Session, SessionMode } from '../types/session';
 import type { ImportCandidate, ImportSessionsRequest, ImportSessionsResult } from '../types/historyImport';
 import type { AgentUserMessageLocator } from '../types/agent';
-import type { AgentInputPayload } from '../types/agentInput';
+import type { AgentInputPayload, AgentInputAttachment, EnrichmentBlockResult, UserAttachmentPreview } from '../types/agentInput';
 import type {
   AgentConfigUpdateMap,
+  ImageRecognitionConfig,
   AppConfig,
   BuiltinProviderTemplate,
   ModelProvider,
@@ -273,6 +274,14 @@ export const sessionApi = {
       forkProviderMessageId: forkProviderMessageId ?? null,
       title: title ?? null,
     }),
+  saveMessageAttachments: (
+    sessionId: string,
+    userIndex: number,
+    attachments: UserAttachmentPreview[],
+  ): Promise<void> =>
+    invokeLogged('save_session_message_attachments', { sessionId, userIndex, attachments }),
+  getMessageAttachments: (sessionId: string): Promise<Record<number, UserAttachmentPreview[]>> =>
+    invokeLogged('get_session_message_attachments', { sessionId }),
 };
 
 export const agentApi = {
@@ -294,6 +303,8 @@ export const agentApi = {
     inputPayload?: AgentInputPayload,
     displayContent?: string,
   ): Promise<void> => invokeLogged('send_agent_input', { sessionId, prompt, inputPayload, displayContent }),
+  enrichAttachments: (attachments: AgentInputAttachment[]): Promise<{ blocks: EnrichmentBlockResult[] }> =>
+    invokeLogged('enrich_attachments', { attachments }),
   startSession: (
     sessionId: string,
     prompt: string,
@@ -384,6 +395,8 @@ export const configApi = {
   setTheme: (theme: Theme): Promise<void> => invokeLogged('set_theme', { theme: theme.toLowerCase() }),
   setCompactAiOutput: (enabled: boolean): Promise<void> =>
     invokeLogged('set_compact_ai_output', { enabled }),
+  setAttachmentEnrichment: (enrichment: ImageRecognitionConfig): Promise<void> =>
+    invokeLogged('set_attachment_enrichment', { enrichment }),
   setNotificationSettings: (settings: NotificationSettings): Promise<void> =>
     invokeLogged('set_notification_settings', { settings }),
   setDefaultOpenTarget: (target: OpenTarget): Promise<void> =>
@@ -393,9 +406,9 @@ export const configApi = {
   fetchProviderModels: (
     apiKey: string,
     baseUrl: string,
-  ): Promise<Array<{ id: string; owned_by: string }>> =>
+  ): Promise<Array<{ id: string; owned_by: string; name?: string | null }>> =>
     invokeLogged('fetch_provider_models', { apiKey, baseUrl }),
-  fetchOpenCodeFreeModels: (): Promise<Array<{ id: string; owned_by: string }>> =>
+  fetchOpenCodeFreeModels: (): Promise<Array<{ id: string; owned_by: string; name?: string | null }>> =>
     invokeLogged('fetch_opencode_free_models'),
 };
 

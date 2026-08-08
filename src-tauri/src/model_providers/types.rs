@@ -44,6 +44,10 @@ pub struct ProviderModel {
     /// OpenCode `limit.output` (tokens).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_modalities: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_vision: Option<bool>,
 }
 
 /// Strip Claude Code `[1m]` context markers from a model id (case-insensitive).
@@ -266,6 +270,8 @@ mod tests {
                 context_window: None,
                 max_input_tokens: None,
                 max_output_tokens: None,
+                supports_vision: None,
+                input_modalities: None,
             }],
             default_model: "deepseek-v4-flash".to_string(),
             builtin_template_id: Some("deepseek".to_string()),

@@ -57,6 +57,8 @@ export type AgentConfigUpdateMap = {
 
 export type Protocol = 'anthropic' | 'openai_compatible';
 
+export type InputModality = 'text' | 'image' | 'audio' | 'video';
+
 export interface ProtocolEndpoint {
   protocol: Protocol;
   base_url: string;
@@ -75,7 +77,32 @@ export interface ProviderModel {
   max_input_tokens?: number | null;
   /** OpenCode `limit.output`；仅 openai_compatible 端点时有意义。 */
   max_output_tokens?: number | null;
+  /** 输入模态；始终包含 text，可额外选择 image / audio / video。 */
+  input_modalities?: InputModality[] | null;
+  /** @deprecated 由 input_modalities 是否包含 image 推导。 */
+  supports_vision?: boolean | null;
 }
+
+export interface ImageRecognitionConfig {
+  enabled: boolean;
+  api_key: string;
+  api_key_configured?: boolean;
+  base_url: string;
+  model: string;
+}
+
+/** @deprecated 使用 ImageRecognitionConfig */
+export type AttachmentEnrichmentConfig = ImageRecognitionConfig;
+
+export const DEFAULT_IMAGE_RECOGNITION_CONFIG: ImageRecognitionConfig = {
+  enabled: false,
+  api_key: '',
+  base_url: 'https://open.bigmodel.cn/api/paas/v4',
+  model: '',
+};
+
+/** @deprecated */
+export const DEFAULT_ATTACHMENT_ENRICHMENT_CONFIG = DEFAULT_IMAGE_RECOGNITION_CONFIG;
 
 export interface ModelProvider {
   id: string;
@@ -125,6 +152,7 @@ export interface AppConfig {
   default_open_target: OpenTarget;
   notifications: NotificationSettings;
   theme: Theme;
+  attachment_enrichment?: AttachmentEnrichmentConfig;
   /** Cleared on load; kept optional for transitional UI code. */
   providers?: Provider[];
   agent_profile_registry?: never;

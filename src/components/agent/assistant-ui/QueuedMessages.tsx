@@ -179,7 +179,7 @@ function QueuedMessageRow({
   onDelete: () => void;
 }) {
   const content = query.displayContent?.trim() || query.prompt.trim() || '空消息';
-  const hasImages = (query.inputPayload?.images?.length ?? 0) > 0;
+  const hasImages = (query.inputPayload?.attachments?.length ?? query.inputPayload?.images?.length ?? 0) > 0;
 
   return (
     <div
@@ -248,7 +248,7 @@ function QueuedMessageGhost({
   }
 
   const content = query.displayContent?.trim() || query.prompt.trim() || '空消息';
-  const hasImages = (query.inputPayload?.images?.length ?? 0) > 0;
+  const hasImages = (query.inputPayload?.attachments?.length ?? query.inputPayload?.images?.length ?? 0) > 0;
 
   return (
     <div

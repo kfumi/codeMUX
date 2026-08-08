@@ -3,6 +3,7 @@ import type {
   AgentConfigMap,
   AgentConfigUpdateMap,
   AppConfig,
+  ImageRecognitionConfig,
   ModelProvider,
   NotificationSettings,
   Theme,
@@ -48,6 +49,7 @@ interface SettingsState {
   fetchConfig: () => Promise<void>;
   setTheme: (theme: Theme) => Promise<void>;
   setCompactAiOutput: (enabled: boolean) => Promise<void>;
+  setAttachmentEnrichment: (enrichment: ImageRecognitionConfig) => Promise<void>;
   setDefaultOpenTarget: (target: OpenTarget) => Promise<void>;
   setNotificationSettings: (settings: NotificationSettings) => Promise<void>;
   setActiveProvider: (providerId: string) => Promise<void>;
@@ -120,6 +122,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (error) {
       set((state) => ({
         config: state.config ? { ...state.config, compact_ai_output: previous } : state.config,
+        error: String(error),
+      }));
+    }
+  },
+
+  setAttachmentEnrichment: async (enrichment: ImageRecognitionConfig) => {
+    const previous = get().config?.attachment_enrichment;
+    set((state) => ({
+      config: state.config ? { ...state.config, attachment_enrichment: enrichment } : state.config,
+      error: null,
+    }));
+    try {
+      await configApi.setAttachmentEnrichment(enrichment);
+    } catch (error) {
+      set((state) => ({
+        config: state.config ? { ...state.config, attachment_enrichment: previous } : state.config,
         error: String(error),
       }));
     }

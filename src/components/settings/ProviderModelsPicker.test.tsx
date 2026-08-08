@@ -24,7 +24,9 @@ describe('ProviderModelsPicker', () => {
     );
 
     fireEvent.click(screen.getByLabelText('添加 m1'));
-    expect(onChangeSelected).toHaveBeenCalledWith([{ id: 'm1', name: 'Model One' }]);
+    expect(onChangeSelected).toHaveBeenCalledWith([
+      { id: 'm1', name: 'Model One', input_modalities: ['text'] },
+    ]);
 
     rerender(
       <ProviderModelsPicker

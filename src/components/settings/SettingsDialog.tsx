@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Archive, ArrowLeft, BarChart3, Bot, FileText, Info, Palette, Plug, Puzzle, Server, Settings, Terminal } from 'lucide-react';
+import { Archive, ArrowLeft, BarChart3, Bot, FileText, Image, Info, Palette, Plug, Puzzle, Server, Settings, Terminal } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
 import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
@@ -8,6 +8,7 @@ import { AgentRuntimeSettingsPanel } from './AgentRuntimeSettings';
 import { ArchivedSessionsPanel } from './ArchivedSessionsPanel';
 import { EnvironmentSettings } from './EnvironmentSettings';
 import { GeneralSettings } from './GeneralSettings';
+import { ImageRecognitionSettings } from './ImageRecognitionSettings';
 import { LogSettings } from './LogSettings';
 import { McpSettingsPanel } from './McpSettings';
 import { ProviderConfigPanel } from './ProviderConfig';
@@ -19,7 +20,7 @@ interface SettingsViewProps {
   onBack: () => void;
 }
 
-export type SettingsTab = 'general' | 'appearance' | 'provider' | 'agent-runtime' | 'mcp' | 'skills' | 'usage' | 'archive' | 'system-tools' | 'logs' | 'about';
+export type SettingsTab = 'general' | 'appearance' | 'provider' | 'image-recognition' | 'agent-runtime' | 'mcp' | 'skills' | 'usage' | 'archive' | 'system-tools' | 'logs' | 'about';
 
 interface SettingsSidebarProps {
   activeTab: SettingsTab;
@@ -36,6 +37,7 @@ const primaryTabs = [
   { id: 'general' as const, label: '常规', description: '应用级的通用信息与偏好设置。', icon: Settings },
   { id: 'appearance' as const, label: '外观', description: '自定义应用主题与视觉风格。', icon: Palette },
   { id: 'provider' as const, label: '模型配置', description: '管理模型供应商的 API Key、协议端点与模型列表；会话按智能体所需协议选用可用供应商。', icon: Plug },
+  { id: 'image-recognition' as const, label: '图片识别', description: '为非 vision 会话模型配置图片解析用的 API 密钥、地址与解析模型。', icon: Image },
   { id: 'agent-runtime' as const, label: '智能体运行时', description: '统一管理默认智能体、会话权限、托管 SDK Runtime 和外部 CLI 诊断。', icon: Bot },
   { id: 'mcp' as const, label: 'MCP', description: '管理 MCP 服务器，为智能体扩展工具与能力。', icon: Server },
   { id: 'skills' as const, label: 'Skills', description: '查看、卸载已安装的 skills，从各智能体工具导入。', icon: Puzzle },
@@ -115,6 +117,7 @@ export function SettingsContent({ activeTab, onTabChange }: SettingsContentProps
         {activeTab === 'general' && <GeneralSettings />}
         {activeTab === 'appearance' && <ThemeToggle />}
         {activeTab === 'provider' && <ProviderConfigPanel />}
+        {activeTab === 'image-recognition' && <ImageRecognitionSettings />}
         {activeTab === 'agent-runtime' && (
           <AgentRuntimeSettingsPanel onOpenSystemTools={() => onTabChange('system-tools')} />
         )}

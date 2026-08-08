@@ -17,7 +17,7 @@ pub struct BuiltinProviderTemplate {
     pub default_codex_needs_proxy: bool,
 }
 
-fn model(id: &str, name: &str) -> ProviderModel {
+fn model(id: &str, name: &str, input_modalities: Option<Vec<&str>>) -> ProviderModel {
     ProviderModel {
         id: id.to_string(),
         name: Some(name.to_string()),
@@ -25,6 +25,9 @@ fn model(id: &str, name: &str) -> ProviderModel {
         context_window: None,
         max_input_tokens: None,
         max_output_tokens: None,
+        input_modalities: input_modalities
+            .map(|items| items.into_iter().map(str::to_string).collect()),
+        supports_vision: None,
     }
 }
 
@@ -48,8 +51,8 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
                 None,
             )],
             models: vec![
-                model("claude-sonnet-4-20250514", "Claude Sonnet 4"),
-                model("claude-opus-4-20250514", "Claude Opus 4"),
+                model("claude-sonnet-4-20250514", "Claude Sonnet 4", Some(vec!["text", "image"])),
+                model("claude-opus-4-20250514", "Claude Opus 4", Some(vec!["text", "image"])),
             ],
             default_model: "claude-sonnet-4-20250514".to_string(),
             opencode_provider_key: None,
@@ -65,8 +68,8 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
                 Some(false),
             )],
             models: vec![
-                model("gpt-5", "GPT-5"),
-                model("gpt-4.1", "GPT-4.1"),
+                model("gpt-5", "GPT-5", Some(vec!["text", "image"])),
+                model("gpt-4.1", "GPT-4.1", Some(vec!["text", "image"])),
             ],
             default_model: "gpt-5".to_string(),
             opencode_provider_key: Some("openai".to_string()),
@@ -89,8 +92,8 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
                 ),
             ],
             models: vec![
-                model("deepseek-v4-flash", "DeepSeek V4 Flash"),
-                model("deepseek-v4-pro", "DeepSeek V4 Pro"),
+                model("deepseek-v4-flash", "DeepSeek V4 Flash", Some(vec!["text"])),
+                model("deepseek-v4-pro", "DeepSeek V4 Pro", Some(vec!["text"])),
             ],
             default_model: "deepseek-v4-flash".to_string(),
             opencode_provider_key: Some("deepseek".to_string()),
@@ -113,8 +116,8 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
                 ),
             ],
             models: vec![
-                model("anthropic/claude-sonnet-4", "Claude Sonnet 4"),
-                model("openai/gpt-4.1", "GPT-4.1"),
+                model("anthropic/claude-sonnet-4", "Claude Sonnet 4", Some(vec!["text", "image"])),
+                model("openai/gpt-4.1", "GPT-4.1", Some(vec!["text", "image"])),
             ],
             default_model: "anthropic/claude-sonnet-4".to_string(),
             opencode_provider_key: Some("openrouter".to_string()),
@@ -130,8 +133,8 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
                 Some(true),
             )],
             models: vec![
-                model("deepseek-ai/DeepSeek-V3", "DeepSeek V3"),
-                model("Qwen/Qwen2.5-72B-Instruct", "Qwen2.5 72B"),
+                model("deepseek-ai/DeepSeek-V3", "DeepSeek V3 0324", Some(vec!["text"])),
+                model("Qwen/Qwen2.5-72B-Instruct", "Qwen2.5 72B Instruct", None),
             ],
             default_model: "deepseek-ai/DeepSeek-V3".to_string(),
             opencode_provider_key: Some("siliconflow".to_string()),
@@ -147,8 +150,8 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
                 Some(true),
             )],
             models: vec![
-                model("glm-4.7", "GLM-4.7"),
-                model("glm-4.7-flash", "GLM-4.7 Flash"),
+                model("glm-4.7", "GLM-4.7", Some(vec!["text"])),
+                model("glm-4.7-flash", "GLM-4.7-Flash", Some(vec!["text"])),
             ],
             default_model: "glm-4.7".to_string(),
             opencode_provider_key: Some("zhipu".to_string()),
@@ -167,9 +170,9 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
                 ),
             ],
             models: vec![
-                model("deepseek-v4-flash", "DeepSeek V4 Flash"),
-                model("kimi-k2.6", "Kimi K2.6"),
-                model("glm-5.1", "GLM 5.1"),
+                model("deepseek-v4-flash", "DeepSeek V4 Flash", Some(vec!["text"])),
+                model("kimi-k2.6", "Kimi K2.6", None),
+                model("glm-5.1", "GLM-5.1", None),
             ],
             default_model: "deepseek-v4-flash".to_string(),
             opencode_provider_key: Some("opencode-go".to_string()),

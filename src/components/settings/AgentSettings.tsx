@@ -32,6 +32,7 @@ import {
 } from '../../lib/agentPermissions';
 import { cn } from '../../lib/utils';
 import { isProviderUsable } from '../../lib/modelProviders';
+import { resolveModelDisplayName } from '../../lib/providerModels';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { getAgentDefinition } from '../../types/agentRegistry';
 import type { AgentKind } from '../../types/session';
@@ -510,7 +511,13 @@ function AgentModelSelect({ agentKind }: { agentKind: AgentKind }) {
                 size={14}
                 className="h-5 w-5 rounded-[5px]"
               />
-              <span className="truncate">{selectedModel.name ?? selectedModel.id}</span>
+              <span className="truncate">
+                {resolveModelDisplayName({
+                  id: selectedModel.id,
+                  name: selectedModel.name,
+                  providerTemplateId: provider.builtin_template_id,
+                })}
+              </span>
             </span>
           ) : undefined}
         </SelectValue>
@@ -528,7 +535,13 @@ function AgentModelSelect({ agentKind }: { agentKind: AgentKind }) {
                     size={14}
                     className="h-5 w-5 rounded-[5px]"
                   />
-                  <span>{model.name ?? model.id}</span>
+                  <span>
+                    {resolveModelDisplayName({
+                      id: model.id,
+                      name: model.name,
+                      providerTemplateId: item.builtin_template_id,
+                    })}
+                  </span>
                 </span>
               </SelectItem>
             ))}

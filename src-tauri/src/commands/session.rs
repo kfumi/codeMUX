@@ -228,3 +228,24 @@ pub async fn update_session_permissions(
 
     Ok(())
 }
+
+#[tauri::command]
+pub fn save_session_message_attachments(
+    state: State<'_, AppState>,
+    session_id: String,
+    user_index: i64,
+    attachments: Vec<serde_json::Value>,
+) -> Result<(), String> {
+    let db = state.db.lock().unwrap();
+    operations::save_session_message_attachments(&db, &session_id, user_index, &attachments)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn get_session_message_attachments(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<std::collections::HashMap<i64, Vec<serde_json::Value>>, String> {
+    let db = state.db.lock().unwrap();
+    operations::get_session_message_attachments(&db, &session_id).map_err(|error| error.to_string())
+}

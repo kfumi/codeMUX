@@ -255,6 +255,35 @@ pub struct AgentConfigs {
     pub opencode: OpenCodeAgentConfig,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AttachmentEnrichmentConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub api_key_configured: bool,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+}
+
+impl Default for AttachmentEnrichmentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_key: String::new(),
+            api_key_configured: false,
+            base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
+            model: String::new(),
+            provider_id: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     /// CodeMUX-owned model providers (ADR 0005).
@@ -285,6 +314,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub notifications: NotificationSettings,
     pub theme: Theme,
+    #[serde(default)]
+    pub attachment_enrichment: AttachmentEnrichmentConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -309,6 +340,7 @@ impl Default for AppConfig {
             default_open_target: default_open_target(),
             notifications: NotificationSettings::default(),
             theme: Theme::System,
+            attachment_enrichment: AttachmentEnrichmentConfig::default(),
         }
     }
 }

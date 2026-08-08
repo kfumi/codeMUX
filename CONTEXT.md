@@ -69,6 +69,30 @@ _Avoid_: 空 API Key 表示使用 CLI 认证
 Model Provider 是否对会话可选。禁用后配置保留，但不可被选为可用供应商；已绑定该供应商的会话在改选前不可发送。
 _Avoid_: 用删除表达临时停用；禁用后仍允许已绑会话继续调用
 
+### Attachment
+用户随 User Message 一并提交的、非文本的附加内容。首版仅包含 image；UI 中始终保留原始 Attachment 供用户查看，与发给智能体的 payload 可以不同。
+_Avoid_: 截图（当泛指一切图片时）, file upload
+
+### Vision Capability
+当前会话所选模型能否原生接收 image modality 的能力。与 Agent 种类无关，由 Model Provider 目录中的模型元数据、运行时探测结果共同决定。
+_Avoid_: multimodal support, 多模态
+
+### Attachment Enrichment
+在 User Message 发送给智能体之前，将 Attachment 转为结构化文本上下文的过程。Enrichment 结果合并进 User Message 文本，供不支持 Vision Capability 的模型使用。
+_Avoid_: OCR, 截图理解, image caption
+
+### Enrichment Provider
+专门执行 Attachment Enrichment 的 Model Provider 及其模型配置（如 GLM-4.6V-Flash）。与会话当前选用的 Model Provider 独立，由应用级设置指定。
+_Avoid_: vision model, fallback model
+
+### Enriched Context Block
+Attachment Enrichment 产出、合并进 User Message 文本的描述块。每个 Attachment 对应一个 Block，由 Enrichment 模型自由生成的 Markdown 包裹在固定边界标记内；UI 中不作为 User Message 正文展示，仅注入发给智能体的 payload。
+_Avoid_: OCR 结果, caption, system prompt
+
+### Attachment Processor
+按 Attachment 类型执行 Enrichment 的处理单元。每种类型（如 image、pdf）对应一个 Processor，由 Sidecar 内的 Registry 按类型分发。首版仅实现 image Processor。
+_Avoid_: enricher, handler, adapter（当指 Enrichment 处理时）
+
 ## Preferred Terms
 
 
@@ -80,6 +104,9 @@ _Avoid_: 用删除表达临时停用；禁用后仍允许已绑会话继续调�
 | Built-in Provider Template / 内置供应商模板 | 与自定义供应商分叉的第二套模型 |
 | Provider Credentials（显式配置） | 空 key 魔法回落 CLI |
 | Provider Enabled / 启用 | 用删除代替停用 |
+| Enrichment Provider / enrichment 供应商 | vision model, fallback model |
+| Attachment Processor / 附件处理器 | enricher, handler |
+| Enriched Context Block / enriched 上下文块 | OCR 结果, caption |
 
 ## Notes
 

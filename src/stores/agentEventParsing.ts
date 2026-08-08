@@ -7,6 +7,7 @@ import type {
 import type { AgentKind } from '../types/session';
 import { formatPromptAsCommandDisplay } from '../lib/slashCommands';
 import type { UserAttachmentPreview } from '../types/agentInput';
+import { stripAttachmentEnrichmentContext } from '../lib/attachmentEnrichment';
 
 export const INTERRUPT_MARKER = '[Request interrupted by user]';
 
@@ -74,7 +75,9 @@ export function parseSdkUserMessage(data: Record<string, unknown>): ParsedStoreE
   }
 
   if (typeof message?.content === 'string') {
-    const contentText = stripCodexCollaborationPolicyBlock(message.content);
+    const contentText = stripAttachmentEnrichmentContext(
+      stripCodexCollaborationPolicyBlock(message.content),
+    );
     return {
       kind: 'user',
       data: {
@@ -86,7 +89,7 @@ export function parseSdkUserMessage(data: Record<string, unknown>): ParsedStoreE
 
   const textParts = content
     ?.filter((block) => isRecord(block) && (block.type === 'text' || block.type === 'input_text'))
-    .map((block) => stripCodexCollaborationPolicyBlock(String(block.text || '')))
+    .map((block) => stripAttachmentEnrichmentContext(stripCodexCollaborationPolicyBlock(String(block.text || ''))))
     .filter((text) => text.length > 0) ?? [];
   const attachments = extractImageAttachments(content ?? []);
 

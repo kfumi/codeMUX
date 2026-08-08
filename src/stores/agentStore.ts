@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { agentApi, fileApi } from '../lib/tauri';
+import { agentApi, fileApi, sessionApi } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 import {
   isClaudeSubagentEvent,
@@ -61,7 +61,10 @@ import type {
 import type { AgentKind, ReasoningEffort } from '../types/session';
 import type { AgentInputPayload, UserAttachmentPreview } from '../types/agentInput';
 import type { QueuedAgentQuery } from '../types/agentQueue';
-import { inferModelSupportsVision, markModelVisionUnsupported } from '../lib/modelVisionCapabilities';
+import { markModelVisionUnsupported, resolveVisionCapability, findProviderModelMetadata, isImageRecognitionConfigured } from '../lib/modelVisionCapabilities';
+import { getPayloadAttachments, getPayloadImageAttachments, payloadHasAttachments } from '../types/agentInput';
+import { countEnrichmentFailures, filterSuccessfulEnrichmentBlocks, firstEnrichmentFailureSummary, mergeEnrichedContext } from '../lib/attachmentEnrichment';
+import { mergeSessionMessageAttachments, parseSessionMessageAttachmentsMap } from '../lib/sessionMessageAttachments';
 import {
   normalizeThreadTokenUsage,
   type ThreadTokenUsage,
@@ -199,6 +202,29 @@ const logger = createLogger('agentStore');
 const pendingStreamingBuffers = new Map<string, StreamingBuffer>();
 const pendingStreamingFlushHandles = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingSessionMessageLoads = new Map<string, Promise<void>>();
+
+async function hydrateSessionMessageAttachments(sessionId: string, events: AgentMessage[]): Promise<AgentMessage[]> {
+  try {
+    const raw = await sessionApi.getMessageAttachments(sessionId);
+    const attachmentsByUserIndex = parseSessionMessageAttachmentsMap(raw);
+    return mergeSessionMessageAttachments(events, attachmentsByUserIndex);
+  } catch (error) {
+    logger.warn('Failed to hydrate session message attachments', { sessionId }, serializeError(error));
+    return events;
+  }
+}
+
+function sessionEventsNeedAttachmentHydration(before: AgentMessage[], after: AgentMessage[]): boolean {
+  return after.some((event, index) => {
+    if (event.kind !== 'user' || before[index]?.kind !== 'user') {
+      return false;
+    }
+    const previousCount = before[index].data.attachments?.length ?? 0;
+    const nextCount = event.data.attachments?.length ?? 0;
+    return nextCount > previousCount;
+  });
+}
+
 const sessionsWithLiveTextStream = new Set<string>();
 /** Per-session live stream phase. OpenCode often emits reasoning as text_delta;
  * keep content in the reasoning panel until we explicitly enter the answer phase. */
@@ -1386,13 +1412,21 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     const state = get();
     const hasExistingUserMsg = (state.events[sessionId] || []).some(e => e.kind === 'user');
     const originalPayload = inputPayload ?? { text: prompt };
-    const shouldSendImages = (originalPayload.images?.length ?? 0) > 0 && inferModelSupportsVision(modelForVision);
-    const payloadForModel: AgentInputPayload = shouldSendImages
+    const attachments = getPayloadAttachments(originalPayload);
+    const appConfig = useSettingsStore.getState().config;
+    const enrichmentConfig = appConfig?.attachment_enrichment;
+    const enrichmentEnabled = isImageRecognitionConfigured(enrichmentConfig);
+    const providerModels = (appConfig?.model_providers ?? []).flatMap((provider) => provider.models);
+    const modelMetadata = findProviderModelMetadata(modelForVision, providerModels);
+    const supportsVision = !payloadHasAttachments(originalPayload)
+      || resolveVisionCapability(modelForVision, modelMetadata, enrichmentEnabled);
+    const shouldSendImages = attachments.length > 0 && supportsVision;
+    let payloadForModel: AgentInputPayload = shouldSendImages
       ? originalPayload
       : { text: originalPayload.text };
-    const droppedImages = (originalPayload.images?.length ?? 0) > 0 && !shouldSendImages;
+    const droppedImages = attachments.length > 0 && !shouldSendImages && !enrichmentEnabled;
     const userContent = displayContent ?? originalPayload.text;
-    const userAttachments = originalPayload.images?.map((image) => ({
+    const userAttachments = getPayloadImageAttachments(originalPayload).map((image) => ({
       type: 'image' as const,
       name: image.name,
       mediaType: image.mediaType,
@@ -1415,11 +1449,12 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     // Git baseline is no longer needed since we use HEAD comparison directly
 
     // 添加用户消息到事件列表
+    const userMessageIndex = (state.events[sessionId] || []).filter((event) => event.kind === 'user').length;
     const userMsg: AgentMessage = {
       kind: 'user',
       data: {
         content: userContent,
-        ...(userAttachments ? { attachments: userAttachments } : {}),
+        ...(userAttachments.length > 0 ? { attachments: userAttachments } : {}),
       },
     };
     const userTs = Date.now();
@@ -1437,12 +1472,65 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
       error: { ...s.error, [sessionId]: null },
       queuePaused: { ...s.queuePaused, [sessionId]: false },
     }));
+    if (userAttachments.length > 0) {
+      void sessionApi.saveMessageAttachments(sessionId, userMessageIndex, userAttachments).catch((error) => {
+        logger.warn('Failed to persist session message attachments', { sessionId, userMessageIndex }, serializeError(error));
+      });
+    }
     try {
-      if (droppedImages) {
+      if (attachments.length > 0 && !supportsVision && enrichmentEnabled) {
+        try {
+          const enrichmentResponse = await agentApi.enrichAttachments(attachments);
+          const blocks = enrichmentResponse.blocks ?? [];
+          const successfulBlocks = filterSuccessfulEnrichmentBlocks(blocks);
+          const failureCount = countEnrichmentFailures(blocks);
+          const failureSummary = firstEnrichmentFailureSummary(blocks);
+          if (successfulBlocks.length > 0) {
+            payloadForModel = {
+              text: mergeEnrichedContext(originalPayload.text, successfulBlocks),
+              historyAttachments: attachments,
+            };
+          }
+          if (failureSummary) {
+            logger.warn('Attachment enrichment partial or total failure', {
+              sessionId,
+              model: modelForVision || 'default',
+              failureCount,
+              successCount: successfulBlocks.length,
+              failureSummary,
+            });
+          }
+        } catch (error) {
+          logger.warn('Attachment enrichment failed; falling back to text-only payload', {
+            sessionId,
+            model: modelForVision || 'default',
+          }, serializeError(error));
+          payloadForModel = { text: originalPayload.text };
+        }
+      } else if (droppedImages) {
         logger.info('Skipping image payload for model without vision support', {
           sessionId,
           model: modelForVision || 'default',
         });
+        set((s) => ({
+          events: {
+            ...s.events,
+            [sessionId]: [
+              ...(s.events[sessionId] || []),
+              {
+                kind: 'stream_status',
+                data: {
+                  message: '当前模型不支持图片。请在设置 → 图片识别中配置解析模型，或在模型编辑中勾选「视觉」输入模态。',
+                  is_reconnecting: false,
+                },
+              },
+            ],
+          },
+          eventTimestamps: {
+            ...s.eventTimestamps,
+            [sessionId]: [...(s.eventTimestamps[sessionId] || []), Date.now()],
+          },
+        }));
       }
 
       const handleEvent = (raw: string) => {
@@ -2367,6 +2455,12 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     // repeating the expensive IPC call for empty sessions after remounts.
     const existing = get().events[sessionId];
     if (existing) {
+      const hydrated = await hydrateSessionMessageAttachments(sessionId, existing);
+      if (sessionEventsNeedAttachmentHydration(existing, hydrated)) {
+        set((state) => ({
+          events: { ...state.events, [sessionId]: hydrated },
+        }));
+      }
       return;
     }
 
@@ -2424,10 +2518,12 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
           }
         }
 
+        const hydratedEvents = await hydrateSessionMessageAttachments(sessionId, events);
+
         set((state) => ({
-          events: { ...state.events, [sessionId]: events },
+          events: { ...state.events, [sessionId]: hydratedEvents },
           eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
-          todos: { ...state.todos, [sessionId]: extractTodosFromEvents(events) },
+          todos: { ...state.todos, [sessionId]: extractTodosFromEvents(hydratedEvents) },
         }));
         await get().refreshLatestTokenUsage(sessionId, 'restored');
         logger.info('Loaded session events from agent JSONL', {

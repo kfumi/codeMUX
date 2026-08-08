@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { providerDisplayName } from '@/components/settings/ProviderBrandIcon';
 import { isProviderUsable } from '../lib/modelProviders';
+import { resolveModelDisplayName } from '../lib/providerModels';
 import type { ModelProvider } from '../types/provider';
 import type { AgentKind } from '../types/session';
 
@@ -82,7 +83,11 @@ export function useAgentModels(
             modelId,
             providerId: provider.id,
             providerTemplateId: provider.builtin_template_id ?? null,
-            name: (model.name ?? modelId).trim() || modelId,
+            name: resolveModelDisplayName({
+              id: modelId,
+              name: model.name,
+              providerTemplateId: provider.builtin_template_id,
+            }),
             group,
             efforts: true,
             source: 'provider' as const,

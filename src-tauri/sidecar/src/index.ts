@@ -39,10 +39,12 @@ import {
 } from './activePermissionState.js';
 import {
   buildClaudeUserMessageContent,
+  getDisplayPayloadAttachments,
   isImageUnsupportedError,
   normalizeAgentInputPayload,
   type AgentInputPayload,
 } from './agentInputPayload.js';
+import { enrichAttachments } from './attachmentEnrichment/index.js';
 import { shouldCaptureClaudeSessionMapping } from './claudeSessionMapping.js';
 import { shouldForwardClaudeSdkMessage } from './claudeSdkMessageFilter.js';
 import { nextWithTimeout } from './claudeQueryTimeout.js';
@@ -1366,11 +1368,17 @@ export function buildUserMessageEvent(
   displayContent?: string,
 ): Record<string, unknown> {
   const payload = normalizeAgentInputPayload(prompt, inputPayload);
-  const imageBlocks = buildClaudeUserMessageContent(payload, true)
+  const displayAttachments = getDisplayPayloadAttachments(payload);
+  const displayPayload: AgentInputPayload = {
+    text: displayContent ?? payload.text,
+    attachments: displayAttachments,
+    images: displayAttachments.map(({ name, mediaType, dataUrl, size }) => ({ name, mediaType, dataUrl, size })),
+  };
+  const imageBlocks = buildClaudeUserMessageContent(displayPayload, true)
     .filter((block): block is { type: 'image'; source: { type: 'base64'; media_type: string; data: string } } => block.type === 'image')
     .map((block, index) => ({
       ...block,
-      ...(payload.images?.[index]?.name ? { name: payload.images[index].name } : {}),
+      ...(displayAttachments[index]?.name ? { name: displayAttachments[index].name } : {}),
     }));
 
   return {
@@ -1548,6 +1556,44 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           }
         } catch (error) {
           emitError(error);
+        }
+        return;
+      }
+      case 'enrich_attachments': {
+        try {
+          process.stderr.write(
+            `[sidecar] Attachment enrichment START model=${cmd.model} baseUrl=${cmd.baseUrl} attachments=${cmd.attachments.length}\n`,
+          );
+          const blocks = await enrichAttachments(cmd.attachments, {
+            protocol: cmd.protocol,
+            apiKey: cmd.apiKey,
+            baseUrl: cmd.baseUrl,
+            model: cmd.model,
+          });
+          for (const block of blocks) {
+            if (block.ok) {
+              process.stderr.write(
+                `[sidecar] Attachment enrichment OK name=${block.attachment_name} chars=${block.markdown.length}\n`,
+              );
+            } else {
+              process.stderr.write(
+                `[sidecar] Attachment enrichment FAILED name=${block.attachment_name} error=${block.error ?? 'unknown'}\n`,
+              );
+            }
+          }
+          options.emit({
+            type: 'enrichment_result',
+            request_id: cmd.requestId,
+            ok: true,
+            blocks,
+          });
+        } catch (error) {
+          options.emit({
+            type: 'enrichment_result',
+            request_id: cmd.requestId,
+            ok: false,
+            error: String(error),
+          });
         }
         return;
       }

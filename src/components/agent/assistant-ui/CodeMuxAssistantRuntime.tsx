@@ -8,6 +8,7 @@ import { useAgentStore } from '../../../stores/agentStore';
 import type { AgentMessage } from '../../../stores/agentStore';
 
 import type { AgentInputPayload } from '../../../types/agentInput';
+import { payloadHasAttachments } from '../../../types/agentInput';
 import type { AgentKind } from '../../../types/session';
 import type { ProjectSkill } from '../../../types/skill';
 import type { ConversationTurn } from '../../../types/conversationTurn';
@@ -87,11 +88,11 @@ function SessionScopedAssistantRuntime({
         return;
       }
 
-      if (payload.text.length === 0 && (payload.images?.length ?? 0) === 0) {
+      if (payload.text.length === 0 && !payloadHasAttachments(payload)) {
         return;
       }
 
-      const hasImages = (payload.images?.length ?? 0) > 0;
+      const hasImages = payloadHasAttachments(payload);
       const chipCommand = hasImages ? null : resolveChipCommand(payload.text, agentKind, projectSkills);
 
       if (chipCommand) {
@@ -232,6 +233,7 @@ export function buildAgentInputPayloadFromAppendMessage(message: AppendMessage):
       );
 
       return imageParts.map((part) => ({
+        type: 'image' as const,
         name: attachment.name,
         mediaType: attachment.contentType || mediaTypeFromDataUrl(part.image) || 'image/png',
         dataUrl: part.image,
@@ -239,7 +241,15 @@ export function buildAgentInputPayloadFromAppendMessage(message: AppendMessage):
       }));
     });
 
-  return images.length > 0 ? { text, images } : { text };
+  if (images.length === 0) {
+    return { text };
+  }
+
+  return {
+    text,
+    attachments: images,
+    images: images.map(({ name, mediaType, dataUrl, size }) => ({ name, mediaType, dataUrl, size })),
+  };
 }
 
 export class CodeMuxImageAttachmentAdapter extends SimpleImageAttachmentAdapter {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, EyeOff, Loader2, Pencil, Plus, RefreshCw, Search, Settings2, Trash2 } from 'lucide-react';
+import { Ear, Eye, EyeOff, Loader2, Pencil, Plus, RefreshCw, Search, Settings2, Trash2, Video } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { AddProviderDialog } from '@/components/settings/AddProviderDialog';
@@ -22,7 +22,13 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { formatModelDisplayName } from '@/lib/providerModels';
+import {
+  INPUT_MODALITY_OPTIONS,
+  hasInputModality,
+  normalizeInputModalities,
+  toggleOptionalInputModality,
+} from '@/lib/inputModalities';
+import { enrichFetchedModels, resolveModelDisplayName } from '@/lib/providerModels';
 import { configApi } from '@/lib/tauri';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -81,12 +87,19 @@ function syncDefaultModel(models: ProviderModel[], currentDefault = ''): string 
   return ids[0] ?? '';
 }
 
-function cleanProviderModel(model: ProviderModel): ProviderModel | null {
+function cleanProviderModel(
+  model: ProviderModel,
+  providerTemplateId?: string | null,
+): ProviderModel | null {
   const id = model.id.trim();
   if (!id) return null;
   const cleaned: ProviderModel = {
     id,
-    name: model.name?.trim() || id,
+    name: resolveModelDisplayName({
+      id,
+      name: model.name,
+      providerTemplateId,
+    }),
   };
   if (model.context_1m === true) {
     cleaned.context_1m = true;
@@ -108,6 +121,9 @@ function cleanProviderModel(model: ProviderModel): ProviderModel | null {
   ) {
     cleaned.max_output_tokens = Math.floor(model.max_output_tokens);
   }
+  if (model.input_modalities?.length) {
+    cleaned.input_modalities = normalizeInputModalities(model.input_modalities);
+  }
   return cleaned;
 }
 
@@ -123,7 +139,12 @@ function builtinCatalogModels(template: BuiltinProviderTemplate | undefined): Pi
   if (!template) return [];
   return template.models.map((model) => ({
     id: model.id,
-    name: model.name?.trim() || formatModelDisplayName(model.id),
+    name: resolveModelDisplayName({
+      id: model.id,
+      name: model.name,
+      providerTemplateId: template.id,
+    }),
+    input_modalities: model.input_modalities ?? null,
   }));
 }
 
@@ -357,7 +378,7 @@ export function ProviderConfigPanel() {
       api_key: draft.api_key.trim(),
       endpoints: draft.endpoints.filter((endpoint) => endpoint.base_url.trim().length > 0),
       models: draft.models
-        .map((model) => cleanProviderModel(model))
+        .map((model) => cleanProviderModel(model, draft.builtin_template_id))
         .filter((model): model is ProviderModel => Boolean(model)),
     };
     if (!cleaned.name.trim()) {
@@ -570,15 +591,10 @@ export function ProviderConfigPanel() {
 
     try {
       const fetched = await configApi.fetchProviderModels(apiKey, baseUrl);
-      const catalog = fetched
-        .map((item) => {
-          const id = item.id.trim();
-          return {
-            id,
-            name: formatModelDisplayName(id),
-          };
-        })
-        .filter((item) => item.id.length > 0);
+      const catalog = enrichFetchedModels(
+        current.builtin_template_id,
+        fetched.map((item) => ({ id: item.id, name: item.name })),
+      );
       if (catalog.length > 0) {
         setPickerCatalog(catalog);
         setPickerSource('api');
@@ -863,18 +879,16 @@ export function ProviderConfigPanel() {
                         </td>
                         <td className="px-1 py-1.5">
                           <div className="flex items-center justify-end gap-0.5">
-                            {showModelMoreSettings && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0 text-muted-foreground"
-                                aria-label={`设置模型 ${model.id || index + 1}`}
-                                onClick={() => setEditingModelIndex(index)}
-                              >
-                                <Settings2 className="h-3.5 w-3.5" />
-                              </Button>
-                            )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-muted-foreground"
+                              aria-label={`设置模型 ${model.id || index + 1}`}
+                              onClick={() => setEditingModelIndex(index)}
+                            >
+                              <Settings2 className="h-3.5 w-3.5" />
+                            </Button>
                             <Button
                               type="button"
                               variant="ghost"
@@ -990,6 +1004,39 @@ export function ProviderConfigPanel() {
                     })
                   }
                 />
+              </div>
+
+              <div className="space-y-3 border-t border-border/60 pt-4">
+                <p className="text-sm font-medium">输入模态</p>
+                <div className="flex flex-wrap gap-2">
+                  {INPUT_MODALITY_OPTIONS.map(({ id, label }) => {
+                    const selected = hasInputModality(editingModel.input_modalities, id);
+                    const Icon = id === 'image' ? Eye : id === 'audio' ? Ear : Video;
+                    return (
+                      <Button
+                        key={id}
+                        type="button"
+                        variant={selected ? 'default' : 'outline'}
+                        size="sm"
+                        className="h-8 gap-1.5"
+                        onClick={() =>
+                          setDraft({
+                            ...draft,
+                            models: updateModelAt(draft.models, editingModelIndex, {
+                              input_modalities: toggleOptionalInputModality(editingModel.input_modalities, id),
+                            }),
+                          })
+                        }
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        {label}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  勾选「视觉」表示模型原生支持图片识别；未勾选时，若已启用「设置 → 图片识别」，发送图片将自动走解析模型。
+                </p>
               </div>
 
               {showModelMoreSettings && (

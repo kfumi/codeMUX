@@ -1,6 +1,6 @@
 use crate::config;
 use crate::config::types::{
-    AgentKind, AppConfig, ClaudeCodeAgentConfigUpdate, CodexAgentConfigUpdate,
+    AgentKind, AppConfig, AttachmentEnrichmentConfig, ClaudeCodeAgentConfigUpdate, CodexAgentConfigUpdate,
     NotificationSettings, Provider, Theme,
 };
 use crate::AppState;
@@ -287,6 +287,36 @@ pub fn set_compact_ai_output(
 }
 
 #[tauri::command]
+pub fn set_attachment_enrichment(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    mut enrichment: AttachmentEnrichmentConfig,
+) -> Result<(), String> {
+    info!(
+        target: "provider",
+        "Setting image recognition enabled={} base_url={} model={}",
+        enrichment.enabled,
+        enrichment.base_url,
+        enrichment.model
+    );
+    let mut config = state.config.lock().unwrap();
+    let existing = config.attachment_enrichment.clone();
+    if enrichment.api_key.trim().is_empty()
+        && existing.api_key.trim().is_empty()
+        && enrichment.api_key_configured
+    {
+        enrichment.api_key = existing.api_key;
+    } else if enrichment.api_key.trim().is_empty() && !existing.api_key.trim().is_empty() {
+        enrichment.api_key = existing.api_key;
+    }
+    enrichment.api_key_configured = false;
+    enrichment.provider_id = None;
+    config.attachment_enrichment = enrichment;
+    config::save_config(&app, &config)?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn set_notification_settings(
     state: State<'_, AppState>,
     app: AppHandle,
@@ -335,10 +365,40 @@ pub fn set_default_open_target(
     Ok(())
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct ModelInfo {
     pub id: String,
     pub owned_by: String,
+    /// Upstream display name when the provider returns one that differs from `id`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// Pick the first non-empty display-name field from an OpenAI-compatible model object.
+fn extract_model_display_name(model: &serde_json::Value, model_id: &str) -> Option<String> {
+    const KEYS: &[&str] = &["display_name", "displayName", "model_name", "name"];
+    for key in KEYS {
+        if let Some(raw) = model.get(*key).and_then(serde_json::Value::as_str) {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() && trimmed != model_id {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn model_info_from_json(model: &serde_json::Value) -> Option<ModelInfo> {
+    let id = model.get("id").and_then(serde_json::Value::as_str)?.to_string();
+    Some(ModelInfo {
+        owned_by: model
+            .get("owned_by")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown")
+            .to_string(),
+        name: extract_model_display_name(model, &id),
+        id,
+    })
 }
 
 const OPENCODE_FREE_MODELS_URL: &str = "https://opencode.ai/zen/v1/models";
@@ -383,18 +443,18 @@ pub async fn fetch_opencode_free_models() -> Result<Vec<ModelInfo>, String> {
     let mut models: Vec<ModelInfo> = data
         .iter()
         .filter_map(|model| {
-            let id = model.get("id").and_then(serde_json::Value::as_str)?;
-            let is_free = id.ends_with("-free") || id == "big-pickle";
+            let info = model_info_from_json(model)?;
+            let is_free = info.id.ends_with("-free") || info.id == "big-pickle";
             if !is_free {
                 return None;
             }
             Some(ModelInfo {
-                id: id.to_string(),
                 owned_by: model
                     .get("owned_by")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("opencode")
                     .to_string(),
+                ..info
             })
         })
         .collect();
@@ -509,16 +569,7 @@ pub(crate) async fn probe_openai_models(
 
         let data = body["data"].as_array().ok_or("该接口不支持获取模型")?;
 
-        let mut models: Vec<ModelInfo> = data
-            .iter()
-            .filter_map(|m| {
-                let id = m["id"].as_str()?;
-                Some(ModelInfo {
-                    id: id.to_string(),
-                    owned_by: m["owned_by"].as_str().unwrap_or("unknown").to_string(),
-                })
-            })
-            .collect();
+        let mut models: Vec<ModelInfo> = data.iter().filter_map(model_info_from_json).collect();
 
         models.sort_by(|a, b| a.id.cmp(&b.id));
         return Ok((models, url.clone()));
@@ -724,7 +775,8 @@ async fn test_openai_stream(base_url: &str, api_key: &str, model: &str) -> Resul
 mod tests {
     use super::{
         agent_provider_profile_retired_err, apply_agent_config_update, build_model_urls,
-        redact_config_for_frontend, AGENT_PROVIDER_PROFILE_RETIRED,
+        model_info_from_json, redact_config_for_frontend, ModelInfo,
+        AGENT_PROVIDER_PROFILE_RETIRED,
     };
     use crate::config::types::{AgentKind, AppConfig};
 
@@ -780,6 +832,8 @@ mod tests {
                 context_window: None,
                 max_input_tokens: None,
                 max_output_tokens: None,
+                input_modalities: None,
+                supports_vision: None,
             }],
             default_model: "model".to_string(),
             builtin_template_id: None,
@@ -809,6 +863,37 @@ mod tests {
         );
         assert_eq!(redacted.providers[0].api_key, "");
         assert_eq!(app_config.model_providers[0].api_key, "sk-secret");
+    }
+
+    #[test]
+    fn model_info_prefers_upstream_display_name_fields() {
+        let model = serde_json::json!({
+            "id": "gpt-4o",
+            "owned_by": "openai",
+            "display_name": "GPT-4o"
+        });
+        assert_eq!(
+            model_info_from_json(&model),
+            Some(ModelInfo {
+                id: "gpt-4o".to_string(),
+                owned_by: "openai".to_string(),
+                name: Some("GPT-4o".to_string()),
+            })
+        );
+
+        let echoed = serde_json::json!({
+            "id": "deepseek-chat",
+            "owned_by": "deepseek",
+            "name": "deepseek-chat"
+        });
+        assert_eq!(
+            model_info_from_json(&echoed),
+            Some(ModelInfo {
+                id: "deepseek-chat".to_string(),
+                owned_by: "deepseek".to_string(),
+                name: None,
+            })
+        );
     }
 
     #[test]

@@ -8,6 +8,7 @@ import {
   modelsFromText,
   modelsToText,
   normalizeProviderModels,
+  resolveModelDisplayName,
 } from './providerModels';
 
 const baseProvider: Provider = {
@@ -20,10 +21,24 @@ const baseProvider: Provider = {
 };
 
 describe('provider model helpers', () => {
-  it('formats model ids into title-case display names', () => {
+  it('prettifies unmatched model ids', () => {
     expect(formatModelDisplayName('deepseek-v4-flash')).toBe('Deepseek V4 Flash');
-    expect(formatModelDisplayName('deepseek_v4_flash')).toBe('Deepseek V4 Flash');
-    expect(formatModelDisplayName('openai/gpt-5')).toBe('Openai Gpt 5');
+    expect(formatModelDisplayName('custom-model')).toBe('Custom Model');
+    expect(formatModelDisplayName('openai/gpt-5-preview')).toBe('Openai: GPT 5 Preview');
+    expect(formatModelDisplayName('glm-5.2')).toBe('GLM 5.2');
+  });
+
+  it('uses registry curated names when resolving with or without provider context', () => {
+    expect(resolveModelDisplayName({ id: 'gpt-4o' })).toBe('GPT-4o');
+    expect(
+      resolveModelDisplayName({
+        id: 'deepseek-ai/DeepSeek-V3',
+        providerTemplateId: 'siliconflow',
+      }),
+    ).toBe('DeepSeek V3 0324');
+    expect(
+      resolveModelDisplayName({ id: 'custom-model', name: 'Provider Display Name' }),
+    ).toBe('Provider Display Name');
   });
 
   it('uses models in order and keeps the first model as the default model', () => {
