@@ -55,16 +55,20 @@ export function resolveCodexModelCatalogPath(homeDir = homedir()): string {
 }
 
 /** Build a complete valid ModelInfo entry for a custom model id. */
-export function buildCodexModelCatalogEntry(modelId: string): CodexCatalogModel {
+export function buildCodexModelCatalogEntry(
+  modelId: string,
+  options?: { contextWindow?: number },
+): CodexCatalogModel {
   const slug = modelId.trim();
   const displayName = formatCatalogDisplayName(slug);
+  const contextWindow = normalizeContextWindow(options?.contextWindow);
   return {
     slug,
     display_name: displayName,
     description: displayName,
     base_instructions: 'You are Codex, a coding agent. Help the user complete tasks in their workspace.',
-    context_window: 272000,
-    max_context_window: 272000,
+    context_window: contextWindow,
+    max_context_window: contextWindow,
     effective_context_window_percent: 95,
     shell_type: 'shell_command',
     visibility: 'list',
@@ -98,13 +102,14 @@ export function buildCodexModelCatalogEntry(modelId: string): CodexCatalogModel 
 /**
  * Ensure the given model ids exist in the CodeMUX Codex catalog file.
  * Existing richer entries are preserved; only missing slugs are appended.
+ * When contextWindow is provided, context_window / max_context_window are updated.
  */
 export async function ensureCodexModelCatalog(
-  modelIds: readonly string[],
+  models: ReadonlyArray<string | { id: string; contextWindow?: number }>,
   catalogPath = resolveCodexModelCatalogPath(),
 ): Promise<string | null> {
-  const slugs = uniqueModelIds(modelIds);
-  if (slugs.length === 0) {
+  const entries = normalizeCatalogInputs(models);
+  if (entries.length === 0) {
     return null;
   }
 
@@ -131,12 +136,29 @@ export async function ensureCodexModelCatalog(
       changed = true;
     }
   }
-  for (const slug of slugs) {
-    if (bySlug.has(slug)) {
+  for (const entry of entries) {
+    const existingEntry = bySlug.get(entry.id);
+    if (!existingEntry) {
+      bySlug.set(entry.id, buildCodexModelCatalogEntry(entry.id, {
+        contextWindow: entry.contextWindow,
+      }));
+      changed = true;
       continue;
     }
-    bySlug.set(slug, buildCodexModelCatalogEntry(slug));
-    changed = true;
+    if (entry.contextWindow && entry.contextWindow > 0) {
+      const contextWindow = normalizeContextWindow(entry.contextWindow);
+      if (
+        existingEntry.context_window !== contextWindow
+        || existingEntry.max_context_window !== contextWindow
+      ) {
+        bySlug.set(entry.id, {
+          ...existingEntry,
+          context_window: contextWindow,
+          max_context_window: contextWindow,
+        });
+        changed = true;
+      }
+    }
   }
 
   if (changed || !existing.models.length) {
@@ -178,16 +200,28 @@ function formatCatalogDisplayName(modelId: string): string {
     .join(' ');
 }
 
-function uniqueModelIds(modelIds: readonly string[]): string[] {
+const DEFAULT_CODEX_CONTEXT_WINDOW = 272000;
+
+function normalizeContextWindow(value: number | undefined): number {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return Math.floor(value);
+  }
+  return DEFAULT_CODEX_CONTEXT_WINDOW;
+}
+
+function normalizeCatalogInputs(
+  models: ReadonlyArray<string | { id: string; contextWindow?: number }>,
+): Array<{ id: string; contextWindow?: number }> {
   const seen = new Set<string>();
-  const result: string[] = [];
-  for (const raw of modelIds) {
-    const modelId = raw?.trim();
-    if (!modelId || seen.has(modelId)) {
+  const result: Array<{ id: string; contextWindow?: number }> = [];
+  for (const raw of models) {
+    const id = typeof raw === 'string' ? raw.trim() : raw?.id?.trim();
+    if (!id || seen.has(id)) {
       continue;
     }
-    seen.add(modelId);
-    result.push(modelId);
+    seen.add(id);
+    const contextWindow = typeof raw === 'string' ? undefined : raw.contextWindow;
+    result.push({ id, ...(contextWindow && contextWindow > 0 ? { contextWindow } : {}) });
   }
   return result;
 }

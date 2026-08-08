@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, EyeOff, Loader2, Pencil, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2, Pencil, Plus, RefreshCw, Search, Settings2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { AddProviderDialog } from '@/components/settings/AddProviderDialog';
@@ -79,6 +79,44 @@ function syncDefaultModel(models: ProviderModel[], currentDefault = ''): string 
   const ids = models.map((model) => model.id.trim()).filter(Boolean);
   if (ids.some((id) => id === currentDefault.trim())) return currentDefault.trim();
   return ids[0] ?? '';
+}
+
+function cleanProviderModel(model: ProviderModel): ProviderModel | null {
+  const id = model.id.trim();
+  if (!id) return null;
+  const cleaned: ProviderModel = {
+    id,
+    name: model.name?.trim() || id,
+  };
+  if (model.context_1m === true) {
+    cleaned.context_1m = true;
+  }
+  if (typeof model.context_window === 'number' && Number.isFinite(model.context_window) && model.context_window > 0) {
+    cleaned.context_window = Math.floor(model.context_window);
+  }
+  if (
+    typeof model.max_input_tokens === 'number'
+    && Number.isFinite(model.max_input_tokens)
+    && model.max_input_tokens > 0
+  ) {
+    cleaned.max_input_tokens = Math.floor(model.max_input_tokens);
+  }
+  if (
+    typeof model.max_output_tokens === 'number'
+    && Number.isFinite(model.max_output_tokens)
+    && model.max_output_tokens > 0
+  ) {
+    cleaned.max_output_tokens = Math.floor(model.max_output_tokens);
+  }
+  return cleaned;
+}
+
+function parseOptionalPositiveInt(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed);
 }
 
 function builtinCatalogModels(template: BuiltinProviderTemplate | undefined): PickerModel[] {
@@ -172,6 +210,7 @@ export function ProviderConfigPanel() {
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const [renaming, setRenaming] = useState(false);
+  const [editingModelIndex, setEditingModelIndex] = useState<number | null>(null);
   const draftRef = useRef<ModelProvider | null>(null);
   draftRef.current = draft;
   const isBuiltin = Boolean(draft?.builtin_template_id);
@@ -248,7 +287,15 @@ export function ProviderConfigPanel() {
 
   useEffect(() => {
     setShowApiKey(false);
+    setEditingModelIndex(null);
   }, [selection?.kind, selection && 'id' in selection ? selection.id : null]);
+
+  useEffect(() => {
+    if (editingModelIndex == null || !draft) return;
+    if (editingModelIndex < 0 || editingModelIndex >= draft.models.length) {
+      setEditingModelIndex(null);
+    }
+  }, [draft, editingModelIndex]);
 
   useEffect(() => {
     if (!selection) {
@@ -288,6 +335,11 @@ export function ProviderConfigPanel() {
     draft?.endpoints.find((endpoint) => endpoint.protocol === 'anthropic')?.base_url ?? '';
   const openaiUrl =
     draft?.endpoints.find((endpoint) => endpoint.protocol === 'openai_compatible')?.base_url ?? '';
+  const showClaudeContext1m = anthropicUrl.trim().length > 0;
+  const showOpenAiModelLimits = openaiUrl.trim().length > 0;
+  const showModelMoreSettings = showClaudeContext1m || showOpenAiModelLimits;
+  const editingModel =
+    draft && editingModelIndex != null ? draft.models[editingModelIndex] ?? null : null;
   const persisted = Boolean(draft && providers.some((item) => item.id === draft.id));
   const draftTemplateId = draft?.builtin_template_id ?? null;
   const codexNeedsProxy = Boolean(
@@ -305,11 +357,8 @@ export function ProviderConfigPanel() {
       api_key: draft.api_key.trim(),
       endpoints: draft.endpoints.filter((endpoint) => endpoint.base_url.trim().length > 0),
       models: draft.models
-        .map((model) => ({
-          id: model.id.trim(),
-          name: model.name?.trim() || model.id.trim(),
-        }))
-        .filter((model) => model.id.length > 0),
+        .map((model) => cleanProviderModel(model))
+        .filter((model): model is ProviderModel => Boolean(model)),
     };
     if (!cleaned.name.trim()) {
       toast.error('请填写供应商名称');
@@ -441,6 +490,11 @@ export function ProviderConfigPanel() {
       ...draft,
       models,
       default_model: syncDefaultModel(models, draft.default_model),
+    });
+    setEditingModelIndex((current) => {
+      if (current == null) return current;
+      if (current === index) return null;
+      return current > index ? current - 1 : current;
     });
   }
 
@@ -769,7 +823,7 @@ export function ProviderConfigPanel() {
                     <tr>
                       <th className="px-3 py-2 font-medium">模型 ID</th>
                       <th className="px-3 py-2 font-medium">显示名称</th>
-                      <th className="w-12 px-2 py-2" />
+                      <th className="w-20 px-2 py-2" />
                     </tr>
                   </thead>
                   <tbody>
@@ -807,16 +861,31 @@ export function ProviderConfigPanel() {
                             }
                           />
                         </td>
-                        <td className="px-1 py-1.5 text-center">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                            onClick={() => removeModelRow(index)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                        <td className="px-1 py-1.5">
+                          <div className="flex items-center justify-end gap-0.5">
+                            {showModelMoreSettings && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-muted-foreground"
+                                aria-label={`设置模型 ${model.id || index + 1}`}
+                                onClick={() => setEditingModelIndex(index)}
+                              >
+                                <Settings2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                              aria-label={`删除模型 ${model.id || index + 1}`}
+                              onClick={() => removeModelRow(index)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -878,6 +947,139 @@ export function ProviderConfigPanel() {
         variant="destructive"
         onConfirm={handleDelete}
       />
+
+      <Dialog
+        open={editingModelIndex != null && Boolean(editingModel)}
+        onOpenChange={(open) => {
+          if (!open) setEditingModelIndex(null);
+        }}
+      >
+        <DialogContent
+          overlayClassName="z-[240]"
+          className={cn(
+            'fixed inset-y-0 right-0 left-auto top-0 z-[240] flex h-full w-full max-w-md translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-l border-r-0 p-0 shadow-xl sm:max-w-md',
+            'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+            'data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right',
+            'data-[state=closed]:zoom-out-100 data-[state=open]:zoom-in-100',
+          )}
+        >
+          <DialogHeader className="space-y-0 border-b border-border/60 px-4 py-3 text-left">
+            <DialogTitle className="text-base">编辑模型</DialogTitle>
+          </DialogHeader>
+          {editingModel && editingModelIndex != null && draft && (
+            <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">模型 ID</label>
+                <Input value={editingModel.id} readOnly className="h-9 bg-muted/40" />
+              </div>
+              <div className="grid gap-2">
+                <label className="text-sm font-medium" htmlFor="edit-model-name">
+                  模型名称
+                </label>
+                <Input
+                  id="edit-model-name"
+                  className="h-9"
+                  value={editingModel.name ?? ''}
+                  placeholder="可选"
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      models: updateModelAt(draft.models, editingModelIndex, {
+                        name: event.target.value,
+                      }),
+                    })
+                  }
+                />
+              </div>
+
+              {showModelMoreSettings && (
+                <div className="space-y-3 border-t border-border/60 pt-4">
+                  <p className="text-sm font-medium">更多设置</p>
+                  {showClaudeContext1m && (
+                    <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-sm">1M 上下文</p>
+                        <p className="text-xs text-muted-foreground">
+                          仅 Claude Code（模型 ID 追加 [1m]）
+                        </p>
+                      </div>
+                      <Switch
+                        checked={editingModel.context_1m === true}
+                        onCheckedChange={(checked) =>
+                          setDraft({
+                            ...draft,
+                            models: updateModelAt(draft.models, editingModelIndex, {
+                              context_1m: checked ? true : null,
+                            }),
+                          })
+                        }
+                      />
+                    </div>
+                  )}
+                  {showOpenAiModelLimits && (
+                    <div className="grid gap-3">
+                      <label className="grid gap-1.5 text-sm">
+                        <span className="font-medium">上下文窗口</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          className="h-9"
+                          placeholder="例如 128000"
+                          value={editingModel.context_window ?? ''}
+                          onChange={(event) =>
+                            setDraft({
+                              ...draft,
+                              models: updateModelAt(draft.models, editingModelIndex, {
+                                context_window: parseOptionalPositiveInt(event.target.value),
+                              }),
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1.5 text-sm">
+                        <span className="font-medium">最大输入 Token</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          className="h-9"
+                          placeholder="例如 128000"
+                          value={editingModel.max_input_tokens ?? ''}
+                          onChange={(event) =>
+                            setDraft({
+                              ...draft,
+                              models: updateModelAt(draft.models, editingModelIndex, {
+                                max_input_tokens: parseOptionalPositiveInt(event.target.value),
+                              }),
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1.5 text-sm">
+                        <span className="font-medium">最大输出 Token</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          className="h-9"
+                          placeholder="例如 65536"
+                          value={editingModel.max_output_tokens ?? ''}
+                          onChange={(event) =>
+                            setDraft({
+                              ...draft,
+                              models: updateModelAt(draft.models, editingModelIndex, {
+                                max_output_tokens: parseOptionalPositiveInt(event.target.value),
+                              }),
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
         <DialogContent overlayClassName="z-[240]" className="z-[240] max-w-sm">

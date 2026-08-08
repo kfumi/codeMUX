@@ -32,6 +32,40 @@ pub struct ProviderModel {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Claude Code: append `[1m]` to the request model id for 1M context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_1m: Option<bool>,
+    /// Codex / OpenCode context window metadata (tokens).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
+    /// OpenCode `limit.input` (tokens).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_input_tokens: Option<u64>,
+    /// OpenCode `limit.output` (tokens).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u64>,
+}
+
+/// Strip Claude Code `[1m]` context markers from a model id (case-insensitive).
+pub fn strip_context_1m_suffix(model: &str) -> String {
+    let mut value = model.trim().to_string();
+    loop {
+        let lower = value.to_ascii_lowercase();
+        let Some(index) = lower.find("[1m]") else {
+            break;
+        };
+        value = format!("{}{}", &value[..index], &value[index + 4..]);
+    }
+    value.trim().to_string()
+}
+
+/// Ensure a bare model id carries the Claude Code `[1m]` suffix.
+pub fn with_context_1m_suffix(model: &str) -> String {
+    let base = strip_context_1m_suffix(model);
+    if base.is_empty() {
+        return base;
+    }
+    format!("{base}[1m]")
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -228,6 +262,10 @@ mod tests {
             models: vec![ProviderModel {
                 id: "deepseek-v4-flash".to_string(),
                 name: Some("DeepSeek V4 Flash".to_string()),
+                context_1m: None,
+                context_window: None,
+                max_input_tokens: None,
+                max_output_tokens: None,
             }],
             default_model: "deepseek-v4-flash".to_string(),
             builtin_template_id: Some("deepseek".to_string()),
@@ -306,5 +344,21 @@ mod tests {
             Some(Protocol::OpenaiCompatible)
         );
         assert_eq!(required_protocol(AgentKind::GeminiCli), None);
+    }
+
+    #[test]
+    fn strip_context_1m_suffix_removes_markers() {
+        assert_eq!(
+            strip_context_1m_suffix("deepseek-v4-flash[1m]"),
+            "deepseek-v4-flash"
+        );
+        assert_eq!(
+            strip_context_1m_suffix("deepseek-v4-flash[1M]"),
+            "deepseek-v4-flash"
+        );
+        assert_eq!(
+            with_context_1m_suffix("deepseek-v4-flash[1m]"),
+            "deepseek-v4-flash[1m]"
+        );
     }
 }

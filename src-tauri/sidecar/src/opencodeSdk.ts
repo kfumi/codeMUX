@@ -78,6 +78,11 @@ export interface OpenCodeSdkStartInput {
   serverCloseTimeoutMs?: number;
   /** 外部托管 Runtime 引用。 */
   runtimeRef?: ProviderRuntimeRef;
+  modelLimits?: {
+    contextWindow?: number;
+    maxInputTokens?: number;
+    maxOutputTokens?: number;
+  };
 }
 
 export function normalizeOpenCodeModelReference(model: string): { provider: string; model: string } {
@@ -100,6 +105,11 @@ export interface OpenCodeServerConfigInput {
   baseUrl?: string;
   credentialSource: 'codemux' | 'environment' | 'opencode' | 'none';
   existingConfig?: Config;
+  modelLimits?: {
+    contextWindow?: number;
+    maxInputTokens?: number;
+    maxOutputTokens?: number;
+  };
 }
 
 export function buildOpenCodeServerConfig(input: OpenCodeServerConfigInput): Config {
@@ -123,6 +133,7 @@ export function buildOpenCodeServerConfig(input: OpenCodeServerConfigInput): Con
       [input.model]: {
         id: input.model,
         name: input.model,
+        ...buildOpenCodeModelLimit(input.modelLimits),
       },
     },
     ...(adapter ? { npm: adapter, name: adapter === '@ai-sdk/openai-compatible' ? 'CodeMUX OpenAI-compatible' : 'CodeMUX Anthropic' } : {}),
@@ -156,6 +167,25 @@ function resolveOpenCodeAdapter(input: OpenCodeServerConfigInput): '@ai-sdk/open
     return undefined;
   }
   return '@ai-sdk/openai-compatible';
+}
+
+function buildOpenCodeModelLimit(modelLimits: OpenCodeServerConfigInput['modelLimits']): {
+  limit?: { context?: number; input?: number; output?: number };
+} {
+  if (!modelLimits) {
+    return {};
+  }
+  const limit: { context?: number; input?: number; output?: number } = {};
+  if (typeof modelLimits.contextWindow === 'number' && modelLimits.contextWindow > 0) {
+    limit.context = Math.floor(modelLimits.contextWindow);
+  }
+  if (typeof modelLimits.maxInputTokens === 'number' && modelLimits.maxInputTokens > 0) {
+    limit.input = Math.floor(modelLimits.maxInputTokens);
+  }
+  if (typeof modelLimits.maxOutputTokens === 'number' && modelLimits.maxOutputTokens > 0) {
+    limit.output = Math.floor(modelLimits.maxOutputTokens);
+  }
+  return Object.keys(limit).length > 0 ? { limit } : {};
 }
 function normalizeOpenCodeBaseUrl(baseUrl: string): string {
   let normalized = baseUrl.trim().replace(/\/+$/, '');
@@ -347,7 +377,7 @@ function loadRuntime(runtimeRef?: ProviderRuntimeRef): RuntimeLoadResult {
 }
 
 export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
-  async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS, runtimeRef }) {
+  async start({ cwd, provider, model, apiKey, baseUrl, credentialSource, serverCloseTimeoutMs = DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS, runtimeRef, modelLimits }) {
     const runtimeLoaded = loadRuntime(runtimeRef);
     const executable = prepareOpenCodeExecutable({ runtimePath: runtimeLoaded.ref.runtimePath });
     const cliPath = executable?.executablePath ?? '(托管 Runtime CLI 路径未解析)';
@@ -363,7 +393,15 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
     const server = await createOpencodeServer({
       hostname: '127.0.0.1',
       port: 0,
-      config: buildOpenCodeServerConfig({ provider, model, apiKey, baseUrl, credentialSource, existingConfig }),
+      config: buildOpenCodeServerConfig({
+        provider,
+        model,
+        apiKey,
+        baseUrl,
+        credentialSource,
+        existingConfig,
+        modelLimits,
+      }),
     });
     try {
       const client = createOpencodeClient({

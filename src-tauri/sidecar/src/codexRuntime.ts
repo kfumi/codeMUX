@@ -7,7 +7,7 @@ import type {
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import type { SidecarCommand } from './types.js';
+import type { SidecarCommand, SidecarModelLimits } from './types.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
 import { readLatestCodexTotalTokenUsage } from './codexSessionUsage.js';
 import { CodexSessionEventTailer, type CodexSessionTailEvent } from './codexSessionEventTailer.js';
@@ -103,6 +103,7 @@ type CodexSessionBootstrap = {
   /** 外部托管 Runtime 引用。 */
   runtimeRef?: ProviderRuntimeRef;
   timeouts?: TurnTimeouts;
+  modelLimits?: SidecarModelLimits;
 };
 
 type UsageBaseline = {
@@ -279,6 +280,7 @@ export class CodexSessionRuntime {
       planMode: normalizeCodexPlanMode(cmd.planMode),
       timeouts: cmd.timeouts,
       runtimeRef: cmd.runtimeRef,
+      modelLimits: cmd.modelLimits,
     };
     this.timeouts = resolveTurnTimeouts(requestedConfig.timeouts);
     const collaborationPolicy = resolveCodexCollaborationPolicy({
@@ -374,7 +376,10 @@ export class CodexSessionRuntime {
     }
     applyCodexWindowsSandboxPathCompatibility(codexEnv);
 
-    const modelCatalogPath = await this.syncModelCatalog(requestedConfig.model);
+    const modelCatalogPath = await this.syncModelCatalog(
+      requestedConfig.model,
+      requestedConfig.modelLimits?.contextWindow,
+    );
     const codexConfig = buildCodexCliConfig(runtimeBaseUrl, modelCatalogPath);
 
     // 仅从 CodeMUX 托管 Runtime 动态加载 Codex SDK。
@@ -920,13 +925,19 @@ export class CodexSessionRuntime {
     return turnUsage;
   }
 
-  private async syncModelCatalog(model: string | undefined): Promise<string | null> {
+  private async syncModelCatalog(
+    model: string | undefined,
+    contextWindow?: number,
+  ): Promise<string | null> {
     const modelId = model?.trim();
     if (!modelId) {
       return null;
     }
     try {
-      const catalogPath = await ensureCodexModelCatalog([modelId], resolveCodexModelCatalogPath());
+      const catalogPath = await ensureCodexModelCatalog(
+        [{ id: modelId, ...(contextWindow && contextWindow > 0 ? { contextWindow } : {}) }],
+        resolveCodexModelCatalogPath(),
+      );
       if (catalogPath) {
         process.stderr.write(`[codex] Ensured model catalog entry for ${modelId} at ${catalogPath}\n`);
       }

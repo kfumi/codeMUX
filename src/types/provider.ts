@@ -67,6 +67,14 @@ export interface ProtocolEndpoint {
 export interface ProviderModel {
   id: string;
   name?: string | null;
+  /** Claude Code：通过模型 ID 追加 `[1m]` 启用 1M 上下文；仅 anthropic 端点时有意义。 */
+  context_1m?: boolean | null;
+  /** Codex / OpenCode 上下文窗口（token）；仅 openai_compatible 端点时有意义。 */
+  context_window?: number | null;
+  /** OpenCode `limit.input`；仅 openai_compatible 端点时有意义。 */
+  max_input_tokens?: number | null;
+  /** OpenCode `limit.output`；仅 openai_compatible 端点时有意义。 */
+  max_output_tokens?: number | null;
 }
 
 export interface ModelProvider {

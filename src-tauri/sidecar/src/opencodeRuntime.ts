@@ -371,6 +371,7 @@ export class OpenCodeRuntime {
           credentialSource: this.config.credentialSource,
           serverCloseTimeoutMs: this.serverCloseTimeoutMs,
           runtimeRef: this.config.runtimeRef,
+          modelLimits: this.config.modelLimits,
         });
       } catch (error) {
         this.retainStartResources(getStartFailureResources(error));

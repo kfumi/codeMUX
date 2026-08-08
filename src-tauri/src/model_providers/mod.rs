@@ -3,8 +3,8 @@ pub mod types;
 
 pub use builtins::{builtin_templates, instantiate_template, BuiltinProviderTemplate};
 pub use types::{
-    effective_api_key, is_provider_usable, required_protocol, select_endpoint, validate_provider,
-    validate_provider_for_enable,
+    effective_api_key, is_provider_usable, required_protocol, select_endpoint,
+    strip_context_1m_suffix, validate_provider, validate_provider_for_enable, with_context_1m_suffix,
     ModelProvider, Protocol,
 };
 

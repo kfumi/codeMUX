@@ -776,6 +776,10 @@ mod tests {
             models: vec![crate::model_providers::ProviderModel {
                 id: "model".to_string(),
                 name: None,
+                context_1m: None,
+                context_window: None,
+                max_input_tokens: None,
+                max_output_tokens: None,
             }],
             default_model: "model".to_string(),
             builtin_template_id: None,

@@ -24,7 +24,7 @@ import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistant
 import { CodeMuxThread } from './assistant-ui/CodeMuxThread';
 import { AgentPermissionSelector } from './AgentPermissionSelector';
 import { AgentModelSelector } from './AgentModelSelector';
-import { checkProfileModelSupports1m, formatModelDisplayName } from './modelDisplay';
+import { checkProfileModelSupports1m, formatModelDisplayName, stripContext1mSuffix } from './modelDisplay';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface AgentPanelProps {
@@ -78,18 +78,17 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     [modelProviders, session?.provider_id],
   );
   const runtimeProvider = sessionProvider ?? activeProvider;
-  const stripSuffix = (s: string) => s.replace(/\[1m\]/gi, '').trim();
-  const model = stripSuffix(session?.model ?? '') || runtimeProvider?.default_model.trim() || getProviderPrimaryModel(runtimeProvider) || '';
-  const [selectorModelState, setSelectorModelState] = useState(() => stripSuffix(session?.model ?? '') || activeProvider?.default_model.trim() || getProviderPrimaryModel(activeProvider) || '');
+  const model = stripContext1mSuffix(session?.model ?? '') || runtimeProvider?.default_model.trim() || getProviderPrimaryModel(runtimeProvider) || '';
+  const [selectorModelState, setSelectorModelState] = useState(() => stripContext1mSuffix(session?.model ?? '') || activeProvider?.default_model.trim() || getProviderPrimaryModel(activeProvider) || '');
   const prevSessionIdRef = useRef<string | null>(null);
   const userModifiedRef = useRef(false);
   useEffect(() => {
     if (prevSessionIdRef.current !== sessionId) {
       prevSessionIdRef.current = sessionId;
       userModifiedRef.current = false;
-      setSelectorModelState(stripSuffix(session?.model ?? '') || activeProvider?.default_model.trim() || getProviderPrimaryModel(activeProvider) || '');
+      setSelectorModelState(stripContext1mSuffix(session?.model ?? '') || activeProvider?.default_model.trim() || getProviderPrimaryModel(activeProvider) || '');
     } else if (!userModifiedRef.current) {
-      const next = stripSuffix(session?.model ?? '') || activeProvider?.default_model.trim() || getProviderPrimaryModel(activeProvider) || '';
+      const next = stripContext1mSuffix(session?.model ?? '') || activeProvider?.default_model.trim() || getProviderPrimaryModel(activeProvider) || '';
       if (next) {
         setSelectorModelState(next);
       }
@@ -228,7 +227,9 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     const nextProvider =
       modelProviders.find((provider) => provider.id === providerId) ?? runtimeProvider;
     const supports1m = checkProfileModelSupports1m(nextProvider, nextModel);
-    const suffixedModel = supports1m ? `${nextModel}[1m]` : nextModel;
+    const suffixedModel = agentKind === 'claude_code' && supports1m
+      ? `${nextModel}[1m]`
+      : nextModel;
     useSessionStore.setState((state) => ({
       sessions: state.sessions.map((entry) => (
         entry.id === sessionId
@@ -252,6 +253,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
   }, [
     activeProviderId,
+    agentKind,
     cwd,
     isProviderAgent,
     isReadOnly,

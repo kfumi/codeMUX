@@ -21,6 +21,10 @@ fn model(id: &str, name: &str) -> ProviderModel {
     ProviderModel {
         id: id.to_string(),
         name: Some(name.to_string()),
+        context_1m: None,
+        context_window: None,
+        max_input_tokens: None,
+        max_output_tokens: None,
     }
 }
 

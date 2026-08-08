@@ -6,7 +6,8 @@ use std::sync::Arc;
 use crate::config::types::AgentKind;
 use crate::db::operations;
 use crate::model_providers::{
-    effective_api_key, is_provider_usable, required_protocol, select_endpoint, Protocol,
+    effective_api_key, is_provider_usable, required_protocol, select_endpoint,
+    strip_context_1m_suffix, with_context_1m_suffix, Protocol,
 };
 use crate::provider_profiles::types::AgentTimeouts;
 use log::{debug, info, warn};
@@ -85,6 +86,8 @@ struct ResolvedRuntimeConfig {
     provider: Option<String>,
     credential_source: Option<String>,
     timeouts: Option<AgentTimeouts>,
+    /// Optional per-model limits forwarded to sidecar (Codex / OpenCode).
+    model_limits: Option<serde_json::Value>,
 }
 
 fn agent_timeouts(
@@ -179,16 +182,58 @@ fn resolve_active_runtime_config(
         })
         .ok_or_else(|| format!("供应商「{}」没有可用模型", provider.name))?;
 
-    if !provider
+    let model_base = strip_context_1m_suffix(&model);
+    let provider_model = provider
         .models
         .iter()
-        .any(|entry| entry.id.trim() == model.trim())
-    {
-        return Err(format!(
-            "模型 `{model}` 不在供应商「{}」的模型列表中",
-            provider.name
-        ));
-    }
+        .find(|entry| strip_context_1m_suffix(entry.id.trim()) == model_base)
+        .ok_or_else(|| {
+            format!(
+                "模型 `{model}` 不在供应商「{}」的模型列表中",
+                provider.name
+            )
+        })?;
+
+    let model = match agent_kind {
+        AgentKind::ClaudeCode => {
+            if provider_model.context_1m.unwrap_or(false) {
+                with_context_1m_suffix(&model_base)
+            } else {
+                model_base
+            }
+        }
+        // Codex / OpenCode should never receive Claude's `[1m]` request marker.
+        _ => model_base,
+    };
+
+    let model_limits = match agent_kind {
+        AgentKind::Codex | AgentKind::Opencode => {
+            let mut limits = serde_json::Map::new();
+            if let Some(context_window) = provider_model.context_window.filter(|value| *value > 0) {
+                limits.insert(
+                    "contextWindow".to_string(),
+                    serde_json::Value::Number(context_window.into()),
+                );
+            }
+            if agent_kind == AgentKind::Opencode {
+                if let Some(max_input) = provider_model.max_input_tokens.filter(|value| *value > 0) {
+                    limits.insert(
+                        "maxInputTokens".to_string(),
+                        serde_json::Value::Number(max_input.into()),
+                    );
+                }
+                if let Some(max_output) = provider_model.max_output_tokens.filter(|value| *value > 0)
+                {
+                    limits.insert(
+                        "maxOutputTokens".to_string(),
+                        serde_json::Value::Number(max_output.into()),
+                    );
+                }
+            }
+            (!limits.is_empty()).then(|| serde_json::Value::Object(limits))
+        }
+        _ => None,
+    };
 
     let (opencode_provider, credential_source) = match agent_kind {
         AgentKind::Opencode => (
@@ -212,6 +257,7 @@ fn resolve_active_runtime_config(
         provider: opencode_provider,
         credential_source,
         timeouts: agent_timeouts(&config, agent_kind),
+        model_limits,
     };
     drop(config);
 
@@ -2894,6 +2940,7 @@ fn build_ensure_session_command(
     credential_source: Option<String>,
     runtime_generation: Option<u64>,
     timeouts: Option<AgentTimeouts>,
+    model_limits: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     let mut cmd = serde_json::json!({
         "type": "ensure_session",
@@ -2967,6 +3014,9 @@ fn build_ensure_session_command(
     if let Some(timeouts) = timeouts {
         cmd["timeouts"] = serde_json::to_value(timeouts)
             .map_err(|error| format!("无法序列化 Agent 超时配置: {}", error))?;
+    }
+    if let Some(limits) = model_limits {
+        cmd["modelLimits"] = limits;
     }
     let permission_snapshot = {
         let db = state.db.lock().unwrap();
@@ -3172,6 +3222,7 @@ pub async fn ensure_agent_session(
         runtime_config.credential_source,
         runtime_generation,
         runtime_config.timeouts,
+        runtime_config.model_limits,
     )?;
 
     ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
@@ -3261,6 +3312,7 @@ pub async fn start_agent_session(
             runtime_config.credential_source,
             runtime_generation,
             runtime_config.timeouts,
+            runtime_config.model_limits,
         )?;
 
         ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
@@ -4591,6 +4643,10 @@ mod tests {
                 .map(|model| crate::model_providers::ProviderModel {
                     id: (*model).to_string(),
                     name: None,
+                    context_1m: None,
+                    context_window: None,
+                    max_input_tokens: None,
+                    max_output_tokens: None,
                 })
                 .collect(),
             default_model: default_model.to_string(),
@@ -4799,6 +4855,7 @@ mod tests {
             Some("codemux".to_string()),
             Some(1),
             None,
+            None,
         )
         .unwrap();
 
@@ -4820,6 +4877,7 @@ mod tests {
             None,
             Some("codemux-openai".to_string()),
             Some("codemux".to_string()),
+            None,
             None,
             None,
         )
@@ -4872,6 +4930,7 @@ mod tests {
             None,
             None,
             Some(timeouts),
+            None,
         )
         .unwrap();
 
@@ -4884,6 +4943,7 @@ mod tests {
             "session-timeouts",
             "claude_code",
             "D:/workspace/demo".to_string(),
+            None,
             None,
             None,
             None,
@@ -4919,6 +4979,7 @@ mod tests {
             "session-missing-runtime",
             "claude_code",
             "D:/workspace/demo".to_string(),
+            None,
             None,
             None,
             None,

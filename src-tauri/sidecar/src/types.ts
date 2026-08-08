@@ -7,6 +7,12 @@ export type RuntimeFlavor = 'claude' | 'codex' | 'opencode';
 
 export type OpenCodeCredentialSource = 'codemux' | 'environment' | 'opencode' | 'none';
 
+export interface SidecarModelLimits {
+  contextWindow?: number;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+}
+
 export interface OpenCodeSessionConfig {
   cwd: string;
   sessionId: string;
@@ -20,6 +26,7 @@ export interface OpenCodeSessionConfig {
   /** 外部托管 Runtime 引用。 */
   runtimeRef?: ProviderRuntimeRef;
   timeouts?: TurnTimeouts;
+  modelLimits?: SidecarModelLimits;
 }
 
 export interface OpenCodeSessionMapping {
@@ -38,7 +45,7 @@ export interface RuntimeEventContext {
 
 // Commands from Rust to sidecar (via stdin)
 export type SidecarCommand =
-  | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; resumeOnly?: boolean; runtimeGeneration?: number; apiKey?: string; baseUrl?: string; provider?: string; credentialSource?: OpenCodeCredentialSource; model?: string; reasoningEffort?: string; codexNeedsProxy?: boolean; skills?: string[]; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode; runtimeRef?: ProviderRuntimeRef; timeouts?: TurnTimeouts }
+  | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; resumeOnly?: boolean; runtimeGeneration?: number; apiKey?: string; baseUrl?: string; provider?: string; credentialSource?: OpenCodeCredentialSource; model?: string; reasoningEffort?: string; codexNeedsProxy?: boolean; skills?: string[]; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode; runtimeRef?: ProviderRuntimeRef; timeouts?: TurnTimeouts; modelLimits?: SidecarModelLimits }
   | { type: 'fork_session'; sessionId: string; requestId: string; sourceAgentSessionId?: string; sourceProviderMessageId?: string; sourceProviderTurnId?: string; sourceProviderTurnOrdinal?: number }
   | { type: 'update_permissions'; sessionId?: string; agentKind?: string; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode }
   | { type: 'send_input'; sessionId?: string; prompt: string; displayContent?: string; inputPayload?: AgentInputPayload }

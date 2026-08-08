@@ -1764,6 +1764,7 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
     ...(cmd.baseUrl ? { baseUrl: cmd.baseUrl } : {}),
     ...(cmd.runtimeRef ? { runtimeRef: cmd.runtimeRef } : {}),
     ...(cmd.timeouts ? { timeouts: cmd.timeouts } : {}),
+    ...(cmd.modelLimits ? { modelLimits: cmd.modelLimits } : {}),
   };
   const openCodeRuntime = new OpenCodeRuntime(config);
   if (cmd.planMode === 'on' || cmd.planMode === 'off') {

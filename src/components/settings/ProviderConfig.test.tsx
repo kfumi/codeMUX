@@ -303,14 +303,14 @@ describe('ProviderConfigPanel', () => {
     const listEl = container.querySelector('.overflow-y-auto.px-2') as HTMLElement;
     fireEvent.click(within(listEl).getByText('深度求索'));
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /删除/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: '删除' })).toBeNull();
     });
 
     fireEvent.click(within(listEl).getByText('测试1'));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /删除/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: '删除' })).toBeTruthy();
     });
-    fireEvent.click(screen.getByRole('button', { name: /删除/ }));
+    fireEvent.click(screen.getByRole('button', { name: '删除' }));
     expect(await screen.findByText('删除供应商')).toBeTruthy();
     expect(screen.getByText(/确认删除供应商「测试1」/)).toBeTruthy();
   });
@@ -397,5 +397,50 @@ describe('ProviderConfigPanel', () => {
     expect(await screen.findByText('系统内置')).toBeTruthy();
     expect(screen.getByText('DeepSeek V4 Flash')).toBeTruthy();
     expect(screen.getByText('DeepSeek V4 Pro')).toBeTruthy();
+  });
+
+  it('shows protocol-gated model more settings', async () => {
+    settingsState.config = {
+      model_providers: [
+        {
+          id: 'openai-only',
+          name: 'OpenAI Only',
+          enabled: true,
+          api_key: 'sk-test',
+          endpoints: [
+            {
+              protocol: 'openai_compatible',
+              base_url: 'https://api.openai.com/v1',
+              api_key_override: null,
+              codex_needs_proxy: false,
+            },
+          ],
+          models: [{ id: 'gpt-5', name: 'GPT-5' }],
+          default_model: 'gpt-5',
+          builtin_template_id: null,
+          opencode_provider_key: null,
+          opencode_npm: null,
+        },
+      ],
+      active_provider_id: 'openai-only',
+    };
+
+    render(<ProviderConfigPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('gpt-5')).toBeTruthy();
+    });
+    expect(screen.getByRole('button', { name: /设置模型 gpt-5/ })).toBeTruthy();
+    expect(screen.queryByText('编辑模型')).toBeNull();
+    expect(screen.queryByText('上下文窗口')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /设置模型 gpt-5/ }));
+
+    expect(await screen.findByText('编辑模型')).toBeTruthy();
+    expect(screen.getByText('上下文窗口')).toBeTruthy();
+    expect(screen.getByText('最大输入 Token')).toBeTruthy();
+    expect(screen.getByText('最大输出 Token')).toBeTruthy();
+    expect(screen.queryByText('1M 上下文')).toBeNull();
+    expect(screen.queryByText('模型类型')).toBeNull();
   });
 });

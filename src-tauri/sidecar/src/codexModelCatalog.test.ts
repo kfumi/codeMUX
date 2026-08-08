@@ -36,7 +36,44 @@ describe('codexModelCatalog', () => {
       apply_patch_tool_type: 'freeform',
       shell_type: 'shell_command',
       supported_in_api: true,
+      context_window: 272000,
+      max_context_window: 272000,
     });
+  });
+
+  it('builds a catalog entry with a custom context window', () => {
+    expect(buildCodexModelCatalogEntry('custom-model', { contextWindow: 128000 })).toMatchObject({
+      slug: 'custom-model',
+      context_window: 128000,
+      max_context_window: 128000,
+    });
+  });
+
+  it('updates context window for an existing catalog slug', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'codemux-catalog-'));
+    tempDirs.push(dir);
+    const catalogPath = path.join(dir, 'codemux-model-catalog.json');
+    writeFileSync(catalogPath, JSON.stringify({
+      models: [{
+        slug: 'deepseek-v4-flash',
+        display_name: 'Deepseek V4 Flash',
+        base_instructions: 'keep me',
+        context_window: 272000,
+        max_context_window: 272000,
+      }],
+    }, null, 2));
+
+    await ensureCodexModelCatalog(
+      [{ id: 'deepseek-v4-flash', contextWindow: 200000 }],
+      catalogPath,
+    );
+
+    const next = JSON.parse(readFileSync(catalogPath, 'utf8')) as {
+      models: Array<{ slug: string; base_instructions?: string; context_window?: number; max_context_window?: number }>;
+    };
+    expect(next.models[0]?.base_instructions).toBe('keep me');
+    expect(next.models[0]?.context_window).toBe(200000);
+    expect(next.models[0]?.max_context_window).toBe(200000);
   });
 
   it('merges missing model slugs into an existing catalog file', async () => {

@@ -144,6 +144,35 @@ describe('official OpenCode SDK adapter', () => {
     });
   });
 
+  it('writes OpenCode model limit metadata when provided', () => {
+    expect(buildOpenCodeServerConfig({
+      provider: 'provider-1',
+      model: 'model-1',
+      credentialSource: 'codemux',
+      modelLimits: {
+        contextWindow: 200000,
+        maxInputTokens: 180000,
+        maxOutputTokens: 65536,
+      },
+    })).toMatchObject({
+      provider: {
+        'provider-1': {
+          models: {
+            'model-1': {
+              id: 'model-1',
+              name: 'model-1',
+              limit: {
+                context: 200000,
+                input: 180000,
+                output: 65536,
+              },
+            },
+          },
+        },
+      },
+    });
+  });
+
   it('uses the OpenAI-compatible AI SDK adapter for a custom OpenAI endpoint', () => {
     expect(buildOpenCodeServerConfig({
       provider: 'codemux-openai',

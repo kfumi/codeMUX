@@ -588,6 +588,10 @@ mod tests {
             models: vec![crate::model_providers::ProviderModel {
                 id: "deepseek-v4-flash".to_string(),
                 name: Some("Flash".to_string()),
+                context_1m: None,
+                context_window: None,
+                max_input_tokens: None,
+                max_output_tokens: None,
             }],
             default_model: "deepseek-v4-flash".to_string(),
             builtin_template_id: Some("deepseek".to_string()),
