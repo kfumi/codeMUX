@@ -31,7 +31,7 @@ export interface AccentPreset {
 }
 
 export const ACCENTS: Record<AccentKey, AccentPreset> = {
-  azure: { name: 'Codex 蓝', light: '209 99% 40%', dark: '209 92% 58%', lightForeground: '0 0% 100%', darkForeground: '0 0% 100%', swatch: '#0169CC' },
+  azure: { name: '天蓝', light: '209 99% 40%', dark: '209 92% 58%', lightForeground: '0 0% 100%', darkForeground: '0 0% 100%', swatch: '#0169CC' },
   cyan: { name: '青碧', light: '192 75% 42%', dark: '187 70% 55%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(192 75% 42%)' },
   emerald: { name: '翠绿', light: '152 56% 40%', dark: '152 56% 50%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(152 56% 40%)' },
   amber: { name: '琥珀', light: '36 80% 42%', dark: '38 90% 58%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(36 80% 42%)' },

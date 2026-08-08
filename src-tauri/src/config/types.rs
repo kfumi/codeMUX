@@ -167,6 +167,10 @@ pub struct ClaudeCodeAgentConfig {
     pub executable_mode: String,
     #[serde(default = "default_true")]
     pub resume_sessions: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
     #[serde(default)]
     pub permission_config: ClaudePermissionConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,6 +182,8 @@ impl Default for ClaudeCodeAgentConfig {
         Self {
             executable_mode: default_claude_executable_mode(),
             resume_sessions: true,
+            default_provider_id: None,
+            default_model: None,
             permission_config: ClaudePermissionConfig::default(),
             timeouts: None,
         }
@@ -188,6 +194,10 @@ impl Default for ClaudeCodeAgentConfig {
 pub struct CodexAgentConfig {
     #[serde(default = "default_codex_sdk_mode")]
     pub sdk_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
     #[serde(default)]
     pub permission_config: CodexPermissionConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -198,6 +208,8 @@ impl Default for CodexAgentConfig {
     fn default() -> Self {
         Self {
             sdk_mode: default_codex_sdk_mode(),
+            default_provider_id: None,
+            default_model: None,
             permission_config: CodexPermissionConfig::default(),
             timeouts: None,
         }
@@ -208,17 +220,25 @@ impl Default for CodexAgentConfig {
 pub struct ClaudeCodeAgentConfigUpdate {
     pub executable_mode: Option<String>,
     pub resume_sessions: Option<bool>,
+    pub default_provider_id: Option<String>,
+    pub default_model: Option<String>,
     pub permission_config: Option<ClaudePermissionConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CodexAgentConfigUpdate {
     pub sdk_mode: Option<String>,
+    pub default_provider_id: Option<String>,
+    pub default_model: Option<String>,
     pub permission_config: Option<CodexPermissionConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OpenCodeAgentConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeouts: Option<crate::provider_profiles::types::AgentTimeouts>,
 }

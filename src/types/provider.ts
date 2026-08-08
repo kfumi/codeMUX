@@ -28,16 +28,22 @@ export interface AgentConfigMap {
   claude_code: {
     executable_mode?: 'auto' | 'bundled' | 'path';
     resume_sessions?: boolean;
+    default_provider_id?: string | null;
+    default_model?: string;
     permission_config?: ClaudePermissionConfig;
     timeouts?: AgentTimeouts | null;
   };
   codex: {
     sdk_mode?: 'responses' | 'agent';
+    default_provider_id?: string | null;
+    default_model?: string;
     permission_config?: CodexPermissionConfig;
     timeouts?: AgentTimeouts | null;
   };
   gemini_cli: Record<string, never>;
   opencode: {
+    default_provider_id?: string | null;
+    default_model?: string;
     timeouts?: AgentTimeouts | null;
   };
 }

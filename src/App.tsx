@@ -173,7 +173,23 @@ function App() {
           selectedModel,
           selectedReasoningEffort,
         );
+        useSessionStore.setState((state) => ({
+          sessions: state.sessions.map((entry) => entry.id === session.id
+            ? {
+                ...entry,
+                provider_id: selectedProviderId,
+                model: selectedModel,
+                reasoning_effort: selectedReasoningEffort,
+              }
+            : entry),
+        }));
       }
+      await sessionApi.updateReasoningEffort(session.id, selectedReasoningEffort);
+      useSessionStore.setState((state) => ({
+        sessions: state.sessions.map((entry) => entry.id === session.id
+          ? { ...entry, reasoning_effort: selectedReasoningEffort }
+          : entry),
+      }));
 
       await startQuery(session.id, input.text, cwd, selectedReasoningEffort, undefined, input, selectedModel ?? undefined);
       closeDraft();

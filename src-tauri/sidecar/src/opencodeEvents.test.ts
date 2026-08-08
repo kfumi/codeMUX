@@ -94,6 +94,9 @@ describe('OpenCode event normalization', () => {
     expect(events[0]).toMatchObject({ type: 'turn_finished', outcome: 'completed', agent_id: 'agent-1', session_id: 'codemux-session-1', agent_session_id: 'opencode-session-1', sequence: 7, usage: { input_tokens: 10, output_tokens: 4, cached_input_tokens: 3, reasoning_output_tokens: 2 }, duration_ms: 123, event_id: 'test-event-id' });
     expect(events[0]).not.toHaveProperty('usage.cache_write_input_tokens');
   });
+  it('silently ignores OpenCode heartbeat events', () => {
+    expect(toCodeMuxEvent({ type: 'server.heartbeat', properties: {} }, context())).toEqual([]);
+  });
   it('converts compaction part to compact_boundary system event', () => {
     const autoCompaction = toCodeMuxEvent({
       type: 'message.part.updated',

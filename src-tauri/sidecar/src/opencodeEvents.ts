@@ -170,6 +170,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
 
   const record = asRecord(event);
   const type = typeof record?.type === 'string' ? record.type : 'unknown';
+  if (type === 'server.heartbeat') return [];
   const properties = asRecord(record?.properties) ?? {};
   const eventSessionId = getOpenCodeEventSessionId(event);
   const sessionId = eventSessionId;

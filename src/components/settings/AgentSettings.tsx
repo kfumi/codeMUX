@@ -31,11 +31,22 @@ import {
   type ClaudePermissionMode,
 } from '../../lib/agentPermissions';
 import { cn } from '../../lib/utils';
+import { isProviderUsable } from '../../lib/modelProviders';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { getAgentDefinition } from '../../types/agentRegistry';
 import type { AgentKind } from '../../types/session';
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
+import { ProviderBrandIcon } from './ProviderBrandIcon';
 import { Button } from '../ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
 import { TooltipHint } from '../ui/tooltip';
 import { AgentInstallRow } from './AgentInstallRow';
 import { AgentUpgradeConfirmDialog } from './AgentUpgradeConfirmDialog';
@@ -318,13 +329,213 @@ export function AgentPreferencesPanel() {
 
   return (
     <div className="space-y-8">
-      <DefaultAgentSection selectedKind={selectedKind} onSelect={setDefaultAgentKind} />
-      <ClaudePermissionSection
-        executionMode={claudePermissionModeToExecutionMode(claudePermissionMode)}
-        onChange={handleClaudePermissionChange}
+      <AgentConfigurationSection
+        selectedKind={selectedKind}
+        onSelectDefault={setDefaultAgentKind}
+        claudeExecutionMode={claudePermissionModeToExecutionMode(claudePermissionMode)}
+        onClaudePermissionChange={handleClaudePermissionChange}
       />
       <ProxyRouteSection proxyRunning={proxyRunning} proxyUrl={proxyUrl} />
     </div>
+  );
+}
+
+interface AgentConfigurationSectionProps {
+  selectedKind: AgentKind;
+  onSelectDefault: (kind: AgentKind) => void;
+  claudeExecutionMode: AgentExecutionMode;
+  onClaudePermissionChange: (mode: AgentExecutionMode) => void;
+}
+
+function AgentConfigurationSection({
+  selectedKind,
+  onSelectDefault,
+  claudeExecutionMode,
+  onClaudePermissionChange,
+}: AgentConfigurationSectionProps) {
+  return (
+    <section className="space-y-4">
+      <div className="space-y-1">
+        <h3 className="text-sm font-semibold text-foreground">智能体配置</h3>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          为每个智能体配置新建会话的默认模型；支持特殊配置的智能体也会显示在对应卡片中。
+        </p>
+      </div>
+      <div className="grid gap-3">
+        {RUNTIME_AGENTS.map((entry) => (
+          <AgentConfigurationCard
+            key={entry.kind}
+            agent={entry}
+            isDefault={entry.kind === selectedKind}
+            onSelectDefault={() => onSelectDefault(entry.kind)}
+            claudeExecutionMode={entry.kind === 'claude_code' ? claudeExecutionMode : undefined}
+            onClaudePermissionChange={onClaudePermissionChange}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+interface AgentConfigurationCardProps {
+  agent: (typeof RUNTIME_AGENTS)[number];
+  isDefault: boolean;
+  onSelectDefault: () => void;
+  claudeExecutionMode?: AgentExecutionMode;
+  onClaudePermissionChange: (mode: AgentExecutionMode) => void;
+}
+
+function AgentConfigurationCard({
+  agent,
+  isDefault,
+  onSelectDefault,
+  claudeExecutionMode,
+  onClaudePermissionChange,
+}: AgentConfigurationCardProps) {
+  const definition = getAgentDefinition(agent.kind);
+  const agentDefinition = definition ?? {
+    kind: agent.kind,
+    label: agent.label,
+    description: '',
+    icon: agent.icon,
+    capabilities: [],
+  };
+
+  return (
+    <article
+      className={cn(
+        'flex min-w-0 flex-col rounded-2xl border p-4 transition-colors',
+        isDefault
+          ? 'border-[hsl(var(--primary)/0.32)] bg-[hsl(var(--primary)/0.06)]'
+          : 'border-border/55 bg-background/60',
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/45 bg-background/78">
+          <AgentBrandIcon agent={agentDefinition} size="md" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h4 className="truncate text-sm font-semibold text-foreground">{agent.label}</h4>
+            {isDefault && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[hsl(var(--primary)/0.14)] px-2 py-0.5 text-ui-micro font-medium text-[hsl(var(--primary))]">
+                <Check className="h-3 w-3" />
+                默认
+              </span>
+            )}
+          </div>
+          <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+            {agentDefinition.description}
+          </p>
+        </div>
+        {!isDefault && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 px-2 text-xs text-muted-foreground"
+            onClick={onSelectDefault}
+          >
+            设为默认
+          </Button>
+        )}
+      </div>
+
+      <div className="mt-4 flex min-w-0 flex-col gap-3 border-t border-border/50 pt-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex shrink-0 items-center gap-3 lg:w-44">
+          <span className="text-xs font-medium text-foreground/70">新建会话默认模型</span>
+        </div>
+        <div className="min-w-0 w-full lg:w-72 lg:flex-none">
+          <AgentModelSelect agentKind={agent.kind} />
+        </div>
+      </div>
+
+      {agent.kind === 'claude_code' && claudeExecutionMode && (
+        <ClaudePermissionSection
+          compact
+          executionMode={claudeExecutionMode}
+          onChange={onClaudePermissionChange}
+        />
+      )}
+    </article>
+  );
+}
+
+function AgentModelSelect({ agentKind }: { agentKind: AgentKind }) {
+  const config = useSettingsStore((state) => state.config);
+  const updateAgentConfig = useSettingsStore((state) => state.updateAgentConfig);
+  const providers = config?.model_providers ?? [];
+  const agentConfig = config?.agent_configs[agentKind] as {
+    default_provider_id?: string | null;
+    default_model?: string;
+  } | undefined;
+  const usableProviders = providers.filter((provider) => isProviderUsable(provider, agentKind));
+  const providerId = agentConfig?.default_provider_id
+    ?? config?.active_provider_id
+    ?? usableProviders[0]?.id
+    ?? '';
+  const provider = usableProviders.find((item) => item.id === providerId) ?? usableProviders[0];
+  const modelId = agentConfig?.default_model
+    ?? provider?.default_model
+    ?? provider?.models[0]?.id
+    ?? '';
+  const selectedModel = provider?.models.find((model) => model.id === modelId)
+    ?? provider?.models[0];
+  const combinedValue = provider && selectedModel
+    ? `${provider.id}::${selectedModel.id}`
+    : '';
+
+  const saveDefault = (value: string) => {
+    const separator = value.indexOf('::');
+    if (separator <= 0) return;
+    void updateAgentConfig(agentKind, {
+      default_provider_id: value.slice(0, separator),
+      default_model: value.slice(separator + 2),
+    });
+  };
+
+  return (
+    <Select
+      value={combinedValue}
+      onValueChange={saveDefault}
+      disabled={usableProviders.length === 0}
+    >
+      <SelectTrigger aria-label={`${getAgentDefinition(agentKind)?.label ?? agentKind} 默认供应商和模型`} className="h-9">
+        <SelectValue placeholder="暂无可用供应商或模型">
+          {provider && selectedModel ? (
+            <span className="flex min-w-0 items-center gap-2">
+              <ProviderBrandIcon
+                templateId={provider.builtin_template_id}
+                name={provider.name}
+                size={14}
+                className="h-5 w-5 rounded-[5px]"
+              />
+              <span className="truncate">{selectedModel.name ?? selectedModel.id}</span>
+            </span>
+          ) : undefined}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {usableProviders.map((item) => (
+          <SelectGroup key={item.id}>
+            <SelectLabel>{item.name}</SelectLabel>
+            {item.models.map((model) => (
+              <SelectItem key={`${item.id}::${model.id}`} value={`${item.id}::${model.id}`}>
+                <span className="flex items-center gap-2">
+                  <ProviderBrandIcon
+                    templateId={item.builtin_template_id}
+                    name={item.name}
+                    size={14}
+                    className="h-5 w-5 rounded-[5px]"
+                  />
+                  <span>{model.name ?? model.id}</span>
+                </span>
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -672,57 +883,6 @@ function RuntimeInfoRow({ label, value, mono, empty, indicator }: RuntimeInfoRow
   );
 }
 
-/* ----------------------------- 默认智能体区 ----------------------------- */
-
-function DefaultAgentSection({
-  selectedKind,
-  onSelect,
-}: {
-  selectedKind: AgentKind;
-  onSelect: (kind: AgentKind) => void;
-}) {
-  return (
-    <section className="space-y-3">
-      <div className="space-y-1">
-        <h3 className="text-sm font-semibold text-foreground">默认智能体</h3>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          新建对话默认使用的智能体。可在会话中单独切换，托管 Runtime 状态不会改变此选择。
-        </p>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-3">
-        {RUNTIME_AGENTS.map((entry) => {
-          const active = selectedKind === entry.kind;
-          const definition = getAgentDefinition(entry.kind);
-          const agent = definition ?? {
-            kind: entry.kind,
-            label: entry.label,
-            description: '',
-            icon: entry.icon,
-            capabilities: [],
-          };
-          return (
-            <button
-              key={entry.kind}
-              type="button"
-              onClick={() => onSelect(entry.kind)}
-              className={cn(
-                'flex items-center gap-2.5 rounded-xl border px-3 py-3 text-left transition-colors',
-                active
-                  ? 'border-[hsl(var(--primary)/0.32)] bg-[hsl(var(--primary)/0.06)]'
-                  : 'border-border/55 bg-background hover:border-border hover:bg-muted/25',
-              )}
-            >
-              <AgentBrandIcon agent={agent} size="sm" />
-              <span className="min-w-0 flex-1 text-sm font-medium text-foreground">{entry.label}</span>
-              {active && <Check className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--primary))]" />}
-            </button>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 /* ----------------------------- 本地代理路由区 ----------------------------- */
 
 interface ProxyRouteSectionProps {
@@ -775,15 +935,45 @@ function ProxyRouteSection({ proxyRunning, proxyUrl }: ProxyRouteSectionProps) {
 /* ----------------------------- Claude Code 默认权限区 ----------------------------- */
 
 interface ClaudePermissionSectionProps {
+  compact?: boolean;
   executionMode: AgentExecutionMode;
   onChange: (mode: AgentExecutionMode) => void;
 }
 
-function ClaudePermissionSection({ executionMode, onChange }: ClaudePermissionSectionProps) {
+function ClaudePermissionSection({
+  compact = false,
+  executionMode,
+  onChange,
+}: ClaudePermissionSectionProps) {
   const selectedOption = useMemo(
     () => CLAUDE_PERMISSION_OPTIONS.find((option) => option.mode === executionMode) ?? CLAUDE_PERMISSION_OPTIONS[0],
     [executionMode],
   );
+
+  if (compact) {
+    return (
+      <section className="mt-4 flex min-w-0 flex-col gap-2 border-t border-border/50 pt-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="shrink-0 space-y-1 lg:w-44">
+          <h3 className="text-sm font-semibold text-foreground">Claude Code 默认权限</h3>
+          <p className="text-xs leading-relaxed text-muted-foreground">新建对话时默认使用的工具权限。</p>
+        </div>
+        <div className="w-full lg:w-72 lg:flex-none">
+          <Select value={executionMode} onValueChange={(value) => onChange(value as AgentExecutionMode)}>
+            <SelectTrigger aria-label="Claude Code 默认权限" className="h-9 w-full">
+              <SelectValue placeholder="选择默认权限" />
+            </SelectTrigger>
+            <SelectContent>
+              {CLAUDE_PERMISSION_OPTIONS.map((option) => (
+                <SelectItem key={option.mode} value={option.mode}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-3">
@@ -793,7 +983,7 @@ function ClaudePermissionSection({ executionMode, onChange }: ClaudePermissionSe
           控制新建 Claude Code 对话时默认选中的工具权限行为，与发送框下拉保持一致。仍可在新建对话时手动切换。
         </p>
       </div>
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className={cn('grid gap-2 sm:grid-cols-2', compact && 'sm:grid-cols-1')}>
         {CLAUDE_PERMISSION_OPTIONS.map((option) => {
           const active = option.mode === selectedOption.mode;
           const Icon = option.icon;

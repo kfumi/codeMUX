@@ -448,6 +448,9 @@ export class OpenCodeRuntime {
       setLogCtx({ sessionId: this.config.sessionId, messageId: eventMessageId });
     }
     const type = typeof (event as { type?: unknown })?.type === 'string' ? (event as { type: string }).type : '';
+    if (type === 'server.heartbeat') {
+      return;
+    }
     const eventLower = type.toLowerCase();
     const eventJson = (() => { try { return JSON.stringify(event).slice(0, 2000) } catch { return String(event).slice(0, 2000) } })();
     process.stderr.write(`[opencode-debug] handleSdkEvent type=${type} sessionId=${eventSessionId ?? 'null'} activeSessionId=${activeSessionId ?? 'null'} event=${eventJson}\n`);

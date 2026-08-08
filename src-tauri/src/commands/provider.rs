@@ -38,6 +38,12 @@ fn apply_agent_config_update(
             if let Some(resume_sessions) = update.resume_sessions {
                 app_config.agent_configs.claude_code.resume_sessions = resume_sessions;
             }
+            if let Some(provider_id) = update.default_provider_id {
+                app_config.agent_configs.claude_code.default_provider_id = Some(provider_id);
+            }
+            if let Some(model) = update.default_model {
+                app_config.agent_configs.claude_code.default_model = Some(model);
+            }
             if let Some(permission_config) = update.permission_config {
                 if !matches!(
                     permission_config.permission_mode.as_str(),
@@ -60,6 +66,12 @@ fn apply_agent_config_update(
                     return Err(format!("Unsupported Codex sdk_mode: {}", sdk_mode));
                 }
                 app_config.agent_configs.codex.sdk_mode = sdk_mode;
+            }
+            if let Some(provider_id) = update.default_provider_id {
+                app_config.agent_configs.codex.default_provider_id = Some(provider_id);
+            }
+            if let Some(model) = update.default_model {
+                app_config.agent_configs.codex.default_model = Some(model);
             }
             if let Some(permission_config) = update.permission_config {
                 if !matches!(
@@ -84,7 +96,14 @@ fn apply_agent_config_update(
             }
         }
         AgentKind::GeminiCli => {}
-        AgentKind::Opencode => {}
+        AgentKind::Opencode => {
+            if let Some(provider_id) = config.get("default_provider_id").and_then(|value| value.as_str()) {
+                app_config.agent_configs.opencode.default_provider_id = Some(provider_id.to_string());
+            }
+            if let Some(model) = config.get("default_model").and_then(|value| value.as_str()) {
+                app_config.agent_configs.opencode.default_model = Some(model.to_string());
+            }
+        }
     }
 
     Ok(())

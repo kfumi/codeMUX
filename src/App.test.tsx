@@ -76,6 +76,7 @@ vi.mock('./lib/slashCommands', () => ({
 vi.mock('./lib/tauri', () => ({
   sessionApi: {
     updateProvider: vi.fn(),
+    updateReasoningEffort: vi.fn(),
   },
 }));
 

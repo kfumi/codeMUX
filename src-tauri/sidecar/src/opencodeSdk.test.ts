@@ -149,6 +149,36 @@ describe('official OpenCode SDK adapter', () => {
     });
   });
 
+  it('adds the OpenAI-compatible v1 path when a provider gives only its API root', () => {
+    expect(buildOpenCodeServerConfig({
+      provider: 'codemux-openai',
+      model: 'deepseek-v4-flash-free',
+      baseUrl: 'https://opencode.ai/zen',
+      credentialSource: 'codemux',
+    })).toMatchObject({
+      provider: {
+        'codemux-openai': {
+          options: { baseURL: 'https://opencode.ai/zen/v1' },
+        },
+      },
+    });
+  });
+
+  it('preserves an existing versioned OpenAI-compatible path', () => {
+    expect(buildOpenCodeServerConfig({
+      provider: 'codemux-openai',
+      model: 'glm-4.7-flash',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      credentialSource: 'none',
+    })).toMatchObject({
+      provider: {
+        'codemux-openai': {
+          options: { baseURL: 'https://open.bigmodel.cn/api/paas/v4' },
+        },
+      },
+    });
+  });
+
   it('does not inject an API key when credentials come from the environment', () => {
     expect(buildOpenCodeServerConfig({
       provider: 'provider-1',

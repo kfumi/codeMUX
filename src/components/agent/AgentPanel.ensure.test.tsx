@@ -12,10 +12,11 @@ import type { ModelProvider } from '../../types/provider';
 import { AgentPanel } from './AgentPanel';
 import type { AgentModelSelectorProps } from './AgentModelSelector';
 
-const { codeMuxThreadRenderMock, ensureSessionMock, updateProviderMock } = vi.hoisted(() => ({
+const { codeMuxThreadRenderMock, ensureSessionMock, updateProviderMock, updateReasoningEffortMock } = vi.hoisted(() => ({
   codeMuxThreadRenderMock: vi.fn(),
   ensureSessionMock: vi.fn(() => Promise.resolve()),
   updateProviderMock: vi.fn(() => Promise.resolve()),
+  updateReasoningEffortMock: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('../../lib/tauri', () => ({
@@ -29,6 +30,7 @@ vi.mock('../../lib/tauri', () => ({
     touch: vi.fn(() => Promise.resolve()),
     updateTitle: vi.fn(() => Promise.resolve()),
     updateProvider: updateProviderMock,
+    updateReasoningEffort: updateReasoningEffortMock,
   },
   fileApi: {
     readFile: vi.fn(),
@@ -135,6 +137,7 @@ describe('AgentPanel session bootstrapping', () => {
     ensureSessionMock.mockClear();
     codeMuxThreadRenderMock.mockClear();
     updateProviderMock.mockClear();
+    updateReasoningEffortMock.mockClear();
 
     useSessionStore.setState({
       sessions: [{
@@ -261,6 +264,21 @@ describe('AgentPanel session bootstrapping', () => {
     fireEvent.click(screen.getByRole('button', { name: 'change model' }));
     await waitFor(() => {
       expect(updateProviderMock).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(ensureSessionMock).toHaveBeenCalled();
+    });
+  });
+
+  it('persists reasoning effort even when the session has no provider binding', async () => {
+    useAgentStore.setState({ isRunning: { 'session-running': false } });
+
+    render(<AgentPanel sessionId="session-running" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'change reasoning' }));
+
+    await waitFor(() => {
+      expect(updateReasoningEffortMock).toHaveBeenCalledWith('session-running', 'high');
     });
   });
 });

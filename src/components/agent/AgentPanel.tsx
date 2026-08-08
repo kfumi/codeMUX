@@ -34,7 +34,7 @@ interface AgentPanelProps {
 const EMPTY_PENDING_PERMISSIONS: AgentPermissionRequest[] = [];
 
 export function AgentPanel({ sessionId }: AgentPanelProps) {
-  const { sessions, createSession, updateSessionPermissions, updateSessionModel } = useSessionStore();
+  const { sessions, createSession, updateSessionPermissions } = useSessionStore();
   const { projects } = useProjectStore();
   const startQuery = useAgentStore((state) => state.startQuery);
   const interrupt = useAgentStore((state) => state.interrupt);
@@ -161,6 +161,8 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       reasoningEffort,
       permissionConfig: session?.permission_config || null,
       planMode,
+      providerId: session?.provider_id ?? null,
+      model: session?.model ?? null,
     });
 
     if (ensuredSessionsRef.current.has(ensureKey)) {
@@ -171,7 +173,18 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     agentApi.ensureSession(sessionId, effectiveCwd, undefined, reasoningEffort).catch(() => {
       ensuredSessionsRef.current.delete(ensureKey);
     });
-  }, [sessionId, cwd, project?.path, reasoningEffort, session?.permission_config, planMode, isRunning, isReadOnly]);
+  }, [
+    sessionId,
+    cwd,
+    project?.path,
+    reasoningEffort,
+    session?.permission_config,
+    session?.provider_id,
+    session?.model,
+    planMode,
+    isRunning,
+    isReadOnly,
+  ]);
 
   const handleSend = async (input: AgentInputPayload, displayContent = input.text) => {
     if (!hasUsableProvider || isReadOnly) {
@@ -216,9 +229,21 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       modelProviders.find((provider) => provider.id === providerId) ?? runtimeProvider;
     const supports1m = checkProfileModelSupports1m(nextProvider, nextModel);
     const suffixedModel = supports1m ? `${nextModel}[1m]` : nextModel;
-    updateSessionModel(sessionId, suffixedModel);
+    useSessionStore.setState((state) => ({
+      sessions: state.sessions.map((entry) => (
+        entry.id === sessionId
+          ? { ...entry, model: suffixedModel, provider_id: providerId }
+          : entry
+      )),
+    }));
     try {
       await sessionApi.updateProvider(sessionId, providerId, suffixedModel);
+      // Re-ensure immediately so Codex resumes the same thread with the new
+      // model before the next send, instead of waiting for startSession.
+      if (!isRunning) {
+        const effectiveCwd = project?.path || cwd;
+        await agentApi.ensureSession(sessionId, effectiveCwd, undefined, reasoningEffort);
+      }
     } catch (error) {
       console.warn('[AgentPanel] handleModelChange failed:', error);
       useAgentStore.setState((state) => ({
@@ -227,13 +252,16 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
   }, [
     activeProviderId,
+    cwd,
     isProviderAgent,
     isReadOnly,
+    isRunning,
     modelProviders,
+    project?.path,
+    reasoningEffort,
     runtimeProvider,
     selectorModelState,
     sessionId,
-    updateSessionModel,
   ]);
 
   const handleReasoningEffortChange = useCallback(async (nextEffort: ReasoningEffort) => {
@@ -243,20 +271,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       return;
     }
 
-    const nextModel = latestSession.model || model || '';
-
     useSessionStore.setState((state) => ({
       sessions: state.sessions.map((entry) =>
         entry.id === sessionId ? { ...entry, reasoning_effort: nextEffort } : entry,
       ),
     }));
 
-    if (!latestSession.provider_id || !nextModel) {
-      return;
-    }
-
     try {
-      await sessionApi.updateProvider(sessionId, latestSession.provider_id, nextModel, nextEffort);
+      await sessionApi.updateReasoningEffort(sessionId, nextEffort);
     } catch (error) {
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },

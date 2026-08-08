@@ -56,13 +56,22 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     modelProviders,
     selectedProviderId ?? activeProviderId,
   );
-  const preferredProviderId = selectedProviderId ?? activeProviderId;
+  const configuredAgentModel = isProviderAgent
+    ? config?.agent_configs[selectedAgentKind] as {
+        default_provider_id?: string | null;
+        default_model?: string;
+      } | undefined
+    : undefined;
+  const preferredProviderId = selectedProviderId
+    ?? configuredAgentModel?.default_provider_id
+    ?? activeProviderId;
+  const preferredModelId = selectedModel ?? configuredAgentModel?.default_model;
   const preferredModel = useMemo(() => {
-    if (selectedModel && models.some((model) => model.modelId === selectedModel && (
+    if (preferredModelId && models.some((model) => model.modelId === preferredModelId && (
       !preferredProviderId || model.providerId === preferredProviderId
     ))) {
       return models.find((model) =>
-        model.modelId === selectedModel
+        model.modelId === preferredModelId
         && (!preferredProviderId || model.providerId === preferredProviderId),
       ) ?? null;
     }
@@ -70,7 +79,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
       return models.find((model) => model.providerId === preferredProviderId) ?? models[0] ?? null;
     }
     return models[0] ?? null;
-  }, [models, preferredProviderId, selectedModel]);
+  }, [models, preferredModelId, preferredProviderId]);
   const effectiveModel = preferredModel?.modelId || '';
   const effectiveProviderId = preferredModel?.providerId || preferredProviderId;
   const hasUsableProvider = !isProviderAgent

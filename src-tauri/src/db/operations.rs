@@ -659,6 +659,19 @@ pub fn update_session_provider(
     Ok(())
 }
 
+pub fn update_session_reasoning_effort(
+    conn: &Connection,
+    session_id: &str,
+    reasoning_effort: &str,
+) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE sessions SET reasoning_effort = ?1, updated_at = ?2 WHERE id = ?3",
+        params![reasoning_effort, now, session_id],
+    )?;
+    Ok(())
+}
+
 pub fn update_session_permissions(
     conn: &Connection,
     session_id: &str,
@@ -824,7 +837,8 @@ mod tests {
         get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
         get_model_distribution, get_session_snapshot, get_usage_heatmap, get_usage_overview,
         import_session_snapshot, set_session_pinned, set_session_read_only, unarchive_session,
-        update_session_provider, upsert_agent_session_mapping, ImportedSessionSnapshot,
+        update_session_provider, update_session_reasoning_effort, upsert_agent_session_mapping,
+        ImportedSessionSnapshot,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -995,6 +1009,22 @@ mod tests {
 
         let sessions = get_all_sessions(&conn).unwrap();
         assert_eq!(sessions[0].model.as_deref(), Some("gpt-5"));
+        assert_eq!(sessions[0].reasoning_effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn updates_session_reasoning_effort_without_provider() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-1", "Test", "codex", "agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+
+        update_session_reasoning_effort(&conn, "session-1", "high").unwrap();
+
+        let sessions = get_all_sessions(&conn).unwrap();
         assert_eq!(sessions[0].reasoning_effort.as_deref(), Some("high"));
     }
 

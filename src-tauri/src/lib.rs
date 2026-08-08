@@ -513,6 +513,7 @@ pub fn run() {
             commands::session::update_session_title,
             commands::session::touch_session,
             commands::session::update_session_provider,
+            commands::session::update_session_reasoning_effort,
             commands::session::update_session_permissions,
             commands::usage::get_usage_stats,
             commands::usage::get_usage_token_breakdown,

@@ -44,6 +44,67 @@ describe('CodexSessionRuntime', () => {
         },
       },
     });
+    expect(buildCodexCliConfig('https://example.test', 'C:\\Users\\me\\.codex\\codemux-model-catalog.json')).toMatchObject({
+      model_catalog_json: 'C:\\Users\\me\\.codex\\codemux-model-catalog.json',
+      model_provider: 'codemux_proxy',
+    });
+  });
+
+  it('does not fail the turn for Codex model metadata or resume advisories', () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
+    const emitFailure = vi.fn();
+
+    try {
+      const runtime = new CodexSessionRuntime();
+      const emitItemEvent = (
+        runtime as unknown as {
+          emitItemEvent: (
+            sessionId: string,
+            eventType: 'item.started' | 'item.updated' | 'item.completed',
+            item: ThreadEvent extends { item: infer T } ? T : never,
+            emitFailure: (message: string) => void,
+          ) => void;
+        }
+      ).emitItemEvent.bind(runtime);
+
+      emitItemEvent(
+        'session-1',
+        'item.completed',
+        {
+          id: 'error-1',
+          type: 'error',
+          message: 'Model metadata for `deepseek-v4-flash` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.',
+        },
+        emitFailure,
+      );
+      emitItemEvent(
+        'session-1',
+        'item.completed',
+        {
+          id: 'error-2',
+          type: 'error',
+          message: 'This session was recorded with model `deepseek-v4-flash` but is resuming with `deepseek-v4-flash-free`. Consider switching back to `deepseek-v4-flash` as it may affect Codex performance.',
+        },
+        emitFailure,
+      );
+      flushStreamEvents();
+
+      expect(emitFailure).not.toHaveBeenCalled();
+      const events = writes
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line))
+        .flatMap((event) => event.type === 'codemux_event_batch' ? event.events : [event]);
+      expect(events).toEqual([]);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
   });
 
   it('renders Codex command executions as shell_command tool calls with user-facing commands', () => {

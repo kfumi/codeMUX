@@ -158,13 +158,33 @@ function resolveOpenCodeAdapter(input: OpenCodeServerConfigInput): '@ai-sdk/open
 }
 function normalizeOpenCodeBaseUrl(baseUrl: string): string {
   let normalized = baseUrl.trim().replace(/\/+$/, '');
+  let lowerCase = normalized.toLowerCase();
   for (const suffix of ['/chat/completions', '/responses', '/messages']) {
-    if (normalized.toLowerCase().endsWith(suffix)) {
+    if (lowerCase.endsWith(suffix)) {
       normalized = normalized.slice(0, -suffix.length);
+      lowerCase = normalized.toLowerCase();
       break;
     }
   }
-  return normalized.replace(/\/+$/, '');
+  normalized = normalized.replace(/\/+$/, '');
+
+  // OpenAI-compatible SDK adapters append `/chat/completions` to baseURL.
+  // Match the Codex compatibility proxy by supplying `/v1` for an unversioned
+  // API root, while preserving gateways that already use paths such as `/v4`.
+  if (!hasApiVersionPath(normalized)) {
+    normalized = `${normalized}/v1`;
+  }
+  return normalized;
+}
+
+function hasApiVersionPath(baseUrl: string): boolean {
+  try {
+    const pathname = new URL(baseUrl).pathname.replace(/\/+$/, '');
+    const lastSegment = pathname.split('/').filter(Boolean).at(-1) ?? '';
+    return /^v\d+[a-z0-9-]*$/i.test(lastSegment);
+  } catch {
+    return /\/v\d+[a-z0-9-]*$/i.test(baseUrl);
+  }
 }
 const pendingServerClosePromises = new WeakMap<OpenCodeServerHandle, Promise<void>>();
 
@@ -414,8 +434,9 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
               onSseError: reportRetry,
               onSseEvent: (event: { id?: string }) => {
                 nextEventId = event.id;
-                if (event && typeof event === 'object') {
-                  process.stderr.write(`[opencode-debug] SSE onSseEvent id=${(event as Record<string, unknown>).id ?? '(none)'} type=${(event as Record<string, unknown>).type ?? '(no type)'}\n`);
+                const eventType = (event as Record<string, unknown>)?.type;
+                if (typeof eventType === 'string') {
+                  process.stderr.write(`[opencode-debug] SSE onSseEvent id=${event.id ?? '(none)'} type=${eventType}\n`);
                 }
               },
             });
@@ -426,8 +447,13 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
                     const eventId = nextEventId;
                     nextEventId = undefined;
                     const eventStr = typeof event === 'string' ? event : (() => { try { return JSON.stringify(event).slice(0, 2000) } catch { return String(event) } })();
-                    process.stderr.write(`[opencode-debug] RAW SSE event type=${typeof event === 'object' && event !== null ? (event as Record<string, unknown>).type ?? '(no type)' : typeof event} preview=${eventStr}\n`);
-                    if (typeof event === 'object' && event !== null) {
+                    const eventType = typeof event === 'object' && event !== null
+                      ? (event as Record<string, unknown>).type
+                      : undefined;
+                    if (eventType !== 'server.heartbeat') {
+                      process.stderr.write(`[opencode-debug] RAW SSE event type=${typeof event === 'object' && event !== null ? eventType ?? '(no type)' : typeof event} preview=${eventStr}\n`);
+                    }
+                    if (eventType !== 'server.heartbeat' && typeof event === 'object' && event !== null) {
                       const record = event as Record<string, unknown>;
                       if (record.type === 'session.error' || record.type === 'server.error' || record.type === 'server.retry' || record.type === 'server.disconnected' || record.type === 'disconnect' || record.type === 'connection.error') {
                         process.stderr.write(`[opencode-debug] RAW SSE ERROR EVENT full=${JSON.stringify(event)}\n`);

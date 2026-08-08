@@ -99,6 +99,34 @@ function deferred<T>() {
 }
 
 describe('OpenCodeRuntime', () => {
+  it('ignores OpenCode heartbeat events without emitting diagnostics or logs', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, {
+      emitEvent: (event) => emitted.push(event),
+    });
+
+    await runtime.start();
+    const stderr = (globalThis as unknown as {
+      process: { stderr: { write: (...args: unknown[]) => boolean } };
+    }).process.stderr;
+    const stderrWrite = vi.spyOn(stderr, 'write').mockImplementation(() => true);
+    try {
+      onEvent({ type: 'server.heartbeat', properties: {} });
+
+      expect(emitted).toEqual([]);
+      expect(stderrWrite).not.toHaveBeenCalled();
+    } finally {
+      stderrWrite.mockRestore();
+      await runtime.shutdown();
+    }
+  });
+
   it('merges partial compatibility permission updates without changing omitted fields', () => {
     const { port } = createPort();
     const runtime = new OpenCodeRuntime(createConfig(), port);

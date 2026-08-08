@@ -221,6 +221,8 @@ export const sessionApi = {
   touch: (sessionId: string): Promise<void> => invokeLogged('touch_session', { sessionId }),
   updateProvider: (sessionId: string, providerId: string | null, model: string, reasoningEffort?: ReasoningEffort): Promise<void> =>
     invokeLogged('update_session_provider', { sessionId, providerId, model, reasoningEffort }),
+  updateReasoningEffort: (sessionId: string, reasoningEffort: ReasoningEffort): Promise<void> =>
+    invokeLogged('update_session_reasoning_effort', { sessionId, reasoningEffort }),
   updatePermissions: (
     sessionId: string,
     permissionConfig?: AgentPermissionConfig,

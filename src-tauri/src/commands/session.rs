@@ -161,6 +161,23 @@ pub fn update_session_provider(
 }
 
 #[tauri::command]
+pub fn update_session_reasoning_effort(
+    state: State<'_, AppState>,
+    session_id: String,
+    reasoning_effort: String,
+) -> Result<(), String> {
+    info!(
+        target: "session",
+        "Updating session reasoning effort session_id={} reasoning_effort={}",
+        session_id,
+        reasoning_effort
+    );
+    let db = state.db.lock().unwrap();
+    operations::update_session_reasoning_effort(&db, &session_id, &reasoning_effort)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn update_session_permissions(
     state: State<'_, AppState>,
     agent_state: State<'_, AgentState>,

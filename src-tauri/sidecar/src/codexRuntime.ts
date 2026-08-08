@@ -53,8 +53,21 @@ import { loadProviderRuntime, isRuntimeError, type RuntimeLoadResult } from './r
 import { loadCodexSdk, type CodexSdkModule } from './sdkLoader.js';
 import { resolveTurnTimeouts, type ResolvedTurnTimeouts, type TurnTimeouts } from './turnTimeouts.js';
 import { createTurnIdleGuard, type TurnIdleGuard } from './turnIdleGuard.js';
+import {
+  ensureCodexModelCatalog,
+  isCodexModelAdvisoryError,
+  isCodexNonFatalErrorItem,
+  resolveCodexModelCatalogPath,
+} from './codexModelCatalog.js';
 
 export { emit } from './streamEventBatcher.js';
+export {
+  buildCodexModelCatalogEntry,
+  ensureCodexModelCatalog,
+  isCodexModelAdvisoryError,
+  isCodexNonFatalErrorItem,
+  resolveCodexModelCatalogPath,
+} from './codexModelCatalog.js';
 
 type EnsureSessionCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
 type UpdatePermissionsCommand = Extract<SidecarCommand, { type: 'update_permissions' }>;
@@ -359,7 +372,8 @@ export class CodexSessionRuntime {
     }
     applyCodexWindowsSandboxPathCompatibility(codexEnv);
 
-    const codexConfig = buildCodexCliConfig(runtimeBaseUrl);
+    const modelCatalogPath = await this.syncModelCatalog(requestedConfig.model);
+    const codexConfig = buildCodexCliConfig(runtimeBaseUrl, modelCatalogPath);
 
     // 仅从 CodeMUX 托管 Runtime 动态加载 Codex SDK。
     const runtimeLoaded = this.loadRuntimeIfNeeded();
@@ -376,7 +390,7 @@ export class CodexSessionRuntime {
       config: Object.keys(codexConfig).length > 0 ? codexConfig as any : undefined,
     });
     process.stderr.write(
-      `[codex] SDK client configured with baseUrl=${runtimeBaseUrl || 'default'} env.OPENAI_BASE_URL=${codexEnv.OPENAI_BASE_URL || 'unset'}\n`,
+      `[codex] SDK client configured with baseUrl=${runtimeBaseUrl || 'default'} env.OPENAI_BASE_URL=${codexEnv.OPENAI_BASE_URL || 'unset'} model_catalog=${modelCatalogPath || 'none'}\n`,
     );
     this.thread = requestedConfig.agentSessionId
       ? this.client.resumeThread(requestedConfig.agentSessionId, this.threadOptions())
@@ -866,6 +880,23 @@ export class CodexSessionRuntime {
     return turnUsage;
   }
 
+  private async syncModelCatalog(model: string | undefined): Promise<string | null> {
+    const modelId = model?.trim();
+    if (!modelId) {
+      return null;
+    }
+    try {
+      const catalogPath = await ensureCodexModelCatalog([modelId], resolveCodexModelCatalogPath());
+      if (catalogPath) {
+        process.stderr.write(`[codex] Ensured model catalog entry for ${modelId} at ${catalogPath}\n`);
+      }
+      return catalogPath;
+    } catch (error) {
+      process.stderr.write(`[codex] Failed to sync model catalog for ${modelId}: ${String(error)}\n`);
+      return null;
+    }
+  }
+
   private emitItemEvent(
     sessionId: string,
     eventType: 'item.started' | 'item.updated' | 'item.completed',
@@ -874,6 +905,17 @@ export class CodexSessionRuntime {
   ): void {
     if (item.type === 'error' && eventType === 'item.completed') {
       process.stderr.write(`[codex] SDK item error: ${item.message}\n`);
+      // Codex documents ErrorItem as non-fatal. Do not emitFailure (that paints
+      // a hard turn failure in the UI) and do not reuse sidecar_stream_status
+      // (the composer renders non-reconnect statuses as "连接断开").
+      if (isCodexNonFatalErrorItem(item.message)) {
+        process.stderr.write(
+          isCodexModelAdvisoryError(item.message)
+            ? `[codex] Ignoring non-fatal model advisory item\n`
+            : `[codex] Ignoring non-fatal SDK error item\n`,
+        );
+        return;
+      }
       emitFailure(item.message);
       return;
     }
@@ -1268,13 +1310,15 @@ function agentPlanModeFromCollaborationPolicy(policy: CodexCollaborationPolicy):
 
 export function buildCodexCliConfig(
   runtimeBaseUrl: string | undefined,
+  modelCatalogJsonPath?: string | null,
 ): Record<string, string | Record<string, unknown>> {
-  if (!runtimeBaseUrl) return {};
+  if (!runtimeBaseUrl && !modelCatalogJsonPath) return {};
 
-  const providerBaseUrl = normalizeCodexResponsesProviderBaseUrl(runtimeBaseUrl);
-  return {
-    model_provider: 'codemux_proxy',
-    model_providers: {
+  const config: Record<string, string | Record<string, unknown>> = {};
+  if (runtimeBaseUrl) {
+    const providerBaseUrl = normalizeCodexResponsesProviderBaseUrl(runtimeBaseUrl);
+    config.model_provider = 'codemux_proxy';
+    config.model_providers = {
       codemux_proxy: {
         name: 'CodeMUX Proxy',
         base_url: providerBaseUrl,
@@ -1282,9 +1326,15 @@ export function buildCodexCliConfig(
         wire_api: 'responses',
         requires_openai_auth: true,
       },
-    },
-    openai_base_url: runtimeBaseUrl,
-  };
+    };
+    config.openai_base_url = runtimeBaseUrl;
+  }
+  if (modelCatalogJsonPath) {
+    // Absolute path to ModelsResponse JSON. Applied when each `codex exec`
+    // process starts so custom provider model ids resolve without fallback.
+    config.model_catalog_json = modelCatalogJsonPath;
+  }
+  return config;
 }
 
 function normalizeCodexResponsesProviderBaseUrl(baseUrl: string): string {
