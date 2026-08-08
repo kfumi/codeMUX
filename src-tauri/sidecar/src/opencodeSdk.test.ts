@@ -9,6 +9,14 @@ const sdkMocks = vi.hoisted(() => {
     session: {
       create: vi.fn().mockResolvedValue({ data: { id: 'opencode-session' } }),
       get: vi.fn().mockResolvedValue({ data: { id: 'opencode-session' } }),
+      messages: vi.fn().mockResolvedValue({
+        data: [
+          { info: { id: 'user-message-1' }, parts: [] },
+          { info: { id: 'assistant-message-1' }, parts: [] },
+          { info: { id: 'user-message-2' }, parts: [] },
+        ],
+      }),
+      fork: vi.fn().mockResolvedValue({ data: { id: 'opencode-forked-session' } }),
       delete: vi.fn().mockResolvedValue({ data: true }),
       prompt: vi.fn().mockResolvedValue({ data: { info: {}, parts: [] } }),
       abort: vi.fn().mockResolvedValue({ data: true }),
@@ -51,6 +59,26 @@ vi.mock('@opencode-ai/sdk/server', () => ({
 }));
 
 describe('official OpenCode SDK adapter', () => {
+  it('forks a session at the requested provider message', async () => {
+    const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'opencode', model: 'default', credentialSource: 'opencode', runtimeRef: sdkMocks.runtimeRef });
+
+    await expect(resources.client.forkSession({
+      cwd: 'D:/workspace/demo',
+      sessionId: 'opencode-session',
+      messageId: 'assistant-message-1',
+    })).resolves.toEqual({ id: 'opencode-forked-session' });
+
+    expect(sdkMocks.client.session.fork).toHaveBeenCalledWith({
+      path: { id: 'opencode-session' },
+      query: { directory: 'D:/workspace/demo' },
+      body: { messageID: 'user-message-2' },
+    });
+    expect(sdkMocks.client.session.messages).toHaveBeenCalledWith({
+      path: { id: 'opencode-session' },
+      query: { directory: 'D:/workspace/demo' },
+    });
+  });
+
   it('deletes a session through the official session.delete endpoint', async () => {
     const resources = await officialOpenCodeSdkPort.start({ cwd: 'D:/workspace/demo', provider: 'opencode', model: 'default', credentialSource: 'opencode', runtimeRef: sdkMocks.runtimeRef });
 

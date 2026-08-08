@@ -285,6 +285,29 @@ export class OpenCodeRuntime {
     });
   }
 
+  async forkSession(
+    sourceAgentSessionId?: string,
+    _sourceProviderTurnId?: string,
+    _sourceProviderTurnOrdinal?: number,
+    sourceProviderMessageId?: string,
+  ): Promise<string> {
+    const client = this.client;
+    const sessionId = sourceAgentSessionId ?? this.agentSessionId;
+    if (this.state !== 'started' || !client || !sessionId) {
+      throw new Error('OpenCode runtime is not started');
+    }
+    if (this.activeTask) {
+      throw new Error('Cannot fork while an OpenCode turn is active');
+    }
+
+    const child = await client.forkSession({
+      cwd: this.config.cwd,
+      sessionId,
+      messageId: sourceProviderMessageId,
+    });
+    return child.id;
+  }
+
   shutdown(): Promise<void> {
     if (this.shutdownPromise) {
       return this.shutdownPromise;

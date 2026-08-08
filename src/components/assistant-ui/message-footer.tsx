@@ -2,7 +2,7 @@
 
 import { ActionBarPrimitive, useAuiState } from '@assistant-ui/react';
 import { invoke } from '@tauri-apps/api/core';
-import { Check, Copy, Bug } from 'lucide-react';
+import { Check, Copy, Bug, GitFork, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 
 import { cn } from '@/lib/utils';
@@ -24,9 +24,22 @@ type MessageFooterProps = {
   revealOnHover?: boolean;
   sessionId?: string;
   sourceUuid?: string;
+  canFork?: boolean;
+  isForking?: boolean;
+  onFork?: () => void | Promise<void>;
 };
 
-export function MessageFooter({ timestamp, stats, className, revealOnHover = false, sessionId, sourceUuid }: MessageFooterProps) {
+export function MessageFooter({
+  timestamp,
+  stats,
+  className,
+  revealOnHover = false,
+  sessionId,
+  sourceUuid,
+  canFork = false,
+  isForking = false,
+  onFork,
+}: MessageFooterProps) {
   const hasStats =
     stats &&
     (stats.durationMs != null ||
@@ -45,6 +58,7 @@ export function MessageFooter({ timestamp, stats, className, revealOnHover = fal
         <ActionBarPrimitive.Root autohide="never" className="flex items-center gap-1">
           <MessageCopyButton />
           {sessionId ? <DebugCopyButton sessionId={sessionId} sourceUuid={sourceUuid} /> : null}
+          {canFork && onFork ? <ForkButton isForking={isForking} onFork={onFork} /> : null}
         </ActionBarPrimitive.Root>
       </div>
     );
@@ -70,6 +84,7 @@ export function MessageFooter({ timestamp, stats, className, revealOnHover = fal
       <ActionBarPrimitive.Root autohide="never" className="flex items-center gap-1">
         <MessageCopyButton />
         {sessionId ? <DebugCopyButton sessionId={sessionId} sourceUuid={sourceUuid} /> : null}
+        {canFork && onFork ? <ForkButton isForking={isForking} onFork={onFork} /> : null}
       </ActionBarPrimitive.Root>
 
       {timestamp ? <FooterItem>{formatTime(timestamp)}</FooterItem> : null}
@@ -128,6 +143,25 @@ function MessageCopyButton() {
       >
         {isCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
       </ActionBarPrimitive.Copy>
+    </TooltipHint>
+  );
+}
+
+function ForkButton({ isForking, onFork }: { isForking: boolean; onFork: () => void | Promise<void> }) {
+  return (
+    <TooltipHint content="从此回复创建分支">
+      <button
+        type="button"
+        onClick={() => void onFork()}
+        disabled={isForking}
+        className={cn(
+          'inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors',
+          'text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground disabled:cursor-wait disabled:opacity-50',
+        )}
+        aria-label="从此回复创建分支"
+      >
+        {isForking ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitFork className="h-3 w-3" />}
+      </button>
     </TooltipHint>
   );
 }

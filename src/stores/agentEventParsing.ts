@@ -549,8 +549,9 @@ function projectCodeMuxHistoryEvent(raw: Record<string, unknown>): Record<string
   if (raw.type === 'assistant_message') {
     return {
       type: 'assistant',
-      uuid: raw.event_id,
+      uuid: raw.provider_message_id ?? raw.event_id,
       session_id: raw.session_id,
+      ...(typeof raw.provider_turn_id === 'string' ? { provider_turn_id: raw.provider_turn_id } : {}),
       timestamp: raw.timestamp,
       message: {
         role: 'assistant',

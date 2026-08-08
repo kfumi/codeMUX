@@ -56,6 +56,7 @@ export type CodeMuxAssistantMessageEvent = {
   session_id?: string;
   content: Array<Record<string, unknown>>;
   provider_message_id?: string;
+  provider_turn_id?: string;
   supersedes_provider_message_ids?: string[];
   event_id: string;
   sequence: number;

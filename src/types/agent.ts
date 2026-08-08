@@ -47,6 +47,7 @@ export interface AgentAssistantMessage {
   type: 'assistant';
   uuid: string;
   session_id: string;
+  provider_turn_id?: string;
   supersedes?: string[];
   message: {
     role: 'assistant';

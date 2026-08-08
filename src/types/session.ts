@@ -19,6 +19,7 @@ export interface Session {
   is_read_only?: boolean;
   created_at: string;
   updated_at: string;
+  parent_session_id?: string | null;
   is_archived: boolean;
   is_pinned: boolean;
 }

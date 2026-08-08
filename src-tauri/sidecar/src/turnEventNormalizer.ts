@@ -6,6 +6,7 @@ export type TurnSourceEvent =
       content: Array<Record<string, unknown>>;
       stopReason?: string | null;
       providerMessageId?: string;
+      providerTurnId?: string;
       supersedesProviderMessageIds?: string[];
     }
   | { kind: 'user_input_requested'; toolUseId: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; allowOther?: boolean; presentation?: 'plan-approval'; inputPlaceholder?: string }> }
@@ -56,6 +57,7 @@ export class TurnEventNormalizer {
         type: 'assistant_message', session_id: this.sessionId, content: source.content,
         ...(source.stopReason !== undefined ? { stop_reason: source.stopReason } : {}),
         ...(source.providerMessageId ? { provider_message_id: source.providerMessageId } : {}),
+        ...(source.providerTurnId ? { provider_turn_id: source.providerTurnId } : {}),
         ...(source.supersedesProviderMessageIds?.length
           ? { supersedes_provider_message_ids: source.supersedesProviderMessageIds }
           : {}),

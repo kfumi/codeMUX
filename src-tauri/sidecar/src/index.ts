@@ -404,6 +404,67 @@ export class SessionRuntime {
     }
   }
 
+  async forkSession(sourceAgentSessionId?: string): Promise<string> {
+    const config = this.config;
+    if (!config) {
+      throw new Error('Claude session has not been created yet');
+    }
+    const sourceSessionId = sourceAgentSessionId ?? config.agentSessionId;
+    if (!sourceSessionId) {
+      throw new Error('Claude session has not been created yet');
+    }
+    if (this.turnActive) {
+      throw new Error('Cannot fork while a Claude turn is active');
+    }
+    if (!this.claudeSdk) {
+      throw new Error('Claude SDK not loaded; cannot fork session');
+    }
+
+    const forkQuery = this.claudeSdk.query({
+      // An empty prompt opens the SDK session without creating a user turn.
+      prompt: '',
+      options: {
+        ...this.buildOptions(config),
+        abortController: new AbortController(),
+        resume: sourceSessionId,
+        forkSession: true,
+      } as any,
+    });
+
+    let forkedSessionId: string | undefined;
+    try {
+      for await (const message of forkQuery) {
+        const candidate = message && typeof message === 'object'
+          ? (message as Record<string, unknown>).session_id
+          : undefined;
+        if (typeof candidate === 'string' && candidate.length > 0 && candidate !== sourceSessionId) {
+          forkedSessionId = candidate;
+        }
+        if (
+          forkedSessionId
+          && message
+          && typeof message === 'object'
+          && (message as Record<string, unknown>).type === 'system'
+          && (message as Record<string, unknown>).subtype === 'init'
+        ) {
+          break;
+        }
+      }
+    } finally {
+      try {
+        forkQuery.close();
+      } catch {
+        // Closing an already completed query is best-effort.
+      }
+    }
+
+    if (!forkedSessionId) {
+      throw new Error('Claude SDK did not return a forked session ID');
+    }
+    process.stderr.write(`[sidecar] Forked Claude session ${sourceSessionId} -> ${forkedSessionId}\n`);
+    return forkedSessionId;
+  }
+
   async interrupt(): Promise<void> {
     clearClaudeToolResponses(this.config?.sessionId);
     if (!this.queryHandle) {
@@ -1353,6 +1414,12 @@ type SidecarRuntime = {
   ensure(cmd: EnsureSessionCommand): Promise<void>;
   updatePermissions(cmd: UpdatePermissionsCommand): void | Promise<void>;
   sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void>;
+  forkSession?(
+    sourceAgentSessionId?: string,
+    sourceProviderTurnId?: string,
+    sourceProviderTurnOrdinal?: number,
+    sourceProviderMessageId?: string,
+  ): Promise<string>;
   resetSession(sessionId: string): Promise<void>;
   deleteSession?(agentSessionId: string): Promise<void>;
   interrupt(): Promise<void>;
@@ -1503,6 +1570,40 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
             emitError(error);
           }
         });
+        return;
+      }
+      case 'fork_session': {
+        await ensureTail;
+        try {
+          const current = selectedRuntime();
+          const flavor = getRuntimeFlavor(activeAgentKind);
+          if ((flavor !== 'claude' && flavor !== 'codex' && flavor !== 'opencode') || !current?.forkSession) {
+            throw new Error('This provider runtime does not support session fork');
+          }
+          const agentSessionId = await current.forkSession(
+            cmd.sourceAgentSessionId,
+            cmd.sourceProviderTurnId,
+            cmd.sourceProviderTurnOrdinal,
+            cmd.sourceProviderMessageId,
+          );
+          options.emit({
+            type: 'session_fork_result',
+            request_id: cmd.requestId,
+            session_id: cmd.sessionId,
+            agent_kind: activeAgentKind,
+            agent_session_id: agentSessionId,
+            ok: true,
+          });
+        } catch (error) {
+          options.emit({
+            type: 'session_fork_result',
+            request_id: cmd.requestId,
+            session_id: cmd.sessionId,
+            agent_kind: activeAgentKind,
+            ok: false,
+            error: String(error),
+          });
+        }
         return;
       }
       case 'reset_session':
@@ -1675,6 +1776,17 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
     },
     sendInput: (prompt, inputPayload) => openCodeRuntime.sendInput(prompt, inputPayload),
     updatePermissions: (update) => openCodeRuntime.updatePermissions(update),
+    forkSession: (
+      sourceAgentSessionId,
+      sourceProviderTurnId,
+      sourceProviderTurnOrdinal,
+      sourceProviderMessageId,
+    ) => openCodeRuntime.forkSession(
+      sourceAgentSessionId,
+      sourceProviderTurnId,
+      sourceProviderTurnOrdinal,
+      sourceProviderMessageId,
+    ),
     resetSession: () => openCodeRuntime.resetSession(),
     deleteSession: (agentSessionId) => openCodeRuntime.deleteSession(agentSessionId),
     interrupt: () => openCodeRuntime.interrupt(),

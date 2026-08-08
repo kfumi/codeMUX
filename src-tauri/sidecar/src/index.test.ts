@@ -9,6 +9,7 @@ function createRuntime() {
     ensure: vi.fn().mockResolvedValue(undefined),
     updatePermissions: vi.fn(),
     sendInput: vi.fn().mockResolvedValue(undefined),
+    forkSession: vi.fn().mockResolvedValue('forked-session'),
     resetSession: vi.fn().mockResolvedValue(undefined),
     deleteSession: vi.fn().mockResolvedValue(undefined),
     interrupt: vi.fn().mockResolvedValue(undefined),
@@ -54,6 +55,128 @@ describe('sidecar command dispatcher', () => {
       agent_kind: 'opencode',
       agent_session_id: 'opencode-session',
       runtime_generation: 3,
+    });
+  });
+
+  it('forks through the active Claude runtime and returns the provider session ID', async () => {
+    const claude = createRuntime();
+    const emit = vi.fn();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: claude,
+      codexRuntime: createRuntime(),
+      createOpenCodeRuntime: vi.fn(() => createRuntime()),
+      emit,
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({
+      type: 'ensure_session',
+      agentKind: 'claude_code',
+      cwd: 'D:\\workspace',
+      sessionId: 'session-1',
+      agentSessionId: 'source-session',
+    });
+    await dispatcher.dispatch({
+      type: 'fork_session',
+      sessionId: 'session-1',
+      requestId: 'request-1',
+      sourceAgentSessionId: 'staged-session',
+      sourceProviderTurnId: 'turn-1',
+      sourceProviderTurnOrdinal: 0,
+    });
+
+    expect(claude.forkSession).toHaveBeenCalledTimes(1);
+    expect(claude.forkSession).toHaveBeenCalledWith('staged-session', 'turn-1', 0, undefined);
+    expect(emit).toHaveBeenCalledWith({
+      type: 'session_fork_result',
+      request_id: 'request-1',
+      session_id: 'session-1',
+      agent_kind: 'claude_code',
+      agent_session_id: 'forked-session',
+      ok: true,
+    });
+  });
+
+  it('forks through the active Codex runtime at the selected provider turn', async () => {
+    const codex = createRuntime();
+    const emit = vi.fn();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: createRuntime(),
+      codexRuntime: codex,
+      createOpenCodeRuntime: vi.fn(() => createRuntime()),
+      emit,
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({
+      type: 'ensure_session',
+      agentKind: 'codex',
+      cwd: 'D:\\workspace',
+      sessionId: 'session-1',
+      agentSessionId: 'source-thread',
+    });
+    await dispatcher.dispatch({
+      type: 'fork_session',
+      sessionId: 'session-1',
+      requestId: 'request-2',
+      sourceAgentSessionId: 'source-thread',
+      sourceProviderTurnId: 'turn-2',
+      sourceProviderTurnOrdinal: 1,
+    });
+
+    expect(codex.forkSession).toHaveBeenCalledWith('source-thread', 'turn-2', 1, undefined);
+    expect(emit).toHaveBeenCalledWith({
+      type: 'session_fork_result',
+      request_id: 'request-2',
+      session_id: 'session-1',
+      agent_kind: 'codex',
+      agent_session_id: 'forked-session',
+      ok: true,
+    });
+  });
+
+  it('forks through the active OpenCode runtime at the selected provider message', async () => {
+    const opencode = createRuntime();
+    const emit = vi.fn();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: createRuntime(),
+      codexRuntime: createRuntime(),
+      createOpenCodeRuntime: vi.fn(() => opencode),
+      emit,
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({
+      type: 'ensure_session',
+      agentKind: 'opencode',
+      cwd: 'D:\\workspace',
+      sessionId: 'session-1',
+      agentSessionId: 'source-session',
+    });
+    await dispatcher.dispatch({
+      type: 'fork_session',
+      sessionId: 'session-1',
+      requestId: 'request-3',
+      sourceAgentSessionId: 'source-session',
+      sourceProviderMessageId: 'assistant-message-1',
+    });
+
+    expect(opencode.forkSession).toHaveBeenCalledWith(
+      'source-session',
+      undefined,
+      undefined,
+      'assistant-message-1',
+    );
+    expect(emit).toHaveBeenCalledWith({
+      type: 'session_fork_result',
+      request_id: 'request-3',
+      session_id: 'session-1',
+      agent_kind: 'opencode',
+      agent_session_id: 'forked-session',
+      ok: true,
     });
   });
 

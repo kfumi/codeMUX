@@ -44,6 +44,7 @@ export interface OpenCodeEventSubscription {
 export interface OpenCodeClientPort {
   createSession(input: { cwd: string }): Promise<OpenCodeSessionHandle>;
   restoreSession(input: { cwd: string; sessionId: string }): Promise<OpenCodeSessionHandle>;
+  forkSession(input: { cwd: string; sessionId: string; messageId?: string }): Promise<OpenCodeSessionHandle>;
   deleteSession(input: { cwd?: string; sessionId: string }): Promise<void>;
   prompt(input: OpenCodePromptInput): Promise<void>;
   abort(sessionId: string): Promise<boolean | void>;
@@ -234,6 +235,43 @@ function readResponse<T>(operation: string, response: { data?: T; error?: unknow
   throw new Error(`${operation} failed${response.error ? `: ${formatSdkError(response.error)}` : ''}`);
 }
 
+async function resolveForkBoundaryMessageId(
+  client: { session: { messages: (input: unknown) => Promise<{ data?: unknown[]; error?: unknown }> } },
+  cwd: string,
+  sessionId: string,
+  targetMessageId: string,
+): Promise<string | undefined> {
+  const messages = readResponse<unknown[]>(
+    `OpenCode session messages for "${sessionId}"`,
+    await client.session.messages({
+      path: { id: sessionId },
+      query: { directory: cwd },
+    }),
+  );
+  const targetIndex = messages.findIndex((message) => {
+    if (typeof message !== 'object' || message === null) return false;
+    const info = (message as { info?: unknown }).info;
+    return typeof info === 'object'
+      && info !== null
+      && (info as { id?: unknown }).id === targetMessageId;
+  });
+  if (targetIndex < 0) {
+    throw new Error(`OpenCode Fork target message "${targetMessageId}" was not found`);
+  }
+
+  const nextMessage = messages[targetIndex + 1];
+  if (typeof nextMessage !== 'object' || nextMessage === null) {
+    return undefined;
+  }
+  const info = (nextMessage as { info?: unknown }).info;
+  const nextMessageId = typeof info === 'object' && info !== null
+    ? (info as { id?: unknown }).id
+    : undefined;
+  return typeof nextMessageId === 'string' && nextMessageId.length > 0
+    ? nextMessageId
+    : undefined;
+}
+
 function isNotFoundResponse(response: { error?: unknown; response?: { status?: number } }): boolean {
   if (response.response?.status === 404) return true;
   const error = response.error;
@@ -346,6 +384,19 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
             return readResponse(
               `OpenCode session restoration for "${sessionId}"`,
               await client.session.get({ path: { id: sessionId }, query: { directory: sessionCwd } }),
+            );
+          },
+          async forkSession({ cwd: sessionCwd, sessionId, messageId }) {
+            const boundaryMessageId = messageId
+              ? await resolveForkBoundaryMessageId(client, sessionCwd, sessionId, messageId)
+              : undefined;
+            return readResponse(
+              `OpenCode session fork for "${sessionId}"`,
+              await client.session.fork({
+                path: { id: sessionId },
+                query: { directory: sessionCwd },
+                ...(boundaryMessageId ? { body: { messageID: boundaryMessageId } } : {}),
+              }),
             );
           },
           async deleteSession({ cwd: sessionCwd, sessionId }) {

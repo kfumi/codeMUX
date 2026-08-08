@@ -10,6 +10,7 @@ const unarchiveMock = vi.fn<(...args: unknown[]) => Promise<void>>();
 const updatePermissionsMock = vi.fn<(...args: unknown[]) => Promise<void>>();
 const deleteSessionMock = vi.fn<(...args: unknown[]) => Promise<void>>();
 const deleteOpenCodeSessionMock = vi.fn<(...args: unknown[]) => Promise<void>>();
+const forkMock = vi.fn<(...args: unknown[]) => Promise<Session>>();
 
 vi.mock('../lib/tauri', () => ({
   agentApi: {
@@ -40,6 +41,9 @@ vi.mock('../lib/tauri', () => ({
     updateTitle: vi.fn(),
     updatePermissions: updatePermissionsMock,
     touch: touchMock,
+    forkClaude: forkMock,
+    forkCodex: forkMock,
+    forkOpenCode: forkMock,
   },
 }));
 
@@ -81,6 +85,93 @@ describe('session store createSession', () => {
       isLoading: false,
       error: null,
     });
+  });
+
+  it('creates and activates a Claude fork without sharing the parent events', async () => {
+    const parent: Session = {
+      id: 'parent',
+      title: 'Parent',
+      agent_kind: 'claude_code',
+      provider_id: null,
+      model: 'claude-sonnet',
+      mode: 'agent',
+      project_id: null,
+      created_at: '',
+      updated_at: '',
+    };
+    const child: Session = {
+      ...parent,
+      id: 'child',
+      title: 'Parent · 分支',
+      parent_session_id: 'parent',
+    };
+    forkMock.mockResolvedValue(child);
+
+    const { useSessionStore } = await import('./sessionStore');
+    useSessionStore.setState({ sessions: [parent], activeSessionId: parent.id });
+
+    const result = await useSessionStore.getState().forkSession('parent', 'assistant-1', 'provider-1');
+
+    expect(result).toEqual(child);
+    expect(forkMock).toHaveBeenCalledWith('parent', 'assistant-1', 'provider-1');
+    expect(useSessionStore.getState().activeSessionId).toBe('child');
+    expect(useSessionStore.getState().sessions[0]).toEqual(child);
+  });
+
+  it('routes a Codex fork through the Codex session command', async () => {
+    const parent: Session = {
+      id: 'codex-parent',
+      title: 'Codex Parent',
+      agent_kind: 'codex',
+      provider_id: null,
+      model: 'gpt-5',
+      mode: 'agent',
+      project_id: null,
+      created_at: '',
+      updated_at: '',
+    };
+    const child: Session = {
+      ...parent,
+      id: 'codex-child',
+      title: 'Codex Parent · 分支',
+      parent_session_id: parent.id,
+    };
+    forkMock.mockResolvedValue(child);
+
+    const { useSessionStore } = await import('./sessionStore');
+    useSessionStore.setState({ sessions: [parent], activeSessionId: parent.id });
+
+    await useSessionStore.getState().forkSession(parent.id, 'assistant-2', 'item-2', 'turn-2', 1);
+
+    expect(forkMock).toHaveBeenCalledWith(parent.id, 'assistant-2', 'item-2', 'turn-2', 1);
+  });
+
+  it('routes an OpenCode fork through the OpenCode session command', async () => {
+    const parent: Session = {
+      id: 'opencode-parent',
+      title: 'OpenCode Parent',
+      agent_kind: 'opencode',
+      provider_id: null,
+      model: 'gpt-5',
+      mode: 'agent',
+      project_id: null,
+      created_at: '',
+      updated_at: '',
+    };
+    const child: Session = {
+      ...parent,
+      id: 'opencode-child',
+      title: 'OpenCode Parent · 分支',
+      parent_session_id: parent.id,
+    };
+    forkMock.mockResolvedValue(child);
+
+    const { useSessionStore } = await import('./sessionStore');
+    useSessionStore.setState({ sessions: [parent], activeSessionId: parent.id });
+
+    await useSessionStore.getState().forkSession(parent.id, 'assistant-3', 'message-3');
+
+    expect(forkMock).toHaveBeenCalledWith(parent.id, 'assistant-3', 'message-3');
   });
 
   it('keeps the legacy createSession(title, mode, projectId) call shape', async () => {

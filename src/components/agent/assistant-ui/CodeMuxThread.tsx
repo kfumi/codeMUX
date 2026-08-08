@@ -27,6 +27,7 @@ import {
 } from '@/components/reasoning';
 import { cn } from '../../../lib/utils';
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
+import { useSessionStore } from '../../../stores/sessionStore';
 import { buildConversationTurnIndex, buildConversationTurns } from '../../../lib/conversationTurns';
 import type { ConversationTurn } from '../../../types/conversationTurn';
 
@@ -72,6 +73,7 @@ type CodeMuxThreadRenderContextValue = {
   onToggleExpandedTurn: (turnKey: string) => void;
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
+  turnOrdinalById: Map<string, number>;
 };
 
 const EMPTY_EVENTS: AgentMessage[] = [];
@@ -169,7 +171,10 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     () => buildConversationTurnIndex(conversationTurns),
     [conversationTurns],
   );
-
+  const turnOrdinalById = useMemo(
+    () => new Map(conversationTurns.map((turn, index) => [turn.id, index])),
+    [conversationTurns],
+  );
   const userNavItems = useMemo(() => buildUserNavItems(events), [events]);
   const userMessageCount = useMemo(
     () => events.reduce((count, event) => count + (event.kind === 'user' ? 1 : 0), 0),
@@ -193,6 +198,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     onToggleExpandedTurn: toggleExpandedTurn,
     toolDurations,
     turnByEventIndex,
+    turnOrdinalById,
   }), [
     sessionId,
     compactAiOutput,
@@ -203,6 +209,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     toggleExpandedTurn,
     toolDurations,
     turnByEventIndex,
+    turnOrdinalById,
   ]);
 
   return (
@@ -456,22 +463,26 @@ function CodeMuxAssistantMessage() {
   const {
     sessionId,
     compactAiOutput,
+    isRunning,
     collapseInfoByEventIndex,
     expandedTurnKeys,
     onToggleExpandedTurn,
     toolDurations,
     turnByEventIndex,
+    turnOrdinalById,
   } = useCodeMuxThreadRenderContext();
   return (
     <AssistantLikeMessage
       message={message}
       sessionId={sessionId}
       compactAiOutput={compactAiOutput}
+      isRunning={isRunning}
       collapseInfoByEventIndex={collapseInfoByEventIndex}
       expandedTurnKeys={expandedTurnKeys}
       onToggleExpandedTurn={onToggleExpandedTurn}
       toolDurations={toolDurations}
       turnByEventIndex={turnByEventIndex}
+      turnOrdinalById={turnOrdinalById}
     />
   );
 }
@@ -1026,21 +1037,27 @@ function AssistantLikeMessage({
   message,
   sessionId,
   compactAiOutput,
+  isRunning,
   collapseInfoByEventIndex,
   expandedTurnKeys,
   onToggleExpandedTurn,
   toolDurations,
   turnByEventIndex,
+  turnOrdinalById,
 }: {
   message: MessageState;
   sessionId: string;
   compactAiOutput: boolean;
+  isRunning: boolean;
   collapseInfoByEventIndex: Map<number, AssistantCollapseInfo>;
   expandedTurnKeys: Set<string>;
   onToggleExpandedTurn: (turnKey: string) => void;
   toolDurations: Record<string, number>;
   turnByEventIndex: Map<number, ConversationTurn<AgentMessage>>;
+  turnOrdinalById: Map<string, number>;
 }) {
+  const forkSession = useSessionStore((state) => state.forkSession);
+  const [isForking, setIsForking] = useState(false);
   if (message.content.length === 0) {
     return null;
   }
@@ -1065,6 +1082,29 @@ function AssistantLikeMessage({
     && turn?.status === 'completed'
     && message.metadata.custom?.sourceRole !== 'system'
     && turn !== undefined;
+  const sourceUuid = message.metadata.custom?.sourceUuid as string | undefined;
+  const sourceProviderTurnId = message.metadata.custom?.sourceProviderTurnId as string | undefined;
+  const sourceProviderTurnOrdinal = turn ? turnOrdinalById.get(turn.id) : undefined;
+  const isForkable = shouldRenderFooter
+    && !isRunning
+    && sourceUuid != null;
+  const handleFork = async () => {
+    if (!isForkable || !sourceUuid || isForking) return;
+    setIsForking(true);
+    try {
+      await forkSession(
+        sessionId,
+        sourceUuid,
+        sourceUuid,
+        sourceProviderTurnId,
+        sourceProviderTurnOrdinal,
+      );
+    } catch {
+      // The session store retains the error for the surrounding session UI.
+    } finally {
+      setIsForking(false);
+    }
+  };
   const messageBottomSpacing = shouldRenderFooter ? 'mb-2' : 'mb-5';
 
   return (
@@ -1153,7 +1193,10 @@ function AssistantLikeMessage({
             stats={footerStats}
             revealOnHover
             sessionId={sessionId}
-            sourceUuid={message.metadata.custom?.sourceUuid as string | undefined}
+            sourceUuid={sourceUuid}
+            canFork={isForkable}
+            isForking={isForking}
+            onFork={handleFork}
           />
         ) : null}
       </div>

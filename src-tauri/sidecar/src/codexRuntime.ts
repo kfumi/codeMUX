@@ -51,6 +51,7 @@ import {
 import { setLogCtx, writeLog } from './writeLog.js';
 import { loadProviderRuntime, isRuntimeError, type RuntimeLoadResult } from './runtimeLoader.js';
 import { loadCodexSdk, type CodexSdkModule } from './sdkLoader.js';
+import { forkCodexThread } from './codexFork.js';
 import { resolveTurnTimeouts, type ResolvedTurnTimeouts, type TurnTimeouts } from './turnTimeouts.js';
 import { createTurnIdleGuard, type TurnIdleGuard } from './turnIdleGuard.js';
 import {
@@ -251,6 +252,7 @@ export class CodexSessionRuntime {
   private timeouts: ResolvedTurnTimeouts = resolveTurnTimeouts();
   private turnIdleGuard: TurnIdleGuard | undefined;
   private idleTimedOut = false;
+  private activeTurnId: string | null = null;
 
   /** Question timeout for the compat-proxy interactive path (0 = infinite). */
   getQuestionTimeoutMs(): number {
@@ -697,6 +699,42 @@ export class CodexSessionRuntime {
     await this.teardownClient();
   }
 
+  async forkSession(
+    sourceAgentSessionId?: string,
+    sourceProviderTurnId?: string,
+    sourceProviderTurnOrdinal?: number,
+  ): Promise<string> {
+    const config = this.config;
+    if (!config) {
+      throw new Error('Codex session has not been created yet');
+    }
+    if (this.abortController) {
+      throw new Error('Cannot fork while a Codex turn is active');
+    }
+
+    const sourceThreadId = sourceAgentSessionId ?? config.agentSessionId;
+    if (!sourceThreadId) {
+      throw new Error('Codex session has no provider thread ID');
+    }
+    if (!config.runtimeRef?.runtimePath) {
+      throw new Error('Codex Runtime is required to fork a session');
+    }
+
+    const childThreadId = await forkCodexThread({
+      runtimePath: config.runtimeRef.runtimePath,
+      cwd: config.cwd,
+      sourceThreadId,
+      lastTurnId: sourceProviderTurnId,
+      turnOrdinal: sourceProviderTurnOrdinal,
+      apiKey: config.apiKey,
+      baseUrl: config.runtimeBaseUrl,
+    });
+    process.stderr.write(
+      `[codex] Forked thread ${sourceThreadId}${sourceProviderTurnId ? ` at turn ${sourceProviderTurnId}` : ''} -> ${childThreadId}\n`,
+    );
+    return childThreadId;
+  }
+
   async resetSession(sessionId: string): Promise<void> {
     process.stderr.write(`[codex] Reset session: ${sessionId}\n`);
     this.abortController?.abort();
@@ -828,6 +866,8 @@ export class CodexSessionRuntime {
         });
         return;
       case 'turn.started':
+        this.activeTurnId = readCodexTurnId(event);
+        return;
       case 'turn.completed':
         return;
       default: {
@@ -949,7 +989,12 @@ export class CodexSessionRuntime {
         return;
       }
       if (item.text.trim()) {
-        this.emitTurnEvent(sessionId, { kind: 'assistant_message', content: [{ type: 'text', text: item.text }] });
+        this.emitTurnEvent(sessionId, {
+          kind: 'assistant_message',
+          content: [{ type: 'text', text: item.text }],
+          providerMessageId: item.id,
+          providerTurnId: this.activeTurnId ?? undefined,
+        });
       }
       return;
     }
@@ -967,7 +1012,12 @@ export class CodexSessionRuntime {
     if (item.type === 'reasoning' && eventType === 'item.completed') {
       this.completeStreamingText(sessionId, item.id);
       if (item.text.trim()) {
-        this.emitTurnEvent(sessionId, { kind: 'assistant_message', content: [{ type: 'thinking', thinking: item.text }] });
+        this.emitTurnEvent(sessionId, {
+          kind: 'assistant_message',
+          content: [{ type: 'thinking', thinking: item.text }],
+          providerMessageId: item.id,
+          providerTurnId: this.activeTurnId ?? undefined,
+        });
       }
       return;
     }
@@ -1096,6 +1146,7 @@ export class CodexSessionRuntime {
     this.activeCompactItemIds.clear();
     emit({ type: 'sidecar_query_done' });
     this.turnEventNormalizer = null;
+    this.activeTurnId = null;
   }
 
   private emitTurnEvent(sessionId: string, source: Parameters<CodexTurnEventNormalizer['accept']>[0]): void {
@@ -1132,6 +1183,7 @@ export class CodexSessionRuntime {
     this.blockedPlanMutationItemIds.clear();
     this.activeCompactItemIds.clear();
     this.emittedCompactItemIds.clear();
+    this.activeTurnId = null;
     this.thread = null;
     this.client = null;
   }
@@ -1389,4 +1441,14 @@ function isMissingResponsesCompletionError(message: string): boolean {
   const normalized = message.toLowerCase();
   return normalized.includes('stream closed before response.completed')
     || normalized.includes('stream disconnected before completion');
+}
+
+function readCodexTurnId(event: ThreadEvent): string | null {
+  const raw = event as unknown as Record<string, unknown>;
+  const candidates = [
+    raw.turn_id,
+    raw.turnId,
+    (raw.turn as Record<string, unknown> | undefined)?.id,
+  ];
+  return candidates.find((value): value is string => typeof value === 'string' && value.length > 0) ?? null;
 }

@@ -14,6 +14,7 @@ const sdkMocks = vi.hoisted(() => {
   const session = {
     create: vi.fn().mockResolvedValue({ data: { id: 'mock-session' } }),
     get: vi.fn().mockResolvedValue({ data: { id: 'mock-session' } }),
+    fork: vi.fn().mockResolvedValue({ data: { id: 'mock-forked-session' } }),
     delete: vi.fn().mockResolvedValue({ data: true }),
     prompt,
     promptAsync,
@@ -77,6 +78,7 @@ function createPort() {
   const client = {
     createSession: vi.fn().mockResolvedValue({ id: 'opencode-new' }),
     restoreSession: vi.fn().mockResolvedValue({ id: 'opencode-existing' }),
+    forkSession: vi.fn().mockResolvedValue({ id: 'opencode-forked' }),
     deleteSession: vi.fn().mockResolvedValue(undefined),
     prompt: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(true),
@@ -664,6 +666,41 @@ describe('OpenCodeRuntime', () => {
     await runtime.deleteSession('opencode-new');
 
     expect(client.deleteSession).toHaveBeenCalledWith({ cwd: 'D:/workspace/demo', sessionId: 'opencode-new' });
+  });
+
+  it('forks the native OpenCode session at a provider message', async () => {
+    const { port, client } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+
+    await expect(runtime.forkSession(
+      'opencode-new',
+      undefined,
+      undefined,
+      'assistant-message-1',
+    )).resolves.toBe('opencode-forked');
+
+    expect(client.forkSession).toHaveBeenCalledWith({
+      cwd: 'D:/workspace/demo',
+      sessionId: 'opencode-new',
+      messageId: 'assistant-message-1',
+    });
+  });
+
+  it('rejects an OpenCode fork while a turn is active', async () => {
+    const { port, client } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+    await runtime.start();
+    const pending = deferred<void>();
+    client.prompt.mockReturnValueOnce(pending.promise);
+
+    const input = runtime.sendInput('keep running');
+    await vi.waitFor(() => expect(client.prompt).toHaveBeenCalled());
+
+    await expect(runtime.forkSession(undefined, undefined, undefined, 'assistant-message-1'))
+      .rejects.toThrow('Cannot fork while an OpenCode turn is active');
+    pending.resolve();
+    await input;
   });
 
   it('sends text and image payloads to the adapter without exposing SDK objects', async () => {

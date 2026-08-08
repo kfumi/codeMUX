@@ -18,6 +18,13 @@ interface SessionState {
   fetchSessions: () => Promise<void>;
   fetchArchivedSessions: () => Promise<void>;
   createSession: CreateSessionAction;
+  forkSession: (
+    sessionId: string,
+    forkEventId: string,
+    forkProviderMessageId?: string,
+    forkProviderTurnId?: string,
+    forkProviderTurnOrdinal?: number,
+  ) => Promise<Session>;
   deleteSession: (sessionId: string) => Promise<void>;
   archiveSession: (sessionId: string) => Promise<void>;
   unarchiveSession: (sessionId: string) => Promise<void>;
@@ -147,6 +154,40 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
   createSession: createSessionAction(set),
+  forkSession: async (
+    sessionId,
+    forkEventId,
+    forkProviderMessageId,
+    forkProviderTurnId,
+    forkProviderTurnOrdinal,
+  ) => {
+    set({ isLoading: true, error: null });
+    try {
+      const sourceSession = get().sessions.find((entry) => entry.id === sessionId)
+        ?? get().archivedSessions.find((entry) => entry.id === sessionId);
+      const session = sourceSession?.agent_kind === 'codex'
+        ? await sessionApi.forkCodex(
+          sessionId,
+          forkEventId,
+          forkProviderMessageId,
+          forkProviderTurnId,
+          forkProviderTurnOrdinal,
+        )
+        : sourceSession?.agent_kind === 'opencode'
+          ? await sessionApi.forkOpenCode(sessionId, forkEventId, forkProviderMessageId)
+        : await sessionApi.forkClaude(sessionId, forkEventId, forkProviderMessageId);
+      useAgentStore.getState().clearEvents(session.id);
+      set((state) => ({
+        sessions: [session, ...state.sessions.filter((entry) => entry.id !== session.id)],
+        activeSessionId: session.id,
+        isLoading: false,
+      }));
+      return session;
+    } catch (error) {
+      set({ error: String(error), isLoading: false });
+      throw error;
+    }
+  },
   deleteSession: async (sessionId: string) => {
     set({ isLoading: true, error: null });
     try {

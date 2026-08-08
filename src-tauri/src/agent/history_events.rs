@@ -365,6 +365,10 @@ fn copy_history_fields(target: &mut Value, source: &Value) {
             target.insert("uuid".to_string(), json!(provider_message_id));
         }
     }
+    if let Some(provider_turn_id) = first_string(source, &["provider_turn_id", "turn_id", "turnId"])
+    {
+        target.insert("provider_turn_id".to_string(), json!(provider_turn_id));
+    }
     for (target_key, source_keys) in [
         ("line_index", &["line_index", "__lineIndex"][..]),
         (

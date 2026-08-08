@@ -34,6 +34,16 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
         );
 
+        CREATE TABLE IF NOT EXISTS session_lineage (
+            child_session_id TEXT PRIMARY KEY,
+            parent_session_id TEXT,
+            fork_event_id TEXT NOT NULL,
+            fork_provider_message_id TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (child_session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+            FOREIGN KEY (parent_session_id) REFERENCES sessions(id) ON DELETE SET NULL
+        );
+
         CREATE TABLE IF NOT EXISTS agent_session_mappings (
             app_session_id TEXT NOT NULL,
             agent_kind TEXT NOT NULL,
@@ -272,6 +282,7 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "
         CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions(project_id);
+        CREATE INDEX IF NOT EXISTS idx_session_lineage_parent_session_id ON session_lineage(parent_session_id);
         CREATE INDEX IF NOT EXISTS idx_agent_session_mappings_app_session_id ON agent_session_mappings(app_session_id);
         CREATE INDEX IF NOT EXISTS idx_session_sources_app_session_id ON session_sources(app_session_id);
         CREATE INDEX IF NOT EXISTS idx_session_event_snapshots_session_id ON session_event_snapshots(session_id);

@@ -47,6 +47,7 @@ pub struct Session {
     pub is_pinned: bool,
     pub created_at: String,
     pub updated_at: String,
+    pub parent_session_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -179,6 +180,7 @@ pub fn create_session_with_mode_and_permissions(
         is_pinned: false,
         created_at: now.clone(),
         updated_at: now,
+        parent_session_id: None,
     })
 }
 
@@ -220,12 +222,13 @@ pub fn create_session_for_project_with_permissions(
         is_pinned: false,
         created_at: now.clone(),
         updated_at: now,
+        parent_session_id: None,
     })
 }
 
 pub fn get_session(conn: &Connection, session_id: &str) -> Result<Option<Session>> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at FROM sessions WHERE id = ?1 LIMIT 1",
+        "SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at, (SELECT parent_session_id FROM session_lineage WHERE child_session_id = sessions.id) FROM sessions WHERE id = ?1 LIMIT 1",
     )?;
     let mut rows = stmt.query([session_id])?;
     let Some(row) = rows.next()? else {
@@ -248,7 +251,89 @@ pub fn get_session(conn: &Connection, session_id: &str) -> Result<Option<Session
         is_pinned: row.get::<_, i32>(13)? != 0,
         created_at: row.get(14)?,
         updated_at: row.get(15)?,
+        parent_session_id: row.get(16)?,
     }))
+}
+
+pub fn create_forked_session(
+    conn: &mut Connection,
+    source_session_id: &str,
+    child_agent_session_id: &str,
+    fork_event_id: &str,
+    fork_provider_message_id: Option<&str>,
+    title: &str,
+) -> Result<Session> {
+    let source = get_session(conn, source_session_id)?
+        .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
+    let child_id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT INTO sessions (
+            id, title, agent_kind, provider_id, model, reasoning_effort, mode,
+            permission_config, plan_mode, project_id, origin, is_read_only,
+            is_archived, is_pinned, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'native', 0, 0, 0, ?11, ?11)",
+        params![
+            child_id,
+            title,
+            source.agent_kind.as_str(),
+            source.provider_id.as_deref(),
+            source.model.as_deref(),
+            source.reasoning_effort.as_deref(),
+            source.mode.as_deref(),
+            source.permission_config.as_deref().unwrap_or(""),
+            source.plan_mode.as_deref().unwrap_or("off"),
+            source.project_id.as_deref(),
+            &now,
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO session_lineage (
+            child_session_id, parent_session_id, fork_event_id,
+            fork_provider_message_id, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            child_id,
+            source_session_id,
+            fork_event_id,
+            fork_provider_message_id,
+            &now,
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO agent_session_mappings (
+            app_session_id, agent_kind, agent_session_id, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?4)",
+        params![
+            child_id,
+            source.agent_kind.as_str(),
+            child_agent_session_id,
+            &now
+        ],
+    )?;
+    tx.commit()?;
+
+    Ok(Session {
+        id: child_id,
+        title: title.to_string(),
+        agent_kind: source.agent_kind,
+        provider_id: source.provider_id,
+        model: source.model,
+        reasoning_effort: source.reasoning_effort,
+        mode: source.mode,
+        permission_config: source.permission_config,
+        plan_mode: source.plan_mode,
+        project_id: source.project_id,
+        origin: "native".to_string(),
+        is_read_only: false,
+        is_archived: false,
+        is_pinned: false,
+        created_at: now.clone(),
+        updated_at: now,
+        parent_session_id: Some(source_session_id.to_string()),
+    })
 }
 
 pub fn get_imported_source(
@@ -465,7 +550,7 @@ fn insert_snapshot_events(
 }
 
 pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at FROM sessions WHERE is_archived = 0 ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at, (SELECT parent_session_id FROM session_lineage WHERE child_session_id = sessions.id) FROM sessions WHERE is_archived = 0 ORDER BY updated_at DESC")?;
 
     let sessions = stmt
         .query_map([], |row| {
@@ -486,6 +571,7 @@ pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
                 is_pinned: row.get::<_, i32>(13)? != 0,
                 created_at: row.get(14)?,
                 updated_at: row.get(15)?,
+                parent_session_id: row.get(16)?,
             })
         })?
         .collect::<Result<Vec<_>>>()?;
@@ -494,7 +580,7 @@ pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
 }
 
 pub fn get_all_archived_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at FROM sessions WHERE is_archived = 1 ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at, (SELECT parent_session_id FROM session_lineage WHERE child_session_id = sessions.id) FROM sessions WHERE is_archived = 1 ORDER BY updated_at DESC")?;
 
     let sessions = stmt
         .query_map([], |row| {
@@ -515,6 +601,7 @@ pub fn get_all_archived_sessions(conn: &Connection) -> Result<Vec<Session>> {
                 is_pinned: row.get::<_, i32>(13)? != 0,
                 created_at: row.get(14)?,
                 updated_at: row.get(15)?,
+                parent_session_id: row.get(16)?,
             })
         })?
         .collect::<Result<Vec<_>>>()?;
@@ -833,12 +920,12 @@ pub fn get_model_distribution(
 #[cfg(test)]
 mod tests {
     use super::{
-        archive_session, delete_agent_session_mapping, get_agent_distribution,
-        get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
-        get_model_distribution, get_session_snapshot, get_usage_heatmap, get_usage_overview,
-        import_session_snapshot, set_session_pinned, set_session_read_only, unarchive_session,
-        update_session_provider, update_session_reasoning_effort, upsert_agent_session_mapping,
-        ImportedSessionSnapshot,
+        archive_session, create_forked_session, delete_agent_session_mapping,
+        get_agent_distribution, get_agent_session_mapping, get_all_archived_sessions,
+        get_all_sessions, get_model_distribution, get_session_snapshot, get_usage_heatmap,
+        get_usage_overview, import_session_snapshot, set_session_pinned, set_session_read_only,
+        unarchive_session, update_session_provider, update_session_reasoning_effort,
+        upsert_agent_session_mapping, ImportedSessionSnapshot,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -883,6 +970,66 @@ mod tests {
             .unwrap()
             .expect("mapping should exist");
         assert_eq!(loaded.agent_session_id, "claude-b");
+    }
+
+    #[test]
+    fn creates_forked_session_with_independent_mapping_and_lineage() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, model, permission_config, plan_mode, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+            rusqlite::params![
+                "parent",
+                "Parent",
+                "claude_code",
+                "agent",
+                "claude-sonnet",
+                "{}",
+                "off",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+        upsert_agent_session_mapping(&conn, "parent", AgentKind::ClaudeCode, "claude-parent")
+            .unwrap();
+
+        let child = create_forked_session(
+            &mut conn,
+            "parent",
+            "claude-child",
+            "assistant-event-1",
+            Some("provider-message-1"),
+            "Parent · 分支",
+        )
+        .unwrap();
+
+        assert_eq!(child.parent_session_id.as_deref(), Some("parent"));
+        assert_eq!(child.model.as_deref(), Some("claude-sonnet"));
+        assert_eq!(
+            get_agent_session_mapping(&conn, &child.id, AgentKind::ClaudeCode)
+                .unwrap()
+                .unwrap()
+                .agent_session_id,
+            "claude-child"
+        );
+        let lineage = conn
+            .query_row(
+                "SELECT parent_session_id, fork_event_id, fork_provider_message_id
+                 FROM session_lineage WHERE child_session_id = ?1",
+                [&child.id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(lineage.0, "parent");
+        assert_eq!(lineage.1, "assistant-event-1");
+        assert_eq!(lineage.2, "provider-message-1");
     }
 
     #[test]

@@ -170,6 +170,27 @@ describe('parseSdkUserMessage', () => {
 });
 
 describe('mapPersistedClaudeMessage', () => {
+  it('uses the provider message ID for normalized assistant history events', () => {
+    const event = mapPersistedClaudeMessage({
+      type: 'assistant_message',
+      provider_message_id: 'claude-assistant-1',
+      event_id: 'codemux-history-session-7',
+      session_id: 'session-1',
+      content: [{ type: 'text', text: '已完成。' }],
+      stop_reason: 'end_turn',
+    });
+
+    expect(event).toMatchObject({
+      kind: 'assistant',
+      data: {
+        uuid: 'claude-assistant-1',
+        message: {
+          stop_reason: 'end_turn',
+        },
+      },
+    });
+  });
+
   it('keeps persisted user message locator with line index', () => {
     expect(
       mapPersistedClaudeMessage({

@@ -131,7 +131,7 @@ function summarizeInvokeArgs(args?: Record<string, unknown>) {
 }
 
 async function invokeLogged<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  const isAgentCommand = command.startsWith('agent_') || command.startsWith('ensure_agent') || command.startsWith('start_agent') || command.startsWith('send_agent') || command.startsWith('interrupt_agent') || command.startsWith('reset_agent') || command.startsWith('shutdown_agent') || command.startsWith('rewind_agent');
+  const isAgentCommand = command.startsWith('agent_') || command.startsWith('ensure_agent') || command.startsWith('start_agent') || command.startsWith('send_agent') || command.startsWith('interrupt_agent') || command.startsWith('reset_agent') || command.startsWith('shutdown_agent') || command.startsWith('rewind_agent') || command.startsWith('fork_');
 
   if (isAgentCommand) {
     logger.debug('Tauri command invoked', {
@@ -232,6 +232,46 @@ export const sessionApi = {
       sessionId,
       permissionConfig: permissionConfig ? JSON.stringify(permissionConfig) : null,
       planMode: planMode ?? null,
+    }),
+  forkClaude: (
+    sessionId: string,
+    forkEventId: string,
+    forkProviderMessageId?: string,
+    title?: string,
+  ): Promise<Session> =>
+    invokeLogged('fork_claude_session', {
+      sessionId,
+      forkEventId,
+      forkProviderMessageId: forkProviderMessageId ?? null,
+      title: title ?? null,
+    }),
+  forkCodex: (
+    sessionId: string,
+    forkEventId: string,
+    forkProviderMessageId?: string,
+    forkProviderTurnId?: string,
+    forkProviderTurnOrdinal?: number,
+    title?: string,
+  ): Promise<Session> =>
+    invokeLogged('fork_codex_session', {
+      sessionId,
+      forkEventId,
+      forkProviderMessageId: forkProviderMessageId ?? null,
+      forkProviderTurnId: forkProviderTurnId ?? null,
+      forkProviderTurnOrdinal: forkProviderTurnOrdinal ?? null,
+      title: title ?? null,
+    }),
+  forkOpenCode: (
+    sessionId: string,
+    forkEventId: string,
+    forkProviderMessageId?: string,
+    title?: string,
+  ): Promise<Session> =>
+    invokeLogged('fork_opencode_session', {
+      sessionId,
+      forkEventId,
+      forkProviderMessageId: forkProviderMessageId ?? null,
+      title: title ?? null,
     }),
 };
 

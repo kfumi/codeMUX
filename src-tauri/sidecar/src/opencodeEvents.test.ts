@@ -9,7 +9,7 @@ describe('OpenCode event normalization', () => {
   it('converts text deltas into assistant events with complete routing metadata', () => {
     const events = toCodeMuxEvent({ type: 'message.part.updated', properties: { part: { id: 'part-1', sessionID: 'opencode-session-1', messageID: 'message-1', type: 'text', text: 'Hello' }, delta: 'Hello' } }, context());
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ type: 'assistant_message', agent_id: 'agent-1', session_id: 'codemux-session-1', agent_session_id: 'opencode-session-1', opencode_session_id: 'opencode-session-1', sequence: 7, content: [{ type: 'text', text: 'Hello' }] });
+    expect(events[0]).toMatchObject({ type: 'assistant_message', agent_id: 'agent-1', session_id: 'codemux-session-1', agent_session_id: 'opencode-session-1', opencode_session_id: 'opencode-session-1', provider_message_id: 'message-1', sequence: 7, content: [{ type: 'text', text: 'Hello' }] });
   });
   it('does not expose text parts belonging to a user message as assistant output', () => {
     const userMessageUpdated = {

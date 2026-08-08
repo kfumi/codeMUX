@@ -210,7 +210,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
             events.push(buildAssistantEnvelope(context, sessionId, [{
               type: partState.kind,
               ...(partState.kind === 'thinking' ? { thinking: text } : { text }),
-            }]));
+            }], messageId));
           }
           if (context.idleStreamKind && partType === 'text') context.idleStreamKind.kind = 'text';
         } else if (partState) {
@@ -229,7 +229,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
             events.push(buildAssistantEnvelope(context, sessionId, [{
               type: partState.kind,
               ...(partState.kind === 'thinking' ? { thinking: text } : { text }),
-            }]));
+            }], messageId));
           }
           // Only advance idleStreamKind to 'text' when a text part finalizes.
           // A reasoning part finalizing does NOT mean subsequent parts are text —
@@ -257,7 +257,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
             events.push(buildAssistantEnvelope(context, sessionId, [{
               type: partType === 'reasoning' ? 'thinking' : 'text',
               ...(partType === 'reasoning' ? { thinking: text } : { text }),
-            }]));
+            }], messageId));
           }
           // Only advance idleStreamKind to 'text' when a text part is seen.
           if (context.idleStreamKind && partType === 'text') {
@@ -653,11 +653,17 @@ function buildTurnErrorEvent(
   };
 }
 
-function buildAssistantEnvelope(context: OpenCodeEventContext, sessionId: string | undefined, content: Array<Record<string, unknown>>): CodeMuxEvent {
+function buildAssistantEnvelope(
+  context: OpenCodeEventContext,
+  sessionId: string | undefined,
+  content: Array<Record<string, unknown>>,
+  providerMessageId?: string,
+): CodeMuxEvent {
   return {
     type: 'assistant_message',
     session_id: context.sessionId,
     content: content as AssistantContentBlock[],
+    ...(providerMessageId ? { provider_message_id: providerMessageId } : {}),
     event_id: context.eventIdFactory(),
     ...routingMetadata(context, sessionId),
   };
