@@ -3,6 +3,8 @@ use super::db;
 use super::ssot;
 use super::types::{Skill, SkillApps};
 use crate::AppState;
+use crate::config::types::AgentKind;
+use std::str::FromStr;
 use tauri::State;
 
 fn skills_dir() -> std::path::PathBuf {
@@ -389,4 +391,24 @@ pub fn get_enabled_skill_names(state: State<'_, AppState>) -> Result<Vec<String>
     let db_guard = state.db.lock().unwrap();
     db::get_enabled_skill_names(&db_guard)
         .map_err(|e| format!("Failed to get enabled skills: {}", e))
+}
+
+#[tauri::command]
+pub async fn list_project_skills(
+    project_root: String,
+    agent_kind: String,
+    force: Option<bool>,
+) -> Result<Vec<super::project::ProjectSkill>, String> {
+    let agent_kind = AgentKind::from_str(&agent_kind)?;
+    if force.unwrap_or(false) {
+        super::project::invalidate_project_skills(
+            std::path::Path::new(&project_root),
+            agent_kind,
+        );
+    }
+    tokio::task::spawn_blocking(move || {
+        super::project::resolve_project_skills(std::path::Path::new(&project_root), agent_kind)
+    })
+    .await
+    .map_err(|error| format!("Failed to scan project skills: {}", error))
 }

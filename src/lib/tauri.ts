@@ -16,7 +16,7 @@ import type { OpenTarget } from './openTargets';
 import type { AgentPermissionConfig, AgentPlanMode } from './agentPermissions';
 import type { Project } from '../types/project';
 import type { McpServer } from '../types/mcp';
-import type { ImportableSkill, Skill } from '../types/skill';
+import type { ImportableSkill, ProjectSkill, Skill } from '../types/skill';
 import type { UsageStatsResponse, TokenBreakdownResponse } from '../types/usage';
 import { createLogger, serializeError } from './logger';
 import { usePerfStore } from '../stores/perfStore';
@@ -491,6 +491,8 @@ export const skillApi = {
     invokeLogged('register_skill_from_disk', { name }),
   importFromApps: (selected?: string[] | null): Promise<{ total: number }> =>
     invokeLogged('import_skills_from_apps', { selected: selected ?? null }),
+  listProject: (projectRoot: string, agentKind: AgentKind, force = false): Promise<ProjectSkill[]> =>
+    invokeLogged('list_project_skills', { projectRoot, agentKind, force }),
 };
 
 export interface LogFileInfo {

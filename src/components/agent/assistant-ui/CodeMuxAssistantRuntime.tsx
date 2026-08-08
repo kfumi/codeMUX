@@ -9,6 +9,7 @@ import type { AgentMessage } from '../../../stores/agentStore';
 
 import type { AgentInputPayload } from '../../../types/agentInput';
 import type { AgentKind } from '../../../types/session';
+import type { ProjectSkill } from '../../../types/skill';
 import type { ConversationTurn } from '../../../types/conversationTurn';
 import {
   convertAgentEventsToAssistantMessages,
@@ -19,6 +20,7 @@ import {
 type CodeMuxAssistantRuntimeProviderProps = {
   sessionId: string;
   agentKind?: AgentKind;
+  projectSkills?: ProjectSkill[];
   onSend: (content: AgentInputPayload, displayContent?: string) => Promise<void>;
   onCommand: (command: SlashCommand, args: string) => void | Promise<void>;
   sendDisabled?: boolean;
@@ -34,6 +36,7 @@ const EMPTY_TIMESTAMPS: number[] = [];
 export function CodeMuxAssistantRuntimeProvider({
   sessionId,
   agentKind = 'claude_code',
+  projectSkills = [],
   onSend,
   onCommand,
   sendDisabled = false,
@@ -44,6 +47,7 @@ export function CodeMuxAssistantRuntimeProvider({
       key={sessionId}
       sessionId={sessionId}
       agentKind={agentKind}
+      projectSkills={projectSkills}
       onSend={onSend}
       onCommand={onCommand}
       sendDisabled={sendDisabled}
@@ -56,6 +60,7 @@ export function CodeMuxAssistantRuntimeProvider({
 function SessionScopedAssistantRuntime({
   sessionId,
   agentKind = 'claude_code',
+  projectSkills = [],
   onSend,
   onCommand,
   sendDisabled = false,
@@ -87,7 +92,7 @@ function SessionScopedAssistantRuntime({
       }
 
       const hasImages = (payload.images?.length ?? 0) > 0;
-      const chipCommand = hasImages ? null : resolveChipCommand(payload.text, agentKind);
+      const chipCommand = hasImages ? null : resolveChipCommand(payload.text, agentKind, projectSkills);
 
       if (chipCommand) {
         if (agentKind === 'claude_code') {
@@ -103,7 +108,7 @@ function SessionScopedAssistantRuntime({
         return;
       }
 
-      const slashCommand = hasImages ? null : resolveSlashCommand(payload.text, agentKind);
+      const slashCommand = hasImages ? null : resolveSlashCommand(payload.text, agentKind, projectSkills);
       if (slashCommand) {
         await onCommand(slashCommand.command, slashCommand.args);
         return;
@@ -111,7 +116,7 @@ function SessionScopedAssistantRuntime({
 
       await onSend(payload);
     },
-    [onCommand, onSend, agentKind, sendDisabled],
+    [onCommand, onSend, agentKind, projectSkills, sendDisabled],
   );
 
   const handleNew = useCallback(
@@ -260,7 +265,11 @@ function mediaTypeFromDataUrl(dataUrl: string): string | undefined {
   return match?.[1];
 }
 
-export function resolveSlashCommand(content: string, agentKind: AgentKind = 'claude_code'): { command: SlashCommand; args: string } | null {
+export function resolveSlashCommand(
+  content: string,
+  agentKind: AgentKind = 'claude_code',
+  projectSkills: ProjectSkill[] = [],
+): { command: SlashCommand; args: string } | null {
   if (!content.startsWith('/')) {
     return null;
   }
@@ -272,7 +281,7 @@ export function resolveSlashCommand(content: string, agentKind: AgentKind = 'cla
     return null;
   }
 
-  const command = findCommand(name, agentKind);
+  const command = findCommand(name, agentKind, projectSkills);
   return command
     ? { command, args: firstSpaceIndex === -1 ? '' : content.slice(firstSpaceIndex + 1).trim() }
     : null;
@@ -283,11 +292,12 @@ const CHIP_COMMAND_RE = /^\[\$([^\]]+)\]\([^)]+\)\s*([\s\S]*)$/;
 export function resolveChipCommand(
   content: string,
   agentKind: AgentKind = 'claude_code',
+  projectSkills: ProjectSkill[] = [],
 ): { command: SlashCommand; args: string } | null {
   const match = CHIP_COMMAND_RE.exec(content.trim());
   if (!match) return null;
   const [, name, rest] = match;
   const args = rest.trim();
-  const command = findCommand(name, agentKind);
+  const command = findCommand(name, agentKind, projectSkills);
   return command ? { command, args } : null;
 }

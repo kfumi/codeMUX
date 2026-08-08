@@ -43,6 +43,7 @@ import { usePreviewStore, type FileTreeNodeData } from '../../../stores/previewS
 import { useSessionStore } from '../../../stores/sessionStore';
 import { mapExecutionModeToPermissionConfig } from '../../../lib/agentPermissions';
 import type { AgentKind } from '../../../types/session';
+import type { ProjectSkill } from '../../../types/skill';
 import { ContextDisplay } from '../../assistant-ui/context-display';
 import { buildContextUsageViewModel } from '../contextUsage';
 import { AskUserQuestionCard, type AskUserQuestion } from '../AskUserQuestionCard';
@@ -62,6 +63,7 @@ interface CodeMuxComposerProps {
   sessionId: string;
   agentKind?: AgentKind;
   projectPath?: string | null;
+  projectSkills?: ProjectSkill[];
   modelName?: string;
   placeholder?: string;
   modelSelector?: ReactNode;
@@ -86,7 +88,10 @@ const CATEGORY_LABELS: Record<string, string> = {
   skill: '技能',
 };
 
-export function createCodeMuxFormatter(agentKind: AgentKind = 'claude_code'): Unstable_DirectiveFormatter {
+export function createCodeMuxFormatter(
+  agentKind: AgentKind = 'claude_code',
+  projectSkills: ProjectSkill[] = [],
+): Unstable_DirectiveFormatter {
   return {
     serialize: (item) => {
       if (item.type === 'file' || item.type === 'directory') {
@@ -95,7 +100,7 @@ export function createCodeMuxFormatter(agentKind: AgentKind = 'claude_code'): Un
       }
 
       const metadata = item.metadata ?? {};
-      const command = item.type === 'command' ? findCommand(item.id, agentKind) : undefined;
+      const command = item.type === 'command' ? findCommand(item.id, agentKind, projectSkills) : undefined;
       const filePath = typeof metadata.filePath === 'string' && metadata.filePath
         ? metadata.filePath
         : command?.filePath ?? '';
@@ -166,6 +171,7 @@ export function CodeMuxComposer({
   sessionId,
   agentKind = 'claude_code',
   projectPath,
+  projectSkills = [],
   modelName,
   placeholder = '输入消息... (@ 引用文件, / 命令)',
   modelSelector,
@@ -201,8 +207,11 @@ export function CodeMuxComposer({
     sessionProviderUsesLargeContext: false,
     activeProviderUsesLargeContext: false,
   }), [tokenUsage, modelName]);
-  const commands = useMemo(() => getAllCommands(agentKind), [agentKind]);
-  const formatter = useMemo(() => createCodeMuxFormatter(agentKind), [agentKind]);
+  const commands = useMemo(() => getAllCommands(agentKind, projectSkills), [agentKind, projectSkills]);
+  const formatter = useMemo(
+    () => createCodeMuxFormatter(agentKind, projectSkills),
+    [agentKind, projectSkills],
+  );
 
   const treeRoot = usePreviewStore((state) => state.treeRoot);
   // Flatten the file tree once per tree change instead of every render.
@@ -1153,6 +1162,11 @@ function TriggerMenuItem({
           <span className="truncate text-sm font-medium text-foreground" style={{ fontFamily: 'var(--font-ui)' }}>
             {item.label}
           </span>
+          {getCommandSourceLabel(item) && (
+            <span className="shrink-0 text-[11px] text-muted-foreground/65">
+              {getCommandSourceLabel(item)}
+            </span>
+          )}
           {getItemArgsHint(item) && <span className="shrink-0 text-xs text-muted-foreground">{getItemArgsHint(item)}</span>}
         </div>
         {item.description && <div className="truncate text-xs text-muted-foreground">{item.description}</div>}
@@ -1211,7 +1225,8 @@ function isCompletedTrigger(trigger: ActiveTrigger, commands: SlashCommand[], fi
   }
 
   if (trigger.char === '/') {
-    return commands.some((command) => command.name === trigger.query);
+    const query = trigger.query.toLowerCase();
+    return commands.some((command) => command.name.toLowerCase() === query);
   }
 
   return files.some((file) => file.relativePath === trigger.query || file.name === trigger.query);
@@ -1308,8 +1323,19 @@ function toTriggerItem(command: SlashCommand, agentKind: AgentKind): Unstable_Tr
       agentKind,
       argsHint: command.argsHint ?? '',
       filePath: command.filePath ?? '',
+      scope: command.scope ?? '',
+      source: command.source ?? '',
+      sourcePath: command.sourcePath ?? '',
     },
   };
+}
+
+function getCommandSourceLabel(item: Unstable_TriggerItem): string | null {
+  if (item.type !== 'command' || item.metadata?.scope !== 'project') {
+    return null;
+  }
+  const sourcePath = typeof item.metadata.sourcePath === 'string' ? item.metadata.sourcePath : '';
+  return sourcePath ? `项目 · ${sourcePath}` : '项目';
 }
 
 function toFileTriggerItem(file: FileEntry): Unstable_TriggerItem {
@@ -1324,7 +1350,7 @@ function toFileTriggerItem(file: FileEntry): Unstable_TriggerItem {
 function matchesCommand(command: SlashCommand, q: string) {
   if (!q) return true;
   return (
-    command.name.includes(q) ||
+    command.name.toLowerCase().includes(q) ||
     command.description.toLowerCase().includes(q) ||
     command.alias?.some((a) => a.toLowerCase().includes(q)) === true
   );

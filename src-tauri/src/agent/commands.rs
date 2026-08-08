@@ -2925,6 +2925,42 @@ async fn handle_agent_session_mapping_event(
     Ok(persisted)
 }
 
+fn resolve_skill_cwd(
+    state: &crate::AppState,
+    session_id: &str,
+    cwd: &str,
+) -> Result<String, String> {
+    let (origin, imported_cwd) = {
+        let db = state.db.lock().unwrap();
+        db.query_row(
+            "SELECT s.origin, ss.cwd FROM sessions s LEFT JOIN session_sources ss ON ss.app_session_id = s.id WHERE s.id = ?1 LIMIT 1",
+            [session_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .map_err(|error| format!("无法读取会话来源信息: {}", error))?
+    };
+    if origin == "imported" {
+        if let Some(imported_cwd) = imported_cwd.filter(|value| !value.trim().is_empty()) {
+            return Ok(imported_cwd);
+        }
+    }
+    Ok(cwd.to_string())
+}
+
+async fn preload_project_skills(project_root: String, agent_kind: &str) -> Result<(), String> {
+    let Ok(agent_kind) = AgentKind::from_str(agent_kind) else {
+        return Ok(());
+    };
+    tokio::task::spawn_blocking(move || {
+        let _ = crate::skills::project::resolve_project_skills(
+            std::path::Path::new(&project_root),
+            agent_kind,
+        );
+    })
+    .await
+    .map_err(|error| format!("Failed to preload project skills: {}", error))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_ensure_session_command(
     state: &crate::AppState,
@@ -2945,7 +2981,7 @@ fn build_ensure_session_command(
     let mut cmd = serde_json::json!({
         "type": "ensure_session",
         "agentKind": agent_kind,
-        "cwd": cwd,
+        "cwd": cwd.clone(),
         "sessionId": session_id,
     });
 
@@ -3061,7 +3097,7 @@ fn build_ensure_session_command(
         "opencode" => "opencode",
         _ => "claude",
     };
-    let enabled_skills = {
+    let mut enabled_skills = {
         let db = state.db.lock().unwrap();
         crate::skills::db::get_enabled_skill_names_for_app(&db, app).map_err(|error| {
             format!(
@@ -3070,6 +3106,34 @@ fn build_ensure_session_command(
             )
         })?
     };
+    if let Ok(parsed_agent_kind) = AgentKind::from_str(agent_kind) {
+        if parsed_agent_kind == AgentKind::ClaudeCode {
+            let project_root = cmd
+                .get("cwd")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(&cwd);
+            let project_skills = crate::skills::project::cached_project_skills(
+                std::path::Path::new(project_root),
+                parsed_agent_kind,
+            )
+            .unwrap_or_default();
+            let mut seen_names = HashSet::new();
+            let mut merged_skills = Vec::with_capacity(project_skills.len() + enabled_skills.len());
+            for skill in project_skills {
+                let key = skill.name.trim().to_lowercase();
+                if seen_names.insert(key) {
+                    merged_skills.push(skill.name);
+                }
+            }
+            for skill in enabled_skills {
+                if seen_names.insert(skill.trim().to_lowercase()) {
+                    merged_skills.push(skill);
+                }
+            }
+            enabled_skills = merged_skills;
+            cmd["settingSources"] = serde_json::json!(["user", "project"]);
+        }
+    }
     if !enabled_skills.is_empty() {
         cmd["skills"] = serde_json::json!(enabled_skills);
     }
@@ -3207,6 +3271,8 @@ pub async fn ensure_agent_session(
     } else {
         None
     };
+    let skill_cwd = resolve_skill_cwd(state.inner(), &session_id, &cwd)?;
+    preload_project_skills(skill_cwd, &agent_kind).await?;
 
     let cmd = build_ensure_session_command(
         &state,
@@ -3297,6 +3363,8 @@ pub async fn start_agent_session(
         } else {
             None
         };
+        let skill_cwd = resolve_skill_cwd(state.inner(), &session_id, &cwd)?;
+        preload_project_skills(skill_cwd, &agent_kind).await?;
 
         let ensure_cmd = build_ensure_session_command(
             &state,

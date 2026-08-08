@@ -104,6 +104,7 @@ type SessionBootstrap = {
   model?: string;
   reasoningEffort?: string;
   skills?: string[];
+  settingSources?: string[];
   permissionConfig?: SidecarPermissionConfig;
   planMode?: AgentPlanMode;
   runtimeRef?: import('./runtimeContract.js').ProviderRuntimeRef;
@@ -531,6 +532,7 @@ export class SessionRuntime {
       model: cmd.model,
       reasoningEffort: normalizeReasoningEffort(cmd.reasoningEffort),
       skills: cmd.skills,
+      settingSources: cmd.settingSources,
       permissionConfig: cmd.permissionConfig,
       planMode: normalizePlanMode(cmd.planMode),
       runtimeRef: cmd.runtimeRef,
@@ -982,6 +984,9 @@ export class SessionRuntime {
     if (claudePath) options.pathToClaudeCodeExecutable = claudePath;
     if (config.skills && config.skills.length > 0) {
       options.skills = config.skills;
+    }
+    if (config.settingSources && config.settingSources.length > 0) {
+      options.settingSources = config.settingSources;
     }
     if (config.model) {
       options.model = config.model;

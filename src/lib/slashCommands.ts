@@ -1,4 +1,5 @@
-import type { AgentKind } from '../types/session';
+import type { AgentKind } from '@/types/session';
+import type { ProjectSkill, SkillApps } from '@/types/skill';
 
 export type CommandCategory = 'session' | 'info' | 'builtin' | 'custom' | 'skill';
 export type CommandHandler = 'local' | 'prompt';
@@ -37,23 +38,43 @@ export interface SlashCommand {
   prompt?: string;
   /** Skill 命令对应的 SKILL.md 文件绝对路径 (仅 skill 类别) */
   filePath?: string;
+  /** Skill 的作用域 */
+  scope?: 'project' | 'global';
+  /** Skill 的来源目录标识 */
+  source?: string;
+  /** Skill 在项目中的相对来源路径 */
+  sourcePath?: string;
 }
 
 export function renderCommandPrompt(command: SlashCommand, args: string): string {
   return (command.prompt ?? '').replace(/\{args\}/g, args || '').trim();
 }
 
+export function renderCommandInput(command: SlashCommand, args: string, agentKind: AgentKind): string {
+  if (agentKind === 'codex' && command.category === 'skill' && command.filePath) {
+    const normalized = command.filePath.replace(/[\\/]+$/, '');
+    const separator = command.filePath.includes('\\') ? '\\' : '/';
+    const skillFilePath = `${normalized}${separator}SKILL.md`;
+    return `[$${command.name}](${skillFilePath})${args ? ` ${args}` : ' '}`;
+  }
+  return renderCommandPrompt(command, args);
+}
+
 export function formatCommandDisplay(command: SlashCommand, args: string): string {
   return `/${command.name}${args ? ` ${args}` : ''}`;
 }
 
-export function formatPromptAsCommandDisplay(prompt: string, agentKind: AgentKind = 'claude_code'): string | null {
+export function formatPromptAsCommandDisplay(
+  prompt: string,
+  agentKind: AgentKind = 'claude_code',
+  projectSkills: ProjectSkill[] = [],
+): string | null {
   const normalizedPrompt = prompt.trim();
   if (!normalizedPrompt) {
     return null;
   }
 
-  for (const command of getAllCommands(agentKind)) {
+  for (const command of getAllCommands(agentKind, projectSkills)) {
     if (command.handler !== 'prompt' || !command.prompt) {
       continue;
     }
@@ -182,17 +203,20 @@ function getCommands(agentKind: AgentKind = 'claude_code'): SlashCommand[] {
   const commands = agentKind === 'codex'
     ? [...getBuiltInCommands(agentKind), ...sharedCommands, ...customCommands]
     : [...sharedCommands, ...getBuiltInCommands(agentKind), ...customCommands];
+  return dedupeCommands(commands);
+}
+
+function dedupeCommands(commands: SlashCommand[]): SlashCommand[] {
   const seen = new Set<string>();
   return commands.filter((command) => {
-    if (seen.has(command.name)) return false;
-    seen.add(command.name);
+    const key = normalizeCommandName(command.name);
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }
 
 // ─── Skill 命令 (动态注册) ─────────────────────────────
-
-import type { SkillApps } from '../types/skill';
 
 interface SkillInfo {
   name: string;
@@ -222,6 +246,8 @@ export function registerSkillCommands(skills: SkillInfo[]): void {
       handler: 'prompt',
       prompt: `/${skill.name} {args}`,
       filePath: skill.diskPath ?? undefined,
+      scope: 'global',
+      source: 'global',
     };
     skillCommandsWithApps.push({ command, apps: skill.apps });
   }
@@ -241,33 +267,70 @@ function getSkillCommandsForAgent(agentKind: AgentKind): SlashCommand[] {
     .map((item) => item.command);
 }
 
+function getProjectSkillCommands(projectSkills: ProjectSkill[]): SlashCommand[] {
+  return projectSkills.map((skill) => ({
+    name: skill.name,
+    description: skill.description || skill.displayName || skill.name,
+    alias: [],
+    category: 'skill' as const,
+    handler: 'prompt' as const,
+    prompt: `/${skill.name} {args}`,
+    filePath: skill.diskPath,
+    scope: 'project' as const,
+    source: skill.source,
+    sourcePath: skill.relativePath,
+  }));
+}
+
 // ─── 公开 API ─────────────────────────────────────────
 
 /** 获取所有命令 */
-export function getAllCommands(agentKind: AgentKind = 'claude_code'): SlashCommand[] {
-  return [...getCommands(agentKind), ...getSkillCommandsForAgent(agentKind)];
+export function getAllCommands(
+  agentKind: AgentKind = 'claude_code',
+  projectSkills: ProjectSkill[] = [],
+): SlashCommand[] {
+  const commands = [
+    ...getCommands(agentKind),
+    ...getProjectSkillCommands(projectSkills),
+    ...getSkillCommandsForAgent(agentKind),
+  ];
+  return dedupeCommands(commands);
 }
 
 /** 按名称或别名查找命令 */
-export function findCommand(name: string, agentKind: AgentKind = 'claude_code'): SlashCommand | undefined {
-  const lower = name.toLowerCase();
-  const all = getAllCommands(agentKind);
+export function findCommand(
+  name: string,
+  agentKind: AgentKind = 'claude_code',
+  projectSkills: ProjectSkill[] = [],
+): SlashCommand | undefined {
+  const normalized = normalizeCommandName(name);
+  const all = getAllCommands(agentKind, projectSkills);
   return all.find(
-    (c) => c.name === lower || c.alias?.some((a) => a === lower)
+    (c) =>
+      normalizeCommandName(c.name) === normalized
+      || c.alias?.some((alias) => normalizeCommandName(alias) === normalized),
   );
 }
 
 /** 按前缀过滤命令 (用于自动补全) */
-export function filterCommands(prefix: string, agentKind: AgentKind = 'claude_code'): SlashCommand[] {
-  const all = getAllCommands(agentKind);
+export function filterCommands(
+  prefix: string,
+  agentKind: AgentKind = 'claude_code',
+  projectSkills: ProjectSkill[] = [],
+): SlashCommand[] {
+  const all = getAllCommands(agentKind, projectSkills);
   if (!prefix) return all;
   const lower = prefix.toLowerCase();
   return all.filter(
     (c) =>
-      c.name.startsWith(lower) ||
+      c.name.toLowerCase().startsWith(lower) ||
       c.description.includes(lower) ||
-      c.alias?.some((a) => a.startsWith(lower))
+      c.alias?.some((a) => a.toLowerCase().startsWith(lower))
   );
+}
+
+function normalizeCommandName(name: string): string {
+  return name.trim().toLowerCase();
 }
 
 function matchPromptTemplate(template: string, prompt: string): string | null {

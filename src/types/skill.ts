@@ -16,6 +16,15 @@ export interface Skill {
   directory: string;
 }
 
+export interface ProjectSkill {
+  name: string;
+  displayName: string | null;
+  description: string | null;
+  diskPath: string;
+  source: string;
+  relativePath: string;
+}
+
 export interface ImportableSkill {
   name: string;
   display_name: string | null;

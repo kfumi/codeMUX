@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
-import { renderCommandPrompt } from '../../lib/slashCommands';
+import { renderCommandInput } from '../../lib/slashCommands';
 import { serializePermissionConfig } from '../../lib/agentPermissions';
 import { agentApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
 import { useNewSessionStore } from '../../stores/newSessionStore';
 import { usePreviewStore } from '../../stores/previewStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { projectSkillCacheKey, useProjectSkillStore } from '@/stores/projectSkillStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useAgentModels } from '../../hooks/useAgentModels';
 import { getAgentDefinition } from '../../types/agentRegistry';
@@ -53,6 +54,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const getActiveProvider = useSettingsStore((s) => s.getActiveProvider);
   const { setProjectPath } = usePreviewStore();
   const clearEvents = useAgentStore((state) => state.clearEvents);
+  const loadProjectSkills = useProjectSkillStore((state) => state.load);
 
   const selectedAgent = getAgentDefinition(selectedAgentKind);
   const isProviderAgent = selectedAgentKind === 'claude_code' || selectedAgentKind === 'codex' || selectedAgentKind === 'opencode';
@@ -97,6 +99,12 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     [draftProjectId, projects],
   );
   const projectName = draftProject?.name ?? '';
+  const projectSkillEntry = useProjectSkillStore((state) => (
+    draftProject?.path
+      ? state.entries[projectSkillCacheKey(draftProject.path, selectedAgentKind)]
+      : undefined
+  ));
+  const projectSkills = projectSkillEntry?.skills ?? [];
   const title = projectName
     ? `我们应该在 ${projectName} 中构建什么？`
     : '我们应该做什么？';
@@ -113,6 +121,10 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
       usePreviewStore.setState({ treeRoot: null, treeRootPath: null });
     }
   }, [draftProject?.path, setProjectPath]);
+
+  useEffect(() => {
+    void loadProjectSkills(draftProject?.path, selectedAgentKind);
+  }, [draftProject?.path, loadProjectSkills, selectedAgentKind]);
 
   useEffect(() => {
     const configured = selectedAgentKind === 'codex'
@@ -209,7 +221,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
         }
       }
 
-      await handleSend({ text: renderCommandPrompt(command, args) });
+      await handleSend({ text: renderCommandInput(command, args, selectedAgentKind) });
     }
   };
 
@@ -218,6 +230,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
       <CodeMuxAssistantRuntimeProvider
         sessionId="new-session-draft"
         agentKind={selectedAgentKind}
+        projectSkills={projectSkills}
         onSend={handleSend}
         onCommand={handleCommand}
         sendDisabled={!hasUsableProvider || isCheckingRuntime}
@@ -260,6 +273,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               sessionId="new-session-draft"
               agentKind={selectedAgentKind}
               projectPath={draftProject?.path}
+              projectSkills={projectSkills}
               placeholder={placeholder}
               disabled={!hasUsableProvider || isCheckingRuntime}
               loading={isCheckingRuntime}

@@ -5,7 +5,7 @@ import { getStoredAgentCwd } from '../../lib/sessionCwd';
 import { getProviderPrimaryModel } from '../../lib/agentProfileSelector';
 import { getActiveModelProvider, isProviderUsable } from '../../lib/modelProviders';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
-import { formatCommandDisplay, renderCommandPrompt } from '../../lib/slashCommands';
+import { formatCommandDisplay, renderCommandInput } from '../../lib/slashCommands';
 import { mapExecutionModeToPermissionConfig, serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
 import type { ReasoningEffort } from '../../types/session';
 import type { AgentInputPayload } from '../../types/agentInput';
@@ -14,6 +14,8 @@ import { agentApi, sessionApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
 import { usePreviewStore } from '../../stores/previewStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { projectSkillCacheKey, useProjectSkillStore } from '@/stores/projectSkillStore';
+import type { ProjectSkill } from '@/types/skill';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { usePerfStore } from '../../stores/perfStore';
@@ -32,6 +34,7 @@ interface AgentPanelProps {
 }
 
 const EMPTY_PENDING_PERMISSIONS: AgentPermissionRequest[] = [];
+const EMPTY_PROJECT_SKILLS: ProjectSkill[] = [];
 
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, createSession, updateSessionPermissions } = useSessionStore();
@@ -44,6 +47,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const pendingPermissions = useAgentStore((state) => state.pendingPermissions[sessionId] ?? EMPTY_PENDING_PERMISSIONS);
   const { config, getActiveProvider } = useSettingsStore();
   const { setProjectPath } = usePreviewStore();
+  const loadProjectSkills = useProjectSkillStore((state) => state.load);
 
   // 检测容器宽度，窄屏时启用紧凑模式
   const containerRef = useRef<HTMLDivElement>(null);
@@ -66,6 +70,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const isReadOnly = Boolean(session?.is_read_only);
   const reasoningEffort = session?.reasoning_effort ?? 'medium';
   const agentKind = session?.agent_kind ?? 'claude_code';
+  const projectSkillEntry = useProjectSkillStore((state) => (
+    project?.path ? state.entries[projectSkillCacheKey(project.path, agentKind)] : undefined
+  ));
+  const projectSkills = projectSkillEntry?.skills ?? EMPTY_PROJECT_SKILLS;
   const isProviderAgent = agentKind === 'claude_code' || agentKind === 'codex' || agentKind === 'opencode';
   const modelProviders = config?.model_providers ?? [];
   const activeProviderId = config?.active_provider_id ?? null;
@@ -147,6 +155,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       setCwd(getStoredAgentCwd());
     }
   }, [sessionId, project?.path]);
+
+  useEffect(() => {
+    void loadProjectSkills(project?.path, agentKind);
+  }, [agentKind, loadProjectSkills, project?.path]);
 
   useEffect(() => {
     if (isRunning || isReadOnly) {
@@ -369,7 +381,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
     if (command.handler === 'prompt' && command.prompt) {
       const displayContent = formatCommandDisplay(command, args);
-      const prompt = renderCommandPrompt(command, args);
+      const prompt = renderCommandInput(command, args, agentKind);
       await handleSend({ text: prompt }, displayContent);
     }
   }, [sessionId, cwd, showInfoDialog, createSession, clearEvents, getActiveProvider, config, agentKind, handleSend]);
@@ -426,7 +438,14 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   return (
     <div ref={containerRef} className="flex h-full flex-col">
-      <CodeMuxAssistantRuntimeProvider sessionId={sessionId} agentKind={agentKind} onSend={handleSend} onCommand={handleCommand} sendDisabled={!hasUsableProvider || isReadOnly}>
+      <CodeMuxAssistantRuntimeProvider
+        sessionId={sessionId}
+        agentKind={agentKind}
+        projectSkills={projectSkills}
+        onSend={handleSend}
+        onCommand={handleCommand}
+        sendDisabled={!hasUsableProvider || isReadOnly}
+      >
         <Profiler id="AgentThread" onRender={handleProfilerRender}>
           <CodeMuxThread
             sessionId={sessionId}
@@ -436,6 +455,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                   sessionId={sessionId}
                   agentKind={agentKind}
                   projectPath={project?.path}
+                  projectSkills={projectSkills}
                   modelName={modelNameWithSuffix}
                   disabled={!hasUsableProvider || isReadOnly}
                   modelSelector={(

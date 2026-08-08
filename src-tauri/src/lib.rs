@@ -588,6 +588,7 @@ pub fn run() {
             skills::commands::scan_disk_skills,
             skills::commands::register_skill_from_disk,
             skills::commands::get_enabled_skill_names,
+            skills::commands::list_project_skills,
             commands::perf::get_tokio_console_info,
             commands::perf::export_perf_snapshot,
         ])
