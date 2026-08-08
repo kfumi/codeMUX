@@ -3918,6 +3918,7 @@ mod tests {
             name: id.to_string(),
             enabled: true,
             api_key: api_key.to_string(),
+            api_key_configured: false,
             endpoints: vec![crate::model_providers::ProtocolEndpoint {
                 protocol,
                 base_url: base_url.to_string(),

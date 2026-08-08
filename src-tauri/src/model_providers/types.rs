@@ -42,6 +42,9 @@ pub struct ModelProvider {
     pub enabled: bool,
     #[serde(default)]
     pub api_key: String,
+    /// Frontend-only: true when a non-empty key exists but was redacted from `api_key`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub api_key_configured: bool,
     #[serde(default)]
     pub endpoints: Vec<ProtocolEndpoint>,
     #[serde(default)]
@@ -131,6 +134,7 @@ pub fn is_provider_usable(provider: &ModelProvider, agent_kind: AgentKind) -> bo
         .any(|model| model.id.trim() == default_model)
 }
 
+/// Soft validation for save: identity + at least one endpoint. API key optional.
 pub fn validate_provider(provider: &ModelProvider) -> Result<(), String> {
     if provider.id.trim().is_empty() {
         return Err("供应商 id 不能为空".to_string());
@@ -150,11 +154,37 @@ pub fn validate_provider(provider: &ModelProvider) -> Result<(), String> {
         }
     }
     let default_model = provider.default_model.trim();
-    if default_model.is_empty() {
-        return Err("默认模型不能为空".to_string());
+    if !default_model.is_empty()
+        && !provider.models.is_empty()
+        && !provider
+            .models
+            .iter()
+            .any(|model| model.id.trim() == default_model)
+    {
+        return Err("默认模型必须存在于模型列表中".to_string());
+    }
+    Ok(())
+}
+
+/// Strict validation when enabling a provider: key, models, and default model required.
+pub fn validate_provider_for_enable(provider: &ModelProvider) -> Result<(), String> {
+    validate_provider(provider)?;
+    let has_key = !provider.api_key.trim().is_empty()
+        || provider.endpoints.iter().any(|endpoint| {
+            endpoint
+                .api_key_override
+                .as_deref()
+                .is_some_and(|key| !key.trim().is_empty())
+        });
+    if !has_key {
+        return Err("启用前请先填写 API Key".to_string());
     }
     if provider.models.is_empty() {
-        return Err("至少需要一个模型".to_string());
+        return Err("启用前请至少添加一个模型".to_string());
+    }
+    let default_model = provider.default_model.trim();
+    if default_model.is_empty() {
+        return Err("启用前请选择默认模型".to_string());
     }
     if !provider
         .models
@@ -193,6 +223,7 @@ mod tests {
             name: "DeepSeek".to_string(),
             enabled: true,
             api_key: "sk-test".to_string(),
+            api_key_configured: false,
             endpoints,
             models: vec![ProviderModel {
                 id: "deepseek-v4-flash".to_string(),
@@ -244,7 +275,21 @@ mod tests {
     }
 
     #[test]
-    fn validate_provider_requires_default_in_models() {
+    fn validate_provider_allows_empty_api_key_on_save() {
+        let mut provider = deepseek_provider(true, true);
+        provider.api_key.clear();
+        assert!(validate_provider(&provider).is_ok());
+    }
+
+    #[test]
+    fn validate_provider_for_enable_requires_api_key() {
+        let mut provider = deepseek_provider(true, true);
+        provider.api_key.clear();
+        assert!(validate_provider_for_enable(&provider).is_err());
+    }
+
+    #[test]
+    fn validate_provider_requires_default_in_models_when_set() {
         let mut provider = deepseek_provider(true, true);
         provider.default_model = "missing".to_string();
         assert!(validate_provider(&provider).is_err());

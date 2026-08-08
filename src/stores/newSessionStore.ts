@@ -10,6 +10,7 @@ import {
 interface NewSessionState {
   selectedAgentKind: AgentKind;
   selectedModel: string | null;
+  selectedProviderId: string | null;
   selectedReasoningEffort: ReasoningEffort;
   selectedPermissionConfig: AgentPermissionConfig;
   selectedPlanMode: AgentPlanMode;
@@ -20,6 +21,7 @@ interface NewSessionState {
   closeDraft: () => void;
   setSelectedAgentKind: (agentKind: AgentKind) => void;
   setSelectedModel: (model: string | null) => void;
+  setSelectedProviderId: (providerId: string | null) => void;
   setSelectedReasoningEffort: (effort: ReasoningEffort) => void;
   setSelectedPermissionConfig: (permissionConfig: AgentPermissionConfig) => void;
   setSelectedPlanMode: (planMode: AgentPlanMode) => void;
@@ -28,6 +30,7 @@ interface NewSessionState {
 export const useNewSessionStore = create<NewSessionState>((set) => ({
   selectedAgentKind: 'claude_code',
   selectedModel: null,
+  selectedProviderId: null,
   selectedReasoningEffort: 'medium',
   selectedPermissionConfig: buildDefaultPermissionConfig('claude_code'),
   selectedPlanMode: 'off',
@@ -39,6 +42,7 @@ export const useNewSessionStore = create<NewSessionState>((set) => ({
     draftRevision: state.draftRevision + 1,
     isDraftOpen: true,
     selectedModel: null,
+    selectedProviderId: null,
     selectedReasoningEffort: 'medium',
     selectedPermissionConfig: permissionConfig ?? buildDefaultPermissionConfig(state.selectedAgentKind),
     selectedPlanMode: 'off',
@@ -47,6 +51,7 @@ export const useNewSessionStore = create<NewSessionState>((set) => ({
     draftProjectId: null,
     isDraftOpen: false,
     selectedModel: null,
+    selectedProviderId: null,
     selectedReasoningEffort: 'medium',
     selectedPermissionConfig: buildDefaultPermissionConfig(state.selectedAgentKind),
     selectedPlanMode: 'off',
@@ -58,11 +63,14 @@ export const useNewSessionStore = create<NewSessionState>((set) => ({
 
     return {
       selectedAgentKind,
+      selectedModel: null,
+      selectedProviderId: null,
       selectedPermissionConfig: buildDefaultPermissionConfig(selectedAgentKind),
       selectedPlanMode: 'off',
     };
   }),
   setSelectedModel: (selectedModel) => set({ selectedModel }),
+  setSelectedProviderId: (selectedProviderId) => set({ selectedProviderId }),
   setSelectedReasoningEffort: (selectedReasoningEffort) => set({ selectedReasoningEffort }),
   setSelectedPermissionConfig: (selectedPermissionConfig) => set({ selectedPermissionConfig }),
   setSelectedPlanMode: (selectedPlanMode) => set({ selectedPlanMode }),

@@ -201,27 +201,40 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
   };
 
-  const handleModelChange = useCallback(async (nextModel: string) => {
-    if (isReadOnly || !isProviderAgent || !nextModel || nextModel === selectorModelState) {
+  const handleModelChange = useCallback(async (nextModel: string, providerId: string) => {
+    if (isReadOnly || !isProviderAgent || !nextModel) {
+      return;
+    }
+    const sameModel = nextModel === selectorModelState;
+    const sameProvider = providerId === (runtimeProvider?.id ?? activeProviderId);
+    if (sameModel && sameProvider) {
       return;
     }
     userModifiedRef.current = true;
     setSelectorModelState(nextModel);
-    const suffixedModel = modelSupports1m(nextModel)
-      ? `${nextModel}[1m]`
-      : nextModel;
+    const nextProvider =
+      modelProviders.find((provider) => provider.id === providerId) ?? runtimeProvider;
+    const supports1m = checkProfileModelSupports1m(nextProvider, nextModel);
+    const suffixedModel = supports1m ? `${nextModel}[1m]` : nextModel;
     updateSessionModel(sessionId, suffixedModel);
     try {
-      const providerId = runtimeProvider?.id ?? activeProviderId;
-      const isProviderModel = Boolean(runtimeProvider?.models.some((m) => m.id.trim() === nextModel));
-      await sessionApi.updateProvider(sessionId, isProviderModel ? providerId : providerId, suffixedModel);
+      await sessionApi.updateProvider(sessionId, providerId, suffixedModel);
     } catch (error) {
       console.warn('[AgentPanel] handleModelChange failed:', error);
       useAgentStore.setState((state) => ({
         error: { ...state.error, [sessionId]: String(error) },
       }));
     }
-  }, [activeProviderId, isProviderAgent, isReadOnly, modelSupports1m, runtimeProvider, sessionId, selectorModelState, updateSessionModel]);
+  }, [
+    activeProviderId,
+    isProviderAgent,
+    isReadOnly,
+    modelProviders,
+    runtimeProvider,
+    selectorModelState,
+    sessionId,
+    updateSessionModel,
+  ]);
 
   const handleReasoningEffortChange = useCallback(async (nextEffort: ReasoningEffort) => {
     if (isReadOnly) return;
@@ -404,7 +417,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                   modelSelector={(
                     <AgentModelSelector
                       agentKind={agentKind}
-                      activeProvider={runtimeProvider}
+                      providers={modelProviders}
                       activeProviderId={runtimeProvider?.id ?? activeProviderId}
                       value={selectorModelState}
                       contextModel={sessionProvider ? model : undefined}

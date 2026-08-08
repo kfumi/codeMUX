@@ -3,8 +3,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { renderCommandPrompt } from '../../lib/slashCommands';
 import { serializePermissionConfig } from '../../lib/agentPermissions';
-import { getActiveModelProvider, isProviderUsable } from '../../lib/modelProviders';
-import { getProviderPrimaryModel } from '../../lib/agentProfileSelector';
 import { agentApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
 import { useNewSessionStore } from '../../stores/newSessionStore';
@@ -30,12 +28,14 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const {
     selectedAgentKind,
     selectedModel,
+    selectedProviderId,
     selectedReasoningEffort,
     selectedPermissionConfig,
     selectedPlanMode,
     draftRevision,
     setSelectedAgentKind,
     setSelectedModel,
+    setSelectedProviderId,
     setSelectedReasoningEffort,
     setSelectedPermissionConfig,
     setSelectedPlanMode,
@@ -51,21 +51,30 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const isProviderAgent = selectedAgentKind === 'claude_code' || selectedAgentKind === 'codex' || selectedAgentKind === 'opencode';
   const modelProviders = config?.model_providers ?? [];
   const activeProviderId = config?.active_provider_id ?? null;
-  const activeProvider = useMemo(
-    () => getActiveModelProvider(modelProviders, activeProviderId),
-    [activeProviderId, modelProviders],
+  const { models, isLoading: areModelsLoading } = useAgentModels(
+    selectedAgentKind,
+    modelProviders,
+    selectedProviderId ?? activeProviderId,
   );
-  const { models, isLoading: areModelsLoading } = useAgentModels(selectedAgentKind, activeProvider, activeProviderId);
-  const effectiveModel = selectedModel || getProviderPrimaryModel(activeProvider) || models[0]?.id || '';
-  const selectedModelIsAvailable = !selectedModel || models.some((model) => model.id === selectedModel);
+  const preferredProviderId = selectedProviderId ?? activeProviderId;
+  const preferredModel = useMemo(() => {
+    if (selectedModel && models.some((model) => model.modelId === selectedModel && (
+      !preferredProviderId || model.providerId === preferredProviderId
+    ))) {
+      return models.find((model) =>
+        model.modelId === selectedModel
+        && (!preferredProviderId || model.providerId === preferredProviderId),
+      ) ?? null;
+    }
+    if (preferredProviderId) {
+      return models.find((model) => model.providerId === preferredProviderId) ?? models[0] ?? null;
+    }
+    return models[0] ?? null;
+  }, [models, preferredProviderId, selectedModel]);
+  const effectiveModel = preferredModel?.modelId || '';
+  const effectiveProviderId = preferredModel?.providerId || preferredProviderId;
   const hasUsableProvider = !isProviderAgent
-    || Boolean(
-      activeProvider
-        && isProviderUsable(activeProvider, selectedAgentKind)
-        && effectiveModel
-        && !areModelsLoading
-        && selectedModelIsAvailable,
-    );
+    || Boolean(effectiveModel && effectiveProviderId && !areModelsLoading);
 
   const draftProject = useMemo(
     () => projects.find((project) => project.id === draftProjectId) ?? null,
@@ -106,12 +115,31 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
 
   useEffect(() => {
     if (!isProviderAgent) return;
-    if (!activeProvider || !isProviderUsable(activeProvider, selectedAgentKind)) {
+    if (!preferredModel) {
       setSelectedModel(null);
+      setSelectedProviderId(null);
       return;
     }
-    setSelectedModel(getProviderPrimaryModel(activeProvider) || null);
-  }, [activeProvider, isProviderAgent, selectedAgentKind, setSelectedModel]);
+    if (
+      selectedModel !== preferredModel.modelId
+      || selectedProviderId !== preferredModel.providerId
+    ) {
+      setSelectedModel(preferredModel.modelId);
+      setSelectedProviderId(preferredModel.providerId);
+    }
+  }, [
+    isProviderAgent,
+    preferredModel,
+    selectedModel,
+    selectedProviderId,
+    setSelectedModel,
+    setSelectedProviderId,
+  ]);
+
+  const handleModelChange = (modelId: string, providerId: string) => {
+    setSelectedModel(modelId);
+    setSelectedProviderId(providerId);
+  };
 
   const handleSend = async (input: AgentInputPayload | string) => {
     const currentStore = useNewSessionStore.getState();
@@ -121,8 +149,13 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     if (currentStore.selectedAgentKind !== selectedAgentKind || !hasUsableProvider) {
       return;
     }
-    if (isProviderAgent && effectiveModel !== selectedModel) {
-      setSelectedModel(effectiveModel);
+    if (isProviderAgent && preferredModel) {
+      if (effectiveModel !== selectedModel) {
+        setSelectedModel(effectiveModel);
+      }
+      if (effectiveProviderId && effectiveProviderId !== selectedProviderId) {
+        setSelectedProviderId(effectiveProviderId);
+      }
     }
     const payload = typeof input === 'string' ? { text: input } : input;
     checkingRuntimeRef.current = true;
@@ -182,7 +215,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               </h1>
               {!hasUsableProvider && isProviderAgent && (
                 <p className="text-center text-sm text-muted-foreground">
-                  请先在设置 → 供应商配置中添加并激活可用的模型供应商（需 API Key 与匹配协议端点）。
+                  请先在设置 → 模型配置中配置并启用可用的模型供应商（需 API Key 与匹配协议端点）。
                 </p>
               )}
             </div>
@@ -197,10 +230,10 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               modelSelector={(
                 <AgentModelSelector
                   agentKind={selectedAgentKind}
-                  activeProvider={activeProvider}
-                  activeProviderId={activeProviderId}
+                  providers={modelProviders}
+                  activeProviderId={effectiveProviderId}
                   value={effectiveModel}
-                  onChange={setSelectedModel}
+                  onChange={handleModelChange}
                   reasoningEffort={selectedReasoningEffort}
                   onReasoningEffortChange={setSelectedReasoningEffort}
                 />

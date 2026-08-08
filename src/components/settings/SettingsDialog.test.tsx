@@ -95,7 +95,7 @@ describe('SettingsView', () => {
 
     render(<SettingsView onBack={vi.fn()} />);
 
-    expect(screen.getByRole('button', { name: '智能体与运行时' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '智能体运行时' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '运行时环境' })).toBeNull();
     expect(screen.queryByRole('button', { name: '智能体引擎' })).toBeNull();
   });

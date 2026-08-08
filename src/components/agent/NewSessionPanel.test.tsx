@@ -14,17 +14,27 @@ import { NewSessionPanel } from './NewSessionPanel';
 import type { AgentModelSelectorProps } from './AgentModelSelector';
 
 vi.mock('../../hooks/useAgentModels', () => ({
-  useAgentModels: (_agentKind: AgentKind, activeProvider: ModelProvider | null) => ({
-    isLoading: false,
-    models: activeProvider
-      ? activeProvider.models.map((model) => ({
-          id: model.id,
+  useAgentModels: (
+    _agentKind: AgentKind,
+    providers: ModelProvider[] | ModelProvider | null,
+  ) => {
+    const list = !providers ? [] : Array.isArray(providers) ? providers : [providers];
+    return {
+      isLoading: false,
+      models: list.flatMap((provider) =>
+        provider.models.map((model) => ({
+          id: `${provider.id}::${model.id}`,
+          modelId: model.id,
+          providerId: provider.id,
+          providerTemplateId: provider.builtin_template_id ?? null,
           name: model.id,
+          group: provider.name,
           efforts: true,
           source: 'provider' as const,
-        }))
-      : [],
-  }),
+        })),
+      ),
+    };
+  },
 }));
 
 const composerProps: Array<{
@@ -60,40 +70,46 @@ vi.mock('./assistant-ui/CodeMuxComposer', () => ({
 vi.mock('./AgentModelSelector', () => ({
   AgentModelSelector: ({
     agentKind,
-    activeProvider,
+    providers,
     activeProviderId,
     value,
     reasoningEffort,
     onChange,
     onReasoningEffortChange,
     disabled,
-  }: AgentModelSelectorProps) => (
-    <div data-agent-kind={agentKind}>
-      <span data-testid="active-provider-id">{activeProviderId}</span>
-      <select
-        aria-label="Models"
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {activeProvider?.models.map((model) => (
-          <option key={model.id} value={model.id}>
-            {model.id}
-          </option>
-        ))}
-      </select>
-      <select
-        aria-label="思考强度"
-        value={reasoningEffort}
-        disabled={disabled}
-        onChange={(event) => onReasoningEffortChange(event.target.value as any)}
-      >
-        <option value="low">low</option>
-        <option value="medium">medium</option>
-        <option value="high">high</option>
-      </select>
-    </div>
-  ),
+  }: AgentModelSelectorProps) => {
+    const activeProvider =
+      providers.find((provider) => provider.id === activeProviderId) ?? providers[0] ?? null;
+    return (
+      <div data-agent-kind={agentKind}>
+        <span data-testid="active-provider-id">{activeProviderId}</span>
+        <select
+          aria-label="Models"
+          value={value}
+          disabled={disabled}
+          onChange={(event) =>
+            onChange(event.target.value, activeProvider?.id ?? activeProviderId ?? '')
+          }
+        >
+          {(activeProvider?.models ?? []).map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.id}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="思考强度"
+          value={reasoningEffort}
+          disabled={disabled}
+          onChange={(event) => onReasoningEffortChange(event.target.value as any)}
+        >
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+        </select>
+      </div>
+    );
+  },
 }));
 
 function sampleProvider(id: string, models: string[], protocol: 'anthropic' | 'openai_compatible' = 'anthropic'): ModelProvider {
@@ -138,6 +154,7 @@ describe('NewSessionPanel', () => {
     useNewSessionStore.setState({
       selectedAgentKind: 'claude_code',
       selectedModel: null,
+      selectedProviderId: null,
       selectedReasoningEffort: 'medium',
       selectedPermissionConfig: { kind: 'claude_code', permissionMode: 'default' },
       selectedPlanMode: 'off',
@@ -208,6 +225,6 @@ describe('NewSessionPanel', () => {
         : null,
     }));
     render(<NewSessionPanel onSubmit={vi.fn()} />);
-    expect(screen.getByText(/请先在设置 → 供应商配置/)).toBeTruthy();
+    expect(screen.getByText(/请先在设置 → 模型配置/)).toBeTruthy();
   });
 });

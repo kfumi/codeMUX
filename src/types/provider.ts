@@ -68,6 +68,8 @@ export interface ModelProvider {
   name: string;
   enabled: boolean;
   api_key: string;
+  /** True when backend has a key but redacted it from `api_key`. */
+  api_key_configured?: boolean;
   endpoints: ProtocolEndpoint[];
   models: ProviderModel[];
   default_model: string;

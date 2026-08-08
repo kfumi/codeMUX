@@ -79,7 +79,7 @@ vi.mock('./assistant-ui/CodeMuxComposer', () => ({
 vi.mock('./AgentModelSelector', () => ({
   AgentModelSelector: ({
     agentKind,
-    activeProvider,
+    providers,
     activeProviderId,
     value,
     contextModel,
@@ -91,12 +91,16 @@ vi.mock('./AgentModelSelector', () => ({
     <div
       data-testid="model-selector"
       data-agent-kind={agentKind}
-      data-has-provider={activeProvider ? 'true' : 'false'}
+      data-has-provider={providers.length > 0 ? 'true' : 'false'}
       data-provider-id={activeProviderId ?? ''}
       data-model={value}
     >
       <span data-testid="model-context">{contextModel}</span>
-      <button type="button" disabled={disabled} onClick={() => onChange('claude-sonnet-4-20250514')}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange('claude-sonnet-4-20250514', activeProviderId ?? 'provider-1')}
+      >
         change model
       </button>
       <button type="button" disabled={disabled} onClick={() => onReasoningEffortChange('high')}>

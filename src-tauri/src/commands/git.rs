@@ -1622,6 +1622,7 @@ mod tests {
             name: "Active".to_string(),
             enabled: true,
             api_key: "key".to_string(),
+            api_key_configured: false,
             endpoints: vec![crate::model_providers::ProtocolEndpoint {
                 protocol: crate::model_providers::Protocol::OpenaiCompatible,
                 base_url: "https://api.openai.com".to_string(),
@@ -1642,6 +1643,7 @@ mod tests {
             name: "Fallback".to_string(),
             enabled: true,
             api_key: "key".to_string(),
+            api_key_configured: false,
             endpoints: vec![crate::model_providers::ProtocolEndpoint {
                 protocol: crate::model_providers::Protocol::Anthropic,
                 base_url: "https://api.anthropic.com".to_string(),

@@ -1,5 +1,15 @@
 import type { Provider } from '../types/provider';
 
+/** Turn model ids like `deepseek-v4-flash` / `deepseek_v4_flash` into `Deepseek V4 Flash`. */
+export function formatModelDisplayName(modelId: string): string {
+  return modelId
+    .trim()
+    .split(/[-_/.\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
+
 export function modelsFromText(value: string): string[] {
   const seen = new Set<string>();
   const models: string[] = [];

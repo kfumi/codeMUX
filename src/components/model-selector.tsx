@@ -49,6 +49,8 @@ export type ModelOption = {
   description?: string;
   icon?: ReactNode;
   disabled?: boolean;
+  /** Optional provider / category heading used to group items in the list. */
+  group?: string;
   /** Extra terms matched by ModelSelector.Search, in addition to id and name. */
   keywords?: readonly string[];
   /**
@@ -449,12 +451,36 @@ export type ModelSelectorListProps = ComponentPropsWithoutRef<
   typeof CommandList
 >;
 
+function groupModels(models: readonly ModelOption[]): Array<{
+  heading: string | undefined;
+  models: ModelOption[];
+}> {
+  const groups: Array<{ heading: string | undefined; models: ModelOption[] }> = [];
+  const indexByHeading = new Map<string, number>();
+
+  for (const model of models) {
+    const heading = model.group?.trim() || undefined;
+    const key = heading ?? "";
+    const existing = indexByHeading.get(key);
+    if (existing === undefined) {
+      indexByHeading.set(key, groups.length);
+      groups.push({ heading, models: [model] });
+      continue;
+    }
+    groups[existing]!.models.push(model);
+  }
+
+  return groups;
+}
+
 function ModelSelectorList({
   className,
   children,
   ...props
 }: ModelSelectorListProps) {
   const { models } = useModelSelectorContext();
+  const groups = useMemo(() => groupModels(models), [models]);
+  const hasNamedGroups = groups.some((group) => Boolean(group.heading));
 
   return (
     <CommandList
@@ -468,11 +494,24 @@ function ModelSelectorList({
       {children ?? (
         <>
           <ModelSelectorEmpty />
-          <CommandGroup>
-            {models.map((model) => (
-              <ModelSelectorItem key={model.id} model={model} />
-            ))}
-          </CommandGroup>
+          {hasNamedGroups ? (
+            groups.map((group, index) => (
+              <CommandGroup
+                key={group.heading ?? `group-${index}`}
+                heading={group.heading}
+              >
+                {group.models.map((model) => (
+                  <ModelSelectorItem key={model.id} model={model} />
+                ))}
+              </CommandGroup>
+            ))
+          ) : (
+            <CommandGroup>
+              {models.map((model) => (
+                <ModelSelectorItem key={model.id} model={model} />
+              ))}
+            </CommandGroup>
+          )}
         </>
       )}
     </CommandList>

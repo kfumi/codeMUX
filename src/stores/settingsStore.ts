@@ -55,7 +55,7 @@ interface SettingsState {
   deleteModelProvider: (providerId: string) => Promise<void>;
   setModelProviderEnabled: (providerId: string, enabled: boolean) => Promise<void>;
   instantiateBuiltinTemplate: (templateId: string) => Promise<ModelProvider>;
-  testModelProvider: (providerId: string) => Promise<string>;
+  testModelProvider: (apiKey: string, baseUrl: string) => Promise<string>;
   getActiveProvider: () => ModelProvider | null;
   getNeedsProxy: () => boolean;
   getDefaultAgentKind: () => AgentKind;
@@ -209,8 +209,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     return provider;
   },
 
-  testModelProvider: async (providerId: string) => {
-    return configApi.testModelProvider(providerId);
+  testModelProvider: async (apiKey: string, baseUrl: string) => {
+    return configApi.testModelProvider(apiKey, baseUrl);
   },
 
   getActiveProvider: () => {

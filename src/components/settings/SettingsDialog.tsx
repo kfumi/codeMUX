@@ -35,8 +35,8 @@ interface SettingsContentProps {
 const primaryTabs = [
   { id: 'general' as const, label: '常规', description: '应用级的通用信息与偏好设置。', icon: Settings },
   { id: 'appearance' as const, label: '外观', description: '自定义应用主题与视觉风格。', icon: Palette },
-  { id: 'provider' as const, label: '供应商配置', description: '管理 AI 供应商，激活的供应商将用于智能体。', icon: Plug },
-  { id: 'agent-runtime' as const, label: '智能体与运行时', description: '统一管理默认智能体、会话权限、托管 SDK Runtime 和外部 CLI 诊断。', icon: Bot },
+  { id: 'provider' as const, label: '模型配置', description: '管理模型供应商的 API Key、协议端点与模型列表；会话按智能体所需协议选用可用供应商。', icon: Plug },
+  { id: 'agent-runtime' as const, label: '智能体运行时', description: '统一管理默认智能体、会话权限、托管 SDK Runtime 和外部 CLI 诊断。', icon: Bot },
   { id: 'mcp' as const, label: 'MCP', description: '管理 MCP 服务器，为智能体扩展工具与能力。', icon: Server },
   { id: 'skills' as const, label: 'Skills', description: '查看、卸载已安装的 skills，从各智能体工具导入。', icon: Puzzle },
   { id: 'usage' as const, label: '使用统计', description: '查看会话活跃度、Token 用量与模型分布。', icon: BarChart3 },

@@ -14,7 +14,7 @@ import type { AgentInputPayload } from './types/agentInput';
 import { getStoredAgentCwd, resolveSessionCwd } from './lib/sessionCwd';
 import { registerSkillCommands } from './lib/slashCommands';
 import { serializePermissionConfig } from './lib/agentPermissions';
-import { appApi, type RuntimeProvider } from './lib/tauri';
+import { appApi, sessionApi, type RuntimeProvider } from './lib/tauri';
 import { useAgentStore } from './stores/agentStore';
 import './stores/appearanceStore';
 import { useNewSessionStore } from './stores/newSessionStore';
@@ -137,6 +137,7 @@ function App() {
     const {
       selectedAgentKind,
       selectedModel,
+      selectedProviderId,
       selectedReasoningEffort,
       selectedPermissionConfig,
       selectedPlanMode,
@@ -164,6 +165,15 @@ function App() {
         selectedModel ?? undefined,
       );
       createdSessionId = session.id;
+
+      if (selectedProviderId && selectedModel) {
+        await sessionApi.updateProvider(
+          session.id,
+          selectedProviderId,
+          selectedModel,
+          selectedReasoningEffort,
+        );
+      }
 
       await startQuery(session.id, input.text, cwd, selectedReasoningEffort, undefined, input, selectedModel ?? undefined);
       closeDraft();

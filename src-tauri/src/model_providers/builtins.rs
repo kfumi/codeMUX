@@ -197,11 +197,13 @@ pub fn instantiate_template(template_id: &str, provider_id: String) -> Result<Mo
     Ok(ModelProvider {
         id: provider_id,
         name: template.name,
-        enabled: true,
+        enabled: false,
         api_key: String::new(),
+        api_key_configured: false,
         endpoints,
-        models: template.models,
-        default_model: template.default_model,
+        // Configured model list starts empty; template.models is the builtin catalog for the picker.
+        models: Vec::new(),
+        default_model: String::new(),
         builtin_template_id: Some(template.id),
         opencode_provider_key: template.opencode_provider_key,
         opencode_npm: template.opencode_npm,
@@ -234,10 +236,24 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_template_instance_usable_after_key() {
-        let mut provider = instantiate_template("deepseek", "id-1".to_string()).unwrap();
+    fn deepseek_template_instance_starts_with_empty_models() {
+        let provider = instantiate_template("deepseek", "id-1".to_string()).unwrap();
+        assert!(provider.models.is_empty());
+        assert!(provider.default_model.is_empty());
         assert!(!is_provider_usable(&provider, AgentKind::ClaudeCode));
+    }
+
+    #[test]
+    fn deepseek_template_instance_usable_after_key_and_models() {
+        let template = builtin_templates()
+            .into_iter()
+            .find(|item| item.id == "deepseek")
+            .unwrap();
+        let mut provider = instantiate_template("deepseek", "id-1".to_string()).unwrap();
+        provider.enabled = true;
         provider.api_key = "sk-test".to_string();
+        provider.models = template.models;
+        provider.default_model = template.default_model;
         assert!(is_provider_usable(&provider, AgentKind::ClaudeCode));
         assert!(is_provider_usable(&provider, AgentKind::Codex));
     }

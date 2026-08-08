@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Provider } from '../types/provider';
 import {
+  formatModelDisplayName,
   getPrimaryProviderModel,
   getProviderModelList,
   modelsFromText,
@@ -19,6 +20,12 @@ const baseProvider: Provider = {
 };
 
 describe('provider model helpers', () => {
+  it('formats model ids into title-case display names', () => {
+    expect(formatModelDisplayName('deepseek-v4-flash')).toBe('Deepseek V4 Flash');
+    expect(formatModelDisplayName('deepseek_v4_flash')).toBe('Deepseek V4 Flash');
+    expect(formatModelDisplayName('openai/gpt-5')).toBe('Openai Gpt 5');
+  });
+
   it('uses models in order and keeps the first model as the default model', () => {
     const provider = normalizeProviderModels({
       ...baseProvider,

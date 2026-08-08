@@ -1,7 +1,7 @@
 use crate::config::{self, types::AppConfig};
 use crate::model_providers::{
-    builtin_templates, instantiate_template, is_provider_usable, required_protocol, select_endpoint,
-    validate_provider, BuiltinProviderTemplate, ModelProvider, Protocol,
+    builtin_templates, instantiate_template, is_provider_usable, required_protocol,
+    validate_provider, validate_provider_for_enable, BuiltinProviderTemplate, ModelProvider,
 };
 use crate::AppState;
 use tauri::{AppHandle, State};
@@ -43,19 +43,63 @@ pub fn upsert_model_provider(
     upsert_model_provider_inner(&state, &app, provider)
 }
 
+fn merge_provider_secrets(mut incoming: ModelProvider, existing: Option<&ModelProvider>) -> ModelProvider {
+    if let Some(existing) = existing {
+        if incoming.api_key.trim().is_empty() {
+            incoming.api_key = existing.api_key.clone();
+        }
+        for endpoint in &mut incoming.endpoints {
+            let incoming_override_empty = endpoint
+                .api_key_override
+                .as_deref()
+                .map(|key| key.trim().is_empty())
+                .unwrap_or(true);
+            if !incoming_override_empty {
+                continue;
+            }
+            if let Some(previous) = existing
+                .endpoints
+                .iter()
+                .find(|item| item.protocol == endpoint.protocol)
+            {
+                if previous
+                    .api_key_override
+                    .as_deref()
+                    .is_some_and(|key| !key.trim().is_empty())
+                {
+                    endpoint.api_key_override = previous.api_key_override.clone();
+                }
+            }
+        }
+    }
+    // Never persist the frontend-only redaction flag.
+    incoming.api_key_configured = false;
+    incoming
+}
+
 fn upsert_model_provider_inner(
     state: &State<'_, AppState>,
     app: &AppHandle,
     provider: ModelProvider,
 ) -> Result<(), String> {
-    validate_provider(&provider)?;
     let mut config = state.config.lock().unwrap();
-    if let Some(existing) = config
+    let existing = config
+        .model_providers
+        .iter()
+        .find(|item| item.id == provider.id)
+        .cloned();
+    let provider = merge_provider_secrets(provider, existing.as_ref());
+    if provider.enabled {
+        validate_provider_for_enable(&provider)?;
+    } else {
+        validate_provider(&provider)?;
+    }
+    if let Some(slot) = config
         .model_providers
         .iter_mut()
         .find(|item| item.id == provider.id)
     {
-        *existing = provider;
+        *slot = provider;
     } else {
         config.model_providers.push(provider);
     }
@@ -115,46 +159,28 @@ pub fn set_model_provider_enabled(
 ) -> Result<(), String> {
     let mut config = state.config.lock().unwrap();
     let provider = find_provider_mut(&mut config, &provider_id)?;
+    if enabled {
+        validate_provider_for_enable(provider)?;
+    }
     provider.enabled = enabled;
     config::save_config(&app, &config)?;
     Ok(())
 }
 
+/// Test connection with the currently entered API key + Base URL (OpenAI-compatible GET …/models).
 #[tauri::command]
-pub fn test_model_provider(
-    state: State<'_, AppState>,
-    provider_id: String,
-    protocol: Option<Protocol>,
-) -> Result<String, String> {
-    let config = state.config.lock().unwrap();
-    let provider = config
-        .model_providers
-        .iter()
-        .find(|item| item.id == provider_id)
-        .ok_or_else(|| format!("供应商不存在: {provider_id}"))?;
-
-    let protocol = protocol
-        .or_else(|| {
-            provider
-                .endpoints
-                .iter()
-                .find(|endpoint| !endpoint.base_url.trim().is_empty())
-                .map(|endpoint| endpoint.protocol)
-        })
-        .ok_or_else(|| "供应商没有可用协议端点".to_string())?;
-
-    let endpoint = select_endpoint(provider, protocol)
-        .ok_or_else(|| format!("缺少协议端点: {}", protocol.as_str()))?;
-    let api_key = crate::model_providers::effective_api_key(provider, endpoint);
-    if api_key.is_empty() {
-        return Err("API Key 未配置".to_string());
+pub async fn test_model_provider(api_key: String, base_url: String) -> Result<String, String> {
+    if api_key.trim().is_empty() {
+        return Err("请先填写 API Key".to_string());
     }
-
-    // Reuse existing HTTP helpers from provider commands when available; lightweight check here.
+    if base_url.trim().is_empty() {
+        return Err("请先填写 API 地址".to_string());
+    }
+    let (models, url) = crate::commands::provider::probe_openai_models(&api_key, &base_url).await?;
     Ok(format!(
-        "ok: protocol={} base_url={}",
-        protocol.as_str(),
-        endpoint.base_url
+        "连接成功：GET {}（{} 个模型）",
+        url,
+        models.len()
     ))
 }
 

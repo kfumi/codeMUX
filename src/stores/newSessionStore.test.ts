@@ -7,6 +7,7 @@ describe('new session store', () => {
     useNewSessionStore.setState({
       selectedAgentKind: 'claude_code',
       selectedModel: null,
+      selectedProviderId: null,
       selectedReasoningEffort: 'medium',
       draftProjectId: null,
       draftRevision: 0,

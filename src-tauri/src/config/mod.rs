@@ -570,6 +570,7 @@ mod tests {
             name: "DeepSeek".to_string(),
             enabled: true,
             api_key: "sk-test".to_string(),
+            api_key_configured: false,
             endpoints: vec![
                 crate::model_providers::ProtocolEndpoint {
                     protocol: crate::model_providers::Protocol::Anthropic,

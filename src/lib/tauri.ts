@@ -9,7 +9,6 @@ import type {
   BuiltinProviderTemplate,
   ModelProvider,
   NotificationSettings,
-  Protocol,
   Provider,
   Theme,
 } from '../types/provider';
@@ -330,8 +329,8 @@ export const configApi = {
     invokeLogged('delete_model_provider', { providerId }),
   setModelProviderEnabled: (providerId: string, enabled: boolean): Promise<void> =>
     invokeLogged('set_model_provider_enabled', { providerId, enabled }),
-  testModelProvider: (providerId: string, protocol?: Protocol): Promise<string> =>
-    invokeLogged('test_model_provider', { providerId, protocol: protocol ?? null }),
+  testModelProvider: (apiKey: string, baseUrl: string): Promise<string> =>
+    invokeLogged('test_model_provider', { apiKey, baseUrl }),
   providerUsableForAgent: (providerId: string, agentKind: AgentKind): Promise<boolean> =>
     invokeLogged('provider_usable_for_agent', { providerId, agentKind }),
   setDefaultAgentKind: (agentKind: AgentKind): Promise<void> =>
@@ -347,9 +346,12 @@ export const configApi = {
     invokeLogged('set_notification_settings', { settings }),
   setDefaultOpenTarget: (target: OpenTarget): Promise<void> =>
     invokeLogged('set_default_open_target', { target }),
-  testProvider: (providerId: string): Promise<string> =>
-    invokeLogged('test_model_provider', { providerId, protocol: null }),
-  fetchProviderModels: (apiKey: string, baseUrl: string): Promise<string[]> =>
+  testProvider: (apiKey: string, baseUrl: string): Promise<string> =>
+    invokeLogged('test_model_provider', { apiKey, baseUrl }),
+  fetchProviderModels: (
+    apiKey: string,
+    baseUrl: string,
+  ): Promise<Array<{ id: string; owned_by: string }>> =>
     invokeLogged('fetch_provider_models', { apiKey, baseUrl }),
   fetchOpenCodeFreeModels: (): Promise<Array<{ id: string; owned_by: string }>> =>
     invokeLogged('fetch_opencode_free_models'),

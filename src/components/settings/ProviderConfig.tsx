@@ -1,13 +1,30 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Check, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Eye, EyeOff, Loader2, Pencil, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { AddProviderDialog } from '@/components/settings/AddProviderDialog';
+import {
+  ProviderBrandIcon,
+  providerDisplayName,
+} from '@/components/settings/ProviderBrandIcon';
+import {
+  ProviderModelsPicker,
+  type PickerModel,
+} from '@/components/settings/ProviderModelsPicker';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { cn } from '@/lib/utils';
+import { formatModelDisplayName } from '@/lib/providerModels';
 import { configApi } from '@/lib/tauri';
-import { isProviderUsable, providerUnusableReason } from '@/lib/modelProviders';
+import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settingsStore';
 import type {
   BuiltinProviderTemplate,
@@ -17,30 +34,59 @@ import type {
   ProviderModel,
 } from '@/types/provider';
 
-function emptyCustomProvider(): ModelProvider {
+type CatalogSelection =
+  | { kind: 'provider'; id: string }
+  | { kind: 'template'; id: string }
+  | { kind: 'draft'; id: string };
+
+type CatalogRow =
+  | {
+      key: string;
+      kind: 'provider';
+      provider: ModelProvider;
+      templateId: string | null;
+      name: string;
+      enabled: boolean;
+      active: boolean;
+    }
+  | {
+      key: string;
+      kind: 'template';
+      template: BuiltinProviderTemplate;
+      templateId: string;
+      name: string;
+      enabled: boolean;
+      active: boolean;
+    };
+
+function providerFromTemplate(template: BuiltinProviderTemplate): ModelProvider {
   return {
     id: crypto.randomUUID(),
-    name: '自定义供应商',
-    enabled: true,
+    name: providerDisplayName(template.name, template.id),
+    enabled: false,
     api_key: '',
-    endpoints: [
-      {
-        protocol: 'openai_compatible',
-        base_url: '',
-        api_key_override: null,
-        codex_needs_proxy: true,
-      },
-    ],
-    models: [{ id: 'default-model', name: 'Default Model' }],
-    default_model: 'default-model',
-    builtin_template_id: null,
-    opencode_provider_key: 'codemux-openai',
-    opencode_npm: '@ai-sdk/openai-compatible',
+    endpoints: structuredClone(template.endpoints),
+    models: [],
+    default_model: '',
+    builtin_template_id: template.id,
+    opencode_provider_key: template.opencode_provider_key ?? null,
+    opencode_npm: template.opencode_npm ?? null,
   };
 }
 
-function endpointLabel(protocol: Protocol): string {
-  return protocol === 'anthropic' ? 'Anthropic' : 'OpenAI 兼容';
+/** Keep runtime default_model as first configured model (no UI selector). */
+function syncDefaultModel(models: ProviderModel[], currentDefault = ''): string {
+  const ids = models.map((model) => model.id.trim()).filter(Boolean);
+  if (ids.some((id) => id === currentDefault.trim())) return currentDefault.trim();
+  return ids[0] ?? '';
+}
+
+function builtinCatalogModels(template: BuiltinProviderTemplate | undefined): PickerModel[] {
+  if (!template) return [];
+  return template.models.map((model) => ({
+    id: model.id,
+    name: model.name?.trim() || formatModelDisplayName(model.id),
+  }));
 }
 
 function ensureEndpoint(
@@ -65,69 +111,224 @@ function ensureEndpoint(
   ];
 }
 
+function setCodexNeedsProxy(endpoints: ProtocolEndpoint[], enabled: boolean): ProtocolEndpoint[] {
+  const hasOpenAi = endpoints.some((item) => item.protocol === 'openai_compatible');
+  if (!hasOpenAi) {
+    return [
+      ...endpoints,
+      {
+        protocol: 'openai_compatible',
+        base_url: '',
+        api_key_override: null,
+        codex_needs_proxy: enabled,
+      },
+    ];
+  }
+  return endpoints.map((endpoint) =>
+    endpoint.protocol === 'openai_compatible'
+      ? { ...endpoint, codex_needs_proxy: enabled }
+      : endpoint,
+  );
+}
+
+function catalogSortRank(row: CatalogRow): number {
+  // Only enabled providers float to the top; new/disabled stay in list order (customs last).
+  return row.kind === 'provider' && row.provider.enabled ? 0 : 1;
+}
+
+function updateModelAt(
+  models: ProviderModel[],
+  index: number,
+  patch: Partial<ProviderModel>,
+): ProviderModel[] {
+  return models.map((model, i) => (i === index ? { ...model, ...patch } : model));
+}
+
 export function ProviderConfigPanel() {
   const {
     config,
     fetchConfig,
     upsertModelProvider,
     deleteModelProvider,
-    setActiveProvider,
     setModelProviderEnabled,
-    instantiateBuiltinTemplate,
     testModelProvider,
   } = useSettingsStore();
 
   const providers = config?.model_providers ?? [];
   const activeId = config?.active_provider_id ?? null;
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<CatalogSelection | null>(null);
   const [draft, setDraft] = useState<ModelProvider | null>(null);
   const [templates, setTemplates] = useState<BuiltinProviderTemplate[]>([]);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerSource, setPickerSource] = useState<'api' | 'builtin' | 'empty'>('empty');
+  const [pickerCatalog, setPickerCatalog] = useState<PickerModel[]>([]);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const draftRef = useRef<ModelProvider | null>(null);
+  draftRef.current = draft;
+  const isBuiltin = Boolean(draft?.builtin_template_id);
 
   useEffect(() => {
     void fetchConfig();
     void configApi.listBuiltinProviderTemplates().then(setTemplates).catch(() => setTemplates([]));
   }, [fetchConfig]);
 
-  useEffect(() => {
-    if (!selectedId && providers[0]) {
-      setSelectedId(providers[0].id);
+  const catalog = useMemo(() => {
+    const rows: CatalogRow[] = [];
+    const usedProviderIds = new Set<string>();
+
+    for (const template of templates) {
+      const instance = providers.find((provider) => provider.builtin_template_id === template.id);
+      if (instance) {
+        usedProviderIds.add(instance.id);
+        rows.push({
+          key: `provider:${instance.id}`,
+          kind: 'provider',
+          provider: instance,
+          templateId: template.id,
+          name: providerDisplayName(instance.name, template.id),
+          enabled: instance.enabled,
+          active: instance.id === activeId,
+        });
+      } else {
+        rows.push({
+          key: `template:${template.id}`,
+          kind: 'template',
+          template,
+          templateId: template.id,
+          name: providerDisplayName(template.name, template.id),
+          enabled: false,
+          active: false,
+        });
+      }
     }
-  }, [providers, selectedId]);
+
+    for (const provider of providers) {
+      if (usedProviderIds.has(provider.id)) continue;
+      rows.push({
+        key: `provider:${provider.id}`,
+        kind: 'provider',
+        provider,
+        templateId: provider.builtin_template_id ?? null,
+        name: providerDisplayName(provider.name, provider.builtin_template_id),
+        enabled: provider.enabled,
+        active: provider.id === activeId,
+      });
+    }
+
+    rows.sort((a, b) => catalogSortRank(a) - catalogSortRank(b));
+    return rows;
+  }, [templates, providers, activeId]);
+
+  const filteredCatalog = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return catalog;
+    return catalog.filter((row) => row.name.toLowerCase().includes(q));
+  }, [catalog, search]);
 
   useEffect(() => {
-    const selected = providers.find((provider) => provider.id === selectedId) ?? null;
-    setDraft(selected ? structuredClone(selected) : null);
-  }, [providers, selectedId]);
+    if (selection) return;
+    const first = catalog[0];
+    if (!first) return;
+    setShowApiKey(false);
+    if (first.kind === 'provider') {
+      setSelection({ kind: 'provider', id: first.provider.id });
+    } else {
+      setSelection({ kind: 'template', id: first.template.id });
+    }
+  }, [catalog, selection]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return providers;
-    return providers.filter((provider) => provider.name.toLowerCase().includes(q));
-  }, [providers, search]);
+  useEffect(() => {
+    setShowApiKey(false);
+  }, [selection?.kind, selection && 'id' in selection ? selection.id : null]);
+
+  useEffect(() => {
+    if (!selection) {
+      setDraft(null);
+      return;
+    }
+    if (selection.kind === 'draft') {
+      return;
+    }
+    if (selection.kind === 'provider') {
+      const selected = providers.find((provider) => provider.id === selection.id) ?? null;
+      setDraft(selected ? structuredClone(selected) : null);
+      return;
+    }
+    const instance = providers.find((provider) => provider.builtin_template_id === selection.id);
+    if (instance) {
+      setSelection({ kind: 'provider', id: instance.id });
+      return;
+    }
+    const template = templates.find((item) => item.id === selection.id);
+    if (!template) {
+      setDraft(null);
+      return;
+    }
+    setDraft((current) => {
+      if (
+        current?.builtin_template_id === template.id &&
+        !providers.some((provider) => provider.id === current.id)
+      ) {
+        return current;
+      }
+      return providerFromTemplate(template);
+    });
+  }, [selection, providers, templates]);
 
   const anthropicUrl =
     draft?.endpoints.find((endpoint) => endpoint.protocol === 'anthropic')?.base_url ?? '';
   const openaiUrl =
     draft?.endpoints.find((endpoint) => endpoint.protocol === 'openai_compatible')?.base_url ?? '';
-  const modelsText = (draft?.models ?? []).map((model) => model.id).join('\n');
+  const persisted = Boolean(draft && providers.some((item) => item.id === draft.id));
+  const draftTemplateId = draft?.builtin_template_id ?? null;
+  const codexNeedsProxy = Boolean(
+    draft?.endpoints.find((item) => item.protocol === 'openai_compatible')?.codex_needs_proxy,
+  );
+  const canTestConnection = Boolean(
+    draft && draft.api_key.trim() && resolveFetchBaseUrl(draft),
+  );
 
   async function handleSave() {
     if (!draft) return;
     const cleaned: ModelProvider = {
       ...draft,
+      name: draft.name.trim() || providerDisplayName(draft.name, draft.builtin_template_id),
+      api_key: draft.api_key.trim(),
       endpoints: draft.endpoints.filter((endpoint) => endpoint.base_url.trim().length > 0),
+      models: draft.models
+        .map((model) => ({
+          id: model.id.trim(),
+          name: model.name?.trim() || model.id.trim(),
+        }))
+        .filter((model) => model.id.length > 0),
     };
+    if (!cleaned.name.trim()) {
+      toast.error('请填写供应商名称');
+      return;
+    }
     if (cleaned.endpoints.length === 0) {
       toast.error('至少填写一个协议端点 URL');
       return;
+    }
+    cleaned.default_model = syncDefaultModel(cleaned.models, cleaned.default_model);
+    // Enabling requires a key; keep enabled=false when saving without one.
+    if (cleaned.enabled && !cleaned.api_key) {
+      cleaned.enabled = false;
     }
     setSaving(true);
     try {
       await upsertModelProvider(cleaned);
       toast.success('供应商已保存');
-      setSelectedId(cleaned.id);
+      setSelection({ kind: 'provider', id: cleaned.id });
     } catch (error) {
       toast.error(String(error));
     } finally {
@@ -135,149 +336,367 @@ export function ProviderConfigPanel() {
     }
   }
 
-  async function handleAddCustom() {
-    const provider = emptyCustomProvider();
-    setSelectedId(provider.id);
-    setDraft(provider);
-  }
-
-  async function handleInstantiate(templateId: string) {
+  async function handleEnabledChange(enabled: boolean) {
+    if (!draft) return;
+    if (enabled) {
+      if (!draft.api_key.trim()) {
+        toast.error('启用前请先填写 API Key');
+        return;
+      }
+      if (!draft.endpoints.some((endpoint) => endpoint.base_url.trim().length > 0)) {
+        toast.error('启用前请至少填写一个协议端点');
+        return;
+      }
+      if (!draft.models.some((model) => model.id.trim().length > 0)) {
+        toast.error('启用前请至少添加一个模型');
+        return;
+      }
+      if (!persisted) {
+        toast.error('请先保存供应商后再启用');
+        return;
+      }
+    }
+    const previous = draft.enabled;
+    setDraft({ ...draft, enabled });
     try {
-      const provider = await instantiateBuiltinTemplate(templateId);
-      setSelectedId(provider.id);
-      toast.success(`已添加 ${provider.name}，请填写 API Key`);
+      await setModelProviderEnabled(draft.id, enabled);
     } catch (error) {
+      setDraft({ ...draft, enabled: previous });
       toast.error(String(error));
     }
   }
 
+  async function handleAddCustomProvider(provider: ModelProvider) {
+    await upsertModelProvider(provider);
+    setSelection({ kind: 'provider', id: provider.id });
+    toast.success('已添加供应商（默认未启用）');
+  }
+
+  function handleSelectRow(row: CatalogRow) {
+    setShowApiKey(false);
+    if (row.kind === 'provider') {
+      setSelection({ kind: 'provider', id: row.provider.id });
+      return;
+    }
+    setSelection({ kind: 'template', id: row.template.id });
+  }
+
   async function handleDelete() {
-    if (!draft) return;
-    if (!window.confirm(`确认删除供应商「${draft.name}」？`)) return;
+    if (!draft || !persisted || isBuiltin) return;
     try {
       await deleteModelProvider(draft.id);
-      setSelectedId(null);
+      setSelection(null);
+      setDeleteConfirmOpen(false);
       toast.success('已删除');
     } catch (error) {
       toast.error(String(error));
     }
   }
 
+  function openRenameDialog() {
+    if (!draft || isBuiltin) return;
+    setRenameValue(draft.name);
+    setRenameOpen(true);
+  }
+
+  async function handleRenameSave() {
+    if (!draft || isBuiltin) return;
+    const name = renameValue.trim();
+    if (!name) {
+      toast.error('请填写提供商名称');
+      return;
+    }
+    const next = { ...draft, name };
+    setDraft(next);
+    if (!persisted) {
+      setRenameOpen(false);
+      return;
+    }
+    setRenaming(true);
+    try {
+      await upsertModelProvider(next);
+      setRenameOpen(false);
+      toast.success('名称已更新');
+    } catch (error) {
+      toast.error(String(error));
+    } finally {
+      setRenaming(false);
+    }
+  }
+
+  function addModelRow() {
+    if (!draft) return;
+    const models = [...draft.models, { id: '', name: '' }];
+    setDraft({
+      ...draft,
+      models,
+      default_model: syncDefaultModel(models, draft.default_model),
+    });
+  }
+
+  function removeModelRow(index: number) {
+    if (!draft) return;
+    const models = draft.models.filter((_, i) => i !== index);
+    setDraft({
+      ...draft,
+      models,
+      default_model: syncDefaultModel(models, draft.default_model),
+    });
+  }
+
+  function applySelectedModels(models: ProviderModel[]) {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        models,
+        default_model: syncDefaultModel(models, prev.default_model),
+      };
+    });
+  }
+
+  function resolveFetchBaseUrl(provider: ModelProvider): string {
+    const openai = provider.endpoints.find(
+      (endpoint) =>
+        endpoint.protocol === 'openai_compatible' && endpoint.base_url.trim().length > 0,
+    )?.base_url;
+    if (openai) return openai.trim();
+    return (
+      provider.endpoints.find(
+        (endpoint) => endpoint.protocol === 'anthropic' && endpoint.base_url.trim().length > 0,
+      )?.base_url.trim() ?? ''
+    );
+  }
+
+  async function handleTestConnection() {
+    const current = draftRef.current;
+    if (!current) return;
+    const apiKey = current.api_key.trim();
+    const baseUrl = resolveFetchBaseUrl(current);
+    if (!apiKey || !baseUrl) {
+      toast.error('请同时填写 API 密钥和 API 地址后再测试');
+      return;
+    }
+    setTesting(true);
+    try {
+      const message = await testModelProvider(apiKey, baseUrl);
+      toast.success(message);
+    } catch (error) {
+      toast.error(String(error));
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function handleOpenModelPicker() {
+    const current = draftRef.current;
+    if (!current) return;
+    const template = templates.find((item) => item.id === current.builtin_template_id);
+    const builtinModels = builtinCatalogModels(template);
+
+    setPickerOpen(true);
+    setPickerLoading(true);
+    setPickerCatalog([]);
+    setPickerSource('empty');
+
+    const apiKey = current.api_key.trim();
+    const baseUrl = resolveFetchBaseUrl(current);
+
+    if (!apiKey || !baseUrl) {
+      setPickerCatalog(builtinModels);
+      setPickerSource(builtinModels.length > 0 ? 'builtin' : 'empty');
+      setPickerLoading(false);
+      if (builtinModels.length > 0) {
+        toast.info('未填写密钥或地址，已展示系统内置模型');
+      } else {
+        toast.error('请先填写 API 密钥和 API 地址');
+      }
+      return;
+    }
+
+    try {
+      const fetched = await configApi.fetchProviderModels(apiKey, baseUrl);
+      const catalog = fetched
+        .map((item) => {
+          const id = item.id.trim();
+          return {
+            id,
+            name: formatModelDisplayName(id),
+          };
+        })
+        .filter((item) => item.id.length > 0);
+      if (catalog.length > 0) {
+        setPickerCatalog(catalog);
+        setPickerSource('api');
+        return;
+      }
+      setPickerCatalog(builtinModels);
+      setPickerSource(builtinModels.length > 0 ? 'builtin' : 'empty');
+      if (builtinModels.length > 0) {
+        toast.info('接口未返回模型，已展示系统内置模型');
+      } else {
+        toast.error('未获取到模型');
+      }
+    } catch (error) {
+      setPickerCatalog(builtinModels);
+      setPickerSource(builtinModels.length > 0 ? 'builtin' : 'empty');
+      if (builtinModels.length > 0) {
+        toast.info(`获取失败，已展示系统内置模型（${String(error)}）`);
+      } else {
+        toast.error(String(error));
+      }
+    } finally {
+      setPickerLoading(false);
+    }
+  }
+
   return (
-    <div className="flex h-full min-h-0 gap-4">
-      <div className="flex w-64 shrink-0 flex-col gap-3 border-r border-border/60 pr-3">
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="搜索供应商"
-        />
-        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
-          {filtered.map((provider) => {
-            const active = provider.id === activeId;
-            const selected = provider.id === selectedId;
-            return (
-              <button
-                key={provider.id}
-                type="button"
-                onClick={() => setSelectedId(provider.id)}
-                className={cn(
-                  'flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm',
-                  selected ? 'bg-primary/10 text-foreground' : 'hover:bg-muted/50 text-muted-foreground',
-                )}
-              >
-                <span className="truncate font-medium text-foreground">{provider.name}</span>
-                <span className="flex items-center gap-1">
-                  {active && <Check className="h-3.5 w-3.5 text-primary" />}
-                  <span
-                    className={cn(
-                      'h-2 w-2 rounded-full',
-                      provider.enabled && provider.api_key.trim() ? 'bg-emerald-500' : 'bg-muted-foreground/40',
-                    )}
-                  />
-                </span>
-              </button>
-            );
-          })}
-          {filtered.length === 0 && (
-            <div className="px-2 py-6 text-center text-xs text-muted-foreground">暂无供应商</div>
-          )}
-        </div>
-        <div className="space-y-2 border-t border-border/60 pt-3">
-          <Button variant="outline" className="w-full justify-start" onClick={() => void handleAddCustom()}>
-            <Plus className="mr-2 h-4 w-4" />
-            添加自定义
-          </Button>
-          <div className="max-h-40 space-y-1 overflow-y-auto">
-            {templates.map((template) => (
-              <Button
-                key={template.id}
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start text-xs"
-                onClick={() => void handleInstantiate(template.id)}
-              >
-                + {template.name}
-              </Button>
-            ))}
+    <div className="flex h-full min-h-0 gap-0">
+      <div className="flex w-60 shrink-0 flex-col border-r border-border/60">
+        <div className="px-3 pb-2 pt-1">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="搜索模型平台..."
+              className="h-9 pl-8"
+            />
           </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+          <div className="space-y-0.5">
+            {filteredCatalog.map((row) => {
+              const selected =
+                (selection?.kind === 'provider' &&
+                  row.kind === 'provider' &&
+                  selection.id === row.provider.id) ||
+                (selection?.kind === 'template' &&
+                  row.kind === 'template' &&
+                  selection.id === row.template.id);
+              return (
+                <button
+                  key={row.key}
+                  type="button"
+                  onClick={() => handleSelectRow(row)}
+                  className={cn(
+                    'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors',
+                    selected
+                      ? 'bg-muted/80 text-foreground'
+                      : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground',
+                  )}
+                >
+                  <ProviderBrandIcon templateId={row.templateId} name={row.name} />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                    {row.name}
+                  </span>
+                  {row.enabled && (
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" title="已启用" />
+                  )}
+                </button>
+              );
+            })}
+            {filteredCatalog.length === 0 && (
+              <div className="px-2 py-6 text-center text-xs text-muted-foreground">
+                无匹配的模型平台
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setAddDialogOpen(true)}
+            className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+          >
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-dashed border-border">
+              <Plus className="h-4 w-4" />
+            </span>
+            添加服务商
+          </button>
         </div>
       </div>
 
-      <div className="min-w-0 flex-1 overflow-y-auto pr-1">
+      <AddProviderDialog
+        open={addDialogOpen}
+        onOpenChange={setAddDialogOpen}
+        onSubmit={handleAddCustomProvider}
+      />
+
+      <div className="min-w-0 flex-1 overflow-y-auto px-5 py-2">
         {!draft ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            从左侧选择或添加供应商
+            从左侧选择模型平台
           </div>
         ) : (
           <div className="mx-auto flex max-w-2xl flex-col gap-5 pb-8">
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold">{draft.name}</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  CodeMUX 自维护配置；对话时动态注入 SDK，不写入智能体原生配置文件。
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <label htmlFor="provider-enabled" className="text-xs text-muted-foreground">
-                  启用
-                </label>
-                <Switch
-                  id="provider-enabled"
-                  checked={draft.enabled}
-                  onCheckedChange={(enabled) => {
-                    setDraft({ ...draft, enabled });
-                    if (providers.some((item) => item.id === draft.id)) {
-                      void setModelProviderEnabled(draft.id, enabled).catch((error) =>
-                        toast.error(String(error)),
-                      );
-                    }
-                  }}
+              <div className="flex items-center gap-3">
+                <ProviderBrandIcon
+                  templateId={draftTemplateId}
+                  name={providerDisplayName(draft.name, draftTemplateId)}
+                  className="h-9 w-9"
+                  size={24}
                 />
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <h2 className="text-lg font-semibold">
+                      {providerDisplayName(draft.name, draftTemplateId)}
+                    </h2>
+                    {!isBuiltin && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                        aria-label="编辑名称"
+                        onClick={openRenameDialog}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <Switch
+                id="provider-enabled"
+                checked={draft.enabled}
+                onCheckedChange={(enabled) => void handleEnabledChange(enabled)}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">API 密钥</label>
+              <div className="relative">
+                <Input
+                  type={showApiKey ? 'text' : 'password'}
+                  value={draft.api_key}
+                  onChange={(event) => setDraft({ ...draft, api_key: event.target.value })}
+                  placeholder="保存可留空，启用时必填"
+                  className="pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 p-0 text-muted-foreground"
+                  onClick={() => setShowApiKey((value) => !value)}
+                  aria-label={showApiKey ? '隐藏密钥' : '显示密钥'}
+                >
+                  {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
               </div>
             </div>
 
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">名称</label>
-              <Input
-                value={draft.name}
-                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">API Key</label>
-              <Input
-                type="password"
-                value={draft.api_key}
-                onChange={(event) => setDraft({ ...draft, api_key: event.target.value })}
-                placeholder="必填；空值视为未配置"
-              />
-            </div>
-
-            <div className="grid gap-3 rounded-xl border border-border/60 p-4">
-              <div className="text-sm font-medium">协议端点</div>
+            <div className="grid gap-3">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">API 地址</label>
+                <span className="text-xs text-muted-foreground">
+                  可同时配置 Anthropic / OpenAI 兼容端点
+                </span>
+              </div>
               <div className="grid gap-2">
-                <label className="text-sm font-medium">{endpointLabel('anthropic')} URL</label>
+                <label className="text-xs font-medium text-muted-foreground">Anthropic</label>
                 <Input
                   value={anthropicUrl}
                   onChange={(event) =>
@@ -290,7 +709,7 @@ export function ProviderConfigPanel() {
                 />
               </div>
               <div className="grid gap-2">
-                <label className="text-sm font-medium">{endpointLabel('openai_compatible')} URL</label>
+                <label className="text-xs font-medium text-muted-foreground">OpenAI 兼容</label>
                 <Input
                   value={openaiUrl}
                   onChange={(event) =>
@@ -306,66 +725,114 @@ export function ProviderConfigPanel() {
                   placeholder="https://api.example.com/v1"
                 />
               </div>
-              <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={Boolean(
-                    draft.endpoints.find((item) => item.protocol === 'openai_compatible')
-                      ?.codex_needs_proxy,
-                  )}
-                  onChange={(event) => {
+              <div className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
+                <div>
+                  <div className="text-sm font-medium">Codex 需要兼容代理</div>
+                  <div className="text-xs text-muted-foreground">
+                    非原生 Responses 接口时开启（如 DeepSeek）
+                  </div>
+                </div>
+                <Switch
+                  checked={codexNeedsProxy}
+                  onCheckedChange={(enabled) =>
                     setDraft({
                       ...draft,
-                      endpoints: draft.endpoints.map((endpoint) =>
-                        endpoint.protocol === 'openai_compatible'
-                          ? { ...endpoint, codex_needs_proxy: event.target.checked }
-                          : endpoint,
-                      ),
-                    });
-                  }}
+                      endpoints: setCodexNeedsProxy(draft.endpoints, enabled),
+                    })
+                  }
                 />
-                Codex 需要兼容代理（codex_needs_proxy）
-              </label>
-            </div>
-
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">模型列表（每行一个 model id）</label>
-              <textarea
-                className="min-h-28 rounded-md border border-input bg-transparent px-3 py-2 text-sm"
-                value={modelsText}
-                onChange={(event) => {
-                  const models: ProviderModel[] = event.target.value
-                    .split('\n')
-                    .map((line) => line.trim())
-                    .filter(Boolean)
-                    .map((id) => ({ id, name: id }));
-                  const default_model =
-                    models.some((model) => model.id === draft.default_model)
-                      ? draft.default_model
-                      : models[0]?.id ?? '';
-                  setDraft({ ...draft, models, default_model });
-                }}
-              />
-              <div className="grid gap-2">
-                <label className="text-sm font-medium">默认模型</label>
-                <select
-                  className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
-                  value={draft.default_model}
-                  onChange={(event) => setDraft({ ...draft, default_model: event.target.value })}
-                >
-                  {draft.models.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.name || model.id}
-                    </option>
-                  ))}
-                </select>
               </div>
             </div>
 
-            <div className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-              <div>Claude Code：{isProviderUsable(draft, 'claude_code') ? '可用' : providerUnusableReason(draft, 'claude_code')}</div>
-              <div>Codex：{isProviderUsable(draft, 'codex') ? '可用' : providerUnusableReason(draft, 'codex')}</div>
-              <div>OpenCode：{isProviderUsable(draft, 'opencode') ? '可用' : providerUnusableReason(draft, 'opencode')}</div>
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-sm font-medium">模型</label>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleOpenModelPicker()}
+                  >
+                    <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                    获取模型列表
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={addModelRow}>
+                    <Plus className="mr-1 h-3.5 w-3.5" />
+                    添加模型
+                  </Button>
+                </div>
+              </div>
+              <div className="overflow-hidden rounded-lg border border-border/60">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">模型 ID</th>
+                      <th className="px-3 py-2 font-medium">显示名称</th>
+                      <th className="w-12 px-2 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {draft.models.map((model, index) => (
+                      <tr key={`${index}-${model.id}`} className="border-t border-border/50">
+                        <td className="px-2 py-1.5">
+                          <Input
+                            value={model.id}
+                            className="h-8"
+                            placeholder="model-id"
+                            onChange={(event) => {
+                              const models = updateModelAt(draft.models, index, {
+                                id: event.target.value,
+                              });
+                              setDraft({
+                                ...draft,
+                                models,
+                                default_model: syncDefaultModel(models, draft.default_model),
+                              });
+                            }}
+                          />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <Input
+                            value={model.name ?? ''}
+                            className="h-8"
+                            placeholder="可选"
+                            onChange={(event) =>
+                              setDraft({
+                                ...draft,
+                                models: updateModelAt(draft.models, index, {
+                                  name: event.target.value,
+                                }),
+                              })
+                            }
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 text-center">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => removeModelRow(index)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                    {draft.models.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={3}
+                          className="px-3 py-6 text-center text-xs text-muted-foreground"
+                        >
+                          暂无模型，可通过「获取模型列表」添加
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -373,36 +840,94 @@ export function ProviderConfigPanel() {
                 保存
               </Button>
               <Button
-                variant="secondary"
-                disabled={!providers.some((item) => item.id === draft.id)}
-                onClick={() => void setActiveProvider(draft.id).then(() => toast.success('已设为 Active Provider')).catch((error) => toast.error(String(error)))}
-              >
-                设为当前供应商
-              </Button>
-              <Button
                 variant="outline"
-                disabled={!providers.some((item) => item.id === draft.id)}
-                onClick={() =>
-                  void testModelProvider(draft.id)
-                    .then((message) => toast.success(message))
-                    .catch((error) => toast.error(String(error)))
-                }
+                disabled={!canTestConnection || testing}
+                onClick={() => void handleTestConnection()}
               >
-                测试连接
+                {testing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    测试中
+                  </>
+                ) : (
+                  '测试连接'
+                )}
               </Button>
-              <Button
-                variant="ghost"
-                className="text-destructive"
-                disabled={!providers.some((item) => item.id === draft.id)}
-                onClick={() => void handleDelete()}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                删除
-              </Button>
+              {!isBuiltin && (
+                <Button
+                  variant="ghost"
+                  className="text-destructive"
+                  disabled={!persisted}
+                  onClick={() => setDeleteConfirmOpen(true)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  删除
+                </Button>
+              )}
             </div>
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="删除供应商"
+        description={`确认删除供应商「${draft?.name ?? ''}」？此操作不可撤销。`}
+        confirmLabel="删除"
+        variant="destructive"
+        onConfirm={handleDelete}
+      />
+
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent overlayClassName="z-[240]" className="z-[240] max-w-sm">
+          <DialogHeader>
+            <DialogTitle>编辑提供商名称</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-2 py-1">
+            <label className="text-sm font-medium" htmlFor="rename-provider-name">
+              提供商名称
+            </label>
+            <Input
+              id="rename-provider-name"
+              value={renameValue}
+              onChange={(event) => setRenameValue(event.target.value)}
+              placeholder="例如 OpenAI"
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void handleRenameSave();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={renaming}
+              onClick={() => setRenameOpen(false)}
+            >
+              取消
+            </Button>
+            <Button type="button" disabled={renaming} onClick={() => void handleRenameSave()}>
+              {renaming ? '保存中…' : '保存'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ProviderModelsPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        title={`${providerDisplayName(draft?.name ?? '', draftTemplateId)} 模型`}
+        loading={pickerLoading}
+        source={pickerSource}
+        catalog={pickerCatalog}
+        selected={draft?.models ?? []}
+        onChangeSelected={applySelectedModels}
+      />
     </div>
   );
 }

@@ -92,14 +92,8 @@ fn apply_agent_config_update(
 
 fn redact_config_for_frontend(app_config: &AppConfig) -> AppConfig {
     let mut redacted = app_config.clone();
-    for provider in &mut redacted.model_providers {
-        provider.api_key.clear();
-        for endpoint in &mut provider.endpoints {
-            if let Some(override_key) = endpoint.api_key_override.as_mut() {
-                override_key.clear();
-            }
-        }
-    }
+    // Model Provider keys are shown in Settings (password input + reveal toggle).
+    // Only legacy unified providers stay redacted.
     for provider in &mut redacted.providers {
         provider.api_key.clear();
     }
@@ -398,21 +392,26 @@ const COMPAT_SUFFIXES: &[&str] = &["/anthropic", "/claudecode", "/coding", "/v1"
 
 /// Build candidate model-list URLs from a base URL, trying multiple patterns.
 fn build_model_urls(base_url: &str) -> Vec<String> {
-    let base = base_url.trim_end_matches('/');
+    let base = base_url.trim().trim_end_matches('/');
     let mut candidates: Vec<String> = Vec::new();
 
-    // If base already contains /v1, just append /models
+    // Prefer the path that matches how the base was entered.
     if base.ends_with("/v1") {
         candidates.push(format!("{}/models", base));
-        return candidates;
+    } else {
+        candidates.push(format!("{}/v1/models", base));
+        // Many OpenAI-compatible gateways already include a version segment
+        // (e.g. /api/paas/v4) and expose models at `{base}/models`.
+        candidates.push(format!("{}/models", base));
     }
-
-    // Try standard /v1/models
-    candidates.push(format!("{}/v1/models", base));
 
     // Try stripping known compat suffixes and retry
     for suffix in COMPAT_SUFFIXES {
         if let Some(stripped) = base.strip_suffix(suffix) {
+            let stripped = stripped.trim_end_matches('/');
+            if stripped.is_empty() {
+                continue;
+            }
             candidates.push(format!("{}/v1/models", stripped));
             candidates.push(format!("{}/models", stripped));
         }
@@ -423,26 +422,27 @@ fn build_model_urls(base_url: &str) -> Vec<String> {
     candidates
 }
 
-#[tauri::command]
-pub async fn fetch_provider_models(
-    api_key: String,
-    base_url: String,
-) -> Result<Vec<ModelInfo>, String> {
-    info!(target: "provider", "Fetching provider models base_url={}", base_url);
+/// Probe OpenAI-compatible `GET …/models` candidates. Returns models and the URL that worked.
+pub(crate) async fn probe_openai_models(
+    api_key: &str,
+    base_url: &str,
+) -> Result<(Vec<ModelInfo>, String), String> {
     if base_url.trim().is_empty() {
         return Err("请填写 Base URL".to_string());
     }
-    if api_key.trim().is_empty() {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
         return Err("请填写 API Key".to_string());
     }
 
-    let candidates = build_model_urls(&base_url);
+    let candidates = build_model_urls(base_url);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
     let mut last_error = String::new();
+    let mut saw_auth_failure = false;
 
     for url in &candidates {
         let resp = match client
@@ -463,9 +463,11 @@ pub async fn fetch_provider_models(
 
         let status = resp.status().as_u16();
 
-        // 401/403 → auth failure, stop immediately
+        // Wrong path candidates may also return 401/403 — keep trying others.
         if status == 401 || status == 403 {
-            return Err("认证失败，请检查 API Key".to_string());
+            saw_auth_failure = true;
+            last_error = format!("HTTP {}", status);
+            continue;
         }
 
         // 404/405 → try next candidate
@@ -474,9 +476,10 @@ pub async fn fetch_provider_models(
             continue;
         }
 
-        // Other non-2xx → stop
+        // Other non-2xx → try next candidate
         if !(200..300).contains(&status) {
-            return Err(format!("请求失败: HTTP {}", status));
+            last_error = format!("HTTP {}", status);
+            continue;
         }
 
         // Parse response
@@ -499,15 +502,29 @@ pub async fn fetch_provider_models(
             .collect();
 
         models.sort_by(|a, b| a.id.cmp(&b.id));
-        return Ok(models);
+        return Ok((models, url.clone()));
     }
 
     // All candidates failed
-    if last_error.contains("404") || last_error.contains("405") {
-        Err("接口地址未找到".to_string())
+    if saw_auth_failure {
+        Err("认证失败，请检查 API Key 与 Base URL".to_string())
+    } else if last_error.contains("404") || last_error.contains("405") {
+        Err("接口地址未找到，请检查 Base URL".to_string())
+    } else if last_error.is_empty() {
+        Err("获取失败".to_string())
     } else {
         Err(format!("获取失败: {}", last_error))
     }
+}
+
+#[tauri::command]
+pub async fn fetch_provider_models(
+    api_key: String,
+    base_url: String,
+) -> Result<Vec<ModelInfo>, String> {
+    info!(target: "provider", "Fetching provider models base_url={}", base_url);
+    let (models, _) = probe_openai_models(&api_key, &base_url).await?;
+    Ok(models)
 }
 
 /// Test a provider by sending a streaming request. Returns model name on success.
@@ -687,8 +704,8 @@ async fn test_openai_stream(base_url: &str, api_key: &str, model: &str) -> Resul
 #[cfg(test)]
 mod tests {
     use super::{
-        agent_provider_profile_retired_err, apply_agent_config_update, redact_config_for_frontend,
-        AGENT_PROVIDER_PROFILE_RETIRED,
+        agent_provider_profile_retired_err, apply_agent_config_update, build_model_urls,
+        redact_config_for_frontend, AGENT_PROVIDER_PROFILE_RETIRED,
     };
     use crate::config::types::{AgentKind, AppConfig};
 
@@ -730,6 +747,7 @@ mod tests {
             name: "测试供应商".to_string(),
             enabled: true,
             api_key: "sk-secret".to_string(),
+            api_key_configured: false,
             endpoints: vec![crate::model_providers::ProtocolEndpoint {
                 protocol: crate::model_providers::Protocol::OpenaiCompatible,
                 base_url: "https://example.com/v1".to_string(),
@@ -759,13 +777,28 @@ mod tests {
 
         let redacted = redact_config_for_frontend(&app_config);
 
-        assert_eq!(redacted.model_providers[0].api_key, "");
+        assert_eq!(redacted.model_providers[0].api_key, "sk-secret");
         assert_eq!(
-            redacted.model_providers[0].endpoints[0].api_key_override.as_deref(),
-            Some("")
+            redacted.model_providers[0].endpoints[0]
+                .api_key_override
+                .as_deref(),
+            Some("sk-override")
         );
         assert_eq!(redacted.providers[0].api_key, "");
         assert_eq!(app_config.model_providers[0].api_key, "sk-secret");
+    }
+
+    #[test]
+    fn build_model_urls_includes_base_models_for_versioned_gateways() {
+        let urls = build_model_urls("https://open.bigmodel.cn/api/paas/v4");
+        assert!(urls.contains(&"https://open.bigmodel.cn/api/paas/v4/models".to_string()));
+        assert!(urls.contains(&"https://open.bigmodel.cn/api/paas/v4/v1/models".to_string()));
+    }
+
+    #[test]
+    fn build_model_urls_strips_anthropic_compat_suffix() {
+        let urls = build_model_urls("https://api.deepseek.com/anthropic");
+        assert!(urls.contains(&"https://api.deepseek.com/v1/models".to_string()));
     }
 
     #[test]

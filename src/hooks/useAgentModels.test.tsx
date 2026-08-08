@@ -21,36 +21,68 @@ function provider(partial?: Partial<ModelProvider>): ModelProvider {
       { id: 'deepseek-v4-pro', name: 'Pro' },
     ],
     default_model: 'deepseek-v4-flash',
+    builtin_template_id: 'deepseek',
     ...partial,
   };
 }
 
 describe('useAgentModels', () => {
-  it('returns provider models when usable for the agent', () => {
-    const { result } = renderHook(() => useAgentModels('claude_code', provider(), 'p1'));
+  it('returns usable provider models grouped by provider', () => {
+    const { result } = renderHook(() =>
+      useAgentModels(
+        'claude_code',
+        [
+          provider(),
+          provider({
+            id: 'p2',
+            name: 'Anthropic',
+            builtin_template_id: 'anthropic',
+            models: [{ id: 'claude-sonnet-4', name: 'Sonnet' }],
+            default_model: 'claude-sonnet-4',
+            endpoints: [{ protocol: 'anthropic', base_url: 'https://api.anthropic.com' }],
+          }),
+          provider({
+            id: 'disabled',
+            enabled: false,
+            models: [{ id: 'x', name: 'X' }],
+            default_model: 'x',
+          }),
+        ],
+        'p1',
+      ),
+    );
+
     expect(result.current.models.map((model) => model.id)).toEqual([
-      'deepseek-v4-flash',
-      'deepseek-v4-pro',
+      'p1::deepseek-v4-flash',
+      'p1::deepseek-v4-pro',
+      'p2::claude-sonnet-4',
+    ]);
+    expect(result.current.models.map((model) => model.group)).toEqual([
+      '深度求索',
+      '深度求索',
+      'Anthropic',
     ]);
     expect(result.current.isLoading).toBe(false);
   });
 
-  it('returns empty list when provider lacks matching endpoint', () => {
+  it('skips providers that lack a matching endpoint', () => {
     const { result } = renderHook(() =>
       useAgentModels(
         'codex',
-        provider({
-          endpoints: [{ protocol: 'anthropic', base_url: 'https://api.deepseek.com/anthropic' }],
-        }),
+        [
+          provider({
+            endpoints: [{ protocol: 'anthropic', base_url: 'https://api.deepseek.com/anthropic' }],
+          }),
+        ],
         'p1',
       ),
     );
     expect(result.current.models).toEqual([]);
   });
 
-  it('returns empty list when api key is missing', () => {
+  it('skips providers without an api key', () => {
     const { result } = renderHook(() =>
-      useAgentModels('claude_code', provider({ api_key: '' }), 'p1'),
+      useAgentModels('claude_code', [provider({ api_key: '' })], 'p1'),
     );
     expect(result.current.models).toEqual([]);
   });
