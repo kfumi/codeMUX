@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 interface ChatSearchDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onNavigateHome: () => void;
+  onSelectSession: (sessionId: string, projectId: string | null) => void;
 }
 
 type PreviewState = {
@@ -31,11 +31,9 @@ type ChatSearchItem = {
 const MAX_RECENT_RESULTS = 9;
 const PREVIEW_LIMIT = 92;
 
-export function ChatSearchDialog({ open, onOpenChange, onNavigateHome }: ChatSearchDialogProps) {
+export function ChatSearchDialog({ open, onOpenChange, onSelectSession }: ChatSearchDialogProps) {
   const sessions = useSessionStore((state) => state.sessions);
-  const setActiveSession = useSessionStore((state) => state.setActiveSession);
   const projects = useProjectStore((state) => state.projects);
-  const setActiveProject = useProjectStore((state) => state.setActiveProject);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [previews, setPreviews] = useState<Record<string, PreviewState>>({});
@@ -128,9 +126,7 @@ export function ChatSearchDialog({ open, onOpenChange, onNavigateHome }: ChatSea
   }, [selectedIndex, visibleItems.length]);
 
   const selectItem = (item: ChatSearchItem) => {
-    onNavigateHome();
-    setActiveProject(item.session.project_id ?? null);
-    setActiveSession(item.session.id);
+    onSelectSession(item.session.id, item.session.project_id ?? null);
     onOpenChange(false);
   };
 

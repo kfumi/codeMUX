@@ -37,7 +37,7 @@ function renderDialog(props: Partial<React.ComponentProps<typeof ChatSearchDialo
     <ChatSearchDialog
       open
       onOpenChange={vi.fn()}
-      onNavigateHome={vi.fn()}
+      onSelectSession={vi.fn()}
       {...props}
     />,
   );
@@ -147,8 +147,8 @@ describe('ChatSearchDialog', () => {
     expect(screen.queryByText('Other')).toBeNull();
   });
 
-  it('selects a result by click and updates active session and project', () => {
-    const onNavigateHome = vi.fn();
+  it('selects a result by click and delegates session navigation', () => {
+    const onSelectSession = vi.fn();
     const onOpenChange = vi.fn();
     useProjectStore.setState({
       projects: [{
@@ -165,18 +165,17 @@ describe('ChatSearchDialog', () => {
       ],
     });
 
-    renderDialog({ onNavigateHome, onOpenChange });
+    renderDialog({ onSelectSession, onOpenChange });
 
     fireEvent.click(screen.getByText('Target chat'));
 
-    expect(useSessionStore.getState().activeSessionId).toBe('target');
-    expect(useProjectStore.getState().activeProjectId).toBe('project-1');
-    expect(onNavigateHome).toHaveBeenCalledTimes(1);
+    expect(onSelectSession).toHaveBeenCalledWith('target', 'project-1');
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it('supports keyboard navigation and enter selection', () => {
     const onOpenChange = vi.fn();
+    const onSelectSession = vi.fn();
     useSessionStore.setState({
       sessions: [
         makeSession({ id: 'first', title: 'First chat', updated_at: '2026-01-03T00:00:00.000Z' }),
@@ -184,13 +183,13 @@ describe('ChatSearchDialog', () => {
       ],
     });
 
-    renderDialog({ onOpenChange });
+    renderDialog({ onOpenChange, onSelectSession });
 
     const input = screen.getByPlaceholderText('搜索聊天或运行命令');
     fireEvent.keyDown(input, { key: 'ArrowDown' });
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    expect(useSessionStore.getState().activeSessionId).toBe('second');
+    expect(onSelectSession).toHaveBeenCalledWith('second', null);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 

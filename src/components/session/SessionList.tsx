@@ -12,7 +12,7 @@ import { cn } from '../../lib/utils';
 interface SessionListProps {
   onNewSessionInProject: (projectId: string) => void;
   onAddProject: () => void;
-  onNavigateHome: () => void;
+  onSelectSession: (sessionId: string, projectId: string | null) => void;
 }
 
 const PROJECTS_SECTION_KEY = 'codemux-projects-section-expanded';
@@ -74,19 +74,18 @@ function SectionHeader({
   );
 }
 
-export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHome }: SessionListProps) {
+export function SessionList({ onNewSessionInProject, onAddProject, onSelectSession }: SessionListProps) {
   const {
     sessions,
     activeSessionId,
     fetchSessions,
     fetchArchivedSessions,
-    setActiveSession,
     archiveSession,
     setSessionPinned,
     deleteSession,
     updateSessionTitle,
   } = useSessionStore();
-  const { projects, activeProjectId, fetchProjects, deleteProject, renameProject, setActiveProject } = useProjectStore();
+  const { projects, activeProjectId, fetchProjects, deleteProject, renameProject } = useProjectStore();
   const [pinnedExpanded, setPinnedExpanded] = useState(() => loadSectionExpanded(PINNED_SECTION_KEY));
   const [projectsExpanded, setProjectsExpanded] = useState(() => loadSectionExpanded(PROJECTS_SECTION_KEY));
   const [conversationsExpanded, setConversationsExpanded] = useState(() => loadSectionExpanded(CONVERSATIONS_SECTION_KEY));
@@ -151,9 +150,7 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
               session={session}
               isActive={session.id === activeSessionId}
               onClick={() => {
-                onNavigateHome();
-                setActiveProject(session.project_id ?? null);
-                setActiveSession(session.id);
+                onSelectSession(session.id, session.project_id ?? null);
               }}
               onTogglePinned={(pinned) => void setSessionPinned(session.id, pinned)}
               onArchive={() => archiveSession(session.id)}
@@ -195,9 +192,7 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
               activeSessionId={activeSessionId}
               isActiveProject={project.id === activeProjectId}
               onSelectSession={(id) => {
-                onNavigateHome();
-                setActiveProject(project.id);
-                setActiveSession(id);
+                onSelectSession(id, project.id);
               }}
               onArchiveSession={archiveSession}
               onToggleSessionPinned={(sessionId, pinned) => void setSessionPinned(sessionId, pinned)}
@@ -225,9 +220,7 @@ export function SessionList({ onNewSessionInProject, onAddProject, onNavigateHom
               session={session}
               isActive={session.id === activeSessionId}
               onClick={() => {
-                onNavigateHome();
-                setActiveProject(null);
-                setActiveSession(session.id);
+                onSelectSession(session.id, null);
               }}
               onTogglePinned={(pinned) => void setSessionPinned(session.id, pinned)}
               onArchive={() => archiveSession(session.id)}

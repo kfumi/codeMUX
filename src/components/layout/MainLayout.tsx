@@ -1,3 +1,4 @@
+import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { useRef, useState, useCallback, useEffect, useLayoutEffect, type ReactNode } from 'react';
 
 import { cn } from '../../lib/utils';
@@ -6,7 +7,7 @@ import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
 import { SidePanel } from '../workspace/SidePanel';
 import { TooltipHint } from '../ui/tooltip';
 import { RoundedPanelIcon } from './RoundedPanelIcon';
-import { TitleBar } from './TitleBar';
+import { TitleBar, type TitleBarNavigation } from './TitleBar';
 
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 500;
@@ -29,6 +30,7 @@ interface MainLayoutProps {
   headerContent?: ReactNode;
   sidebarAccessory?: ReactNode;
   titleBarControls?: ReactNode;
+  titleBarNavigation?: TitleBarNavigation;
   projectOpenPath?: string | null;
   sidePanelAvailable?: boolean;
   sidePanelProjectPath?: string | null;
@@ -41,6 +43,7 @@ export function MainLayout({
   headerContent,
   sidebarAccessory,
   titleBarControls,
+  titleBarNavigation,
   projectOpenPath,
   sidePanelAvailable = true,
   sidePanelProjectPath,
@@ -134,6 +137,32 @@ export function MainLayout({
   const sidebarControls = sidebarToggleButton ? (
     <div className="flex items-center gap-1">
       {sidebarToggleButton}
+      {titleBarNavigation ? (
+        <div className="flex items-center gap-0.5">
+          <TooltipHint content="后退">
+            <button
+              type="button"
+              aria-label="后退"
+              disabled={!titleBarNavigation.canGoBack}
+              onClick={titleBarNavigation.onBack}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-foreground/58 transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:text-foreground/22 disabled:hover:bg-transparent"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.8} />
+            </button>
+          </TooltipHint>
+          <TooltipHint content="前进">
+            <button
+              type="button"
+              aria-label="前进"
+              disabled={!titleBarNavigation.canGoForward}
+              onClick={titleBarNavigation.onForward}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-foreground/58 transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:text-foreground/22 disabled:hover:bg-transparent"
+            >
+              <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />
+            </button>
+          </TooltipHint>
+        </div>
+      ) : null}
       {sidebarAccessory}
     </div>
   ) : null;

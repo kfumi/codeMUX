@@ -48,6 +48,13 @@ function MaximizeIcon({ restored }: { restored: boolean }) {
   );
 }
 
+export interface TitleBarNavigation {
+  canGoBack: boolean;
+  canGoForward: boolean;
+  onBack: () => void;
+  onForward: () => void;
+}
+
 interface TitleBarProps {
   leftContent?: ReactNode;
   rightContent?: ReactNode;

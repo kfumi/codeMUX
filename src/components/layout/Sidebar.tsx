@@ -16,6 +16,7 @@ interface SidebarProps {
   onNewSession: () => void;
   onNewSessionInProject: (projectId: string) => void;
   onNavigateHome: () => void;
+  onSelectSession: (sessionId: string, projectId: string | null) => void;
   onOpenSettings: () => void;
 }
 
@@ -23,6 +24,7 @@ export function Sidebar({
   onNewSession,
   onNewSessionInProject,
   onNavigateHome,
+  onSelectSession,
   onOpenSettings,
 }: SidebarProps) {
   const fetchProjects = useProjectStore((state) => state.fetchProjects);
@@ -84,7 +86,11 @@ export function Sidebar({
       </div>
 
       <div className="flex-1 overflow-auto px-3 pb-3 scroll-smooth">
-        <SessionList onNewSessionInProject={onNewSessionInProject} onAddProject={handleAddProject} onNavigateHome={onNavigateHome} />
+        <SessionList
+          onNewSessionInProject={onNewSessionInProject}
+          onAddProject={handleAddProject}
+          onSelectSession={onSelectSession}
+        />
       </div>
 
       <div className="flex items-center gap-1 border-t border-[hsl(var(--sidebar-border))]/45 px-3 py-2.5">
@@ -114,7 +120,7 @@ export function Sidebar({
       <ChatSearchDialog
         open={chatSearchOpen}
         onOpenChange={setChatSearchOpen}
-        onNavigateHome={onNavigateHome}
+        onSelectSession={onSelectSession}
       />
       <ImportSessionsDialog
         open={importOpen}

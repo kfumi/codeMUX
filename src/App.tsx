@@ -1,5 +1,5 @@
 import { Sparkles } from 'lucide-react';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { toast, Toaster } from 'sonner';
 
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -20,8 +20,10 @@ import './stores/appearanceStore';
 import { useNewSessionStore } from './stores/newSessionStore';
 import { useProjectStore } from './stores/projectStore';
 import { useSessionStore } from './stores/sessionStore';
+import { useSidePanelStore } from './stores/sidePanelStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useSkillStore } from './stores/skillStore';
+import { useNavigationStore, type NavigationLocation, type SidePanelNavigationState } from './stores/navigationStore';
 import { UpdaterProvider } from './features/update/UpdaterProvider';
 import { UpdateEntry } from './features/update/components/UpdateEntry';
 import type { TodoItem } from './types/agent';
@@ -44,6 +46,24 @@ const panelFallback = (
   </div>
 );
 
+function getSidePanelNavigation(scopeId: string): SidePanelNavigationState {
+  const state = useSidePanelStore.getState();
+  if (state.activeScopeId === scopeId) {
+    return {
+      scopeId,
+      isOpen: state.isOpen,
+      activeTabId: state.activeTabId,
+    };
+  }
+
+  const snapshot = state.scopes[scopeId];
+  return {
+    scopeId,
+    isOpen: snapshot?.isOpen ?? false,
+    activeTabId: snapshot?.activeTabId ?? null,
+  };
+}
+
 function App() {
   const createSession = useSessionStore((state) => state.createSession);
   const deleteSession = useSessionStore((state) => state.deleteSession);
@@ -59,8 +79,15 @@ function App() {
   const draftProjectId = useNewSessionStore((state) => state.draftProjectId);
   const openDraft = useNewSessionStore((state) => state.openDraft);
   const closeDraft = useNewSessionStore((state) => state.closeDraft);
-  const [activeView, setActiveView] = useState<'app' | 'settings'>('app');
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
+  const navigationLocation = useNavigationStore((state) => state.current);
+  const canGoBack = useNavigationStore((state) => state.backStack.length > 0);
+  const canGoForward = useNavigationStore((state) => state.forwardStack.length > 0);
+  const navigate = useNavigationStore((state) => state.navigate);
+  const goBack = useNavigationStore((state) => state.goBack);
+  const goForward = useNavigationStore((state) => state.goForward);
+  const setRestoring = useNavigationStore((state) => state.setRestoring);
+  const activeView = navigationLocation.view;
+  const settingsTab = navigationLocation.settingsTab;
   const [perfOverlayVisible, setPerfOverlayVisible] = useState(true);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -81,6 +108,85 @@ function App() {
 
   useTheme();
   useAgentNotifications();
+
+  const applyNavigationLocation = useCallback((location: NavigationLocation) => {
+    setRestoring(true);
+    setActiveSession(location.activeSessionId);
+    setActiveProject(location.activeProjectId);
+
+    const currentDraft = useNewSessionStore.getState();
+    if (location.isDraftOpen) {
+      if (!currentDraft.isDraftOpen || currentDraft.draftProjectId !== location.draftProjectId) {
+        openDraft(location.draftProjectId);
+      }
+    } else if (currentDraft.isDraftOpen) {
+      closeDraft();
+    }
+
+    useSidePanelStore.getState().restoreNavigation(location.sidePanel);
+    setRestoring(false);
+  }, [closeDraft, openDraft, setActiveProject, setActiveSession, setRestoring]);
+
+  const commitNavigation = useCallback((location: NavigationLocation) => {
+    navigate(location);
+    applyNavigationLocation(location);
+  }, [applyNavigationLocation, navigate]);
+
+  const handleNavigateHome = useCallback(() => {
+    commitNavigation({
+      ...navigationLocation,
+      view: 'app',
+      activeSessionId: null,
+      activeProjectId: null,
+      draftProjectId: null,
+      isDraftOpen: false,
+      sidePanel: getSidePanelNavigation('home'),
+    });
+  }, [commitNavigation, navigationLocation]);
+
+  const handleReturnToApp = useCallback(() => {
+    commitNavigation({
+      ...navigationLocation,
+      view: 'app',
+    });
+  }, [commitNavigation, navigationLocation]);
+
+  const handleSelectSession = useCallback((sessionId: string, projectId: string | null) => {
+    commitNavigation({
+      ...navigationLocation,
+      view: 'app',
+      activeSessionId: sessionId,
+      activeProjectId: projectId,
+      draftProjectId: null,
+      isDraftOpen: false,
+      sidePanel: getSidePanelNavigation(sessionId),
+    });
+  }, [commitNavigation, navigationLocation]);
+
+  const handleOpenSettings = useCallback(() => {
+    commitNavigation({
+      ...navigationLocation,
+      view: 'settings',
+    });
+  }, [commitNavigation, navigationLocation]);
+
+  const handleSettingsTabChange = useCallback((tab: SettingsTab) => {
+    commitNavigation({
+      ...navigationLocation,
+      view: 'settings',
+      settingsTab: tab,
+    });
+  }, [commitNavigation, navigationLocation]);
+
+  const handleBack = useCallback(() => {
+    const location = goBack();
+    if (location) applyNavigationLocation(location);
+  }, [applyNavigationLocation, goBack]);
+
+  const handleForward = useCallback(() => {
+    const location = goForward();
+    if (location) applyNavigationLocation(location);
+  }, [applyNavigationLocation, goForward]);
 
   useEffect(() => {
     fetchConfig().catch((error) => {
@@ -119,7 +225,6 @@ function App() {
   }, [activeSessionId, closeDraft, isDraftOpen]);
 
   const handleNewSession = (projectId?: string) => {
-    setActiveView('app');
     setActiveSession(null);
     setActiveProject(projectId ?? null);
     const newSessionState = useNewSessionStore.getState();
@@ -131,6 +236,16 @@ function App() {
       projectId,
       serializePermissionConfig(newSessionState.selectedAgentKind, configuredPermissionConfig),
     );
+    const draftScopeId = `draft:${projectId ?? 'none'}`;
+    commitNavigation({
+      ...navigationLocation,
+      view: 'app',
+      activeSessionId: null,
+      activeProjectId: projectId ?? null,
+      draftProjectId: projectId ?? null,
+      isDraftOpen: true,
+      sidePanel: getSidePanelNavigation(draftScopeId),
+    });
   };
 
   const handleStartNewSession = async (input: AgentInputPayload) => {
@@ -193,6 +308,16 @@ function App() {
 
       await startQuery(session.id, input.text, cwd, selectedReasoningEffort, undefined, input, selectedModel ?? undefined);
       closeDraft();
+      const currentNavigation = useNavigationStore.getState().current;
+      commitNavigation({
+        ...currentNavigation,
+        view: 'app',
+        activeSessionId: session.id,
+        activeProjectId: draftProjectId ?? null,
+        draftProjectId: null,
+        isDraftOpen: false,
+        sidePanel: getSidePanelNavigation(session.id),
+      });
     } catch (error) {
       if (createdSessionId) {
         await deleteSession(createdSessionId);
@@ -215,16 +340,17 @@ function App() {
             <Suspense fallback={<div className="h-full" />}>
               <SettingsSidebar
                 activeTab={settingsTab}
-                onTabChange={setSettingsTab}
-                onBack={() => setActiveView('app')}
+                onTabChange={handleSettingsTabChange}
+                onBack={handleReturnToApp}
               />
             </Suspense>
           ) : (
             <Sidebar
               onNewSession={() => handleNewSession()}
               onNewSessionInProject={(projectId) => handleNewSession(projectId)}
-              onNavigateHome={() => setActiveView('app')}
-              onOpenSettings={() => setActiveView('settings')}
+              onNavigateHome={handleNavigateHome}
+              onSelectSession={handleSelectSession}
+              onOpenSettings={handleOpenSettings}
             />
           )}
           sidebarAccessory={activeView === 'settings' ? undefined : <UpdateEntry />}
@@ -232,6 +358,12 @@ function App() {
           sidePanelProjectPath={activeView === 'app' ? sidePanelProjectPath : null}
           sidePanelScopeId={activeView === 'app' ? sidePanelScopeId : 'settings'}
           projectOpenPath={activeView === 'app' && activeSessionId ? sidePanelProjectPath : null}
+          titleBarNavigation={{
+            canGoBack,
+            canGoForward,
+            onBack: handleBack,
+            onForward: handleForward,
+          }}
           headerContent={activeView === 'app' && activeSessionId ? (
             <Suspense fallback={null}>
               <SessionHeader sessionId={activeSessionId} />
@@ -244,7 +376,7 @@ function App() {
           <ErrorBoundary>
             {activeView === 'settings' ? (
               <Suspense fallback={panelFallback}>
-              <SettingsContent activeTab={settingsTab} onTabChange={setSettingsTab} />
+              <SettingsContent activeTab={settingsTab} onTabChange={handleSettingsTabChange} />
               </Suspense>
             ) : activeSessionId ? (
               <Suspense fallback={panelFallback}>

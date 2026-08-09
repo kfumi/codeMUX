@@ -69,7 +69,7 @@ describe('SessionList', () => {
   const defaultProps = {
     onNewSessionInProject: vi.fn(),
     onAddProject: vi.fn(),
-    onNavigateHome: vi.fn(),
+    onSelectSession: vi.fn(),
   };
 
   beforeEach(() => {

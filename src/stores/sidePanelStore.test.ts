@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useSidePanelStore } from './sidePanelStore';
+import { useNavigationStore } from './navigationStore';
 
 describe('side panel store', () => {
   beforeEach(() => {
     useSidePanelStore.getState().reset();
+    useNavigationStore.getState().reset();
     vi.stubGlobal('window', { innerWidth: 1024 });
   });
 

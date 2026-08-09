@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+import { useNavigationStore, type SidePanelNavigationState } from './navigationStore';
+
 export type SidePanelTabKind = 'review' | 'terminal' | 'plan' | 'diff';
 
 export interface SidePanelTab {
@@ -42,6 +44,7 @@ interface SidePanelState {
   setPanelWidth: (width: number, splitContainerWidth?: number) => void;
   setResizing: (isResizing: boolean) => void;
   setTerminalId: (tabId: string, terminalId: string) => void;
+  restoreNavigation: (navigation: SidePanelNavigationState) => void;
   reset: () => void;
 }
 
@@ -109,6 +112,16 @@ function getFileName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+function recordNavigation(state: Pick<SidePanelState, 'activeScopeId' | 'isOpen' | 'activeTabId'>): void {
+  if (useNavigationStore.getState().isRestoring) return;
+
+  useNavigationStore.getState().recordSidePanelNavigation({
+    scopeId: state.activeScopeId,
+    isOpen: state.isOpen,
+    activeTabId: state.activeTabId,
+  });
+}
+
 export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   activeScopeId: DEFAULT_SCOPE_ID,
   scopes: {},
@@ -138,7 +151,10 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     });
   },
 
-  openPanel: () => set({ isOpen: true }),
+  openPanel: () => {
+    set({ isOpen: true });
+    recordNavigation(get());
+  },
 
   openReviewTab: (projectPath: string) => {
     const id = tabId(get().activeScopeId, 'review', projectPath);
@@ -147,6 +163,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
       tabs: state.tabs.some((tab) => tab.id === id) ? state.tabs : [...state.tabs, createTab(state.activeScopeId, 'review', projectPath)],
       activeTabId: id,
     }));
+    recordNavigation(get());
   },
 
   openTerminalTab: (projectPath: string) => {
@@ -156,6 +173,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
       tabs: state.tabs.some((tab) => tab.id === id) ? state.tabs : [...state.tabs, createTab(state.activeScopeId, 'terminal', projectPath)],
       activeTabId: id,
     }));
+    recordNavigation(get());
   },
 
   openPlanTab: (planFilePath: string, planContent: string) => {
@@ -167,6 +185,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
         : [...state.tabs, createPlanTab(state.activeScopeId, planFilePath, planContent)],
       activeTabId: id,
     }));
+    recordNavigation(get());
   },
 
   openDiffTab: (filePath: string, oldContent: string, newContent: string) => {
@@ -178,13 +197,18 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
         : [...state.tabs, createDiffTab(state.activeScopeId, filePath, oldContent, newContent)],
       activeTabId: id,
     }));
+    recordNavigation(get());
   },
 
-  closePanel: () => set({ isOpen: false }),
+  closePanel: () => {
+    set({ isOpen: false });
+    recordNavigation(get());
+  },
 
   setActiveTab: (tabId: string) => {
     if (get().tabs.some((tab) => tab.id === tabId)) {
       set({ isOpen: true, activeTabId: tabId });
+      recordNavigation(get());
     }
   },
 
@@ -206,6 +230,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
       activeTabId,
       isOpen: true,
     });
+    recordNavigation(get());
   },
 
   setPanelWidth: (width: number, splitContainerWidth?: number) => {
@@ -220,6 +245,31 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     set((state) => ({
       tabs: state.tabs.map((tab) => (tab.id === tabId ? { ...tab, terminalId } : tab)),
     }));
+  },
+
+  restoreNavigation: (navigation: SidePanelNavigationState) => {
+    set((state) => {
+      const nextScopeId = navigation.scopeId || DEFAULT_SCOPE_ID;
+      const scopes = state.activeScopeId === nextScopeId
+        ? state.scopes
+        : {
+            ...state.scopes,
+            [state.activeScopeId]: snapshotFromState(state),
+          };
+      const next = scopes[nextScopeId] ?? defaultSnapshot();
+      const activeTabId = navigation.activeTabId && next.tabs.some((tab) => tab.id === navigation.activeTabId)
+        ? navigation.activeTabId
+        : null;
+
+      return {
+        ...next,
+        scopes,
+        activeScopeId: nextScopeId,
+        isOpen: navigation.isOpen,
+        activeTabId,
+        isResizing: false,
+      };
+    });
   },
 
   reset: () => set({
