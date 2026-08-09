@@ -65,7 +65,7 @@ export function ProjectOpenTargetButton({ projectPath }: ProjectOpenTargetButton
             return (
               <DropdownMenuItem
                 key={option.value}
-                icon={<Icon className={cn('h-4 w-4', active ? 'text-primary' : 'text-foreground/58')} />}
+                icon={<Icon className="h-4 w-4" />}
                 onClick={() => openProject(option.value)}
               >
                 <span className={cn('text-ui-meta', active && 'font-medium text-foreground')}>

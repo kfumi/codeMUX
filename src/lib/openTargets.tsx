@@ -1,8 +1,9 @@
-import type { ComponentType, SVGProps } from 'react';
-import { FolderOpen, Terminal } from 'lucide-react';
-import cursorSvg from '@lobehub/icons-static-svg/icons/cursor.svg?raw';
-import vscodeSvg from 'devicon/icons/vscode/vscode-original.svg?raw';
-import gitSvg from 'devicon/icons/git/git-original.svg?raw';
+import type { ComponentType } from 'react';
+import vscodePng from '../assets/open-targets/vscode.png';
+import cursorPng from '../assets/open-targets/cursor.png';
+import fileExplorerPng from '../assets/open-targets/file-explorer.png';
+import windowsTerminalPng from '../assets/open-targets/windows-terminal.png';
+import gitBashPng from '../assets/open-targets/git-bash.png';
 import { cn } from './utils';
 
 export const OPEN_TARGETS = ['vscode', 'cursor', 'file_explorer', 'terminal', 'git_bash'] as const;
@@ -10,47 +11,40 @@ export type OpenTarget = typeof OPEN_TARGETS[number];
 
 export const DEFAULT_OPEN_TARGET: OpenTarget = 'file_explorer';
 
-type OpenTargetIconProps = SVGProps<SVGSVGElement> & {
+type OpenTargetIconProps = {
   className?: string;
 };
 
-function cleanSvg(raw: string): string {
-  return raw
-    .replace(/<title>.*?<\/title>/, '')
-    .replace(/(<svg\b[^>]*\bstyle=")[^"]*(")/, '$1display:block$2')
-    .replace(/(<svg\b[^>]*) width="[^"]*"/, '$1')
-    .replace(/(<svg\b[^>]*) height="[^"]*"/, '$1')
-    .replace(/<svg\b/, '<svg width="100%" height="100%"');
-}
-
-function RawSvgIcon({ svg, className }: { svg: string; className?: string }) {
+function PngIcon({ src, className }: { src: string; className?: string }) {
   return (
-    <span
-      className={['inline-flex shrink-0 items-center justify-center', className].filter(Boolean).join(' ')}
+    <img
+      src={src}
+      alt=""
       aria-hidden="true"
-      dangerouslySetInnerHTML={{ __html: cleanSvg(svg) }}
+      draggable={false}
+      className={cn('inline-block shrink-0 object-contain', className)}
     />
   );
 }
 
 function VsCodeIcon({ className }: OpenTargetIconProps) {
-  return <RawSvgIcon svg={vscodeSvg} className={className} />;
+  return <PngIcon src={vscodePng} className={className} />;
 }
 
 function CursorIcon({ className }: OpenTargetIconProps) {
-  return <RawSvgIcon svg={cursorSvg} className={className} />;
+  return <PngIcon src={cursorPng} className={className} />;
 }
 
 function FileExplorerIcon({ className }: OpenTargetIconProps) {
-  return <FolderOpen className={cn(className, 'text-amber-500')} />;
+  return <PngIcon src={fileExplorerPng} className={className} />;
 }
 
 function FileTerminalIcon({ className }: OpenTargetIconProps) {
-  return <Terminal className={cn(className, 'text-black-500')} />;
+  return <PngIcon src={windowsTerminalPng} className={className} />;
 }
 
 function GitBashIcon({ className }: OpenTargetIconProps) {
-  return <RawSvgIcon svg={gitSvg} className={className} />;
+  return <PngIcon src={gitBashPng} className={className} />;
 }
 
 export interface OpenTargetOption {
