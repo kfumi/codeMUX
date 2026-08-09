@@ -2,11 +2,12 @@ import type { UserAttachmentPreview } from '../types/agentInput';
 
 export type SessionMessageAttachmentsMap = Record<number, UserAttachmentPreview[]>;
 
-type UserEventLike = {
+type EventLike = {
   kind: string;
-  data: {
-    attachments?: UserAttachmentPreview[];
-  };
+};
+
+type UserDataWithAttachments = {
+  attachments?: UserAttachmentPreview[];
 };
 
 function isUserAttachmentPreview(value: unknown): value is UserAttachmentPreview {
@@ -16,6 +17,13 @@ function isUserAttachmentPreview(value: unknown): value is UserAttachmentPreview
     && typeof record.name === 'string'
     && typeof record.mediaType === 'string'
     && typeof record.dataUrl === 'string';
+}
+
+function readUserAttachments(event: EventLike): UserAttachmentPreview[] | undefined {
+  if (!('data' in event) || !event.data || typeof event.data !== 'object') {
+    return undefined;
+  }
+  return (event.data as UserDataWithAttachments).attachments;
 }
 
 export function parseSessionMessageAttachmentsMap(
@@ -31,7 +39,8 @@ export function parseSessionMessageAttachmentsMap(
   return map;
 }
 
-export function mergeSessionMessageAttachments<T extends UserEventLike>(
+/** Merge persisted previews into user events. Accepts full session event unions (incl. variants without `data`). */
+export function mergeSessionMessageAttachments<T extends EventLike>(
   events: T[],
   attachmentsByUserIndex: SessionMessageAttachmentsMap,
 ): T[] {
@@ -47,14 +56,19 @@ export function mergeSessionMessageAttachments<T extends UserEventLike>(
 
     const saved = attachmentsByUserIndex[userIndex];
     userIndex += 1;
-    if (!saved?.length || (event.data.attachments?.length ?? 0) > 0) {
+    const existing = readUserAttachments(event);
+    if (!saved?.length || (existing?.length ?? 0) > 0) {
       return event;
     }
+
+    const data = ('data' in event && event.data && typeof event.data === 'object')
+      ? event.data as UserDataWithAttachments
+      : {};
 
     return {
       ...event,
       data: {
-        ...event.data,
+        ...data,
         attachments: saved,
       },
     };

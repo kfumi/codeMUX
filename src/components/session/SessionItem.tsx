@@ -5,11 +5,16 @@ import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui/context-menu';
 import { TooltipHint } from '../ui/tooltip';
+import { sessionAwaitsUserConfirmation } from '../../lib/pendingUserInput';
 import { cn } from '../../lib/utils';
+import type { AgentPermissionRequest } from '../../types/agent';
 import { getAgentDefinition, type AgentDefinition } from '../../types/agentRegistry';
-import { useAgentStore } from '../../stores/agentStore';
+import { useAgentStore, type AgentMessage } from '../../stores/agentStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import type { Session } from '../../types/session';
+
+const EMPTY_EVENTS: AgentMessage[] = [];
+const EMPTY_PERMISSIONS: AgentPermissionRequest[] = [];
 
 interface SessionItemProps {
   session: Session;
@@ -108,6 +113,10 @@ export function SessionItem({
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const agentDef = getAgentDefinition(session.agent_kind);
+  const awaitsConfirmation = useAgentStore((state) => sessionAwaitsUserConfirmation(
+    state.events[session.id] ?? EMPTY_EVENTS,
+    state.pendingPermissions[session.id] ?? EMPTY_PERMISSIONS,
+  ));
   const timeLabel = formatRelativeTime(session.updated_at);
   const ArchiveIcon = archiveIcon === 'archive' ? Archive : Undo2;
   const PinIcon = session.is_pinned ? PinOff : Pin;
@@ -177,8 +186,16 @@ export function SessionItem({
                   </TooltipHint>
                 )}
                 <span className="relative h-5 shrink-0">
-                  <span className={cn('inline-flex h-5 items-center text-ui-compact tabular-nums transition-opacity duration-150', 'text-[hsl(var(--sidebar-fg))]/40', 'group-hover:opacity-0')}>
-                    {timeLabel}
+                  <span className={cn('inline-flex h-5 items-center transition-opacity duration-150', 'group-hover:opacity-0')}>
+                    {awaitsConfirmation ? (
+                      <span className="rounded-full bg-[hsl(var(--success))] px-1.5 py-1 text-[10px] font-medium leading-none text-white">
+                        等待确认
+                      </span>
+                    ) : (
+                      <span className="text-ui-compact tabular-nums text-[hsl(var(--sidebar-fg))]/40">
+                        {timeLabel}
+                      </span>
+                    )}
                   </span>
                   <span className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
                     <TooltipHint content={session.is_pinned ? '取消置顶对话' : '置顶对话'}>

@@ -46,9 +46,13 @@ import type { AgentKind } from '../../../types/session';
 import type { ProjectSkill } from '../../../types/skill';
 import { ContextDisplay } from '../../assistant-ui/context-display';
 import { buildContextUsageViewModel } from '../contextUsage';
-import { AskUserQuestionCard, type AskUserQuestion } from '../AskUserQuestionCard';
+import { AskUserQuestionCard } from '../AskUserQuestionCard';
 import { PermissionApprovalCard, PermissionApprovalTabs } from '../PermissionApprovalCard';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../../types/agent';
+import {
+  collectAnsweredToolUseIds,
+  findLatestPendingUserQuestion,
+} from '../../../lib/pendingUserInput';
 import { CodeMuxDirectiveChip, type CodeMuxDirectiveKind } from './CodeMuxDirectiveText';
 import {
   CodeMuxLexicalComposerInput,
@@ -126,10 +130,6 @@ const PARSE_DIRECTIVE_RE = /(^|\s)(\/[A-Za-z][\w:-]*)(?=\s|$)|(^|\s)(@(?![A-Za-z
 const logger = createLogger('CodeMuxComposer');
 
 type FileEntry = { name: string; relativePath: string; isDir: boolean };
-type PendingUserQuestion = {
-  toolUseId: string;
-  questions: AskUserQuestion[];
-};
 
 type PendingProposedPlan = {
   key: string;
@@ -806,45 +806,6 @@ function ProposedPlanApprovalCard({
   );
 }
 
-function findLatestPendingUserQuestion(events: AgentMessage[], dismissedIds: Set<string>): PendingUserQuestion | null {
-  const answeredIds = collectAnsweredToolUseIds(events);
-  const expiredIds = collectExpiredQuestionIds(events);
-
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event.kind === 'user') {
-      return null;
-    }
-    if (event.kind !== 'ask_user_question') {
-      continue;
-    }
-
-    const toolUseId = event.data.tool_use_id;
-    if (answeredIds.has(toolUseId) || expiredIds.has(toolUseId) || dismissedIds.has(toolUseId)) {
-      continue;
-    }
-
-    return {
-      toolUseId,
-      questions: event.data.questions,
-    };
-  }
-
-  return null;
-}
-
-function collectExpiredQuestionIds(events: AgentMessage[]): Set<string> {
-  const ids = new Set<string>();
-
-  for (const event of events) {
-    if (event.kind === 'ask_user_question_timeout') {
-      ids.add(event.data.tool_use_id);
-    }
-  }
-
-  return ids;
-}
-
 export function findLatestPendingProposedPlan(events: AgentMessage[], dismissedKeys: Set<string>): PendingProposedPlan | null {
   let hasResultAfterAssistant = false;
 
@@ -889,34 +850,6 @@ function getAssistantText(event: Extract<AgentMessage, { kind: 'assistant' }>): 
     .map((block) => block.text)
     .join('\n\n')
     .trim();
-}
-
-function collectAnsweredToolUseIds(events: AgentMessage[]): Set<string> {
-  const ids = new Set<string>();
-
-  for (const event of events) {
-    if (event.kind !== 'tool_result') {
-      continue;
-    }
-
-    const message = (event.data as unknown as { message?: { content?: unknown[] } }).message;
-    for (const part of message?.content ?? []) {
-      if (isToolResultPart(part)) {
-        ids.add(part.tool_use_id);
-      }
-    }
-  }
-
-  return ids;
-}
-
-function isToolResultPart(value: unknown): value is { type: 'tool_result'; tool_use_id: string } {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    (value as { type?: unknown }).type === 'tool_result' &&
-    typeof (value as { tool_use_id?: unknown }).tool_use_id === 'string'
-  );
 }
 
 export function ComposerAttachmentPreview() {

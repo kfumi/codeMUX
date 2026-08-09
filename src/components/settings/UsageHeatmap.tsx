@@ -1,8 +1,15 @@
-import { useMemo } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { cn } from '../../lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import type { UsageHeatmapDay } from '../../types/usage';
+
+const DAY_LABEL_WIDTH = 32;
+const OUTER_GAP = 3;
+const CELL_GAP = 2;
+const MAX_CELL_SIZE = 13;
+const MIN_CELL_SIZE = 4;
+const DEFAULT_CELL_SIZE = 13;
 
 export function UsageHeatmapLegend() {
   return (
@@ -62,6 +69,16 @@ function formatTokenCount(n: number): string {
   return String(n);
 }
 
+function fitCellSize(containerWidth: number, weekCount: number): number {
+  if (containerWidth <= 0 || weekCount <= 0) {
+    return DEFAULT_CELL_SIZE;
+  }
+  const available = containerWidth - DAY_LABEL_WIDTH - OUTER_GAP;
+  const gaps = Math.max(weekCount - 1, 0) * CELL_GAP;
+  const raw = Math.floor((available - gaps) / weekCount);
+  return Math.max(MIN_CELL_SIZE, Math.min(MAX_CELL_SIZE, raw));
+}
+
 interface HeatmapCell {
   dateStr: string;
   count: number;
@@ -75,6 +92,9 @@ interface MonthLabel {
 }
 
 export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [cellSize, setCellSize] = useState(DEFAULT_CELL_SIZE);
+
   const { weeks, monthLabels } = useMemo<{
     weeks: HeatmapCell[][];
     monthLabels: MonthLabel[];
@@ -126,6 +146,20 @@ export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
     return { weeks, monthLabels };
   }, [data, tokenMap]);
 
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const update = () => {
+      setCellSize(fitCellSize(el.getBoundingClientRect().width, weeks.length));
+    };
+    update();
+
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [weeks.length]);
+
   if (data.length === 0) {
     return (
       <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
@@ -134,17 +168,24 @@ export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
     );
   }
 
+  const monthLabelPad = DAY_LABEL_WIDTH + OUTER_GAP;
+  const cellStyle = { width: cellSize, height: cellSize };
+
   return (
-    <div className="w-full">
-      <div className="flex justify-center overflow-x-auto">
-        <div className="inline-flex flex-col">
-          <div className="mb-[3px] flex h-4 gap-[2px] pl-[35px]">
+    <div ref={containerRef} className="w-full overflow-hidden">
+      <div className="flex justify-center">
+        <div className="inline-flex max-w-full flex-col">
+          <div
+            className="mb-[3px] flex h-4"
+            style={{ gap: CELL_GAP, paddingLeft: monthLabelPad }}
+          >
             {weeks.map((_, wi) => {
               const label = monthLabels.find((m) => m.weekIndex === wi);
               return (
                 <div
                   key={wi}
-                  className="w-[13px] overflow-visible whitespace-nowrap text-ui-micro leading-4 text-muted-foreground"
+                  className="overflow-visible whitespace-nowrap text-ui-micro leading-4 text-muted-foreground"
+                  style={{ width: cellSize }}
                 >
                   {label?.label ?? ''}
                 </div>
@@ -152,28 +193,36 @@ export function UsageHeatmap({ data, tokenMap }: UsageHeatmapProps) {
             })}
           </div>
 
-          <div className="flex gap-[3px]">
-            <div className="flex w-8 flex-col gap-[2px]">
+          <div className="flex" style={{ gap: OUTER_GAP }}>
+            <div
+              className="flex flex-col"
+              style={{ width: DAY_LABEL_WIDTH, gap: CELL_GAP }}
+            >
               {DAY_LABELS.map((label, i) => (
-                <div key={label} className="h-[13px] text-ui-micro leading-[13px] text-muted-foreground">
+                <div
+                  key={label}
+                  className="text-ui-micro text-muted-foreground"
+                  style={{ height: cellSize, lineHeight: `${cellSize}px` }}
+                >
                   {i % 2 === 1 ? label : ''}
                 </div>
               ))}
             </div>
 
-            <div className="flex gap-[2px]">
+            <div className="flex" style={{ gap: CELL_GAP }}>
               {weeks.map((week, wi) => (
-                <div key={wi} className="flex flex-col gap-[2px]">
+                <div key={wi} className="flex flex-col" style={{ gap: CELL_GAP }}>
                   {week.map((cell) => (
                     <Tooltip key={cell.dateStr} delayDuration={250}>
                       <TooltipTrigger asChild>
                         <div
                           className={cn(
-                            'h-[13px] w-[13px] rounded-[2px]',
+                            'rounded-[2px]',
                             cell.isFuture
                               ? 'bg-transparent'
                               : LEVEL_BG[getLevel(cell.tokens)],
                           )}
+                          style={cellStyle}
                         />
                       </TooltipTrigger>
                       <TooltipContent>

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SessionItem } from './SessionItem';
+import { useAgentStore } from '../../stores/agentStore';
 import type { Session } from '../../types/session';
 
 function makeSession(overrides: Partial<Session>): Session {
@@ -29,6 +30,12 @@ function makeSession(overrides: Partial<Session>): Session {
 describe('SessionItem', () => {
   beforeEach(() => {
     vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(() => {});
+    useAgentStore.setState({
+      events: {},
+      pendingPermissions: {},
+      isRunning: {},
+      error: {},
+    });
   });
 
   afterEach(() => {
@@ -125,5 +132,36 @@ describe('SessionItem', () => {
 
     expect(onTogglePinned).toHaveBeenCalledWith(true);
     expect(onArchive).not.toHaveBeenCalled();
+  });
+
+  it('shows a waiting-confirmation badge when ask_user_question is pending', () => {
+    useAgentStore.setState({
+      events: {
+        'session-5': [{
+          kind: 'ask_user_question',
+          data: {
+            tool_use_id: 'q-1',
+            questions: [{
+              question: '选择一种习惯',
+              options: [{ label: '频繁调试' }],
+            }],
+          },
+        }],
+      },
+    });
+
+    render(
+      <SessionItem
+        session={makeSession({ id: 'session-5', title: 'Waiting Session', updated_at: '2026-01-01T00:00:00.000Z' })}
+        isActive={false}
+        onClick={vi.fn()}
+        onTogglePinned={vi.fn()}
+        onArchive={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('等待确认')).toBeTruthy();
   });
 });
