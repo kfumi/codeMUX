@@ -78,6 +78,7 @@ export class OpenCodeRuntime {
   private readonly terminalToolIds = new Set<string>();
   private readonly pendingQuestionIds = new Set<string>();
   private pendingTurnCompletion: { resolve: () => void; reject: (reason: unknown) => void; sessionId: string } | undefined;
+  private manualCompactionInFlight = false;
   private readonly pendingTaskToolCallIds = new Set<string>();
   private readonly assistantMessageIds = new Set<string>();
   private readonly userMessageIds = new Set<string>();
@@ -152,9 +153,13 @@ export class OpenCodeRuntime {
       throw new Error('OpenCode runtime already has an active task');
     }
 
-    this.beginTurnEventState();
     const normalizedPayload = normalizeAgentInputPayload(prompt, inputPayload);
     const normalizedPrompt = normalizedPayload.text;
+    if (normalizedPrompt.trim() === '/compact' && (normalizedPayload.images?.length ?? 0) === 0) {
+      await this.compactSession();
+      return;
+    }
+    this.beginTurnEventState();
     setLogCtx({ sessionId: this.config.sessionId });
     writeLog('[opencode-task]', `sendInput START model=${this.config.provider}/${this.config.model} prompt_preview=${normalizedPrompt.slice(0, 120)}`);
     const task = (async () => {
@@ -223,6 +228,86 @@ export class OpenCodeRuntime {
         this.pendingTurnCompletion = undefined;
       }
       if (this.activeTask === handledTask) {
+        this.activeTask = undefined;
+      }
+    }
+  }
+
+  private async compactSession(): Promise<void> {
+    const client = this.client;
+    const sessionId = this.agentSessionId;
+    if (!client || !sessionId) {
+      throw new Error('OpenCode runtime is not started');
+    }
+    if (!client.compactSession) {
+      throw new Error('OpenCode runtime does not support native session compaction');
+    }
+    if (this.activeTask) {
+      throw new Error('OpenCode runtime already has an active task');
+    }
+
+    this.beginTurnEventState();
+    this.manualCompactionInFlight = true;
+    setLogCtx({ sessionId: this.config.sessionId });
+    writeLog('[opencode-task]', `native compact START model=${this.config.provider}/${this.config.model}`);
+    const turnCompletion = new Promise<void>((resolve, reject) => {
+      this.pendingTurnCompletion = { resolve, reject, sessionId };
+    });
+    const task = (async () => {
+      try {
+        await client.compactSession!({
+          cwd: this.config.cwd,
+          sessionId,
+          provider: this.config.provider,
+          model: this.config.model,
+        });
+      } catch (error) {
+        this.pendingTurnCompletion = undefined;
+        this.manualCompactionInFlight = false;
+        throw error;
+      }
+      if (!this.eventSubscription) {
+        if (this.pendingTurnCompletion?.sessionId === sessionId) {
+          this.pendingTurnCompletion.resolve();
+          this.pendingTurnCompletion = undefined;
+        }
+        return;
+      }
+      await turnCompletion;
+    })();
+    this.activeTask = task;
+    try {
+      this.idleTimedOut = false;
+      this.turnIdleGuard = createTurnIdleGuard({
+        idleTimeoutMs: this.timeouts.idle_timeout_ms,
+        onExpired: () => {
+          this.idleTimedOut = true;
+          writeLog('[opencode-task]', `native compact idle timeout after ${this.timeouts.idle_timeout_ms}ms`);
+          void this.client?.abort(sessionId).catch(() => undefined);
+          this.handleSdkEvent({
+            type: 'session.error',
+            properties: {
+              sessionID: sessionId,
+              error: {
+                name: 'OpenCodeIdleTimeoutError',
+                data: { message: `No progress events for ${this.timeouts.idle_timeout_ms}ms; native compaction timed out` },
+              },
+            },
+          });
+        },
+      });
+      this.turnIdleGuard.reset();
+      await task;
+      writeLog('[opencode-task]', 'native compact COMPLETE');
+    } finally {
+      this.turnIdleGuard?.dispose();
+      this.turnIdleGuard = undefined;
+      this.idleTimedOut = false;
+      this.manualCompactionInFlight = false;
+      if (this.pendingTurnCompletion?.sessionId === sessionId) {
+        this.pendingTurnCompletion = undefined;
+      }
+      if (this.activeTask === task) {
         this.activeTask = undefined;
       }
     }
@@ -487,6 +572,9 @@ export class OpenCodeRuntime {
       return;
     }
     const eventLower = type.toLowerCase();
+    const isCompactionCompletedEvent =
+      type === 'session.next.compaction.ended'
+      || type === 'session.compacted';
     const eventJson = (() => { try { return JSON.stringify(event).slice(0, 2000) } catch { return String(event).slice(0, 2000) } })();
     process.stderr.write(`[opencode-debug] handleSdkEvent type=${type} sessionId=${eventSessionId ?? 'null'} activeSessionId=${activeSessionId ?? 'null'} event=${eventJson}\n`);
     if (eventLower.includes('cancel') || eventLower.includes('abort') || eventLower.includes('interrupt') || type === 'session.error') {
@@ -617,6 +705,13 @@ export class OpenCodeRuntime {
       this.emitEvent(toEmit);
     }
     this.eventSequence += events.length;
+
+    if (isCompactionCompletedEvent && this.manualCompactionInFlight && activeSessionId) {
+      // V2 compaction completion is not guaranteed to be followed by session.idle.
+      // Feed the normal terminal path so the frontend also leaves its running state.
+      this.handleSdkEvent({ type: 'session.idle', properties: { sessionID: activeSessionId } });
+      return;
+    }
 
     for (const normalizedEvent of events) {
       if (

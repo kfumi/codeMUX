@@ -18,6 +18,7 @@ const sdkMocks = vi.hoisted(() => {
       }),
       fork: vi.fn().mockResolvedValue({ data: { id: 'opencode-forked-session' } }),
       delete: vi.fn().mockResolvedValue({ data: true }),
+      summarize: vi.fn().mockResolvedValue({ data: true }),
       prompt: vi.fn().mockResolvedValue({ data: { info: {}, parts: [] } }),
       abort: vi.fn().mockResolvedValue({ data: true }),
     },
@@ -88,6 +89,62 @@ describe('official OpenCode SDK adapter', () => {
       path: { id: 'opencode-session' },
       query: { directory: 'D:/workspace/demo' },
     });
+  });
+
+  it('triggers native session compaction through the official summarize endpoint', async () => {
+    const resources = await officialOpenCodeSdkPort.start({
+      cwd: 'D:/workspace/demo',
+      provider: 'codemux-openai',
+      model: 'gpt-5',
+      credentialSource: 'none',
+      runtimeRef: sdkMocks.runtimeRef,
+    });
+
+    await expect(resources.client.compactSession?.({
+      cwd: 'D:/workspace/demo',
+      sessionId: 'opencode-session',
+      provider: 'codemux-openai',
+      model: 'gpt-5',
+    })).resolves.toBeUndefined();
+
+    expect(sdkMocks.client.session.summarize).toHaveBeenCalledWith({
+      path: { id: 'opencode-session' },
+      query: { directory: 'D:/workspace/demo' },
+      body: { providerID: 'codemux-openai', modelID: 'gpt-5', auto: false },
+    });
+  });
+
+  it('prefers the V2 native session.compact endpoint when the SDK exposes it', async () => {
+    const compact = vi.fn().mockResolvedValue({
+      data: { id: 'pending-compaction', sessionID: 'opencode-session', type: 'compaction' },
+    });
+    sdkMocks.client.session.summarize.mockClear();
+    Object.assign(sdkMocks.client.session, { compact });
+    try {
+      const resources = await officialOpenCodeSdkPort.start({
+        cwd: 'D:/workspace/demo',
+        provider: 'codemux-openai',
+        model: 'gpt-5',
+        credentialSource: 'none',
+        runtimeRef: sdkMocks.runtimeRef,
+      });
+
+      await expect(resources.client.compactSession?.({
+        cwd: 'D:/workspace/demo',
+        sessionId: 'opencode-session',
+        provider: 'codemux-openai',
+        model: 'gpt-5',
+      })).resolves.toBeUndefined();
+
+      expect(compact).toHaveBeenCalledWith({
+        path: { id: 'opencode-session' },
+        query: { directory: 'D:/workspace/demo' },
+        body: {},
+      });
+      expect(sdkMocks.client.session.summarize).not.toHaveBeenCalled();
+    } finally {
+      delete (sdkMocks.client.session as { compact?: unknown }).compact;
+    }
   });
 
   it('treats a native 404 as an idempotent delete', async () => {

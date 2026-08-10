@@ -149,6 +149,28 @@ describe('OpenCode event normalization', () => {
     });
   });
 
+  it('converts V2 native compaction lifecycle events into a compact boundary', () => {
+    const started = toCodeMuxEvent({
+      type: 'session.next.compaction.started',
+      properties: { sessionID: 'opencode-session-1', reason: 'manual' },
+    }, context());
+    const ended = toCodeMuxEvent({
+      type: 'session.next.compaction.ended',
+      properties: { sessionID: 'opencode-session-1', reason: 'manual' },
+    }, context({ sequence: 8 }));
+
+    expect(started[0]).toMatchObject({
+      type: 'system_event',
+      subtype: 'status',
+      status: 'compacting',
+    });
+    expect(ended[0]).toMatchObject({
+      type: 'system_event',
+      subtype: 'compact_boundary',
+      compact_metadata: { trigger: 'manual', pre_tokens: 0 },
+    });
+  });
+
   it('normalizes SDK errors, interruptions, and permission requests without dropping them', () => {
     const error = toCodeMuxEvent({ type: 'session.error', properties: { sessionID: 'opencode-session-1', error: { name: 'UnknownError', data: { message: 'upstream down' } } } }, context());
     const interrupted = toCodeMuxEvent({ type: 'session.error', properties: { sessionID: 'opencode-session-1', error: { name: 'MessageAbortedError', data: { message: 'aborted' } } } }, context({ sequence: 9 }));

@@ -12,7 +12,9 @@ import {
   buildAgentInputPayloadFromAppendMessage,
   CodeMuxImageAttachmentAdapter,
   CodeMuxAssistantRuntimeProvider,
+  resolveChipCommand,
   resolveSlashCommand,
+  shouldRouteChipCommandToHandler,
 } from './CodeMuxAssistantRuntime';
 import { CodeMuxThread, buildToolDurationMap, extractUserNavTitle } from './CodeMuxThread';
 
@@ -1439,6 +1441,14 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       command: expect.objectContaining({ name: 'init' }),
     });
     expect(resolveSlashCommand('/security-review', 'claude_code')?.command.name).toBe('security-review');
+  });
+
+  it('routes OpenCode session command chips to command handling instead of agent input', () => {
+    const compact = resolveChipCommand('[$compact](compact)', 'opencode');
+
+    expect(compact?.command.name).toBe('compact');
+    expect(shouldRouteChipCommandToHandler(compact!.command, 'opencode')).toBe(true);
+    expect(shouldRouteChipCommandToHandler(compact!.command, 'codex')).toBe(true);
   });
 
   it('builds image payloads from assistant-ui attachments', () => {

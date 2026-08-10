@@ -37,6 +37,13 @@ export interface OpenCodePromptInput {
   agent?: string;
 }
 
+export interface OpenCodeCompactInput {
+  cwd: string;
+  sessionId: string;
+  provider: string;
+  model: string;
+}
+
 export interface OpenCodeEventSubscription {
   close(): void | Promise<void>;
 }
@@ -47,6 +54,7 @@ export interface OpenCodeClientPort {
   forkSession(input: { cwd: string; sessionId: string; messageId?: string }): Promise<OpenCodeSessionHandle>;
   deleteSession(input: { cwd?: string; sessionId: string }): Promise<void>;
   prompt(input: OpenCodePromptInput): Promise<void>;
+  compactSession?(input: OpenCodeCompactInput): Promise<void>;
   abort(sessionId: string): Promise<boolean | void>;
   respondToPermission(input: { sessionId: string; requestId: string; response: OpenCodeNativePermissionResponse }): Promise<boolean | void>;
   respondToQuestion?(input: { requestId: string; answers: string[][]; directory?: string }): Promise<boolean | void>;
@@ -510,6 +518,34 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
               throw new Error(`[opencode-task] SDK promptAsync failed: ${errMsg}${errStack ? `\n${errStack}` : ''}`);
             }
             process.stderr.write(`[opencode-task] SDK promptAsync ACCEPTED sessionId=${sessionId}\n`);
+          },
+          async compactSession({ cwd: sessionCwd, sessionId, provider: providerId, model: modelId }) {
+            const sessionApi = client.session as unknown as {
+              compact?: (input: unknown) => Promise<{ data?: unknown; error?: unknown }>;
+              summarize?: (input: unknown) => Promise<{ data?: unknown; error?: unknown }>;
+            };
+            const input = {
+              path: { id: sessionId },
+              query: { directory: sessionCwd },
+            };
+            const response = typeof sessionApi.compact === 'function'
+              ? await sessionApi.compact({ ...input, body: {} })
+              : typeof sessionApi.summarize === 'function'
+                ? await sessionApi.summarize({
+                  ...input,
+                  body: { providerID: providerId, modelID: modelId, auto: false },
+                })
+                : undefined;
+
+            if (!response) {
+              throw new Error('OpenCode SDK does not expose a native session compaction endpoint');
+            }
+            if (response.error !== undefined) {
+              throw new Error(`OpenCode session compaction failed: ${formatSdkError(response.error)}`);
+            }
+            process.stderr.write(
+              `[opencode-task] native session compaction admitted sessionId=${sessionId} endpoint=${typeof sessionApi.compact === 'function' ? 'compact' : 'summarize'}\n`,
+            );
           },
           async subscribe({ cwd: sessionCwd, onEvent, onError, onRetry, onDisconnect }) {
             let closed = false;

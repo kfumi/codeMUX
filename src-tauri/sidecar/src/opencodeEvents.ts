@@ -403,6 +403,24 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       }
       break;
     }
+    case 'session.next.compaction.started':
+      events.push(buildEnvelope({
+        type: 'system_event',
+        subtype: 'status',
+        status: 'compacting',
+      }, context, sessionId));
+      break;
+    case 'session.next.compaction.ended':
+      events.push(buildEnvelope({
+        type: 'system_event',
+        subtype: 'compact_boundary',
+        content: 'Conversation compacted',
+        compact_metadata: {
+          trigger: readString(properties.reason) === 'auto' ? 'auto' : 'manual',
+          pre_tokens: 0,
+        },
+      }, context, sessionId));
+      break;
     case 'file.edited':
     case 'file.watcher.updated':
       // These notifications contain no diff content. The tool input and

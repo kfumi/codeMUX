@@ -96,7 +96,7 @@ function SessionScopedAssistantRuntime({
       const chipCommand = hasImages ? null : resolveChipCommand(payload.text, agentKind, projectSkills);
 
       if (chipCommand) {
-        if (agentKind === 'claude_code') {
+        if (shouldRouteChipCommandToHandler(chipCommand.command, agentKind)) {
           await onCommand(chipCommand.command, chipCommand.args);
           return;
         }
@@ -310,4 +310,12 @@ export function resolveChipCommand(
   const args = rest.trim();
   const command = findCommand(name, agentKind, projectSkills);
   return command ? { command, args } : null;
+}
+
+export function shouldRouteChipCommandToHandler(command: SlashCommand, agentKind: AgentKind): boolean {
+  return (
+    agentKind === 'claude_code'
+    || command.handler === 'local'
+    || command.category === 'session'
+  );
 }

@@ -81,6 +81,7 @@ function createPort() {
     forkSession: vi.fn().mockResolvedValue({ id: 'opencode-forked' }),
     deleteSession: vi.fn().mockResolvedValue(undefined),
     prompt: vi.fn().mockResolvedValue(undefined),
+    compactSession: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(true),
     respondToPermission: vi.fn().mockResolvedValue(true),
   };
@@ -664,6 +665,43 @@ describe('OpenCodeRuntime', () => {
       model: 'gpt-5',
       agent: 'build',
     });
+  });
+
+  it('routes /compact through the native OpenCode compaction API and waits for completion', async () => {
+    const { port, client } = createPort();
+    const emitted: unknown[] = [];
+    let onEvent!: (event: unknown) => void;
+    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+      onEvent = input.onEvent;
+      return { close: vi.fn() };
+    });
+    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
+    await runtime.start();
+
+    const compactPromise = runtime.sendInput('/compact');
+    await vi.waitFor(() => expect(client.compactSession).toHaveBeenCalledWith({
+      cwd: 'D:/workspace/demo',
+      sessionId: 'opencode-new',
+      provider: 'codemux-openai',
+      model: 'gpt-5',
+    }));
+    expect(client.prompt).not.toHaveBeenCalled();
+
+    onEvent({
+      type: 'session.next.compaction.started',
+      properties: { sessionID: 'opencode-new', reason: 'manual' },
+    });
+    onEvent({
+      type: 'session.next.compaction.ended',
+      properties: { sessionID: 'opencode-new', reason: 'manual' },
+    });
+    await compactPromise;
+
+    expect(emitted).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'system_event', subtype: 'compact_boundary' }),
+      expect.objectContaining({ type: 'turn_finished', outcome: 'completed' }),
+    ]));
+    await runtime.shutdown();
   });
 
   it('deletes the native OpenCode session through the client port', async () => {
