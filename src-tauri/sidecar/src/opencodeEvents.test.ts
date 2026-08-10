@@ -169,6 +169,9 @@ describe('OpenCode event normalization', () => {
         sessionID: 'opencode-session-1',
         permission: 'external_directory',
         metadata: { filepath: 'C:\\Users\\user\\.agents' },
+        patterns: ['C:\\Users\\user\\.agents\\**'],
+        always: ['*'],
+        tool: { messageID: 'message-1', callID: 'call-1' },
       },
     }, context());
 
@@ -178,7 +181,12 @@ describe('OpenCode event normalization', () => {
       permission_id: 'permission-asked-1',
       permission_type: 'external_directory',
       description: 'external_directory',
-      metadata: { filepath: 'C:\\Users\\user\\.agents' },
+      metadata: {
+        filepath: 'C:\\Users\\user\\.agents',
+        patterns: ['C:\\Users\\user\\.agents\\**'],
+        always: ['*'],
+        tool: { messageID: 'message-1', callID: 'call-1' },
+      },
     })]);
   });
 

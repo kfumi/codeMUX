@@ -200,7 +200,7 @@ function formatCatalogDisplayName(modelId: string): string {
     .join(' ');
 }
 
-const DEFAULT_CODEX_CONTEXT_WINDOW = 272000;
+export const DEFAULT_CODEX_CONTEXT_WINDOW = 200000;
 
 function normalizeContextWindow(value: number | undefined): number {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) {

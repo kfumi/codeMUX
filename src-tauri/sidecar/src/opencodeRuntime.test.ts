@@ -372,6 +372,9 @@ describe('OpenCodeRuntime', () => {
       sessionID: 'opencode-new',
       permission: 'external_directory',
       metadata: { filepath: 'C:\\Users\\user\\.agents' },
+      patterns: ['C:\\Users\\user\\.agents\\**'],
+      always: ['*'],
+      tool: { messageID: 'message-1', callID: 'call-1' },
     };
     onEvent({ type: 'permission.asked', properties: rawPermission });
 
@@ -384,7 +387,12 @@ describe('OpenCodeRuntime', () => {
       request_id: 'permission-asked-1',
       permission_type: 'external_directory',
       description: 'external_directory',
-      metadata: rawPermission.metadata,
+      metadata: {
+        ...rawPermission.metadata,
+        patterns: rawPermission.patterns,
+        always: rawPermission.always,
+        tool: rawPermission.tool,
+      },
     }));
     await runtime.respondToPermission('permission-asked-1', 'once');
     expect(client.respondToPermission).toHaveBeenCalledWith({

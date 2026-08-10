@@ -160,6 +160,26 @@ describe('ProviderConfigPanel', () => {
     expect(screen.getByLabelText('显示密钥')).toBeTruthy();
   });
 
+  it('fills default OpenAI model limits when adding a model', async () => {
+    render(<ProviderConfigPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('https://api.deepseek.com')).toBeTruthy();
+    });
+
+    const listEl = document.querySelector('.overflow-y-auto.px-2') as HTMLElement;
+    fireEvent.click(within(listEl).getByText('深度求索'));
+    fireEvent.click(screen.getByRole('button', { name: '添加模型' }));
+
+    const modelIdInput = screen.getByPlaceholderText('model-id');
+    fireEvent.change(modelIdInput, { target: { value: 'new-model' } });
+    fireEvent.click(screen.getByRole('button', { name: '设置模型 new-model' }));
+
+    expect(screen.getByDisplayValue('200000')).toBeTruthy();
+    expect(screen.getByDisplayValue('128000')).toBeTruthy();
+    expect(screen.getByDisplayValue('65536')).toBeTruthy();
+  });
+
   it('opens model picker with api results', async () => {
     render(<ProviderConfigPanel />);
 

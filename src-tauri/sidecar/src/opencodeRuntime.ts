@@ -1,7 +1,18 @@
 import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInputPayload.js';
 import { emit } from './streamEventBatcher.js';
 import { OpenCodePermissionRegistry, type OpenCodePermissionResponse } from './opencodePermissions.js';
-import { extractOpenCodeUsageUpdate, mergeOpenCodeUsage, getOpenCodeEventIdentity, isOpenCodeSessionScopedEvent, getOpenCodeEventSessionId, getOpenCodePayloadKey, getOpenCodeToolId, getOpenCodeToolStatus, toCodeMuxEvent } from './opencodeEvents.js';
+import {
+  extractOpenCodeUsageUpdate,
+  mergeOpenCodeUsage,
+  getOpenCodeEventIdentity,
+  isOpenCodeSessionScopedEvent,
+  getOpenCodeEventSessionId,
+  getOpenCodePayloadKey,
+  getOpenCodeToolId,
+  getOpenCodeToolStatus,
+  getOpenCodePermissionMetadata,
+  toCodeMuxEvent,
+} from './opencodeEvents.js';
 import type { OpenCodeEventSubscription, OpenCodePermissionUpdate } from './opencodeSdk.js';
 import type { AgentPlanMode, SidecarPermissionConfig } from './agentPermissions.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
@@ -700,7 +711,7 @@ export class OpenCodeRuntime {
     }
     const permissionType = readString(properties?.type) ?? readString(properties?.permission) ?? 'unknown';
     const description = readString(properties?.title) ?? permissionType;
-    const metadata = asRecord(properties?.metadata);
+    const metadata = getOpenCodePermissionMetadata(properties);
     const openCodeSessionId = eventSessionId ?? readString(properties?.sessionID);
     const rawPermission = properties ?? event;
     const registration = this.permissions.upsert({

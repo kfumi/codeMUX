@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   checkProfileModelSupports1m,
   formatModelDisplayName,
+  getProfileModelContextWindow,
   stripContext1mSuffix,
   withContext1mSuffix,
 } from './modelDisplay';
@@ -34,6 +35,14 @@ describe('modelDisplay context_1m', () => {
     expect(checkProfileModelSupports1m(providerWithModel({ context_1m: true }), 'deepseek-v4-flash')).toBe(true);
     expect(checkProfileModelSupports1m(providerWithModel({ context_1m: true }), 'deepseek-v4-flash[1m]')).toBe(true);
     expect(checkProfileModelSupports1m(providerWithModel(), 'deepseek-v4-flash')).toBe(false);
+  });
+
+  it('reads the configured context window regardless of a Claude suffix', () => {
+    expect(getProfileModelContextWindow(
+      providerWithModel({ context_window: 1_000_000 }),
+      'deepseek-v4-flash[1m]',
+    )).toBe(1_000_000);
+    expect(getProfileModelContextWindow(providerWithModel(), 'deepseek-v4-flash')).toBeNull();
   });
 
   it('formats Claude display names with the 1m suffix when enabled', () => {

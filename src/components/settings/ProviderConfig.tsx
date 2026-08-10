@@ -87,6 +87,31 @@ function syncDefaultModel(models: ProviderModel[], currentDefault = ''): string 
   return ids[0] ?? '';
 }
 
+const DEFAULT_OPENAI_MODEL_LIMITS = {
+  context_window: 200_000,
+  max_input_tokens: 128_000,
+  max_output_tokens: 65_536,
+} as const;
+
+function hasOpenAiEndpoint(provider: ModelProvider): boolean {
+  return provider.endpoints.some(
+    (endpoint) => endpoint.protocol === 'openai_compatible' && endpoint.base_url.trim().length > 0,
+  );
+}
+
+function withDefaultOpenAiModelLimits(
+  model: ProviderModel,
+  applyDefaults: boolean,
+): ProviderModel {
+  if (!applyDefaults) return model;
+  return {
+    ...model,
+    context_window: model.context_window ?? DEFAULT_OPENAI_MODEL_LIMITS.context_window,
+    max_input_tokens: model.max_input_tokens ?? DEFAULT_OPENAI_MODEL_LIMITS.max_input_tokens,
+    max_output_tokens: model.max_output_tokens ?? DEFAULT_OPENAI_MODEL_LIMITS.max_output_tokens,
+  };
+}
+
 function cleanProviderModel(
   model: ProviderModel,
   providerTemplateId?: string | null,
@@ -496,7 +521,10 @@ export function ProviderConfigPanel() {
 
   function addModelRow() {
     if (!draft) return;
-    const models = [...draft.models, { id: '', name: '' }];
+    const models = [
+      ...draft.models,
+      withDefaultOpenAiModelLimits({ id: '', name: '' }, hasOpenAiEndpoint(draft)),
+    ];
     setDraft({
       ...draft,
       models,
@@ -522,10 +550,16 @@ export function ProviderConfigPanel() {
   function applySelectedModels(models: ProviderModel[]) {
     setDraft((prev) => {
       if (!prev) return prev;
+      const existingIds = new Set(prev.models.map((model) => model.id.trim()).filter(Boolean));
+      const nextModels = models.map((model) => (
+        existingIds.has(model.id.trim())
+          ? model
+          : withDefaultOpenAiModelLimits(model, hasOpenAiEndpoint(prev))
+      ));
       return {
         ...prev,
-        models,
-        default_model: syncDefaultModel(models, prev.default_model),
+        models: nextModels,
+        default_model: syncDefaultModel(nextModels, prev.default_model),
       };
     });
   }

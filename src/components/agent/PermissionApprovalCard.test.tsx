@@ -28,9 +28,9 @@ describe('PermissionApprovalCard', () => {
 
     expect(screen.getByTestId('permission-approval-card')).toBeTruthy();
     expect(screen.getByText('$ cd D:/project/ai-code/codeMUX && npm test')).toBeTruthy();
-    expect(screen.getByText('始终允许本项目')).toBeTruthy();
+    expect(screen.getByText('始终允许匹配规则')).toBeTruthy();
 
-    fireEvent.click(screen.getByText('始终允许本项目'));
+    fireEvent.click(screen.getByText('始终允许匹配规则'));
     fireEvent.click(screen.getByRole('button', { name: /确认/ }));
 
     await waitFor(() => expect(onResponse).toHaveBeenCalledWith('always'));
@@ -56,7 +56,7 @@ describe('PermissionApprovalCard', () => {
     expect(screen.getByText('批准')).toBeTruthy();
     expect(screen.getByText('忽略')).toBeTruthy();
     expect(screen.getByPlaceholderText('输入你的回答...')).toBeTruthy();
-    expect(screen.queryByText('始终允许本项目')).toBeNull();
+    expect(screen.queryByText('始终允许匹配规则')).toBeNull();
 
     fireEvent.click(screen.getByText('忽略'));
     return waitFor(() => expect(onResponse).toHaveBeenCalledWith('reject'));
@@ -73,7 +73,7 @@ describe('PermissionApprovalCard', () => {
     );
 
     const once = screen.getByText('允许').closest('button');
-    const always = screen.getByText('始终允许本项目').closest('button');
+    const always = screen.getByText('始终允许匹配规则').closest('button');
     expect(once).toBeTruthy();
     expect(always).toBeTruthy();
 

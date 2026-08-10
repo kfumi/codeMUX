@@ -158,6 +158,33 @@ describe('useAgentNotifications', () => {
     });
   });
 
+  it('sends a native agent notification for a permission approval while inactive', async () => {
+    render(<Harness />);
+
+    useAgentStore.setState({
+      events: {
+        'session-1': [{
+          kind: 'permission',
+          data: {
+            request_id: 'permission-1',
+            permission_type: 'read',
+            description: '读取文件',
+            metadata: { patterns: ['D:\\workspace\\secret.txt'] },
+          },
+        }],
+      },
+      eventTimestamps: { 'session-1': [Date.now()] },
+    });
+
+    await waitFor(() => {
+      expect(sendAgentNotificationMock).toHaveBeenCalledWith({
+        title: '需要你的确认',
+        body: '重构设置页：读取文件 · D:\\workspace\\secret.txt',
+        sessionId: 'session-1',
+      });
+    });
+  });
+
   it('does not play a sound for waiting-input notifications', async () => {
     useSettingsStore.setState({
       config: {

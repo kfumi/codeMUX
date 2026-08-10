@@ -185,10 +185,10 @@ export function SessionItem({
                     <LockKeyhole className="h-3 w-3 shrink-0 text-[hsl(var(--sidebar-fg))]/42" aria-label="只读会话" />
                   </TooltipHint>
                 )}
-                <span className="relative h-5 shrink-0">
-                  <span className={cn('inline-flex h-5 items-center transition-opacity duration-150', 'group-hover:opacity-0')}>
+                <span className="relative flex h-5 shrink-0 items-center">
+                  <span className={cn('inline-flex h-full items-center transition-opacity duration-150', 'group-hover:opacity-0')}>
                     {awaitsConfirmation ? (
-                      <span className="rounded-full bg-[hsl(var(--success))] px-1.5 py-1 text-[10px] font-medium leading-none text-white">
+                      <span className="inline-flex h-4 items-center rounded-full bg-[hsl(var(--success))] px-1.5 text-[10px] font-medium leading-4 text-white">
                         等待确认
                       </span>
                     ) : (

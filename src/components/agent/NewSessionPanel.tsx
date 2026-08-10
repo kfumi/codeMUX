@@ -19,6 +19,7 @@ import { AgentSetupChecklist } from './AgentSetupChecklist';
 import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistantRuntime';
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 import { AgentModelSelector } from './AgentModelSelector';
+import { getProfileModelContextWindow } from './modelDisplay';
 
 interface NewSessionPanelProps {
   onSubmit: (input: AgentInputPayload) => Promise<void> | void;
@@ -91,6 +92,12 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   }, [models, preferredModelId, preferredProviderId]);
   const effectiveModel = preferredModel?.modelId || '';
   const effectiveProviderId = preferredModel?.providerId || preferredProviderId;
+  const configuredContextWindow = selectedAgentKind === 'codex' || selectedAgentKind === 'opencode'
+    ? getProfileModelContextWindow(
+      modelProviders.find((provider) => provider.id === effectiveProviderId) ?? null,
+      effectiveModel,
+    )
+    : null;
   const hasUsableProvider = !isProviderAgent
     || Boolean(effectiveModel && effectiveProviderId && !areModelsLoading);
 
@@ -274,6 +281,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               agentKind={selectedAgentKind}
               projectPath={draftProject?.path}
               projectSkills={projectSkills}
+              configuredContextWindow={configuredContextWindow}
               placeholder={placeholder}
               disabled={!hasUsableProvider || isCheckingRuntime}
               loading={isCheckingRuntime}

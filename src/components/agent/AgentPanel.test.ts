@@ -85,6 +85,22 @@ describe('history-file context usage view model', () => {
     })?.usedTokens).toBe(156_061);
   });
 
+  it('prefers the configured model context window over runtime history metadata', () => {
+    const tokenUsage = normalizeThreadTokenUsage({
+      input_tokens: 20,
+      output_tokens: 5,
+      model_context_window: 258_400,
+    });
+
+    expect(buildContextUsageViewModel({
+      tokenUsage,
+      model: 'gpt-5-codex',
+      configuredContextWindow: 1_000_000,
+      sessionProviderUsesLargeContext: false,
+      activeProviderUsesLargeContext: false,
+    })?.totalTokens).toBe(1_000_000);
+  });
+
   it('falls back Codex-like usage without total_tokens to input plus output', () => {
     const tokenUsage = normalizeThreadTokenUsage({
       input_tokens: 20,

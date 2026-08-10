@@ -36,8 +36,8 @@ describe('codexModelCatalog', () => {
       apply_patch_tool_type: 'freeform',
       shell_type: 'shell_command',
       supported_in_api: true,
-      context_window: 272000,
-      max_context_window: 272000,
+      context_window: 200000,
+      max_context_window: 200000,
     });
   });
 
@@ -58,8 +58,8 @@ describe('codexModelCatalog', () => {
         slug: 'deepseek-v4-flash',
         display_name: 'Deepseek V4 Flash',
         base_instructions: 'keep me',
-        context_window: 272000,
-        max_context_window: 272000,
+        context_window: 200000,
+        max_context_window: 200000,
       }],
     }, null, 2));
 

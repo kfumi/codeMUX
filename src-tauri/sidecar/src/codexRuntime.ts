@@ -55,6 +55,7 @@ import { forkCodexThread } from './codexFork.js';
 import { resolveTurnTimeouts, type ResolvedTurnTimeouts, type TurnTimeouts } from './turnTimeouts.js';
 import { createTurnIdleGuard, type TurnIdleGuard } from './turnIdleGuard.js';
 import {
+  DEFAULT_CODEX_CONTEXT_WINDOW,
   ensureCodexModelCatalog,
   isCodexModelAdvisoryError,
   isCodexNonFatalErrorItem,
@@ -935,7 +936,12 @@ export class CodexSessionRuntime {
     }
     try {
       const catalogPath = await ensureCodexModelCatalog(
-        [{ id: modelId, ...(contextWindow && contextWindow > 0 ? { contextWindow } : {}) }],
+        [{
+          id: modelId,
+          contextWindow: contextWindow && contextWindow > 0
+            ? contextWindow
+            : DEFAULT_CODEX_CONTEXT_WINDOW,
+        }],
         resolveCodexModelCatalogPath(),
       );
       if (catalogPath) {

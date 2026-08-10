@@ -98,6 +98,7 @@ export interface OpenCodeSdkPort {
 }
 
 export const DEFAULT_OPENCODE_SERVER_CLOSE_TIMEOUT_MS = 10_000;
+const DEFAULT_OPENCODE_OUTPUT_TOKENS = 65_536;
 export interface OpenCodeServerConfigInput {
   provider: string;
   model: string;
@@ -184,6 +185,9 @@ function buildOpenCodeModelLimit(modelLimits: OpenCodeServerConfigInput['modelLi
   }
   if (typeof modelLimits.maxOutputTokens === 'number' && modelLimits.maxOutputTokens > 0) {
     limit.output = Math.floor(modelLimits.maxOutputTokens);
+  }
+  if (Object.keys(limit).length > 0 && limit.output === undefined) {
+    limit.output = DEFAULT_OPENCODE_OUTPUT_TOKENS;
   }
   return Object.keys(limit).length > 0 ? { limit } : {};
 }

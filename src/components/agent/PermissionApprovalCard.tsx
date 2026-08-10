@@ -1,4 +1,4 @@
-import { Check, Clock3, Info, Terminal } from 'lucide-react';
+import { Check, Info } from 'lucide-react';
 import { useRef, useState, type KeyboardEvent } from 'react';
 
 import { cn } from '../../lib/utils';
@@ -104,7 +104,7 @@ function getPermissionOptions(planApproval: boolean): PermissionApprovalOption[]
     ? [{ response: 'once', label: '批准', description: '退出计划模式并开始实施。' }]
     : [
         { response: 'once', label: '允许', description: '仅允许这一次操作。' },
-        { response: 'always', label: '始终允许本项目', description: '后续相同命令不再询问。' },
+        { response: 'always', label: '始终允许匹配规则', description: '后续匹配到相同规则时不再询问。' },
         { response: 'reject', label: '拒绝', description: '这次先拒绝。' },
       ];
 }
@@ -162,16 +162,18 @@ function PermissionApprovalBody({
           <span className="rounded-md border border-border/65 px-2 py-0.5 text-xs font-medium text-foreground/82">需要权限</span>
           <span className="min-w-0 truncate text-foreground/85">{planApproval ? '实施计划' : title}</span>
         </div>
-        {resource ? <p className="mt-1 truncate font-mono text-xs text-muted-foreground/72" title={resource}>{resource}</p> : null}
-      </div>
-
-      <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground/78">
-        {planApproval ? <Terminal className="h-3.5 w-3.5" /> : <Clock3 className="h-3.5 w-3.5" />}
-        <span>{planApproval ? '等待批准' : '等待确认'}</span>
+        {resource ? (
+          <div
+            className="mt-1.5 max-h-24 overflow-auto rounded-lg border border-border/40 bg-background/72 px-3 py-2 font-mono text-xs leading-5 text-muted-foreground/80 whitespace-pre-wrap break-all"
+            title={resource}
+          >
+            {resource}
+          </div>
+        ) : null}
       </div>
 
       {command ? (
-        <pre className="max-h-36 overflow-auto rounded-xl border border-border/40 bg-background/72 px-3 py-2.5 font-mono text-code leading-5 text-foreground/88 whitespace-pre-wrap break-words">
+        <pre className="max-h-36 overflow-auto rounded-xl border border-border/40 bg-background/72 px-3 py-2.5 font-mono text-code leading-5 text-foreground/88 whitespace-pre-wrap wrap-break-word">
           <code>$ {command}</code>
         </pre>
       ) : null}
@@ -333,7 +335,7 @@ export function PermissionApprovalTabs({ requests, onResponse }: PermissionAppro
         <Tabs value={activeId} onValueChange={setActiveRequestId}>
           <TabsList className="mb-2 w-full min-w-0 max-w-full flex-nowrap justify-start overflow-x-auto overflow-y-hidden overscroll-x-contain">
             {requests.map((request, index) => (
-              <TabsTrigger key={request.request_id} value={request.request_id} className="relative min-w-0 max-w-[15rem] flex-1">
+              <TabsTrigger key={request.request_id} value={request.request_id} className="relative min-w-0 max-w-60 flex-1">
                 <span className="truncate">{getPermissionTabLabel(request, index)}</span>
               </TabsTrigger>
             ))}

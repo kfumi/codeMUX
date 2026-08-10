@@ -26,7 +26,12 @@ import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistant
 import { CodeMuxThread } from './assistant-ui/CodeMuxThread';
 import { AgentPermissionSelector } from './AgentPermissionSelector';
 import { AgentModelSelector } from './AgentModelSelector';
-import { checkProfileModelSupports1m, formatModelDisplayName, stripContext1mSuffix } from './modelDisplay';
+import {
+  checkProfileModelSupports1m,
+  formatModelDisplayName,
+  getProfileModelContextWindow,
+  stripContext1mSuffix,
+} from './modelDisplay';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface AgentPanelProps {
@@ -87,6 +92,9 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   );
   const runtimeProvider = sessionProvider ?? activeProvider;
   const model = stripContext1mSuffix(session?.model ?? '') || runtimeProvider?.default_model.trim() || getProviderPrimaryModel(runtimeProvider) || '';
+  const configuredContextWindow = agentKind === 'codex' || agentKind === 'opencode'
+    ? getProfileModelContextWindow(runtimeProvider, model)
+    : null;
   const [selectorModelState, setSelectorModelState] = useState(() => stripContext1mSuffix(session?.model ?? '') || activeProvider?.default_model.trim() || getProviderPrimaryModel(activeProvider) || '');
   const prevSessionIdRef = useRef<string | null>(null);
   const userModifiedRef = useRef(false);
@@ -457,6 +465,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                   projectPath={project?.path}
                   projectSkills={projectSkills}
                   modelName={modelNameWithSuffix}
+                  configuredContextWindow={configuredContextWindow}
                   disabled={!hasUsableProvider || isReadOnly}
                   modelSelector={(
                     <AgentModelSelector

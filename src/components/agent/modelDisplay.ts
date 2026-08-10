@@ -27,6 +27,20 @@ export function checkProfileModelSupports1m(
   return entry?.context_1m === true;
 }
 
+/** Read the configured Codex/OpenCode context window for a model. */
+export function getProfileModelContextWindow(
+  provider: ModelProvider | null,
+  modelId: string,
+): number | null {
+  if (!provider) return null;
+  const baseId = stripContext1mSuffix(modelId);
+  if (!baseId) return null;
+  const entry = provider.models.find((model) => stripContext1mSuffix(model.id) === baseId);
+  return typeof entry?.context_window === 'number' && entry.context_window > 0
+    ? entry.context_window
+    : null;
+}
+
 export function formatModelDisplayName({
   model,
   agentKind,

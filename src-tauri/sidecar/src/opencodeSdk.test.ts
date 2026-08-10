@@ -173,6 +173,30 @@ describe('official OpenCode SDK adapter', () => {
     });
   });
 
+  it('includes a default output limit when only the context window is configured', () => {
+    expect(buildOpenCodeServerConfig({
+      provider: 'codemux-openai',
+      model: 'deepseek-v4-flash-free',
+      credentialSource: 'codemux',
+      modelLimits: {
+        contextWindow: 1_000_000,
+      },
+    })).toMatchObject({
+      provider: {
+        'codemux-openai': {
+          models: {
+            'deepseek-v4-flash-free': {
+              limit: {
+                context: 1_000_000,
+                output: 65_536,
+              },
+            },
+          },
+        },
+      },
+    });
+  });
+
   it('uses the OpenAI-compatible AI SDK adapter for a custom OpenAI endpoint', () => {
     expect(buildOpenCodeServerConfig({
       provider: 'codemux-openai',

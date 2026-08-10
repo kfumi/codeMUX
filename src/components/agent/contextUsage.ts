@@ -29,6 +29,7 @@ export type ThreadTokenUsage = {
 type ContextUsageOptions = {
   tokenUsage?: ThreadTokenUsage | null;
   model?: string | null;
+  configuredContextWindow?: number | null;
   sessionProviderUsesLargeContext: boolean;
   activeProviderUsesLargeContext: boolean;
 };
@@ -61,6 +62,7 @@ export function normalizeThreadTokenUsage(raw: unknown): ThreadTokenUsage | null
 export function buildContextUsageViewModel({
   tokenUsage,
   model,
+  configuredContextWindow,
   sessionProviderUsesLargeContext,
   activeProviderUsesLargeContext,
 }: ContextUsageOptions): ContextUsage | null {
@@ -80,6 +82,7 @@ export function buildContextUsageViewModel({
     usedTokens,
     totalTokens: getSessionContextLimit({
       model,
+      configuredContextWindow,
       sessionProviderUsesLargeContext,
       activeProviderUsesLargeContext,
       modelContextWindow: tokenUsage.modelContextWindow ?? undefined,
@@ -157,15 +160,21 @@ function readOptionalString(value: unknown): string | null {
 
 function getSessionContextLimit({
   model,
+  configuredContextWindow,
   sessionProviderUsesLargeContext,
   activeProviderUsesLargeContext,
   modelContextWindow,
 }: {
   model?: string | null;
+  configuredContextWindow?: number | null;
   sessionProviderUsesLargeContext: boolean;
   activeProviderUsesLargeContext: boolean;
   modelContextWindow?: number;
 }) {
+  if (configuredContextWindow && configuredContextWindow > 0) {
+    return configuredContextWindow;
+  }
+
   if (typeof model === 'string' && model.trim().length > 0) {
     if (model.toLowerCase().includes(LARGE_CONTEXT_MODEL_SUFFIX)) {
       return LARGE_CONTEXT_TOKENS;

@@ -41,6 +41,20 @@ function getQuestionSummary(event: Extract<AgentMessage, { kind: 'ask_user_quest
   return compactBody(questions[questions.length - 1]?.question ?? '等待你的输入');
 }
 
+function getPermissionSummary(event: Extract<AgentMessage, { kind: 'permission' }>): string {
+  const metadata = event.data.metadata ?? {};
+  const directResource = ['filepath', 'path', 'parentDir']
+    .map((key) => metadata[key])
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  const patterns = metadata.patterns;
+  const patternResource = Array.isArray(patterns)
+    ? patterns.find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : undefined;
+  const description = event.data.description.trim() || event.data.permission_type;
+  const resource = directResource ?? patternResource;
+  return compactBody([description, resource].filter(Boolean).join(' · ') || '等待权限确认');
+}
+
 export function buildAgentNotificationCandidate({
   sessionId,
   event,
@@ -56,6 +70,16 @@ export function buildAgentNotificationCandidate({
       sessionId,
       title: '需要你的回复',
       body: compactBody(`${sessionTitle}：${getQuestionSummary(event)}`),
+    };
+  }
+
+  if (event.kind === 'permission') {
+    return {
+      key: `requires_permission:${sessionId}:${event.data.request_id}`,
+      kind: 'requires_input',
+      sessionId,
+      title: '需要你的确认',
+      body: compactBody(`${sessionTitle}：${getPermissionSummary(event)}`),
     };
   }
 

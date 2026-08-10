@@ -37,6 +37,33 @@ describe('agent notification rules', () => {
     });
   });
 
+  it('builds a requires-confirmation notification for permission events', () => {
+    const event: AgentMessage = {
+      kind: 'permission',
+      data: {
+        request_id: 'permission-1',
+        permission_type: 'read',
+        description: '读取文件',
+        metadata: { patterns: ['D:\\workspace\\secret.txt'] },
+      },
+    };
+
+    const candidate = buildAgentNotificationCandidate({
+      sessionId: 'session-1',
+      event,
+      eventIndex: 4,
+      sessionTitles,
+    });
+
+    expect(candidate).toEqual({
+      key: 'requires_permission:session-1:permission-1',
+      kind: 'requires_input',
+      sessionId: 'session-1',
+      title: '需要你的确认',
+      body: '重构设置页：读取文件 · D:\\workspace\\secret.txt',
+    });
+  });
+
   it('builds a completed notification for done events', () => {
     const candidate = buildAgentNotificationCandidate({
       sessionId: 'session-1',

@@ -99,6 +99,26 @@ export function getOpenCodeToolStatus(event: unknown): string | undefined {
   return readString(state?.status);
 }
 
+/**
+ * OpenCode permission.asked keeps useful approval details beside metadata.
+ * Keep those fields when projecting the event to the frontend permission model.
+ */
+export function getOpenCodePermissionMetadata(
+  properties: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  const metadata = asRecord(properties?.metadata);
+  const patterns = readArray(properties?.patterns);
+  const always = readArray(properties?.always);
+  const tool = asRecord(properties?.tool);
+  const normalized: Record<string, unknown> = { ...(metadata ?? {}) };
+
+  if (normalized.patterns === undefined && patterns) normalized.patterns = patterns;
+  if (normalized.always === undefined && always) normalized.always = always;
+  if (normalized.tool === undefined && tool) normalized.tool = tool;
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
 export type OpenCodeUsageUpdate = {
   usage: OpenCodeTokenUsage;
   mode: 'snapshot' | 'step';
@@ -476,13 +496,14 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
     case 'permission.updated':
     case 'permission.asked': {
       const permissionType = readString(properties.type) ?? readString(properties.permission) ?? 'unknown';
+      const metadata = getOpenCodePermissionMetadata(properties);
       events.push(buildEnvelope({
         type: 'permission_requested',
         request_id: readString(properties.id) ?? `permission-${context.sequence}`,
         permission_id: readString(properties.id),
         permission_type: permissionType,
         description: readString(properties.title) ?? permissionType,
-        ...(asRecord(properties.metadata) ? { metadata: asRecord(properties.metadata) } : {}),
+        ...(metadata ? { metadata } : {}),
         event_id: context.eventIdFactory(),
       }, context, sessionId));
       break;

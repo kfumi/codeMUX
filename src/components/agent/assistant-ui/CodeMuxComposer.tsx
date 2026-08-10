@@ -69,6 +69,7 @@ interface CodeMuxComposerProps {
   projectPath?: string | null;
   projectSkills?: ProjectSkill[];
   modelName?: string;
+  configuredContextWindow?: number | null;
   placeholder?: string;
   modelSelector?: ReactNode;
   permissionSelector?: ReactNode;
@@ -173,6 +174,7 @@ export function CodeMuxComposer({
   projectPath,
   projectSkills = [],
   modelName,
+  configuredContextWindow,
   placeholder = '输入消息... (@ 引用文件, / 命令)',
   modelSelector,
   permissionSelector,
@@ -204,9 +206,10 @@ export function CodeMuxComposer({
   const contextUsage = useMemo(() => buildContextUsageViewModel({
     tokenUsage,
     model: modelName,
+    configuredContextWindow,
     sessionProviderUsesLargeContext: false,
     activeProviderUsesLargeContext: false,
-  }), [tokenUsage, modelName]);
+  }), [configuredContextWindow, modelName, tokenUsage]);
   const commands = useMemo(() => getAllCommands(agentKind, projectSkills), [agentKind, projectSkills]);
   const formatter = useMemo(
     () => createCodeMuxFormatter(agentKind, projectSkills),

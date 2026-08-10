@@ -779,10 +779,9 @@ pub fn update_session_provider(
     model: &str,
     reasoning_effort: Option<&str>,
 ) -> Result<()> {
-    let now = Utc::now().to_rfc3339();
     conn.execute(
-        "UPDATE sessions SET provider_id = ?1, model = ?2, reasoning_effort = COALESCE(?3, reasoning_effort, 'medium'), updated_at = ?4 WHERE id = ?5",
-        params![provider_id, model, reasoning_effort, now, session_id],
+        "UPDATE sessions SET provider_id = ?1, model = ?2, reasoning_effort = COALESCE(?3, reasoning_effort, 'medium') WHERE id = ?4",
+        params![provider_id, model, reasoning_effort, session_id],
     )?;
     Ok(())
 }
@@ -1198,6 +1197,7 @@ mod tests {
         let sessions = get_all_sessions(&conn).unwrap();
         assert_eq!(sessions[0].model.as_deref(), Some("gpt-5"));
         assert_eq!(sessions[0].reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(sessions[0].updated_at, "2026-01-01T00:00:00Z");
     }
 
     #[test]
