@@ -15,7 +15,7 @@ import {
 import { AskUserQuestionCard } from '../AskUserQuestionCard';
 import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
 import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
-import { AlertTriangle, Check, Copy, Maximize2, ListTodo, XCircle, ChevronDown, ChevronRight, FileCode, FileText } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Maximize2, ListTodo, XCircle, ChevronDown, ChevronRight, FileText } from 'lucide-react';
 import { getCodeChangeFilePath, getCodeChangeStats, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
 import { getDisplayableArgs, getToolHeaderSummary } from '../toolHeaderSummary';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipHint } from '@/components/ui/tooltip';
@@ -24,6 +24,7 @@ import { CODEMUX_MARKDOWN_REHYPE_PLUGINS, CodeMuxMarkdownLink } from '@/componen
 import { cn } from '../../../lib/utils';
 import { parseUnifiedDiffPatch } from '../../../lib/diffStats';
 import { getProposedPlanPreview, getProposedPlanTitle, parseProposedPlan } from './proposedPlan';
+import { FileTypeIcon } from '@/components/assistant-ui/file-type-icon';
 
 type CodeMuxToolCallPartProps = {
   toolName: string;
@@ -679,7 +680,7 @@ function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 's
                 }
               }}
             >
-              <FileCode className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--primary)/0.68)]" />
+              <FileTypeIcon filePath={diff.file} />
               <span className="max-w-[28%] shrink-0 truncate font-mono text-foreground/80">
                 {getSummaryFileName(diff.file)}
               </span>
@@ -688,7 +689,7 @@ function SessionSummaryCard({ event }: { event: Extract<AgentMessage, { kind: 's
                   {diff.file}
                 </span>
               </TooltipHint>
-              <span className="inline-flex w-[4.5rem] shrink-0 justify-end gap-1.5 tabular-nums">
+              <span className="inline-flex w-18 shrink-0 justify-end gap-1.5 tabular-nums">
                 <span className="rounded bg-[hsl(var(--success)/0.09)] px-1 py-0.5 text-right text-[hsl(var(--success))]">+{diff.additions ?? 0}</span>
                 <span className="rounded bg-[hsl(var(--destructive)/0.09)] px-1 py-0.5 text-right text-[hsl(var(--destructive))]">−{diff.deletions ?? 0}</span>
               </span>

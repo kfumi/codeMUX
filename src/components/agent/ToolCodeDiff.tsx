@@ -1,4 +1,5 @@
 import { DiffViewer } from '@/components/assistant-ui/diff-viewer';
+import { FileTypeIcon } from '@/components/assistant-ui/file-type-icon';
 import { countDiffLines } from '@/lib/diffStats';
 import { cn } from '@/lib/utils';
 
@@ -149,6 +150,7 @@ function PatchDiffFile({ file }: { file: PatchFile }) {
   return (
     <div data-slot="diff-viewer-file" className="min-w-max">
       <div data-slot="diff-viewer-header" className="sticky top-0 z-1 flex items-center gap-2 border-b bg-muted px-4 py-2 text-muted-foreground">
+        <FileTypeIcon filePath={file.path} />
         <span className="flex-1 truncate">{normalizePath(file.path)}</span>
         <span className="rounded border bg-background px-1.5 py-0.5 text-[10px] uppercase tracking-normal">{file.operation}</span>
         <span className="text-green-600 dark:text-green-400">+{additions}</span>

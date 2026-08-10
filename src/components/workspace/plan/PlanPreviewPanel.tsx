@@ -1,4 +1,4 @@
-import { FileText } from 'lucide-react';
+import { FileTypeIcon } from '../../assistant-ui/file-type-icon';
 import { Streamdown } from 'streamdown';
 import { code } from '@streamdown/code';
 
@@ -34,7 +34,7 @@ export function PlanPreviewPanel({
     <div className="flex h-full flex-col">
       <div className="flex h-15 shrink-0 items-center gap-3 border-b border-border/25 bg-[hsl(var(--surface-2))]/45 px-4">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted/45 text-muted-foreground/80">
-          <FileText className="h-4 w-4" />
+          <FileTypeIcon filePath={planFilePath ?? ''} className="h-4 w-4" />
         </div>
         <div className="min-w-0">
           <div className="truncate text-sm font-medium text-foreground/88">

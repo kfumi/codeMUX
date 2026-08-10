@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Streamdown } from 'streamdown';
 
 import { useSidePanelStore } from '@/stores/sidePanelStore';
 import { useProjectStore } from '@/stores/projectStore';
+import { usePreviewStore } from '@/stores/previewStore';
 import {
   CODEMUX_MARKDOWN_REHYPE_PLUGINS,
   CodeMuxMarkdownLink,
   normalizeLocalMarkdownHref,
+  parsePlainFileReferences,
 } from './markdown-link';
 
 const readFile = vi.fn();
@@ -39,10 +41,56 @@ describe('normalizeLocalMarkdownHref', () => {
     expect(normalizeLocalMarkdownHref('D:/project/ai-code/codeMUX/src/App.tsx:359:12')).toBe(
       'D:/project/ai-code/codeMUX/src/App.tsx',
     );
+    expect(normalizeLocalMarkdownHref('src/App.tsx#L359')).toBe('src/App.tsx');
+    expect(normalizeLocalMarkdownHref('src/App.tsx:66-96')).toBe('src/App.tsx');
   });
 
   it('does not treat web links as local files', () => {
     expect(normalizeLocalMarkdownHref('https://example.com/docs/spec.md')).toBeNull();
+  });
+});
+
+describe('parsePlainFileReferences', () => {
+  it('ignores relative paths during automatic parsing', () => {
+    expect(parsePlainFileReferences('请查看 src/components/App.tsx:120:8。')).toEqual([]);
+  });
+
+  it('recognizes absolute paths with the human-readable line format', () => {
+    expect(parsePlainFileReferences('修复见 D:/project/codeMUX/CodeMuxThread.tsx (line 1007)。')).toMatchObject([
+      {
+        label: 'D:/project/codeMUX/CodeMuxThread.tsx (line 1007)',
+        path: 'D:/project/codeMUX/CodeMuxThread.tsx:1007',
+      },
+    ]);
+  });
+
+  it('recognizes absolute line ranges and preserves them as link metadata', () => {
+    expect(parsePlainFileReferences('查看 D:/project/codeMUX/types.rs:66-96 和 D:/project/codeMUX/builtins.rs:4-18。')).toMatchObject([
+      {
+        label: 'D:/project/codeMUX/types.rs:66-96',
+        path: 'D:/project/codeMUX/types.rs:66-96',
+      },
+      {
+        label: 'D:/project/codeMUX/builtins.rs:4-18',
+        path: 'D:/project/codeMUX/builtins.rs:4-18',
+      },
+    ]);
+  });
+
+  it('does not turn web URLs into local file references', () => {
+    expect(parsePlainFileReferences('参考 https://example.com/src/App.tsx:20。')).toEqual([]);
+  });
+
+  it('removes Chinese punctuation and ignores directory-only Windows paths', () => {
+    expect(parsePlainFileReferences('文件 D:\\project\\codeMUX\\src\\schema.rs：用于数据库。')).toEqual([
+      {
+        start: 3,
+        end: 35,
+        label: 'D:\\project\\codeMUX\\src\\schema.rs',
+        path: 'D:\\project\\codeMUX\\src\\schema.rs',
+      },
+    ]);
+    expect(parsePlainFileReferences('目录 D:\\project\\codeMUX\\src\\：后续说明')).toEqual([]);
   });
 });
 
@@ -51,6 +99,7 @@ describe('CodeMuxMarkdownLink', () => {
     readFile.mockReset();
     openExternal.mockReset();
     useSidePanelStore.getState().reset();
+    usePreviewStore.setState({ treeRoot: null, treeRootPath: null });
     useProjectStore.setState({
       projects: [{
         id: 'project-1',
@@ -113,6 +162,25 @@ describe('CodeMuxMarkdownLink', () => {
     });
   });
 
+  it('strips line ranges before reading a local file link', async () => {
+    readFile.mockResolvedValue('pub fn example() {}');
+
+    render(
+      <CodeMuxMarkdownLink href="D:/project/ai-code/codeMUX/src/types.rs:66-96">
+        types.rs:66-96
+      </CodeMuxMarkdownLink>,
+    );
+
+    fireEvent.click(screen.getByRole('link', { name: 'types.rs:66-96' }));
+
+    await waitFor(() => {
+      expect(readFile).toHaveBeenCalledWith(
+        'D:/project/ai-code/codeMUX/src/types.rs',
+        'D:/project/ai-code/codeMUX',
+      );
+    });
+  });
+
   it('keeps external links opening through the shell', () => {
     render(<CodeMuxMarkdownLink href="https://example.com/docs">外部文档</CodeMuxMarkdownLink>);
 
@@ -136,7 +204,7 @@ describe('CodeMuxMarkdownLink', () => {
       </Streamdown>,
     );
 
-    fireEvent.click(screen.getByRole('link', { name: '设计文档' }));
+    fireEvent.click(screen.getByRole('link', { name: 'design.md' }));
 
     await waitFor(() => {
       expect(useSidePanelStore.getState().tabs[0]).toMatchObject({
@@ -145,5 +213,51 @@ describe('CodeMuxMarkdownLink', () => {
         planContent: '# Streamdown 文件\n\n已打开。',
       });
     });
+  });
+
+  it('renders plain file paths in Streamdown as clickable file links', async () => {
+    readFile.mockResolvedValue('export function App() {}');
+
+    const { container } = render(
+      <Streamdown
+        mode="static"
+        components={{ a: CodeMuxMarkdownLink }}
+        rehypePlugins={CODEMUX_MARKDOWN_REHYPE_PLUGINS}
+        linkSafety={{ enabled: false }}
+      >
+        {'已修复 D:/project/ai-code/codeMUX/src/App.tsx:20，请查看 D:/project/ai-code/codeMUX/CodeMuxThread.tsx (line 1007)，入口在 `src-tauri/src/main.rs`。'}
+      </Streamdown>,
+    );
+
+    const links = await within(container).findAllByRole('link');
+    expect(links.map((link) => link.textContent)).toEqual([
+      'App.tsx:20',
+      'CodeMuxThread.tsx:1007',
+    ]);
+
+    fireEvent.click(links[1]!);
+
+    await waitFor(() => {
+      expect(readFile).toHaveBeenCalledWith(
+        'D:/project/ai-code/codeMUX/CodeMuxThread.tsx',
+        'D:/project/ai-code/codeMUX',
+      );
+    });
+  });
+
+  it('rejects paths outside the project, directories, and unqualified filenames', async () => {
+    const { container } = render(
+      <Streamdown
+        mode="static"
+        components={{ a: CodeMuxMarkdownLink }}
+        rehypePlugins={CODEMUX_MARKDOWN_REHYPE_PLUGINS}
+        linkSafety={{ enabled: false }}
+      >
+        {'src/App.tsx D:/other-project/src/App.tsx:20 D:/project/ai-code/codeMUX/src/: directory D:/project/ai-code/codeMUX/src/App.tsx:20'}
+      </Streamdown>,
+    );
+
+    const links = await within(container).findAllByRole('link');
+    expect(links.map((link) => link.textContent)).toEqual(['App.tsx:20']);
   });
 });

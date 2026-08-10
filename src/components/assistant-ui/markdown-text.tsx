@@ -84,7 +84,7 @@ const defaultComponents = {
       {...props}
       href={href}
       className={cn(
-        "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2 cursor-pointer",
+        "aui-md-a text-primary hover:text-primary/80 no-underline cursor-pointer",
         className,
       )}
     >

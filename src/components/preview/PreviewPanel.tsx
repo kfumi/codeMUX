@@ -8,6 +8,7 @@ import { DiffView } from './DiffView';
 import { FileView } from './FileView';
 import { FileTree } from './FileTree';
 import { cn } from '../../lib/utils';
+import { FileTypeIcon } from '../assistant-ui/file-type-icon';
 
 export function PreviewPanel() {
   const {
@@ -161,6 +162,7 @@ export function PreviewPanel() {
                           {isActive && (
                             <div className="absolute left-0 right-0 top-0 h-0.5 bg-primary/70" />
                           )}
+                          <FileTypeIcon filePath={file.path} />
                           <span className="max-w-35 truncate">{fileName}</span>
                           {fileIsModified && <span className="text-[hsl(var(--warning))] text-[10px]">●</span>}
                           <button

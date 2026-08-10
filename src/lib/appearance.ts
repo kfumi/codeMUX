@@ -82,7 +82,7 @@ export const RADII: Record<RadiusKey, string> = {
 };
 
 export const CONTENT_WIDTHS: Record<ContentWidthKey, string> = {
-  fixed: '48rem',
+  fixed: '52rem',
   stream: '100%',
 };
 

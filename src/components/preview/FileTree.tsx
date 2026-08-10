@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
-import { ChevronRight, ChevronDown, Folder, FolderOpen, FileCode } from 'lucide-react';
+import { ChevronRight, ChevronDown, Folder, FolderOpen } from 'lucide-react';
 import { usePreviewStore, type FileTreeNodeData } from '../../stores/previewStore';
 import { Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { FileTypeIcon } from '../assistant-ui/file-type-icon';
 
 function TreeNode({ node, onFileClick, level = 0 }: { node: FileTreeNodeData; onFileClick: (path: string) => void; level: number }) {
   const [expanded, setExpanded] = useState(false);
@@ -41,7 +42,7 @@ function TreeNode({ node, onFileClick, level = 0 }: { node: FileTreeNodeData; on
         ) : (
           <>
             <span className="w-3 shrink-0" />
-            <FileCode className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
+            <FileTypeIcon filePath={node.path} />
           </>
         )}
         <span className="truncate">{node.name}</span>

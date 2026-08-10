@@ -112,7 +112,7 @@
     --ring: 209 99% 40%;
     --radius: 0.5rem;
     --glow: 209 99% 40%;
-    --content-width: 48rem;
+    --content-width: 52rem;
     --sidebar-bg: 0 0% 96%;
     --sidebar-fg: 0 0% 16%;
     --sidebar-border: 0 0% 86%;
@@ -132,6 +132,7 @@
     --codemux-directive-accent: 221 83% 46%;
     --codemux-directive-bg: 214 100% 93%;
     --codemux-directive-border: 214 100% 82%;
+    --codemux-link: 209 99% 40%;
   }
 
   .dark {
@@ -176,6 +177,7 @@
     --codemux-directive-accent: 211 100% 72%;
     --codemux-directive-bg: 211 68% 28%;
     --codemux-directive-border: 211 68% 43%;
+    --codemux-link: 211 100% 72%;
   }
 
   * {
@@ -399,6 +401,15 @@ input[type='password']::-ms-reveal {
 .prose {
   --tw-prose-pre-code: currentColor;
   --tw-prose-invert-pre-code: currentColor;
+}
+
+.aui-md a.aui-md-a {
+  color: hsl(var(--codemux-link)) !important;
+  text-decoration: none !important;
+}
+
+.aui-md a.aui-md-a:hover {
+  color: hsl(var(--codemux-link) / 0.82) !important;
 }
 
 .prose :where(code):not(:where([class~="not-prose"] *))::before,

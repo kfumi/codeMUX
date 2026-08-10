@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, FileText, RefreshCw, Trash2, Undo2, Upload } from 'lucide-react';
+import { ChevronDown, ChevronUp, RefreshCw, Trash2, Undo2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { gitApi, type GitRepositoryState, type GitStatusArea, type GitStatusChange } from '../../../lib/tauri';
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { TooltipHint } from '../../ui/tooltip';
 import { GitBranchBar } from './GitBranchBar';
 import { GitBranchDialog } from './GitBranchDialog';
+import { FileTypeIcon } from '../../assistant-ui/file-type-icon';
 
 function displayPath(filePath: string, projectPath: string): string {
   const normalize = (path: string) => path
@@ -368,7 +369,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
                     )}>
                       {statusLabel(file.status)}
                     </span>
-                    <FileText className="h-4 w-4 shrink-0 text-muted-foreground/55" />
+                    <FileTypeIcon filePath={file.path} className="h-4 w-4" />
                     <span className="min-w-0 flex-1 truncate text-sm text-foreground/88">
                       {name}
                       {directory && <span className="ml-2 text-sm text-muted-foreground/55">{directory}</span>}

@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { diffLines, type Change } from 'diff';
-import { ChevronDown, ChevronRight, FileCode } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { splitDiffLines } from '../../lib/diffStats';
+import { FileTypeIcon } from '../assistant-ui/file-type-icon';
 
 interface DiffBlockProps {
   filePath: string;
@@ -23,7 +24,7 @@ export function DiffBlock({ filePath, oldContent, newContent }: DiffBlockProps) 
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        <FileCode className="h-3.5 w-3.5 text-[hsl(var(--primary)/0.5)] shrink-0" />
+        <FileTypeIcon filePath={filePath} />
         <span className="font-medium text-ui-compact">{fileName}</span>
         <span className="text-muted-foreground/40 text-xs truncate">{filePath}</span>
       </button>

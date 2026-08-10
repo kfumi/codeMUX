@@ -62,6 +62,7 @@ import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 import { parseProposedPlan, getProposedPlanTitle } from './proposedPlan';
 import { QueuedMessages } from './QueuedMessages';
 import type { QueuedAgentQuery } from '../../../types/agentQueue';
+import { FileTypeIcon } from '@/components/assistant-ui/file-type-icon';
 
 interface CodeMuxComposerProps {
   sessionId: string;
@@ -1091,7 +1092,7 @@ function TriggerMenuItem({
       )}
     >
       <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-muted/74 text-muted-foreground">
-        {isFile ? (item.type === 'directory' ? <Folder className="h-4 w-4" /> : <FileCode2 className="h-4 w-4" />) : getCommandIcon(item.id)}
+        {isFile ? (item.type === 'directory' ? <Folder className="h-4 w-4" /> : <FileTypeIcon filePath={item.id} className="h-4 w-4" />) : getCommandIcon(item.id)}
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">

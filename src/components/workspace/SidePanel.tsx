@@ -11,6 +11,7 @@ import { DiffView } from '../preview/DiffView';
 import { PlanPreviewPanel } from './plan/PlanPreviewPanel';
 import { ReviewPanel } from './review/ReviewPanel';
 import { TerminalPanel } from './terminal/TerminalPanel';
+import { FileTypeIcon } from '../assistant-ui/file-type-icon';
 
 interface SidePanelProps {
   projectPath?: string | null;
@@ -164,7 +165,7 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
                   <TooltipContent>打开标签</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-              <DropdownMenuContent align="end" className="z-[190] min-w-32">
+              <DropdownMenuContent align="end" className="z-190 min-w-32">
                 <DropdownMenuItem onClick={openReview} icon={<FileSearch className="h-3.5 w-3.5" />}>
                   审查
                 </DropdownMenuItem>
@@ -237,7 +238,11 @@ function TabButton({
       )}
       onClick={onClick}
     >
-      <Icon className="h-3.5 w-3.5 shrink-0" />
+      {tab.kind === 'plan' ? (
+        <FileTypeIcon filePath={tab.planFilePath ?? tab.title} />
+      ) : (
+        <Icon className="h-3.5 w-3.5 shrink-0" />
+      )}
       <span className="truncate">{tab.title}</span>
       <span
         role="button"
