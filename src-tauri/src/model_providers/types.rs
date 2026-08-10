@@ -253,7 +253,7 @@ mod tests {
                 protocol: Protocol::OpenaiCompatible,
                 base_url: "https://api.deepseek.com".to_string(),
                 api_key_override: None,
-                codex_needs_proxy: Some(true),
+                codex_needs_proxy: Some(false),
             });
         }
         ModelProvider {

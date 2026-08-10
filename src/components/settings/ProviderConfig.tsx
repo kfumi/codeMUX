@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Ear, Eye, EyeOff, Loader2, Pencil, Plus, RefreshCw, Search, Settings2, Trash2, Video } from 'lucide-react';
+import { Ear, Eye, EyeOff, ExternalLink, Loader2, Pencil, Plus, RefreshCw, Search, Settings2, Trash2, Video } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { AddProviderDialog } from '@/components/settings/AddProviderDialog';
@@ -44,6 +44,22 @@ type CatalogSelection =
   | { kind: 'provider'; id: string }
   | { kind: 'template'; id: string }
   | { kind: 'draft'; id: string };
+
+const API_KEY_URLS: Record<string, string> = {
+  anthropic: 'https://console.anthropic.com/settings/keys',
+  deepseek: 'https://platform.deepseek.com/api_keys',
+  mimo: 'https://mimo.mi.com/',
+  moonshot: 'https://platform.kimi.com/console/api-keys',
+  openai: 'https://platform.openai.com/api-keys',
+  openrouter: 'https://openrouter.ai/settings/keys',
+  'opencode-go': 'https://opencode.ai/auth',
+  siliconflow: 'https://cloud.siliconflow.cn/account/ak',
+  zhipu: 'https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys',
+};
+
+export function resolveProviderApiKeyUrl(templateId?: string | null): string | null {
+  return templateId ? API_KEY_URLS[templateId] ?? null : null;
+}
 
 type CatalogRow =
   | {
@@ -388,6 +404,7 @@ export function ProviderConfigPanel() {
     draft && editingModelIndex != null ? draft.models[editingModelIndex] ?? null : null;
   const persisted = Boolean(draft && providers.some((item) => item.id === draft.id));
   const draftTemplateId = draft?.builtin_template_id ?? null;
+  const apiKeyUrl = resolveProviderApiKeyUrl(draftTemplateId);
   const codexNeedsProxy = Boolean(
     draft?.endpoints.find((item) => item.protocol === 'openai_compatible')?.codex_needs_proxy,
   );
@@ -770,7 +787,23 @@ export function ProviderConfigPanel() {
             </div>
 
             <div className="grid gap-2">
-              <label className="text-sm font-medium">API 密钥</label>
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium">API 密钥</label>
+                {apiKeyUrl && (
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 text-xs text-primary transition-colors hover:text-primary/80 hover:underline"
+                    onClick={() => {
+                      void import('@tauri-apps/plugin-shell')
+                        .then(({ open }) => open(apiKeyUrl))
+                        .catch(() => {});
+                    }}
+                  >
+                    获取密钥
+                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
               <div className="relative">
                 <Input
                   type={showApiKey ? 'text' : 'password'}

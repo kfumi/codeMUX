@@ -15,7 +15,7 @@ function deepseek(partial?: Partial<ModelProvider>): ModelProvider {
     api_key: 'sk-test',
     endpoints: [
       { protocol: 'anthropic', base_url: 'https://api.deepseek.com/anthropic' },
-      { protocol: 'openai_compatible', base_url: 'https://api.deepseek.com', codex_needs_proxy: true },
+      { protocol: 'openai_compatible', base_url: 'https://api.deepseek.com', codex_needs_proxy: false },
     ],
     models: [{ id: 'deepseek-v4-flash', name: 'Flash' }],
     default_model: 'deepseek-v4-flash',

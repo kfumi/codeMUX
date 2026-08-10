@@ -88,7 +88,7 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
                 endpoint(
                     Protocol::OpenaiCompatible,
                     "https://api.deepseek.com",
-                    Some(true),
+                    Some(false),
                 ),
             ],
             models: vec![
@@ -98,7 +98,7 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
             default_model: "deepseek-v4-flash".to_string(),
             opencode_provider_key: Some("deepseek".to_string()),
             opencode_npm: Some("@ai-sdk/openai-compatible".to_string()),
-            default_codex_needs_proxy: true,
+            default_codex_needs_proxy: false,
         },
         BuiltinProviderTemplate {
             id: "openrouter".to_string(),
@@ -155,6 +155,45 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
             ],
             default_model: "glm-4.7".to_string(),
             opencode_provider_key: Some("zhipu".to_string()),
+            opencode_npm: Some("@ai-sdk/openai-compatible".to_string()),
+            default_codex_needs_proxy: true,
+        },
+        BuiltinProviderTemplate {
+            id: "moonshot".to_string(),
+            name: "月之暗面".to_string(),
+            endpoints: vec![endpoint(
+                Protocol::OpenaiCompatible,
+                "https://api.moonshot.cn/v1",
+                Some(true),
+            )],
+            models: vec![
+                model("kimi-k2.6", "Kimi K2.6", Some(vec!["text"])),
+                model("kimi-k3", "Kimi K3", Some(vec!["text"])),
+            ],
+            default_model: "kimi-k2.6".to_string(),
+            opencode_provider_key: Some("moonshot".to_string()),
+            opencode_npm: Some("@ai-sdk/openai-compatible".to_string()),
+            default_codex_needs_proxy: true,
+        },
+        BuiltinProviderTemplate {
+            id: "mimo".to_string(),
+            name: "Xiaomi MiMo".to_string(),
+            endpoints: vec![endpoint(
+                Protocol::OpenaiCompatible,
+                "https://api.xiaomimimo.com/v1",
+                Some(true),
+            )],
+            models: vec![
+                model("mimo-m2.5", "MiMo M2.5", Some(vec!["text"])),
+                model("mimo-v2.5-pro", "MiMo V2.5 Pro", Some(vec!["text"])),
+                model(
+                    "mimo-v2.5-pro-ultraspeed",
+                    "MiMo-V2.5-Pro-UltraSpeed",
+                    Some(vec!["text"]),
+                ),
+            ],
+            default_model: "mimo-m2.5".to_string(),
+            opencode_provider_key: Some("mimo".to_string()),
             opencode_npm: Some("@ai-sdk/openai-compatible".to_string()),
             default_codex_needs_proxy: true,
         },
@@ -236,6 +275,8 @@ mod tests {
             "openrouter",
             "siliconflow",
             "zhipu",
+            "moonshot",
+            "mimo",
             "opencode-go",
         ] {
             assert!(ids.contains(&expected.to_string()), "missing {expected}");
@@ -248,6 +289,23 @@ mod tests {
         assert!(provider.models.is_empty());
         assert!(provider.default_model.is_empty());
         assert!(!is_provider_usable(&provider, AgentKind::ClaudeCode));
+    }
+
+    #[test]
+    fn deepseek_codex_endpoint_defaults_to_direct_responses() {
+        let template = builtin_templates()
+            .into_iter()
+            .find(|item| item.id == "deepseek")
+            .unwrap();
+
+        let endpoint = template
+            .endpoints
+            .iter()
+            .find(|item| item.protocol == Protocol::OpenaiCompatible)
+            .unwrap();
+
+        assert_eq!(endpoint.codex_needs_proxy, Some(false));
+        assert!(!template.default_codex_needs_proxy);
     }
 
     #[test]

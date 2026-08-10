@@ -5,6 +5,8 @@ import openrouterSvg from '@lobehub/icons-static-svg/icons/openrouter.svg?raw';
 import siliconcloudSvg from '@lobehub/icons-static-svg/icons/siliconcloud-color.svg?raw';
 import zhipuSvg from '@lobehub/icons-static-svg/icons/zhipu-color.svg?raw';
 import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
+import moonshotSvg from '@lobehub/icons-static-svg/icons/moonshot.svg?raw';
+import xiaomimimoSvg from '@lobehub/icons-static-svg/icons/xiaomimimo.svg?raw';
 
 import { cn } from '@/lib/utils';
 
@@ -22,6 +24,8 @@ const BRANDS: Record<string, BrandMeta> = {
   openrouter: { label: 'OpenRouter', svg: openrouterSvg },
   siliconflow: { label: '硅基流动', svg: siliconcloudSvg },
   zhipu: { label: '智谱', svg: zhipuSvg },
+  moonshot: { label: '月之暗面', svg: moonshotSvg },
+  mimo: { label: 'Xiaomi MiMo', svg: xiaomimimoSvg },
   'opencode-go': { label: 'OpenCode Go', svg: opencodeSvg },
   custom: {
     label: '自定义',
@@ -63,7 +67,19 @@ export function providerDisplayName(
   if (brand && (name === brand.label || !name.trim() || name === templateId)) {
     return brand.label;
   }
-  if (brand && ['DeepSeek', 'OpenAI', 'Anthropic', 'OpenRouter', 'OpenCode Go'].includes(name)) {
+  if (
+    brand
+    && [
+      'DeepSeek',
+      'OpenAI',
+      'Anthropic',
+      'OpenRouter',
+      'OpenCode Go',
+      'Moonshot',
+      'MiMo',
+      'Xiaomi MiMo',
+    ].includes(name)
+  ) {
     return brand.label;
   }
   return name;

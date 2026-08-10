@@ -41,8 +41,8 @@ describe('buildMcpInstructions', () => {
 });
 
 describe('shouldUseCodexChatCompatProxy', () => {
-  it('uses the local chat-compat proxy for non-OpenAI providers', () => {
-    expect(shouldUseCodexChatCompatProxy('https://api.deepseek.com')).toBe(true);
+  it('keeps direct Responses mode for official OpenAI-compatible endpoints', () => {
+    expect(shouldUseCodexChatCompatProxy('https://api.deepseek.com')).toBe(false);
     expect(shouldUseCodexChatCompatProxy('https://token-plan-cn.xiaomimimo.com/v1')).toBe(true);
     expect(shouldUseCodexChatCompatProxy('https://openrouter.ai/api/v1')).toBe(true);
   });

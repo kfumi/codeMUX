@@ -31,7 +31,8 @@ class ProxyManager {
   /**
    * Start the compat proxy. If already running with the same config, returns existing port.
    * If config changed, stops the old proxy and starts a new one.
-   * Returns null if the baseUrl doesn't need a proxy (i.e. it's api.openai.com).
+   * Returns null if the baseUrl doesn't need a proxy (for example, official
+   * OpenAI or DeepSeek Responses endpoints).
    */
   async start(apiKey: string, baseUrl: string, providerName?: string, explicitNeedsProxy?: boolean): Promise<{ port: number } | null> {
     if (!shouldUseCodexChatCompatProxy(baseUrl, explicitNeedsProxy)) {

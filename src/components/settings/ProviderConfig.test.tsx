@@ -8,6 +8,7 @@ const {
   listTemplates,
   upsertModelProvider,
   fetchProviderModels,
+  openExternal,
   settingsState,
 } = vi.hoisted(() => ({
   fetchConfig: vi.fn(() => Promise.resolve()),
@@ -27,7 +28,7 @@ const {
             protocol: 'openai_compatible',
             base_url: 'https://api.deepseek.com',
             api_key_override: null,
-            codex_needs_proxy: true,
+            codex_needs_proxy: false,
           },
         ],
         models: [
@@ -37,7 +38,7 @@ const {
         default_model: 'deepseek-v4-flash',
         opencode_provider_key: 'deepseek',
         opencode_npm: '@ai-sdk/openai-compatible',
-        default_codex_needs_proxy: true,
+        default_codex_needs_proxy: false,
       },
       {
         id: 'zhipu',
@@ -65,12 +66,17 @@ const {
       { id: 'deepseek-new', owned_by: 'deepseek' },
     ]),
   ),
+  openExternal: vi.fn(() => Promise.resolve()),
   settingsState: {
     config: {
       model_providers: [] as Array<Record<string, unknown>>,
       active_provider_id: null as string | null,
     },
   },
+}));
+
+vi.mock('@tauri-apps/plugin-shell', () => ({
+  open: openExternal,
 }));
 
 vi.mock('@/stores/settingsStore', () => ({
@@ -97,7 +103,7 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
-import { ProviderConfigPanel } from './ProviderConfig';
+import { ProviderConfigPanel, resolveProviderApiKeyUrl } from './ProviderConfig';
 
 describe('ProviderConfigPanel', () => {
   afterEach(() => {
@@ -109,6 +115,7 @@ describe('ProviderConfigPanel', () => {
     listTemplates.mockClear();
     upsertModelProvider.mockClear();
     fetchProviderModels.mockClear();
+    openExternal.mockClear();
     settingsState.config = {
       model_providers: [],
       active_provider_id: null,
@@ -134,6 +141,25 @@ describe('ProviderConfigPanel', () => {
     expect(await screen.findByText('添加自定义供应商')).toBeTruthy();
   });
 
+  it('shows an official API key link for builtin providers', async () => {
+    render(<ProviderConfigPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('https://api.deepseek.com/anthropic')).toBeTruthy();
+    });
+
+    expect(resolveProviderApiKeyUrl('deepseek')).toBe('https://platform.deepseek.com/api_keys');
+    const apiKeyButton = screen.getByRole('button', { name: /获取密钥/ });
+    expect(apiKeyButton).toBeTruthy();
+    fireEvent.click(apiKeyButton);
+    await waitFor(() => expect(openExternal).toHaveBeenCalledTimes(1));
+    expect(openExternal).toHaveBeenCalledWith('https://platform.deepseek.com/api_keys');
+    expect(resolveProviderApiKeyUrl('opencode-go')).toBe('https://opencode.ai/auth');
+    expect(resolveProviderApiKeyUrl('moonshot')).toBe('https://platform.kimi.com/console/api-keys');
+    expect(resolveProviderApiKeyUrl('mimo')).toBe('https://mimo.mi.com/');
+    expect(resolveProviderApiKeyUrl('custom')).toBeNull();
+  });
+
   it('starts with empty models, no default column, and toggles codex proxy switch', async () => {
     render(<ProviderConfigPanel />);
 
@@ -150,10 +176,10 @@ describe('ProviderConfigPanel', () => {
 
     const switches = screen.getAllByRole('switch');
     const proxySwitch = switches[switches.length - 1];
-    expect(proxySwitch.getAttribute('data-state')).toBe('checked');
+    expect(proxySwitch.getAttribute('data-state')).toBe('unchecked');
     fireEvent.click(proxySwitch);
     await waitFor(() => {
-      expect(proxySwitch.getAttribute('data-state')).toBe('unchecked');
+      expect(proxySwitch.getAttribute('data-state')).toBe('checked');
     });
 
     expect(screen.queryByText(/Claude Code：/)).toBeNull();
@@ -212,7 +238,7 @@ describe('ProviderConfigPanel', () => {
               protocol: 'openai_compatible',
               base_url: 'https://api.deepseek.com',
               api_key_override: null,
-              codex_needs_proxy: true,
+              codex_needs_proxy: false,
             },
           ],
           models: [],
@@ -282,7 +308,7 @@ describe('ProviderConfigPanel', () => {
               protocol: 'openai_compatible',
               base_url: 'https://api.deepseek.com',
               api_key_override: null,
-              codex_needs_proxy: true,
+              codex_needs_proxy: false,
             },
           ],
           models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' }],
@@ -367,7 +393,7 @@ describe('ProviderConfigPanel', () => {
               protocol: 'openai_compatible',
               base_url: 'https://api.deepseek.com',
               api_key_override: null,
-              codex_needs_proxy: true,
+              codex_needs_proxy: false,
             },
           ],
           models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' }],

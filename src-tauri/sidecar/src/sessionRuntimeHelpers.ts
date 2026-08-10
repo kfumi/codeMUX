@@ -50,7 +50,8 @@ export function shouldUseCodexChatCompatProxy(baseUrl?: string | null, explicitN
 
   try {
     const parsed = new URL(baseUrl);
-    return parsed.host.toLowerCase() !== 'api.openai.com';
+    const normalizedHost = parsed.host.toLowerCase();
+    return normalizedHost !== 'api.openai.com' && normalizedHost !== 'api.deepseek.com';
   } catch {
     return true;
   }
