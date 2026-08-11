@@ -17,7 +17,7 @@ import { serializePermissionConfig } from './lib/agentPermissions';
 import { appApi, sessionApi, type RuntimeProvider } from './lib/tauri';
 import { useAgentStore } from './stores/agentStore';
 import './stores/appearanceStore';
-import { useNewSessionStore } from './stores/newSessionStore';
+import { useNewSessionStore, NEW_SESSION_DRAFT_SESSION_ID } from './stores/newSessionStore';
 import { useProjectStore } from './stores/projectStore';
 import { useSessionStore } from './stores/sessionStore';
 import { useSidePanelStore } from './stores/sidePanelStore';
@@ -307,6 +307,7 @@ function App() {
       }));
 
       await startQuery(session.id, input.text, cwd, selectedReasoningEffort, undefined, input, selectedModel ?? undefined);
+      useAgentStore.getState().consumeComposerDraft(NEW_SESSION_DRAFT_SESSION_ID);
       closeDraft();
       const currentNavigation = useNavigationStore.getState().current;
       commitNavigation({

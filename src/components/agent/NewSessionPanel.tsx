@@ -5,7 +5,7 @@ import { renderCommandInput } from '../../lib/slashCommands';
 import { serializePermissionConfig } from '../../lib/agentPermissions';
 import { agentApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
-import { useNewSessionStore } from '../../stores/newSessionStore';
+import { useNewSessionStore, NEW_SESSION_DRAFT_SESSION_ID } from '../../stores/newSessionStore';
 import { usePreviewStore } from '../../stores/previewStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { projectSkillCacheKey, useProjectSkillStore } from '@/stores/projectSkillStore';
@@ -197,6 +197,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     setIsCheckingRuntime(true);
     try {
       await onSubmit(payload);
+      useAgentStore.getState().consumeComposerDraft(NEW_SESSION_DRAFT_SESSION_ID);
     } finally {
       checkingRuntimeRef.current = false;
       setIsCheckingRuntime(false);
@@ -206,13 +207,13 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   const handleCommand = async (command: SlashCommand, args: string) => {
     if (command.handler === 'local' && command.action) {
       const context: CommandContext = {
-        sessionId: 'new-session-draft',
+        sessionId: NEW_SESSION_DRAFT_SESSION_ID,
         cwd: draftProject?.path ?? '',
         showInfoDialog: () => {},
         createSession: async () => {},
         clearEvents,
-        resetSession: () => { agentApi.resetSession('new-session-draft'); },
-        deleteClaudeSessionFiles: () => agentApi.deleteClaudeSessionFiles('new-session-draft'),
+        resetSession: () => { agentApi.resetSession(NEW_SESSION_DRAFT_SESSION_ID); },
+        deleteClaudeSessionFiles: () => agentApi.deleteClaudeSessionFiles(NEW_SESSION_DRAFT_SESSION_ID),
         getActiveProvider: () => getActiveProvider(),
         getTheme: () => config?.theme || 'System',
       };
@@ -235,7 +236,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   return (
     <div className="flex flex-1 overflow-auto bg-[hsl(var(--background))] transition-[background] duration-300">
       <CodeMuxAssistantRuntimeProvider
-        sessionId="new-session-draft"
+        sessionId={NEW_SESSION_DRAFT_SESSION_ID}
         agentKind={selectedAgentKind}
         projectSkills={projectSkills}
         onSend={handleSend}
@@ -277,7 +278,8 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
             </div>
 
             <CodeMuxComposer
-              sessionId="new-session-draft"
+              key={draftRevision}
+              sessionId={NEW_SESSION_DRAFT_SESSION_ID}
               agentKind={selectedAgentKind}
               projectPath={draftProject?.path}
               projectSkills={projectSkills}

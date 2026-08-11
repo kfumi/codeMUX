@@ -380,6 +380,7 @@ export class CodexSessionRuntime {
     const modelCatalogPath = await this.syncModelCatalog(
       requestedConfig.model,
       requestedConfig.modelLimits?.contextWindow,
+      requestedConfig.modelLimits?.inputModalities,
     );
     const codexConfig = buildCodexCliConfig(runtimeBaseUrl, modelCatalogPath);
 
@@ -929,6 +930,7 @@ export class CodexSessionRuntime {
   private async syncModelCatalog(
     model: string | undefined,
     contextWindow?: number,
+    inputModalities?: string[],
   ): Promise<string | null> {
     const modelId = model?.trim();
     if (!modelId) {
@@ -941,6 +943,7 @@ export class CodexSessionRuntime {
           contextWindow: contextWindow && contextWindow > 0
             ? contextWindow
             : DEFAULT_CODEX_CONTEXT_WINDOW,
+          ...(inputModalities ? { inputModalities } : {}),
         }],
         resolveCodexModelCatalogPath(),
       );

@@ -57,11 +57,13 @@ export function resolveCodexModelCatalogPath(homeDir = homedir()): string {
 /** Build a complete valid ModelInfo entry for a custom model id. */
 export function buildCodexModelCatalogEntry(
   modelId: string,
-  options?: { contextWindow?: number },
+  options?: { contextWindow?: number; inputModalities?: string[] },
 ): CodexCatalogModel {
   const slug = modelId.trim();
   const displayName = formatCatalogDisplayName(slug);
   const contextWindow = normalizeContextWindow(options?.contextWindow);
+  const inputModalities = normalizeInputModalities(options?.inputModalities);
+  const supportsImage = inputModalities.includes('image');
   return {
     slug,
     display_name: displayName,
@@ -83,7 +85,7 @@ export function buildCodexModelCatalogEntry(
     default_reasoning_level: 'medium',
     default_reasoning_summary: 'none',
     supported_reasoning_levels: DEFAULT_REASONING_LEVELS,
-    input_modalities: ['text'],
+    input_modalities: inputModalities,
     truncation_policy: { mode: 'tokens', limit: 10000 },
     experimental_supported_tools: [],
     additional_speed_tiers: [],
@@ -95,17 +97,17 @@ export function buildCodexModelCatalogEntry(
     availability_nux: null,
     upgrade: null,
     web_search_tool_type: 'text',
-    supports_image_detail_original: false,
+    supports_image_detail_original: supportsImage,
   };
 }
 
 /**
  * Ensure the given model ids exist in the CodeMUX Codex catalog file.
  * Existing richer entries are preserved; only missing slugs are appended.
- * When contextWindow is provided, context_window / max_context_window are updated.
+ * When contextWindow / inputModalities are provided, those fields are updated.
  */
 export async function ensureCodexModelCatalog(
-  models: ReadonlyArray<string | { id: string; contextWindow?: number }>,
+  models: ReadonlyArray<string | { id: string; contextWindow?: number; inputModalities?: string[] }>,
   catalogPath = resolveCodexModelCatalogPath(),
 ): Promise<string | null> {
   const entries = normalizeCatalogInputs(models);
@@ -141,23 +143,43 @@ export async function ensureCodexModelCatalog(
     if (!existingEntry) {
       bySlug.set(entry.id, buildCodexModelCatalogEntry(entry.id, {
         contextWindow: entry.contextWindow,
+        inputModalities: entry.inputModalities,
       }));
       changed = true;
       continue;
     }
+
+    let nextEntry = existingEntry;
     if (entry.contextWindow && entry.contextWindow > 0) {
       const contextWindow = normalizeContextWindow(entry.contextWindow);
       if (
-        existingEntry.context_window !== contextWindow
-        || existingEntry.max_context_window !== contextWindow
+        nextEntry.context_window !== contextWindow
+        || nextEntry.max_context_window !== contextWindow
       ) {
-        bySlug.set(entry.id, {
-          ...existingEntry,
+        nextEntry = {
+          ...nextEntry,
           context_window: contextWindow,
           max_context_window: contextWindow,
-        });
-        changed = true;
+        };
       }
+    }
+    if (entry.inputModalities) {
+      const inputModalities = normalizeInputModalities(entry.inputModalities);
+      const supportsImage = inputModalities.includes('image');
+      if (
+        JSON.stringify(nextEntry.input_modalities ?? []) !== JSON.stringify(inputModalities)
+        || nextEntry.supports_image_detail_original !== supportsImage
+      ) {
+        nextEntry = {
+          ...nextEntry,
+          input_modalities: inputModalities,
+          supports_image_detail_original: supportsImage,
+        };
+      }
+    }
+    if (nextEntry !== existingEntry) {
+      bySlug.set(entry.id, nextEntry);
+      changed = true;
     }
   }
 
@@ -209,11 +231,22 @@ function normalizeContextWindow(value: number | undefined): number {
   return DEFAULT_CODEX_CONTEXT_WINDOW;
 }
 
+function normalizeInputModalities(modalities?: string[]): string[] {
+  const result = new Set<string>(['text']);
+  for (const modality of modalities ?? []) {
+    const normalized = modality.trim().toLowerCase();
+    if (normalized && normalized !== 'text') {
+      result.add(normalized);
+    }
+  }
+  return Array.from(result);
+}
+
 function normalizeCatalogInputs(
-  models: ReadonlyArray<string | { id: string; contextWindow?: number }>,
-): Array<{ id: string; contextWindow?: number }> {
+  models: ReadonlyArray<string | { id: string; contextWindow?: number; inputModalities?: string[] }>,
+): Array<{ id: string; contextWindow?: number; inputModalities?: string[] }> {
   const seen = new Set<string>();
-  const result: Array<{ id: string; contextWindow?: number }> = [];
+  const result: Array<{ id: string; contextWindow?: number; inputModalities?: string[] }> = [];
   for (const raw of models) {
     const id = typeof raw === 'string' ? raw.trim() : raw?.id?.trim();
     if (!id || seen.has(id)) {
@@ -221,7 +254,12 @@ function normalizeCatalogInputs(
     }
     seen.add(id);
     const contextWindow = typeof raw === 'string' ? undefined : raw.contextWindow;
-    result.push({ id, ...(contextWindow && contextWindow > 0 ? { contextWindow } : {}) });
+    const inputModalities = typeof raw === 'string' ? undefined : raw.inputModalities;
+    result.push({
+      id,
+      ...(contextWindow && contextWindow > 0 ? { contextWindow } : {}),
+      ...(inputModalities ? { inputModalities: normalizeInputModalities(inputModalities) } : {}),
+    });
   }
   return result;
 }

@@ -333,8 +333,10 @@ export function CodeMuxComposer({
     }, 500);
     return () => {
       clearTimeout(timer);
-      // Save immediately on unmount
-      saveComposerDraft(sessionId, draftTextRef.current.trim());
+      // Prefer live editor text so a successful send that cleared the editor
+      // does not re-persist the pre-send draft during unmount races.
+      const latest = editorRef.current?.getText() ?? draftTextRef.current;
+      saveComposerDraft(sessionId, latest.trim());
     };
   }, [composerText, sessionId, saveComposerDraft]);
 

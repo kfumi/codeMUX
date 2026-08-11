@@ -202,7 +202,7 @@ describe('ProviderConfigPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '设置模型 new-model' }));
 
     expect(screen.getByDisplayValue('200000')).toBeTruthy();
-    expect(screen.getByDisplayValue('128000')).toBeTruthy();
+    expect(screen.queryByDisplayValue('128000')).toBeNull();
     expect(screen.getByDisplayValue('65536')).toBeTruthy();
   });
 

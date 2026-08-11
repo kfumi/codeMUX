@@ -1105,7 +1105,11 @@ function AssistantLikeMessage({
       setIsForking(false);
     }
   };
-  const messageBottomSpacing = shouldRenderFooter ? 'mb-2' : 'mb-5';
+  const messageBottomSpacing = shouldHideCollapsedContent && collapseInfo?.isToggleMessage
+    ? 'mb-2'
+    : shouldRenderFooter
+      ? 'mb-2'
+      : 'mb-5';
 
   return (
     <MessagePrimitive.Root
@@ -1214,7 +1218,7 @@ function AssistantCollapseToggle({
   onClick: () => void;
 }) {
   return (
-    <div className="pb-2">
+    <div className={expanded ? 'pb-2' : 'pb-1'}>
       <Button
         type="button"
         variant="ghost"
@@ -1228,7 +1232,7 @@ function AssistantCollapseToggle({
         {durationMs != null ? <span className="tabular-nums">{formatCompactDuration(durationMs)}</span> : null}
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
       </Button>
-      <div className="mt-1.5 border-b border-border/40" />
+      <div className={cn('border-b border-border/40', expanded ? 'mt-1.5' : 'mt-1')} />
     </div>
   );
 }

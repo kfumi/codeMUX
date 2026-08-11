@@ -41,8 +41,9 @@ const composerProps: Array<{
   agentKind?: AgentKind;
   placeholder?: string;
   projectPath?: string | null;
+  sessionId?: string;
   disabled?: boolean;
-  onSend?: (content: string) => Promise<void>;
+  onSend?: (content: unknown) => Promise<void>;
   onCommand?: (command: SlashCommand, args: string) => Promise<void>;
 }> = [];
 
@@ -197,6 +198,22 @@ describe('NewSessionPanel', () => {
     render(<NewSessionPanel onSubmit={vi.fn()} />);
     expect(screen.getByText('我们应该做什么？')).toBeTruthy();
     expect(screen.getByText('Mock Composer')).toBeTruthy();
+    expect(composerProps.some((entry) => entry.sessionId === 'new-session-draft')).toBe(true);
+  });
+
+  it('clears the shared new-session composer draft after a successful submit', async () => {
+    const { useAgentStore } = await import('../../stores/agentStore');
+    useAgentStore.getState().saveComposerDraft('new-session-draft', '旧输入还在');
+
+    const onSubmit = vi.fn(async () => {});
+    render(<NewSessionPanel onSubmit={onSubmit} />);
+
+    const send = composerProps.find((entry) => typeof entry.onSend === 'function')?.onSend;
+    expect(send).toBeTypeOf('function');
+    await send?.({ text: '开始新任务' });
+
+    expect(onSubmit).toHaveBeenCalled();
+    expect(useAgentStore.getState().getComposerDraft('new-session-draft')).toBe('');
   });
 
   it('uses the project folder name in the prompt when starting from a project', () => {

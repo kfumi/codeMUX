@@ -42,6 +42,26 @@ describe('toolHeaderSummary', () => {
     expect(getToolDisplayName('resume_agent')).toBe('恢复子智能体');
   });
 
+  it('maps Codex image and js_repl tools to Chinese display names', () => {
+    expect(getToolDisplayName('view_image')).toBe('查看图片');
+    expect(getToolDisplayName('js')).toBe('运行 JS');
+    expect(getToolDisplayName('js_repl')).toBe('运行 JS');
+    expect(getToolDisplayName('js_repl_reset')).toBe('重置 JS');
+
+    const imageSummary = getToolHeaderSummary('view_image', {
+      path: 'C:\\Users\\kuangdi\\AppData\\Local\\Temp\\codemux-images-Y7hiHB\\demo.png',
+    });
+    expect(imageSummary.displayName).toBe('查看图片');
+    expect(imageSummary.text).toBe('demo.png');
+
+    const jsSummary = getToolHeaderSummary('js', {
+      title: 'Inspect reference image',
+      code: 'await nodeRepl.emitImage({ bytes, mimeType: "image/png" })',
+    });
+    expect(jsSummary.displayName).toBe('运行 JS');
+    expect(jsSummary.text).toBe('Inspect reference image');
+  });
+
 
   it('maps lowercase OpenCode tool names to the existing Chinese display names', () => {
     expect(getToolDisplayName('bash')).toBe('运行命令');

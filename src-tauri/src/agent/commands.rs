@@ -7,7 +7,7 @@ use crate::config::types::AgentKind;
 use crate::db::operations;
 use crate::model_providers::{
     effective_api_key, is_provider_usable, required_protocol, select_endpoint,
-    strip_context_1m_suffix, with_context_1m_suffix, Protocol,
+    strip_context_1m_suffix, with_context_1m_suffix, Protocol, ProviderModel,
 };
 use crate::provider_profiles::types::AgentTimeouts;
 use log::{debug, info, warn};
@@ -100,6 +100,34 @@ fn agent_timeouts(
         AgentKind::Opencode => config.agent_configs.opencode.timeouts.clone(),
         AgentKind::GeminiCli => None,
     }
+}
+
+fn resolve_codex_input_modalities(provider_model: &ProviderModel) -> Vec<String> {
+    let mut modalities = vec!["text".to_string()];
+    let mut has_image = false;
+
+    if let Some(configured) = provider_model.input_modalities.as_ref() {
+        for modality in configured {
+            let normalized = modality.trim().to_ascii_lowercase();
+            if normalized.is_empty() || normalized == "text" {
+                continue;
+            }
+            if normalized == "image" {
+                has_image = true;
+            }
+            if !modalities.iter().any(|entry| entry == &normalized) {
+                modalities.push(normalized);
+            }
+        }
+    } else if provider_model.supports_vision == Some(true) {
+        has_image = true;
+        modalities.push("image".to_string());
+    }
+
+    if has_image && !modalities.iter().any(|entry| entry == "image") {
+        modalities.push("image".to_string());
+    }
+    modalities
 }
 
 fn resolve_active_runtime_config(
@@ -213,6 +241,18 @@ fn resolve_active_runtime_config(
                 limits.insert(
                     "contextWindow".to_string(),
                     serde_json::Value::Number(context_window.into()),
+                );
+            }
+            if agent_kind == AgentKind::Codex {
+                let modalities = resolve_codex_input_modalities(provider_model);
+                limits.insert(
+                    "inputModalities".to_string(),
+                    serde_json::Value::Array(
+                        modalities
+                            .into_iter()
+                            .map(serde_json::Value::String)
+                            .collect(),
+                    ),
                 );
             }
             if agent_kind == AgentKind::Opencode {
@@ -4865,6 +4905,55 @@ mod tests {
             )
             .unwrap();
         assert_eq!(snapshot, "codex-provider");
+    }
+
+    #[test]
+    fn forwards_codex_input_modalities_in_model_limits() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, provider_id, model, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                "session-codex-vision",
+                "Codex",
+                "codex",
+                "codex-provider",
+                "gpt-5.6-luna",
+                "agent",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+
+        let mut provider = test_model_provider(
+            "codex-provider",
+            crate::model_providers::Protocol::OpenaiCompatible,
+            "https://provider.example/v1",
+            "internal-secret",
+            "gpt-5.6-luna",
+            &["gpt-5.6-luna"],
+            Some(true),
+        );
+        provider.models[0].input_modalities =
+            Some(vec!["text".to_string(), "image".to_string()]);
+
+        let mut config = crate::config::types::AppConfig::default();
+        config.model_providers.push(provider);
+        config.active_provider_id = Some("codex-provider".to_string());
+        let state = crate::AppState {
+            db: std::sync::Mutex::new(conn),
+            config: std::sync::Mutex::new(config),
+            app_data_dir: std::path::PathBuf::new(),
+            runtime_resolver: crate::runtime::RuntimeResolver::new(std::path::PathBuf::new()),
+        };
+
+        let resolved = resolve_active_runtime_config(&state, "session-codex-vision").unwrap();
+        let limits = resolved.model_limits.expect("model limits");
+        assert_eq!(
+            limits["inputModalities"],
+            serde_json::json!(["text", "image"])
+        );
     }
 
     #[test]

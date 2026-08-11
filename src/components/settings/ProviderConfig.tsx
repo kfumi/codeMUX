@@ -105,7 +105,6 @@ function syncDefaultModel(models: ProviderModel[], currentDefault = ''): string 
 
 const DEFAULT_OPENAI_MODEL_LIMITS = {
   context_window: 200_000,
-  max_input_tokens: 128_000,
   max_output_tokens: 65_536,
 } as const;
 
@@ -123,7 +122,6 @@ function withDefaultOpenAiModelLimits(
   return {
     ...model,
     context_window: model.context_window ?? DEFAULT_OPENAI_MODEL_LIMITS.context_window,
-    max_input_tokens: model.max_input_tokens ?? DEFAULT_OPENAI_MODEL_LIMITS.max_input_tokens,
     max_output_tokens: model.max_output_tokens ?? DEFAULT_OPENAI_MODEL_LIMITS.max_output_tokens,
   };
 }

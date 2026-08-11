@@ -49,6 +49,49 @@ describe('codexModelCatalog', () => {
     });
   });
 
+  it('builds and updates catalog entries with vision input modalities', async () => {
+    expect(buildCodexModelCatalogEntry('gpt-5.6-luna')).toMatchObject({
+      input_modalities: ['text'],
+      supports_image_detail_original: false,
+    });
+    expect(buildCodexModelCatalogEntry('gpt-5.6-luna', {
+      inputModalities: ['text', 'image'],
+    })).toMatchObject({
+      input_modalities: ['text', 'image'],
+      supports_image_detail_original: true,
+    });
+
+    const dir = mkdtempSync(path.join(tmpdir(), 'codemux-catalog-'));
+    tempDirs.push(dir);
+    const catalogPath = path.join(dir, 'codemux-model-catalog.json');
+    writeFileSync(catalogPath, JSON.stringify({
+      models: [{
+        slug: 'gpt-5.6-luna',
+        display_name: 'Gpt 5.6 Luna',
+        base_instructions: 'keep me',
+        input_modalities: ['text'],
+        supports_image_detail_original: false,
+      }],
+    }, null, 2));
+
+    await ensureCodexModelCatalog(
+      [{ id: 'gpt-5.6-luna', inputModalities: ['text', 'image'] }],
+      catalogPath,
+    );
+
+    const next = JSON.parse(readFileSync(catalogPath, 'utf8')) as {
+      models: Array<{
+        slug: string;
+        base_instructions?: string;
+        input_modalities?: string[];
+        supports_image_detail_original?: boolean;
+      }>;
+    };
+    expect(next.models[0]?.base_instructions).toBe('keep me');
+    expect(next.models[0]?.input_modalities).toEqual(['text', 'image']);
+    expect(next.models[0]?.supports_image_detail_original).toBe(true);
+  });
+
   it('updates context window for an existing catalog slug', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'codemux-catalog-'));
     tempDirs.push(dir);

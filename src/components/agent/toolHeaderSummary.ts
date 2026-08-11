@@ -45,6 +45,10 @@ const BUILT_IN_TOOL_DISPLAY_NAMES: Record<string, string> = {
   wait_agent: '等待子智能体',
   close_agent: '关闭子智能体',
   resume_agent: '恢复子智能体',
+  view_image: '查看图片',
+  js: '运行 JS',
+  js_repl: '运行 JS',
+  js_repl_reset: '重置 JS',
 };
 
 const BUILT_IN_TOOL_ALIASES: Record<string, string> = {
@@ -141,6 +145,16 @@ export function getToolHeaderSummary(toolName: string, input: Record<string, unk
 
       case 'AskUserQuestion':
         return fromFirstKey(input, ['question', 'header']);
+
+      case 'view_image':
+        return readSummary(input);
+
+      case 'js':
+      case 'js_repl':
+        return fromFirstKey(input, ['title', 'description']);
+
+      case 'js_repl_reset':
+        return { consumedKeys: [] };
 
       case 'TodoWrite':
         return { consumedKeys: ['todos'] };

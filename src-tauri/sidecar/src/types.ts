@@ -11,6 +11,7 @@ export interface SidecarModelLimits {
   contextWindow?: number;
   maxInputTokens?: number;
   maxOutputTokens?: number;
+  inputModalities?: string[];
 }
 
 export interface OpenCodeSessionConfig {
