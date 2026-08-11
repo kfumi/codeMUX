@@ -255,7 +255,7 @@ describe('AskUserQuestionCard', () => {
 
     const multiSelectControl = screen.getByText('甲').closest('button')?.firstElementChild?.firstElementChild;
 
-    expect(multiSelectControl?.className).toContain('rounded-sm');
+    expect(multiSelectControl?.className).toContain('rounded-none');
     expect(multiSelectControl?.className).not.toContain('rounded-full');
 
     cleanup();
@@ -270,6 +270,89 @@ describe('AskUserQuestionCard', () => {
 
     const singleSelectControl = screen.getByText('乙').closest('button')?.firstElementChild?.firstElementChild;
     expect(singleSelectControl?.className).toContain('rounded-full');
+  });
+
+  it('accepts OpenCode multiple field for multi-select rendering', () => {
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="opencode-multiple-1"
+        variant="composer"
+        questions={[{ question: '选择多个', multiple: true, options: [{ label: '甲' }] }]}
+      />,
+    );
+
+    const control = screen.getByText('甲').closest('button')?.firstElementChild?.firstElementChild;
+    expect(control?.className).toContain('rounded-none');
+    expect(control?.className).not.toContain('rounded-full');
+  });
+
+  it('does not infer multi-select from question text without metadata', () => {
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="opencode-multiple-hint-1"
+        variant="composer"
+        questions={[{ question: '你的日常编程习惯有哪些?(可多选)', multiSelect: false, options: [{ label: '自动化测试' }] }]}
+      />,
+    );
+
+    const control = screen.getByText('自动化测试').closest('button')?.firstElementChild?.firstElementChild;
+    expect(control?.className).toContain('rounded-full');
+    expect(control?.className).not.toContain('rounded-none');
+  });
+
+  it('renders Claude answers as a readable question summary', () => {
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="claude-result-1"
+        submitted
+        resultContent={'Your questions have been answered: "如果你有一台时间机器，你最想去哪个时代看看？"="中国古代", "周末闲暇时，你更喜欢怎么放松？"="宅家打游戏".'}
+        questions={[
+          { header: '时间机器', question: '如果你有一台时间机器，你最想去哪个时代看看？', options: [{ label: '中国古代' }] },
+          { header: '周末', question: '周末闲暇时，你更喜欢怎么放松？', options: [{ label: '宅家打游戏' }] },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('中国古代')).toBeTruthy();
+    expect(screen.getByText('宅家打游戏')).toBeTruthy();
+    expect(screen.getAllByText('时间机器')).toHaveLength(2);
+    expect(screen.getByText('周末')).toBeTruthy();
+  });
+
+  it('renders structured OpenCode answers as chips and expands numeric multi-select answers', () => {
+    render(
+      <AskUserQuestionCard
+        sessionId="session-1"
+        toolUseId="opencode-result-1"
+        submitted
+        resultContent={JSON.stringify({
+          answers: [['PWA / 手机浏览器网页 (Recommended)'], ['Rust axum，直接在 Tauri 核心 (Recommended)'], ['1+2+3'], ['扫码配对 (Recommended)']],
+        })}
+        questions={[
+          { header: '移动端形态', question: '移动端客户端用什么形态？', options: [{ label: 'PWA / 手机浏览器网页 (Recommended)' }] },
+          { header: 'Server 实现', question: '桌面端 Sync Server 用什么实现？', options: [{ label: 'Rust axum，直接在 Tauri 核心 (Recommended)' }] },
+          {
+            header: '操作范围',
+            question: '移动端需要哪些对话操作？',
+            multiple: true,
+            options: [{ label: '查看会话列表' }, { label: '发送消息' }, { label: '中断生成' }],
+          },
+          { header: '连接方式', question: '手机如何连接到桌面端？', options: [{ label: '扫码配对 (Recommended)' }] },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('PWA / 手机浏览器网页 (Recommended)')).toBeTruthy();
+    expect(screen.getByText('Rust axum，直接在 Tauri 核心 (Recommended)')).toBeTruthy();
+    expect(screen.getByText('查看会话列表')).toBeTruthy();
+    expect(screen.getByText('发送消息')).toBeTruthy();
+    expect(screen.getByText('中断生成')).toBeTruthy();
+    expect(screen.getByText('多选')).toBeTruthy();
+    expect(screen.getByText('扫码配对 (Recommended)')).toBeTruthy();
+    expect(screen.queryByText('1+2+3')).toBeNull();
   });
 
   it('submits the plan approval input as the answer when it is focused', async () => {

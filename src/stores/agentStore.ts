@@ -83,7 +83,7 @@ export type AgentMessage =
   | { kind: 'resume_failed'; data: SessionResumeFailedEvent }
   | { kind: 'stream_status'; data: { message: string; is_reconnecting: boolean; mode_blocked?: ModeBlockedDiagnostic | null } }
   | { kind: 'api_retry'; data: { attempt: number; max_retries: number; retry_delay_ms: number; error_status: number; error: string } }
-  | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; allowOther?: boolean; presentation?: 'plan-approval'; inputPlaceholder?: string }> } }
+  | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; multiple?: boolean; allowOther?: boolean; presentation?: 'plan-approval'; inputPlaceholder?: string }> } }
   | { kind: 'ask_user_question_timeout'; data: { tool_use_id: string; timeout_ms: number; message: string } }
   | { kind: 'permission'; data: AgentPermissionRequest }
   | { kind: 'permission_mode_changed'; data: AgentPermissionModeChanged }

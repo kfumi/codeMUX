@@ -161,7 +161,7 @@ describe('OpenCodeRuntime', () => {
       properties: {
         id: 'question-1',
         sessionID: 'opencode-new',
-        questions: [{ question: '继续吗？', options: [{ label: '继续' }] }],
+        questions: [{ question: '继续吗？', multiple: true, options: [{ label: '继续' }] }],
       },
     });
     await runtime.respondToQuestion('question-1', [['继续']]);
@@ -171,7 +171,10 @@ describe('OpenCodeRuntime', () => {
         type: 'tool_started', tool_use_id: 'question-1', name: 'request_user_input', sequence: 0,
       },
       {
-        type: 'user_input_requested', tool_use_id: 'question-1', sequence: 1,
+        type: 'user_input_requested',
+        tool_use_id: 'question-1',
+        sequence: 1,
+        questions: [{ question: '继续吗？', multiSelect: true }],
       },
       {
         type: 'tool_finished', tool_use_id: 'question-1', content: '{"answers":[["继续"]]}', sequence: 2,

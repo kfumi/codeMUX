@@ -865,7 +865,12 @@ export class OpenCodeRuntime {
         label: String(opt.label ?? ''),
         ...(opt.description ? { description: String(opt.description) } : {}),
       })) : [];
-      return { question: readString(qr?.question) ?? '', header: readString(qr?.header), options };
+      return {
+        question: readString(qr?.question) ?? '',
+        header: readString(qr?.header),
+        options,
+        multiSelect: qr?.multiple === true,
+      };
     });
     this.emitToolStarted(requestId, 'request_user_input', { questions: normalizedQuestions }, openCodeSessionId);
     this.emitEvent({

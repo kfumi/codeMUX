@@ -72,6 +72,7 @@ type CodeMuxQuestion = {
   header?: string;
   options: Array<{ label: string; description?: string; value?: unknown }>;
   multiSelect?: boolean;
+  multiple?: boolean;
   allowOther?: boolean;
   presentation?: 'plan-approval';
   inputPlaceholder?: string;

@@ -538,7 +538,12 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
               label: String(opt.label ?? ''),
               ...(opt.description ? { description: String(opt.description) } : {}),
             })) : [];
-            return { question: readString(qr?.question) ?? '', header: readString(qr?.header), options };
+            return {
+              question: readString(qr?.question) ?? '',
+              header: readString(qr?.header),
+              options,
+              multiSelect: qr?.multiple === true,
+            };
           }),
           event_id: context.eventIdFactory(),
         }, context, sessionId));

@@ -12,7 +12,7 @@ import {
   ToolFallbackArgs,
   ToolFallbackConversationArgs,
 } from '@/components/assistant-ui/tool-fallback';
-import { AskUserQuestionCard } from '../AskUserQuestionCard';
+import { AskUserQuestionCard, type AskUserQuestion } from '../AskUserQuestionCard';
 import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
 import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
 import { AlertTriangle, Check, Copy, Maximize2, ListTodo, XCircle, ChevronDown, ChevronRight, FileText } from 'lucide-react';
@@ -28,6 +28,8 @@ import { FileTypeIcon } from '@/components/assistant-ui/file-type-icon';
 
 type CodeMuxToolCallPartProps = {
   toolName: string;
+  toolCallId?: string;
+  sessionId?: string;
   args: Record<string, unknown>;
   argsText?: string;
   result?: unknown;
@@ -66,6 +68,7 @@ type AskUserQuestionCardData = {
       description?: string;
     }>;
     multiSelect?: boolean;
+    multiple?: boolean;
   }>;
 };
 
@@ -225,6 +228,8 @@ export function getStreamStatusDisplay(data: StreamStatusDisplayInput): StreamSt
 
 export function CodeMuxToolCallMessagePart({
   toolName,
+  toolCallId,
+  sessionId,
   args,
   argsText,
   result,
@@ -233,8 +238,37 @@ export function CodeMuxToolCallMessagePart({
   status,
 }: CodeMuxToolCallPartProps) {
   const openPlanTab = useSidePanelStore((state) => state.openPlanTab);
-  const resolvedStatus = resolveToolStatus(status, result, isError);
   const headerSummary = getToolHeaderSummary(toolName, args);
+  const resolvedStatus = resolveToolStatus(status, result, isError);
+  const askQuestions = getAskUserQuestions(toolName, args);
+  if (askQuestions && sessionId && toolCallId) {
+    const resultContent = typeof result === 'string' ? result : result == null ? undefined : stringifyResult(result);
+    const isSubmittedQuestion = result !== undefined && !isError;
+    if (isSubmittedQuestion) {
+      return (
+        <ToolFallbackRoot>
+          <ToolFallbackTrigger toolName={headerSummary.displayName || toolName} status={resolvedStatus}>
+            <span className="rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-ui-caption font-medium text-primary">
+              {askQuestions.length} 已回答
+            </span>
+          </ToolFallbackTrigger>
+          <ToolFallbackContent scrollable={false}>
+            <AskUserQuestionCard
+              sessionId={sessionId}
+              toolUseId={toolCallId}
+              questions={askQuestions}
+              compact
+              submitted
+              resultContent={resultContent}
+            />
+          </ToolFallbackContent>
+        </ToolFallbackRoot>
+      );
+    }
+
+    return <AskUserQuestionPreview />;
+  }
+
   const codeFilePath = isCodeChangeTool(toolName, args) ? getCodeChangeFilePath(args) : undefined;
   const headerText = codeFilePath || headerSummary.text;
   const codeChangeStats = codeFilePath ? getCodeChangeStats(args) : null;
@@ -329,6 +363,10 @@ export function CodeMuxToolCallMessagePart({
       </ToolFallbackContent>
     </ToolFallbackRoot>
   );
+}
+
+function AskUserQuestionPreview() {
+  return <div className="px-1 py-1 text-xs text-muted-foreground/65">等待用户回答</div>;
 }
 
 export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPartProps) {
@@ -518,6 +556,10 @@ function isAskUserQuestionCardData(value: unknown): value is AskUserQuestionCard
       return false;
     }
 
+    if ('multiple' in question && typeof question.multiple !== 'boolean') {
+      return false;
+    }
+
     return question.options.every((option) => {
       if (!isRecord(option) || typeof option.label !== 'string') {
         return false;
@@ -526,6 +568,39 @@ function isAskUserQuestionCardData(value: unknown): value is AskUserQuestionCard
       return !('description' in option) || typeof option.description === 'string';
     });
   });
+}
+
+function getAskUserQuestions(toolName: string, args: Record<string, unknown>): AskUserQuestion[] | null {
+  if (
+    !['AskUserQuestion', 'askUserQuestion', 'request_user_input', 'question'].includes(toolName)
+    || !Array.isArray(args.questions)
+    || args.questions.length === 0
+  ) {
+    return null;
+  }
+
+  const questions = args.questions
+    .filter(isRecord)
+    .filter((question) => typeof question.question === 'string' && Array.isArray(question.options))
+    .map((question) => ({
+      question: question.question as string,
+      ...(typeof question.header === 'string' ? { header: question.header } : {}),
+      options: (question.options as unknown[])
+        .filter(isRecord)
+        .filter((option) => typeof option.label === 'string')
+        .map((option) => ({
+          label: option.label as string,
+          ...(typeof option.description === 'string' ? { description: option.description } : {}),
+          ...(Object.prototype.hasOwnProperty.call(option, 'value') ? { value: option.value } : {}),
+        })),
+      ...(question.multiSelect === true ? { multiSelect: true } : {}),
+      ...(question.multiple === true ? { multiple: true } : {}),
+      ...(question.allowOther === false ? { allowOther: false } : {}),
+      ...(question.presentation === 'plan-approval' ? { presentation: 'plan-approval' as const } : {}),
+      ...(typeof question.inputPlaceholder === 'string' ? { inputPlaceholder: question.inputPlaceholder } : {}),
+    }));
+
+  return questions.length > 0 ? questions : null;
 }
 
 function stringifyResult(result: unknown): string | undefined {

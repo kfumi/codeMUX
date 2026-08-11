@@ -1173,6 +1173,8 @@ function AssistantLikeMessage({
                   return (
                     <CodeMuxToolCallMessagePart
                       toolName={part.toolName}
+                      toolCallId={part.toolCallId}
+                      sessionId={sessionId}
                       args={asRecord(part.args)}
                       argsText={part.argsText}
                       result={part.result}

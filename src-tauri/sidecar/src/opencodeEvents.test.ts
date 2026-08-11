@@ -97,6 +97,30 @@ describe('OpenCode event normalization', () => {
   it('silently ignores OpenCode heartbeat events', () => {
     expect(toCodeMuxEvent({ type: 'server.heartbeat', properties: {} }, context())).toEqual([]);
   });
+  it('preserves OpenCode multiple-choice question semantics', () => {
+    const events = toCodeMuxEvent({
+      type: 'question.asked',
+      properties: {
+        id: 'question-1',
+        questions: [{
+          question: '选择功能',
+          header: '功能',
+          multiple: true,
+          options: [{ label: 'A', description: '选项 A' }, { label: 'B' }],
+        }],
+      },
+    }, context());
+
+    expect(events[0]).toMatchObject({
+      type: 'user_input_requested',
+      questions: [{
+        question: '选择功能',
+        header: '功能',
+        multiSelect: true,
+        options: [{ label: 'A', description: '选项 A' }, { label: 'B' }],
+      }],
+    });
+  });
   it('converts compaction part to compact_boundary system event', () => {
     const autoCompaction = toCodeMuxEvent({
       type: 'message.part.updated',

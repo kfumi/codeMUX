@@ -98,6 +98,68 @@ describe('CodeMuxToolCallMessagePart', () => {
     expect(toolContent.className).toContain('duration-(--animation-duration)');
   });
 
+  it('在 AI 消息中将询问用户工具渲染为问题回单卡片', () => {
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="question"
+        toolCallId="question-message-1"
+        sessionId="session-1"
+        args={{
+          questions: [{
+            header: '技术栈',
+            question: '你主要使用哪些技术栈？',
+            multiple: true,
+            options: [{ label: 'TypeScript' }, { label: 'Rust' }],
+          }, {
+            header: '周末',
+            question: '周末你喜欢做什么？',
+            options: [{ label: '写代码' }],
+          }],
+        }}
+        result={JSON.stringify({ answers: [['TypeScript', 'Rust'], ['写代码']] })}
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: /询问用户/ });
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(trigger);
+
+    expect(screen.getByText('技术栈')).toBeTruthy();
+    expect(screen.getByText('TypeScript')).toBeTruthy();
+    expect(screen.getByText('Rust')).toBeTruthy();
+    expect(screen.getByText('多选')).toBeTruthy();
+    expect(screen.getByText('2 已回答')).toBeTruthy();
+    expect(screen.getByText('你主要使用哪些技术栈？')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /下一个/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /下一个/ }));
+    expect(screen.getByText('周末')).toBeTruthy();
+    expect(screen.getByText('写代码')).toBeTruthy();
+    expect(container.querySelector('[data-slot="tool-fallback-root"]')).toBeTruthy();
+    expect(container.querySelector('[data-compact="true"]')).toBeTruthy();
+  });
+
+  it('将未回答的询问工具渲染为不可操作的工具预览', () => {
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="AskUserQuestion"
+        toolCallId="pending-question-message-1"
+        sessionId="session-1"
+        args={{
+          questions: [{
+            header: '编程习惯',
+            question: '你的日常编程习惯有哪些?(可多选)',
+            multiple: true,
+            options: [{ label: '自动化测试' }, { label: '代码审查' }],
+          }],
+        }}
+      />,
+    );
+
+    expect(container.textContent).toContain('等待用户回答');
+    expect(container.textContent).not.toContain('自动化测试');
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+
   it('点击 ExitPlanMode 的 planFilePath 后在右侧计划标签中预览 plan 快照，展开区不重复展示整段 plan', () => {
     const { container } = renderWithTooltip(
       <CodeMuxToolCallMessagePart
