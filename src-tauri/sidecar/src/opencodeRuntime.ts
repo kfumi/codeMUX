@@ -76,6 +76,8 @@ export class OpenCodeRuntime {
   private seenPayloadKeyBytes = 0;
   private readonly terminalSessionIds = new Set<string>();
   private readonly terminalToolIds = new Set<string>();
+  /** Tool call ids currently in the `running` state. Drives the idle guard: while any tool is running, the guard is suspended so long-running tool execution (e.g. builds, installs) is not mistaken for a hang. The tool layer is authoritative for its own timeouts. */
+  private readonly runningToolIds = new Set<string>();
   private readonly pendingQuestionIds = new Set<string>();
   private pendingTurnCompletion: { resolve: () => void; reject: (reason: unknown) => void; sessionId: string } | undefined;
   private manualCompactionInFlight = false;
@@ -552,7 +554,11 @@ export class OpenCodeRuntime {
   private syncGuardWithInteractiveState(): void {
     const hasPendingInteraction =
       this.pendingQuestionIds.size > 0 || this.permissions.hasPending(this.config.sessionId);
-    if (hasPendingInteraction) {
+    // Tools own their own timeouts. While any tool is executing, treat the turn as busy
+    // rather than idle so the idle guard does not abort long-running commands (builds,
+    // installs, long tests). The guard stays armed for genuine streaming stalls.
+    const hasRunningTool = this.runningToolIds.size > 0;
+    if (hasPendingInteraction || hasRunningTool) {
       this.turnIdleGuard?.suspend();
     } else {
       this.turnIdleGuard?.resume();
@@ -674,6 +680,8 @@ export class OpenCodeRuntime {
         this.emitToolFinished(taskId, '', activeSessionId);
       }
       this.pendingTaskToolCallIds.clear();
+      // Pending Task tools were also tracked as running; ensure the guard reconsiders.
+      this.syncGuardWithInteractiveState();
     }
     const events = toCodeMuxEvent(event, {
       agentId: this.agentId,
@@ -717,11 +725,21 @@ export class OpenCodeRuntime {
       if (
         normalizedEvent.type === 'tool_started'
         && typeof normalizedEvent.tool_use_id === 'string'
-        && (normalizedEvent.name === 'Task' || normalizedEvent.name === 'Agent')
       ) {
-        this.pendingTaskToolCallIds.add(normalizedEvent.tool_use_id);
+        this.runningToolIds.add(normalizedEvent.tool_use_id);
+        if (normalizedEvent.name === 'Task' || normalizedEvent.name === 'Agent') {
+          this.pendingTaskToolCallIds.add(normalizedEvent.tool_use_id);
+        }
+      }
+      if (
+        normalizedEvent.type === 'tool_finished'
+        && typeof normalizedEvent.tool_use_id === 'string'
+      ) {
+        this.runningToolIds.delete(normalizedEvent.tool_use_id);
       }
     }
+    // Tool lifecycle changed running state; recompute guard suspension.
+    this.syncGuardWithInteractiveState();
 
     if (terminalSessionId && isTerminalEventType(type)) {
       if (events.some((eventItem) => eventItem.type === 'turn_finished')) {
@@ -751,6 +769,7 @@ export class OpenCodeRuntime {
     this.turnId += 1;
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
+    this.runningToolIds.clear();
     this.pendingTaskToolCallIds.clear();
     this.assistantMessageIds.clear();
     this.userMessageIds.clear();
@@ -792,6 +811,7 @@ export class OpenCodeRuntime {
     this.seenPayloadKeyBytes = 0;
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
+    this.runningToolIds.clear();
     this.assistantMessageIds.clear();
     this.userMessageIds.clear();
     this.usage = { input_tokens: 0, output_tokens: 0 };
@@ -915,6 +935,7 @@ export class OpenCodeRuntime {
   }
 
   private emitToolFinished(toolUseId: string, content: string, agentSessionId?: string): void {
+    this.runningToolIds.delete(toolUseId);
     this.emitEvent({
       type: 'tool_finished',
       session_id: this.config.sessionId,

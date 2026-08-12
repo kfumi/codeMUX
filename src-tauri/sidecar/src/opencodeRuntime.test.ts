@@ -274,6 +274,70 @@ describe('OpenCodeRuntime', () => {
       vi.useRealTimers();
     }
   });
+  it('does not expire the turn while a tool is running, then re-arms the guard when it finishes', async () => {
+    vi.useFakeTimers();
+    try {
+      const { port, client } = createPort();
+      client.prompt.mockResolvedValue(undefined);
+      let onEvent: (event: unknown) => void = () => undefined;
+      client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+        onEvent = input.onEvent;
+        return { close: vi.fn() };
+      });
+      const emitted: unknown[] = [];
+      const runtime = new OpenCodeRuntime(createConfig({ timeouts: { idle_timeout_ms: 25 } }), port, {
+        emitEvent: (event) => emitted.push(event),
+        eventIdFactory: () => 'event-tool',
+      } as any);
+
+      await runtime.start();
+      const sendPromise = runtime.sendInput('hello');
+
+      // A long-running tool starts. This is the scenario where a build/install
+      // produces no SSE progress for far longer than the idle window.
+      onEvent({
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'opencode-new',
+          part: {
+            type: 'tool',
+            tool: 'bash',
+            callID: 'call-1',
+            state: { status: 'running', input: { command: 'cargo build' } },
+          },
+        },
+      });
+
+      // Far past the idle window, but the tool is still running: the guard
+      // must stay suspended and must NOT abort the session.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(client.abort).not.toHaveBeenCalled();
+      expect(emitted.some((event) => (event as { type?: string }).type === 'turn_finished')).toBe(false);
+
+      // The tool finishes. The guard re-arms; with no further progress and no
+      // terminal event, the idle window now elapses and the turn is aborted.
+      onEvent({
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'opencode-new',
+          part: {
+            type: 'tool',
+            tool: 'bash',
+            callID: 'call-1',
+            state: { status: 'completed', output: 'done' },
+          },
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(26);
+      expect(client.abort).toHaveBeenCalledWith('opencode-new');
+      expect(emitted.some((event) => (event as { type?: string }).type === 'turn_finished')).toBe(true);
+
+      await sendPromise;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('re-arms the idle guard after an answered permission expires the turn', async () => {
     vi.useFakeTimers();
     try {
