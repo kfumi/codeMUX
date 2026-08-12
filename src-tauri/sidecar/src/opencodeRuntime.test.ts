@@ -240,6 +240,112 @@ describe('OpenCodeRuntime', () => {
       vi.useRealTimers();
     }
   });
+  it('promotes a child free-tier failure to the active parent turn', async () => {
+    vi.useFakeTimers();
+    try {
+      const { port, client } = createPort();
+      client.prompt.mockResolvedValue(undefined);
+      let onEvent: (event: unknown) => void = () => undefined;
+      client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+        onEvent = input.onEvent;
+        return { close: vi.fn() };
+      });
+      const emitted: Array<Record<string, unknown>> = [];
+      const runtime = new OpenCodeRuntime(createConfig({ timeouts: { idle_timeout_ms: 25 } }), port, {
+        emitEvent: (event) => emitted.push(event as Record<string, unknown>),
+        eventIdFactory: () => 'event-provider-quota',
+      } as any);
+
+      await runtime.start();
+      const sendPromise = runtime.sendInput('delegate research');
+      onEvent({
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'opencode-new',
+          part: {
+            type: 'tool',
+            tool: 'Task',
+            callID: 'task-1',
+            state: {
+              status: 'running',
+              input: {},
+              metadata: { parentSessionId: 'opencode-new', sessionId: 'child-session-1' },
+            },
+          },
+        },
+      });
+      onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
+      onEvent({
+        type: 'session.status',
+        properties: {
+          sessionID: 'child-session-1',
+          status: {
+            type: 'retry',
+            attempt: 1,
+            message: 'Free usage exceeded, subscribe to Go',
+            action: { reason: 'free_tier_limit' },
+          },
+        },
+      });
+      await Promise.resolve();
+
+      try {
+        expect(client.abort).toHaveBeenCalledWith('opencode-new');
+        expect(emitted).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            type: 'tool_finished',
+            tool_use_id: 'task-1',
+            is_error: true,
+            content: expect.stringContaining('Free usage exceeded'),
+          }),
+          expect.objectContaining({
+            type: 'error',
+            subtype: 'provider_quota',
+            error: expect.stringContaining('Free usage exceeded'),
+          }),
+          expect.objectContaining({ type: 'turn_finished', outcome: 'failed' }),
+        ]));
+        expect(emitted).not.toEqual(expect.arrayContaining([
+          expect.objectContaining({ type: 'turn_finished', outcome: 'completed' }),
+        ]));
+      } finally {
+        onEvent({ type: 'session.interrupted', properties: { sessionID: 'opencode-new' } });
+        await sendPromise;
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('re-arms the idle guard after progress events in the active session', async () => {
+    vi.useFakeTimers();
+    try {
+      const { port, client } = createPort();
+      client.prompt.mockResolvedValue(undefined);
+      let onEvent: (event: unknown) => void = () => undefined;
+      client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
+        onEvent = input.onEvent;
+        return { close: vi.fn() };
+      });
+      const runtime = new OpenCodeRuntime(createConfig({ timeouts: { idle_timeout_ms: 25 } }), port, {
+        emitEvent: (event) => undefined,
+      } as any);
+
+      await runtime.start();
+      const sendPromise = runtime.sendInput('keep streaming');
+      await vi.advanceTimersByTimeAsync(20);
+      onEvent({
+        type: 'session.status',
+        properties: { sessionID: 'opencode-new', status: { type: 'busy' } },
+      });
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(client.abort).not.toHaveBeenCalled();
+      onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
+      await sendPromise;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('does not expire the turn while a permission is awaiting approval', async () => {
     vi.useFakeTimers();
     try {

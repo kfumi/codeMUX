@@ -1,7 +1,7 @@
 use crate::config;
 use crate::config::types::{
-    AgentKind, AppConfig, AttachmentEnrichmentConfig, ClaudeCodeAgentConfigUpdate, CodexAgentConfigUpdate,
-    NotificationSettings, Provider, Theme,
+    AgentKind, AppConfig, AttachmentEnrichmentConfig, ClaudeCodeAgentConfigUpdate,
+    CodexAgentConfigUpdate, NotificationSettings, Provider, Theme,
 };
 use crate::AppState;
 use futures::StreamExt;
@@ -97,8 +97,12 @@ fn apply_agent_config_update(
         }
         AgentKind::GeminiCli => {}
         AgentKind::Opencode => {
-            if let Some(provider_id) = config.get("default_provider_id").and_then(|value| value.as_str()) {
-                app_config.agent_configs.opencode.default_provider_id = Some(provider_id.to_string());
+            if let Some(provider_id) = config
+                .get("default_provider_id")
+                .and_then(|value| value.as_str())
+            {
+                app_config.agent_configs.opencode.default_provider_id =
+                    Some(provider_id.to_string());
             }
             if let Some(model) = config.get("default_model").and_then(|value| value.as_str()) {
                 app_config.agent_configs.opencode.default_model = Some(model.to_string());
@@ -389,7 +393,10 @@ fn extract_model_display_name(model: &serde_json::Value, model_id: &str) -> Opti
 }
 
 fn model_info_from_json(model: &serde_json::Value) -> Option<ModelInfo> {
-    let id = model.get("id").and_then(serde_json::Value::as_str)?.to_string();
+    let id = model
+        .get("id")
+        .and_then(serde_json::Value::as_str)?
+        .to_string();
     Some(ModelInfo {
         owned_by: model
             .get("owned_by")
@@ -813,33 +820,35 @@ mod tests {
     #[test]
     fn redact_config_clears_model_provider_secrets() {
         let mut app_config = AppConfig::default();
-        app_config.model_providers.push(crate::model_providers::ModelProvider {
-            id: "provider-1".to_string(),
-            name: "测试供应商".to_string(),
-            enabled: true,
-            api_key: "sk-secret".to_string(),
-            api_key_configured: false,
-            endpoints: vec![crate::model_providers::ProtocolEndpoint {
-                protocol: crate::model_providers::Protocol::OpenaiCompatible,
-                base_url: "https://example.com/v1".to_string(),
-                api_key_override: Some("sk-override".to_string()),
-                codex_needs_proxy: None,
-            }],
-            models: vec![crate::model_providers::ProviderModel {
-                id: "model".to_string(),
-                name: None,
-                context_1m: None,
-                context_window: None,
-                max_input_tokens: None,
-                max_output_tokens: None,
-                input_modalities: None,
-                supports_vision: None,
-            }],
-            default_model: "model".to_string(),
-            builtin_template_id: None,
-            opencode_provider_key: None,
-            opencode_npm: None,
-        });
+        app_config
+            .model_providers
+            .push(crate::model_providers::ModelProvider {
+                id: "provider-1".to_string(),
+                name: "测试供应商".to_string(),
+                enabled: true,
+                api_key: "sk-secret".to_string(),
+                api_key_configured: false,
+                endpoints: vec![crate::model_providers::ProtocolEndpoint {
+                    protocol: crate::model_providers::Protocol::OpenaiCompatible,
+                    base_url: "https://example.com/v1".to_string(),
+                    api_key_override: Some("sk-override".to_string()),
+                    codex_needs_proxy: None,
+                }],
+                models: vec![crate::model_providers::ProviderModel {
+                    id: "model".to_string(),
+                    name: None,
+                    context_1m: None,
+                    context_window: None,
+                    max_input_tokens: None,
+                    max_output_tokens: None,
+                    input_modalities: None,
+                    supports_vision: None,
+                }],
+                default_model: "model".to_string(),
+                builtin_template_id: None,
+                opencode_provider_key: None,
+                opencode_npm: None,
+            });
         app_config.providers.push(crate::config::types::Provider {
             id: "legacy".to_string(),
             name: "旧供应商".to_string(),

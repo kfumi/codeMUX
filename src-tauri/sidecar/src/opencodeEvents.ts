@@ -452,8 +452,10 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       const error = properties.error ?? properties;
       const outcome = isInterruptedError(error) ? 'interrupted' : 'failed';
       const errorText = errorMessage(error);
-      process.stderr.write(`[opencode-task] toCodeMuxEvent session.error sessionId=${sessionId ?? 'null'} outcome=${outcome} error=${errorText} isInterrupted=${isInterruptedError(error)} isTimeout=${isTimeoutError(error)}\n`);
-      events.push(buildTurnErrorEvent(context, isTimeoutError(error) ? 'timeout' : outcome, errorText, sessionId));
+      const isTimeout = isTimeoutError(error);
+      const isProviderQuota = isProviderQuotaError(error);
+      process.stderr.write(`[opencode-task] toCodeMuxEvent session.error sessionId=${sessionId ?? 'null'} outcome=${outcome} error=${errorText} isInterrupted=${isInterruptedError(error)} isTimeout=${isTimeout} isProviderQuota=${isProviderQuota}\n`);
+      events.push(buildTurnErrorEvent(context, isTimeout ? 'timeout' : isProviderQuota ? 'provider_quota' : outcome, errorText, sessionId));
       events.push(buildTurnFinishedEvent(context, outcome, sessionId, errorText));
       break;
     }
@@ -760,6 +762,21 @@ function serializeToolValue(value: unknown): string {
 function isTimeoutError(error: unknown): boolean {
   const text = `${readString(asRecord(error)?.name) ?? ''} ${errorMessage(error)}`.toLowerCase();
   return text.includes('timeout') || text.includes('timed out');
+}
+
+function isProviderQuotaError(error: unknown): boolean {
+  const record = asRecord(error);
+  const data = asRecord(record?.data);
+  const text = [
+    readString(record?.name),
+    readString(record?.code),
+    readString(data?.code),
+    errorMessage(error),
+  ].filter(Boolean).join(' ').toLowerCase();
+  return text.includes('free_tier_limit')
+    || text.includes('free tier')
+    || text.includes('usage exceeded')
+    || text.includes('quota exceeded');
 }
 
 function isInterruptedError(error: unknown): boolean {

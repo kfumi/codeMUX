@@ -497,9 +497,7 @@ impl AgentProfileRegistry {
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::{
-        AgentProfileRegistry, AgentProviderProfile, NativeProfileConfig, ProfileModel,
-    };
+    use super::{AgentProfileRegistry, AgentProviderProfile, NativeProfileConfig, ProfileModel};
     use crate::config::types::AgentKind;
 
     #[test]

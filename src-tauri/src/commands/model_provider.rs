@@ -43,7 +43,10 @@ pub fn upsert_model_provider(
     upsert_model_provider_inner(&state, &app, provider)
 }
 
-fn merge_provider_secrets(mut incoming: ModelProvider, existing: Option<&ModelProvider>) -> ModelProvider {
+fn merge_provider_secrets(
+    mut incoming: ModelProvider,
+    existing: Option<&ModelProvider>,
+) -> ModelProvider {
     if let Some(existing) = existing {
         if incoming.api_key.trim().is_empty() {
             incoming.api_key = existing.api_key.clone();
@@ -177,11 +180,7 @@ pub async fn test_model_provider(api_key: String, base_url: String) -> Result<St
         return Err("请先填写 API 地址".to_string());
     }
     let (models, url) = crate::commands::provider::probe_openai_models(&api_key, &base_url).await?;
-    Ok(format!(
-        "连接成功：GET {}（{} 个模型）",
-        url,
-        models.len()
-    ))
+    Ok(format!("连接成功：GET {}（{} 个模型）", url, models.len()))
 }
 
 #[tauri::command]

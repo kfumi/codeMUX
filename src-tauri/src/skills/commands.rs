@@ -2,8 +2,8 @@ use super::adapters;
 use super::db;
 use super::ssot;
 use super::types::{Skill, SkillApps};
-use crate::AppState;
 use crate::config::types::AgentKind;
+use crate::AppState;
 use std::str::FromStr;
 use tauri::State;
 
@@ -401,10 +401,7 @@ pub async fn list_project_skills(
 ) -> Result<Vec<super::project::ProjectSkill>, String> {
     let agent_kind = AgentKind::from_str(&agent_kind)?;
     if force.unwrap_or(false) {
-        super::project::invalidate_project_skills(
-            std::path::Path::new(&project_root),
-            agent_kind,
-        );
+        super::project::invalidate_project_skills(std::path::Path::new(&project_root), agent_kind);
     }
     tokio::task::spawn_blocking(move || {
         super::project::resolve_project_skills(std::path::Path::new(&project_root), agent_kind)

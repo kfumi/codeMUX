@@ -565,41 +565,43 @@ mod tests {
         let temp_dir = temp_config_dir();
         let config_path = temp_dir.join("config.json");
         let mut config = AppConfig::default();
-        config.model_providers.push(crate::model_providers::ModelProvider {
-            id: "deepseek-1".to_string(),
-            name: "DeepSeek".to_string(),
-            enabled: true,
-            api_key: "sk-test".to_string(),
-            api_key_configured: false,
-            endpoints: vec![
-                crate::model_providers::ProtocolEndpoint {
-                    protocol: crate::model_providers::Protocol::Anthropic,
-                    base_url: "https://api.deepseek.com/anthropic".to_string(),
-                    api_key_override: None,
-                    codex_needs_proxy: None,
-                },
-                crate::model_providers::ProtocolEndpoint {
-                    protocol: crate::model_providers::Protocol::OpenaiCompatible,
-                    base_url: "https://api.deepseek.com".to_string(),
-                    api_key_override: None,
-                    codex_needs_proxy: Some(false),
-                },
-            ],
-            models: vec![crate::model_providers::ProviderModel {
-                id: "deepseek-v4-flash".to_string(),
-                name: Some("Flash".to_string()),
-                context_1m: None,
-                context_window: None,
-                max_input_tokens: None,
-                max_output_tokens: None,
-                input_modalities: None,
-                supports_vision: None,
-            }],
-            default_model: "deepseek-v4-flash".to_string(),
-            builtin_template_id: Some("deepseek".to_string()),
-            opencode_provider_key: None,
-            opencode_npm: None,
-        });
+        config
+            .model_providers
+            .push(crate::model_providers::ModelProvider {
+                id: "deepseek-1".to_string(),
+                name: "DeepSeek".to_string(),
+                enabled: true,
+                api_key: "sk-test".to_string(),
+                api_key_configured: false,
+                endpoints: vec![
+                    crate::model_providers::ProtocolEndpoint {
+                        protocol: crate::model_providers::Protocol::Anthropic,
+                        base_url: "https://api.deepseek.com/anthropic".to_string(),
+                        api_key_override: None,
+                        codex_needs_proxy: None,
+                    },
+                    crate::model_providers::ProtocolEndpoint {
+                        protocol: crate::model_providers::Protocol::OpenaiCompatible,
+                        base_url: "https://api.deepseek.com".to_string(),
+                        api_key_override: None,
+                        codex_needs_proxy: Some(false),
+                    },
+                ],
+                models: vec![crate::model_providers::ProviderModel {
+                    id: "deepseek-v4-flash".to_string(),
+                    name: Some("Flash".to_string()),
+                    context_1m: None,
+                    context_window: None,
+                    max_input_tokens: None,
+                    max_output_tokens: None,
+                    input_modalities: None,
+                    supports_vision: None,
+                }],
+                default_model: "deepseek-v4-flash".to_string(),
+                builtin_template_id: Some("deepseek".to_string()),
+                opencode_provider_key: None,
+                opencode_npm: None,
+            });
         config.active_provider_id = Some("deepseek-1".to_string());
         save_config_to_path(&config_path, &config).unwrap();
 

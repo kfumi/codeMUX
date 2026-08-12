@@ -31,7 +31,11 @@ fn model(id: &str, name: &str, input_modalities: Option<Vec<&str>>) -> ProviderM
     }
 }
 
-fn endpoint(protocol: Protocol, base_url: &str, codex_needs_proxy: Option<bool>) -> ProtocolEndpoint {
+fn endpoint(
+    protocol: Protocol,
+    base_url: &str,
+    codex_needs_proxy: Option<bool>,
+) -> ProtocolEndpoint {
     ProtocolEndpoint {
         protocol,
         base_url: base_url.to_string(),
@@ -51,8 +55,16 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
                 None,
             )],
             models: vec![
-                model("claude-sonnet-4-20250514", "Claude Sonnet 4", Some(vec!["text", "image"])),
-                model("claude-opus-4-20250514", "Claude Opus 4", Some(vec!["text", "image"])),
+                model(
+                    "claude-sonnet-4-20250514",
+                    "Claude Sonnet 4",
+                    Some(vec!["text", "image"]),
+                ),
+                model(
+                    "claude-opus-4-20250514",
+                    "Claude Opus 4",
+                    Some(vec!["text", "image"]),
+                ),
             ],
             default_model: "claude-sonnet-4-20250514".to_string(),
             opencode_provider_key: None,
@@ -104,11 +116,7 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
             id: "openrouter".to_string(),
             name: "OpenRouter".to_string(),
             endpoints: vec![
-                endpoint(
-                    Protocol::Anthropic,
-                    "https://openrouter.ai/api/v1",
-                    None,
-                ),
+                endpoint(Protocol::Anthropic, "https://openrouter.ai/api/v1", None),
                 endpoint(
                     Protocol::OpenaiCompatible,
                     "https://openrouter.ai/api/v1",
@@ -116,7 +124,11 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
                 ),
             ],
             models: vec![
-                model("anthropic/claude-sonnet-4", "Claude Sonnet 4", Some(vec!["text", "image"])),
+                model(
+                    "anthropic/claude-sonnet-4",
+                    "Claude Sonnet 4",
+                    Some(vec!["text", "image"]),
+                ),
                 model("openai/gpt-4.1", "GPT-4.1", Some(vec!["text", "image"])),
             ],
             default_model: "anthropic/claude-sonnet-4".to_string(),
@@ -133,7 +145,11 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
                 Some(true),
             )],
             models: vec![
-                model("deepseek-ai/DeepSeek-V3", "DeepSeek V3 0324", Some(vec!["text"])),
+                model(
+                    "deepseek-ai/DeepSeek-V3",
+                    "DeepSeek V3 0324",
+                    Some(vec!["text"]),
+                ),
                 model("Qwen/Qwen2.5-72B-Instruct", "Qwen2.5 72B Instruct", None),
             ],
             default_model: "deepseek-ai/DeepSeek-V3".to_string(),
@@ -222,7 +238,10 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
 }
 
 /// Instantiates a built-in template into a concrete Model Provider (empty API key).
-pub fn instantiate_template(template_id: &str, provider_id: String) -> Result<ModelProvider, String> {
+pub fn instantiate_template(
+    template_id: &str,
+    provider_id: String,
+) -> Result<ModelProvider, String> {
     let template = builtin_templates()
         .into_iter()
         .find(|item| item.id == template_id)
@@ -232,7 +251,8 @@ pub fn instantiate_template(template_id: &str, provider_id: String) -> Result<Mo
         .endpoints
         .into_iter()
         .map(|mut endpoint| {
-            if endpoint.protocol == Protocol::OpenaiCompatible && endpoint.codex_needs_proxy.is_none()
+            if endpoint.protocol == Protocol::OpenaiCompatible
+                && endpoint.codex_needs_proxy.is_none()
             {
                 endpoint.codex_needs_proxy = Some(template.default_codex_needs_proxy);
             }

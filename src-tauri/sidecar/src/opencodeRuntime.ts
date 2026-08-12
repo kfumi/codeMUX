@@ -61,6 +61,7 @@ export class OpenCodeRuntime {
   private readonly timeouts: ResolvedTurnTimeouts;
   private turnIdleGuard: TurnIdleGuard | undefined;
   private idleTimedOut = false;
+  private providerFailed = false;
   private readonly questionTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
   private server: OpenCodeServerHandle | undefined;
   private client: OpenCodeClientPort | undefined;
@@ -82,6 +83,7 @@ export class OpenCodeRuntime {
   private pendingTurnCompletion: { resolve: () => void; reject: (reason: unknown) => void; sessionId: string } | undefined;
   private manualCompactionInFlight = false;
   private readonly pendingTaskToolCallIds = new Set<string>();
+  private readonly childTaskToolIds = new Map<string, string>();
   private readonly assistantMessageIds = new Set<string>();
   private readonly userMessageIds = new Set<string>();
   private readonly streamingParts = new Map<string, import('./opencodeEvents.js').StreamingPartState>();
@@ -200,8 +202,8 @@ export class OpenCodeRuntime {
       }
     })();
     const handledTask = task.catch((error) => {
-      if (isAbortError(error) || this.idleTimedOut) {
-        writeLog('[opencode-task]', `sendInput settled (abort or idle timeout): ${errorMessage(error)}`);
+      if (isAbortError(error) || this.idleTimedOut || this.providerFailed) {
+        writeLog('[opencode-task]', `sendInput settled (abort, idle timeout, or provider failure): ${errorMessage(error)}`);
         return;
       }
       writeLog('[opencode-task]', `sendInput ERROR propagating: ${errorMessage(error)}`);
@@ -210,6 +212,7 @@ export class OpenCodeRuntime {
     this.activeTask = handledTask;
     try {
       this.idleTimedOut = false;
+      this.providerFailed = false;
       this.turnIdleGuard = createTurnIdleGuard({
         idleTimeoutMs: this.timeouts.idle_timeout_ms,
         onExpired: () => {
@@ -226,6 +229,7 @@ export class OpenCodeRuntime {
       this.turnIdleGuard?.dispose();
       this.turnIdleGuard = undefined;
       this.idleTimedOut = false;
+      this.providerFailed = false;
       if (this.pendingTurnCompletion?.sessionId === sessionId) {
         this.pendingTurnCompletion = undefined;
       }
@@ -646,7 +650,22 @@ export class OpenCodeRuntime {
       return;
     }
 
+    const toolId = getOpenCodeToolId(event);
+    const toolStatus = getOpenCodeToolStatus(event);
+    this.captureChildTaskSession(event, type, toolId, toolStatus);
     if (eventSessionId && eventSessionId !== activeSessionId) {
+      if (eventSessionId && isFreeTierLimitRetry(event) && this.childTaskToolIds.has(eventSessionId)) {
+        this.failParentTurnForChildProviderError(eventSessionId, event);
+      } else if (isChildTerminalEventType(type)) {
+        this.childTaskToolIds.delete(eventSessionId);
+      }
+      return;
+    }
+    if (type === 'session.idle' && this.childTaskToolIds.size > 0) {
+      writeLog(
+        '[opencode-task]',
+        `ignoring parent session.idle while child tasks are active count=${this.childTaskToolIds.size}`,
+      );
       return;
     }
     const terminalSessionId = eventSessionId ?? activeSessionId;
@@ -660,8 +679,6 @@ export class OpenCodeRuntime {
       if (messageId && readString(info?.role) === 'assistant') this.assistantMessageIds.add(messageId);
       if (messageId && readString(info?.role) === 'user') this.userMessageIds.add(messageId);
     }
-    const toolId = getOpenCodeToolId(event);
-    const toolStatus = getOpenCodeToolStatus(event);
     if (toolId && this.terminalToolIds.has(toolId)) {
       return;
     }
@@ -765,12 +782,71 @@ export class OpenCodeRuntime {
     }
   }
 
+  private captureChildTaskSession(
+    event: unknown,
+    type: string,
+    toolId: string | undefined,
+    toolStatus: string | undefined,
+  ): void {
+    if (type !== 'message.part.updated' || !toolId || (toolStatus !== 'pending' && toolStatus !== 'running')) {
+      return;
+    }
+    const properties = asRecord(asRecord(event)?.properties);
+    const part = asRecord(properties?.part);
+    const state = asRecord(part?.state);
+    const metadata = asRecord(state?.metadata);
+    const childSessionId =
+      readString(metadata?.sessionId)
+      ?? readString(metadata?.sessionID)
+      ?? readString(metadata?.session_id);
+    if (childSessionId) {
+      this.childTaskToolIds.set(childSessionId, toolId);
+    }
+  }
+
+  private failParentTurnForChildProviderError(childSessionId: string, event: unknown): void {
+    const parentSessionId = this.agentSessionId;
+    if (!parentSessionId || this.providerFailed || (!this.activeTask && !this.pendingTurnCompletion)) {
+      return;
+    }
+
+    const message = providerFailureMessage(event);
+    const toolId = this.childTaskToolIds.get(childSessionId);
+    this.providerFailed = true;
+    this.childTaskToolIds.delete(childSessionId);
+    writeLog(
+      '[opencode-task]',
+      `child provider failure childSessionId=${childSessionId} toolId=${toolId ?? 'unknown'} error=${message}`,
+    );
+    if (toolId) {
+      this.pendingTaskToolCallIds.delete(toolId);
+      this.emitToolFinished(toolId, message, parentSessionId, true);
+    }
+    this.syncGuardWithInteractiveState();
+    void this.client?.abort(parentSessionId).catch(() => undefined);
+    this.handleSdkEvent({
+      type: 'session.error',
+      properties: {
+        sessionID: parentSessionId,
+        error: {
+          name: 'OpenCodeProviderQuotaError',
+          data: {
+            code: 'free_tier_limit',
+            childSessionId,
+            message,
+          },
+        },
+      },
+    });
+  }
+
   private beginTurnEventState(): void {
     this.turnId += 1;
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
     this.runningToolIds.clear();
     this.pendingTaskToolCallIds.clear();
+    this.childTaskToolIds.clear();
     this.assistantMessageIds.clear();
     this.userMessageIds.clear();
     this.streamingParts.clear();
@@ -812,6 +888,7 @@ export class OpenCodeRuntime {
     this.terminalSessionIds.clear();
     this.terminalToolIds.clear();
     this.runningToolIds.clear();
+    this.childTaskToolIds.clear();
     this.assistantMessageIds.clear();
     this.userMessageIds.clear();
     this.usage = { input_tokens: 0, output_tokens: 0 };
@@ -934,14 +1011,15 @@ export class OpenCodeRuntime {
     this.eventSequence += 1;
   }
 
-  private emitToolFinished(toolUseId: string, content: string, agentSessionId?: string): void {
+  private emitToolFinished(toolUseId: string, content: string, agentSessionId?: string, isError = false): void {
     this.runningToolIds.delete(toolUseId);
+    this.pendingTaskToolCallIds.delete(toolUseId);
     this.emitEvent({
       type: 'tool_finished',
       session_id: this.config.sessionId,
       tool_use_id: toolUseId,
       content,
-      is_error: false,
+      is_error: isError,
       event_id: this.eventIdFactory(),
       sequence: this.eventSequence,
       ...(agentSessionId ? { agent_session_id: agentSessionId, opencode_session_id: agentSessionId } : {}),
@@ -1142,6 +1220,30 @@ function isAbortError(error: unknown): boolean {
     message.includes('cancelled') ||
     message.includes('canceled')
   );
+}
+
+function isFreeTierLimitRetry(event: unknown): boolean {
+  const properties = asRecord(asRecord(event)?.properties);
+  const status = asRecord(properties?.status);
+  const action = asRecord(status?.action);
+  return [readString(action?.reason), readString(status?.reason)]
+    .filter(Boolean)
+    .some((reason) => reason?.toLowerCase() === 'free_tier_limit');
+}
+
+function providerFailureMessage(event: unknown): string {
+  const properties = asRecord(asRecord(event)?.properties);
+  const status = asRecord(properties?.status);
+  return readString(status?.message)
+    ?? readString(asRecord(status?.action)?.message)
+    ?? 'OpenCode 子任务因免费额度限制失败，请检查账户额度或订阅状态';
+}
+
+function isChildTerminalEventType(type: string): boolean {
+  return type === 'session.idle'
+    || type === 'session.error'
+    || type === 'session.interrupted'
+    || type === 'session.aborted';
 }
 
 function isTerminalEventType(type: string): boolean {

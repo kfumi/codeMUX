@@ -215,12 +215,7 @@ fn resolve_active_runtime_config(
         .models
         .iter()
         .find(|entry| strip_context_1m_suffix(entry.id.trim()) == model_base)
-        .ok_or_else(|| {
-            format!(
-                "模型 `{model}` 不在供应商「{}」的模型列表中",
-                provider.name
-            )
-        })?;
+        .ok_or_else(|| format!("模型 `{model}` 不在供应商「{}」的模型列表中", provider.name))?;
 
     let model = match agent_kind {
         AgentKind::ClaudeCode => {
@@ -256,13 +251,15 @@ fn resolve_active_runtime_config(
                 );
             }
             if agent_kind == AgentKind::Opencode {
-                if let Some(max_input) = provider_model.max_input_tokens.filter(|value| *value > 0) {
+                if let Some(max_input) = provider_model.max_input_tokens.filter(|value| *value > 0)
+                {
                     limits.insert(
                         "maxInputTokens".to_string(),
                         serde_json::Value::Number(max_input.into()),
                     );
                 }
-                if let Some(max_output) = provider_model.max_output_tokens.filter(|value| *value > 0)
+                if let Some(max_output) =
+                    provider_model.max_output_tokens.filter(|value| *value > 0)
                 {
                     limits.insert(
                         "maxOutputTokens".to_string(),
@@ -1458,8 +1455,9 @@ pub async fn fork_opencode_session(
         );
     }
     let source_agent_session_id =
-        get_agent_session_id(state.inner(), &session_id, AgentKind::Opencode)?
-            .ok_or_else(|| "No OpenCode session mapping found for the source session".to_string())?;
+        get_agent_session_id(state.inner(), &session_id, AgentKind::Opencode)?.ok_or_else(
+            || "No OpenCode session mapping found for the source session".to_string(),
+        )?;
 
     let sender = {
         let sidecars = agent_state.sidecars.lock().await;
@@ -1495,7 +1493,9 @@ pub async fn fork_opencode_session(
     let child_result =
         match tokio::time::timeout(std::time::Duration::from_secs(30), result_receiver).await {
             Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err("OpenCode sidecar stopped before confirming session fork".to_string()),
+            Ok(Err(_)) => {
+                Err("OpenCode sidecar stopped before confirming session fork".to_string())
+            }
             Err(_) => {
                 agent_state
                     .session_fork_waiters
@@ -4935,8 +4935,7 @@ mod tests {
             &["gpt-5.6-luna"],
             Some(true),
         );
-        provider.models[0].input_modalities =
-            Some(vec!["text".to_string(), "image".to_string()]);
+        provider.models[0].input_modalities = Some(vec!["text".to_string(), "image".to_string()]);
 
         let mut config = crate::config::types::AppConfig::default();
         config.model_providers.push(provider);
