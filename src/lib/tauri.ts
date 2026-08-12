@@ -239,12 +239,14 @@ export const sessionApi = {
     forkEventId: string,
     forkProviderMessageId?: string,
     title?: string,
+    forkUserMessageCount?: number,
   ): Promise<Session> =>
     invokeLogged('fork_claude_session', {
       sessionId,
       forkEventId,
       forkProviderMessageId: forkProviderMessageId ?? null,
       title: title ?? null,
+      forkUserMessageCount: forkUserMessageCount ?? null,
     }),
   forkCodex: (
     sessionId: string,
@@ -253,6 +255,7 @@ export const sessionApi = {
     forkProviderTurnId?: string,
     forkProviderTurnOrdinal?: number,
     title?: string,
+    forkUserMessageCount?: number,
   ): Promise<Session> =>
     invokeLogged('fork_codex_session', {
       sessionId,
@@ -261,18 +264,21 @@ export const sessionApi = {
       forkProviderTurnId: forkProviderTurnId ?? null,
       forkProviderTurnOrdinal: forkProviderTurnOrdinal ?? null,
       title: title ?? null,
+      forkUserMessageCount: forkUserMessageCount ?? null,
     }),
   forkOpenCode: (
     sessionId: string,
     forkEventId: string,
     forkProviderMessageId?: string,
     title?: string,
+    forkUserMessageCount?: number,
   ): Promise<Session> =>
     invokeLogged('fork_opencode_session', {
       sessionId,
       forkEventId,
       forkProviderMessageId: forkProviderMessageId ?? null,
       title: title ?? null,
+      forkUserMessageCount: forkUserMessageCount ?? null,
     }),
   saveMessageAttachments: (
     sessionId: string,
@@ -351,8 +357,18 @@ export const agentApi = {
   ): Promise<Record<string, unknown> | null> =>
     invokeLogged('load_agent_latest_token_usage', { appSessionId, agentKind, freshness }),
   /** Rewind the latest visible turn in the provider session history. */
-  rewindSession: (appSessionId: string, agentKind: AgentKind, target?: AgentUserMessageLocator): Promise<void> =>
-    invokeLogged('rewind_agent_session', { appSessionId, agentKind, target }),
+  rewindSession: (
+    appSessionId: string,
+    agentKind: AgentKind,
+    target?: AgentUserMessageLocator,
+    rewindUserIndex?: number,
+  ): Promise<void> =>
+    invokeLogged('rewind_agent_session', {
+      appSessionId,
+      agentKind,
+      target,
+      rewindUserIndex: rewindUserIndex ?? null,
+    }),
   getSessionInfo: (appSessionId: string, agentKind: AgentKind): Promise<{ agentSessionId: string | null; messagePath: string | null }> =>
     invokeLogged('get_agent_session_info', { appSessionId, agentKind }),
   stopProxy: (): Promise<void> => invokeLogged('stop_codex_proxy'),

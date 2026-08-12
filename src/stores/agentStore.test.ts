@@ -23,7 +23,7 @@ const getEventsMock = vi.fn<(sessionId: string) => Promise<string>>();
 const loadClaudeSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadCodexSessionEventsMock = vi.fn<(appSessionId: string) => Promise<Record<string, unknown>[]>>();
 const loadLatestTokenUsageMock = vi.fn<(appSessionId: string, agentKind: string, freshness: 'live_synced' | 'restored') => Promise<Record<string, unknown> | null>>();
-const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator) => Promise<void>>();
+const rewindSessionMock = vi.fn<(appSessionId: string, agentKind: string, target?: AgentUserMessageLocator, rewindUserIndex?: number) => Promise<void>>();
 const respondToAgentPermissionMock = vi.fn();
 
 vi.mock('sonner', () => ({
@@ -63,6 +63,7 @@ vi.mock('../lib/tauri', () => ({
     updateProvider: vi.fn(),
     updatePermissions: vi.fn(() => Promise.resolve()),
     touch: vi.fn(() => Promise.resolve()),
+    saveMessageAttachments: vi.fn(() => Promise.resolve()),
     getMessages: vi.fn(),
   },
   configApi: {
@@ -2168,7 +2169,7 @@ describe('agent store Codex history loading', () => {
       role: 'user',
       textFingerprint: 'inspect image',
       turnOrdinal: 2,
-    });
+    }, 1);
     expect(payload).toEqual({
       text: 'inspect image',
       images: [{ name: 'screen.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
@@ -2209,7 +2210,7 @@ describe('agent store Codex history loading', () => {
 
     await useAgentStore.getState().rewindLastTurn(session.id);
 
-    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', undefined);
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', undefined, 0);
   });
 
   it('marks an inactive session unread after a rewound turn completes', async () => {

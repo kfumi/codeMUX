@@ -307,6 +307,7 @@ describe('agentApi', () => {
     expect(invokeMock).toHaveBeenCalledWith('rewind_agent_session', {
       appSessionId: 'session-1',
       agentKind: 'codex',
+      rewindUserIndex: null,
     });
   });
 });

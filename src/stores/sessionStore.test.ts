@@ -113,7 +113,7 @@ describe('session store createSession', () => {
     const result = await useSessionStore.getState().forkSession('parent', 'assistant-1', 'provider-1');
 
     expect(result).toEqual(child);
-    expect(forkMock).toHaveBeenCalledWith('parent', 'assistant-1', 'provider-1');
+    expect(forkMock).toHaveBeenCalledWith('parent', 'assistant-1', 'provider-1', undefined, undefined);
     expect(useSessionStore.getState().activeSessionId).toBe('child');
     expect(useSessionStore.getState().sessions[0]).toEqual(child);
   });
@@ -143,7 +143,7 @@ describe('session store createSession', () => {
 
     await useSessionStore.getState().forkSession(parent.id, 'assistant-2', 'item-2', 'turn-2', 1);
 
-    expect(forkMock).toHaveBeenCalledWith(parent.id, 'assistant-2', 'item-2', 'turn-2', 1);
+    expect(forkMock).toHaveBeenCalledWith(parent.id, 'assistant-2', 'item-2', 'turn-2', 1, undefined, undefined);
   });
 
   it('routes an OpenCode fork through the OpenCode session command', async () => {
@@ -171,7 +171,7 @@ describe('session store createSession', () => {
 
     await useSessionStore.getState().forkSession(parent.id, 'assistant-3', 'message-3');
 
-    expect(forkMock).toHaveBeenCalledWith(parent.id, 'assistant-3', 'message-3');
+    expect(forkMock).toHaveBeenCalledWith(parent.id, 'assistant-3', 'message-3', undefined, undefined);
   });
 
   it('keeps the legacy createSession(title, mode, projectId) call shape', async () => {

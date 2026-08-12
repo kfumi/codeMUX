@@ -1367,6 +1367,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
       set((state) => ({ error: { ...state.error, [sessionId]: '会话为只读，原生会话无法恢复' } }));
       return;
     }
+    const pendingHistoryLoad = pendingSessionMessageLoads.get(sessionId);
+    if (pendingHistoryLoad) {
+      await pendingHistoryLoad;
+    }
     const currentState = get();
     const hasQueuedQueries = (currentState.queuedQueries[sessionId]?.length ?? 0) > 0;
     const shouldQueue =
@@ -2617,8 +2621,12 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     const target = hasStrongRewindLocator(userEvent.data.locator)
       ? userEvent.data.locator
       : undefined;
+    const rewindUserIndex = events
+      .slice(0, userIndex + 1)
+      .filter((event) => event.kind === 'user')
+      .length - 1;
 
-    await agentApi.rewindSession(sessionId, agentKind, target);
+    await agentApi.rewindSession(sessionId, agentKind, target, rewindUserIndex);
 
     clearPendingStreaming(sessionId);
     clearPendingStreamingToolInputs(sessionId);

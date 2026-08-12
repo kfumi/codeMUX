@@ -262,6 +262,7 @@ pub fn create_forked_session(
     fork_event_id: &str,
     fork_provider_message_id: Option<&str>,
     title: &str,
+    fork_user_message_count: Option<i64>,
 ) -> Result<Session> {
     let source = get_session(conn, source_session_id)?
         .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
@@ -313,6 +314,17 @@ pub fn create_forked_session(
             &now
         ],
     )?;
+    if let Some(message_count) = fork_user_message_count {
+        tx.execute(
+            "INSERT INTO session_message_attachments (
+                session_id, user_index, attachments_json
+             )
+             SELECT ?1, user_index, attachments_json
+             FROM session_message_attachments
+             WHERE session_id = ?2 AND user_index >= 0 AND user_index < ?3",
+            params![child_id, source_session_id, message_count.max(0)],
+        )?;
+    }
     tx.commit()?;
 
     Ok(Session {
@@ -564,6 +576,19 @@ pub fn save_session_message_attachments(
             user_index,
             serde_json::to_string(attachments).unwrap_or_else(|_| "[]".to_string())
         ],
+    )?;
+    Ok(())
+}
+
+pub fn delete_session_message_attachments_from_index(
+    conn: &Connection,
+    session_id: &str,
+    user_index: i64,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM session_message_attachments
+         WHERE session_id = ?1 AND user_index >= ?2",
+        params![session_id, user_index.max(0)],
     )?;
     Ok(())
 }
@@ -961,11 +986,12 @@ pub fn get_model_distribution(
 mod tests {
     use super::{
         archive_session, create_forked_session, delete_agent_session_mapping,
-        get_agent_distribution, get_agent_session_mapping, get_all_archived_sessions,
-        get_all_sessions, get_model_distribution, get_session_snapshot, get_usage_heatmap,
-        get_usage_overview, import_session_snapshot, set_session_pinned, set_session_read_only,
-        unarchive_session, update_session_provider, update_session_reasoning_effort,
-        upsert_agent_session_mapping, ImportedSessionSnapshot,
+        delete_session_message_attachments_from_index, get_agent_distribution,
+        get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
+        get_model_distribution, get_session_snapshot, get_usage_heatmap, get_usage_overview,
+        import_session_snapshot, set_session_pinned, set_session_read_only, unarchive_session,
+        update_session_provider, update_session_reasoning_effort, upsert_agent_session_mapping,
+        ImportedSessionSnapshot,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -1033,6 +1059,12 @@ mod tests {
         .unwrap();
         upsert_agent_session_mapping(&conn, "parent", AgentKind::ClaudeCode, "claude-parent")
             .unwrap();
+        conn.execute(
+            "INSERT INTO session_message_attachments (session_id, user_index, attachments_json)
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params!["parent", 0_i64, "[]"],
+        )
+        .unwrap();
 
         let child = create_forked_session(
             &mut conn,
@@ -1041,6 +1073,7 @@ mod tests {
             "assistant-event-1",
             Some("provider-message-1"),
             "Parent · 分支",
+            Some(1),
         )
         .unwrap();
 
@@ -1070,6 +1103,44 @@ mod tests {
         assert_eq!(lineage.0, "parent");
         assert_eq!(lineage.1, "assistant-event-1");
         assert_eq!(lineage.2, "provider-message-1");
+        let copied_attachment_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_message_attachments WHERE session_id = ?1",
+                [&child.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(copied_attachment_count, 1);
+    }
+
+    #[test]
+    fn deletes_rewound_message_attachments_without_touching_previous_turns() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at)
+             VALUES ('session-1', 'Test', 'claude_code', 'agent', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO session_message_attachments (session_id, user_index, attachments_json)
+             VALUES ('session-1', 0, '[]'), ('session-1', 1, '[]'), ('session-1', 2, '[]')",
+            [],
+        )
+        .unwrap();
+
+        delete_session_message_attachments_from_index(&conn, "session-1", 1).unwrap();
+
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_message_attachments
+                 WHERE session_id = 'session-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 1);
     }
 
     #[test]
