@@ -225,6 +225,19 @@ function shellCommandSummary(toolName: string, input: Record<string, unknown>): 
   };
 }
 
+export function isShellCommandTool(toolName: string): boolean {
+  const normalizedToolName = normalizeToolName(toolName);
+  return normalizedToolName === 'Bash' || normalizedToolName === 'shell_command' || normalizedToolName === 'shell';
+}
+
+export function getShellCommand(input: Record<string, unknown>): string | undefined {
+  const key = firstPresentKey(input, ['command', 'cmd', 'script']);
+  if (!key) return undefined;
+
+  const command = asDisplayText(input[key]);
+  return command || undefined;
+}
+
 export function normalizePath(path: string): string {
   return path.replace(/\\\\/g, '\\');
 }

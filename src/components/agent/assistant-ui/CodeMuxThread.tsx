@@ -82,10 +82,26 @@ const EMPTY_TIMESTAMPS: number[] = [];
 const INTERRUPT_LABEL = '用户中断请求';
 const COLLAPSED_USER_MESSAGE_CLASS = 'max-h-80 overflow-hidden';
 const MESSAGE_NAV_HIDE_BREAKPOINT = 860;
-const GROUP_BY_PART = groupPartByType({
-  reasoning: ['group-thinking'],
-  'tool-call': ['group-tool-call'],
+const ASK_USER_QUESTION_TOOL_NAMES = new Set([
+  'AskUserQuestion',
+  'askUserQuestion',
+  'request_user_input',
+  'question',
+]);
+const GROUP_BY_PART_INNER = groupPartByType({
+  reasoning: ['group-explore', 'group-thinking'],
+  'tool-call': ['group-explore'],
+  'standalone-tool-call': [],
 });
+const GROUP_BY_PART = (
+  part: Parameters<typeof GROUP_BY_PART_INNER>[0],
+  context?: Parameters<typeof GROUP_BY_PART_INNER>[1],
+) => {
+  if (part.type === 'tool-call' && ASK_USER_QUESTION_TOOL_NAMES.has(part.toolName)) {
+    return [];
+  }
+  return GROUP_BY_PART_INNER(part, context);
+};
 const STREAMING_MARKDOWN_COMPONENTS = {
   a: CodeMuxMarkdownLink,
 };
@@ -1146,17 +1162,21 @@ function AssistantLikeMessage({
                     </CodeMuxReasoningGroup>
                   );
 
-                case 'group-tool-call':
-                  // Get tool names from message content
+                case 'group-explore': {
                   const toolNames = part.indices
                     .map((idx) => message.content[idx])
-                    .filter((c) => c?.type === 'tool-call')
-                    .map((c) => (c as { toolName: string }).toolName);
+                    .filter((c): c is Extract<typeof c, { type: 'tool-call' }> => c?.type === 'tool-call')
+                    .filter((c) => !ASK_USER_QUESTION_TOOL_NAMES.has(c.toolName))
+                    .map((c) => c.toolName);
+                  if (toolNames.length === 0) {
+                    return children;
+                  }
                   return (
                     <ToolGroup startIndex={part.indices[0] ?? 0} endIndex={part.indices[part.indices.length - 1] ?? 0} toolNames={toolNames}>
                       {children}
                     </ToolGroup>
                   );
+                }
 
                 case 'text':
                   return (
@@ -1234,7 +1254,7 @@ function AssistantCollapseToggle({
         {durationMs != null ? <span className="tabular-nums">{formatCompactDuration(durationMs)}</span> : null}
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
       </Button>
-      <div className={cn('border-b border-border/40', expanded ? 'mt-1.5' : 'mt-1')} />
+      {expanded ? <div className="mt-1.5 border-b border-border/40" /> : null}
     </div>
   );
 }
@@ -1592,9 +1612,13 @@ function getMessageCollapseInfo(
     return undefined;
   }
 
+  if (firstInfo.hideReasoningOnly && !message.content.some((part) => part.type === 'reasoning')) {
+    return undefined;
+  }
+
   return {
     ...firstInfo,
-    isToggleMessage: hasToggleMessage,
+    isToggleMessage: Boolean(hasToggleMessage && message.metadata.custom?.isSplitHead !== false),
   };
 }
 

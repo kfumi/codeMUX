@@ -162,6 +162,124 @@ const groupedToolEvents: AgentMessage[] = [
   },
 ];
 
+const exploreGroupEvents: AgentMessage[] = [
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'explore-text-1',
+      session_id: 'session-explore-group',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '先确认范围。' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'explore-think-1',
+      session_id: 'session-explore-group',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: '先探索下当前桌面端架构。' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'explore-tool-1',
+      session_id: 'session-explore-group',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'explore-read-1', name: 'Read', input: { file_path: 'src/App.tsx' } }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'tool_result',
+    data: {
+      type: 'user',
+      uuid: 'explore-tool-result-1',
+      session_id: 'session-explore-group',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'explore-read-1', content: 'app' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'explore-think-2',
+      session_id: 'session-explore-group',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: '再核对任务入口。' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'explore-tool-2',
+      session_id: 'session-explore-group',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'explore-task-1', name: 'Task', input: { description: 'Inspect architecture' } },
+          { type: 'tool_use', id: 'explore-glob-1', name: 'Glob', input: { pattern: 'src/**/*.tsx' } },
+          { type: 'tool_use', id: 'explore-bash-1', name: 'Bash', input: { command: 'pwd' } },
+        ],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'tool_result',
+    data: {
+      type: 'user',
+      uuid: 'explore-tool-result-2',
+      session_id: 'session-explore-group',
+      message: {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'explore-task-1', content: 'done' },
+          { type: 'tool_result', tool_use_id: 'explore-glob-1', content: 'files' },
+          { type: 'tool_result', tool_use_id: 'explore-bash-1', content: '/' },
+        ],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'explore-text-2',
+      session_id: 'session-explore-group',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '架构已摸清。先给你我的分析，再确认几个关键决策点。' },
+          { type: 'text', text: '架构已摸清。' },
+        ],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+];
+
 const directiveUserEvents: AgentMessage[] = [
   { kind: 'user', data: { content: '/review @src/App.tsx please check this' } },
 ];
@@ -1011,6 +1129,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-timestamp': timestampOnlyAssistantEvents,
         'session-reasoning': reasoningEvents,
         'session-grouped-tools': groupedToolEvents,
+        'session-explore-group': exploreGroupEvents,
         'session-directives': directiveUserEvents,
         'session-skill-directive': skillDirectiveUserEvents,
         'session-long-user': longUserEvents,
@@ -1155,7 +1274,8 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
   it('renders failed tool calls as errors instead of leaving them running', () => {
     const { container } = render(<Harness sessionId="session-tool" />);
 
-    expect(screen.getByText(/执行工具 运行命令/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /探索/ })).toBeTruthy();
+    expect(screen.getByText('运行命令×1')).toBeTruthy();
     expect(screen.queryByText(/Error: Command failed with exit code 1/)).toBeNull();
 
     const trigger = container.querySelector('[data-slot="tool-group-trigger"]');
@@ -1362,6 +1482,34 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(toolGroup).toBeTruthy();
     expect(toolGroup?.getAttribute('data-variant')).toBe('ghost');
     expect(container.querySelector('[data-slot="tool-group-trigger"]')).toBeTruthy();
+  });
+
+  it('collapses thinking and tools between two text messages into one explore group', () => {
+    const { container } = render(<Harness sessionId="session-explore-group" />);
+
+    expect(screen.getByText('先确认范围。')).toBeTruthy();
+    expect(screen.getByText('架构已摸清。')).toBeTruthy();
+    expect(screen.getByText('读取×1、任务×1、匹配文件×1、运行命令×1')).toBeTruthy();
+    expect(screen.queryByText('先探索下当前桌面端架构。')).toBeNull();
+    expect(screen.queryByText('再核对任务入口。')).toBeNull();
+    expect(screen.queryByText('架构已摸清。先给你我的分析，再确认几个关键决策点。')).toBeNull();
+    expect(container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: /探索/ }));
+
+    const reasoningTriggers = screen.getAllByRole('button', { name: /思考/ });
+    expect(reasoningTriggers).toHaveLength(3);
+    fireEvent.click(reasoningTriggers[0]!);
+    fireEvent.click(reasoningTriggers[1]!);
+    fireEvent.click(reasoningTriggers[2]!);
+
+    expect(screen.getByText('先探索下当前桌面端架构。')).toBeTruthy();
+    expect(screen.getByText('再核对任务入口。')).toBeTruthy();
+    expect(screen.getByText('架构已摸清。先给你我的分析，再确认几个关键决策点。')).toBeTruthy();
+    expect(screen.getByText('读取')).toBeTruthy();
+    expect(screen.getByText('任务')).toBeTruthy();
+    expect(screen.getByText('匹配文件')).toBeTruthy();
+    expect(screen.getByText('运行命令')).toBeTruthy();
   });
 
   it('keeps expanded tool details open across large-history running updates', async () => {
@@ -2006,6 +2154,12 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.queryByText('思考')).toBeNull();
     expect(screen.getByRole('button', { name: /展开AI过程/ })).toBeTruthy();
 
+    const textRow = screen.getByText('最终总结结果').closest('[data-message-row]');
+    const toggleRow = screen.getByRole('button', { name: /展开AI过程/ }).closest('[data-message-row]');
+    expect(textRow?.querySelector('[data-message-footer]')).toBeTruthy();
+    expect(toggleRow?.querySelector('[data-message-footer]')).toBeNull();
+    expect(screen.getAllByText(/耗时/)).toHaveLength(1);
+
     fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
 
     const reasoningTrigger = screen.getByRole('button', { name: /思考/ });
@@ -2031,14 +2185,19 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
 
     expect(screen.getByText("I'll create a statusline-setup agent...")).toBeTruthy();
+    expect(screen.getByRole('button', { name: /探索.*任务/ })).toBeTruthy();
+
+    const firstReasoningTrigger = screen.getByRole('button', { name: /思考/ });
+    expect(firstReasoningTrigger.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(firstReasoningTrigger);
+    expect(screen.getByText('第一段内部思考')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /探索.*任务/ }));
     const reasoningTriggers = screen.getAllByRole('button', { name: /思考/ });
     expect(reasoningTriggers).toHaveLength(2);
-    expect(reasoningTriggers.every((trigger) => trigger.getAttribute('aria-expanded') === 'false')).toBe(true);
+    expect(reasoningTriggers[1]?.getAttribute('aria-expanded')).toBe('false');
 
-    fireEvent.click(reasoningTriggers[0]!);
     fireEvent.click(reasoningTriggers[1]!);
-
-    expect(screen.getByText('第一段内部思考')).toBeTruthy();
     expect(screen.getByText('第二段内部思考')).toBeTruthy();
   });
 
@@ -2054,7 +2213,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /展开AI过程/ }));
 
-    fireEvent.click(screen.getByRole('button', { name: /执行工具 运行命令/ }));
+    fireEvent.click(screen.getByRole('button', { name: /探索.*运行命令/ }));
     expect(screen.getByText('运行命令')).toBeTruthy();
   });
 
@@ -2077,14 +2236,124 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     expect(screen.getByText('历史过程一')).toBeTruthy();
     expect(screen.getByText('历史过程二')).toBeTruthy();
+    expect(screen.queryByText('最终思考泄漏')).toBeNull();
 
+    const exploreTriggers = screen.getAllByRole('button', { name: /探索/ });
+    fireEvent.click(exploreTriggers[exploreTriggers.length - 1]!);
+    const reasoningTriggers = screen.getAllByRole('button', { name: /思考/ });
+    fireEvent.click(reasoningTriggers[reasoningTriggers.length - 1]!);
+
+    expect(screen.getByText('最终思考泄漏')).toBeTruthy();
     const finalRow = screen.getByText('历史最终结果').closest('[data-message-row]');
-    const finalReasoningTrigger = finalRow?.querySelector('[data-slot="reasoning-trigger"]');
-    expect(finalReasoningTrigger?.getAttribute('aria-expanded')).toBe('false');
+    expect(finalRow?.querySelector('[data-slot="reasoning-trigger"]')).toBeNull();
+  });
 
-    fireEvent.click(finalReasoningTrigger!);
+  it('keeps the session summary card outside the compact process group', () => {
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: '将About页面的Ztwo改为Ztwo123' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-1',
+          session_id: 'session-summary-outside-process',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-1', name: 'edit', input: { filePath: 'index.html' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'session-summary-outside-process',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'Edit applied successfully.' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'session_summary',
+        data: {
+          type: 'system',
+          subtype: 'session_summary',
+          diffs: [{ file: 'index.html', additions: 1, deletions: 1, status: 'modified' }],
+          uuid: 'summary-1',
+          session_id: 'session-summary-outside-process',
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-final-1',
+          session_id: 'session-summary-outside-process',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: '改完 About 文案就可以收尾了。' },
+              { type: 'text', text: '已完成。About 页面中的 Ztwo 已改为 Ztwo123。' },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'result-1',
+          session_id: 'session-summary-outside-process',
+          duration_ms: 6000,
+          duration_api_ms: 10,
+          num_turns: 1,
+          result: '',
+          usage: {
+            input_tokens: 10,
+            output_tokens: 20,
+          },
+        },
+      },
+    ];
 
-    expect(finalRow?.textContent).toContain('最终思考泄漏');
+    useAgentStore.setState((state) => ({
+      events: {
+        ...state.events,
+        'session-summary-outside-process': events,
+      },
+      eventTimestamps: {
+        ...state.eventTimestamps,
+        'session-summary-outside-process': events.map((_, index) => index + 1),
+      },
+    }));
+    useSettingsStore.setState((state) => ({
+      config: state.config ? { ...state.config, compact_ai_output: true } : state.config,
+    }));
+
+    render(<Harness sessionId="session-summary-outside-process" />);
+
+    expect(screen.getByText('已完成。About 页面中的 Ztwo 已改为 Ztwo123。')).toBeTruthy();
+    expect(screen.getByText('1 个文件已更改')).toBeTruthy();
+    expect(screen.queryByText('编辑')).toBeNull();
+
+    const toggle = screen.getByRole('button', { name: /展开AI过程/ });
+    const summaryRow = screen.getByText('1 个文件已更改').closest('[data-message-row]');
+    const textRow = screen.getByText('已完成。About 页面中的 Ztwo 已改为 Ztwo123。').closest('[data-message-row]');
+    expect(summaryRow).toBe(textRow);
+    expect(toggle.closest('[data-message-row]')).not.toBe(summaryRow);
+
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: /探索/ }));
+
+    expect(screen.getByText('编辑')).toBeTruthy();
+    expect(screen.getByText('1 个文件已更改').closest('[data-message-row]')).toBe(textRow);
   });
 
   it('renders proposed_plan in final assistant messages as a plan preview card', () => {

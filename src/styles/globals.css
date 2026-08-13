@@ -321,6 +321,43 @@ input[type='password']::-ms-reveal {
   background: transparent;
 }
 
+.aui-tool-command-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.28) transparent;
+}
+
+.aui-tool-command-scroll::-webkit-scrollbar {
+  width: 5px;
+  height: 0;
+}
+
+.aui-tool-command-scroll::-webkit-scrollbar-track,
+.dark .aui-tool-command-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.aui-tool-command-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.28);
+  border: none;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.aui-tool-command-scroll::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.45);
+  background-clip: padding-box;
+}
+
+.aui-tool-command-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.aui-tool-command-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 @keyframes shimmer {
   0% {
     background-position: -200% 0;

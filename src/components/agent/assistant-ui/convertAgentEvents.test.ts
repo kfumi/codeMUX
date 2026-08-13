@@ -672,6 +672,385 @@ describe('convertAgentEventsToAssistantMessages', () => {
     ]);
   });
 
+  it('coalesces reasoning and tool events between text messages into one process message', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-think-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'thinking', thinking: '先看桌面端架构' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'src/App.tsx' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'app' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-think-2',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'thinking', thinking: '再核对任务入口' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-text-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '架构已摸清。' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.content.map((part) => part.type)).toEqual([
+      'reasoning',
+      'tool-call',
+      'reasoning',
+    ]);
+    expect(messages[1]?.content).toEqual([{ type: 'text', text: '架构已摸清。' }]);
+  });
+
+  it('peels trailing thinking off a mixed thinking-and-text event into the previous process group', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'src/App.tsx' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'app' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-final-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: '架构已摸清。先给你我的分析，再确认几个关键决策点。' },
+              { type: 'text', text: '现状关键事实' },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.content.map((part) => part.type)).toEqual(['tool-call', 'reasoning']);
+    expect(messages[0]?.content[1]).toEqual({
+      type: 'reasoning',
+      text: '架构已摸清。先给你我的分析，再确认几个关键决策点。',
+    });
+    expect(messages[1]?.content).toEqual([{ type: 'text', text: '现状关键事实' }]);
+  });
+
+  it('keeps the final footer on trailing text instead of peeled thinking', () => {
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: '定稿方案' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'src/App.tsx' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'app' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-final-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: '方案可以定稿了' },
+              { type: 'text', text: '方案已定稿，汇总如下。' },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'result-1',
+          session_id: 'session-1',
+          duration_ms: 21_700,
+          duration_api_ms: 21_700,
+          num_turns: 1,
+          result: '',
+          usage: { input_tokens: 141, output_tokens: 629 },
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+    const assistantMessages = messages.filter((message) => message.role === 'assistant');
+
+    expect(assistantMessages).toHaveLength(2);
+    expect(assistantMessages[0]?.content.map((part) => part.type)).toEqual(['tool-call', 'reasoning']);
+    expect(assistantMessages[0]?.metadata.isFinalAssistantMessage).toBeUndefined();
+    expect(assistantMessages[1]?.content).toEqual([{ type: 'text', text: '方案已定稿，汇总如下。' }]);
+    expect(assistantMessages[1]?.metadata.isFinalAssistantMessage).toBe(true);
+  });
+
+  it('merges thinking that arrives after a pending tool instead of inserting it before', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'src/App.tsx' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-think-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'thinking', thinking: '先看桌面端架构' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'app' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content.map((part) => part.type)).toEqual(['tool-call', 'reasoning']);
+  });
+
+  it('keeps ask-user-question tools out of the surrounding process message', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-think-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'thinking', thinking: '先读配置' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'src/App.tsx' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'app' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-ask-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'ask-1', name: 'AskUserQuestion', input: { questions: [] } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'ask-result-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'ask-1', content: 'ok' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-2',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-2', name: 'Glob', input: { pattern: 'src/**/*.tsx' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-2',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-2', content: 'files' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-text-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '确认后再继续。' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(4);
+    expect(messages[0]?.content.map((part) => part.type)).toEqual(['reasoning', 'tool-call']);
+    expect(messages[1]?.content).toEqual([
+      expect.objectContaining({ type: 'tool-call', toolName: 'AskUserQuestion', toolCallId: 'ask-1' }),
+    ]);
+    expect(messages[2]?.content).toEqual([
+      expect.objectContaining({ type: 'tool-call', toolName: 'Glob', toolCallId: 'tool-2' }),
+    ]);
+    expect(messages[3]?.content).toEqual([{ type: 'text', text: '确认后再继续。' }]);
+  });
+
   it('marks trailing assistant text as final when the result event arrives before it', () => {
     const events: AgentMessage[] = [
       {
@@ -1169,6 +1548,93 @@ describe('convertAgentEventsToAssistantMessages', () => {
       type: 'data-codemux-event',
       eventKind: 'session_summary',
     });
+  });
+
+  it('attaches session_summary to trailing text instead of the peeled process group', () => {
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: '将About页面的Ztwo改为Ztwo123' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-1', name: 'edit', input: { filePath: 'index.html' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'Edit applied successfully.' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'session_summary',
+        data: {
+          type: 'system',
+          subtype: 'session_summary',
+          diffs: [{ file: 'index.html', additions: 1, deletions: 1, status: 'modified' }],
+          uuid: 'summary-1',
+          session_id: 'session-1',
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-final-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: '改完 About 文案就可以收尾了。' },
+              { type: 'text', text: '已完成。About 页面中的 Ztwo 已改为 Ztwo123。' },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'result',
+        data: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          uuid: 'result-1',
+          session_id: 'session-1',
+          duration_ms: 6000,
+          duration_api_ms: 10,
+          num_turns: 1,
+          result: '',
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+    const processMessage = messages.find((message) => (
+      message.role === 'assistant' && message.content.some((part) => part.type === 'tool-call')
+    ));
+    const textMessage = messages.find((message) => (
+      message.role === 'assistant' && message.content.some((part) => part.type === 'text')
+    ));
+
+    expect(processMessage?.content.some((part) => part.type === 'data-codemux-event')).toBe(false);
+    expect(textMessage?.content.at(-1)).toMatchObject({
+      type: 'data-codemux-event',
+      eventKind: 'session_summary',
+    });
+    expect(textMessage?.metadata.isFinalAssistantMessage).toBe(true);
   });
 
   it('coalesces repeated summaries into one final summary card per turn', () => {

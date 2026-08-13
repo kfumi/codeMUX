@@ -98,7 +98,7 @@ function ToolFallbackTrigger({
     <CollapsibleTrigger
       data-slot="tool-fallback-trigger"
       className={cn(
-        'aui-tool-fallback-trigger group/trigger flex w-full items-center gap-2 text-sm text-muted-foreground/76 transition-colors hover:text-foreground/88 pl-1',
+        'aui-tool-fallback-trigger group/trigger flex w-full items-center gap-2 text-sm font-normal text-muted-foreground/52 transition-colors hover:text-muted-foreground/78',
         className,
       )}
       {...props}
@@ -120,16 +120,19 @@ function ToolFallbackTrigger({
         )}
       >
         <span>
-          <b>{toolName}</b>
+          <span>{toolName}</span>
         </span>
         {children}
       </span>
       <ChevronDownIcon
+        data-slot="tool-fallback-trigger-chevron"
         className={cn(
-          'size-3.5 shrink-0 text-muted-foreground/52 transition-transform',
+          'size-3.5 shrink-0 text-muted-foreground/52',
+          'opacity-0 transition-[transform,opacity]',
           'duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
+          'group-hover/trigger:opacity-100 group-focus-visible/trigger:opacity-100',
           'group-data-[state=closed]/trigger:-rotate-90',
-          'group-data-[state=open]/trigger:rotate-0',
+          'group-data-[state=open]/trigger:rotate-0 group-data-[state=open]/trigger:opacity-100',
         )}
       />
     </CollapsibleTrigger>
@@ -229,6 +232,49 @@ function ToolFallbackResult({
       <pre className="aui-tool-fallback-result-content mt-1 rounded-md bg-muted/50 p-2.5 text-xs text-foreground/90 whitespace-pre-wrap">
         {resultText}
       </pre>
+    </div>
+  );
+}
+
+function ToolFallbackCommandOutput({
+  command,
+  output,
+  className,
+  ...props
+}: React.ComponentProps<'div'> & { command?: string; output?: string }) {
+  if (!command && !output) return null;
+
+  return (
+    <div
+      data-slot="tool-fallback-command"
+      className={cn(
+        'min-w-0 overflow-hidden rounded-xl border border-border/40 bg-[hsl(var(--surface-2))] font-mono text-code leading-[1.55]',
+        'dark:border-transparent dark:bg-[hsl(0_0%_10%)]',
+        className,
+      )}
+      {...props}
+    >
+      {command ? (
+        <div
+          data-slot="tool-fallback-command-line"
+          className="px-4 pt-4 whitespace-pre-wrap wrap-anywhere text-foreground dark:text-[hsl(0_0%_90%)]"
+        >
+          <span className="select-none text-muted-foreground/55">$</span>
+          {' '}
+          <span>{command}</span>
+        </div>
+      ) : null}
+      {output ? (
+        <pre
+          data-slot="tool-fallback-command-output"
+          className={cn(
+            'aui-tool-command-scroll m-0 max-h-72 overflow-x-hidden overflow-y-auto px-4 pb-4 whitespace-pre-wrap wrap-anywhere text-muted-foreground dark:text-[hsl(0_0%_56%)]',
+            command ? 'mt-3' : 'pt-4',
+          )}
+        >
+          {output}
+        </pre>
+      ) : null}
     </div>
   );
 }
@@ -369,6 +415,7 @@ const ToolFallback = memo(ToolFallbackImpl) as unknown as ToolCallMessagePartCom
   Args: typeof ToolFallbackArgs;
   ConversationArgs: typeof ToolFallbackConversationArgs;
   Result: typeof ToolFallbackResult;
+  CommandOutput: typeof ToolFallbackCommandOutput;
   ConversationResult: typeof ToolFallbackConversationResult;
   Error: typeof ToolFallbackError;
   Approval: typeof ToolFallbackApproval;
@@ -381,6 +428,7 @@ ToolFallback.Content = ToolFallbackContent;
 ToolFallback.Args = ToolFallbackArgs;
 ToolFallback.ConversationArgs = ToolFallbackConversationArgs;
 ToolFallback.Result = ToolFallbackResult;
+ToolFallback.CommandOutput = ToolFallbackCommandOutput;
 ToolFallback.ConversationResult = ToolFallbackConversationResult;
 ToolFallback.Error = ToolFallbackError;
 ToolFallback.Approval = ToolFallbackApproval;
@@ -393,6 +441,7 @@ export {
   ToolFallbackArgs,
   ToolFallbackConversationArgs,
   ToolFallbackResult,
+  ToolFallbackCommandOutput,
   ToolFallbackConversationResult,
   ToolFallbackError,
   ToolFallbackApproval,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getDisplayableArgs, getToolDisplayName, getToolHeaderSummary } from './toolHeaderSummary';
+import { getDisplayableArgs, getShellCommand, getToolDisplayName, getToolHeaderSummary, isShellCommandTool } from './toolHeaderSummary';
 
 describe('toolHeaderSummary', () => {
   it('shows update_plan explanation as the header summary and omits it from displayable args', () => {
@@ -71,6 +71,21 @@ describe('toolHeaderSummary', () => {
     expect(getToolDisplayName('ls')).toBe('列目录');
     expect(getToolDisplayName('grep')).toBe('搜索文本');
     expect(getToolDisplayName('glob')).toBe('匹配文件');
+  });
+
+  it('extracts the executable command for Bash and shell tools', () => {
+    expect(isShellCommandTool('Bash')).toBe(true);
+    expect(isShellCommandTool('bash')).toBe(true);
+    expect(isShellCommandTool('shell_command')).toBe(true);
+    expect(isShellCommandTool('shell')).toBe(true);
+    expect(isShellCommandTool('Grep')).toBe(false);
+
+    expect(getShellCommand({
+      description: 'Check git status',
+      command: 'git status --short',
+    })).toBe('git status --short');
+    expect(getShellCommand({ cmd: 'pwd' })).toBe('pwd');
+    expect(getShellCommand({ description: 'No command field' })).toBeUndefined();
   });
 
   it('uses lowercase OpenCode aliases for header summaries', () => {

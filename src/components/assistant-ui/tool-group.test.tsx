@@ -18,11 +18,16 @@ describe('ToolGroupTrigger', () => {
     const { container } = renderTrigger(['Read', 'Read', 'shell_command']);
     const trigger = container.querySelector('[data-slot="tool-group-trigger"]');
 
-    expect(screen.getByText('执行工具 读取 × 2、运行命令 × 1')).toBeTruthy();
+    expect(container.querySelector('[data-slot="tool-group-trigger-summary"]')?.textContent).toBe('读取×2、运行命令×1');
     expect(screen.queryByText(/Read/)).toBeNull();
     expect(screen.queryByText(/shell_command/)).toBeNull();
     expect(trigger?.className).not.toContain('pl-1');
+    expect(trigger?.className).toContain('font-normal');
     expect(container.querySelector('[data-slot="tool-group-trigger-icon"]')).toBeTruthy();
+    expect(container.querySelector('[data-slot="tool-group-trigger-dot"]')?.className).toContain('mx-2');
+    expect(container.querySelector('[data-slot="tool-group-trigger-label"]')?.className).not.toContain('font-medium');
+    expect(container.querySelector('[data-slot="tool-group-trigger-chevron"]')?.getAttribute('class')).toContain('opacity-0');
+    expect(container.querySelector('[data-slot="tool-group-trigger-chevron"]')?.getAttribute('class')).toContain('group-hover/trigger:opacity-100');
   });
 
   it('uses the tool group for a single tool', () => {
@@ -32,18 +37,26 @@ describe('ToolGroupTrigger', () => {
       </ToolGroup>,
     );
 
-    expect(screen.getByText('执行工具 读取 × 1')).toBeTruthy();
+    expect(container.querySelector('[data-slot="tool-group-trigger-summary"]')?.textContent).toBe('读取×1');
     expect(container.querySelector('[data-slot="tool-group-root"]')).toBeTruthy();
     expect(container.querySelector('[data-slot="tool-group-trigger-icon"]')).toBeTruthy();
   });
 
   it('summarizes MCP grouped tools by server name only', () => {
-    renderTrigger(['mcp__context7__resolve-library-id', 'mcp__context7__query_docs']);
+    const { container } = renderTrigger(['mcp__context7__resolve-library-id', 'mcp__context7__query_docs']);
 
-    expect(screen.getByText('执行工具 context7 × 2')).toBeTruthy();
+    expect(container.querySelector('[data-slot="tool-group-trigger-summary"]')?.textContent).toBe('context7×2');
     expect(screen.queryByText(/mcp__/)).toBeNull();
     expect(screen.queryByText(/query_docs/)).toBeNull();
     expect(screen.queryByText(/resolve-library-id/)).toBeNull();
+  });
+
+  it('summarizes more than three tool types instead of collapsing to a generic count', () => {
+    const { container } = renderTrigger(['Read', 'Read', 'Task', 'Glob', 'Glob', 'Glob', 'Bash']);
+
+    expect(container.querySelector('[data-slot="tool-group-trigger-summary"]')?.textContent).toBe(
+      '读取×2、任务×1、匹配文件×3、运行命令×1',
+    );
   });
 
   it('restores the native collapsible animation for grouped tools', () => {
@@ -62,5 +75,9 @@ describe('ToolGroupTrigger', () => {
     expect(root.style.getPropertyValue('--animation-duration')).toBe('200ms');
     expect(content.className).toContain('animate-collapsible-down');
     expect(content.className).toContain('duration-(--animation-duration)');
+    expect(container.querySelector('[data-slot="tool-group-rail"]')).toBeTruthy();
+    expect(container.querySelector('[data-slot="tool-group-rail"]')?.className).toContain('left-2');
+    expect(container.querySelector('[data-slot="tool-group-content"] .pl-5')).toBeTruthy();
+    expect(container.querySelector('[data-slot="tool-group-trigger-chevron"]')?.getAttribute('class')).toContain('group-data-[state=open]/trigger:opacity-100');
   });
 });

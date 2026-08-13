@@ -57,6 +57,9 @@ describe('ReasoningRoot', () => {
     const content = container.querySelector('[data-slot="reasoning-content"]');
     expect(content).not.toBeNull();
     expect(container.querySelector('[data-slot="reasoning-trigger"]')?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('[data-slot="reasoning-trigger"]')?.className).toContain('font-normal');
+    expect(container.querySelector('[data-slot="reasoning-trigger-chevron"]')?.getAttribute('class')).toContain('opacity-0');
+    expect(container.querySelector('[data-slot="reasoning-trigger-chevron"]')?.getAttribute('class')).toContain('group-hover/trigger:opacity-100');
     expect(content?.className).toContain('max-h-[min(36vh,24rem)]');
   });
 });

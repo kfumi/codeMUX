@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -76,26 +76,95 @@ describe('CodeMuxToolCallMessagePart', () => {
   it('普通工具参数和结果保持原始详情样式，不使用子智能体对话式气泡或 Markdown 渲染', () => {
     const { container } = renderWithTooltip(
       <CodeMuxToolCallMessagePart
-        toolName="shell_command"
-        args={{ command: 'echo "**not bold**"' }}
+        toolName="Grep"
+        args={{ pattern: '**not bold**', path: 'src' }}
         result="结果包含 **not bold**"
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /运行命令/ }));
+    fireEvent.click(screen.getByRole('button', { name: /搜索文本/ }));
 
+    const trigger = container.querySelector('[data-slot="tool-fallback-trigger"]');
+    const chevron = container.querySelector('[data-slot="tool-fallback-trigger-chevron"]');
     const argsBlock = container.querySelector('[data-slot="tool-fallback-args"]');
     const resultBlock = container.querySelector('[data-slot="tool-fallback-result"]');
     const toolRoot = container.querySelector('[data-slot="tool-fallback-root"]') as HTMLElement;
     const toolContent = container.querySelector('[data-slot="tool-fallback-content"]') as HTMLElement;
 
+    expect(trigger?.className).toContain('font-normal');
+    expect(trigger?.querySelector('b')).toBeNull();
+    expect(chevron?.getAttribute('class')).toContain('opacity-0');
+    expect(chevron?.getAttribute('class')).toContain('group-hover/trigger:opacity-100');
+    expect(chevron?.getAttribute('class')).toContain('group-data-[state=open]/trigger:opacity-100');
     expect(argsBlock?.className).not.toContain('justify-end');
     expect(resultBlock?.className).not.toContain('justify-start');
     expect(resultBlock?.querySelector('strong')).toBeNull();
     expect(resultBlock?.textContent).toContain('结果包含 **not bold**');
+    expect(resultBlock?.textContent).toContain('结果：');
     expect(toolRoot.style.getPropertyValue('--animation-duration')).toBe('200ms');
     expect(toolContent.className).toContain('animate-collapsible-down');
     expect(toolContent.className).toContain('duration-(--animation-duration)');
+  });
+
+  it('运行命令展开后以终端面板展示命令和输出，不再拆成参数 JSON 和结果标签', () => {
+    const command = 'cd /d/project/ai-code/codeMUX && git diff --stat HEAD | head -40';
+    const output = [
+      'src/components/agent/assistant-ui/CodeMuxMessageParts.tsx | 10 +++-',
+      'src/components/assistant-ui/tool-fallback.tsx           |  4 +',
+      ' 2 files changed, 12 insertions(+), 2 deletions(-)',
+    ].join('\n');
+
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="shell_command"
+        args={{ command, timeout_ms: 10000, workdir: 'D:\\project\\ai-code\\codeMUX' }}
+        result={output}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /运行命令/ }));
+
+    const panel = container.querySelector('[data-slot="tool-fallback-command"]');
+    const commandLine = container.querySelector('[data-slot="tool-fallback-command-line"]');
+    const outputBlock = container.querySelector('[data-slot="tool-fallback-command-output"]');
+    const contentBody = container.querySelector('[data-slot="tool-fallback-content"]')?.firstElementChild;
+
+    expect(panel?.textContent).toContain(`$ ${command}`);
+    expect(panel?.textContent).toContain('CodeMuxMessageParts.tsx');
+    expect(panel?.textContent).toContain('2 files changed');
+    expect(panel?.className).toContain('font-mono');
+    expect(panel?.className).toContain('overflow-hidden');
+    expect(panel?.className).not.toMatch(/overflow-(?:y-)?auto/);
+    expect(commandLine?.className).toContain('wrap-anywhere');
+    expect(commandLine?.className).not.toMatch(/overflow-(?:y-)?auto/);
+    expect(outputBlock?.className).toContain('overflow-y-auto');
+    expect(outputBlock?.className).toContain('overflow-x-hidden');
+    expect(outputBlock?.className).toContain('whitespace-pre-wrap');
+    expect(outputBlock?.className).toContain('wrap-anywhere');
+    expect(contentBody?.className).not.toContain('overflow-y-auto');
+    expect(contentBody?.className).not.toContain('max-h-40');
+    expect(container.querySelector('[data-slot="tool-fallback-args"]')).toBeNull();
+    expect(container.querySelector('[data-slot="tool-fallback-result"]')).toBeNull();
+    expect(container.textContent).not.toContain('结果：');
+    expect(container.textContent).not.toContain('"timeout_ms"');
+    expect(container.textContent).not.toContain('"workdir"');
+  });
+
+  it('Bash 展开面板展示真实命令而不是 header 里的 description', () => {
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="Bash"
+        args={{ description: 'Check git diff', command: 'git diff --stat HEAD' }}
+        result="1 file changed, 4 insertions(+)"
+      />,
+    );
+
+    fireEvent.click(within(container).getByRole('button', { name: /运行命令/ }));
+
+    const panel = container.querySelector('[data-slot="tool-fallback-command"]');
+    expect(panel?.textContent).toContain('$ git diff --stat HEAD');
+    expect(panel?.textContent).toContain('1 file changed, 4 insertions(+)');
+    expect(panel?.textContent).not.toContain('Check git diff');
   });
 
   it('在 AI 消息中将询问用户工具渲染为问题回单卡片', () => {

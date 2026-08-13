@@ -6,6 +6,7 @@ import { useState } from 'react';
 import {
   ToolFallbackContent,
   ToolFallbackResult,
+  ToolFallbackCommandOutput,
   ToolFallbackConversationResult,
   ToolFallbackRoot,
   ToolFallbackTrigger,
@@ -17,7 +18,7 @@ import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
 import { INTERRUPT_MARKER } from '../../../stores/agentEventParsing';
 import { AlertTriangle, Check, Copy, Maximize2, ListTodo, XCircle, ChevronDown, ChevronRight, FileText } from 'lucide-react';
 import { getCodeChangeFilePath, getCodeChangeStats, isCodeChangeTool, ToolCodeDiff } from '../ToolCodeDiff';
-import { getDisplayableArgs, getToolHeaderSummary } from '../toolHeaderSummary';
+import { getDisplayableArgs, getShellCommand, getToolHeaderSummary, isShellCommandTool } from '../toolHeaderSummary';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipHint } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
 import { CODEMUX_MARKDOWN_REHYPE_PLUGINS, CodeMuxMarkdownLink } from '@/components/assistant-ui/markdown-link';
@@ -272,7 +273,9 @@ export function CodeMuxToolCallMessagePart({
   const codeFilePath = isCodeChangeTool(toolName, args) ? getCodeChangeFilePath(args) : undefined;
   const headerText = codeFilePath || headerSummary.text;
   const codeChangeStats = codeFilePath ? getCodeChangeStats(args) : null;
-  const displayableArgs = codeFilePath ? null : getToolDisplayableArgs(toolName, args, []);
+  const shellCommand = isShellCommandTool(toolName) ? getShellCommand(args) : undefined;
+  const isShellCommandPanel = Boolean(shellCommand) && !codeFilePath;
+  const displayableArgs = codeFilePath || isShellCommandPanel ? null : getToolDisplayableArgs(toolName, args, []);
   const subAgentPrompt = getSubAgentPrompt(toolName, args);
   const isSubAgentToolCall = isSubAgentTool(toolName);
   const resolvedArgsText = subAgentPrompt
@@ -314,7 +317,7 @@ export function CodeMuxToolCallMessagePart({
           tooltipPath ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="ml-2 inline-block max-w-[min(33rem,54vw)] truncate align-middle text-xs font-normal text-muted-foreground/72">
+                <span className="ml-2 inline-block max-w-[min(33rem,54vw)] truncate align-middle text-xs font-normal text-muted-foreground/48">
                   {headerText}
                 </span>
               </TooltipTrigger>
@@ -323,7 +326,7 @@ export function CodeMuxToolCallMessagePart({
               </TooltipContent>
             </Tooltip>
           ) : (
-            <span className="ml-2 inline-block max-w-[min(33rem,56vw)] truncate align-middle text-xs font-normal text-muted-foreground/68">
+            <span className="ml-2 inline-block max-w-[min(33rem,56vw)] truncate align-middle text-xs font-normal text-muted-foreground/48">
               {headerText}
             </span>
           )
@@ -348,17 +351,26 @@ export function CodeMuxToolCallMessagePart({
           </span>
         )}
       </ToolFallbackTrigger>
-      <ToolFallbackContent scrollable={!codeFilePath}>
-        {resolvedArgsText && (
-          isSubAgentToolCall
-            ? <ToolFallbackConversationArgs argsText={resolvedArgsText} />
-            : <ToolFallbackArgs argsText={resolvedArgsText} />
-        )}
-        {resolvedStatus?.type !== 'incomplete' && <ToolCodeDiff toolName={toolName} input={args} />}
-        {(!codeFilePath || resolvedStatus?.type === 'incomplete') && (
-          isSubAgentToolCall
-            ? <ToolFallbackConversationResult result={stringifyResult(result)} />
-            : <ToolFallbackResult result={stringifyResult(result)} />
+      <ToolFallbackContent scrollable={!codeFilePath && !isShellCommandPanel}>
+        {isShellCommandPanel ? (
+          <ToolFallbackCommandOutput
+            command={shellCommand}
+            output={formatShellCommandOutput(result)}
+          />
+        ) : (
+          <>
+            {resolvedArgsText && (
+              isSubAgentToolCall
+                ? <ToolFallbackConversationArgs argsText={resolvedArgsText} />
+                : <ToolFallbackArgs argsText={resolvedArgsText} />
+            )}
+            {resolvedStatus?.type !== 'incomplete' && <ToolCodeDiff toolName={toolName} input={args} />}
+            {(!codeFilePath || resolvedStatus?.type === 'incomplete') && (
+              isSubAgentToolCall
+                ? <ToolFallbackConversationResult result={stringifyResult(result)} />
+                : <ToolFallbackResult result={stringifyResult(result)} />
+            )}
+          </>
         )}
       </ToolFallbackContent>
     </ToolFallbackRoot>
@@ -617,6 +629,33 @@ function stringifyResult(result: unknown): string | undefined {
   } catch {
     return String(result);
   }
+}
+
+function formatShellCommandOutput(result: unknown): string | undefined {
+  if (result == null) {
+    return undefined;
+  }
+
+  if (typeof result === 'string') {
+    const parsed = tryParseJson(result);
+    if (parsed !== undefined) {
+      return formatShellCommandOutput(parsed);
+    }
+
+    return result;
+  }
+
+  if (isRecord(result)) {
+    const parts = ['stdout', 'stderr', 'output']
+      .map((key) => result[key])
+      .filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+    if (parts.length > 0) {
+      return parts.join('\n');
+    }
+  }
+
+  return stringifyResult(result);
 }
 
 function getSubAgentPrompt(toolName: string, args: Record<string, unknown>): string | undefined {

@@ -41,6 +41,7 @@ export type CodeMuxAssistantMessage = {
     sourceUuid?: string;
     sourceProviderTurnId?: string;
     isFinalAssistantMessage?: boolean;
+    isSplitHead?: boolean;
     attachments?: UserAttachmentPreview[];
     locator?: AgentUserMessageLocator;
   };
@@ -63,11 +64,14 @@ export function convertAgentEventsToAssistantMessages(
   const usedMessageIds = new Set<string>();
 
   const ensureUniqueId = (id: string, index: number): string => {
-    if (usedMessageIds.has(id)) {
-      return `${id}-dup${index}`;
+    let candidate = id;
+    let suffix = 0;
+    while (usedMessageIds.has(candidate)) {
+      suffix += 1;
+      candidate = `${id}-dup${index}-${suffix}`;
     }
-    usedMessageIds.add(id);
-    return id;
+    usedMessageIds.add(candidate);
+    return candidate;
   };
 
   events.forEach((event, index) => {
@@ -96,29 +100,57 @@ export function convertAgentEventsToAssistantMessages(
         .filter((part) => !isDuplicateAskUserQuestionToolCall(part, toolCallLocationById, askQuestionToolUseIds));
 
       if (parts.length > 0) {
-        const message = createMessage(
-          ensureUniqueId(event.data.uuid || `assistant-${index}`, index),
-          'assistant',
-          parts,
-          event,
-          index,
-        );
-        const messageIndex = getAssistantInsertionIndex(messages, message) ?? messages.length;
-        const mergedMessageIndex = mergeIntoPreviousToolOnlyMessage(
-          messages,
-          message,
-          messageIndex,
-          toolCallLocationById,
-        );
+        for (const [segmentIndex, segment] of splitAssistantPartsByProcess(parts).entries()) {
+          const message = createMessage(
+            ensureUniqueId(event.data.uuid || `assistant-${index}`, index),
+            'assistant',
+            segment,
+            event,
+            index,
+            { isSplitHead: segmentIndex === 0 },
+          );
+          const messageIndex = getAssistantInsertionIndex(messages, message) ?? messages.length;
+          const mergedMessageIndex = mergeIntoPreviousProcessMessage(
+            messages,
+            message,
+            messageIndex,
+            toolCallLocationById,
+          );
 
-        if (mergedMessageIndex != null) {
+          if (mergedMessageIndex != null) {
+            message.content.forEach((part, partIndex) => {
+              if (part.type === 'tool-call') {
+                const mergedPartIndex = messages[mergedMessageIndex]?.content.length - message.content.length + partIndex;
+                toolCallLocationById.set(part.toolCallId, {
+                  messageIndex: mergedMessageIndex,
+                  partIndex: mergedPartIndex,
+                });
+                const pendingResult = pendingToolResultsById.get(part.toolCallId);
+                if (pendingResult) {
+                  attachToolResult(
+                    messages,
+                    toolCallLocationById,
+                    part.toolCallId,
+                    pendingResult.content,
+                    pendingResult.isError,
+                  );
+                  pendingToolResultsById.delete(part.toolCallId);
+                }
+              }
+            });
+            continue;
+          }
+
+          if (messageIndex < messages.length) {
+            messages.splice(messageIndex, 0, message);
+            shiftLocationIndexes(toolCallLocationById, messageIndex);
+          } else {
+            messages.push(message);
+          }
+
           message.content.forEach((part, partIndex) => {
             if (part.type === 'tool-call') {
-              const mergedPartIndex = messages[mergedMessageIndex]?.content.length - message.content.length + partIndex;
-              toolCallLocationById.set(part.toolCallId, {
-                messageIndex: mergedMessageIndex,
-                partIndex: mergedPartIndex,
-              });
+              toolCallLocationById.set(part.toolCallId, { messageIndex, partIndex });
               const pendingResult = pendingToolResultsById.get(part.toolCallId);
               if (pendingResult) {
                 attachToolResult(
@@ -132,33 +164,7 @@ export function convertAgentEventsToAssistantMessages(
               }
             }
           });
-
-          return;
         }
-
-        if (messageIndex < messages.length) {
-          messages.splice(messageIndex, 0, message);
-          shiftLocationIndexes(toolCallLocationById, messageIndex);
-        } else {
-          messages.push(message);
-        }
-
-        message.content.forEach((part, partIndex) => {
-          if (part.type === 'tool-call') {
-            toolCallLocationById.set(part.toolCallId, { messageIndex, partIndex });
-            const pendingResult = pendingToolResultsById.get(part.toolCallId);
-            if (pendingResult) {
-              attachToolResult(
-                messages,
-                toolCallLocationById,
-                part.toolCallId,
-                pendingResult.content,
-                pendingResult.isError,
-              );
-              pendingToolResultsById.delete(part.toolCallId);
-            }
-          }
-        });
       }
 
       return;
@@ -343,10 +349,7 @@ function attachSessionSummariesToFinalAssistants(
       continue;
     }
 
-    const messageIndex = messages.findIndex((message) => (
-      message.role === 'assistant'
-      && message.metadata.sourceEventIndices.includes(finalAssistantEventIndex)
-    ));
+    const messageIndex = findFinalAssistantMessageIndex(messages, finalAssistantEventIndex);
     if (messageIndex < 0) {
       continue;
     }
@@ -432,20 +435,40 @@ function markFinalAssistantMessages(
       .filter((index): index is number => index != null),
   );
 
-  // Mark the message whose sourceEventIndex is in that set.
-  for (const message of messages) {
-    if (
-      message.role === 'assistant' &&
-      message.metadata.sourceEventIndices.some((sourceEventIndex) =>
-        assistantIndicesWithResult.has(sourceEventIndex),
-      )
-    ) {
-      message.metadata.isFinalAssistantMessage = true;
+  for (const footerIndex of assistantIndicesWithResult) {
+    const messageIndex = findFinalAssistantMessageIndex(messages, footerIndex);
+    if (messageIndex < 0) {
+      continue;
     }
+
+    messages[messageIndex].metadata.isFinalAssistantMessage = true;
   }
 }
 
-function mergeIntoPreviousToolOnlyMessage(
+function findFinalAssistantMessageIndex(
+  messages: CodeMuxAssistantMessage[],
+  footerIndex: number,
+): number {
+  const candidateIndices: number[] = [];
+  messages.forEach((message, index) => {
+    if (
+      message.role === 'assistant'
+      && message.metadata.sourceEventIndices.includes(footerIndex)
+    ) {
+      candidateIndices.push(index);
+    }
+  });
+  if (candidateIndices.length === 0) {
+    return -1;
+  }
+
+  const textIndices = candidateIndices.filter((index) => (
+    messages[index].content.some((part) => part.type === 'text')
+  ));
+  return textIndices[textIndices.length - 1] ?? candidateIndices[candidateIndices.length - 1] ?? -1;
+}
+
+function mergeIntoPreviousProcessMessage(
   messages: CodeMuxAssistantMessage[],
   nextMessage: CodeMuxAssistantMessage,
   insertionIndex: number,
@@ -456,8 +479,8 @@ function mergeIntoPreviousToolOnlyMessage(
 
   if (
     !previousMessage ||
-    !isToolOnlyAssistantMessage(previousMessage) ||
-    !isToolOnlyAssistantMessage(nextMessage)
+    !isProcessOnlyAssistantMessage(previousMessage) ||
+    !isProcessOnlyAssistantMessage(nextMessage)
   ) {
     return undefined;
   }
@@ -483,12 +506,39 @@ function mergeIntoPreviousToolOnlyMessage(
   return previousIndex;
 }
 
-function isToolOnlyAssistantMessage(message: CodeMuxAssistantMessage): boolean {
+function isProcessOnlyAssistantMessage(message: CodeMuxAssistantMessage): boolean {
   if (message.role !== 'assistant' || message.content.length === 0) {
     return false;
   }
 
-  return message.content.every((part) => part.type === 'tool-call');
+  return message.content.every((part) => isProcessAssistantPart(part));
+}
+
+function isProcessAssistantPart(part: CodeMuxAssistantPart): boolean {
+  if (part.type === 'reasoning') {
+    return true;
+  }
+
+  return part.type === 'tool-call' && !isAskUserQuestionToolName(part.toolName);
+}
+
+function splitAssistantPartsByProcess(parts: CodeMuxAssistantPart[]): CodeMuxAssistantPart[][] {
+  const segments: CodeMuxAssistantPart[][] = [];
+
+  for (const part of parts) {
+    const isProcess = isProcessAssistantPart(part);
+    const current = segments[segments.length - 1];
+    const currentIsProcess = current?.[0] ? isProcessAssistantPart(current[0]) : null;
+
+    if (current && currentIsProcess === isProcess) {
+      current.push(part);
+      continue;
+    }
+
+    segments.push([part]);
+  }
+
+  return segments;
 }
 
 function convertContentBlockToParts(
@@ -661,7 +711,7 @@ function isNarrationOnlyAssistantMessage(message: CodeMuxAssistantMessage): bool
     return false;
   }
 
-  return message.content.every((part) => part.type === 'text' || part.type === 'reasoning');
+  return message.content.every((part) => part.type === 'text');
 }
 
 function isPendingToolOnlyAssistantMessage(message: CodeMuxAssistantMessage): boolean {
@@ -838,6 +888,7 @@ function createMessage(
   content: CodeMuxAssistantPart[],
   event: AgentMessage,
   index: number,
+  extra?: { isSplitHead?: boolean },
 ): CodeMuxAssistantMessage {
   return {
     id,
@@ -847,6 +898,7 @@ function createMessage(
       sourceEventIndex: index,
       sourceEventIndices: [index],
       sourceKind: event.kind,
+      ...(extra?.isSplitHead === false ? { isSplitHead: false } : {}),
       ...(event.kind === 'assistant' && event.data.uuid ? { sourceUuid: event.data.uuid } : {}),
       ...(event.kind === 'assistant' && event.data.provider_turn_id
         ? { sourceProviderTurnId: event.data.provider_turn_id }
