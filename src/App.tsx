@@ -14,7 +14,7 @@ import type { AgentInputPayload } from './types/agentInput';
 import { getStoredAgentCwd, resolveSessionCwd } from './lib/sessionCwd';
 import { registerSkillCommands } from './lib/slashCommands';
 import { serializePermissionConfig } from './lib/agentPermissions';
-import { appApi, sessionApi, type RuntimeProvider } from './lib/tauri';
+import { appApi, sessionApi } from './lib/tauri';
 import { useAgentStore } from './stores/agentStore';
 import './stores/appearanceStore';
 import { useNewSessionStore, NEW_SESSION_DRAFT_SESSION_ID } from './stores/newSessionStore';
@@ -264,9 +264,10 @@ function App() {
 
     try {
       if (selectedAgentKind === 'claude_code' || selectedAgentKind === 'codex' || selectedAgentKind === 'opencode') {
-        const runtime = await appApi.refreshManagedRuntime(selectedAgentKind as RuntimeProvider);
-        if (runtime.status !== 'ready' && runtime.status !== 'outdated') {
-          throw new Error(`${runtime.label} Runtime 未安装或不可用，请先在设置中安装`);
+        const runtimeCheck = await appApi.checkManagedRuntimes();
+        const runtime = runtimeCheck.runtimes.find((entry) => entry.provider === selectedAgentKind);
+        if (!runtime || (runtime.status !== 'ready' && runtime.status !== 'outdated')) {
+          throw new Error(runtime?.message ?? `${runtime?.label ?? selectedAgentKind} Runtime 未安装或不可用，请先在设置中安装`);
         }
       }
 
