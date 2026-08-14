@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import { agentApi, fileApi, sessionApi } from '../lib/tauri';
 import { createLogger, serializeError } from '../lib/logger';
 import {
+  buildSessionTitleFromUserContent,
+} from '../lib/sessionTitle';
+import {
   isClaudeSubagentEvent,
   isClaudeCompactSummaryRawEvent,
   isClaudeCompactSummaryText,
@@ -830,26 +833,6 @@ function isAssistantCompactSummaryEvent(data: Record<string, unknown>): boolean 
   });
 }
 
-function truncateTitle(text: string, maxLen = 30): string {
-  const firstLine = text.split('\n')[0].trim();
-  if (firstLine.length <= maxLen) return firstLine;
-  return firstLine.slice(0, maxLen) + '...';
-}
-
-function extractTitleFromCommandMessage(content: string): string | null {
-  const trimmed = content.trimStart();
-  // Claude Code slash command display: /command-name args
-  const slashMatch = /^\/\S+\s+(.*)$/.exec(trimmed);
-  if (slashMatch) {
-    return slashMatch[1].trim() || null;
-  }
-  // Chip format: [$xxx](yyy) args
-  const chipMatch = /^\[\$[^\]]+\]\([^)]+\)\s*([\s\S]*)$/.exec(trimmed);
-  if (chipMatch) {
-    return chipMatch[1].trim() || null;
-  }
-  return null;
-}
 
 type FileOriginalSnapshot = { content: string; isNew: boolean; toolUseId?: string };
 
@@ -1437,11 +1420,9 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
       dataUrl: image.dataUrl,
     }));
     if (!hasExistingUserMsg) {
-      const extracted = extractTitleFromCommandMessage(userContent);
-      const titleContent = extracted !== null ? extracted : userContent;
-      if (titleContent.trim()) {
-        const title = truncateTitle(titleContent);
-        if (title) {
+      if (userContent.trim()) {
+        const title = buildSessionTitleFromUserContent(userContent);
+        if (title !== '未命名对话') {
           useSessionStore.getState().updateSessionTitle(sessionId, title);
         }
       }

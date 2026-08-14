@@ -149,7 +149,7 @@ vi.mock('./stores/settingsStore', () => ({
 
 vi.mock('./stores/appearanceStore', () => ({
   useAppearanceStore: (selector: (state: {
-    prefs: { accent: string; uiFont: string; uiFontSize: number; codeFontSize: number; radius: string; contentWidth: string };
+    prefs: { accent: string; uiFontFamily: string; uiFontSize: number; codeFontSize: number; radius: string; contentWidth: string };
     setAccent: ReturnType<typeof vi.fn>;
     setUiFont: ReturnType<typeof vi.fn>;
     setUiFontSize: ReturnType<typeof vi.fn>;
@@ -158,7 +158,7 @@ vi.mock('./stores/appearanceStore', () => ({
     setContentWidth: ReturnType<typeof vi.fn>;
     reset: ReturnType<typeof vi.fn>;
   }) => unknown) => selector({
-    prefs: { accent: 'azure', uiFont: 'inter', uiFontSize: 14, codeFontSize: 13, radius: 'soft', contentWidth: 'fixed' },
+    prefs: { accent: 'azure', uiFontFamily: '', uiFontSize: 14, codeFontSize: 13, radius: 'soft', contentWidth: 'fixed' },
     setAccent: vi.fn(),
     setUiFont: vi.fn(),
     setUiFontSize: vi.fn(),

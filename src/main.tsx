@@ -1,8 +1,5 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import "@fontsource-variable/inter";
-import "@fontsource-variable/ibm-plex-sans";
-import "@fontsource-variable/noto-sans-sc";
 import "@fontsource-variable/jetbrains-mono";
 import App from "./App";
 import { initializeOpenCodeFreeModels } from "./hooks/useAgentModels";

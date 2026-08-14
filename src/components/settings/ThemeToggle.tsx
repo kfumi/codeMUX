@@ -8,9 +8,7 @@ import {
   CODE_FONT_SIZE_MIN,
   type ContentWidthKey,
   type RadiusKey,
-  type UiFontKey,
   RADII,
-  UI_FONTS,
   UI_FONT_SIZE_MAX,
   UI_FONT_SIZE_MIN,
 } from '../../lib/appearance';
@@ -19,13 +17,7 @@ import { useAppearanceStore } from '../../stores/appearanceStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Theme } from '../../types/provider';
 import { Button } from '../ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../ui/select';
+import { FontPicker } from './FontPicker';
 
 interface FormSectionProps {
   label: string;
@@ -230,7 +222,7 @@ export function ThemeToggle() {
 
   const prefs = useAppearanceStore((state) => state.prefs);
   const setAccent = useAppearanceStore((state) => state.setAccent);
-  const setUiFont = useAppearanceStore((state) => state.setUiFont);
+  const setUiFontFamily = useAppearanceStore((state) => state.setUiFontFamily);
   const setUiFontSize = useAppearanceStore((state) => state.setUiFontSize);
   const setCodeFontSize = useAppearanceStore((state) => state.setCodeFontSize);
   const setRadius = useAppearanceStore((state) => state.setRadius);
@@ -260,22 +252,8 @@ export function ThemeToggle() {
         </div>
       </FormSection>
 
-      <FormSection label="界面字体" hint="仅影响界面文字，代码区保持等宽字体">
-        <Select value={prefs.uiFont} onValueChange={(value) => setUiFont(value as UiFontKey)}>
-          <SelectTrigger className="h-10 max-w-md bg-background">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(Object.keys(UI_FONTS) as UiFontKey[]).map((key) => (
-              <SelectItem key={key} value={key}>
-                <span className="flex items-center gap-2">
-                  <span style={{ fontFamily: UI_FONTS[key].previewFamily }}>{UI_FONTS[key].name}</span>
-                  <span className="text-ui-caption text-muted-foreground/70">{UI_FONTS[key].description}</span>
-                </span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <FormSection label="界面字体" hint="从本机已安装字体中选择，仅影响界面文字">
+        <FontPicker value={prefs.uiFontFamily} onChange={setUiFontFamily} />
       </FormSection>
 
       <FormSection label="界面字号" hint="12–18px，按 1px 调整">

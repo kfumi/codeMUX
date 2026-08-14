@@ -9,6 +9,7 @@ import {
   UI_FONT_SIZE_MAX,
   UI_FONT_SIZE_MIN,
   applyAppearance,
+  buildUiFontFamily,
   clampCodeFontSize,
   clampUiFontSize,
   loadPrefs,
@@ -35,10 +36,19 @@ describe('appearance preferences', () => {
     });
   });
 
+  it('migrates legacy preset font keys to system font family names', () => {
+    window.localStorage.setItem(
+      'codemux:appearance',
+      JSON.stringify({ uiFont: 'ibm-plex-sans' }),
+    );
+
+    expect(loadPrefs().uiFontFamily).toBe('IBM Plex Sans');
+  });
+
   it('falls back from invalid values and clamps numeric sizes', () => {
     window.localStorage.setItem(
       'codemux:appearance',
-      JSON.stringify({ accent: 'unknown', uiFont: 'unknown', uiFontSize: 99, radius: null, contentWidth: 1 }),
+      JSON.stringify({ accent: 'unknown', uiFontFamily: 1, uiFontSize: 99, radius: null, contentWidth: 1 }),
     );
 
     expect(loadPrefs()).toEqual({ ...DEFAULT_PREFS, uiFontSize: UI_FONT_SIZE_MAX });
@@ -51,11 +61,20 @@ describe('appearance preferences', () => {
     expect(clampCodeFontSize(CODE_FONT_SIZE_MAX + 4.4)).toBe(CODE_FONT_SIZE_MAX);
   });
 
+  it('builds ui font stacks with chinese fallbacks', () => {
+    expect(buildUiFontFamily('')).toContain('system-ui');
+    expect(buildUiFontFamily('Microsoft YaHei UI')).toContain("'Microsoft YaHei UI'");
+    expect(buildUiFontFamily('Microsoft YaHei UI')).toContain('PingFang SC');
+  });
+
   it('applies CSS variables without changing the root font size', () => {
-    applyAppearance({ ...DEFAULT_PREFS, uiFont: 'ibm-plex-sans', uiFontSize: 18, codeFontSize: 16, accent: 'rose' }, false);
+    applyAppearance(
+      { ...DEFAULT_PREFS, uiFontFamily: 'IBM Plex Sans', uiFontSize: 18, codeFontSize: 16, accent: 'rose' },
+      false,
+    );
 
     const root = document.documentElement;
-    expect(root.style.getPropertyValue('--font-ui')).toContain('IBM Plex Sans Variable');
+    expect(root.style.getPropertyValue('--font-ui')).toContain('IBM Plex Sans');
     expect(root.style.getPropertyValue('--ui-font-size')).toBe('18px');
     expect(root.style.getPropertyValue('--code-font-size')).toBe('16px');
     expect(root.style.getPropertyValue('--primary')).toBe('346 70% 50%');

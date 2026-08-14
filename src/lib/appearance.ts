@@ -1,24 +1,16 @@
 import type { Theme } from '../types/provider';
 
 export type AccentKey = 'azure' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet' | 'graphite';
-export type UiFontKey = 'system' | 'inter' | 'ibm-plex-sans' | 'noto-sans-sc';
 export type RadiusKey = 'sharp' | 'soft' | 'round';
 export type ContentWidthKey = 'fixed' | 'stream';
 
 export interface AppearancePrefs {
   accent: AccentKey;
-  uiFont: UiFontKey;
+  uiFontFamily: string;
   uiFontSize: number;
   codeFontSize: number;
   radius: RadiusKey;
   contentWidth: ContentWidthKey;
-}
-
-export interface UiFontPreset {
-  name: string;
-  description: string;
-  family: string;
-  previewFamily: string;
 }
 
 export interface AccentPreset {
@@ -30,6 +22,10 @@ export interface AccentPreset {
   swatch: string;
 }
 
+export const SYSTEM_FONT_STACK =
+  "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', sans-serif";
+export const CHINESE_FONT_FALLBACK = "'Microsoft YaHei UI', 'PingFang SC', sans-serif";
+
 export const ACCENTS: Record<AccentKey, AccentPreset> = {
   azure: { name: '天蓝', light: '209 99% 40%', dark: '209 92% 58%', lightForeground: '0 0% 100%', darkForeground: '0 0% 100%', swatch: '#0169CC' },
   cyan: { name: '青碧', light: '192 75% 42%', dark: '187 70% 55%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(192 75% 42%)' },
@@ -38,36 +34,6 @@ export const ACCENTS: Record<AccentKey, AccentPreset> = {
   rose: { name: '玫红', light: '346 70% 50%', dark: '346 70% 65%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(346 70% 50%)' },
   violet: { name: '紫罗兰', light: '262 55% 55%', dark: '262 60% 68%', lightForeground: '210 24% 98%', darkForeground: '210 26% 96%', swatch: 'hsl(262 55% 55%)' },
   graphite: { name: '墨黑', light: '222 18% 10%', dark: '220 10% 88%', lightForeground: '210 24% 98%', darkForeground: '220 15% 9%', swatch: 'hsl(222 18% 10%)' },
-};
-
-const SYSTEM_FONT_STACK = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', sans-serif";
-const CHINESE_FONT_FALLBACK = "'Noto Sans SC Variable', 'Microsoft YaHei UI', sans-serif";
-
-export const UI_FONTS: Record<UiFontKey, UiFontPreset> = {
-  system: {
-    name: '系统字体',
-    description: '跟随当前操作系统的界面字体',
-    family: SYSTEM_FONT_STACK,
-    previewFamily: SYSTEM_FONT_STACK,
-  },
-  inter: {
-    name: 'Inter',
-    description: '紧凑清晰，适合高密度工作界面',
-    family: `'Inter Variable', ${CHINESE_FONT_FALLBACK}`,
-    previewFamily: "'Inter Variable', sans-serif",
-  },
-  'ibm-plex-sans': {
-    name: 'IBM Plex Sans',
-    description: '更具技术感，字符辨识度高',
-    family: `'IBM Plex Sans Variable', ${CHINESE_FONT_FALLBACK}`,
-    previewFamily: "'IBM Plex Sans Variable', sans-serif",
-  },
-  'noto-sans-sc': {
-    name: '思源黑体',
-    description: '针对中文界面优化的均衡字形',
-    family: `'Noto Sans SC Variable', 'Microsoft YaHei UI', sans-serif`,
-    previewFamily: "'Noto Sans SC Variable', sans-serif",
-  },
 };
 
 export const UI_FONT_SIZE_MIN = 12;
@@ -88,7 +54,7 @@ export const CONTENT_WIDTHS: Record<ContentWidthKey, string> = {
 
 export const DEFAULT_PREFS: AppearancePrefs = {
   accent: 'azure',
-  uiFont: 'inter',
+  uiFontFamily: '',
   uiFontSize: 14,
   codeFontSize: 13,
   radius: 'soft',
@@ -110,6 +76,27 @@ const DIRECTIVE_CHIP_COLORS = {
 
 const STORAGE_KEY = 'codemux:appearance';
 
+const LEGACY_UI_FONT_MAP: Record<string, string> = {
+  system: '',
+  inter: 'Inter',
+  'ibm-plex-sans': 'IBM Plex Sans',
+  'noto-sans-sc': 'Noto Sans SC',
+};
+
+export function buildUiFontFamily(family: string): string {
+  const trimmed = family.trim();
+  if (!trimmed) return SYSTEM_FONT_STACK;
+  const escaped = trimmed.replace(/'/g, "\\'");
+  return `'${escaped}', ${CHINESE_FONT_FALLBACK}`;
+}
+
+export function formatFontFamilyForCss(family: string): string {
+  const trimmed = family.trim();
+  if (!trimmed) return SYSTEM_FONT_STACK;
+  const escaped = trimmed.replace(/'/g, "\\'");
+  return `'${escaped}'`;
+}
+
 export function loadPrefs(): AppearancePrefs {
   if (typeof window === 'undefined') return DEFAULT_PREFS;
   try {
@@ -118,7 +105,7 @@ export function loadPrefs(): AppearancePrefs {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     return {
       accent: isValidAccent(parsed.accent) ? parsed.accent : DEFAULT_PREFS.accent,
-      uiFont: isValidUiFont(parsed.uiFont) ? parsed.uiFont : DEFAULT_PREFS.uiFont,
+      uiFontFamily: resolveStoredUiFontFamily(parsed),
       uiFontSize: resolveStoredUiFontSize(parsed.uiFontSize, parsed.fontSize),
       codeFontSize: resolveStoredCodeFontSize(parsed.codeFontSize),
       radius: isValidRadius(parsed.radius) ? parsed.radius : DEFAULT_PREFS.radius,
@@ -161,7 +148,7 @@ export function applyAppearance(prefs: AppearancePrefs, isDark: boolean): void {
   root.style.setProperty('--codemux-directive-border', directiveChipColors.border);
   root.style.setProperty('--radius', RADII[prefs.radius]);
   root.style.setProperty('--content-width', CONTENT_WIDTHS[prefs.contentWidth]);
-  root.style.setProperty('--font-ui', UI_FONTS[prefs.uiFont].family);
+  root.style.setProperty('--font-ui', buildUiFontFamily(prefs.uiFontFamily));
   root.style.setProperty('--ui-font-size', `${clampUiFontSize(prefs.uiFontSize)}px`);
   root.style.setProperty('--code-font-size', `${clampCodeFontSize(prefs.codeFontSize)}px`);
 }
@@ -170,16 +157,20 @@ function isValidAccent(v: unknown): v is AccentKey {
   return typeof v === 'string' && v in ACCENTS;
 }
 
-function isValidUiFont(v: unknown): v is UiFontKey {
-  return typeof v === 'string' && v in UI_FONTS;
-}
-
 function isValidRadius(v: unknown): v is RadiusKey {
   return typeof v === 'string' && v in RADII;
 }
 
 function isValidContentWidth(v: unknown): v is ContentWidthKey {
   return typeof v === 'string' && v in CONTENT_WIDTHS;
+}
+
+function resolveStoredUiFontFamily(parsed: Record<string, unknown>): string {
+  if (typeof parsed.uiFontFamily === 'string') return parsed.uiFontFamily;
+  if (typeof parsed.uiFont === 'string') {
+    return LEGACY_UI_FONT_MAP[parsed.uiFont] ?? DEFAULT_PREFS.uiFontFamily;
+  }
+  return DEFAULT_PREFS.uiFontFamily;
 }
 
 export function clampUiFontSize(value: number): number {

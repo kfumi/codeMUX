@@ -5,12 +5,10 @@ import {
   type AppearancePrefs,
   type ContentWidthKey,
   type RadiusKey,
-  type UiFontKey,
   ACCENTS,
   CONTENT_WIDTHS,
   DEFAULT_PREFS,
   RADII,
-  UI_FONTS,
   clampCodeFontSize,
   applyAppearance,
   clampUiFontSize,
@@ -27,7 +25,7 @@ function apply(prefs: AppearancePrefs): void {
 interface AppearanceState {
   prefs: AppearancePrefs;
   setAccent: (accent: AccentKey) => void;
-  setUiFont: (uiFont: UiFontKey) => void;
+  setUiFontFamily: (uiFontFamily: string) => void;
   setUiFontSize: (uiFontSize: number) => void;
   setCodeFontSize: (codeFontSize: number) => void;
   setRadius: (radius: RadiusKey) => void;
@@ -43,8 +41,8 @@ export const useAppearanceStore = create<AppearanceState>((set) => ({
     apply(prefs);
     set({ prefs });
   },
-  setUiFont: (uiFont) => {
-    const prefs = { ...useAppearanceStore.getState().prefs, uiFont };
+  setUiFontFamily: (uiFontFamily) => {
+    const prefs = { ...useAppearanceStore.getState().prefs, uiFontFamily };
     savePrefs(prefs);
     apply(prefs);
     set({ prefs });
@@ -97,4 +95,4 @@ if (typeof window !== 'undefined') {
 
 apply(useAppearanceStore.getState().prefs);
 
-export { ACCENTS, CONTENT_WIDTHS, RADII, UI_FONTS, DEFAULT_PREFS };
+export { ACCENTS, CONTENT_WIDTHS, RADII, DEFAULT_PREFS };
