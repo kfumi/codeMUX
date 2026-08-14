@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { toClaudeTurnOutcome } from './claudeTurnOutcome.js';
 
 describe('toClaudeTurnOutcome', () => {
-  it('maps a successful Claude result and usage into the CodeMUX outcome', () => {
+  it('maps a successful Claude result into the CodeMUX outcome', () => {
     expect(toClaudeTurnOutcome({
       subtype: 'success',
       result: 'ok',
@@ -18,12 +18,6 @@ describe('toClaudeTurnOutcome', () => {
     })).toEqual({
       outcome: 'completed',
       durationMs: 125,
-      usage: {
-        input_tokens: 10,
-        output_tokens: 7,
-        cached_input_tokens: 3,
-        reasoning_output_tokens: 2,
-      },
     });
   });
 

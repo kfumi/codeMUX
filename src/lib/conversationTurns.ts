@@ -5,7 +5,6 @@ import type {
   ConversationTurnDiagnostic,
   ConversationTurnStatus,
   ConversationTurnTermination,
-  ConversationTurnUsage,
 } from '@/types/conversationTurn';
 
 export interface ConversationTurnOptions {
@@ -13,7 +12,6 @@ export interface ConversationTurnOptions {
   forceStopped?: boolean;
   retainRawEvents?: boolean;
   sessionId?: string;
-  latestUsage?: ConversationTurnUsage;
 }
 
 type MutableTurn = {
@@ -24,7 +22,6 @@ type MutableTurn = {
   diagnostics: ConversationTurnDiagnostic[];
   assistantEventIndices: number[];
   rawEvents?: unknown[];
-  usage?: ConversationTurnUsage;
   durationMs?: number;
   numTurns?: number;
   completionReason?: string;
@@ -53,7 +50,6 @@ export function buildConversationTurns(
       isRunning: options.isRunning ?? false,
       forceStopped: options.forceStopped ?? false,
       retainRawEvents: options.retainRawEvents ?? false,
-      latestUsage: options.latestUsage,
     }));
     current = null;
   };
@@ -187,10 +183,6 @@ function appendEvent(
     if (event.data.message?.stop_reason === 'end_turn') {
       turn.completionReason = 'end_turn';
     }
-
-    if (event.data.message?.usage) {
-      turn.usage = normalizeUsage(event.data.message.usage);
-    }
     return;
   }
 
@@ -222,7 +214,6 @@ function appendEvent(
     } else {
       turn.completionReason = event.data.subtype || 'result';
     }
-    turn.usage = normalizeUsage(event.data.last_token_usage ?? event.data.usage);
     turn.durationMs = isSyntheticResult(event.data as unknown as Record<string, unknown>)
       ? undefined
       : finiteNumber(event.data.duration_ms);
@@ -293,14 +284,12 @@ function finalizeTurn(
     isRunning: boolean;
     forceStopped: boolean;
     retainRawEvents: boolean;
-    latestUsage?: ConversationTurnUsage;
   },
 ): ConversationTurn<AgentMessage> {
   const pendingToolIds = [...turn.pendingToolIds];
   let status: ConversationTurnStatus;
   let termination: ConversationTurnTermination | undefined;
   const hasConfirmedCompletion = turn.completionReason !== undefined && pendingToolIds.length === 0;
-  const usage = options.isLast && options.latestUsage ? options.latestUsage : turn.usage;
 
   if (turn.failureReason) {
     status = 'failed';
@@ -328,7 +317,6 @@ function finalizeTurn(
     hasRealUser: turn.hasRealUser,
     status,
     pendingToolIds,
-    ...(status === 'completed' && usage ? { usage } : {}),
     ...(turn.durationMs !== undefined ? { durationMs: turn.durationMs } : {}),
     ...(turn.numTurns !== undefined ? { numTurns: turn.numTurns } : {}),
     ...(termination ? { termination } : {}),
@@ -338,25 +326,6 @@ function finalizeTurn(
       ? { footerAnchorEventIndex: turn.assistantEventIndices[turn.assistantEventIndices.length - 1] }
       : {}),
   };
-}
-
-function normalizeUsage(value: unknown): ConversationTurnUsage | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const usage: ConversationTurnUsage = {
-    ...(finiteNumber(value.input_tokens) !== undefined ? { inputTokens: finiteNumber(value.input_tokens) } : {}),
-    ...(finiteNumber(value.output_tokens) !== undefined ? { outputTokens: finiteNumber(value.output_tokens) } : {}),
-    ...(finiteNumber(value.cache_read_input_tokens ?? value.cached_input_tokens) !== undefined
-      ? { cacheReadTokens: finiteNumber(value.cache_read_input_tokens ?? value.cached_input_tokens) }
-      : {}),
-    ...(finiteNumber(value.cache_creation_input_tokens) !== undefined
-      ? { cacheCreationTokens: finiteNumber(value.cache_creation_input_tokens) }
-      : {}),
-  };
-
-  return Object.keys(usage).length > 0 ? usage : undefined;
 }
 
 function addDiagnostic(turn: MutableTurn, code: string, message: string, eventIndex: number): void {

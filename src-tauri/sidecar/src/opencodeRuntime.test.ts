@@ -1318,7 +1318,8 @@ describe('OpenCodeRuntime', () => {
     onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(1));
     expect(emitted).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'diagnostic', subtype: 'missing_session_id' })]));
-    expect(emitted.find((event) => (event as { type?: string }).type === 'turn_finished')).toMatchObject({ usage: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reasoning_output_tokens: 0 } });
+    expect(emitted.find((event) => (event as { type?: string }).type === 'turn_finished')).toMatchObject({ type: 'turn_finished', outcome: 'completed' });
+    expect(emitted.find((event) => (event as { type?: string }).type === 'turn_finished')).not.toHaveProperty('usage');
     await runtime.shutdown();
   });
 
@@ -1341,44 +1342,6 @@ describe('OpenCodeRuntime', () => {
     onEvent({ type: 'future.sessionless', properties: { value: 'changed' } });
     await vi.waitFor(() => expect(emitted.filter((event) => (event as { subtype?: string }).subtype === 'missing_session_id')).toHaveLength(2));
     expect(emitted.filter((event) => (event as { subtype?: string }).subtype === 'unknown_event')).toHaveLength(2);
-    await runtime.shutdown();
-  });
-  it('adds step-finish usage and ignores an exact repeated step payload', async () => {
-    const { port, client } = createPort();
-    const emitted: unknown[] = [];
-    let onEvent!: (event: unknown) => void;
-    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
-      onEvent = input.onEvent;
-      return { close: vi.fn() };
-    });
-    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
-    await runtime.start();
-    const step = (id: string, input: number, output: number, reasoning: number, read: number, write: number) => ({ type: 'message.part.updated', id, properties: { sessionID: 'opencode-new', part: { id, messageID: 'message-1', type: 'step-finish', tokens: { input, output, reasoning, cache: { read, write } } } } });
-    onEvent(step('step-1', 10, 2, 1, 3, 4));
-    onEvent(step('step-2', 20, 5, 3, 8, 6));
-    onEvent(step('step-2', 20, 5, 3, 8, 6));
-    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(1));
-    expect(emitted.find((event) => (event as { type?: string }).type === 'turn_finished')).toMatchObject({ usage: { input_tokens: 30, output_tokens: 7, reasoning_output_tokens: 4, cached_input_tokens: 11 } });
-    await runtime.shutdown();
-  });
-  it('preserves cumulative reasoning and cache usage across multiple SDK usage events', async () => {
-    const { port, client } = createPort();
-    const emitted: unknown[] = [];
-    let onEvent!: (event: unknown) => void;
-    client.subscribe = vi.fn().mockImplementation(async (input: { onEvent: (event: unknown) => void }) => {
-      onEvent = input.onEvent;
-      return { close: vi.fn() };
-    });
-    const runtime = new OpenCodeRuntime(createConfig(), port, { emitEvent: (event) => emitted.push(event) });
-    await runtime.start();
-    const usageEvent = (id: string, tokens: Record<string, unknown>) => ({ type: 'message.updated', id, properties: { info: { sessionID: 'opencode-new', tokens } } });
-    onEvent(usageEvent('usage-1', { input: 10, output: 2, reasoning: 1, cache: { read: 3, write: 4 } }));
-    onEvent(usageEvent('usage-2', { input: 14, output: 5, reasoning: 3, cache: { read: 8, write: 6 } }));
-    onEvent(usageEvent('usage-3', { input: 14, output: 5, reasoning: 3, cache: { read: 8, write: 6 } }));
-    onEvent({ type: 'session.idle', properties: { sessionID: 'opencode-new' } });
-    await vi.waitFor(() => expect(emitted.filter((event) => (event as { type?: string }).type === 'turn_finished')).toHaveLength(1));
-    expect(emitted.find((event) => (event as { type?: string }).type === 'turn_finished')).toMatchObject({ usage: { input_tokens: 14, output_tokens: 5, reasoning_output_tokens: 3, cached_input_tokens: 8 } });
     await runtime.shutdown();
   });
   it('allows the official ID-less session.idle fixture to complete two prompt turns', async () => {

@@ -10,11 +10,6 @@ import { TooltipHint } from '@/components/ui/tooltip';
 
 export type MessageFooterStats = {
   durationMs?: number;
-  numTurns?: number;
-  inputTokens?: number;
-  outputTokens?: number;
-  cacheReadTokens?: number;
-  cacheCreationTokens?: number;
 };
 
 type MessageFooterProps = {
@@ -40,11 +35,7 @@ export function MessageFooter({
   isForking = false,
   onFork,
 }: MessageFooterProps) {
-  const hasStats =
-    stats &&
-    (stats.durationMs != null ||
-      stats.inputTokens != null ||
-      stats.outputTokens != null);
+  const hasStats = stats?.durationMs != null;
   const revealClass = revealOnHover
     ? 'opacity-0 transition-opacity duration-150 group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100'
     : undefined;
@@ -64,14 +55,6 @@ export function MessageFooter({
     );
   }
 
-  const totalInputTokens = stats?.inputTokens || 0;
-  const allInputTokens =
-    (stats?.inputTokens || 0) + (stats?.cacheReadTokens || 0) + (stats?.cacheCreationTokens || 0);
-  const cacheHitRate =
-    allInputTokens > 0 && (stats?.cacheReadTokens || 0) > 0
-      ? ((stats?.cacheReadTokens || 0) / allInputTokens) * 100
-      : null;
-
   return (
     <div
       data-message-footer
@@ -89,12 +72,6 @@ export function MessageFooter({
 
       {timestamp ? <FooterItem>{formatTime(timestamp)}</FooterItem> : null}
       {stats?.durationMs != null ? <FooterItem>耗时 {(stats.durationMs / 1000).toFixed(1)}s</FooterItem> : null}
-      {stats?.outputTokens != null || totalInputTokens > 0 ? (
-        <FooterItem>
-          {totalInputTokens}+{stats?.outputTokens || 0} token
-        </FooterItem>
-      ) : null}
-      {cacheHitRate != null ? <FooterItem>缓存命中 {cacheHitRate.toFixed(0)}%</FooterItem> : null}
     </div>
   );
 }

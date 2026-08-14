@@ -2,8 +2,6 @@ import { normalizeAgentInputPayload, type AgentInputPayload } from './agentInput
 import { emit } from './streamEventBatcher.js';
 import { OpenCodePermissionRegistry, type OpenCodePermissionResponse } from './opencodePermissions.js';
 import {
-  extractOpenCodeUsageUpdate,
-  mergeOpenCodeUsage,
   getOpenCodeEventIdentity,
   isOpenCodeSessionScopedEvent,
   getOpenCodeEventSessionId,
@@ -90,7 +88,6 @@ export class OpenCodeRuntime {
   private readonly nextSection: { kind: import('./opencodeEvents.js').NextSectionKind } = { kind: 'idle' };
   private readonly idleStreamKind: { kind: 'thinking' | 'text' } = { kind: 'thinking' };
   private eventSequence = 0;
-  private usage: import('./runtimeEvents.js').OpenCodeTokenUsage = { input_tokens: 0, output_tokens: 0 };
   private turnStartedAt = 0;
   private turnId = 0;
   private permissionCancellationEpoch = 0;
@@ -611,7 +608,6 @@ export class OpenCodeRuntime {
         agentSessionId: this.agentSessionId,
         sequence: this.eventSequence,
         durationMs: this.turnStartedAt > 0 ? Date.now() - this.turnStartedAt : 0,
-        usage: this.usage,
         terminalSessionIds: this.terminalSessionIds,
         terminalToolIds: this.terminalToolIds,
         assistantMessageIds: this.assistantMessageIds,
@@ -688,10 +684,6 @@ export class OpenCodeRuntime {
     } else if (payloadKey) {
       this.rememberSeenPayloadKey(payloadKey);
     }
-    const usageUpdate = extractOpenCodeUsageUpdate(event);
-    if (usageUpdate) {
-      this.usage = mergeOpenCodeUsage(this.usage, usageUpdate.usage, usageUpdate.mode);
-    }
     if (type === 'session.idle' && this.pendingTaskToolCallIds.size > 0 && activeSessionId) {
       for (const taskId of this.pendingTaskToolCallIds) {
         this.emitToolFinished(taskId, '', activeSessionId);
@@ -706,7 +698,6 @@ export class OpenCodeRuntime {
       agentSessionId: this.agentSessionId,
       sequence: this.eventSequence,
       durationMs: this.turnStartedAt > 0 ? Date.now() - this.turnStartedAt : 0,
-      usage: this.usage,
       terminalSessionIds: this.terminalSessionIds,
       terminalToolIds: this.terminalToolIds,
       assistantMessageIds: this.assistantMessageIds,
@@ -762,7 +753,6 @@ export class OpenCodeRuntime {
       if (events.some((eventItem) => eventItem.type === 'turn_finished')) {
         this.terminalSessionIds.add(terminalSessionId);
         this.turnStartedAt = 0;
-        this.usage = { input_tokens: 0, output_tokens: 0 };
       }
       const pending = this.pendingTurnCompletion;
       if (pending && pending.sessionId === terminalSessionId) {
@@ -852,7 +842,6 @@ export class OpenCodeRuntime {
     this.streamingParts.clear();
     this.nextSection.kind = 'idle';
     this.idleStreamKind.kind = 'thinking';
-    this.usage = { input_tokens: 0, output_tokens: 0 };
     this.turnStartedAt = Date.now();
   }
 
@@ -891,7 +880,6 @@ export class OpenCodeRuntime {
     this.childTaskToolIds.clear();
     this.assistantMessageIds.clear();
     this.userMessageIds.clear();
-    this.usage = { input_tokens: 0, output_tokens: 0 };
     this.turnStartedAt = 0;
   }
 

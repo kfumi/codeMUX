@@ -1307,19 +1307,19 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(footer?.className).toContain('group-hover/message-row:opacity-100');
   });
 
-  it('uses the refreshed session token snapshot only for the latest final assistant footer', () => {
+  it('does not show token usage on the latest footer after a context refresh', () => {
     render(<Harness sessionId="session-footer-snapshot" />);
 
     const earlierRow = screen.getByText('Earlier answer.').closest('[data-message-row]');
     const latestRow = screen.getByText('Latest answer.').closest('[data-message-row]');
 
-    expect(earlierRow?.textContent).toContain('10+20 token');
+    expect(earlierRow?.textContent).toContain('耗时 1.0s');
+    expect(earlierRow?.textContent).not.toContain('token');
     expect(earlierRow?.textContent).not.toContain('缓存命中');
 
-    expect(latestRow?.textContent).toContain('80+5 token');
-    expect(latestRow?.textContent).toContain('缓存命中 60%');
-    expect(latestRow?.textContent).not.toContain('30+40 token');
-    expect(latestRow?.textContent).not.toContain('缓存命中 25%');
+    expect(latestRow?.textContent).toContain('耗时 2.0s');
+    expect(latestRow?.textContent).not.toContain('token');
+    expect(latestRow?.textContent).not.toContain('缓存命中');
   });
 
   it('keeps historical footer visible before a compaction boundary', () => {
@@ -1328,7 +1328,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     const earlierRow = screen.getByText('Earlier answer.').closest('[data-message-row]');
 
     expect(earlierRow?.textContent).toContain('耗时 1.0s');
-    expect(earlierRow?.textContent).toContain('10+20 token');
+    expect(earlierRow?.textContent).not.toContain('token');
   });
 
   it('binds final footer stats to trailing text after a same-turn tool-only replay', async () => {
@@ -1455,10 +1455,10 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     await waitFor(() => {
       expect(within(finalMessageRow as HTMLElement).getByText(/1\.0s/)).toBeTruthy();
     });
-    expect(within(finalMessageRow as HTMLElement).getByText(/1\+2 token/)).toBeTruthy();
+    expect(within(finalMessageRow as HTMLElement).queryByText(/token/)).toBeNull();
     expect(toolGroupRow).toBeTruthy();
     expect(within(toolGroupRow as HTMLElement).queryByText(/1\.0s/)).toBeNull();
-    expect(within(toolGroupRow as HTMLElement).queryByText(/1\+2 token/)).toBeNull();
+    expect(within(toolGroupRow as HTMLElement).queryByText(/token/)).toBeNull();
   });
 
   it('renders the reasoning trigger like the native assistant-ui component', () => {

@@ -2076,7 +2076,6 @@ pub(crate) fn convert_codex_history_values_to_events(
 ) -> Vec<serde_json::Value> {
     #[derive(Default)]
     struct TurnInfo {
-        last_token_usage: Option<serde_json::Value>,
         model_context_window: Option<u64>,
         duration_ms: Option<u64>,
         last_assistant_msg_idx: Option<usize>,
@@ -2173,9 +2172,6 @@ pub(crate) fn convert_codex_history_values_to_events(
                     }
                     Some("token_count") => {
                         if let Some(info) = payload.get("info") {
-                            if let Some(usage) = info.get("last_token_usage") {
-                                current_turn.last_token_usage = Some(usage.clone());
-                            }
                             if let Some(ctx) =
                                 info.get("model_context_window").and_then(|v| v.as_u64())
                             {
@@ -2262,7 +2258,6 @@ pub(crate) fn convert_codex_history_values_to_events(
         let Some(outcome) = turn.terminal_outcome else {
             continue;
         };
-        let usage = turn.last_token_usage.as_ref();
         let mut result = serde_json::json!({
             "type": "turn_finished",
             "session_id": app_session_id,
@@ -2273,14 +2268,6 @@ pub(crate) fn convert_codex_history_values_to_events(
         });
         if let Some(reason) = &turn.terminal_reason {
             result["reason"] = serde_json::json!(reason);
-        }
-        if let Some(usage) = usage {
-            result["usage"] = serde_json::json!({
-                "input_tokens": usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                "cached_input_tokens": usage.get("cached_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                "output_tokens": usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                "reasoning_output_tokens": usage.get("reasoning_output_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
-            });
         }
         if let Some(ctx) = turn.model_context_window {
             result["model_context_window"] = serde_json::json!(ctx);
@@ -6040,7 +6027,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![0, 1, 2]
         );
-        assert_eq!(codemux_events[2]["usage"]["reasoning_output_tokens"], 1);
+        assert!(codemux_events[2].get("usage").is_none());
     }
 
     #[test]

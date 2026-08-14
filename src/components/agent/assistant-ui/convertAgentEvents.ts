@@ -551,7 +551,9 @@ function convertContentBlockToParts(
   }
 
   if (block.type === 'text') {
-    return typeof block.text === 'string' && block.text.length > 0
+    // OpenCode often finalizes a step with a "\n\n" text part. Keep it out of
+    // the thread so it cannot split consecutive thinking/tool process groups.
+    return typeof block.text === 'string' && block.text.trim().length > 0
       ? [{ type: 'text', text: block.text }]
       : [];
   }

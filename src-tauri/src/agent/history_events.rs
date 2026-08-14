@@ -1,4 +1,4 @@
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 
 /// Converts provider history records into the CodeMUX Event interface.
 ///
@@ -189,9 +189,6 @@ fn normalize_result(raw: Value) -> Vec<Value> {
     if let Some(duration) = raw.get("duration_ms").and_then(as_u64) {
         event["duration_ms"] = json!(duration);
     }
-    if let Some(usage) = normalize_usage(raw.get("usage")) {
-        event["usage"] = usage;
-    }
     copy_history_fields(&mut event, &raw);
     vec![event]
 }
@@ -270,28 +267,6 @@ fn content_blocks(content: Value) -> Vec<Value> {
         Value::String(text) if !text.is_empty() => vec![json!({ "type": "text", "text": text })],
         _ => Vec::new(),
     }
-}
-
-fn normalize_usage(value: Option<&Value>) -> Option<Value> {
-    let usage = value?.as_object()?;
-    let input = number(usage, &["input_tokens", "inputTokens"]);
-    let output = number(usage, &["output_tokens", "outputTokens"]);
-    let cached = number(
-        usage,
-        &[
-            "cached_input_tokens",
-            "cachedInputTokens",
-            "cache_read_input_tokens",
-            "cacheReadInputTokens",
-        ],
-    );
-    let reasoning = number(usage, &["reasoning_output_tokens", "reasoningOutputTokens"]);
-    Some(json!({
-        "input_tokens": input,
-        "output_tokens": output,
-        "cached_input_tokens": cached,
-        "reasoning_output_tokens": reasoning,
-    }))
 }
 
 fn normalize_envelope(event: &mut Value, app_session_id: &str, sequence: u64) {
@@ -388,12 +363,6 @@ fn first_string(value: &Value, keys: &[&str]) -> Option<String> {
         .find_map(|key| value.get(*key).and_then(Value::as_str))
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-}
-
-fn number(object: &Map<String, Value>, keys: &[&str]) -> u64 {
-    keys.iter()
-        .find_map(|key| object.get(*key).and_then(as_u64))
-        .unwrap_or(0)
 }
 
 fn as_u64(value: &Value) -> Option<u64> {
@@ -518,7 +487,6 @@ mod tests {
         assert_eq!(events[1]["type"], "turn_finished");
         assert_eq!(events[1]["outcome"], "failed");
         assert_eq!(events[1]["reason"], "upstream down");
-        assert_eq!(events[1]["usage"]["cached_input_tokens"], 2);
         for event in events {
             assert_eq!(event["session_id"], "app-1");
             assert_eq!(event["agent_session_id"], "provider-session-1");

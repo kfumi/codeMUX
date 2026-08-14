@@ -21,8 +21,6 @@ import type { OpenCodePermissionResponse } from './opencodePermissions.js';
 import type { OpenCodeSessionConfig, OpenCodeSessionMapping } from './types.js';
 import {
   getRuntimeFlavor,
-  normalizeClaudeResultEvent,
-  type ClaudeTokenUsage,
 } from './runtimeEvents.js';
 import { toClaudeTurnOutcome } from './claudeTurnOutcome.js';
 import { TurnEventNormalizer, type TurnOutcome, type TurnSourceEvent } from './turnEventNormalizer.js';
@@ -1009,7 +1007,6 @@ export class SessionRuntime {
     let compacting = false;
     let sawResult = false;
     let compactTimer: ReturnType<typeof setTimeout> | null = null;
-    let lastAssistantUsage: ClaudeTokenUsage | null = null;
 
     const clearCompactTimer = () => {
       if (compactTimer) {
@@ -1081,17 +1078,6 @@ export class SessionRuntime {
         if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
           compacting = false;
         }
-        if (msg.type === 'assistant') {
-          const assistant = result.value as any;
-          const usage = assistant?.message?.usage || assistant?.usage;
-          if (DEBUG_MESSAGE_LOGS) {
-            process.stderr.write(`[sidecar]   -> assistant usage: ${JSON.stringify(usage || 'NONE')}\n`);
-          }
-          const normalizedUsage = normalizeClaudeAssistantUsage(usage);
-          if (normalizedUsage) {
-            lastAssistantUsage = normalizedUsage;
-          }
-        }
         if (typeof appSessionId === 'string' && shouldCaptureClaudeSessionMapping(msg)) {
           const sdkSessionId = typeof msg.session_id === 'string' ? String(msg.session_id) : undefined;
           if (sdkSessionId && this.config?.agentSessionId !== sdkSessionId) {
@@ -1113,16 +1099,9 @@ export class SessionRuntime {
           continue;
         }
 
-        const eventToEmit = msg.type === 'result'
-          ? normalizeClaudeResultEvent(result.value as Record<string, unknown>, lastAssistantUsage)
-          : msg.type === 'system' && msg.subtype === 'compact_boundary'
+        const eventToEmit = msg.type === 'system' && msg.subtype === 'compact_boundary'
             ? { ...(result.value as Record<string, unknown>), type: 'system_event', event_id: msg.uuid ?? crypto.randomUUID() }
             : result.value;
-
-        if (msg.type === 'result') {
-          const resultEvent = eventToEmit as Record<string, unknown>;
-          process.stderr.write(`[sidecar]   -> result usage: ${JSON.stringify(resultEvent.usage || 'NONE')}, modelUsage=${JSON.stringify(resultEvent.modelUsage || 'NONE')}\n`);
-        }
 
         if (DEBUG_MESSAGE_LOGS) {
           const emitObj = eventToEmit as Record<string, unknown>;
@@ -1392,28 +1371,6 @@ export function buildUserMessageEvent(
 
 function normalizeReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | undefined {
   return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
-}
-
-function normalizeClaudeAssistantUsage(value: unknown): ClaudeTokenUsage | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return null;
-  }
-
-  const usage = value as Record<string, unknown>;
-  const normalized = {
-    input_tokens: readFiniteNumber(usage.input_tokens),
-    output_tokens: readFiniteNumber(usage.output_tokens),
-    cache_read_input_tokens: readFiniteNumber(usage.cache_read_input_tokens),
-    cache_creation_input_tokens: readFiniteNumber(usage.cache_creation_input_tokens),
-  };
-
-  return normalized.input_tokens > 0 || normalized.output_tokens > 0 || normalized.cache_read_input_tokens > 0 || normalized.cache_creation_input_tokens > 0
-    ? normalized
-    : null;
-}
-
-function readFiniteNumber(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 function normalizePlanMode(value: unknown): AgentPlanMode {

@@ -1832,7 +1832,6 @@ describe('agent store Codex history loading', () => {
     expect(events.some((event) => event.kind === 'result')).toBe(false);
     expect(useAgentStore.getState().turns[session.id]?.[0]).toMatchObject({
       status: 'completed',
-      usage: { inputTokens: 200, outputTokens: 40, cacheReadTokens: 60 },
     });
  
     const assistant = events.find((event) => event.kind === 'assistant');

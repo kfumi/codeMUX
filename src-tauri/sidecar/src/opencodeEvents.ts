@@ -3,7 +3,6 @@ import type { RuntimeEventContext } from './types.js';
 import { toCodeMuxStreamEvent } from './codeMuxProtocol.js';
 import {
   type AssistantContentBlock,
-  type OpenCodeTokenUsage,
 } from './runtimeEvents.js';
 
 export type CodeMuxEvent = Record<string, unknown>;
@@ -21,7 +20,6 @@ export type NextSectionKind = 'idle' | 'reasoning' | 'text';
 
 export interface OpenCodeEventContext extends RuntimeEventContext {
   durationMs?: number;
-  usage?: OpenCodeTokenUsage;
   seenEventIds?: ReadonlySet<string>;
   seenPayloadKeys?: ReadonlySet<string>;
   terminalSessionIds?: ReadonlySet<string>;
@@ -119,70 +117,6 @@ export function getOpenCodePermissionMetadata(
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
-export type OpenCodeUsageUpdate = {
-  usage: OpenCodeTokenUsage;
-  mode: 'snapshot' | 'step';
-};
-
-export function extractOpenCodeUsageUpdate(event: unknown): OpenCodeUsageUpdate | undefined {
-  const record = asRecord(event);
-  const properties = asRecord(record?.properties);
-  const part = asRecord(properties?.part);
-  const info = asRecord(properties?.info);
-  const partTokens = asRecord(part?.tokens);
-  const infoTokens = asRecord(info?.tokens);
-  const tokens = partTokens ?? infoTokens;
-  if (!tokens) return undefined;
-  const cache = asRecord(tokens.cache);
-  const input = readNumber(tokens.input);
-  const output = readNumber(tokens.output);
-  const total = readNumber(tokens.total);
-  const reasoning = readNumber(tokens.reasoning);
-  const cacheRead = readNumber(cache?.read);
-  const cacheWrite = readNumber(cache?.write);
-  if (input === undefined && output === undefined && reasoning === undefined && cacheRead === undefined && cacheWrite === undefined && total === undefined) return undefined;
-  // SDK message.updated info.tokens are cumulative snapshots; step-finish part.tokens are per-step deltas.
-  return {
-    mode: partTokens ? 'step' : 'snapshot',
-    usage: {
-      input_tokens: input ?? 0,
-      output_tokens: output ?? 0,
-      ...(total !== undefined ? { total_tokens: total } : {}),
-      ...(reasoning !== undefined ? { reasoning_output_tokens: reasoning } : {}),
-      ...(cacheRead !== undefined ? { cached_input_tokens: cacheRead } : {}),
-      ...(cacheWrite !== undefined ? { cache_write_input_tokens: cacheWrite } : {}),
-    },
-  };
-}
-
-export function extractOpenCodeUsage(event: unknown): OpenCodeTokenUsage | undefined {
-  return extractOpenCodeUsageUpdate(event)?.usage;
-}
-
-export function mergeOpenCodeUsage(previous: OpenCodeTokenUsage, next: OpenCodeTokenUsage, mode: 'snapshot' | 'step' = 'snapshot'): OpenCodeTokenUsage {
-  const mergeValue = (previousValue: number, nextValue: number): number => mode === 'step' ? previousValue + nextValue : Math.max(previousValue, nextValue);
-  const merged: OpenCodeTokenUsage = {
-    input_tokens: mergeValue(previous.input_tokens, next.input_tokens),
-    output_tokens: mergeValue(previous.output_tokens, next.output_tokens),
-  };
-  const optionalKeys: Array<keyof Pick<OpenCodeTokenUsage, 'cached_input_tokens' | 'cache_write_input_tokens' | 'cache_creation_input_tokens' | 'reasoning_output_tokens' | 'total_tokens'>> = [
-    'cached_input_tokens',
-    'cache_write_input_tokens',
-    'cache_creation_input_tokens',
-    'reasoning_output_tokens',
-    'total_tokens',
-  ];
-  for (const key of optionalKeys) {
-    const value = next[key];
-    const previousValue = previous[key];
-    if (value !== undefined || previousValue !== undefined) {
-      merged[key] = mergeValue(previousValue ?? 0, value ?? 0);
-    }
-  }
-  return merged;
-}
-
-
 export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): CodeMuxEvent[] {
   const identity = getOpenCodeEventIdentity(event, context.turnId);
   const payloadKey = identity ? undefined : getOpenCodePayloadKey(event);
@@ -226,7 +160,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
             }
             events.push(buildStreamEvent(sessionId, { type: 'content_block_stop', index: 0 }));
           }
-          if (text) {
+          if (hasVisibleContent(text)) {
             events.push(buildAssistantEnvelope(context, sessionId, [{
               type: partState.kind,
               ...(partState.kind === 'thinking' ? { thinking: text } : { text }),
@@ -245,7 +179,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
             events.push(buildStreamEvent(sessionId, { type: 'content_block_stop', index: partState.index }));
           }
           const text = readString(properties.delta) ?? readString(part.text) ?? '';
-          if (text) {
+          if (hasVisibleContent(text)) {
             events.push(buildAssistantEnvelope(context, sessionId, [{
               type: partState.kind,
               ...(partState.kind === 'thinking' ? { thinking: text } : { text }),
@@ -273,7 +207,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
             context.streamingParts.set(partId, { kind, index, started: false });
           }
           const text = readString(properties.delta) ?? readString(part.text) ?? '';
-          if (text) {
+          if (hasVisibleContent(text)) {
             events.push(buildAssistantEnvelope(context, sessionId, [{
               type: partType === 'reasoning' ? 'thinking' : 'text',
               ...(partType === 'reasoning' ? { thinking: text } : { text }),
@@ -656,18 +590,11 @@ function buildTurnFinishedEvent(
   sessionId?: string,
   reason?: string,
 ): CodeMuxEvent {
-  const usage = context.usage ?? emptyUsage();
   return {
     type: 'turn_finished',
     session_id: context.sessionId,
     outcome,
     ...(reason ? { reason } : {}),
-    usage: {
-      input_tokens: usage.input_tokens,
-      output_tokens: usage.output_tokens,
-      cached_input_tokens: usage.cached_input_tokens ?? 0,
-      reasoning_output_tokens: usage.reasoning_output_tokens ?? 0,
-    },
     duration_ms: context.durationMs ?? 0,
     event_id: context.eventIdFactory(),
     ...routingMetadata(context, sessionId),
@@ -746,10 +673,6 @@ function isTerminalSessionEvent(type: string): boolean {
   return type === 'session.idle' || type === 'session.error' || type === 'session.interrupted' || type === 'session.aborted' || type === 'server.disconnected' || type === 'server.error' || type === 'disconnect' || type === 'connection.error';
 }
 
-function emptyUsage(): OpenCodeTokenUsage {
-  return { input_tokens: 0, output_tokens: 0 };
-}
-
 function serializeToolValue(value: unknown): string {
   if (typeof value === 'string') return value;
   try {
@@ -797,6 +720,10 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function readString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+function hasVisibleContent(text: string): boolean {
+  return text.trim().length > 0;
 }
 
 function readNumber(value: unknown): number | undefined {

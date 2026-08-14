@@ -129,7 +129,7 @@ describe('history-file context usage view model', () => {
 });
 
 describe('message footer stats', () => {
-  it('maps Claude and Codex result stats back to every assistant turn', () => {
+  it('maps Claude and Codex result duration back to every assistant turn', () => {
     const events: AgentMessage[] = [
       {
         kind: 'user',
@@ -221,19 +221,9 @@ describe('message footer stats', () => {
     expect(buildAssistantResultStatsMap(events)).toEqual({
       1: {
         durationMs: 1_200,
-        numTurns: 1,
-        inputTokens: 352,
-        outputTokens: 152,
-        cacheReadTokens: 25_088,
-        cacheCreationTokens: 0,
       },
       4: {
         durationMs: 2_300,
-        numTurns: 1,
-        inputTokens: 154_933,
-        outputTokens: 1_128,
-        cacheReadTokens: 148_864,
-        cacheCreationTokens: 0,
       },
     });
   });

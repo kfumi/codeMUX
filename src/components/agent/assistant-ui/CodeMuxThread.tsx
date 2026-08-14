@@ -1715,27 +1715,11 @@ export function buildToolDurationMap(events: AgentMessage[]): Record<string, num
 function buildFooterStatsFromTurn(
   turn: ConversationTurn<AgentMessage>,
 ): MessageFooterStats | undefined {
-  if (turn.status === 'failed') {
+  if (turn.status === 'failed' || turn.status === 'running') {
     return undefined;
   }
 
-  if (turn.status === 'interrupted') {
-    return turn.durationMs !== undefined ? { durationMs: turn.durationMs } : undefined;
-  }
-
-  if (turn.status !== 'completed') {
-    return undefined;
-  }
-
-  const stats: MessageFooterStats = {
-    ...(turn.durationMs !== undefined ? { durationMs: turn.durationMs } : {}),
-    ...(turn.usage?.inputTokens !== undefined ? { inputTokens: turn.usage.inputTokens } : {}),
-    ...(turn.usage?.outputTokens !== undefined ? { outputTokens: turn.usage.outputTokens } : {}),
-    ...(turn.usage?.cacheReadTokens !== undefined ? { cacheReadTokens: turn.usage.cacheReadTokens } : {}),
-    ...(turn.usage?.cacheCreationTokens !== undefined ? { cacheCreationTokens: turn.usage.cacheCreationTokens } : {}),
-  };
-
-  return Object.keys(stats).length > 0 ? stats : undefined;
+  return turn.durationMs !== undefined ? { durationMs: turn.durationMs } : undefined;
 }
 
 /**
@@ -1760,8 +1744,6 @@ export function buildAssistantResultStatsMap(
 
     statsMap[turn.footerAnchorEventIndex] = {
       ...stats,
-      ...(turn.numTurns !== undefined ? { numTurns: turn.numTurns } : {}),
-      ...(stats.cacheCreationTokens === undefined ? { cacheCreationTokens: 0 } : {}),
     };
   }
 

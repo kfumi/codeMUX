@@ -85,29 +85,25 @@ export function ToolCodeDiff({ toolName, input }: ToolCodeDiffProps) {
 
   if (diff.kind === 'patch') {
     return (
-      <div className="px-3.5">
-        <PatchDiffViewer
-          files={diff.files}
-          className="max-h-90 overflow-auto rounded-md border border-border/45 bg-background/70 text-code"
-        />
-      </div>
+      <PatchDiffViewer
+        files={diff.files}
+        className="max-h-90 overflow-auto rounded-md border border-border/45 bg-background/70 text-code"
+      />
     );
   }
 
   return (
-    <div className="px-3.5">
-      <DiffViewer
-        oldFile={diff.oldFile}
-        newFile={diff.newFile}
-        oldFileName={diff.filePath}
-        newFileName={diff.filePath}
-        viewMode="unified"
-        showIcon={false}
-        showHunkHeaders={false}
-        showNoNewlineMarker={false}
-        className="max-h-90 overflow-auto border-border/45 text-code [--diff-add-bg:rgba(46,160,67,0.16)] [--diff-del-bg:rgba(248,81,73,0.16)]"
-      />
-    </div>
+    <DiffViewer
+      oldFile={diff.oldFile}
+      newFile={diff.newFile}
+      oldFileName={diff.filePath}
+      newFileName={diff.filePath}
+      viewMode="unified"
+      showIcon={false}
+      showHunkHeaders={false}
+      showNoNewlineMarker={false}
+      className="max-h-90 overflow-auto border-border/45 text-code [--diff-add-bg:rgba(46,160,67,0.16)] [--diff-del-bg:rgba(248,81,73,0.16)]"
+    />
   );
 }
 

@@ -77,11 +77,11 @@ mod tests {
         assert_eq!(events[1]["usage"]["input_tokens"], 3);
         assert_eq!(events[2]["type"], "result");
         assert_eq!(events[2]["subtype"], "success");
-        assert_eq!(events[2]["usage"]["cache_read_input_tokens"], 4);
+        assert!(events[2].get("usage").is_none());
     }
 
     #[test]
-    fn adds_success_result_event_after_opencode_assistant_for_footer_stats() {
+    fn adds_success_result_event_after_opencode_assistant() {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch(
             "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);\
@@ -145,13 +145,103 @@ mod tests {
         assert_eq!(events[2]["is_error"], false);
         assert_eq!(events[2]["duration_ms"], 600);
         assert_eq!(events[2]["timestamp"], "1970-01-01T00:00:02.600Z");
-        assert_eq!(events[2]["usage"]["input_tokens"], 3);
-        assert_eq!(events[2]["usage"]["output_tokens"], 2);
-        assert_eq!(events[2]["usage"]["cache_read_input_tokens"], 4);
-        assert_eq!(events[2]["last_token_usage"]["input_tokens"], 3);
-        assert_eq!(events[2]["last_token_usage"]["output_tokens"], 2);
-        assert_eq!(events[2]["last_token_usage"]["cached_input_tokens"], 4);
-        assert_eq!(events[2]["last_token_usage"]["total_tokens"], 5);
+        assert!(events[2].get("usage").is_none());
+        assert!(events[2].get("last_token_usage").is_none());
+    }
+
+    #[test]
+    fn keeps_one_success_result_for_a_multi_assistant_turn() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);\
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);",
+        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    "user-1",
+                    "session-1",
+                    1000_i64,
+                    1000_i64,
+                    r#"{"role":"user","time":{"created":1000}}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    "assistant-1",
+                    "session-1",
+                    2000_i64,
+                    2300_i64,
+                    r#"{"role":"assistant","tokens":{"input":5346,"output":126,"reasoning":5918,"cache":{"read":50432,"write":0}},"providerID":"openai","modelID":"model-1"}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    "assistant-2",
+                    "session-1",
+                    2400_i64,
+                    2800_i64,
+                    r#"{"role":"assistant","tokens":{"input":13348,"output":1591,"reasoning":0,"cache":{"read":48640,"write":0}},"providerID":"openai","modelID":"model-1"}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![
+                    "part-user",
+                    "user-1",
+                    "session-1",
+                    1001_i64,
+                    r#"{"type":"text","text":"hello"}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![
+                    "part-tool",
+                    "assistant-1",
+                    "session-1",
+                    2001_i64,
+                    r#"{"type":"tool","callID":"call-1","tool":"bash","state":{"status":"completed","input":{"command":"pwd"},"output":"ok"}}"#
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![
+                    "part-text",
+                    "assistant-2",
+                    "session-1",
+                    2402_i64,
+                    r#"{"type":"text","text":"answer"}"#
+                ],
+            )
+            .unwrap();
+
+        let events = load_opencode_events_from_connection(&connection, "session-1").unwrap();
+        let result_count = events
+            .iter()
+            .filter(|event| event.get("type").and_then(Value::as_str) == Some("result"))
+            .count();
+        let result = events
+            .iter()
+            .find(|event| event.get("type").and_then(Value::as_str) == Some("result"))
+            .expect("turn result should exist");
+
+        assert_eq!(result_count, 1);
+        assert_eq!(result["subtype"], "success");
+        assert_eq!(result["duration_ms"], 400);
     }
 
     #[test]
@@ -281,11 +371,8 @@ mod tests {
         assert_eq!(events[2]["subtype"], "success");
         assert_eq!(events[2]["is_error"], false);
         assert_eq!(events[2]["duration_ms"], 600);
-        assert_eq!(events[2]["usage"]["input_tokens"], 0);
-        assert_eq!(events[2]["usage"]["output_tokens"], 0);
-        assert_eq!(events[2]["usage"]["cache_read_input_tokens"], 0);
-        assert_eq!(events[2]["usage"]["cache_write_input_tokens"], 0);
-        assert_eq!(events[2]["last_token_usage"]["total_tokens"], 0);
+        assert!(events[2].get("usage").is_none());
+        assert!(events[2].get("last_token_usage").is_none());
     }
 
     #[test]
@@ -1216,12 +1303,6 @@ fn load_opencode_events_from_connection(
                     "duration_api_ms": 0,
                     "num_turns": 1,
                     "result": "error",
-                    "usage": {
-                        "input_tokens": 0,
-                        "output_tokens": 0,
-                        "cache_read_input_tokens": 0,
-                        "cache_write_input_tokens": 0,
-                    },
                     "timestamp": timestamp_string(time_created),
                 }));
                 continue;
@@ -1284,7 +1365,6 @@ fn load_opencode_events_from_connection(
                 session_id,
                 time_created,
                 time_updated,
-                &message,
             );
         }
     }
@@ -1310,43 +1390,9 @@ fn build_opencode_success_result_event(
     session_id: &str,
     time_created: i64,
     time_updated: i64,
-    message: &Value,
 ) -> Option<Value> {
-    let tokens = message.get("tokens");
-    let input_tokens = tokens
-        .and_then(|tokens| tokens.get("input"))
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let output_tokens = tokens
-        .and_then(|tokens| tokens.get("output"))
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let total_tokens_from_api = tokens
-        .and_then(|tokens| tokens.get("total"))
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let reasoning_output_tokens = tokens
-        .and_then(|tokens| tokens.get("reasoning"))
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let cached_input_tokens = tokens
-        .and_then(|tokens| tokens.get("cache"))
-        .and_then(|cache| cache.get("read"))
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let cache_write_input_tokens = tokens
-        .and_then(|tokens| tokens.get("cache"))
-        .and_then(|cache| cache.get("write"))
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let total_tokens = if total_tokens_from_api > 0 {
-        total_tokens_from_api
-    } else {
-        input_tokens.saturating_add(output_tokens)
-    };
-
     let duration_ms = (time_updated - time_created).max(0);
-    let mut result = serde_json::json!({
+    Some(serde_json::json!({
         "type": "result",
         "subtype": "success",
         "is_error": false,
@@ -1356,27 +1402,8 @@ fn build_opencode_success_result_event(
         "duration_api_ms": duration_ms,
         "num_turns": 1,
         "result": "ok",
-        "usage": {
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cache_read_input_tokens": cached_input_tokens,
-            "cache_write_input_tokens": cache_write_input_tokens,
-        },
-        "last_token_usage": {
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cached_input_tokens": cached_input_tokens,
-            "cache_write_input_tokens": cache_write_input_tokens,
-            "total_tokens": total_tokens,
-        },
         "timestamp": timestamp_string(time_updated),
-    });
-    if reasoning_output_tokens > 0 {
-        result["usage"]["reasoning_output_tokens"] = serde_json::json!(reasoning_output_tokens);
-        result["last_token_usage"]["reasoning_output_tokens"] =
-            serde_json::json!(reasoning_output_tokens);
-    }
-    Some(result)
+    }))
 }
 
 fn load_latest_opencode_token_usage_from_connection(

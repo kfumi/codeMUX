@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { getOpenCodeEventIdentity, getOpenCodePayloadKey, toCodeMuxEvent, type OpenCodeEventContext } from './opencodeEvents.js';
 
 function context(overrides: Partial<OpenCodeEventContext> = {}): OpenCodeEventContext {
-  return { agentId: 'agent-1', sessionId: 'codemux-session-1', agentSessionId: 'opencode-session-1', sequence: 7, eventIdFactory: () => 'test-event-id', durationMs: 123, usage: { input_tokens: 10, output_tokens: 4, reasoning_output_tokens: 2, cached_input_tokens: 3, cache_write_input_tokens: 1 }, ...overrides };
+  return { agentId: 'agent-1', sessionId: 'codemux-session-1', agentSessionId: 'opencode-session-1', sequence: 7, eventIdFactory: () => 'test-event-id', durationMs: 123, ...overrides };
 }
 
 describe('OpenCode event normalization', () => {
@@ -30,6 +30,21 @@ describe('OpenCode event normalization', () => {
 
     expect(toCodeMuxEvent(userMessageUpdated, context())).toEqual([]);
     expect(toCodeMuxEvent(userPartUpdated, context({ assistantMessageIds: new Set(), userMessageIds: new Set(['user-message-1']) }))).toEqual([]);
+  });
+  it('does not emit assistant text for whitespace-only OpenCode parts', () => {
+    const events = toCodeMuxEvent({
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: 'part-blank-1',
+          sessionID: 'opencode-session-1',
+          messageID: 'message-1',
+          type: 'text',
+          text: '\n\n',
+        },
+      },
+    }, context());
+    expect(events).toEqual([]);
   });
   it('converts tool running, completed, and error states', () => {
     const base = { id: 'tool-part-1', sessionID: 'opencode-session-1', messageID: 'message-1', type: 'tool', callID: 'call-1', tool: 'bash' };
@@ -88,11 +103,11 @@ describe('OpenCode event normalization', () => {
     expect(diff[0]).toMatchObject({ type: 'system_event', subtype: 'session_summary', diffs: [{ file: 'index.html', before: 'old\n', after: 'new\n' }] });
     expect(edited).toEqual([]);
   });
-  it('builds one unified turn outcome with protocol usage on session completion', () => {
+  it('builds one unified turn outcome on session completion', () => {
     const events = toCodeMuxEvent({ type: 'session.idle', properties: { sessionID: 'opencode-session-1' } }, context());
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ type: 'turn_finished', outcome: 'completed', agent_id: 'agent-1', session_id: 'codemux-session-1', agent_session_id: 'opencode-session-1', sequence: 7, usage: { input_tokens: 10, output_tokens: 4, cached_input_tokens: 3, reasoning_output_tokens: 2 }, duration_ms: 123, event_id: 'test-event-id' });
-    expect(events[0]).not.toHaveProperty('usage.cache_write_input_tokens');
+    expect(events[0]).toMatchObject({ type: 'turn_finished', outcome: 'completed', agent_id: 'agent-1', session_id: 'codemux-session-1', agent_session_id: 'opencode-session-1', sequence: 7, duration_ms: 123, event_id: 'test-event-id' });
+    expect(events[0]).not.toHaveProperty('usage');
   });
   it('silently ignores OpenCode heartbeat events', () => {
     expect(toCodeMuxEvent({ type: 'server.heartbeat', properties: {} }, context())).toEqual([]);

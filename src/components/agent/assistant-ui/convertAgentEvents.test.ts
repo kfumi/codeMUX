@@ -752,6 +752,178 @@ describe('convertAgentEventsToAssistantMessages', () => {
     expect(messages[1]?.content).toEqual([{ type: 'text', text: '架构已摸清。' }]);
   });
 
+  it('ignores whitespace-only text so tools stay in one process group', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-write-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-write-1', name: 'write', input: { path: 'repro.py' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-write-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-write-1', content: 'Wrote file successfully.' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-blank-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '\n\n' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-bash-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-bash-1', name: 'bash', input: { command: 'python repro.py' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-bash-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-bash-1', content: 'ok' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content.map((part) => part.type)).toEqual(['tool-call', 'tool-call']);
+    expect(messages[0]?.content.map((part) => part.type === 'tool-call' ? part.toolName : part.type)).toEqual([
+      'write',
+      'bash',
+    ]);
+  });
+
+  it('ignores whitespace-only text so trailing thinking joins the previous explore group', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-tool-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'src/App.tsx' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'tool_result',
+        data: {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'session-1',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'app' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-blank-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '\n\n' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-final-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: '先给结论。' },
+              { type: 'text', text: '探活和 opencode 打的不是同一条路。' },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.content.map((part) => part.type)).toEqual(['tool-call', 'reasoning']);
+    expect(messages[1]?.content).toEqual([{ type: 'text', text: '探活和 opencode 打的不是同一条路。' }]);
+  });
+
+  it('ignores whitespace-only text inside a mixed process event', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-mixed-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: '先写脚本' },
+              { type: 'text', text: '\n\n' },
+              { type: 'tool_use', id: 'tool-write-1', name: 'write', input: { path: 'repro.py' } },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content.map((part) => part.type)).toEqual(['reasoning', 'tool-call']);
+  });
+
   it('peels trailing thinking off a mixed thinking-and-text event into the previous process group', () => {
     const events: AgentMessage[] = [
       {

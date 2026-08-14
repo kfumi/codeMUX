@@ -2086,15 +2086,6 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
           logger.info('Agent query result received', {
             sessionId,
             isError: event.data?.is_error,
-            tokenUsage: event.data?.usage
-              ? {
-                  input: event.data.usage.input_tokens,
-                  output: event.data.usage.output_tokens,
-                  ...(event.data.usage as any).reasoning_output_tokens !== undefined
-                    ? { reasoning: (event.data.usage as any).reasoning_output_tokens }
-                    : {},
-                }
-              : undefined,
           });
           commitPendingSimulatedStream(sessionId, set);
         }
@@ -2673,8 +2664,6 @@ useAgentStore.subscribe((state, previousState) => {
   const sessionIds = new Set([
     ...Object.keys(state.events),
     ...Object.keys(previousState.events),
-    ...Object.keys(state.tokenUsageBySession),
-    ...Object.keys(previousState.tokenUsageBySession),
     ...Object.keys(state.isRunning),
     ...Object.keys(previousState.isRunning),
     ...Object.keys(state.forceStopped),
@@ -2685,25 +2674,16 @@ useAgentStore.subscribe((state, previousState) => {
   for (const sessionId of sessionIds) {
     if (
       state.events[sessionId] === previousState.events[sessionId]
-      && state.tokenUsageBySession[sessionId] === previousState.tokenUsageBySession[sessionId]
       && state.isRunning[sessionId] === previousState.isRunning[sessionId]
       && state.forceStopped[sessionId] === previousState.forceStopped[sessionId]
     ) {
       continue;
     }
 
-    const usage = state.tokenUsageBySession[sessionId];
     changedTurns[sessionId] = buildConversationTurns(state.events[sessionId] ?? [], {
       isRunning: state.isRunning[sessionId] ?? false,
       forceStopped: state.forceStopped[sessionId] ?? false,
       sessionId,
-      ...(usage ? {
-        latestUsage: {
-          inputTokens: usage.last.inputTokens,
-          outputTokens: usage.last.outputTokens,
-          cacheReadTokens: usage.last.cachedInputTokens,
-        },
-      } : {}),
     });
   }
 

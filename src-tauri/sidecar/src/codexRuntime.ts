@@ -2,14 +2,12 @@ import type {
   Thread,
   ThreadEvent,
   ThreadItem,
-  Usage,
 } from '@openai/codex-sdk';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import type { SidecarCommand, SidecarModelLimits } from './types.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
-import { readLatestCodexTotalTokenUsage } from './codexSessionUsage.js';
 import { CodexSessionEventTailer, type CodexSessionTailEvent } from './codexSessionEventTailer.js';
 import {
   buildCodexTodoListEvent,
@@ -107,11 +105,6 @@ type CodexSessionBootstrap = {
   modelLimits?: SidecarModelLimits;
 };
 
-type UsageBaseline = {
-  threadId: string;
-  usage: Usage;
-};
-
 /** Current active session ID — shared with the proxy for event routing. */
 export let activeSessionId = '';
 let activeCodexRuntime: CodexSessionRuntime | null = null;
@@ -174,62 +167,11 @@ export function interruptActiveTurn(): boolean {
   return false;
 }
 
-function emptyUsage(): Usage {
-  return {
-    input_tokens: 0,
-    cached_input_tokens: 0,
-    output_tokens: 0,
-    reasoning_output_tokens: 0,
-  };
-}
-
 function isCodexSdkOwnedToolName(name: string): boolean {
   return CODEX_SDK_OWNED_TOOL_NAMES.has(name)
     || name.startsWith('mcp__')
     || name.startsWith('list_mcp_')
     || name.startsWith('read_mcp_');
-}
-
-function normalizeUsage(usage: Partial<Usage>): Usage {
-  return {
-    input_tokens: readUsageNumber(usage.input_tokens),
-    cached_input_tokens: readUsageNumber(usage.cached_input_tokens),
-    output_tokens: readUsageNumber(usage.output_tokens),
-    reasoning_output_tokens: readUsageNumber(usage.reasoning_output_tokens),
-  };
-}
-
-function subtractUsage(current: Usage, previous: Usage): Usage {
-  return {
-    input_tokens: subtractUsageNumber(current.input_tokens, previous.input_tokens),
-    cached_input_tokens: subtractUsageNumber(current.cached_input_tokens, previous.cached_input_tokens),
-    output_tokens: subtractUsageNumber(current.output_tokens, previous.output_tokens),
-    reasoning_output_tokens: subtractUsageNumber(current.reasoning_output_tokens, previous.reasoning_output_tokens),
-  };
-}
-
-function subtractUsageNumber(current: number, previous: number): number {
-  return Math.max(0, readUsageNumber(current) - readUsageNumber(previous));
-}
-
-function readUsageNumber(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-}
-
-function formatUsageForDebug(usage: Partial<Usage> | null): string {
-  if (!usage) {
-    return 'null';
-  }
-
-  const normalized = normalizeUsage(usage);
-  const totalTokens = normalized.input_tokens + normalized.output_tokens;
-  return JSON.stringify({
-    input_tokens: normalized.input_tokens,
-    cached_input_tokens: normalized.cached_input_tokens,
-    output_tokens: normalized.output_tokens,
-    reasoning_output_tokens: normalized.reasoning_output_tokens,
-    total_tokens: totalTokens,
-  });
 }
 
 export class CodexSessionRuntime {
@@ -247,7 +189,6 @@ export class CodexSessionRuntime {
   private blockedPlanMutationItemIds = new Set<string>();
   private activeCompactItemIds = new Set<string>();
   private emittedCompactItemIds = new Set<string>();
-  private previousTotalUsage: UsageBaseline | null = null;
   private turnEventNormalizer: CodexTurnEventNormalizer | null = null;
   /** 动态加载的 Codex SDK 模块（仅从托管 Runtime 加载）。 */
   private codexSdk: CodexSdkModule | null = null;
@@ -404,9 +345,6 @@ export class CodexSessionRuntime {
     this.thread = requestedConfig.agentSessionId
       ? this.client.resumeThread(requestedConfig.agentSessionId, this.threadOptions())
       : this.client.startThread(this.threadOptions());
-    this.previousTotalUsage = requestedConfig.agentSessionId
-      ? await this.readRestoredTotalUsageBaseline(requestedConfig.agentSessionId)
-      : null;
 
     process.stderr.write(
       `[codex] Session ensured via SDK: session_id=${cmd.sessionId || 'none'} cwd=${cwd} thread=${requestedConfig.agentSessionId || 'new'}\n`,
@@ -496,15 +434,12 @@ export class CodexSessionRuntime {
     const sessionId = this.config.sessionId || '';
     const model = this.config.model || 'o4-mini';
     const startedAt = Date.now();
-    let usage: Usage = emptyUsage();
-    let usageSeen = false;
     let turnCompleted = false;
     let turnFailed = false;
     let failureEmitted = false;
     let pendingStreamError: string | null = null;
     let retryingWithoutImages = false;
     let completedAssistantMessageSeen = false;
-    const completedTurnUsages: Usage[] = [];
 
     this.abortController = new AbortController();
     activeAbortController = this.abortController;
@@ -592,13 +527,6 @@ export class CodexSessionRuntime {
           this.turnIdleGuard?.reset();
 
           if (event.type === 'turn.completed') {
-            usage = event.usage;
-            const normalizedUsage = normalizeUsage(event.usage);
-            completedTurnUsages.push(normalizedUsage);
-            process.stderr.write(
-              `[codex][usage] turn.completed session=${sessionId || 'none'} thread=${this.thread.id ?? this.config.agentSessionId ?? 'unknown'} index=${completedTurnUsages.length} usage=${formatUsageForDebug(normalizedUsage)}\n`,
-            );
-            usageSeen = true;
             turnCompleted = true;
             // Codex marks turn.completed as terminal. Some compatible
             // providers leave the SSE connection open after that event, so
@@ -648,18 +576,9 @@ export class CodexSessionRuntime {
         emitFailure(pendingStreamError);
       }
 
-      const finalUsage = usageSeen ? usage : emptyUsage();
       if (!retryingWithoutImages && !this.abortController?.signal.aborted && turnCompleted && !turnFailed) {
-        const threadId = this.thread.id ?? this.config.agentSessionId ?? sessionId;
-        const liveUsage = this.calculateLiveTurnUsage(threadId, completedTurnUsages, finalUsage);
         this.emitTurnOutcome({
           outcome: 'completed',
-          usage: {
-            input_tokens: liveUsage.input_tokens,
-            output_tokens: liveUsage.output_tokens,
-            cached_input_tokens: liveUsage.cached_input_tokens,
-            reasoning_output_tokens: liveUsage.reasoning_output_tokens,
-          },
           durationMs: Date.now() - startedAt,
         });
       } else if (!retryingWithoutImages && this.idleTimedOut) {
@@ -838,7 +757,6 @@ export class CodexSessionRuntime {
             agentSessionId: event.thread_id,
           };
           this.configFingerprint = JSON.stringify(this.config);
-          this.previousTotalUsage = null;
         }
 
         process.stderr.write(
@@ -889,42 +807,6 @@ export class CodexSessionRuntime {
         return;
       }
     }
-  }
-
-  private async readRestoredTotalUsageBaseline(threadId: string): Promise<UsageBaseline | null> {
-    const usage = await readLatestCodexTotalTokenUsage(threadId).catch((error) => {
-      process.stderr.write(`[codex] Failed to read restored session total_token_usage: ${String(error)}\n`);
-      return null;
-    });
-
-    process.stderr.write(
-      `[codex][usage] restored baseline thread=${threadId} usage=${formatUsageForDebug(usage)}\n`,
-    );
-    return usage ? { threadId, usage: normalizeUsage(usage) } : null;
-  }
-
-  private calculateLiveTurnUsage(
-    threadId: string,
-    completedTurnUsages: Usage[],
-    fallbackUsage: Usage,
-  ): Usage {
-    const current = normalizeUsage(completedTurnUsages.at(-1) ?? fallbackUsage);
-    const previousSource = completedTurnUsages.length >= 2
-      ? 'stream_previous_turn_completed'
-      : this.previousTotalUsage?.threadId === threadId
-        ? 'stored_previous_total'
-        : 'none';
-    const previous = completedTurnUsages.length >= 2
-      ? normalizeUsage(completedTurnUsages[completedTurnUsages.length - 2])
-      : this.previousTotalUsage?.threadId === threadId
-        ? this.previousTotalUsage.usage
-        : null;
-    const turnUsage = previous ? subtractUsage(current, previous) : current;
-    process.stderr.write(
-      `[codex][usage] live calculation thread=${threadId} completed_events=${completedTurnUsages.length} previous_source=${previousSource} current=${formatUsageForDebug(current)} previous=${formatUsageForDebug(previous)} delta=${formatUsageForDebug(turnUsage)}\n`,
-    );
-    this.previousTotalUsage = { threadId, usage: current };
-    return turnUsage;
   }
 
   private async syncModelCatalog(

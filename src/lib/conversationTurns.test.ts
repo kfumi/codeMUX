@@ -135,7 +135,6 @@ describe('buildConversationTurns', () => {
     ], { isRunning: false });
 
     expect(turn?.status).toBe('interrupted');
-    expect(turn?.usage).toBeUndefined();
   });
 
   it('does not let a tool error override a later successful result', () => {
@@ -148,7 +147,6 @@ describe('buildConversationTurns', () => {
 
     expect(turn?.status).toBe('completed');
     expect(turn?.termination?.kind).toBe('completed');
-    expect(turn?.usage).toEqual({ inputTokens: 100, outputTokens: 20 });
   });
 
   it('completes after a tool error when the assistant ends the turn', () => {
@@ -165,7 +163,6 @@ describe('buildConversationTurns', () => {
     expect(turn).toMatchObject({
       status: 'completed',
       pendingToolIds: [],
-      usage: { inputTokens: 99846, outputTokens: 18368 },
       footerAnchorEventIndex: 3,
     });
   });
