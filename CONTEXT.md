@@ -93,6 +93,10 @@ _Avoid_: OCR 结果, caption, system prompt
 按 Attachment 类型执行 Enrichment 的处理单元。每种类型（如 image、pdf）对应一个 Processor，由 Sidecar 内的 Registry 按类型分发。首版仅实现 image Processor。
 _Avoid_: enricher, handler, adapter（当指 Enrichment 处理时）
 
+### Reasoning Effort
+会话级思考强度的规范值：关闭、低、中、高、极高、最高。发送时由各协议映射为自身参数，而不是 UI 选项的逐字透传。
+_Avoid_: thinking mode, reasoning_effort（当指 UI 档位时）
+
 ## Preferred Terms
 
 
@@ -107,6 +111,7 @@ _Avoid_: enricher, handler, adapter（当指 Enrichment 处理时）
 | Enrichment Provider / enrichment 供应商 | vision model, fallback model |
 | Attachment Processor / 附件处理器 | enricher, handler |
 | Enriched Context Block / enriched 上下文块 | OCR 结果, caption |
+| Reasoning Effort / 思考强度 | thinking mode（当指会话档位时） |
 
 ## Notes
 

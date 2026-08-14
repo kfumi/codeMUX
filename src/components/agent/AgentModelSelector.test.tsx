@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { useAui } from '@assistant-ui/react';
 import { useAgentModels } from '../../hooks/useAgentModels';
@@ -56,6 +56,11 @@ vi.mock('@/components/model-selector', () => ({
       <button type="button" data-testid="selector-trigger" disabled={disabled}>
         {children ?? 'selector'}
       </button>
+    ),
+    Value: ({ hideName }: { hideName?: boolean }) => (
+      <span data-testid="selector-value" data-hide-name={hideName ? 'true' : 'false'}>
+        selector-value
+      </span>
     ),
     Content: ({ children }: { children?: React.ReactNode }) => (
       <div data-testid="selector-content">{children}</div>
@@ -122,6 +127,10 @@ const groupedModels = [
 ];
 
 describe('AgentModelSelector', () => {
+  beforeAll(() => {
+    Element.prototype.scrollIntoView = () => {};
+  });
+
   afterEach(() => {
     document.body.replaceChildren();
     vi.clearAllMocks();
@@ -138,7 +147,7 @@ describe('AgentModelSelector', () => {
         activeProviderId={null}
         value="gpt-5"
         onChange={vi.fn()}
-        reasoningEffort="medium"
+        reasoningEffort="high"
         onReasoningEffortChange={vi.fn()}
         disabled={false}
       />,
@@ -158,12 +167,14 @@ describe('AgentModelSelector', () => {
         activeProviderId="provider-1"
         value="gpt-5"
         onChange={vi.fn()}
-        reasoningEffort="medium"
+        reasoningEffort="high"
         onReasoningEffortChange={vi.fn()}
       />,
     );
 
     expect(screen.getByTestId('selector-search')).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: '思考强度' })).toBeTruthy();
+    expect(screen.queryByTestId('selector-effort')).toBeNull();
     expect(screen.getByRole('button', { name: '全部' })).toBeTruthy();
     expect(screen.getByRole('button', { name: /深度求索/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /OpenAI/ })).toBeTruthy();
@@ -189,12 +200,32 @@ describe('AgentModelSelector', () => {
         activeProviderId="provider-1"
         value="gpt-5"
         onChange={onChange}
-        reasoningEffort="medium"
+        reasoningEffort="high"
         onReasoningEffortChange={vi.fn()}
       />,
     );
 
     fireEvent.click(screen.getByTestId('choose-snapshot'));
     expect(onChange).toHaveBeenCalledWith('snapshot-only-model', 'provider-2');
+  });
+
+  it('hides the model name in compact toolbars', () => {
+    mockedUseAui.mockReturnValue({ modelContext: () => ({ register: vi.fn() }) } as never);
+    mockedUseAgentModels.mockReturnValue({ models: groupedModels, isLoading: false });
+
+    render(
+      <AgentModelSelector
+        agentKind="codex"
+        providers={sampleProviders}
+        activeProviderId="provider-1"
+        value="gpt-5"
+        onChange={vi.fn()}
+        reasoningEffort="high"
+        onReasoningEffortChange={vi.fn()}
+        compact
+      />,
+    );
+
+    expect(screen.getByTestId('selector-value').getAttribute('data-hide-name')).toBe('true');
   });
 });

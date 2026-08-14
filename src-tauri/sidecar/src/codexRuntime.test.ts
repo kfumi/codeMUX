@@ -408,6 +408,27 @@ describe('CodexSessionRuntime', () => {
     });
   });
 
+  it('maps Codex max effort to xhigh', () => {
+    const runtime = new CodexSessionRuntime();
+    (runtime as unknown as {
+      config: {
+        sessionId: string;
+        cwd: string;
+        model: string;
+        reasoningEffort: string;
+      };
+    }).config = {
+      sessionId: 'session-1',
+      cwd: 'D:/repo',
+      model: 'gpt-5.5',
+      reasoningEffort: 'max',
+    };
+
+    const options = (runtime as unknown as { threadOptions: () => Record<string, unknown> }).threadOptions();
+
+    expect(options.modelReasoningEffort).toBe('xhigh');
+  });
+
   it('uses read-only Codex thread options when plan mode is active', () => {
     const runtime = new CodexSessionRuntime();
     (runtime as unknown as {

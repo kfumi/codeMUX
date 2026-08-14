@@ -1405,7 +1405,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
       sessionId,
       cwd,
       displayModel: modelForVision || 'default',
-      reasoningEffort: reasoningEffort || 'medium',
+      reasoningEffort: reasoningEffort || 'high',
       promptLength: prompt.length,
     });
     // Clear force-stopped flag when starting a new query

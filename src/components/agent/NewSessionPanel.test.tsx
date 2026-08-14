@@ -156,7 +156,7 @@ describe('NewSessionPanel', () => {
       selectedAgentKind: 'claude_code',
       selectedModel: null,
       selectedProviderId: null,
-      selectedReasoningEffort: 'medium',
+      selectedReasoningEffort: 'high',
       selectedPermissionConfig: { kind: 'claude_code', permissionMode: 'default' },
       selectedPlanMode: 'off',
       draftProjectId: null,

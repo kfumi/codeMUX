@@ -20,6 +20,7 @@ import { shouldUseCodexChatCompatProxy } from './sessionRuntimeHelpers.js';
 import { proxyManager } from './proxyManager.js';
 import { emit } from './streamEventBatcher.js';
 import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
+import { mapToCodexEffort, normalizeReasoningEffort, type ReasoningEffort } from './reasoningEffort.js';
 import {
   buildCodexInputEntries,
   cleanupTempImageFiles,
@@ -94,7 +95,7 @@ type CodexSessionBootstrap = {
   runtimeBaseUrl?: string;
   usesCompatProxy?: boolean;
   model?: string;
-  reasoningEffort?: string;
+  reasoningEffort?: ReasoningEffort;
   codexNeedsProxy?: boolean;
   permissionConfig?: SidecarPermissionConfig;
   planMode?: AgentPlanMode;
@@ -216,7 +217,7 @@ export class CodexSessionRuntime {
       apiKey: cmd.apiKey,
       upstreamBaseUrl: cmd.baseUrl,
       model: cmd.model,
-      reasoningEffort: normalizeCodexReasoningEffort(cmd.reasoningEffort),
+      reasoningEffort: normalizeReasoningEffort(cmd.reasoningEffort),
       codexNeedsProxy: cmd.codexNeedsProxy,
       permissionConfig: cmd.permissionConfig,
       planMode: normalizeCodexPlanMode(cmd.planMode),
@@ -711,7 +712,9 @@ export class CodexSessionRuntime {
       sandboxMode: permissionOptions.sandboxMode,
       approvalPolicy: permissionOptions.approvalPolicy,
       networkAccessEnabled: permissionOptions.networkAccessEnabled,
-      ...(this.config.reasoningEffort ? { modelReasoningEffort: this.config.reasoningEffort as any } : {}),
+      ...(this.config.reasoningEffort
+        ? { modelReasoningEffort: mapToCodexEffort(this.config.reasoningEffort) as any }
+        : {}),
     };
   }
 
@@ -1247,9 +1250,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function normalizeCodexReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | undefined {
-  return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
-}
 
 function normalizeCodexPlanMode(value: unknown): AgentPlanMode | undefined {
   if (value === 'on' || value === 'off') {

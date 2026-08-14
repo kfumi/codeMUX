@@ -28,6 +28,7 @@ import { proxyManager } from './proxyManager.js';
 import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
 import { emit } from './streamEventBatcher.js';
 import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
+import { mapToClaudeEffort, normalizeReasoningEffort, type ReasoningEffort } from './reasoningEffort.js';
 import { buildClaudePermissionOptions, type AgentPlanMode, type SidecarPermissionConfig } from './agentPermissions.js';
 import { getClaudeApprovalTitle } from './claudeApprovalPrompt.js';
 import {
@@ -102,7 +103,7 @@ type SessionBootstrap = {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
-  reasoningEffort?: string;
+  reasoningEffort?: ReasoningEffort;
   skills?: string[];
   settingSources?: string[];
   permissionConfig?: SidecarPermissionConfig;
@@ -991,8 +992,11 @@ export class SessionRuntime {
     if (config.model) {
       options.model = config.model;
     }
-    if (config.reasoningEffort) {
-      options.effort = config.reasoningEffort;
+    const claudeEffort = config.reasoningEffort
+      ? mapToClaudeEffort(config.reasoningEffort)
+      : undefined;
+    if (claudeEffort) {
+      options.effort = claudeEffort;
     }
     if (claudeSessionId) {
       options.resume = claudeSessionId;
@@ -1369,9 +1373,6 @@ export function buildUserMessageEvent(
   };
 }
 
-function normalizeReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | undefined {
-  return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
-}
 
 function normalizePlanMode(value: unknown): AgentPlanMode {
   return value === 'on' ? 'on' : 'off';

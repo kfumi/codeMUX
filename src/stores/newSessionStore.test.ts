@@ -8,7 +8,7 @@ describe('new session store', () => {
       selectedAgentKind: 'claude_code',
       selectedModel: null,
       selectedProviderId: null,
-      selectedReasoningEffort: 'medium',
+      selectedReasoningEffort: 'high',
       draftProjectId: null,
       draftRevision: 0,
       isDraftOpen: false,
@@ -34,7 +34,7 @@ describe('new session store', () => {
 
     useNewSessionStore.getState().openDraft();
     expect(useNewSessionStore.getState().selectedModel).toBeNull();
-    expect(useNewSessionStore.getState().selectedReasoningEffort).toBe('medium');
+    expect(useNewSessionStore.getState().selectedReasoningEffort).toBe('high');
   });
 
   it('opens a global draft without a project', () => {

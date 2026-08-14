@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { convertResponsesToChatRequest } from './codexRequestTransform.js';
 import { CodexHistoryStore } from './codexHistory.js';
-import { inferReasoningConfig } from './codexReasoning.js';
 
 describe('convertResponsesToChatRequest', () => {
   const history = new CodexHistoryStore();
@@ -11,7 +10,7 @@ describe('convertResponsesToChatRequest', () => {
       model: 'mimo-v2.5-pro',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
       stream: false,
-    }, history, null);
+    }, history);
     expect(result.messages).toEqual([{ role: 'user', content: 'Hello' }]);
   });
 
@@ -21,7 +20,7 @@ describe('convertResponsesToChatRequest', () => {
       instructions: 'You are helpful.',
       input: [{ role: 'user', content: 'Hi' }],
       stream: false,
-    }, history, null);
+    }, history);
     expect(result.messages[0]).toEqual({ role: 'system', content: 'You are helpful.' });
   });
 
@@ -33,7 +32,7 @@ describe('convertResponsesToChatRequest', () => {
         { type: 'function_call_output', call_id: 'call_1', output: 'content' },
       ],
       stream: false,
-    }, history, null);
+    }, history);
     expect(result.messages[0]).toEqual({
       role: 'assistant',
       tool_calls: [{
@@ -64,7 +63,7 @@ describe('convertResponsesToChatRequest', () => {
         { type: 'function_call_output', call_id: 'call_context7', output: 'result' },
       ],
       stream: false,
-    }, history, null);
+    }, history);
 
     expect(result.messages[0]).toMatchObject({
       role: 'assistant',
@@ -91,7 +90,7 @@ describe('convertResponsesToChatRequest', () => {
         { type: 'function_call_output', call_id: 'call_2', output: 'b' },
       ],
       stream: false,
-    }, history, null);
+    }, history);
     expect(result.messages[0].tool_calls).toHaveLength(2);
   });
 
@@ -100,7 +99,7 @@ describe('convertResponsesToChatRequest', () => {
       model: 'mimo-v2.5-pro',
       input: [{ role: 'user', content: 'Hi' }],
       stream: true,
-    }, history, null);
+    }, history);
     expect(result.stream_options).toEqual({ include_usage: true });
   });
 
@@ -109,7 +108,7 @@ describe('convertResponsesToChatRequest', () => {
       model: 'mimo-v2.5-pro',
       input: [{ role: 'user', content: 'Hi' }],
       stream: false,
-    }, history, null);
+    }, history);
     expect(result.stream_options).toBeUndefined();
   });
 
@@ -119,7 +118,7 @@ describe('convertResponsesToChatRequest', () => {
       input: [{ role: 'user', content: 'Hi' }],
       max_output_tokens: 1000,
       stream: false,
-    }, history, null);
+    }, history);
     expect(result.max_completion_tokens).toBe(1000);
     expect(result.max_tokens).toBeUndefined();
   });
@@ -130,7 +129,7 @@ describe('convertResponsesToChatRequest', () => {
       input: [{ role: 'user', content: 'Hi' }],
       max_output_tokens: 1000,
       stream: false,
-    }, history, null);
+    }, history);
     expect(result.max_tokens).toBe(1000);
     expect(result.max_completion_tokens).toBeUndefined();
   });
@@ -141,7 +140,7 @@ describe('convertResponsesToChatRequest', () => {
       input: [{ role: 'user', content: 'Hi' }],
       tool_choice: { type: 'function', name: 'read_file' },
       stream: false,
-    }, history, null);
+    }, history);
     expect(result.tool_choice).toEqual({
       type: 'function',
       function: { name: 'read_file' },
@@ -154,18 +153,19 @@ describe('convertResponsesToChatRequest', () => {
       input: [{ role: 'user', content: 'Hi' }],
       tool_choice: 'auto',
       stream: false,
-    }, history, null);
+    }, history);
     expect(result.tool_choice).toBe('auto');
   });
 
-  it('injects reasoning options for MiMo model', () => {
-    const config = inferReasoningConfig('mimo-v2.5-pro', '', '');
+  it('maps Responses reasoning effort onto Chat Completions reasoning_effort', () => {
     const result = convertResponsesToChatRequest({
       model: 'mimo-v2.5-pro',
       input: [{ role: 'user', content: 'Hi' }],
+      reasoning: { effort: 'high' },
       stream: true,
-    }, history, config);
-    expect(result.thinking).toEqual({ type: 'enabled' });
+    }, history);
+    expect(result.reasoning_effort).toBe('high');
+    expect(result.thinking).toBeUndefined();
   });
 
   it('converts tools from Responses format to Chat format', () => {
@@ -179,7 +179,7 @@ describe('convertResponsesToChatRequest', () => {
         parameters: { type: 'object', properties: { path: { type: 'string' } } },
       }],
       stream: false,
-    }, history, null);
+    }, history);
     expect(result.tools).toEqual([{
       type: 'function',
       function: {
@@ -219,7 +219,7 @@ describe('convertResponsesToChatRequest', () => {
         },
       ] as any,
       stream: false,
-    }, history, null);
+    }, history);
 
     expect(result.tools).toEqual([
       {

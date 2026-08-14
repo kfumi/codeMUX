@@ -38,9 +38,12 @@ export type ModelSelectorEffortOption = {
 };
 
 export const DEFAULT_EFFORT_OPTIONS: readonly ModelSelectorEffortOption[] = [
+  { id: "none", name: "关闭" },
   { id: "low", name: "低" },
   { id: "medium", name: "中" },
   { id: "high", name: "高" },
+  { id: "xhigh", name: "极高" },
+  { id: "max", name: "最高" },
 ];
 
 export type ModelOption = {
@@ -242,14 +245,14 @@ function ModelSelectorRoot({
 }
 
 export const modelSelectorTriggerVariants = cva(
-  "focus-visible:ring-ring/50 flex w-fit items-center justify-between gap-2 overflow-hidden rounded-md text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+  "flex w-fit cursor-pointer items-center justify-between gap-2 overflow-hidden rounded-md text-sm whitespace-nowrap transition-colors outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
   {
     variants: {
       variant: {
         outline:
-          "border-input hover:bg-neutral-100 hover:text-neutral-900 border bg-transparent dark:hover:bg-neutral-800 dark:hover:text-neutral-100",
-        ghost: "hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100",
-        muted: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+          "border-input hover:bg-neutral-100 hover:text-neutral-900 border bg-transparent focus-visible:ring-ring/50 focus-visible:ring-2 dark:hover:bg-neutral-800 dark:hover:text-neutral-100",
+        ghost: "hover:bg-neutral-100 hover:text-neutral-900 focus-visible:ring-0 dark:hover:bg-neutral-800 dark:hover:text-neutral-100",
+        muted: "bg-secondary text-secondary-foreground hover:bg-secondary/80 focus-visible:ring-ring/50 focus-visible:ring-2",
       },
       size: {
         default: "h-9 px-3 py-2",
@@ -309,6 +312,8 @@ export type ModelSelectorValueProps = {
   placeholder?: ReactNode;
   /** Show the active effort level next to the model name. */
   showEffort?: boolean;
+  /** Hide the model name and keep the brand icon, used when the toolbar is narrow. */
+  hideName?: boolean;
   className?: string;
 };
 
@@ -334,6 +339,7 @@ function ModelIcon({
 function ModelSelectorValue({
   placeholder = "选择模型",
   showEffort = true,
+  hideName = false,
   className,
 }: ModelSelectorValueProps) {
   const { selectedModel, efforts, effort } = useModelSelectorContext();
@@ -360,7 +366,15 @@ function ModelSelectorValue({
       className={cn("flex min-w-0 items-center gap-2", className)}
     >
       {selectedModel.icon && <ModelIcon>{selectedModel.icon}</ModelIcon>}
-      <span className="truncate font-medium">{selectedModel.name}</span>
+      <span
+        data-slot="model-selector-name"
+        className={cn(
+          "truncate font-medium",
+          hideName ? "hidden" : "@max-[640px]/composer-bar:hidden",
+        )}
+      >
+        {selectedModel.name}
+      </span>
       {effortName && (
         <span className="text-muted-foreground min-w-7.5 truncate text-center">
           {effortName}
@@ -575,7 +589,7 @@ function ModelSelectorItem({
         onSelect?.(selectedValue);
       }}
       className={cn(
-        "relative items-start gap-2 rounded-lg py-2 ps-3 pe-9 text-ui-compact [&_svg:not([class*='size-'])]:size-3.5",
+        "relative cursor-pointer items-start gap-2 rounded-lg py-2 ps-3 pe-9 text-ui-compact [&_svg:not([class*='size-'])]:size-3.5",
         "data-[selected=true]:!bg-neutral-200 data-[selected=true]:!text-neutral-800 dark:data-[selected=true]:!bg-neutral-700 dark:data-[selected=true]:!text-neutral-100",
         className,
       )}

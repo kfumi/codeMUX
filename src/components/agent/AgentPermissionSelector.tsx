@@ -149,7 +149,7 @@ export function AgentPermissionSelector({
                   aria-expanded={open}
                   aria-label={selected.label}
                   className={cn(
-                    'inline-flex h-7 items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-200 hover:bg-muted/58 hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
+                    'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-200 outline-none hover:bg-muted/58 hover:text-foreground focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
                     compact ? 'max-w-9' : 'max-w-40',
                     selected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
                   )}
@@ -181,7 +181,7 @@ export function AgentPermissionSelector({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => selectMode(option.mode)}
                 className={cn(
-                  'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/56',
+                  'flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/56',
                   active && 'bg-muted/64',
                 )}
               >

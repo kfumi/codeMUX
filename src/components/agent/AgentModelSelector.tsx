@@ -3,6 +3,7 @@ import { useAui } from '@assistant-ui/react';
 
 import { ProviderBrandIcon } from '@/components/settings/ProviderBrandIcon';
 import { ModelSelector, type ModelOption } from '@/components/model-selector';
+import { ReasoningEffortSelector } from './ReasoningEffortSelector';
 import { cn } from '@/lib/utils';
 import {
   encodeModelSelectorValue,
@@ -172,7 +173,8 @@ export function AgentModelSelector({
   }, [modelOptions, models, providerFilter]);
 
   return (
-    <ModelSelector.Root
+    <div className="flex min-w-0 items-center gap-1.5">
+      <ModelSelector.Root
       models={modelOptions}
       value={selectorValue}
       onValueChange={(nextValue) => {
@@ -188,7 +190,10 @@ export function AgentModelSelector({
         variant="ghost"
         size={compact ? 'sm' : 'default'}
         disabled={disabled || isLoading || models.length === 0}
-      />
+        className="min-w-0 max-w-full"
+      >
+        <ModelSelector.Value showEffort={false} hideName={compact} />
+      </ModelSelector.Trigger>
       <ModelSelector.Content className="w-80" searchable>
         <ModelSelector.Search placeholder="搜索模型..." />
 
@@ -243,9 +248,14 @@ export function AgentModelSelector({
             </ModelSelector.Group>
           ))}
         </ModelSelector.List>
-
-        <ModelSelector.Effort label="思考强度" />
       </ModelSelector.Content>
-    </ModelSelector.Root>
+      </ModelSelector.Root>
+      <ReasoningEffortSelector
+        value={reasoningEffort}
+        onChange={onReasoningEffortChange}
+        disabled={disabled || isLoading || models.length === 0}
+        compact={compact}
+      />
+    </div>
   );
 }

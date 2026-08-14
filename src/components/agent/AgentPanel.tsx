@@ -7,6 +7,7 @@ import { getActiveModelProvider, isProviderUsable } from '../../lib/modelProvide
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
 import { formatCommandDisplay, renderCommandInput } from '../../lib/slashCommands';
 import { mapExecutionModeToPermissionConfig, serializePermissionConfig, type AgentPermissionConfig, type AgentPlanMode } from '../../lib/agentPermissions';
+import { normalizeReasoningEffort } from '../../lib/reasoningEffort';
 import type { ReasoningEffort } from '../../types/session';
 import type { AgentInputPayload } from '../../types/agentInput';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
@@ -62,7 +63,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        setCompact(entry.contentRect.width < 560);
+        setCompact(entry.contentRect.width < 640);
       }
     });
     observer.observe(el);
@@ -73,7 +74,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const session = sessions.find((entry) => entry.id === sessionId);
   const project = session?.project_id ? projects.find((entry) => entry.id === session.project_id) : null;
   const isReadOnly = Boolean(session?.is_read_only);
-  const reasoningEffort = session?.reasoning_effort ?? 'medium';
+  const reasoningEffort = normalizeReasoningEffort(session?.reasoning_effort);
   const agentKind = session?.agent_kind ?? 'claude_code';
   const projectSkillEntry = useProjectSkillStore((state) => (
     project?.path ? state.entries[projectSkillCacheKey(project.path, agentKind)] : undefined
@@ -211,7 +212,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
     const effectiveCwd = project?.path || cwd;
     const latestSession = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId) ?? session;
-    const latestReasoningEffort = latestSession?.reasoning_effort ?? reasoningEffort;
+    const latestReasoningEffort = normalizeReasoningEffort(latestSession?.reasoning_effort ?? reasoningEffort);
     const content = input.text;
     const runtimeContent = content;
 

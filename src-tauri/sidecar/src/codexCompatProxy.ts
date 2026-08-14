@@ -6,7 +6,7 @@ import os from 'node:os';
 import { convertResponsesToChatRequest } from './codexRequestTransform.js';
 import { convertChatStreamToResponsesEvents, parseChatCompletionSseStream, type ChatCompletionChunk } from './codexStreamTransform.js';
 import { CodexHistoryStore } from './codexHistory.js';
-import { inferReasoningConfig } from './codexReasoning.js';
+import { isResponsesReasoningEnabled } from './codexReasoning.js';
 // Keep legacy imports for non-streaming path compatibility
 import { CodexChatHistory, convertChatCompletionToResponses } from './codexChatCompat.js';
 import crypto from 'node:crypto';
@@ -160,8 +160,8 @@ async function handleRequest(
     proxyLog(`responses tools raw ${truncateForLog(JSON.stringify(effectiveRequestBody.tools.slice(0, 3)))}`);
     persistDebugJson('last-codex-responses-request.json', effectiveRequestBody);
   }
-  const reasoningConfig = inferReasoningConfig(effectiveRequestBody.model, config.baseUrl, config.providerName ?? '');
-  const chatRequest = convertResponsesToChatRequest(effectiveRequestBody, historyStore, reasoningConfig);
+  const chatRequest = convertResponsesToChatRequest(effectiveRequestBody, historyStore);
+  const reasoningEnabled = isResponsesReasoningEnabled(effectiveRequestBody as unknown as Record<string, unknown>);
   let effectiveChatRequest = chatRequest;
   // Extract and remove the metadata field so it doesn't get sent to the upstream API
   const previousMessageCount = (chatRequest as Record<string, unknown>)._previousMessageCount as number ?? 0;
@@ -201,7 +201,7 @@ async function handleRequest(
         model: upstreamRes.headers.get('x-model') || chatRequest.model || 'unknown',
         reasoningId,
         messageId,
-        reasoningEnabled: reasoningConfig?.supports_thinking ?? false,
+        reasoningEnabled,
         toolContext,
       });
 
@@ -250,7 +250,7 @@ async function handleRequest(
           historyStore,
           collaborationPolicy,
           interactiveToolCalls,
-          reasoningEnabled: reasoningConfig?.supports_thinking ?? false,
+          reasoningEnabled,
           toolContext,
         });
         return;

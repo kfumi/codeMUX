@@ -159,7 +159,7 @@ pub fn create_session_with_mode_and_permissions(
     let plan_mode = plan_mode.unwrap_or("off");
 
     conn.execute(
-        "INSERT INTO sessions (id, title, agent_kind, mode, model, permission_config, plan_mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO sessions (id, title, agent_kind, mode, model, permission_config, plan_mode, reasoning_effort, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'high', ?8, ?9)",
         params![id, title, agent_kind.as_str(), mode, model, permission_config, plan_mode, now, now],
     )?;
 
@@ -169,7 +169,7 @@ pub fn create_session_with_mode_and_permissions(
         agent_kind,
         provider_id: None,
         model: model.map(str::to_string),
-        reasoning_effort: Some("medium".to_string()),
+        reasoning_effort: Some("high".to_string()),
         mode: Some(mode.to_string()),
         permission_config: Some(permission_config.to_string()),
         plan_mode: Some(plan_mode.to_string()),
@@ -201,7 +201,7 @@ pub fn create_session_for_project_with_permissions(
     let plan_mode = plan_mode.unwrap_or("off");
 
     conn.execute(
-        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, model, permission_config, plan_mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO sessions (id, title, agent_kind, mode, project_id, model, permission_config, plan_mode, reasoning_effort, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'high', ?9, ?10)",
         params![id, title, agent_kind.as_str(), mode, project_id, model, permission_config, plan_mode, now, now],
     )?;
 
@@ -211,7 +211,7 @@ pub fn create_session_for_project_with_permissions(
         agent_kind,
         provider_id: None,
         model: model.map(str::to_string),
-        reasoning_effort: Some("medium".to_string()),
+        reasoning_effort: Some("high".to_string()),
         mode: Some(mode.to_string()),
         permission_config: Some(permission_config.to_string()),
         plan_mode: Some(plan_mode.to_string()),
@@ -805,7 +805,7 @@ pub fn update_session_provider(
     reasoning_effort: Option<&str>,
 ) -> Result<()> {
     conn.execute(
-        "UPDATE sessions SET provider_id = ?1, model = ?2, reasoning_effort = COALESCE(?3, reasoning_effort, 'medium') WHERE id = ?4",
+        "UPDATE sessions SET provider_id = ?1, model = ?2, reasoning_effort = COALESCE(?3, reasoning_effort, 'high') WHERE id = ?4",
         params![provider_id, model, reasoning_effort, session_id],
     )?;
     Ok(())

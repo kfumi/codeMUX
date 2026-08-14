@@ -1,6 +1,6 @@
 export type AgentKind = 'claude_code' | 'codex' | 'gemini_cli' | 'opencode';
 export type SessionMode = 'chat' | 'agent';
-export type ReasoningEffort = 'low' | 'medium' | 'high';
+export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type AgentPlanMode = 'off' | 'on';
 
 export interface Session {

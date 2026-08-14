@@ -20,7 +20,7 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             agent_kind TEXT NOT NULL DEFAULT 'claude_code',
             provider_id TEXT,
             model TEXT,
-            reasoning_effort TEXT DEFAULT 'medium',
+            reasoning_effort TEXT DEFAULT 'high',
             mode TEXT NOT NULL DEFAULT 'chat',
             permission_config TEXT NOT NULL DEFAULT '',
             plan_mode TEXT NOT NULL DEFAULT 'off',

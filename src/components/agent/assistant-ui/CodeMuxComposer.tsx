@@ -566,8 +566,8 @@ export function CodeMuxComposer({
               />
             )}
 
-            {!hasPendingPermissions && !pendingQuestion && !pendingPlan && <div className="relative flex items-center justify-between pl-1">
-              <div className="flex items-center gap-2">
+            {!hasPendingPermissions && !pendingQuestion && !pendingPlan && <div className="@container/composer-bar relative flex w-full min-w-0 items-center justify-between pl-1">
+              <div className="flex shrink-0 items-center gap-2">
                 <Popover open={addMenuOpen} onOpenChange={setAddMenuOpen}>
                   <TooltipProvider delayDuration={300}>
                     <Tooltip>
@@ -614,7 +614,7 @@ export function CodeMuxComposer({
               </Popover>
                 {permissionSelector}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center justify-end gap-2">
                 {contextUsage ? (
                   <ContextDisplay
                     usedTokens={contextUsage.usedTokens}

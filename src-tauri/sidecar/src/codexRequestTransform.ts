@@ -1,7 +1,7 @@
 // src-tauri/sidecar/src/codexRequestTransform.ts
 // Converts OpenAI Responses API requests to Chat Completions format.
 
-import { applyReasoningOptions, ReasoningConfig } from './codexReasoning.js';
+import { applyReasoningOptions } from './codexReasoning.js';
 import { CodexHistoryStore } from './codexHistory.js';
 
 export type JsonRecord = Record<string, unknown>;
@@ -359,7 +359,6 @@ function ensureToolCallReasoningContent(messages: ChatMessage[]): void {
 export function convertResponsesToChatRequest(
   request: ResponsesRequest,
   history: CodexHistoryStore,
-  reasoningConfig: ReasoningConfig | null,
 ): ChatCompletionsRequest & { _previousMessageCount?: number } {
   const { model, instructions, input, previous_response_id, stream, max_output_tokens, tool_choice, tools, reasoning, ...rest } = request;
 
@@ -511,7 +510,7 @@ export function convertResponsesToChatRequest(
   }
 
   // Apply reasoning options
-  applyReasoningOptions(chatBody, request as unknown as Record<string, unknown>, model, reasoningConfig);
+  applyReasoningOptions(chatBody, request as unknown as Record<string, unknown>, model);
 
   // Track how many messages came from history so the caller can store only new messages
   chatBody._previousMessageCount = previousMessages?.length ?? 0;
