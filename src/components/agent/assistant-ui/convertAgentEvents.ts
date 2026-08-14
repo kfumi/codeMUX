@@ -2,6 +2,7 @@ import type { AgentMessage } from '../../../stores/agentStore';
 import { isCodexCompactSummaryText } from '../../../stores/agentEventParsing';
 import type { AgentUserMessageLocator, ContentBlock } from '../../../types/agent';
 import type { UserAttachmentPreview } from '../../../types/agentInput';
+import { isFileMutationTool } from '../toolHeaderSummary';
 import { isHiddenAssistantThreadUserEvent } from './assistantResultTargets';
 import { buildConversationTurns } from '../../../lib/conversationTurns';
 
@@ -519,7 +520,11 @@ function isProcessAssistantPart(part: CodeMuxAssistantPart): boolean {
     return true;
   }
 
-  return part.type === 'tool-call' && !isAskUserQuestionToolName(part.toolName);
+  return part.type === 'tool-call' && !isStandaloneToolCall(part);
+}
+
+function isStandaloneToolCall(part: Extract<CodeMuxAssistantPart, { type: 'tool-call' }>): boolean {
+  return isAskUserQuestionToolName(part.toolName) || isFileMutationTool(part.toolName, part.args);
 }
 
 function splitAssistantPartsByProcess(parts: CodeMuxAssistantPart[]): CodeMuxAssistantPart[][] {

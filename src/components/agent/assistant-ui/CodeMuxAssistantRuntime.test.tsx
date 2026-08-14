@@ -280,6 +280,100 @@ const exploreGroupEvents: AgentMessage[] = [
   },
 ];
 
+const fileMutationSplitEvents: AgentMessage[] = [
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'mutation-read-1',
+      session_id: 'session-file-mutation-split',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'mutation-read-1', name: 'Read', input: { file_path: 'src/App.tsx' } }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'tool_result',
+    data: {
+      type: 'user',
+      uuid: 'mutation-read-result-1',
+      session_id: 'session-file-mutation-split',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'mutation-read-1', content: 'app' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'mutation-write-1',
+      session_id: 'session-file-mutation-split',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'mutation-write-1', name: 'Write', input: { file_path: 'src/App.tsx', content: 'updated' } }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'tool_result',
+    data: {
+      type: 'user',
+      uuid: 'mutation-write-result-1',
+      session_id: 'session-file-mutation-split',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'mutation-write-1', content: 'Wrote file successfully.' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'mutation-bash-1',
+      session_id: 'session-file-mutation-split',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'mutation-bash-1', name: 'Bash', input: { command: 'pwd' } }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'tool_result',
+    data: {
+      type: 'user',
+      uuid: 'mutation-bash-result-1',
+      session_id: 'session-file-mutation-split',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'mutation-bash-1', content: '/' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'mutation-text-1',
+      session_id: 'session-file-mutation-split',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '文件已写好。' }],
+      },
+      parent_tool_use_id: null,
+    },
+  },
+];
+
 const directiveUserEvents: AgentMessage[] = [
   { kind: 'user', data: { content: '/review @src/App.tsx please check this' } },
 ];
@@ -1130,6 +1224,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-reasoning': reasoningEvents,
         'session-grouped-tools': groupedToolEvents,
         'session-explore-group': exploreGroupEvents,
+        'session-file-mutation-split': fileMutationSplitEvents,
         'session-directives': directiveUserEvents,
         'session-skill-directive': skillDirectiveUserEvents,
         'session-long-user': longUserEvents,
@@ -1510,6 +1605,22 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(screen.getByText('任务')).toBeTruthy();
     expect(screen.getByText('匹配文件')).toBeTruthy();
     expect(screen.getByText('运行命令')).toBeTruthy();
+  });
+
+  it('renders write tools outside explore groups and splits surrounding tools', () => {
+    const { container } = render(<Harness sessionId="session-file-mutation-split" />);
+
+    const exploreTriggers = screen.getAllByRole('button', { name: /探索/ });
+    expect(exploreTriggers).toHaveLength(2);
+    expect(exploreTriggers[0]?.textContent).toContain('读取×1');
+    expect(exploreTriggers[1]?.textContent).toContain('运行命令×1');
+    expect(screen.getByText('写入')).toBeTruthy();
+    expect(screen.getByText('文件已写好。')).toBeTruthy();
+    expect(container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(2);
+
+    const writeTrigger = container.querySelector('[data-slot="tool-fallback-trigger"]');
+    expect(writeTrigger).toBeTruthy();
+    expect(writeTrigger?.closest('[data-slot="tool-group-root"]')).toBeNull();
   });
 
   it('keeps expanded tool details open across large-history running updates', async () => {
@@ -2350,9 +2461,9 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(toggle.closest('[data-message-row]')).not.toBe(summaryRow);
 
     fireEvent.click(toggle);
-    fireEvent.click(screen.getByRole('button', { name: /探索/ }));
 
     expect(screen.getByText('编辑')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /探索/ })).toBeNull();
     expect(screen.getByText('1 个文件已更改').closest('[data-message-row]')).toBe(textRow);
   });
 

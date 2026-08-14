@@ -758,11 +758,11 @@ describe('convertAgentEventsToAssistantMessages', () => {
         kind: 'assistant',
         data: {
           type: 'assistant',
-          uuid: 'assistant-write-1',
+          uuid: 'assistant-read-1',
           session_id: 'session-1',
           message: {
             role: 'assistant',
-            content: [{ type: 'tool_use', id: 'tool-write-1', name: 'write', input: { path: 'repro.py' } }],
+            content: [{ type: 'tool_use', id: 'tool-read-1', name: 'Read', input: { file_path: 'src/App.tsx' } }],
           },
           parent_tool_use_id: null,
         },
@@ -771,11 +771,11 @@ describe('convertAgentEventsToAssistantMessages', () => {
         kind: 'tool_result',
         data: {
           type: 'user',
-          uuid: 'tool-result-write-1',
+          uuid: 'tool-result-read-1',
           session_id: 'session-1',
           message: {
             role: 'user',
-            content: [{ type: 'tool_result', tool_use_id: 'tool-write-1', content: 'Wrote file successfully.' }],
+            content: [{ type: 'tool_result', tool_use_id: 'tool-read-1', content: 'app' }],
           },
           parent_tool_use_id: null,
         },
@@ -826,7 +826,7 @@ describe('convertAgentEventsToAssistantMessages', () => {
     expect(messages).toHaveLength(1);
     expect(messages[0]?.content.map((part) => part.type)).toEqual(['tool-call', 'tool-call']);
     expect(messages[0]?.content.map((part) => part.type === 'tool-call' ? part.toolName : part.type)).toEqual([
-      'write',
+      'Read',
       'bash',
     ]);
   });
@@ -910,7 +910,7 @@ describe('convertAgentEventsToAssistantMessages', () => {
             content: [
               { type: 'thinking', thinking: '先写脚本' },
               { type: 'text', text: '\n\n' },
-              { type: 'tool_use', id: 'tool-write-1', name: 'write', input: { path: 'repro.py' } },
+              { type: 'tool_use', id: 'tool-read-1', name: 'Read', input: { file_path: 'repro.py' } },
             ],
           },
           parent_tool_use_id: null,
@@ -922,6 +922,147 @@ describe('convertAgentEventsToAssistantMessages', () => {
 
     expect(messages).toHaveLength(1);
     expect(messages[0]?.content.map((part) => part.type)).toEqual(['reasoning', 'tool-call']);
+  });
+
+  it('keeps write and edit tools out of process groups so they split explore runs', () => {
+    const mutationNames = ['Write', 'write', 'Edit', 'edit', 'MultiEdit', 'NotebookEdit', 'apply_patch'];
+
+    for (const name of mutationNames) {
+      const messages = convertAgentEventsToAssistantMessages([
+        {
+          kind: 'assistant',
+          data: {
+            type: 'assistant',
+            uuid: `assistant-read-${name}`,
+            session_id: 'session-1',
+            message: {
+              role: 'assistant',
+              content: [{ type: 'tool_use', id: `read-${name}`, name: 'Read', input: { file_path: 'src/App.tsx' } }],
+            },
+            parent_tool_use_id: null,
+          },
+        },
+        {
+          kind: 'tool_result',
+          data: {
+            type: 'user',
+            uuid: `result-read-${name}`,
+            session_id: 'session-1',
+            message: {
+              role: 'user',
+              content: [{ type: 'tool_result', tool_use_id: `read-${name}`, content: 'app' }],
+            },
+            parent_tool_use_id: null,
+          },
+        },
+        {
+          kind: 'assistant',
+          data: {
+            type: 'assistant',
+            uuid: `assistant-mut-${name}`,
+            session_id: 'session-1',
+            message: {
+              role: 'assistant',
+              content: [{ type: 'tool_use', id: `mut-${name}`, name, input: { file_path: 'src/App.tsx' } }],
+            },
+            parent_tool_use_id: null,
+          },
+        },
+        {
+          kind: 'tool_result',
+          data: {
+            type: 'user',
+            uuid: `result-mut-${name}`,
+            session_id: 'session-1',
+            message: {
+              role: 'user',
+              content: [{ type: 'tool_result', tool_use_id: `mut-${name}`, content: 'ok' }],
+            },
+            parent_tool_use_id: null,
+          },
+        },
+        {
+          kind: 'assistant',
+          data: {
+            type: 'assistant',
+            uuid: `assistant-bash-${name}`,
+            session_id: 'session-1',
+            message: {
+              role: 'assistant',
+              content: [{ type: 'tool_use', id: `bash-${name}`, name: 'Bash', input: { command: 'pwd' } }],
+            },
+            parent_tool_use_id: null,
+          },
+        },
+      ]);
+
+      expect(messages.map((message) => message.content.map((part) => (
+        part.type === 'tool-call' ? part.toolName : part.type
+      ))), name).toEqual([
+        ['Read'],
+        [name],
+        ['Bash'],
+      ]);
+    }
+  });
+
+  it('treats Codex apply_patch shell commands as file mutation separators', () => {
+    const messages = convertAgentEventsToAssistantMessages([
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-read-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-read-1', name: 'Read', input: { file_path: 'src/App.tsx' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-patch-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{
+              type: 'tool_use',
+              id: 'tool-patch-1',
+              name: 'shell_command',
+              input: {
+                command: "apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/a.ts\n+export {}\n*** End Patch\nPATCH",
+              },
+            }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-bash-1',
+          session_id: 'session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tool-bash-1', name: 'Bash', input: { command: 'pwd' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ]);
+
+    expect(messages.map((message) => message.content.map((part) => (
+      part.type === 'tool-call' ? part.toolName : part.type
+    )))).toEqual([
+      ['Read'],
+      ['shell_command'],
+      ['Bash'],
+    ]);
   });
 
   it('peels trailing thinking off a mixed thinking-and-text event into the previous process group', () => {

@@ -32,6 +32,7 @@ import { buildConversationTurnIndex, buildConversationTurns } from '../../../lib
 import type { ConversationTurn } from '../../../types/conversationTurn';
 
 import { isInterruptMarker } from '../../../stores/agentEventParsing';
+import { isFileMutationTool } from '../toolHeaderSummary';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import {
   CodeMuxDataMessagePart,
@@ -97,7 +98,10 @@ const GROUP_BY_PART = (
   part: Parameters<typeof GROUP_BY_PART_INNER>[0],
   context?: Parameters<typeof GROUP_BY_PART_INNER>[1],
 ) => {
-  if (part.type === 'tool-call' && ASK_USER_QUESTION_TOOL_NAMES.has(part.toolName)) {
+  if (part.type === 'tool-call' && (
+    ASK_USER_QUESTION_TOOL_NAMES.has(part.toolName)
+    || isFileMutationTool(part.toolName, asRecord(part.args))
+  )) {
     return [];
   }
   return GROUP_BY_PART_INNER(part, context);
@@ -1166,7 +1170,7 @@ function AssistantLikeMessage({
                   const toolNames = part.indices
                     .map((idx) => message.content[idx])
                     .filter((c): c is Extract<typeof c, { type: 'tool-call' }> => c?.type === 'tool-call')
-                    .filter((c) => !ASK_USER_QUESTION_TOOL_NAMES.has(c.toolName))
+                    .filter((c) => !ASK_USER_QUESTION_TOOL_NAMES.has(c.toolName) && !isFileMutationTool(c.toolName, asRecord(c.args)))
                     .map((c) => c.toolName);
                   if (toolNames.length === 0) {
                     return children;

@@ -230,6 +230,31 @@ export function isShellCommandTool(toolName: string): boolean {
   return normalizedToolName === 'Bash' || normalizedToolName === 'shell_command' || normalizedToolName === 'shell';
 }
 
+const FILE_MUTATION_KEYS = new Set([
+  'write',
+  'edit',
+  'multiedit',
+  'notebookedit',
+  'applypatch',
+]);
+
+function fileMutationKey(toolName: string): string {
+  return toolName.trim().toLowerCase().replace(/[-_\s]/g, '');
+}
+
+export function isFileMutationTool(toolName: string, args?: Record<string, unknown>): boolean {
+  if (FILE_MUTATION_KEYS.has(fileMutationKey(toolName))) {
+    return true;
+  }
+
+  if (!args || !isShellCommandTool(toolName)) {
+    return false;
+  }
+
+  const command = getShellCommand(args);
+  return Boolean(command?.includes('*** Begin Patch'));
+}
+
 export function getShellCommand(input: Record<string, unknown>): string | undefined {
   const key = firstPresentKey(input, ['command', 'cmd', 'script']);
   if (!key) return undefined;

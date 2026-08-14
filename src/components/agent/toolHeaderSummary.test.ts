@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getDisplayableArgs, getShellCommand, getToolDisplayName, getToolHeaderSummary, isShellCommandTool } from './toolHeaderSummary';
+import { getDisplayableArgs, getShellCommand, getToolDisplayName, getToolHeaderSummary, isFileMutationTool, isShellCommandTool } from './toolHeaderSummary';
 
 describe('toolHeaderSummary', () => {
   it('shows update_plan explanation as the header summary and omits it from displayable args', () => {
@@ -86,6 +86,25 @@ describe('toolHeaderSummary', () => {
     })).toBe('git status --short');
     expect(getShellCommand({ cmd: 'pwd' })).toBe('pwd');
     expect(getShellCommand({ description: 'No command field' })).toBeUndefined();
+  });
+
+  it('treats write and edit tools from all agents as file mutations', () => {
+    expect(isFileMutationTool('Write')).toBe(true);
+    expect(isFileMutationTool('write')).toBe(true);
+    expect(isFileMutationTool('Edit')).toBe(true);
+    expect(isFileMutationTool('edit')).toBe(true);
+    expect(isFileMutationTool('MultiEdit')).toBe(true);
+    expect(isFileMutationTool('NotebookEdit')).toBe(true);
+    expect(isFileMutationTool('apply_patch')).toBe(true);
+    expect(isFileMutationTool('Read')).toBe(false);
+    expect(isFileMutationTool('read')).toBe(false);
+    expect(isFileMutationTool('Bash')).toBe(false);
+    expect(isFileMutationTool('TodoWrite')).toBe(false);
+    expect(isFileMutationTool('NotebookRead')).toBe(false);
+    expect(isFileMutationTool('shell_command', {
+      command: "apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/a.ts\n+export {}\n*** End Patch\nPATCH",
+    })).toBe(true);
+    expect(isFileMutationTool('Bash', { command: 'ls' })).toBe(false);
   });
 
   it('uses lowercase OpenCode aliases for header summaries', () => {
