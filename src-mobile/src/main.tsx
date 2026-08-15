@@ -24,9 +24,15 @@ function App() {
     });
   }, []);
 
-  const initialBaseUrl = query.get('host')
-    ? `http://${query.get('host')}:${query.get('port') ?? '9240'}`
-    : `${window.location.protocol}//${window.location.host}`;
+  const initialBaseUrl = useMemo(() => {
+    const host = query.get('host');
+    const port = query.get('port') ?? '9240';
+    if (host) return `http://${host}:${port}`;
+    if (window.location.pathname === '/' && window.location.port) {
+      return `${window.location.protocol}//${window.location.host}`;
+    }
+    return '';
+  }, [query]);
   const initialCode = query.get('code') ?? '';
 
   if (screen.kind === 'pairing') {

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ChevronRight, Plus, RefreshCw } from 'lucide-react';
 
-import { createSession, listProjects, listSessions, type MobileProject, type MobileSession } from '../lib/api';
+import { CreateSessionSheet } from './CreateSessionSheet';
+import { listProjects, listSessions, type MobileProject, type MobileSession } from '../lib/api';
 import { cacheSessionList, clearConnection, loadCachedSessionList, type CompanionConnection } from '../lib/storage';
 import { cn } from '../lib/utils';
 
@@ -16,7 +17,7 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
   const [projects, setProjects] = useState<MobileProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -58,26 +59,6 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
     return () => window.clearInterval(timer);
   }, [connection.baseUrl, connection.token]);
 
-  const handleCreate = async () => {
-    const title = window.prompt('新会话标题', '移动端会话');
-    if (!title?.trim()) return;
-    const projectId = projects[0]?.id;
-    setCreating(true);
-    try {
-      const session = await createSession(connection, {
-        title: title.trim(),
-        projectId,
-        agentKind: 'claude_code',
-      });
-      await refresh();
-      onOpenSession(session.id);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setCreating(false);
-    }
-  };
-
   return (
     <div className="flex min-h-dvh flex-col bg-slate-950 text-slate-100">
       <header className="flex items-center justify-between border-b border-white/10 px-5 pb-4 pt-10">
@@ -97,8 +78,7 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
           <button
             type="button"
             className="rounded-lg border border-white/10 p-2"
-            onClick={() => void handleCreate()}
-            disabled={creating}
+            onClick={() => setCreateOpen(true)}
             aria-label="新建会话"
           >
             <Plus className="h-4 w-4" />
@@ -125,7 +105,10 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium">{session.title}</div>
                   <div className="mt-1 text-xs text-slate-400">
-                    {session.agent_kind} · {new Date(session.updated_at).toLocaleString()}
+                    {session.agent_kind}
+                    {session.model ? ` · ${session.model}` : ''}
+                    {' · '}
+                    {new Date(session.updated_at).toLocaleString()}
                   </div>
                 </div>
                 <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
@@ -146,6 +129,16 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
           断开配对
         </button>
       </footer>
+
+      <CreateSessionSheet
+        connection={connection}
+        projects={projects}
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(sessionId) => {
+          void refresh().then(() => onOpenSession(sessionId));
+        }}
+      />
     </div>
   );
 }

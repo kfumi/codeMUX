@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod config;
 pub mod events;
 pub mod pairing;
 pub mod server;

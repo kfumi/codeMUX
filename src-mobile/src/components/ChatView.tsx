@@ -1,10 +1,10 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Send } from 'lucide-react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, ChevronDown, ChevronRight, Send } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { useCompanionSocket } from '../hooks/useCompanionSocket';
-import { fetchSessionEvents, respondPermission, sendSessionMessage } from '../lib/api';
+import { fetchSessionEvents, respondPermission, respondUserInput, sendSessionMessage } from '../lib/api';
 import type { CompanionConnection } from '../lib/storage';
 import { cn } from '../lib/utils';
 
@@ -14,11 +14,19 @@ interface ChatViewProps {
   onBack: () => void;
 }
 
+interface QuestionOption {
+  label: string;
+  description?: string;
+}
+
 interface ChatItem {
   id: string;
-  role: 'user' | 'assistant' | 'system' | 'permission';
+  role: 'user' | 'assistant' | 'system' | 'permission' | 'question' | 'tool';
   content: string;
   requestId?: string;
+  toolUseId?: string;
+  questions?: Array<{ question: string; options: QuestionOption[] }>;
+  collapsed?: boolean;
 }
 
 function eventToChatItem(event: Record<string, unknown>): ChatItem | null {
@@ -54,6 +62,48 @@ function eventToChatItem(event: Record<string, unknown>): ChatItem | null {
     return { id, role: 'permission', content: description, requestId };
   }
 
+  if (type === 'user_input_requested') {
+    const toolUseId = typeof event.tool_use_id === 'string' ? event.tool_use_id : undefined;
+    const questions = Array.isArray(event.questions)
+      ? event.questions
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
+        .map((entry) => ({
+          question: typeof entry.question === 'string' ? entry.question : '请回答',
+          options: Array.isArray(entry.options)
+            ? entry.options
+              .filter((option): option is Record<string, unknown> => Boolean(option) && typeof option === 'object')
+              .map((option) => ({
+                label: typeof option.label === 'string' ? option.label : '选项',
+                description: typeof option.description === 'string' ? option.description : undefined,
+              }))
+            : [],
+        }))
+      : [];
+    return {
+      id,
+      role: 'question',
+      content: questions[0]?.question ?? '需要你的回答',
+      toolUseId,
+      questions,
+    };
+  }
+
+  if (type === 'tool_started') {
+    const name = typeof event.name === 'string' ? event.name : 'tool';
+    return { id, role: 'tool', content: `工具开始：${name}`, collapsed: true };
+  }
+
+  if (type === 'tool_finished') {
+    const name = typeof event.name === 'string' ? event.name : 'tool';
+    const isError = event.is_error === true;
+    return {
+      id,
+      role: 'tool',
+      content: isError ? `工具失败：${name}` : `工具完成：${name}`,
+      collapsed: true,
+    };
+  }
+
   if (type === 'text_delta' && typeof event.text === 'string') {
     return { id: `${id}-delta`, role: 'assistant', content: event.text };
   }
@@ -67,12 +117,13 @@ export function ChatView({ connection, sessionId, onBack }: ChatViewProps) {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastSequence, setLastSequence] = useState(-1);
+  const lastSequenceRef = useRef(-1);
+  const historyLoadedRef = useRef(false);
 
   const appendEvent = useCallback((event: Record<string, unknown>) => {
     const sequence = typeof event.sequence === 'number' ? event.sequence : null;
     if (sequence !== null) {
-      setLastSequence((current) => Math.max(current, sequence));
+      lastSequenceRef.current = Math.max(lastSequenceRef.current, sequence);
     }
 
     const item = eventToChatItem(event);
@@ -85,35 +136,43 @@ export function ChatView({ connection, sessionId, onBack }: ChatViewProps) {
           return [...current.slice(0, -1), { ...last, content: last.content + item.content }];
         }
       }
+      const duplicate = current.some((entry) => entry.id === item.id);
+      if (duplicate && item.role !== 'assistant') {
+        return current;
+      }
       return [...current, item];
     });
   }, []);
 
-  const loadHistory = useCallback(async () => {
+  useEffect(() => {
+    historyLoadedRef.current = false;
+    lastSequenceRef.current = -1;
+    setItems([]);
     setLoading(true);
     setError(null);
-    try {
-      const events = await fetchSessionEvents(connection, sessionId, lastSequence);
-      for (const event of events) {
-        if (event && typeof event === 'object') {
-          appendEvent(event as Record<string, unknown>);
-        }
-      }
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [appendEvent, connection, lastSequence, sessionId]);
 
-  useEffect(() => {
-    void loadHistory();
-  }, [loadHistory]);
+    void fetchSessionEvents(connection, sessionId, -1)
+      .then((events) => {
+        for (const event of events) {
+          if (event && typeof event === 'object') {
+            appendEvent(event as Record<string, unknown>);
+          }
+        }
+        historyLoadedRef.current = true;
+      })
+      .catch((err) => setError(String(err)))
+      .finally(() => setLoading(false));
+  }, [appendEvent, connection, sessionId]);
 
   const { connected } = useCompanionSocket(connection, sessionId, appendEvent);
 
   const pendingPermissions = useMemo(
     () => items.filter((item) => item.role === 'permission' && item.requestId),
+    [items],
+  );
+
+  const pendingQuestions = useMemo(
+    () => items.filter((item) => item.role === 'question' && item.toolUseId),
     [items],
   );
 
@@ -143,6 +202,21 @@ export function ChatView({ connection, sessionId, onBack }: ChatViewProps) {
     }
   };
 
+  const handleQuestion = async (toolUseId: string, answer: string) => {
+    try {
+      await respondUserInput(connection, sessionId, toolUseId, [answer]);
+      setItems((current) => current.filter((item) => item.toolUseId !== toolUseId));
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const toggleToolItem = (id: string) => {
+    setItems((current) => current.map((item) => (
+      item.id === id ? { ...item, collapsed: !item.collapsed } : item
+    )));
+  };
+
   return (
     <div className="flex min-h-dvh flex-col bg-slate-950 text-slate-100">
       <header className="flex items-center gap-3 border-b border-white/10 px-4 pb-4 pt-10">
@@ -166,15 +240,23 @@ export function ChatView({ connection, sessionId, onBack }: ChatViewProps) {
               item.role === 'assistant' && 'mr-4 bg-white/5',
               item.role === 'system' && 'bg-amber-500/10 text-amber-100',
               item.role === 'permission' && 'border border-amber-400/30 bg-amber-500/10',
+              item.role === 'question' && 'border border-sky-400/30 bg-sky-500/10',
+              item.role === 'tool' && 'border border-white/10 bg-white/5 text-slate-300',
             )}
           >
-            {item.role === 'assistant' ? (
+            {item.role === 'tool' ? (
+              <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => toggleToolItem(item.id)}>
+                {item.collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                <span>{item.content}</span>
+              </button>
+            ) : item.role === 'assistant' ? (
               <div className="prose prose-invert max-w-none prose-p:my-2 prose-pre:my-2">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown>
               </div>
             ) : (
               item.content
             )}
+
             {item.role === 'permission' && item.requestId ? (
               <div className="mt-3 flex gap-2">
                 <button
@@ -193,6 +275,22 @@ export function ChatView({ connection, sessionId, onBack }: ChatViewProps) {
                 </button>
               </div>
             ) : null}
+
+            {item.role === 'question' && item.toolUseId ? (
+              <div className="mt-3 space-y-2">
+                {(item.questions?.[0]?.options.length ? item.questions[0].options : [{ label: '继续' }]).map((option) => (
+                  <button
+                    key={option.label}
+                    type="button"
+                    className="block w-full rounded-lg border border-white/10 px-3 py-2 text-left text-xs"
+                    onClick={() => void handleQuestion(item.toolUseId!, option.label)}
+                  >
+                    <div>{option.label}</div>
+                    {option.description ? <div className="mt-1 text-slate-400">{option.description}</div> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         ))}
       </div>
@@ -200,6 +298,11 @@ export function ChatView({ connection, sessionId, onBack }: ChatViewProps) {
       {pendingPermissions.length > 0 ? (
         <div className="border-t border-amber-400/20 bg-amber-500/10 px-4 py-2 text-xs text-amber-100">
           有 {pendingPermissions.length} 个待审批请求
+        </div>
+      ) : null}
+      {pendingQuestions.length > 0 ? (
+        <div className="border-t border-sky-400/20 bg-sky-500/10 px-4 py-2 text-xs text-sky-100">
+          有 {pendingQuestions.length} 个待回答问题
         </div>
       ) : null}
 

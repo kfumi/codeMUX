@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Smartphone, Trash2 } from 'lucide-react';
+import { Copy, RefreshCw, Smartphone, Trash2 } from 'lucide-react';
+import QRCode from 'react-qr-code';
 
 import { companionApi } from '../../lib/tauri';
 import type { CompanionStatus } from '../../types/companion';
@@ -18,6 +19,7 @@ export function MobileCompanionSettings() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
@@ -77,6 +79,17 @@ export function MobileCompanionSettings() {
     }
   };
 
+  const handleCopyUrl = async () => {
+    if (!pairingUrl) return;
+    try {
+      await navigator.clipboard.writeText(pairingUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('复制失败，请手动复制地址');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="space-y-3">
@@ -110,37 +123,62 @@ export function MobileCompanionSettings() {
 
       {status?.enabled ? (
         <div className="space-y-4 rounded-xl border border-border/60 bg-background/60 p-4">
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className="text-sm font-medium text-foreground/90">配对信息</div>
             <p className="text-xs text-foreground/60">
-              在手机浏览器打开下方地址，或扫码进入配对页。配对码 5 分钟内有效。
+              用手机扫描下方二维码，或在浏览器打开配对地址。配对码 5 分钟内有效。
             </p>
-            {pairingUrl ? (
-              <div className="rounded-lg bg-muted/50 px-3 py-2 font-mono text-xs break-all text-foreground/80">
-                {pairingUrl}
+
+            <div className="flex flex-col gap-4 md:flex-row md:items-start">
+              {pairingUrl ? (
+                <div className="rounded-xl bg-white p-4">
+                  <QRCode value={pairingUrl} size={168} />
+                </div>
+              ) : (
+                <div className="flex h-[200px] w-[200px] items-center justify-center rounded-xl bg-muted/50 text-xs text-foreground/50">
+                  正在获取局域网地址…
+                </div>
+              )}
+
+              <div className="min-w-0 flex-1 space-y-3">
+                {pairingUrl ? (
+                  <div className="rounded-lg bg-muted/50 px-3 py-2 font-mono text-xs break-all text-foreground/80">
+                    {pairingUrl}
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!pairingUrl}
+                    onClick={() => {
+                      void handleCopyUrl();
+                    }}
+                  >
+                    <Copy className="mr-1 h-3.5 w-3.5" />
+                    {copied ? '已复制' : '复制地址'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => {
+                      void handleRefreshCode();
+                    }}
+                  >
+                    <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                    刷新配对码
+                  </Button>
+                </div>
+                <div className="text-sm text-foreground/70">
+                  配对码：
+                  <span className="ml-2 font-mono text-lg tracking-[0.3em] text-foreground">
+                    {status.pairingCode ?? '------'}
+                  </span>
+                </div>
               </div>
-            ) : (
-              <div className="text-xs text-foreground/50">正在获取局域网地址…</div>
-            )}
-            <div className="flex items-center gap-3">
-              <div className="text-sm text-foreground/70">
-                配对码：
-                <span className="ml-2 font-mono text-lg tracking-[0.3em] text-foreground">
-                  {status.pairingCode ?? '------'}
-                </span>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={busy}
-                onClick={() => {
-                  void handleRefreshCode();
-                }}
-              >
-                <RefreshCw className="mr-1 h-3.5 w-3.5" />
-                刷新
-              </Button>
             </div>
           </div>
 

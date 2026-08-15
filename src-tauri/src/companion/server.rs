@@ -14,7 +14,10 @@ use tokio::sync::oneshot;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
-use crate::companion::actions::{respond_companion_permission, send_companion_message};
+use crate::companion::actions::{
+    respond_companion_permission, send_companion_message, send_companion_tool_response,
+};
+use crate::companion::config::build_mobile_bootstrap;
 use crate::companion::pairing::complete_pairing;
 use crate::companion::state::{CompanionBroadcastEvent, CompanionState};
 use crate::config::types::AgentKind;
@@ -52,10 +55,20 @@ struct CreateSessionRequest {
     title: String,
     agent_kind: Option<String>,
     project_id: Option<String>,
+    provider_id: Option<String>,
     model: Option<String>,
+    reasoning_effort: Option<String>,
     permission_config: Option<String>,
     plan_mode: Option<String>,
     mode: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UserInputRespondRequest {
+    session_id: String,
+    tool_use_id: String,
+    response: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -145,7 +158,9 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
         .route("/sessions/{session_id}/events", get(session_events))
         .route("/sessions/{session_id}/messages", post(send_message))
         .route("/projects", get(list_projects))
+        .route("/bootstrap", get(bootstrap))
         .route("/permissions/respond", post(permission_respond))
+        .route("/interactive/user-input", post(user_input_respond))
         .route("/ws", get(ws_handler));
 
     let index_file = static_dir.join("index.html");
@@ -220,6 +235,24 @@ async fn create_session(
         ),
     }
     .map_err(|error| ApiError::internal(error.to_string()))?;
+
+    if let (Some(provider_id), Some(model)) = (body.provider_id.as_deref(), body.model.as_deref()) {
+        operations::update_session_provider(
+            &db,
+            &session.id,
+            Some(provider_id),
+            model,
+            body.reasoning_effort.as_deref(),
+        )
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    } else if let Some(reasoning_effort) = body.reasoning_effort.as_deref() {
+        operations::update_session_reasoning_effort(&db, &session.id, reasoning_effort)
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+    }
+
+    let session = operations::get_session(&db, &session.id)
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .unwrap_or(session);
     Ok(Json(session))
 }
 
@@ -271,6 +304,15 @@ async fn list_projects(
     Ok(Json(projects))
 }
 
+async fn bootstrap(
+    State(ctx): State<ServerContext>,
+    headers: HeaderMap,
+) -> Result<Json<crate::companion::config::MobileBootstrap>, ApiError> {
+    authorize(&ctx, &headers)?;
+    let app_state = ctx.app.state::<AppState>();
+    Ok(Json(build_mobile_bootstrap(app_state.inner())))
+}
+
 async fn permission_respond(
     State(ctx): State<ServerContext>,
     headers: HeaderMap,
@@ -278,6 +320,18 @@ async fn permission_respond(
 ) -> Result<StatusCode, ApiError> {
     authorize(&ctx, &headers)?;
     respond_companion_permission(&ctx.app, &body.session_id, &body.request_id, body.response)
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn user_input_respond(
+    State(ctx): State<ServerContext>,
+    headers: HeaderMap,
+    Json(body): Json<UserInputRespondRequest>,
+) -> Result<StatusCode, ApiError> {
+    authorize(&ctx, &headers)?;
+    send_companion_tool_response(&ctx.app, &body.session_id, &body.tool_use_id, body.response)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(StatusCode::NO_CONTENT)

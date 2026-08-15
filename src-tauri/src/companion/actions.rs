@@ -89,6 +89,24 @@ pub async fn respond_companion_permission(
     send_command_to_session(&agent_state, session_id, cmd).await
 }
 
+pub async fn send_companion_tool_response(
+    app: &AppHandle,
+    session_id: &str,
+    tool_use_id: &str,
+    response: serde_json::Value,
+) -> Result<(), String> {
+    let app_state = app.state::<AppState>();
+    let agent_state = app.state::<AgentState>();
+    crate::agent::commands::reject_read_only_session(&app_state, session_id)?;
+
+    let cmd = serde_json::json!({
+        "type": "tool_response",
+        "toolUseId": tool_use_id,
+        "response": response,
+    });
+    send_command_to_session(&agent_state, session_id, cmd).await
+}
+
 pub fn resolve_static_dir() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let release_dir = manifest_dir.join("../dist-mobile");

@@ -1,5 +1,37 @@
 import type { CompanionConnection } from './storage';
 
+export interface MobileBootstrap {
+  defaultAgentKind: string;
+  activeProviderId?: string | null;
+  providers: MobileProvider[];
+  agentDefaults: {
+    claude_code: MobileAgentKindDefaults;
+    codex: MobileAgentKindDefaults;
+    opencode: MobileAgentKindDefaults;
+  };
+  reasoningEfforts: string[];
+  permissionPresets: {
+    claude_code: Record<string, unknown>;
+    codex: Record<string, unknown>;
+    opencode: Record<string, unknown>;
+  };
+}
+
+export interface MobileProvider {
+  id: string;
+  name: string;
+  enabled: boolean;
+  configured: boolean;
+  defaultModel: string;
+  models: Array<{ id: string; name?: string | null }>;
+  protocols: string[];
+}
+
+export interface MobileAgentKindDefaults {
+  providerId?: string | null;
+  model?: string | null;
+}
+
 export interface MobileSession {
   id: string;
   title: string;
@@ -46,6 +78,12 @@ export async function claimPairing(
   return result;
 }
 
+export async function fetchBootstrap(connection: CompanionConnection): Promise<MobileBootstrap> {
+  return requestJson<MobileBootstrap>(`${connection.baseUrl}/api/bootstrap`, {
+    headers: authHeaders(connection.token),
+  });
+}
+
 export async function listSessions(connection: CompanionConnection): Promise<MobileSession[]> {
   return requestJson<MobileSession[]>(`${connection.baseUrl}/api/sessions`, {
     headers: authHeaders(connection.token),
@@ -87,9 +125,12 @@ export async function createSession(
     title: string;
     agentKind?: string;
     projectId?: string;
+    providerId?: string;
     model?: string;
+    reasoningEffort?: string;
     permissionConfig?: string;
     planMode?: string;
+    mode?: string;
   },
 ): Promise<MobileSession> {
   return requestJson<MobileSession>(`${connection.baseUrl}/api/sessions`, {
@@ -99,9 +140,12 @@ export async function createSession(
       title: payload.title,
       agentKind: payload.agentKind,
       projectId: payload.projectId,
+      providerId: payload.providerId,
       model: payload.model,
+      reasoningEffort: payload.reasoningEffort,
       permissionConfig: payload.permissionConfig,
       planMode: payload.planMode,
+      mode: payload.mode ?? 'agent',
     }),
   });
 }
@@ -119,10 +163,45 @@ export async function respondPermission(
   });
 }
 
+export async function respondUserInput(
+  connection: CompanionConnection,
+  sessionId: string,
+  toolUseId: string,
+  response: unknown,
+): Promise<void> {
+  await fetch(`${connection.baseUrl}/api/interactive/user-input`, {
+    method: 'POST',
+    headers: authHeaders(connection.token),
+    body: JSON.stringify({ sessionId, toolUseId, response }),
+  });
+}
+
 export function buildWsUrl(connection: CompanionConnection, sessionId: string): string {
   const url = new URL('/api/ws', connection.baseUrl);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('token', connection.token);
   url.searchParams.set('sessionId', sessionId);
   return url.toString();
+}
+
+export function providerSupportsAgent(provider: MobileProvider, agentKind: string): boolean {
+  const required = agentKind === 'claude_code' ? 'anthropic' : 'openai_compatible';
+  return provider.enabled && provider.configured && provider.protocols.includes(required);
+}
+
+export function resolveDefaultProvider(
+  bootstrap: MobileBootstrap,
+  agentKind: 'claude_code' | 'codex' | 'opencode',
+): MobileProvider | null {
+  const defaults = bootstrap.agentDefaults[agentKind];
+  const candidates = bootstrap.providers.filter((provider) => providerSupportsAgent(provider, agentKind));
+  if (defaults.providerId) {
+    const preferred = candidates.find((provider) => provider.id === defaults.providerId);
+    if (preferred) return preferred;
+  }
+  if (bootstrap.activeProviderId) {
+    const active = candidates.find((provider) => provider.id === bootstrap.activeProviderId);
+    if (active) return active;
+  }
+  return candidates[0] ?? null;
 }
