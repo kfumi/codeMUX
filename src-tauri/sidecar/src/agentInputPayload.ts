@@ -62,7 +62,7 @@ export function getDisplayPayloadAttachments(payload?: AgentInputPayload): Agent
 export function normalizeAgentInputPayload(prompt: string, payload?: AgentInputPayload): AgentInputPayload {
   const attachments = getPayloadAttachments(payload);
   return {
-    text: payload?.text ?? prompt,
+    text: prompt.trim() ? prompt : payload?.text ?? '',
     attachments,
     images: attachments.map(({ name, mediaType, dataUrl, size }) => ({ name, mediaType, dataUrl, size })),
     ...(payload?.historyAttachments?.length ? { historyAttachments: payload.historyAttachments } : {}),

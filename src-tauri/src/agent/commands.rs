@@ -2537,7 +2537,23 @@ pub async fn delete_opencode_session(
     else {
         return Ok(());
     };
+    delete_opencode_native_session(
+        &app,
+        state.inner(),
+        agent_state.inner(),
+        &app_session_id,
+        &opencode_session_id,
+    )
+    .await
+}
 
+pub(crate) async fn delete_opencode_native_session(
+    app: &AppHandle,
+    state: &crate::AppState,
+    agent_state: &AgentState,
+    app_session_id: &str,
+    opencode_session_id: &str,
+) -> Result<(), String> {
     let runtime_ref = state
         .runtime_resolver
         .resolve_runtime_ref(crate::runtime::Provider::OpenCode)
@@ -2545,8 +2561,8 @@ pub async fn delete_opencode_session(
 
     let request_id = uuid::Uuid::new_v4().to_string();
     let command = OpenCodeRuntime::delete_session_command(
-        &app_session_id,
-        &opencode_session_id,
+        app_session_id,
+        opencode_session_id,
         &request_id,
         None,
         &runtime_ref,
@@ -2554,7 +2570,7 @@ pub async fn delete_opencode_session(
     let active_sender = {
         let sidecars = agent_state.sidecars.lock().await;
         sidecars
-            .get(&app_session_id)
+            .get(app_session_id)
             .map(SidecarHandle::command_sender)
     };
 
@@ -2592,8 +2608,7 @@ pub async fn delete_opencode_session(
 
     // No session sidecar is alive after an app restart. Use a short-lived
     // sidecar so the cleanup still goes through OpenCode's official SDK.
-    let (mut handle, mut events) =
-        spawn_sidecar(&app, tauri::ipc::Channel::new(|_| Ok(()))).await?;
+    let (mut handle, mut events) = spawn_sidecar(app, tauri::ipc::Channel::new(|_| Ok(()))).await?;
     let send_result = handle.send_command(&command.to_string()).await;
     if let Err(error) = send_result {
         handle.shutdown().await;
@@ -3490,6 +3505,19 @@ pub async fn start_agent_session(
         let skill_cwd = resolve_skill_cwd(state.inner(), &session_id, &cwd)?;
         preload_project_skills(skill_cwd, &agent_kind).await?;
 
+        let mut input_payload = input_payload;
+        let prompt = {
+            let db = state.db.lock().unwrap();
+            match operations::take_pending_switch_briefing(&db, &session_id) {
+                Ok(Some(briefing)) => crate::agent::switch_briefing::apply_switch_briefing(
+                    prompt,
+                    input_payload.as_mut(),
+                    Some(&briefing),
+                ),
+                _ => prompt,
+            }
+        };
+
         let ensure_cmd = build_ensure_session_command(
             &state,
             &session_id,
@@ -3908,37 +3936,7 @@ pub async fn delete_claude_session_files(
 }
 
 fn cleanup_claude_session_files_by_id(claude_session_id: &str) -> Result<(), String> {
-    use std::fs;
-
-    let claude_dir = home_dir()?.join(".claude");
-    let projects_dir = claude_dir.join("projects");
-    if projects_dir.exists() {
-        for entry in fs::read_dir(&projects_dir)
-            .map_err(|error| format!("Failed to read Claude projects directory: {}", error))?
-            .flatten()
-        {
-            if !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
-                continue;
-            }
-            let jsonl = entry.path().join(format!("{}.jsonl", claude_session_id));
-            if jsonl.exists() {
-                let _ = fs::remove_file(jsonl);
-            }
-            let session_subdir = entry.path().join(claude_session_id);
-            if session_subdir.exists() {
-                let _ = fs::remove_dir_all(session_subdir);
-            }
-        }
-    }
-    for path in [
-        claude_dir.join("session-env").join(claude_session_id),
-        claude_dir.join("file-history").join(claude_session_id),
-    ] {
-        if path.exists() {
-            let _ = fs::remove_dir_all(path);
-        }
-    }
-    Ok(())
+    crate::agent::native_cleanup::cleanup_claude_native_session(&home_dir()?, claude_session_id)
 }
 
 #[tauri::command]

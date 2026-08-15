@@ -340,7 +340,7 @@ describe('session store createSession', () => {
     vi.useRealTimers();
   });
 
-  it('deletes the matching OpenCode SQLite session before removing the app session', async () => {
+  it('shuts down the sidecar then deletes the app session, including OpenCode', async () => {
     const session: Session = {
       id: 'session-opencode-delete',
       title: 'OpenCode',
@@ -353,6 +353,7 @@ describe('session store createSession', () => {
       created_at: '2026-06-20T00:00:00.000Z',
       updated_at: '2026-06-20T00:00:00.000Z',
     };
+    const { agentApi } = await import('../lib/tauri');
     const { useSessionStore } = await import('./sessionStore');
     useSessionStore.setState({
       sessions: [session],
@@ -365,7 +366,8 @@ describe('session store createSession', () => {
 
     await useSessionStore.getState().deleteSession(session.id);
 
-    expect(deleteOpenCodeSessionMock).toHaveBeenCalledWith(session.id);
+    expect(agentApi.shutdown).toHaveBeenCalledWith(session.id);
+    expect(deleteOpenCodeSessionMock).not.toHaveBeenCalled();
     expect(deleteSessionMock).toHaveBeenCalledWith(session.id);
   });
   it('archives a session and removes it from the active sidebar list', async () => {

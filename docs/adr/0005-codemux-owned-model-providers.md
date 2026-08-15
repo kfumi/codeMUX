@@ -6,6 +6,8 @@
 
 accepted
 
+ADR 0007 收窄第 3 条：「切换智能体不自动更换供应商」仅适用于新建草稿。Agent Kind Switch 恢复该 Session 上进入种类的 Kind Model Selection，不再沿用上一种类的供应商。
+
 ## Context
 
 曾用 AgentProviderProfile 按 `claude_code` / `codex` / `opencode` 分档，激活时写入各智能体原生配置。这使「连哪家模型服务」与「智能体本地配置」耦合，切换供应商会改动用户本机 CLI 配置，也难以用同一家供应商（如 DeepSeek）同时服务 Claude Code 与 Codex——因为许多厂商对 Anthropic 与 OpenAI 兼容协议提供不同入口。

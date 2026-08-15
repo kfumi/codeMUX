@@ -357,6 +357,19 @@ export function toLegacySystemMessage(event: CodeMuxSystemEvent): AgentMessage {
       },
     };
   }
+  if (event.subtype === 'runtime_switch') {
+    return {
+      kind: 'runtime_switch',
+      data: {
+        ...(typeof event.from_kind === 'string' ? { from_kind: event.from_kind } : {}),
+        ...(typeof event.to_kind === 'string' ? { to_kind: event.to_kind } : {}),
+        content: typeof event.content === 'string' && event.content.trim()
+          ? event.content
+          : '已切换智能体。原生会话已重建。',
+        ...(typeof event.briefing === 'string' ? { briefing: event.briefing } : {}),
+      },
+    };
+  }
   return { kind: 'raw', data };
 }
 

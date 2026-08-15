@@ -177,6 +177,52 @@ pub async fn load_session_events(
         .as_ref()
         .map(|session| session.agent_kind)
         .unwrap_or(AgentKind::ClaudeCode);
+    let switched = {
+        let db = state.db.lock().unwrap();
+        operations::session_has_runtime_switch(&db, &app_session_id)
+            .map_err(|error| error.to_string())?
+    };
+
+    if switched {
+        let snapshot = {
+            let db = state.db.lock().unwrap();
+            operations::get_session_snapshot(&db, &app_session_id)
+                .map_err(|error| error.to_string())?
+                .unwrap_or_default()
+        };
+        let native = match agent_kind {
+            AgentKind::ClaudeCode => {
+                crate::agent::commands::load_claude_session_events(
+                    state.clone(),
+                    app_session_id.clone(),
+                )
+                .await
+            }
+            AgentKind::Codex => {
+                crate::agent::commands::load_codex_session_events(
+                    state.clone(),
+                    app_session_id.clone(),
+                )
+                .await
+            }
+            AgentKind::Opencode => {
+                crate::agent::commands::load_opencode_session_events(
+                    state.clone(),
+                    app_session_id.clone(),
+                )
+                .await
+            }
+            AgentKind::GeminiCli => Ok(Vec::new()),
+        }
+        .unwrap_or_default();
+        let merged = crate::agent::switch_briefing::merge_history_events(snapshot, native);
+        if !merged.is_empty() {
+            let mut db = state.db.lock().unwrap();
+            operations::replace_session_snapshot(&mut db, &app_session_id, &merged)
+                .map_err(|error| error.to_string())?;
+        }
+        return Ok(merged);
+    }
 
     if session
         .as_ref()

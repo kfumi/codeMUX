@@ -49,6 +49,41 @@ describe('parseSdkUserMessage', () => {
     });
   });
 
+  it('strips the switch briefing prefix and keeps the user follow-up', () => {
+    expect(
+      parseSdkUserMessage({
+        type: 'user',
+        uuid: 'user-switch-1',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: [
+                '[CodeMUX runtime switch]',
+                'Previous driver: Claude Code. Current driver: Codex.',
+                '',
+                '---',
+                'User follow-up:',
+                '刚才我问了你哪些问题？',
+              ].join('\n'),
+            },
+          ],
+        },
+      }),
+    ).toEqual({
+      kind: 'user',
+      data: {
+        content: '刚才我问了你哪些问题？',
+        locator: {
+          providerMessageId: 'user-switch-1',
+          role: 'user',
+          textFingerprint: '刚才我问了你哪些问题？',
+        },
+      },
+    });
+  });
+
   it('strips Codex collaboration policy blocks from live user text', () => {
     expect(
       parseSdkUserMessage({
@@ -630,6 +665,32 @@ describe('mapPersistedClaudeMessage', () => {
           pre_tokens: 40956,
         }),
       }),
+    });
+  });
+
+  it('loads persisted runtime switch events as a dedicated seam', () => {
+    const event = mapPersistedClaudeMessage(
+      {
+        type: 'system_event',
+        subtype: 'runtime_switch',
+        content: '已切换到 Codex。以下由该智能体继续。原生会话已重建，未共用上一驾驶席的 session ID。',
+        from_kind: 'claude_code',
+        to_kind: 'codex',
+        briefing: '[CodeMUX runtime switch]\nPrevious driver: Claude Code.',
+        event_id: 'switch-1',
+        session_id: 'session-1',
+      },
+      'claude_code',
+    );
+
+    expect(event).toEqual({
+      kind: 'runtime_switch',
+      data: {
+        from_kind: 'claude_code',
+        to_kind: 'codex',
+        content: '已切换到 Codex。以下由该智能体继续。原生会话已重建，未共用上一驾驶席的 session ID。',
+        briefing: '[CodeMUX runtime switch]\nPrevious driver: Claude Code.',
+      },
     });
   });
 

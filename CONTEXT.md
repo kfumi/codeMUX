@@ -3,6 +3,38 @@
 
 ## Glossary
 
+### Session
+CodeMUX 应用层的一条对话。它拥有稳定的会话身份和一条连续的 CodeMUX Event 时间线；切换智能体种类不创建新 Session，也不把已有气泡搬走。
+_Avoid_: thread（当指应用对话时）, conversation（与 Session 混用）, 混合模式对话
+
+### Agent Kind
+独立的编码智能体运行时种类：Claude Code、Codex 或 OpenCode。每种有自己的工具协议、权限模型和原生 session 存储；它不是 Model Provider，也不是同一运行时内的 Plan/Build 模式。
+_Avoid_: 智能体（单独使用且未区分种类与模型时）, runtime（与 sidecar 进程混淆时）, agent, harness, 混合模式, gemini_cli（当前未接入，不是本上下文的 Agent Kind）
+
+### Active Agent Kind
+当前 Session 上正在驾驶的 Agent Kind。它是指针，不是出生绑定；同一 Session 在生命周期内可以先后由不同 Agent Kind 驾驶。
+_Avoid_: 把 `agent_kind` 理解成创建后永久绑定；用 Model Provider 或 Plan/Build 表达驾驶席切换
+
+### Native Session
+某一 Agent Kind 自己持久化的对话身份，例如 Claude 的 session UUID、Codex 的 thread id、OpenCode 的 session id。它不是 Session。不同 Agent Kind 的 Native Session 永远不是同一条身份。一次 Agent Kind Switch 会为进入的种类新建 Native Session；该种类此前的 Native Session 不再是本 Session 的继续目标。
+_Avoid_: 把原生 ID 当 Session ID；跨种类共用或合并 Native Session；切回时 resume 旧 Native Session
+
+### Agent Kind Switch
+在已有 Session 上把 Active Agent Kind 换成另一种，不创建新 Session，也不移交 Native Session。只在 Claude Code、Codex、OpenCode 之间成立。用户确认后立即成立，不绑在下一条 User Message 上。用户可见时间线仍是原 Session 的 CodeMUX Event 序列。仅当最近一轮已有 Turn Outcome、且没有未应答的 Interactive Request 时才成立；进行中的一轮不能切换。只读或导入快照 Session 不能切换。若存在尚未发送的排队 User Message，切换仍可成立，但队列保持暂停，不会自动发给进入的 Agent Kind。
+_Avoid_: fork（当指同一 Session 换驾驶席时）, handoff（当指编排框架把对话交给另一进程内 agent 时）, resume（当指跨种类继续时）, 轮中热切 / steer, 把切换推迟到下次发送, 把未接入的种类纳入切换, 切换后自动放行队列
+
+### Fork
+从某条已完成的助手消息切开，创建一条新的 Session，并拷贝到该点为止的历史。子 Session 的 Active Agent Kind 与父 Session 当时相同，并做该种类的原生 fork。Fork 不是 Agent Kind Switch；首版不提供「Fork 到另一种类」。
+_Avoid_: 用 Fork 换驾驶席；把 Switch 做成新 Session
+
+### Switch Briefing
+从 Session 的 CodeMUX Event 做确定性投影得到的文本摘要（最近用户文本、助手最终文本、工具触及的路径、最后一次 Turn Outcome），在 Agent Kind Switch 当时注入目标 Agent Kind **新创建**的 Native Session。它不另调用模型，也不先让当前种类 compact。它不是 User Message，也不在时间线里冒充用户说过的话。切回曾经用过的种类时同样如此。它不是工具调用重放，也不是对该种类旧 Native Session 的 resume。
+_Avoid_: 完整历史导入, tool replay, 把权限审批当可迁移状态, 把 Briefing 当下一条用户消息的前缀, 用另一次模型调用或 native compact 生成 Briefing
+
+### Permission Snapshot
+当前对 Active Agent Kind 生效的权限预设（Claude 的 permission mode、Codex 的 sandbox/approval、OpenCode 的 permission）。它从属于 Active Agent Kind，不是 Session 上可随身携带的意图。Agent Kind Switch 丢弃旧快照（含 plan 与原生「本会话已允许」），并换上进入种类的默认预设。
+_Avoid_: 跨种类翻译权限枚举；把 plan_mode 当切换后仍成立的会话意图
+
 ### Message UUID
 Agent 原生消息 UUID，用于标识一轮具体对话消息。前端 assistant message 的 `uuid` 作为跨层日志中的 message ID。
 
@@ -18,7 +50,7 @@ _Avoid_: provider event, stream event
 _Avoid_: prompt, input event
 
 ### System Event
-不属于用户或助手正文、但会改变对话解释方式的领域事件，例如上下文压缩边界。它可以被 UI 投影为状态提示，但不应被当作助手正文。
+不属于用户或助手正文、但会改变对话解释方式的领域事件，例如上下文压缩边界和 Agent Kind Switch。它可以被 UI 投影为状态提示，但不应被当作助手正文或 User Message。
 _Avoid_: provider system message
 
 ### Diagnostic Event
@@ -54,8 +86,12 @@ _Avoid_: Agent Provider Profile, provider profile, 智能体配置档（当指�
 _Avoid_: base URL（单独当作供应商）, Anthropic/OpenAI URL（当作互斥的两个供应商）；按智能体命名协议
 
 ### Active Provider
-应用级当前默认选用的 Model Provider，用作新建会话的默认。切换智能体种类时不自动更换。会话可另行选定供应商与模型并持久化，发送时以会话选定为准。
+应用级当前默认选用的 Model Provider，用作新建会话的默认。新建草稿里改 Agent Kind 时不自动更换。发送时以当前 Session 上 Active Agent Kind 对应的 Kind Model Selection 为准。
 _Avoid_: active profile（按智能体分别激活的供应商配置档）
+
+### Kind Model Selection
+某一 Session 为某个 Agent Kind 记住的 Model Provider、模型与 Reasoning Effort。Agent Kind Switch 恢复进入种类的这一组，而不是留下一种类的供应商或思考档位。若该种类尚无记录，则回落到能提供匹配 Protocol Endpoint 的 Active Provider 及其默认档位；再没有则切换不能成立。恢复后仍按该模型可支持的档位规范化。
+_Avoid_: 一份会话级 provider/model/effort 跨种类沿用；切换时强行重置为 Active Provider
 
 ### Built-in Provider Template
 由应用预置的 Model Provider 模板：预填厂商名称、协议端点 URL 与常用模型，用户补齐凭据后即可使用。它不是独立配置实体，实例化后仍是普通 Model Provider。OpenCode Go 属于此类模板，与智能体种类 OpenCode 不同。
@@ -94,28 +130,40 @@ _Avoid_: OCR 结果, caption, system prompt
 _Avoid_: enricher, handler, adapter（当指 Enrichment 处理时）
 
 ### Reasoning Effort
-会话级思考强度的规范值：关闭、低、中、高、极高、最高。发送时由各协议映射为自身参数，而不是 UI 选项的逐字透传。
-_Avoid_: thinking mode, reasoning_effort（当指 UI 档位时）
+当前 Active Agent Kind 的思考强度规范值：关闭、低、中、高、极高、最高。各 Agent Kind 在 Kind Model Selection 中分别记住自己的档位；发送时由该种类的协议映射为自身参数，而不是 UI 选项的逐字透传，也不是一条 Session 上跨种类共用的档位。
+_Avoid_: thinking mode, reasoning_effort（当指 UI 档位时）；把思考强度当切换后仍沿用的会话级属性
 
 ## Preferred Terms
 
 
 | Use | Avoid |
 |-----|-------|
+| Session / 会话 | 混合模式对话, thread（指应用对话时） |
+| Agent Kind / 智能体种类 | 用「智能体」兼指种类、模型与 Plan/Build |
+| Active Agent Kind / 当前智能体种类 | 创建后永久绑定的 agent_kind |
+| Native Session / 原生会话 | 把原生 ID 当成 Session |
+| Agent Kind Switch / 智能体种类切换 | 用 fork/handoff/resume 称呼跨种类继续 |
+| Fork | 用 Fork 换驾驶席；把 Switch 做成新 Session |
+| Switch Briefing / 切换摘要 | 完整历史导入, tool replay |
+| Permission Snapshot / 权限快照 | 跨种类翻译权限枚举；切换后仍有效的 plan |
 | Model Provider / 供应商 | Agent Provider Profile（指供应商配置时） |
 | Protocol Endpoint / 协议端点 | 把双协议拆成两个供应商 |
-| Active Provider | 按智能体分别激活的 profile |
+| Active Provider | 按智能体分别激活的 profile；Agent Kind Switch 时沿用上一种类的供应商 |
+| Kind Model Selection / 种类模型选择 | 一份会话级 provider/model/effort 跨种类沿用 |
+| Reasoning Effort / 思考强度 | thinking mode（当指会话档位时）；切换后沿用上一种类的档位 |
 | Built-in Provider Template / 内置供应商模板 | 与自定义供应商分叉的第二套模型 |
 | Provider Credentials（显式配置） | 空 key 魔法回落 CLI |
 | Provider Enabled / 启用 | 用删除代替停用 |
 | Enrichment Provider / enrichment 供应商 | vision model, fallback model |
 | Attachment Processor / 附件处理器 | enricher, handler |
 | Enriched Context Block / enriched 上下文块 | OCR 结果, caption |
-| Reasoning Effort / 思考强度 | thinking mode（当指会话档位时） |
 
 ## Notes
 
 - 从 AgentProviderProfile 升级到 Model Provider 时不做自动迁移；旧 registry 丢弃，用户按内置模板重新配置。
+- Agent Kind Switch 的决策见 [ADR 0007](docs/adr/0007-agent-kind-switch-in-session.md)。
 
 ## Out of Scope (for this feature's first cut)
+
+- `gemini_cli`：当前未接入，不参与 Agent Kind Switch。
 

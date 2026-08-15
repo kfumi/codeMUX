@@ -50,6 +50,12 @@ pub struct Session {
     pub parent_session_id: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeSessionRef {
+    pub agent_kind: AgentKind,
+    pub agent_session_id: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AgentSessionMapping {
     pub app_session_id: String,
@@ -730,9 +736,76 @@ pub fn upsert_agent_session_mapping(
         ",
         params![app_session_id, agent_kind.as_str(), agent_session_id, now],
     )?;
+    record_session_native_session(conn, app_session_id, agent_kind, agent_session_id)?;
 
     Ok(get_agent_session_mapping(conn, app_session_id, agent_kind)?
         .expect("mapping should exist after upsert"))
+}
+
+fn record_session_native_session(
+    conn: &Connection,
+    session_id: &str,
+    agent_kind: AgentKind,
+    agent_session_id: &str,
+) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "
+        INSERT OR IGNORE INTO session_native_sessions (
+            session_id, agent_kind, agent_session_id, created_at
+        ) VALUES (?1, ?2, ?3, ?4)
+        ",
+        params![session_id, agent_kind.as_str(), agent_session_id, now],
+    )?;
+    Ok(())
+}
+
+pub fn current_native_sessions_for_kinds(
+    conn: &Connection,
+    session_id: &str,
+    kinds: &[AgentKind],
+) -> Result<Vec<NativeSessionRef>> {
+    let mut sessions = Vec::new();
+    for kind in kinds {
+        if let Some(mapping) = get_agent_session_mapping(conn, session_id, *kind)? {
+            sessions.push(NativeSessionRef {
+                agent_kind: mapping.agent_kind,
+                agent_session_id: mapping.agent_session_id,
+            });
+        }
+    }
+    Ok(sessions)
+}
+
+pub fn list_native_sessions_for_cleanup(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Vec<NativeSessionRef>> {
+    let mut stmt = conn.prepare(
+        "
+        SELECT agent_kind, agent_session_id FROM session_native_sessions WHERE session_id = ?1
+        UNION
+        SELECT agent_kind, agent_session_id FROM agent_session_mappings WHERE app_session_id = ?1
+        ",
+    )?;
+    let rows = stmt.query_map(params![session_id], |row| {
+        Ok(NativeSessionRef {
+            agent_kind: validate_agent_kind(&row.get::<_, String>(0)?)?,
+            agent_session_id: row.get(1)?,
+        })
+    })?;
+
+    let mut sessions = Vec::new();
+    for row in rows {
+        let session = row?;
+        if !sessions.iter().any(|existing: &NativeSessionRef| {
+            existing.agent_kind == session.agent_kind
+                && existing.agent_session_id == session.agent_session_id
+        }) {
+            sessions.push(session);
+        }
+    }
+    Ok(sessions)
 }
 
 pub fn get_agent_session_mapping(
@@ -836,6 +909,159 @@ pub fn update_session_permissions(
         params![permission_config, plan_mode, now, session_id],
     )?;
     Ok(())
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct SessionKindModelSelection {
+    pub session_id: String,
+    pub agent_kind: AgentKind,
+    pub provider_id: Option<String>,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+}
+
+pub fn upsert_session_kind_model_selection(
+    conn: &Connection,
+    selection: &SessionKindModelSelection,
+) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO session_kind_model_selections (
+            session_id, agent_kind, provider_id, model, reasoning_effort, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(session_id, agent_kind) DO UPDATE SET
+            provider_id = excluded.provider_id,
+            model = excluded.model,
+            reasoning_effort = excluded.reasoning_effort,
+            updated_at = excluded.updated_at",
+        params![
+            selection.session_id,
+            selection.agent_kind.as_str(),
+            selection.provider_id.as_deref(),
+            selection.model.as_deref(),
+            selection.reasoning_effort.as_deref(),
+            now,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_session_kind_model_selection(
+    conn: &Connection,
+    session_id: &str,
+    agent_kind: AgentKind,
+) -> Result<Option<SessionKindModelSelection>> {
+    let mut stmt = conn.prepare(
+        "SELECT session_id, agent_kind, provider_id, model, reasoning_effort
+         FROM session_kind_model_selections
+         WHERE session_id = ?1 AND agent_kind = ?2
+         LIMIT 1",
+    )?;
+    let mut rows = stmt.query(params![session_id, agent_kind.as_str()])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    Ok(Some(SessionKindModelSelection {
+        session_id: row.get(0)?,
+        agent_kind: validate_agent_kind(&row.get::<_, String>(1)?)?,
+        provider_id: row.get(2)?,
+        model: row.get(3)?,
+        reasoning_effort: row.get(4)?,
+    }))
+}
+
+pub fn update_session_agent_kind(
+    conn: &Connection,
+    session_id: &str,
+    agent_kind: AgentKind,
+    permission_config: &str,
+    plan_mode: &str,
+    provider_id: Option<&str>,
+    model: Option<&str>,
+    reasoning_effort: Option<&str>,
+) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE sessions SET
+            agent_kind = ?1,
+            permission_config = ?2,
+            plan_mode = ?3,
+            provider_id = ?4,
+            model = ?5,
+            reasoning_effort = COALESCE(?6, reasoning_effort, 'high'),
+            updated_at = ?7
+         WHERE id = ?8",
+        params![
+            agent_kind.as_str(),
+            permission_config,
+            plan_mode,
+            provider_id,
+            model,
+            reasoning_effort,
+            now,
+            session_id,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn insert_session_runtime_switch(
+    conn: &Connection,
+    session_id: &str,
+    from_kind: AgentKind,
+    to_kind: AgentKind,
+    at_sequence: i64,
+    new_agent_session_id: Option<&str>,
+    briefing_text: Option<&str>,
+) -> Result<String> {
+    let id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO session_runtime_switches (
+            id, session_id, from_kind, to_kind, at_sequence, new_agent_session_id, briefing_text, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            id,
+            session_id,
+            from_kind.as_str(),
+            to_kind.as_str(),
+            at_sequence,
+            new_agent_session_id,
+            briefing_text,
+            now,
+        ],
+    )?;
+    Ok(id)
+}
+
+pub fn session_has_runtime_switch(conn: &Connection, session_id: &str) -> Result<bool> {
+    let mut stmt =
+        conn.prepare("SELECT 1 FROM session_runtime_switches WHERE session_id = ?1 LIMIT 1")?;
+    Ok(stmt.exists([session_id])?)
+}
+
+pub fn set_pending_switch_briefing(
+    conn: &Connection,
+    session_id: &str,
+    briefing: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE sessions SET pending_switch_briefing = ?1, updated_at = ?2 WHERE id = ?3",
+        params![briefing, Utc::now().to_rfc3339(), session_id],
+    )?;
+    Ok(())
+}
+
+pub fn take_pending_switch_briefing(conn: &Connection, session_id: &str) -> Result<Option<String>> {
+    let briefing: Option<String> = conn.query_row(
+        "SELECT pending_switch_briefing FROM sessions WHERE id = ?1 LIMIT 1",
+        [session_id],
+        |row| row.get(0),
+    )?;
+    if briefing.as_ref().is_some_and(|value| !value.is_empty()) {
+        set_pending_switch_briefing(conn, session_id, None)?;
+    }
+    Ok(briefing.filter(|value| !value.is_empty()))
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -985,13 +1211,16 @@ pub fn get_model_distribution(
 #[cfg(test)]
 mod tests {
     use super::{
-        archive_session, create_forked_session, delete_agent_session_mapping,
-        delete_session_message_attachments_from_index, get_agent_distribution,
-        get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
-        get_model_distribution, get_session_snapshot, get_usage_heatmap, get_usage_overview,
-        import_session_snapshot, set_session_pinned, set_session_read_only, unarchive_session,
-        update_session_provider, update_session_reasoning_effort, upsert_agent_session_mapping,
-        ImportedSessionSnapshot,
+        archive_session, create_forked_session, current_native_sessions_for_kinds,
+        delete_agent_session_mapping, delete_session_message_attachments_from_index,
+        get_agent_distribution, get_agent_session_mapping, get_all_archived_sessions,
+        get_all_sessions, get_model_distribution, get_session, get_session_kind_model_selection,
+        get_session_snapshot, get_usage_heatmap, get_usage_overview, import_session_snapshot,
+        insert_session_runtime_switch, list_native_sessions_for_cleanup,
+        session_has_runtime_switch, set_session_pinned, set_session_read_only, unarchive_session,
+        update_session_agent_kind, update_session_provider, update_session_reasoning_effort,
+        upsert_agent_session_mapping, upsert_session_kind_model_selection, ImportedSessionSnapshot,
+        SessionKindModelSelection,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -1036,6 +1265,100 @@ mod tests {
             .unwrap()
             .expect("mapping should exist");
         assert_eq!(loaded.agent_session_id, "claude-b");
+    }
+
+    #[test]
+    fn records_every_native_session_id_even_after_mapping_overwrite() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-1", "Test", "claude_code", "agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+
+        upsert_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode, "claude-a")
+            .unwrap();
+        upsert_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode, "claude-b")
+            .unwrap();
+        upsert_agent_session_mapping(&conn, "session-1", AgentKind::Codex, "codex-a").unwrap();
+
+        let mut ids: Vec<(String, String)> = list_native_sessions_for_cleanup(&conn, "session-1")
+            .unwrap()
+            .into_iter()
+            .map(|entry| {
+                (
+                    entry.agent_kind.as_str().to_string(),
+                    entry.agent_session_id,
+                )
+            })
+            .collect();
+        ids.sort();
+
+        assert_eq!(
+            ids,
+            vec![
+                ("claude_code".to_string(), "claude-a".to_string()),
+                ("claude_code".to_string(), "claude-b".to_string()),
+                ("codex".to_string(), "codex-a".to_string()),
+            ]
+        );
+        assert_eq!(
+            get_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode)
+                .unwrap()
+                .unwrap()
+                .agent_session_id,
+            "claude-b"
+        );
+    }
+
+    #[test]
+    fn current_native_sessions_for_kinds_return_live_mappings_only() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-1", "Test", "claude_code", "agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        upsert_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode, "claude-a")
+            .unwrap();
+        upsert_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode, "claude-b")
+            .unwrap();
+        upsert_agent_session_mapping(&conn, "session-1", AgentKind::Codex, "codex-a").unwrap();
+
+        let abandoned = current_native_sessions_for_kinds(
+            &conn,
+            "session-1",
+            &[AgentKind::ClaudeCode, AgentKind::Opencode],
+        )
+        .unwrap();
+
+        assert_eq!(abandoned.len(), 1);
+        assert_eq!(abandoned[0].agent_kind, AgentKind::ClaudeCode);
+        assert_eq!(abandoned[0].agent_session_id, "claude-b");
+    }
+
+    #[test]
+    fn deleting_session_cascades_native_session_history() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-1", "Test", "claude_code", "agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        upsert_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode, "claude-a")
+            .unwrap();
+        upsert_agent_session_mapping(&conn, "session-1", AgentKind::ClaudeCode, "claude-b")
+            .unwrap();
+
+        conn.execute("DELETE FROM sessions WHERE id = ?1", ["session-1"])
+            .unwrap();
+
+        assert!(list_native_sessions_for_cleanup(&conn, "session-1")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -1652,5 +1975,135 @@ mod tests {
                 .agent_session_id,
             "claude-import-1"
         );
+    }
+
+    fn insert_test_session(conn: &Connection, session_id: &str, agent_kind: &str) {
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![session_id, "Test", agent_kind, "agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn never_switched_session_has_no_runtime_switch_record() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+
+        assert!(!session_has_runtime_switch(&conn, "session-1").unwrap());
+    }
+
+    #[test]
+    fn updates_agent_kind_and_resets_permission_snapshot() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+        conn.execute(
+            "UPDATE sessions SET permission_config = ?1, plan_mode = 'on', provider_id = 'anthropic', model = 'opus' WHERE id = 'session-1'",
+            rusqlite::params![r#"{"kind":"claude_code","permissionMode":"plan"}"#],
+        )
+        .unwrap();
+
+        update_session_agent_kind(
+            &conn,
+            "session-1",
+            AgentKind::Codex,
+            r#"{"kind":"codex","sandboxMode":"danger-full-access","approvalPolicy":"never","networkAccessEnabled":true}"#,
+            "off",
+            Some("openai"),
+            Some("gpt-5"),
+            Some("medium"),
+        )
+        .unwrap();
+
+        let session = get_session(&conn, "session-1").unwrap().unwrap();
+        assert_eq!(session.agent_kind, AgentKind::Codex);
+        assert_eq!(session.plan_mode.as_deref(), Some("off"));
+        assert_eq!(session.provider_id.as_deref(), Some("openai"));
+        assert_eq!(session.model.as_deref(), Some("gpt-5"));
+        assert_eq!(session.reasoning_effort.as_deref(), Some("medium"));
+        assert!(session
+            .permission_config
+            .as_deref()
+            .unwrap_or("")
+            .contains("\"kind\":\"codex\""));
+    }
+
+    #[test]
+    fn remembers_kind_model_selection_per_agent_kind() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+
+        upsert_session_kind_model_selection(
+            &conn,
+            &SessionKindModelSelection {
+                session_id: "session-1".to_string(),
+                agent_kind: AgentKind::ClaudeCode,
+                provider_id: Some("anthropic".to_string()),
+                model: Some("opus".to_string()),
+                reasoning_effort: Some("high".to_string()),
+            },
+        )
+        .unwrap();
+        upsert_session_kind_model_selection(
+            &conn,
+            &SessionKindModelSelection {
+                session_id: "session-1".to_string(),
+                agent_kind: AgentKind::Codex,
+                provider_id: Some("openai".to_string()),
+                model: Some("gpt-5".to_string()),
+                reasoning_effort: Some("medium".to_string()),
+            },
+        )
+        .unwrap();
+        upsert_session_kind_model_selection(
+            &conn,
+            &SessionKindModelSelection {
+                session_id: "session-1".to_string(),
+                agent_kind: AgentKind::ClaudeCode,
+                provider_id: Some("anthropic".to_string()),
+                model: Some("sonnet".to_string()),
+                reasoning_effort: Some("low".to_string()),
+            },
+        )
+        .unwrap();
+
+        let claude = get_session_kind_model_selection(&conn, "session-1", AgentKind::ClaudeCode)
+            .unwrap()
+            .unwrap();
+        let codex = get_session_kind_model_selection(&conn, "session-1", AgentKind::Codex)
+            .unwrap()
+            .unwrap();
+        assert_eq!(claude.model.as_deref(), Some("sonnet"));
+        assert_eq!(claude.reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(codex.model.as_deref(), Some("gpt-5"));
+        assert!(
+            get_session_kind_model_selection(&conn, "session-1", AgentKind::Opencode)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn records_runtime_switch_and_marks_session_as_switched() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+
+        insert_session_runtime_switch(
+            &conn,
+            "session-1",
+            AgentKind::ClaudeCode,
+            AgentKind::Codex,
+            12,
+            Some("thr_new"),
+            Some("briefing"),
+        )
+        .unwrap();
+
+        assert!(session_has_runtime_switch(&conn, "session-1").unwrap());
+        assert!(!session_has_runtime_switch(&conn, "missing").unwrap());
     }
 }

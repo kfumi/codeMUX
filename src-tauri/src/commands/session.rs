@@ -1,10 +1,16 @@
-use crate::agent::commands::{send_permission_update_to_session, AgentState};
+use crate::agent::commands::{
+    delete_opencode_native_session, home_dir, send_permission_update_to_session, AgentState,
+};
+use crate::agent::native_cleanup::{
+    cleanup_claude_native_session, cleanup_codex_app_interactive_events,
+    cleanup_codex_native_session,
+};
 use crate::config::types::AgentKind;
-use crate::db::operations;
+use crate::db::operations::{self, NativeSessionRef};
 use crate::AppState;
 use log::{debug, info, warn};
 use std::str::FromStr;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -69,8 +75,41 @@ pub fn get_archived_sessions(
 }
 
 #[tauri::command]
-pub fn delete_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+pub async fn delete_session(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    agent_state: State<'_, AgentState>,
+    session_id: String,
+) -> Result<(), String> {
     info!(target: "session", "Deleting session session_id={}", session_id);
+    let (skip_native_cleanup, native_sessions) = {
+        let db = state.db.lock().unwrap();
+        let session =
+            operations::get_session(&db, &session_id).map_err(|error| error.to_string())?;
+        let skip = session
+            .as_ref()
+            .is_some_and(|session| session.origin == "imported" || session.is_read_only);
+        let natives = if skip {
+            Vec::new()
+        } else {
+            operations::list_native_sessions_for_cleanup(&db, &session_id)
+                .map_err(|error| error.to_string())?
+        };
+        (skip, natives)
+    };
+
+    if !skip_native_cleanup {
+        cleanup_native_sessions_best_effort(
+            &app,
+            state.inner(),
+            agent_state.inner(),
+            &session_id,
+            &native_sessions,
+            true,
+        )
+        .await;
+    }
+
     let db = state.db.lock().unwrap();
     operations::delete_session(&db, &session_id).map_err(|e| e.to_string())
 }
@@ -248,4 +287,212 @@ pub fn get_session_message_attachments(
 ) -> Result<std::collections::HashMap<i64, Vec<serde_json::Value>>, String> {
     let db = state.db.lock().unwrap();
     operations::get_session_message_attachments(&db, &session_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn switch_session_agent_kind(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    agent_state: State<'_, AgentState>,
+    session_id: String,
+    to_kind: String,
+    provider_id: Option<String>,
+    model: Option<String>,
+    reasoning_effort: Option<String>,
+) -> Result<operations::Session, String> {
+    use crate::agent::switch_briefing::{
+        build_runtime_switch_system_event, build_switch_briefing, default_permission_config_json,
+        is_switchable_agent_kind,
+    };
+
+    let to_kind = AgentKind::from_str(&to_kind)?;
+    if !is_switchable_agent_kind(to_kind) {
+        return Err("该智能体种类当前不可切换".to_string());
+    }
+
+    let session = {
+        let db = state.db.lock().unwrap();
+        operations::get_session(&db, &session_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "会话不存在".to_string())?
+    };
+    if session.is_read_only || session.origin == "imported" {
+        return Err("只读或导入快照会话不能切换智能体".to_string());
+    }
+    let from_kind = session.agent_kind;
+    if from_kind == to_kind {
+        return Ok(session);
+    }
+    if !is_switchable_agent_kind(from_kind) {
+        return Err("当前智能体种类不支持切换".to_string());
+    }
+
+    let events =
+        crate::agent::history_import::load_session_events(state.clone(), session_id.clone())
+            .await
+            .unwrap_or_default();
+    let briefing = build_switch_briefing(&events, from_kind, to_kind);
+    let switch_event =
+        build_runtime_switch_system_event(&session_id, from_kind, to_kind, events.len(), &briefing);
+    let mut snapshot_events = events;
+    snapshot_events.push(switch_event);
+
+    let incoming_selection = {
+        let db = state.db.lock().unwrap();
+        operations::get_session_kind_model_selection(&db, &session_id, to_kind)
+            .map_err(|error| error.to_string())?
+    };
+    let next_provider_id = incoming_selection
+        .as_ref()
+        .and_then(|selection| selection.provider_id.clone())
+        .or(provider_id);
+    let next_model = incoming_selection
+        .as_ref()
+        .and_then(|selection| selection.model.clone())
+        .or(model);
+    let next_effort = incoming_selection
+        .as_ref()
+        .and_then(|selection| selection.reasoning_effort.clone())
+        .or(reasoning_effort);
+
+    let (updated, abandoned) = {
+        let mut db = state.db.lock().unwrap();
+        let abandoned =
+            operations::current_native_sessions_for_kinds(&db, &session_id, &[from_kind, to_kind])
+                .map_err(|error| error.to_string())?;
+        operations::upsert_session_kind_model_selection(
+            &db,
+            &operations::SessionKindModelSelection {
+                session_id: session_id.clone(),
+                agent_kind: from_kind,
+                provider_id: session.provider_id.clone(),
+                model: session.model.clone(),
+                reasoning_effort: session.reasoning_effort.clone(),
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        operations::update_session_agent_kind(
+            &db,
+            &session_id,
+            to_kind,
+            default_permission_config_json(to_kind),
+            "off",
+            next_provider_id.as_deref(),
+            next_model.as_deref(),
+            next_effort.as_deref(),
+        )
+        .map_err(|error| error.to_string())?;
+        operations::delete_agent_session_mapping(&db, &session_id, from_kind)
+            .map_err(|error| error.to_string())?;
+        operations::delete_agent_session_mapping(&db, &session_id, to_kind)
+            .map_err(|error| error.to_string())?;
+        operations::replace_session_snapshot(&mut db, &session_id, &snapshot_events)
+            .map_err(|error| error.to_string())?;
+        operations::insert_session_runtime_switch(
+            &db,
+            &session_id,
+            from_kind,
+            to_kind,
+            snapshot_events.len() as i64 - 1,
+            None,
+            Some(&briefing),
+        )
+        .map_err(|error| error.to_string())?;
+        operations::set_pending_switch_briefing(&db, &session_id, Some(&briefing))
+            .map_err(|error| error.to_string())?;
+        let updated = operations::get_session(&db, &session_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "会话不存在".to_string())?;
+        (updated, abandoned)
+    };
+
+    cleanup_native_sessions_best_effort(
+        &app,
+        state.inner(),
+        agent_state.inner(),
+        &session_id,
+        &abandoned,
+        false,
+    )
+    .await;
+
+    Ok(updated)
+}
+
+async fn cleanup_native_sessions_best_effort(
+    app: &AppHandle,
+    state: &AppState,
+    agent_state: &AgentState,
+    app_session_id: &str,
+    sessions: &[NativeSessionRef],
+    include_codex_interactive: bool,
+) {
+    let home = home_dir().ok();
+    for session in sessions {
+        match session.agent_kind {
+            AgentKind::ClaudeCode => {
+                if let Some(home) = home.as_ref() {
+                    if let Err(error) =
+                        cleanup_claude_native_session(home, &session.agent_session_id)
+                    {
+                        warn!(
+                            target: "session",
+                            "Failed to clean Claude native session app_session_id={} agent_session_id={}: {}",
+                            app_session_id,
+                            session.agent_session_id,
+                            error
+                        );
+                    }
+                }
+            }
+            AgentKind::Codex => {
+                if let Some(home) = home.as_ref() {
+                    if let Err(error) =
+                        cleanup_codex_native_session(home, &session.agent_session_id)
+                    {
+                        warn!(
+                            target: "session",
+                            "Failed to clean Codex native session app_session_id={} agent_session_id={}: {}",
+                            app_session_id,
+                            session.agent_session_id,
+                            error
+                        );
+                    }
+                }
+            }
+            AgentKind::Opencode => {
+                if let Err(error) = delete_opencode_native_session(
+                    app,
+                    state,
+                    agent_state,
+                    app_session_id,
+                    &session.agent_session_id,
+                )
+                .await
+                {
+                    warn!(
+                        target: "session",
+                        "Failed to clean OpenCode native session app_session_id={} agent_session_id={}: {}",
+                        app_session_id,
+                        session.agent_session_id,
+                        error
+                    );
+                }
+            }
+            AgentKind::GeminiCli => {}
+        }
+    }
+
+    if include_codex_interactive {
+        if let Some(home) = home.as_ref() {
+            if let Err(error) = cleanup_codex_app_interactive_events(home, app_session_id) {
+                warn!(
+                    target: "session",
+                    "Failed to clean Codex interactive events app_session_id={}: {}",
+                    app_session_id,
+                    error
+                );
+            }
+        }
+    }
 }

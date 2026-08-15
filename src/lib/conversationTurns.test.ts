@@ -81,6 +81,42 @@ describe('buildConversationTurns', () => {
     expect(turns[0]?.footerAnchorEventIndex).toBe(1);
   });
 
+  it('fills durationMs from user and last assistant timestamps when history has no result', () => {
+    const userTs = Date.parse('2026-08-15T09:22:56.188Z');
+    const thinkingTs = Date.parse('2026-08-15T09:24:21.074Z');
+    const assistantTs = Date.parse('2026-08-15T09:24:21.552Z');
+    const [turn] = buildConversationTurns([
+      user('你是什么模型'),
+      assistant([{ type: 'thinking', thinking: 'The user asked which model I am.' }], 'end_turn'),
+      assistant([{ type: 'text', text: '我是 GLM-4.7 Flash' }], 'end_turn'),
+    ], {
+      isRunning: false,
+      timestamps: [userTs, thinkingTs, assistantTs],
+    });
+
+    expect(turn).toMatchObject({
+      status: 'completed',
+      durationMs: 85_364,
+    });
+  });
+
+  it('prefers result duration_ms over event timestamps', () => {
+    const [turn] = buildConversationTurns([
+      user('hello'),
+      assistant([{ type: 'text', text: 'hi' }], 'end_turn'),
+      result(false),
+    ], {
+      isRunning: false,
+      timestamps: [
+        Date.parse('2026-08-15T09:22:56.188Z'),
+        Date.parse('2026-08-15T09:24:21.552Z'),
+        Date.parse('2026-08-15T09:24:21.800Z'),
+      ],
+    });
+
+    expect(turn?.durationMs).toBe(12_400);
+  });
+
   it('keeps tool use and tool result in one turn', () => {
     const turns = buildConversationTurns([
       user('run it'),

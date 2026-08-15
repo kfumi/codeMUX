@@ -12,6 +12,7 @@ export interface ConversationTurnOptions {
   forceStopped?: boolean;
   retainRawEvents?: boolean;
   sessionId?: string;
+  timestamps?: number[];
 }
 
 type MutableTurn = {
@@ -50,6 +51,7 @@ export function buildConversationTurns(
       isRunning: options.isRunning ?? false,
       forceStopped: options.forceStopped ?? false,
       retainRawEvents: options.retainRawEvents ?? false,
+      timestamps: options.timestamps,
     }));
     current = null;
   };
@@ -284,6 +286,7 @@ function finalizeTurn(
     isRunning: boolean;
     forceStopped: boolean;
     retainRawEvents: boolean;
+    timestamps?: number[];
   },
 ): ConversationTurn<AgentMessage> {
   const pendingToolIds = [...turn.pendingToolIds];
@@ -310,6 +313,10 @@ function finalizeTurn(
     status = 'running';
   }
 
+  const durationMs = turn.durationMs ?? (
+    status === 'completed' ? durationFromTimestamps(turn, options.timestamps) : undefined
+  );
+
   return {
     id: turn.id,
     messages: turn.messages,
@@ -317,7 +324,7 @@ function finalizeTurn(
     hasRealUser: turn.hasRealUser,
     status,
     pendingToolIds,
-    ...(turn.durationMs !== undefined ? { durationMs: turn.durationMs } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
     ...(turn.numTurns !== undefined ? { numTurns: turn.numTurns } : {}),
     ...(termination ? { termination } : {}),
     diagnostics: turn.diagnostics,
@@ -359,6 +366,36 @@ function readReason(data: Record<string, unknown>): string | undefined {
 
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function durationFromTimestamps(turn: MutableTurn, timestamps: number[] | undefined): number | undefined {
+  if (!timestamps || timestamps.length === 0) {
+    return undefined;
+  }
+
+  let startIndex: number | undefined;
+  for (let index = 0; index < turn.messages.length; index++) {
+    const event = turn.messages[index];
+    if (event?.kind === 'user' && isRealConversationUserEvent(event)) {
+      startIndex = turn.eventIndices[index];
+      break;
+    }
+  }
+  startIndex ??= turn.eventIndices[0];
+
+  const endIndex = turn.assistantEventIndices[turn.assistantEventIndices.length - 1]
+    ?? turn.eventIndices[turn.eventIndices.length - 1];
+  if (startIndex == null || endIndex == null) {
+    return undefined;
+  }
+
+  const startTime = timestamps[startIndex];
+  const endTime = timestamps[endIndex];
+  if (typeof startTime === 'number' && startTime > 0 && typeof endTime === 'number' && endTime > startTime) {
+    return endTime - startTime;
+  }
+
+  return undefined;
 }
 
 function isSyntheticResult(data: Record<string, unknown>): boolean {

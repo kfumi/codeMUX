@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AgentKind, Session, SessionMode } from '../types/session';
+import type { AgentKind, ReasoningEffort, Session, SessionMode } from '../types/session';
 import type { AgentPermissionConfig, AgentPlanMode } from '../lib/agentPermissions';
 import { sessionApi, agentApi } from '../lib/tauri';
 import { useAgentStore } from './agentStore';
@@ -34,6 +34,13 @@ interface SessionState {
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   updateSessionModel: (sessionId: string, model: string) => void;
   updateSessionPermissions: (sessionId: string, permissionConfig?: AgentPermissionConfig, planMode?: AgentPlanMode) => Promise<void>;
+  switchSessionAgentKind: (
+    sessionId: string,
+    toKind: AgentKind,
+    providerId?: string | null,
+    model?: string | null,
+    reasoningEffort?: ReasoningEffort | null,
+  ) => Promise<Session>;
   touchSession: (sessionId: string) => void;
   markSessionRead: (sessionId: string) => void;
   markSessionUnread: (sessionId: string) => void;
@@ -212,23 +219,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     try {
       const session = get().sessions.find((entry) => entry.id === sessionId)
         ?? get().archivedSessions.find((entry) => entry.id === sessionId);
-      if (session && session.origin !== 'imported' && !session.is_read_only && session.agent_kind === 'opencode') {
-        await agentApi.deleteOpenCodeSession(sessionId);
-      }
-      // Clean up agent session files (best-effort, don't block on failure)
       if (session?.origin !== 'imported' && !session?.is_read_only) {
         try {
           await agentApi.shutdown(sessionId);
-          await agentApi.deleteClaudeSessionFiles(sessionId);
-          await agentApi.deleteCodexSessionFiles(sessionId);
           await agentApi.resetSession(sessionId);
         } catch {
-          // Ignore cleanup errors — the session mapping may not exist
+          // Ignore cleanup errors — the sidecar may already be gone.
         }
       }
-      // Clear in-memory agent events
       useAgentStore.getState().clearEvents(sessionId);
-      // Delete from database
       await sessionApi.delete(sessionId);
       set((state) => {
         const newSessions = state.sessions.filter((s) => s.id !== sessionId);
@@ -345,6 +344,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({ error: String(error) });
       throw error;
     }
+  },
+  switchSessionAgentKind: async (sessionId, toKind, providerId, model, reasoningEffort) => {
+    const updated = await sessionApi.switchAgentKind(sessionId, toKind, providerId, model, reasoningEffort);
+    set((state) => ({
+      sessions: state.sessions.map((session) => session.id === sessionId ? { ...session, ...updated } : session),
+      error: null,
+    }));
+    useAgentStore.setState((state) => ({
+      queuePaused: { ...state.queuePaused, [sessionId]: true },
+    }));
+    useAgentStore.getState().clearEvents(sessionId);
+    await useAgentStore.getState().loadSessionMessages(sessionId);
+    return updated;
   },
   touchSession: (sessionId: string) => {
     const now = new Date().toISOString();

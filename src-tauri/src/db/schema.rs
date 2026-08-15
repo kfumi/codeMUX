@@ -235,6 +235,16 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         );
     }
 
+    let has_pending_switch_briefing: bool = conn
+        .prepare("SELECT pending_switch_briefing FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_pending_switch_briefing {
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN pending_switch_briefing TEXT",
+            [],
+        );
+    }
+
     let _ = conn.execute("DROP TABLE IF EXISTS tool_calls", []);
     let _ = conn.execute("DROP TABLE IF EXISTS messages", []);
 
@@ -312,6 +322,51 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_session_message_attachments_session_id ON session_message_attachments(session_id)",
         [],
     );
+
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS session_kind_model_selections (
+            session_id TEXT NOT NULL,
+            agent_kind TEXT NOT NULL,
+            provider_id TEXT,
+            model TEXT,
+            reasoning_effort TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (session_id, agent_kind),
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS session_runtime_switches (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            from_kind TEXT NOT NULL,
+            to_kind TEXT NOT NULL,
+            at_sequence INTEGER NOT NULL,
+            new_agent_session_id TEXT,
+            briefing_text TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_kind_model_selections_session_id
+            ON session_kind_model_selections(session_id);
+        CREATE INDEX IF NOT EXISTS idx_session_runtime_switches_session_id
+            ON session_runtime_switches(session_id);
+        CREATE TABLE IF NOT EXISTS session_native_sessions (
+            session_id TEXT NOT NULL,
+            agent_kind TEXT NOT NULL,
+            agent_session_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (session_id, agent_kind, agent_session_id),
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_native_sessions_session_id
+            ON session_native_sessions(session_id);
+        INSERT OR IGNORE INTO session_native_sessions (
+            session_id, agent_kind, agent_session_id, created_at
+        )
+        SELECT app_session_id, agent_kind, agent_session_id, created_at
+        FROM agent_session_mappings;
+        ",
+    )?;
 
     Ok(())
 }

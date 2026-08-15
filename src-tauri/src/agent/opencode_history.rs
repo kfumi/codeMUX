@@ -1116,6 +1116,7 @@ fn load_opencode_events_from_connection(
                         content.push(serde_json::json!({ "type": "thinking", "thinking": text }));
                     }
                 }
+                "step-start" | "step-finish" => {}
                 "tool" if role == "assistant" => {
                     let call_id = part
                         .data

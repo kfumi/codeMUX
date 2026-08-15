@@ -234,6 +234,20 @@ export const sessionApi = {
       permissionConfig: permissionConfig ? JSON.stringify(permissionConfig) : null,
       planMode: planMode ?? null,
     }),
+  switchAgentKind: (
+    sessionId: string,
+    toKind: AgentKind,
+    providerId?: string | null,
+    model?: string | null,
+    reasoningEffort?: ReasoningEffort | null,
+  ): Promise<Session> =>
+    invokeLogged('switch_session_agent_kind', {
+      sessionId,
+      toKind,
+      providerId: providerId ?? null,
+      model: model ?? null,
+      reasoningEffort: reasoningEffort ?? null,
+    }),
   forkClaude: (
     sessionId: string,
     forkEventId: string,

@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
-import { getStreamStatusDisplay } from './CodeMuxMessageParts';
+import { getKnownSidecarErrorDisplay, getStreamStatusDisplay } from './CodeMuxMessageParts';
 import { CodeMuxDataMessagePart, CodeMuxToolCallMessagePart } from './CodeMuxMessageParts';
 
 function renderWithTooltip(ui: React.ReactElement) {
@@ -287,7 +287,39 @@ describe('CodeMuxToolCallMessagePart', () => {
 });
 
 describe('CodeMuxDataMessagePart', () => {
-  it('把 askUserQuestion 等待超时的 sidecar 错误展示成中文提示', () => {
+  beforeEach(() => {
+    cleanup();
+  });
+
+  it('把运行时切换渲染成可展开的时间线缝，默认不展示 briefing', () => {
+    const { container } = render(
+      <CodeMuxDataMessagePart
+        name="codemux-event"
+        data={{
+          eventKind: 'runtime_switch',
+          event: {
+            kind: 'runtime_switch',
+            data: {
+              from_kind: 'claude_code',
+              to_kind: 'codex',
+              content: '已切换到 Codex。以下由该智能体继续。原生会话已重建，未共用上一驾驶席的 session ID。',
+              briefing: '[CodeMUX runtime switch]\nPrevious driver: Claude Code. Current driver: Codex.',
+            },
+          },
+        }}
+      />,
+    );
+
+    const view = within(container);
+    expect(view.getByText(/已从 Claude Code 切换到 Codex/)).toBeTruthy();
+    expect(view.queryByText(/Previous driver: Claude Code/)).toBeNull();
+
+    fireEvent.click(view.getByRole('button', { name: /已从 Claude Code 切换到 Codex/ }));
+
+    expect(view.getByText(/Previous driver: Claude Code/)).toBeTruthy();
+  });
+
+  it('把 Claude 空闲超时的 sidecar 错误展示成中文提示', () => {
     render(
       <CodeMuxDataMessagePart
         name="codemux-event"
@@ -304,8 +336,34 @@ describe('CodeMuxDataMessagePart', () => {
       />,
     );
 
-    expect(screen.getByText('等待用户回复超时，请重新发送消息继续')).toBeTruthy();
+    expect(screen.getByText('引擎空闲超时（300 秒无响应），请重新发送消息继续')).toBeTruthy();
     expect(screen.queryByText(/Timeout\._onTimeout/)).toBeNull();
     expect(screen.queryByText(/Query timed out/)).toBeNull();
+  });
+});
+
+describe('getKnownSidecarErrorDisplay', () => {
+  it('maps configured Claude idle timeouts to engine idle copy', () => {
+    expect(getKnownSidecarErrorDisplay('Query timed out: no message received for 120s (after msg #9)')).toBe(
+      '引擎空闲超时（120 秒无响应），请重新发送消息继续',
+    );
+  });
+
+  it('keeps real user-input timeout copy distinct from idle timeout', () => {
+    expect(getKnownSidecarErrorDisplay('等待用户回复超时，请重新发送消息继续')).toBe(
+      '等待用户回复超时，请重新发送消息继续',
+    );
+  });
+
+  it('maps Codex idle timeout errors', () => {
+    expect(getKnownSidecarErrorDisplay('Turn idle timeout: no progress events received')).toBe(
+      '引擎空闲超时（无进展事件），请重新发送消息继续',
+    );
+  });
+
+  it('maps OpenCode idle timeout errors', () => {
+    expect(getKnownSidecarErrorDisplay('No progress events for 300000ms; turn idle timed out')).toBe(
+      '引擎空闲超时（300 秒无响应），请重新发送消息继续',
+    );
   });
 });

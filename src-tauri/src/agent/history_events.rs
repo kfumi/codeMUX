@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
 
+use crate::agent::switch_briefing::strip_switch_briefing_prefix;
+
 /// Converts provider history records into the CodeMUX Event interface.
 ///
 /// Provider-specific loaders may keep their native parsing logic and fixtures;
@@ -144,6 +146,10 @@ fn normalize_user(raw: Value) -> Vec<Value> {
     }
 
     if !user_content.is_empty() {
+        strip_briefing_from_user_blocks(&mut user_content);
+    }
+
+    if !user_content.is_empty() {
         let mut user = json!({
             "type": "user_message",
             "content": user_content,
@@ -152,6 +158,26 @@ fn normalize_user(raw: Value) -> Vec<Value> {
         events.insert(0, user);
     }
     events
+}
+
+fn strip_briefing_from_user_blocks(blocks: &mut Vec<Value>) {
+    for block in blocks.iter_mut() {
+        if block.get("type").and_then(Value::as_str) != Some("text") {
+            continue;
+        }
+        if let Some(text) = block.get("text").and_then(Value::as_str) {
+            block["text"] = json!(strip_switch_briefing_prefix(text));
+        }
+    }
+    blocks.retain(|block| {
+        if block.get("type").and_then(Value::as_str) != Some("text") {
+            return true;
+        }
+        block
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.is_empty())
+    });
 }
 
 fn normalize_result(raw: Value) -> Vec<Value> {
@@ -296,6 +322,12 @@ fn normalize_envelope(event: &mut Value, app_session_id: &str, sequence: u64) {
                 .and_then(Value::as_str)
                 .filter(|value| !value.is_empty())
         })
+        .or_else(|| {
+            object
+                .get("provider_message_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+        })
         .map(ToOwned::to_owned);
     object.insert(
         "event_id".to_string(),
@@ -336,9 +368,7 @@ fn copy_history_fields(target: &mut Value, source: &Value) {
             "provider_message_id".to_string(),
             json!(provider_message_id),
         );
-        if target.get("type").and_then(Value::as_str) == Some("user_message") {
-            target.insert("uuid".to_string(), json!(provider_message_id));
-        }
+        target.insert("uuid".to_string(), json!(provider_message_id));
     }
     if let Some(provider_turn_id) = first_string(source, &["provider_turn_id", "turn_id", "turnId"])
     {
@@ -463,6 +493,24 @@ mod tests {
     }
 
     #[test]
+    fn strips_switch_briefing_prefix_from_native_user_messages() {
+        let events = normalize_history_events(
+            vec![json!({
+                "type": "user",
+                "uuid": "user-1",
+                "message": {
+                    "role": "user",
+                    "content": "[CodeMUX runtime switch]\nPrevious driver: Claude Code.\n\n---\nUser follow-up:\n刚才问了什么？"
+                }
+            })],
+            "app-1",
+        );
+
+        assert_eq!(events[0]["type"], "user_message");
+        assert_eq!(events[0]["content"][0]["text"], "刚才问了什么？");
+    }
+
+    #[test]
     fn maps_provider_session_id_and_failed_result_without_leaking_old_envelope() {
         let events = normalize_history_events(
             vec![
@@ -493,5 +541,29 @@ mod tests {
             assert!(event.get("type").and_then(|value| value.as_str()) != Some("assistant"));
             assert!(event.get("type").and_then(|value| value.as_str()) != Some("result"));
         }
+    }
+
+    #[test]
+    fn assistant_uuid_becomes_stable_event_id_instead_of_native_sequence() {
+        let events = normalize_history_events(
+            vec![json!({
+                "type": "assistant",
+                "uuid": "msg_native_assistant_1",
+                "message": {
+                    "role": "assistant",
+                    "content": [{ "type": "text", "text": "先前那一轮的回答" }]
+                }
+            })],
+            "app-1",
+        );
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["type"], "assistant_message");
+        assert_eq!(events[0]["event_id"], "msg_native_assistant_1");
+        assert_eq!(events[0]["provider_message_id"], "msg_native_assistant_1");
+        assert_ne!(
+            events[0]["event_id"], "codemux-history-app-1-0",
+            "synthetic native-sequence ids collide after an agent-kind switch"
+        );
     }
 }

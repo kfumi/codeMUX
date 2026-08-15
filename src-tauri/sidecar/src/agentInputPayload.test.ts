@@ -4,6 +4,7 @@ import {
   buildClaudeUserMessageContent,
   buildCodexInputEntries,
   isImageUnsupportedError,
+  normalizeAgentInputPayload,
 } from './agentInputPayload.js';
 
 const image = {
@@ -33,6 +34,16 @@ describe('agentInputPayload', () => {
       { type: 'text', text: 'describe this' },
       { type: 'local_image', path: 'C:/tmp/screen.png' },
     ]);
+  });
+
+  it('sends the command prompt even when inputPayload.text is a shorter display follow-up', () => {
+    const payload = normalizeAgentInputPayload(
+      '[CodeMUX runtime switch]\nUser: 你好\n\n---\nUser follow-up:\n刚才我问了你哪些问题？',
+      { text: '刚才我问了你哪些问题？' },
+    );
+
+    expect(payload.text).toContain('[CodeMUX runtime switch]');
+    expect(payload.text).toContain('刚才我问了你哪些问题？');
   });
 
   it('recognizes common provider image-unsupported errors', () => {

@@ -130,6 +130,16 @@ function provider(id: string, models: string[]): ModelProvider {
 
 describe('AgentPanel session bootstrapping', () => {
   beforeEach(() => {
+    Element.prototype.scrollIntoView = () => {};
+    if (!HTMLElement.prototype.hasPointerCapture) {
+      HTMLElement.prototype.hasPointerCapture = () => false;
+    }
+    if (!HTMLElement.prototype.releasePointerCapture) {
+      HTMLElement.prototype.releasePointerCapture = () => {};
+    }
+    if (!HTMLElement.prototype.setPointerCapture) {
+      HTMLElement.prototype.setPointerCapture = () => {};
+    }
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
       disconnect() {}
@@ -280,5 +290,21 @@ describe('AgentPanel session bootstrapping', () => {
     await waitFor(() => {
       expect(updateReasoningEffortMock).toHaveBeenCalledWith('session-running', 'high');
     });
+  });
+
+  it('raises the agent-switch confirm dialog above the composer so it stays clickable', () => {
+    useAgentStore.setState({ isRunning: { 'session-running': false } });
+
+    render(<AgentPanel sessionId="session-running" />);
+
+    const trigger = screen.getByRole('button', { name: 'Claude Code' });
+    fireEvent.pointerDown(trigger, { pointerType: 'mouse', button: 0 });
+    fireEvent.pointerUp(trigger, { pointerType: 'mouse', button: 0 });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('menuitem', { name: /Codex/ }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.className).toContain('z-[240]');
+    expect(screen.getByRole('button', { name: '确认切换' })).toBeTruthy();
   });
 });

@@ -1809,12 +1809,14 @@ describe('agent store Codex history loading', () => {
         type: 'user_message',
         session_id: session.id,
         event_id: 'history-user-1',
+        timestamp: '2026-08-15T09:22:56.188Z',
         content: [{ type: 'text', text: 'hello' }],
       },
       {
         type: 'assistant_message',
         session_id: session.id,
         event_id: 'history-assistant-1',
+        timestamp: '2026-08-15T09:24:21.552Z',
         content: [{ type: 'text', text: 'reply' }],
         usage: {
           input_tokens: 200,
@@ -1832,6 +1834,7 @@ describe('agent store Codex history loading', () => {
     expect(events.some((event) => event.kind === 'result')).toBe(false);
     expect(useAgentStore.getState().turns[session.id]?.[0]).toMatchObject({
       status: 'completed',
+      durationMs: 85_364,
     });
  
     const assistant = events.find((event) => event.kind === 'assistant');

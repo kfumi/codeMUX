@@ -38,6 +38,7 @@ export type ParsedStoreEvent =
   | { kind: 'tool_result'; data: AgentToolResult }
   | { kind: 'result'; data: AgentResultMessage }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
+  | { kind: 'runtime_switch'; data: { from_kind?: string; to_kind?: string; content: string; briefing?: string } }
   | { kind: 'session_summary'; data: SessionSummaryEvent }
   | { kind: 'file_snapshot'; data: { type: 'file_snapshot'; file_path: string; original_content: string; is_new: boolean; tool_use_id: string } };
 
@@ -66,6 +67,29 @@ export function shouldProcessTerminalEvent(
   return isRunning;
 }
 
+export function stripSwitchBriefingPrefix(text: string): string {
+  const normalized = text.trimStart();
+  if (!normalized.startsWith('[CodeMUX runtime switch]')) {
+    return text;
+  }
+
+  const separator = '\n---\nUser follow-up:\n';
+  const separatorIndex = normalized.indexOf(separator);
+  if (separatorIndex === -1) {
+    return '';
+  }
+
+  return normalized.slice(separatorIndex + separator.length);
+}
+
+function displayUserText(text: string): string {
+  return stripSwitchBriefingPrefix(
+    stripAttachmentEnrichmentContext(
+      stripCodexCollaborationPolicyBlock(text),
+    ),
+  );
+}
+
 export function parseSdkUserMessage(data: Record<string, unknown>): ParsedStoreEvent {
   const message = asRecord(data.message);
   const content = Array.isArray(message?.content) ? message.content : undefined;
@@ -75,9 +99,7 @@ export function parseSdkUserMessage(data: Record<string, unknown>): ParsedStoreE
   }
 
   if (typeof message?.content === 'string') {
-    const contentText = stripAttachmentEnrichmentContext(
-      stripCodexCollaborationPolicyBlock(message.content),
-    );
+    const contentText = displayUserText(message.content);
     return {
       kind: 'user',
       data: {
@@ -89,7 +111,7 @@ export function parseSdkUserMessage(data: Record<string, unknown>): ParsedStoreE
 
   const textParts = content
     ?.filter((block) => isRecord(block) && (block.type === 'text' || block.type === 'input_text'))
-    .map((block) => stripAttachmentEnrichmentContext(stripCodexCollaborationPolicyBlock(String(block.text || ''))))
+    .map((block) => displayUserText(String(block.text || '')))
     .filter((text) => text.length > 0) ?? [];
   const attachments = extractImageAttachments(content ?? []);
 
@@ -375,6 +397,22 @@ function getRawUserText(raw: Record<string, unknown>): string {
     .join('\n');
 }
 
+function mapRuntimeSwitch(raw: Record<string, unknown>): Extract<ParsedStoreEvent, { kind: 'runtime_switch' }> | null {
+  if (raw.type !== 'system' || raw.subtype !== 'runtime_switch') {
+    return null;
+  }
+
+  return {
+    kind: 'runtime_switch',
+    data: {
+      ...(typeof raw.from_kind === 'string' ? { from_kind: raw.from_kind } : {}),
+      ...(typeof raw.to_kind === 'string' ? { to_kind: raw.to_kind } : {}),
+      content: typeof raw.content === 'string' ? raw.content : '',
+      ...(typeof raw.briefing === 'string' ? { briefing: raw.briefing } : {}),
+    },
+  };
+}
+
 function mapCompactBoundary(raw: Record<string, unknown>): Extract<ParsedStoreEvent, { kind: 'compact' }> | null {
   if (raw.type !== 'system' || raw.subtype !== 'compact_boundary') {
     return null;
@@ -474,6 +512,11 @@ export function mapPersistedClaudeMessage(
   const compactEvent = mapCompactBoundary(raw);
   if (compactEvent) {
     return compactEvent;
+  }
+
+  const runtimeSwitchEvent = mapRuntimeSwitch(raw);
+  if (runtimeSwitchEvent) {
+    return runtimeSwitchEvent;
   }
 
   const sessionSummaryEvent = mapSessionSummary(raw);
@@ -585,6 +628,9 @@ function projectCodeMuxHistoryEvent(raw: Record<string, unknown>): Record<string
       content: raw.content,
       compact_metadata: raw.compact_metadata,
       ...(raw.diffs !== undefined ? { diffs: raw.diffs } : {}),
+      ...(typeof raw.from_kind === 'string' ? { from_kind: raw.from_kind } : {}),
+      ...(typeof raw.to_kind === 'string' ? { to_kind: raw.to_kind } : {}),
+      ...(typeof raw.briefing === 'string' ? { briefing: raw.briefing } : {}),
     };
   }
   return null;

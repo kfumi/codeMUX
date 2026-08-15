@@ -102,6 +102,26 @@ describe('CodeMUX frontend protocol adapter', () => {
     });
   });
 
+  it('maps runtime switch system events to a dedicated seam with briefing', () => {
+    expect(toLegacySystemMessage({
+      type: 'system_event',
+      subtype: 'runtime_switch',
+      content: '已切换到 Codex。以下由该智能体继续。原生会话已重建，未共用上一驾驶席的 session ID。',
+      from_kind: 'claude_code',
+      to_kind: 'codex',
+      briefing: '[CodeMUX runtime switch]\nPrevious driver: Claude Code.',
+      event_id: 'event-switch',
+    })).toEqual({
+      kind: 'runtime_switch',
+      data: {
+        from_kind: 'claude_code',
+        to_kind: 'codex',
+        content: '已切换到 Codex。以下由该智能体继续。原生会话已重建，未共用上一驾驶席的 session ID。',
+        briefing: '[CodeMUX runtime switch]\nPrevious driver: Claude Code.',
+      },
+    });
+  });
+
   it('preserves file diffs from session summary system events', () => {
     expect(toLegacySystemMessage({
       type: 'system_event',

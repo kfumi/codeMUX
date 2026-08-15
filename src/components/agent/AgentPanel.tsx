@@ -27,6 +27,9 @@ import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistant
 import { CodeMuxThread } from './assistant-ui/CodeMuxThread';
 import { AgentPermissionSelector } from './AgentPermissionSelector';
 import { AgentModelSelector } from './AgentModelSelector';
+import { AgentSelector } from './AgentSelector';
+import { getAgentDefinition } from '../../types/agentRegistry';
+import type { AgentKind } from '../../types/session';
 import {
   checkProfileModelSupports1m,
   formatModelDisplayName,
@@ -43,7 +46,7 @@ const EMPTY_PENDING_PERMISSIONS: AgentPermissionRequest[] = [];
 const EMPTY_PROJECT_SKILLS: ProjectSkill[] = [];
 
 export function AgentPanel({ sessionId }: AgentPanelProps) {
-  const { sessions, createSession, updateSessionPermissions } = useSessionStore();
+  const { sessions, createSession, updateSessionPermissions, switchSessionAgentKind } = useSessionStore();
   const { projects } = useProjectStore();
   const startQuery = useAgentStore((state) => state.startQuery);
   const interrupt = useAgentStore((state) => state.interrupt);
@@ -143,6 +146,13 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const [infoContent, setInfoContent] = useState('');
   const [cwd, setCwd] = useState(() => getStoredAgentCwd());
   const ensuredSessionsRef = useRef<Set<string>>(new Set());
+  const [pendingSwitchKind, setPendingSwitchKind] = useState<AgentKind | null>(null);
+  const [isSwitchingAgent, setIsSwitchingAgent] = useState(false);
+  const canSwitchAgent = !isRunning
+    && pendingPermissions.length === 0
+    && !isReadOnly
+    && session?.origin !== 'imported'
+    && (agentKind === 'claude_code' || agentKind === 'codex' || agentKind === 'opencode');
 
   useEffect(() => {
     loadSessionMessages(sessionId);
@@ -177,6 +187,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     const effectiveCwd = project?.path || cwd;
     const ensureKey = JSON.stringify({
       sessionId,
+      agentKind,
       cwd: effectiveCwd,
       reasoningEffort,
       permissionConfig: session?.permission_config || null,
@@ -202,6 +213,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     session?.provider_id,
     session?.model,
     planMode,
+    agentKind,
     isRunning,
     isReadOnly,
   ]);
@@ -235,9 +247,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   };
 
   const handleModelChange = useCallback(async (nextModel: string, providerId: string) => {
-    if (isReadOnly || !isProviderAgent || !nextModel) {
-      return;
-    }
     const sameModel = nextModel === selectorModelState;
     const sameProvider = providerId === (runtimeProvider?.id ?? activeProviderId);
     if (sameModel && sameProvider) {
@@ -286,6 +295,34 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     selectorModelState,
     sessionId,
   ]);
+
+  const handleConfirmAgentSwitch = useCallback(async () => {
+    if (!pendingSwitchKind) {
+      return;
+    }
+    const fallbackProvider = modelProviders.find((provider) => isProviderUsable(provider, pendingSwitchKind))
+      ?? (activeProvider && isProviderUsable(activeProvider, pendingSwitchKind) ? activeProvider : null);
+    if (!fallbackProvider) {
+      toast.error('目标智能体没有可用的模型供应商，请先在设置中配置匹配协议端点。');
+      return;
+    }
+    setIsSwitchingAgent(true);
+    try {
+      userModifiedRef.current = false;
+      await switchSessionAgentKind(
+        sessionId,
+        pendingSwitchKind,
+        fallbackProvider.id,
+        fallbackProvider.default_model.trim() || getProviderPrimaryModel(fallbackProvider) || undefined,
+        undefined,
+      );
+      setPendingSwitchKind(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSwitchingAgent(false);
+    }
+  }, [activeProvider, modelProviders, pendingSwitchKind, sessionId, switchSessionAgentKind]);
 
   const handleReasoningEffortChange = useCallback(async (nextEffort: ReasoningEffort) => {
     if (isReadOnly) return;
@@ -469,7 +506,18 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                   configuredContextWindow={configuredContextWindow}
                   disabled={!hasUsableProvider || isReadOnly}
                   modelSelector={(
-                    <AgentModelSelector
+                    <>
+                      <AgentSelector
+                        value={agentKind}
+                        disabled={!canSwitchAgent || isSwitchingAgent}
+                        onChange={(nextKind) => {
+                          if (nextKind === agentKind || !canSwitchAgent) {
+                            return;
+                          }
+                          setPendingSwitchKind(nextKind);
+                        }}
+                      />
+                      <AgentModelSelector
                       agentKind={agentKind}
                       providers={modelProviders}
                       activeProviderId={runtimeProvider?.id ?? activeProviderId}
@@ -481,6 +529,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                       disabled={isRunning || isReadOnly}
                       compact={compact}
                     />
+                    </>
                   )}
                   permissionSelector={(
                     <AgentPermissionSelector
@@ -516,6 +565,23 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
           </div>
           <DialogFooter>
             <Button onClick={() => setInfoOpen(false)}>关闭</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={pendingSwitchKind !== null} onOpenChange={(open) => { if (!open && !isSwitchingAgent) setPendingSwitchKind(null); }}>
+        <DialogContent overlayClassName="z-[240]" className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>切换到 {pendingSwitchKind ? getAgentDefinition(pendingSwitchKind)?.label ?? pendingSwitchKind : ''}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            对话仍是这一条，但会新建原生会话并用摘要交接。不能重放工具或权限；此次切换按新会话计费。未发送的排队消息会保持暂停。
+          </p>
+          <DialogFooter>
+            <Button variant="ghost" disabled={isSwitchingAgent} onClick={() => setPendingSwitchKind(null)}>取消</Button>
+            <Button disabled={isSwitchingAgent} onClick={() => void handleConfirmAgentSwitch()}>
+              {isSwitchingAgent ? '切换中…' : '确认切换'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

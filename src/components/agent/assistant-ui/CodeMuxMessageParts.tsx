@@ -26,6 +26,9 @@ import { cn } from '../../../lib/utils';
 import { parseUnifiedDiffPatch } from '../../../lib/diffStats';
 import { getProposedPlanPreview, getProposedPlanTitle, parseProposedPlan } from './proposedPlan';
 import { FileTypeIcon } from '@/components/assistant-ui/file-type-icon';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { getAgentDefinition } from '@/types/agentRegistry';
+import type { AgentKind } from '@/types/session';
 
 type CodeMuxToolCallPartProps = {
   toolName: string;
@@ -457,11 +460,15 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
     const tokenText = preTokens >= 1000 ? ` · 节省 ${(preTokens / 1000).toFixed(1)}k tokens` : preTokens > 0 ? ` · 节省 ${preTokens} tokens` : '';
     return (
       <div className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
-        <span className="text-ui-caption text-muted-foreground/35 tracking-normal font-medium">
+        <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
           — 上下文已压缩{tokenText} —
         </span>
       </div>
     );
+  }
+
+  if (isRuntimeSwitchData(data)) {
+    return <RuntimeSwitchSeam event={data.event} />;
   }
 
   if (isSessionSummaryData(data)) {
@@ -488,9 +495,26 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
   );
 }
 
-function getKnownSidecarErrorDisplay(errorMsg: string): string | null {
-  if (/Query timed out: no message received for 300s/.test(errorMsg)) {
-    return '等待用户回复超时，请重新发送消息继续';
+const USER_INPUT_TIMEOUT_MESSAGE = '等待用户回复超时，请重新发送消息继续';
+
+export function getKnownSidecarErrorDisplay(errorMsg: string): string | null {
+  if (errorMsg.includes(USER_INPUT_TIMEOUT_MESSAGE)) {
+    return USER_INPUT_TIMEOUT_MESSAGE;
+  }
+
+  const claudeIdleMatch = errorMsg.match(/Query timed out: no message received for (\d+)s/);
+  if (claudeIdleMatch) {
+    return `引擎空闲超时（${claudeIdleMatch[1]} 秒无响应），请重新发送消息继续`;
+  }
+
+  if (/Turn idle timeout: no progress events received/.test(errorMsg)) {
+    return '引擎空闲超时（无进展事件），请重新发送消息继续';
+  }
+
+  const openCodeIdleMatch = errorMsg.match(/No progress events for (\d+)ms; (?:turn idle|native compaction) timed out/);
+  if (openCodeIdleMatch) {
+    const seconds = Math.round(Number(openCodeIdleMatch[1]) / 1000);
+    return `引擎空闲超时（${seconds} 秒无响应），请重新发送消息继续`;
   }
 
   return null;
@@ -520,6 +544,66 @@ function isCompactData(value: unknown): value is { eventKind: string; event: Ext
     value.eventKind === 'compact' &&
     isRecord(value.event) &&
     value.event.kind === 'compact'
+  );
+}
+
+function isRuntimeSwitchData(value: unknown): value is { eventKind: string; event: Extract<AgentMessage, { kind: 'runtime_switch' }> } {
+  return (
+    isRecord(value) &&
+    value.eventKind === 'runtime_switch' &&
+    isRecord(value.event) &&
+    value.event.kind === 'runtime_switch'
+  );
+}
+
+function agentKindDisplayLabel(kind?: string): string | undefined {
+  if (!kind) {
+    return undefined;
+  }
+
+  return getAgentDefinition(kind as AgentKind)?.label ?? kind;
+}
+
+function runtimeSwitchCaption(fromKind?: string, toKind?: string): string {
+  const fromLabel = agentKindDisplayLabel(fromKind);
+  const toLabel = agentKindDisplayLabel(toKind);
+  if (fromLabel && toLabel) {
+    return `— 已从 ${fromLabel} 切换到 ${toLabel} —`;
+  }
+  if (toLabel) {
+    return `— 已切换到 ${toLabel} —`;
+  }
+  return '— 已切换智能体 —';
+}
+
+function RuntimeSwitchSeam({ event }: { event: Extract<AgentMessage, { kind: 'runtime_switch' }> }) {
+  const caption = runtimeSwitchCaption(event.data.from_kind, event.data.to_kind);
+  const briefing = event.data.briefing?.trim();
+
+  if (!briefing) {
+    return (
+      <div className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+        <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
+          {caption}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <Collapsible className="py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+      <div className="text-center">
+        <CollapsibleTrigger className="group inline-flex items-center gap-1 text-ui-caption text-muted-foreground tracking-normal font-medium transition-colors hover:text-foreground">
+          {caption}
+          <ChevronDown className="h-3 w-3 opacity-70 transition-transform group-data-[state=open]:rotate-180" />
+        </CollapsibleTrigger>
+      </div>
+      <CollapsibleContent>
+          <pre className="mt-2 mx-auto max-w-2xl whitespace-pre-wrap wrap-break-word rounded-lg border border-border/40 bg-muted/30 px-3 py-2 text-left text-[11px] leading-relaxed text-muted-foreground">
+          {briefing}
+        </pre>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
