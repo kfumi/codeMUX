@@ -133,6 +133,22 @@ _Avoid_: enricher, handler, adapter（当指 Enrichment 处理时）
 当前 Active Agent Kind 的思考强度规范值：关闭、低、中、高、极高、最高。各 Agent Kind 在 Kind Model Selection 中分别记住自己的档位；发送时由该种类的协议映射为自身参数，而不是 UI 选项的逐字透传，也不是一条 Session 上跨种类共用的档位。
 _Avoid_: thinking mode, reasoning_effort（当指 UI 档位时）；把思考强度当切换后仍沿用的会话级属性
 
+### Mobile Companion
+浏览器中的移动端 PWA，与桌面实例配对后查看并驱动其 Session。它是桌面的远程伴侣而不是独立应用：算力、配置与权威存储都在桌面端。它只看到未归档的 Session，可在已有项目上新建 Session，发消息进入同一队列，审批走同一条响应命令。
+_Avoid_: 移动端独立应用, 云同步端, 手机版桌面
+
+### Companion Server
+桌面端开启移动同步后对外暴露的本机 HTTP/WS 服务（内嵌于 Rust）。它提供配对、会话列表与事件历史的只读查询、实时 CodeMUX Event 订阅，以及驱动动作（发送/新建/审批）的转发。它是移动端对桌面的唯一寻址入口；未来公网中继只换寻址路径，不换协议。
+_Avoid_: 中继服务, 云服务, sync server（当指跨设备状态数据库时）
+
+### Pairing Token
+一次设备配对后颁发给某台移动设备的长期随机凭证，移动端存于 IndexedDB，所有请求与 WS 连接携带它以鉴权。它是「这台手机配过这台桌面」的信任凭证；桌面端可撤销，撤销后该设备失效。
+_Avoid_: 会话 token, session credential, API key
+
+### Device Pairing
+移动端与桌面实例建立信任的动作：扫码读取桌面地址与一次性配对码，换取该设备的 Pairing Token。配对建立后移动端即信任该桌面。
+_Avoid_: 登录, 连接（当指长期信任时）
+
 ## Preferred Terms
 
 
@@ -157,13 +173,19 @@ _Avoid_: thinking mode, reasoning_effort（当指 UI 档位时）；把思考强
 | Enrichment Provider / enrichment 供应商 | vision model, fallback model |
 | Attachment Processor / 附件处理器 | enricher, handler |
 | Enriched Context Block / enriched 上下文块 | OCR 结果, caption |
+| Mobile Companion / 移动伴侣 | 独立移动应用, 云同步端 |
+| Companion Server / 伴侣服务 | 中继服务, 云服务 |
+| Pairing Token / 配对令牌 | 会话 token, API key |
+| Device Pairing / 设备配对 | 登录, 普通连接 |
 
 ## Notes
 
 - 从 AgentProviderProfile 升级到 Model Provider 时不做自动迁移；旧 registry 丢弃，用户按内置模板重新配置。
 - Agent Kind Switch 的决策见 [ADR 0007](docs/adr/0007-agent-kind-switch-in-session.md)。
+- 移动端决策见 [ADR 0008](docs/adr/0008-mobile-companion.md)。
 
 ## Out of Scope (for this feature's first cut)
 
 - `gemini_cli`：当前未接入，不参与 Agent Kind Switch。
+- 移动端（Mobile Companion）首版不含：公网中继、系统推送通知、图片/文件附件、多桌面配对、富渲染（终端/xterm、diff 全展开、语法高亮）。
 

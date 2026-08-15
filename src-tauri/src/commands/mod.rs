@@ -1,5 +1,6 @@
 pub mod agent_runtime_check;
 pub mod app;
+pub mod companion;
 pub mod file;
 pub mod git;
 pub mod mcp;

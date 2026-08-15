@@ -360,6 +360,13 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_session_native_sessions_session_id
             ON session_native_sessions(session_id);
+        CREATE TABLE IF NOT EXISTS companion_paired_devices (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL DEFAULT '',
+            token_hash TEXT NOT NULL UNIQUE,
+            paired_at TEXT NOT NULL,
+            last_seen_at TEXT
+        );
         INSERT OR IGNORE INTO session_native_sessions (
             session_id, agent_kind, agent_session_id, created_at
         )

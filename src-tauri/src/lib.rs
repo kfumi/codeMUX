@@ -1,6 +1,7 @@
 mod agent;
 mod agent_runtime;
 mod commands;
+mod companion;
 mod config;
 mod db;
 mod log_ctx;
@@ -10,7 +11,7 @@ mod provider_profiles;
 mod runtime;
 mod skills;
 
-use log::info;
+use log::{info, warn};
 use serde::Serialize;
 use std::sync::Mutex;
 use tauri::menu::MenuBuilder;
@@ -432,6 +433,22 @@ pub fn run() {
             });
             app.manage(agent::commands::AgentState::default());
             app.manage(commands::terminal::TerminalState::default());
+            app.manage(companion::CompanionState::default());
+
+            let config_for_companion = {
+                let state = app.state::<AppState>();
+                let config = state.config.lock().unwrap();
+                config.companion.clone()
+            };
+            if config_for_companion.enabled {
+                let app_handle = app.handle().clone();
+                let port = config_for_companion.port;
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = companion::start_companion_server(app_handle, port).await {
+                        warn!(target: "companion", "Failed to auto-start companion server: {}", error);
+                    }
+                });
+            }
 
             let tray_menu = MenuBuilder::new(app)
                 .text(TRAY_OPEN_ID, "打开 CodeMUX")
@@ -597,6 +614,10 @@ pub fn run() {
             skills::commands::list_project_skills,
             commands::perf::get_tokio_console_info,
             commands::perf::export_perf_snapshot,
+            commands::companion::get_companion_status,
+            commands::companion::set_companion_enabled,
+            commands::companion::revoke_companion_device,
+            commands::companion::refresh_companion_pairing_code,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

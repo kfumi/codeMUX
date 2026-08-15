@@ -52,7 +52,7 @@ fn is_imported_session(state: &crate::AppState, session_id: &str) -> Result<bool
     .map_err(|error| error.to_string())
 }
 
-fn reject_read_only_session(
+pub(crate) fn reject_read_only_session(
     state: &State<'_, crate::AppState>,
     session_id: &str,
 ) -> Result<(), String> {
@@ -2791,6 +2791,12 @@ async fn ensure_sidecar_for_session(
             {
                 Ok(true) => continue,
                 Ok(false) => {
+                    let app_for_companion = app_handle.clone();
+                    let event_for_companion = event.clone();
+                    crate::companion::handle_sidecar_event_for_companion(
+                        &app_for_companion,
+                        &event_for_companion,
+                    );
                     let ch = shared_channel.lock().await;
                     let _ = ch.send(event);
                 }
@@ -3347,7 +3353,7 @@ fn build_update_permissions_command(
     ))
 }
 
-async fn send_command_to_session(
+pub(crate) async fn send_command_to_session(
     agent_state: &State<'_, AgentState>,
     session_id: &str,
     cmd: serde_json::Value,

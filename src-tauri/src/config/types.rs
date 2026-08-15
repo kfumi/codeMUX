@@ -76,6 +76,27 @@ fn default_open_target() -> String {
     "file_explorer".to_string()
 }
 
+fn default_companion_port() -> u16 {
+    9240
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompanionConfig {
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    #[serde(default = "default_companion_port")]
+    pub port: u16,
+}
+
+impl Default for CompanionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: default_companion_port(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationSettings {
     #[serde(default = "default_true")]
@@ -316,6 +337,8 @@ pub struct AppConfig {
     pub theme: Theme,
     #[serde(default)]
     pub attachment_enrichment: AttachmentEnrichmentConfig,
+    #[serde(default)]
+    pub companion: CompanionConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -341,6 +364,7 @@ impl Default for AppConfig {
             notifications: NotificationSettings::default(),
             theme: Theme::System,
             attachment_enrichment: AttachmentEnrichmentConfig::default(),
+            companion: CompanionConfig::default(),
         }
     }
 }

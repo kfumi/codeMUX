@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:mobile": "cd src-mobile && npm ci && npm run build && cd .. && node scripts/copy-mobile-dist.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "release:prepare": "node scripts/prepare-release.mjs",

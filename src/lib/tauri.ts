@@ -19,6 +19,7 @@ import type { Project } from '../types/project';
 import type { McpServer } from '../types/mcp';
 import type { ImportableSkill, ProjectSkill, Skill } from '../types/skill';
 import type { UsageStatsResponse, TokenBreakdownResponse } from '../types/usage';
+import type { CompanionStatus } from '../types/companion';
 import { createLogger, serializeError } from './logger';
 import { usePerfStore } from '../stores/perfStore';
 
@@ -792,6 +793,16 @@ export const appApi = {
     invokeLogged('repair_managed_runtime', { provider }),
   removeManagedRuntime: (provider: RuntimeProvider): Promise<void> =>
     invokeLogged('remove_managed_runtime', { provider }),
+};
+
+export const companionApi = {
+  getStatus: (): Promise<CompanionStatus> => invokeLogged('get_companion_status'),
+  setEnabled: (enabled: boolean): Promise<CompanionStatus> =>
+    invokeLogged('set_companion_enabled', { enabled }),
+  revokeDevice: (deviceId: string): Promise<CompanionStatus> =>
+    invokeLogged('revoke_companion_device', { deviceId }),
+  refreshPairingCode: (): Promise<CompanionStatus> =>
+    invokeLogged('refresh_companion_pairing_code'),
 };
 
 export const usageApi = {

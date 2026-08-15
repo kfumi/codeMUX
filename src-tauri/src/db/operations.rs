@@ -1208,13 +1208,162 @@ pub fn get_model_distribution(
     Ok(result)
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PairedDevice {
+    pub id: String,
+    pub name: String,
+    pub paired_at: String,
+    pub last_seen_at: Option<String>,
+}
+
+pub fn hash_pairing_token(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(token.as_bytes());
+    hex::encode(digest)
+}
+
+pub fn list_paired_devices(conn: &Connection) -> Result<Vec<PairedDevice>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, paired_at, last_seen_at FROM companion_paired_devices ORDER BY paired_at DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(PairedDevice {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            paired_at: row.get(2)?,
+            last_seen_at: row.get(3)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn insert_paired_device(
+    conn: &Connection,
+    id: &str,
+    name: &str,
+    token_hash: &str,
+    paired_at: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO companion_paired_devices (id, name, token_hash, paired_at) VALUES (?1, ?2, ?3, ?4)",
+        params![id, name, token_hash, paired_at],
+    )?;
+    Ok(())
+}
+
+pub fn delete_paired_device(conn: &Connection, device_id: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM companion_paired_devices WHERE id = ?1",
+        [device_id],
+    )?;
+    Ok(())
+}
+
+pub fn delete_all_paired_devices(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM companion_paired_devices", [])?;
+    Ok(())
+}
+
+pub fn verify_pairing_token(conn: &Connection, token: &str) -> Result<Option<PairedDevice>> {
+    let token_hash = hash_pairing_token(token);
+    let mut stmt = conn.prepare(
+        "SELECT id, name, paired_at, last_seen_at FROM companion_paired_devices WHERE token_hash = ?1",
+    )?;
+    let mut rows = stmt.query([token_hash])?;
+    if let Some(row) = rows.next()? {
+        let device = PairedDevice {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            paired_at: row.get(2)?,
+            last_seen_at: row.get(3)?,
+        };
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE companion_paired_devices SET last_seen_at = ?1 WHERE id = ?2",
+            params![now, device.id],
+        )?;
+        return Ok(Some(device));
+    }
+    Ok(None)
+}
+
+pub fn get_session_events_after(
+    conn: &Connection,
+    session_id: &str,
+    after_sequence: i64,
+) -> Result<Vec<Value>> {
+    let mut stmt = conn.prepare(
+        "SELECT event_json FROM session_event_snapshots WHERE session_id = ?1 AND sequence > ?2 ORDER BY sequence ASC",
+    )?;
+    let rows = stmt.query_map(params![session_id, after_sequence], |row| {
+        row.get::<_, String>(0)
+    })?;
+    let mut events = Vec::new();
+    for raw in rows {
+        let raw = raw?;
+        events.push(serde_json::from_str(&raw).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?);
+    }
+    Ok(events)
+}
+
+pub fn append_snapshot_events(
+    conn: &mut Connection,
+    session_id: &str,
+    events: &[Value],
+) -> Result<()> {
+    if events.is_empty() {
+        return Ok(());
+    }
+    let tx = conn.transaction()?;
+    let next_sequence: i64 = tx.query_row(
+        "SELECT COALESCE(MAX(sequence), -1) + 1 FROM session_event_snapshots WHERE session_id = ?1",
+        [session_id],
+        |row| row.get(0),
+    )?;
+    for (offset, event) in events.iter().enumerate() {
+        let mut snapshot_event = event.clone();
+        if let Some(object) = snapshot_event.as_object_mut() {
+            object.insert(
+                "session_id".to_string(),
+                Value::String(session_id.to_string()),
+            );
+        }
+        let sequence = next_sequence + offset as i64;
+        let event_id = snapshot_event
+            .get("event_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let timestamp = snapshot_event.get("timestamp").and_then(Value::as_str);
+        tx.execute(
+            "INSERT OR IGNORE INTO session_event_snapshots (session_id, sequence, event_id, event_timestamp, event_json) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                session_id,
+                sequence,
+                event_id,
+                timestamp,
+                serde_json::to_string(&snapshot_event).unwrap_or_else(|_| "{}".to_string())
+            ],
+        )?;
+    }
+    tx.commit()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        archive_session, create_forked_session, current_native_sessions_for_kinds,
+        append_snapshot_events, archive_session, create_forked_session, current_native_sessions_for_kinds,
         delete_agent_session_mapping, delete_session_message_attachments_from_index,
         get_agent_distribution, get_agent_session_mapping, get_all_archived_sessions,
-        get_all_sessions, get_model_distribution, get_session, get_session_kind_model_selection,
+        get_all_sessions, get_model_distribution, get_session, get_session_events_after,
+        get_session_kind_model_selection,
         get_session_snapshot, get_usage_heatmap, get_usage_overview, import_session_snapshot,
         insert_session_runtime_switch, list_native_sessions_for_cleanup,
         session_has_runtime_switch, set_session_pinned, set_session_read_only, unarchive_session,
@@ -2084,6 +2233,21 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn append_snapshot_events_increments_sequence() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        insert_test_session(&conn, "session-1", "claude_code");
+
+        let first = serde_json::json!({ "type": "user_message", "event_id": "e1", "content": "hi" });
+        append_snapshot_events(&mut conn, "session-1", &[first]).unwrap();
+        let second = serde_json::json!({ "type": "assistant_message", "event_id": "e2", "content": [] });
+        append_snapshot_events(&mut conn, "session-1", &[second]).unwrap();
+
+        let events = get_session_events_after(&conn, "session-1", -1).unwrap();
+        assert_eq!(events.len(), 2);
     }
 
     #[test]

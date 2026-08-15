@@ -1,0 +1,17 @@
+{
+  "name": "CodeMUX Mobile",
+  "short_name": "CodeMUX",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#111827",
+  "description": "CodeMUX 桌面端移动伴侣",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
