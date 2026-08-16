@@ -99,6 +99,7 @@ struct WsQuery {
 pub async fn start_companion_server(
     app: AppHandle,
     port: u16,
+    listen_address: String,
 ) -> Result<(), String> {
     let companion_state = app.state::<CompanionState>();
     let _lifecycle_guard = companion_state.inner.lifecycle_lock.lock().await;
@@ -114,7 +115,7 @@ pub async fn start_companion_server(
     let ctx = ServerContext { app: app.clone() };
     let router = build_router(ctx, static_dir);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let addr = parse_listen_addr(&listen_address, port)?;
     let listener = bind_listener_with_retry(addr).await?;
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
@@ -129,6 +130,10 @@ pub async fn start_companion_server(
     companion_state.inner.set_enabled(true);
     info!(target: "companion", "Companion server listening on {}", addr);
 
+    if let Err(error) = crate::companion::relay::sync_relay_transport(&app, &companion_state).await {
+        warn!(target: "companion", "Failed to start relay transport: {}", error);
+    }
+
     let companion_for_shutdown = companion_state.inner.clone();
     tokio::spawn(async move {
         let result = axum::serve(listener, router)
@@ -140,7 +145,6 @@ pub async fn start_companion_server(
             warn!(target: "companion", "Companion server stopped with error: {}", error);
         }
         companion_for_shutdown.set_enabled(false);
-        companion_for_shutdown.clear_pairing_codes();
         let _ = stopped_tx.send(());
     });
 
@@ -154,6 +158,7 @@ pub async fn stop_companion_server(app: AppHandle) -> Result<(), String> {
 }
 
 async fn stop_companion_server_inner(companion_state: &CompanionState) -> Result<(), String> {
+    crate::companion::relay::stop_relay_transport(companion_state).await;
     let shutdown_tx = companion_state.inner.shutdown_tx.lock().unwrap().take();
     let stopped_rx = companion_state.inner.stopped_waiter.lock().unwrap().take();
     if let Some(tx) = shutdown_tx {
@@ -172,7 +177,6 @@ async fn stop_companion_server_inner(companion_state: &CompanionState) -> Result
         }
     }
     companion_state.inner.set_enabled(false);
-    companion_state.clear_pairing_codes();
     Ok(())
 }
 
@@ -267,28 +271,39 @@ async fn health() -> impl IntoResponse {
 
 async fn pair_offer(State(ctx): State<ServerContext>) -> Result<Json<crate::companion::offer::CompanionPairingOffer>, ApiError> {
     let companion_state = ctx.app.state::<CompanionState>();
-    let app_state = ctx.app.state::<AppState>();
-    let mut config = app_state
-        .config
-        .lock()
-        .map_err(|error| ApiError::internal(error.to_string()))?;
-    let had_desktop_id = config
-        .companion
-        .desktop_id
-        .as_ref()
-        .is_some_and(|value| !value.trim().is_empty());
-    let desktop_id = get_or_create_desktop_id(&mut config.companion);
-    let port = config.companion.port;
-    if !had_desktop_id {
-        crate::config::save_config(&ctx.app, &config)
-            .map_err(|error| ApiError::internal(error))?;
-    }
-    drop(config);
+    let (desktop_id, port, relay) = {
+        let app_state = ctx.app.state::<AppState>();
+        let mut config = app_state
+            .config
+            .lock()
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+        let had_desktop_id = config
+            .companion
+            .desktop_id
+            .as_ref()
+            .is_some_and(|value| !value.trim().is_empty());
+        let desktop_id = get_or_create_desktop_id(&mut config.companion);
+        let port = config.companion.port;
+        let relay = config.companion.relay.clone();
+        if !had_desktop_id {
+            crate::config::save_config(&ctx.app, &config)
+                .map_err(|error| ApiError::internal(error))?;
+        }
+        (desktop_id, port, relay)
+    };
 
     let lan_ip = local_ip_address::local_ip()
         .ok()
         .map(|ip| ip.to_string());
-    build_pairing_offer(&companion_state, desktop_id, port, lan_ip)
+    let desktop_public_key_b64 = companion_state.e2ee_public_key_b64().await;
+    build_pairing_offer(
+        &companion_state,
+        desktop_id,
+        port,
+        lan_ip,
+        Some(relay),
+        desktop_public_key_b64,
+    )
         .map(Json)
         .map_err(|error| ApiError::bad_request(error))
 }
@@ -600,3 +615,16 @@ impl IntoResponse for ApiError {
 }
 
 use std::str::FromStr;
+
+fn parse_listen_addr(listen_address: &str, port: u16) -> Result<SocketAddr, String> {
+    let trimmed = listen_address.trim();
+    if trimmed.is_empty() {
+        return Ok(SocketAddr::from(([0, 0, 0, 0], port)));
+    }
+    if trimmed.contains(':') {
+        return trimmed.parse::<SocketAddr>().map_err(|error| error.to_string());
+    }
+    format!("{trimmed}:{port}")
+        .parse::<SocketAddr>()
+        .map_err(|error| error.to_string())
+}

@@ -23,7 +23,12 @@ export {
 
 export {
   buildProfileFromPairing,
+  buildProfileFromOffer,
+  addDirectConnection,
+  removeConnection,
   connectionIdForLan,
+  connectionIdForRelay,
+  connectionIdForDirect,
   migrateLegacyConnection,
   normalizeStoredConnection,
   profileToLegacyConnection,
@@ -37,3 +42,15 @@ export {
   resolveProfileRestUrl,
   resolveProfileWsUrl,
 } from './transport';
+
+export { companionHttpRequest, isRelayConnection } from './client';
+export type { CompanionHttpResponse } from './client';
+
+export {
+  buildReachabilityMap,
+  probeConnectionReachability,
+  summarizeActiveConnection,
+} from './reachability';
+
+export { ClientChannel, generateKeyPair } from './e2ee';
+export { RelayTunnelClient, buildRelayWsUrl } from './relay';

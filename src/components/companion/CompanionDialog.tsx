@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Copy, RefreshCw, Smartphone, Square, Trash2 } from 'lucide-react';
 import QRCode from 'react-qr-code';
 
-import { buildPairingUrl, formatDeviceDetails, getCompanionVisualState } from '../../lib/companion';
+import { buildPairingUrl, companionVisualStateLabel, formatDeviceDetails, getCompanionVisualState, relayStateLabel } from '../../lib/companion';
 import type { useCompanionStatus } from '../../hooks/useCompanionStatus';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
@@ -27,7 +27,15 @@ function StatusBadge({ visualState }: { visualState: ReturnType<typeof getCompan
     return (
       <span className="inline-flex items-center gap-1.5 text-sm text-foreground/80">
         <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--success))]" />
-        已有设备配对
+        {companionVisualStateLabel(visualState)}
+      </span>
+    );
+  }
+  if (visualState === 'reconnecting') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-sm text-foreground/80">
+        <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--warning))]" />
+        {companionVisualStateLabel(visualState)}
       </span>
     );
   }
@@ -35,7 +43,7 @@ function StatusBadge({ visualState }: { visualState: ReturnType<typeof getCompan
     return (
       <span className="inline-flex items-center gap-1.5 text-sm text-foreground/80">
         <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--warning))]" />
-        等待手机连接
+        {companionVisualStateLabel(visualState)}
       </span>
     );
   }
@@ -58,6 +66,7 @@ export function CompanionDialog({ open, onOpenChange, controller }: CompanionDia
     setEnabled,
     refreshPairingCode,
     revokeDevice,
+    setRelayEnabled,
   } = controller;
   const [copied, setCopied] = useState(false);
 
@@ -187,12 +196,70 @@ export function CompanionDialog({ open, onOpenChange, controller }: CompanionDia
                 </div>
               </div>
 
+              <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 px-4 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-foreground/90">公网中继</div>
+                    <p className="mt-1 text-xs text-foreground/55">
+                      开启后桌面主动连接中继，跨网流量经端到端加密；中继无法读取明文。
+                    </p>
+                  </div>
+                  {status?.relay.enabled ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-foreground/70">
+                      <span className={`inline-block h-2 w-2 rounded-full ${
+                        status.relay.connectionState === 'connected'
+                          ? 'bg-[hsl(var(--success))]'
+                          : status.relay.connectionState === 'error'
+                            ? 'bg-destructive'
+                            : 'bg-[hsl(var(--warning))]'
+                      }`} />
+                      {relayStateLabel(status.relay.connectionState)}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {status?.relay.enabled ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => {
+                        if (window.confirm('关闭中继后，新的跨网配对将不可用。已有局域网配对不受影响。')) {
+                          void setRelayEnabled(false);
+                        }
+                      }}
+                    >
+                      关闭中继
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => {
+                        void setRelayEnabled(true);
+                      }}
+                    >
+                      启用中继
+                    </Button>
+                  )}
+                </div>
+                {status?.relay.enabled ? (
+                  <div className="text-xs text-foreground/55">
+                    中继端点：{status.relay.endpoint}
+                    {status.relay.useTls ? '（TLS）' : ''}
+                  </div>
+                ) : null}
+              </div>
+
               <div className="space-y-2 border-t border-border/50 pt-4">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <div className="text-sm font-medium text-foreground/90">已配对设备</div>
                     <p className="mt-1 text-xs text-foreground/50">
-                      已授权可连接的设备。手机端断开配对后会自动从此移除。
+                      已授权可连接的设备。仅关闭手机不会自动移除；手机端「断开配对」或点击右侧撤销才会移除。
                     </p>
                   </div>
                   <Button
@@ -224,7 +291,9 @@ export function CompanionDialog({ open, onOpenChange, controller }: CompanionDia
                             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs leading-relaxed text-foreground/50">
                               <span className="font-mono break-all">ID {details.id}</span>
                               <span className="whitespace-nowrap">配对于 {details.pairedAt}</span>
-                              <span className="whitespace-nowrap">最近请求 {details.lastSeen}</span>
+                              <span className="whitespace-nowrap">
+                                {details.online ? '在线' : `最近请求 ${details.lastSeen}`}
+                              </span>
                             </div>
                           </div>
                           <Button

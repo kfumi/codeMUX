@@ -58,7 +58,12 @@ describe('request helpers', () => {
     globalThis.fetch = async () => new Response(null, { status: 202 });
     const { sendSessionMessage } = await import('./api');
     await expect(sendSessionMessage(
-      { baseUrl: 'http://localhost:9240', token: 'token', deviceId: 'device' },
+      {
+        desktopId: 'desktop-1',
+        deviceId: 'device',
+        token: 'token',
+        connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
+      },
       'session-1',
       'hello',
     )).resolves.toBeUndefined();

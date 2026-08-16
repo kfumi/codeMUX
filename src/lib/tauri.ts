@@ -803,6 +803,8 @@ export const companionApi = {
     invokeLogged('revoke_companion_device', { deviceId }),
   refreshPairingCode: (): Promise<CompanionStatus> =>
     invokeLogged('refresh_companion_pairing_code'),
+  setRelayEnabled: (enabled: boolean): Promise<CompanionStatus> =>
+    invokeLogged('set_companion_relay_enabled', { enabled }),
 };
 
 export const usageApi = {

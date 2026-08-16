@@ -2,12 +2,13 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { ClipboardPaste, Link2 } from 'lucide-react';
 
 import {
+  buildProfileFromOffer,
   buildProfileFromPairing,
   parsePairingInput,
   type ParsedPairingInput,
 } from '@shared/lib/companion-connection';
 
-import { claimPairing, formatPairingClaimError } from '../lib/api';
+import { claimPairingResolved, formatPairingClaimError } from '../lib/api';
 import { saveProfile } from '../lib/storage';
 import { cn, suggestDeviceName } from '../lib/utils';
 
@@ -53,21 +54,33 @@ export function PairingScreen({
     setLoading(true);
     setError(null);
     try {
-      const result = await claimPairing(
-        resolved.baseUrl,
-        resolved.pairingCode,
+      const result = await claimPairingResolved(
+        {
+          baseUrl: resolved.baseUrl,
+          pairingCode: resolved.pairingCode,
+          offer: resolved.offer,
+        },
         deviceName.trim() || defaultDeviceName,
       );
       const desktopId = resolved.desktopId
         ?? resolved.offer?.desktopId
         ?? `legacy:${resolved.baseUrl}`;
-      await saveProfile(buildProfileFromPairing({
-        desktopId,
-        deviceId: result.deviceId,
-        token: result.token,
-        baseUrl: resolved.baseUrl,
-        label: deviceName.trim() || defaultDeviceName,
-      }));
+      const profile = resolved.offer
+        ? buildProfileFromOffer({
+          offer: resolved.offer,
+          baseUrl: resolved.baseUrl,
+          deviceId: result.deviceId,
+          token: result.token,
+          label: deviceName.trim() || defaultDeviceName,
+        })
+        : buildProfileFromPairing({
+          desktopId,
+          deviceId: result.deviceId,
+          token: result.token,
+          baseUrl: resolved.baseUrl,
+          label: deviceName.trim() || defaultDeviceName,
+        });
+      await saveProfile(profile);
       onPaired();
     } catch (err) {
       setError(formatPairingClaimError(err));

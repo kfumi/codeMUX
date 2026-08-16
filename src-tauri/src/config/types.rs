@@ -80,6 +80,30 @@ fn default_companion_port() -> u16 {
     9240
 }
 
+fn default_relay_endpoint() -> String {
+    "localhost:8787".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompanionRelayConfig {
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    #[serde(default = "default_relay_endpoint")]
+    pub endpoint: String,
+    #[serde(default = "default_false")]
+    pub use_tls: bool,
+}
+
+impl Default for CompanionRelayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            endpoint: default_relay_endpoint(),
+            use_tls: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompanionConfig {
     #[serde(default = "default_false")]
@@ -88,6 +112,20 @@ pub struct CompanionConfig {
     pub port: u16,
     #[serde(default)]
     pub desktop_id: Option<String>,
+    #[serde(default)]
+    pub relay: CompanionRelayConfig,
+    #[serde(default = "default_listen_address")]
+    pub listen_address: String,
+    #[serde(default)]
+    pub pairing_code: Option<String>,
+    #[serde(default)]
+    pub pairing_code_expires_at: Option<String>,
+    #[serde(default)]
+    pub last_lan_ip: Option<String>,
+}
+
+fn default_listen_address() -> String {
+    "0.0.0.0".to_string()
 }
 
 impl Default for CompanionConfig {
@@ -96,6 +134,11 @@ impl Default for CompanionConfig {
             enabled: false,
             port: default_companion_port(),
             desktop_id: None,
+            relay: CompanionRelayConfig::default(),
+            listen_address: default_listen_address(),
+            pairing_code: None,
+            pairing_code_expires_at: None,
+            last_lan_ip: None,
         }
     }
 }

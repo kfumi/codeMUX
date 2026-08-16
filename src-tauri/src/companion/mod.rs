@@ -1,9 +1,12 @@
 pub mod actions;
 pub mod config;
 pub mod desktop_id;
+pub mod e2ee;
 pub mod events;
 pub mod offer;
 pub mod pairing;
+pub mod pairing_code;
+pub mod relay;
 pub mod server;
 pub mod state;
 

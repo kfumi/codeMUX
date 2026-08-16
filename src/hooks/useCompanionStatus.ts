@@ -94,6 +94,21 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
     }
   }, []);
 
+  const setRelayEnabled = useCallback(async (enabled: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await companionApi.setRelayEnabled(enabled);
+      setStatus(next);
+      return next;
+    } catch (err) {
+      setError(String(err));
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   return {
     status,
     loading,
@@ -104,5 +119,6 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
     setEnabled,
     refreshPairingCode,
     revokeDevice,
+    setRelayEnabled,
   };
 }

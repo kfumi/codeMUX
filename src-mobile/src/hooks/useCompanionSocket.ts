@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { buildWsUrl } from '../lib/api';
+import { normalizeStoredConnection, resolveActiveConnection } from '@shared/lib/companion-connection';
+
+import { buildWsUrl, fetchSessionEvents } from '../lib/api';
 import type { CompanionConnection } from '../lib/storage';
 
 export interface WsEnvelope {
@@ -36,14 +38,62 @@ export function useCompanionSocket(
       return;
     }
 
-    let active = true;
+    const profile = normalizeStoredConnection(connection);
+    const active = resolveActiveConnection(profile);
+    if (active.type === 'relay') {
+      let activePoll = true;
+      let after = -1;
+      let retryTimer: number | undefined;
+
+      const poll = async () => {
+        try {
+          const events = await fetchSessionEvents(connection, sessionId, after);
+          if (!activePoll) return;
+          if (!wasConnectedRef.current) {
+            wasConnectedRef.current = true;
+            setConnected(true);
+          }
+          for (const event of events) {
+            if (event && typeof event === 'object') {
+              const record = event as Record<string, unknown>;
+              const sequence = typeof record.sequence === 'number' ? record.sequence : null;
+              if (sequence !== null) {
+                after = Math.max(after, sequence);
+              }
+              onEventRef.current(record);
+            }
+          }
+        } catch {
+          if (!activePoll) return;
+          setConnected(false);
+          if (wasConnectedRef.current) {
+            onConnectionLostRef.current?.();
+          }
+        }
+      };
+
+      void poll();
+      const timer = window.setInterval(() => {
+        void poll();
+      }, 2000);
+
+      return () => {
+        activePoll = false;
+        window.clearInterval(timer);
+        if (retryTimer) window.clearTimeout(retryTimer);
+        setConnected(false);
+        wasConnectedRef.current = false;
+      };
+    }
+
+    let activeSocket = true;
     let socket: WebSocket | null = null;
     let retryTimer: number | undefined;
 
     const connect = () => {
       socket = new WebSocket(buildWsUrl(connection, sessionId));
       socket.onopen = () => {
-        if (!active) return;
+        if (!activeSocket) return;
         if (wasConnectedRef.current) {
           onReconnectRef.current?.();
         }
@@ -51,7 +101,7 @@ export function useCompanionSocket(
         setConnected(true);
       };
       socket.onclose = () => {
-        if (!active) return;
+        if (!activeSocket) return;
         setConnected(false);
         if (wasConnectedRef.current) {
           onConnectionLostRef.current?.();
@@ -59,7 +109,7 @@ export function useCompanionSocket(
         retryTimer = window.setTimeout(connect, 2000);
       };
       socket.onerror = () => {
-        if (!active) return;
+        if (!activeSocket) return;
         if (wasConnectedRef.current) {
           onConnectionLostRef.current?.();
         }
@@ -79,7 +129,7 @@ export function useCompanionSocket(
     connect();
 
     return () => {
-      active = false;
+      activeSocket = false;
       setConnected(false);
       wasConnectedRef.current = false;
       if (retryTimer) window.clearTimeout(retryTimer);

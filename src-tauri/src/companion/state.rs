@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use tokio::sync::{broadcast, oneshot, RwLock};
+
+use crate::companion::relay::{RelayTransportController, RelayTransportState};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,7 +17,7 @@ pub struct CompanionBroadcastEvent {
 
 #[derive(Debug, Clone)]
 pub struct PairingCodeEntry {
-    pub expires_at: Instant,
+    pub expires_at: DateTime<Utc>,
 }
 
 pub struct CompanionInner {
@@ -28,6 +30,9 @@ pub struct CompanionInner {
     pub enabled: AtomicBool,
     pub turn_active: Mutex<HashSet<String>>,
     pub message_queues: Mutex<HashMap<String, VecDeque<String>>>,
+    pub relay_controller: tokio::sync::Mutex<Option<RelayTransportController>>,
+    pub relay_state: RelayTransportState,
+    pub e2ee_public_key_b64: RwLock<Option<String>>,
 }
 
 impl CompanionInner {
@@ -43,6 +48,9 @@ impl CompanionInner {
             enabled: AtomicBool::new(false),
             turn_active: Mutex::new(HashSet::new()),
             message_queues: Mutex::new(HashMap::new()),
+            relay_controller: tokio::sync::Mutex::new(None),
+            relay_state: RelayTransportState::new(),
+            e2ee_public_key_b64: RwLock::new(None),
         }
     }
 
@@ -77,40 +85,77 @@ impl CompanionState {
             .map(|_| rand::thread_rng().gen_range(0..10).to_string())
             .collect();
         let entry = PairingCodeEntry {
-            expires_at: Instant::now() + Duration::from_secs(300),
+            expires_at: Utc::now() + chrono::Duration::seconds(crate::companion::pairing_code::PAIRING_CODE_TTL_SECS),
         };
         let mut codes = self.inner.pairing_codes.lock().unwrap();
-        codes.retain(|_, value| value.expires_at > Instant::now());
+        codes.retain(|_, value| value.expires_at > Utc::now());
         codes.insert(code.clone(), entry);
         code
     }
 
-    pub fn ensure_pairing_code(&self) -> String {
+    pub fn active_pairing_code(&self) -> Option<String> {
         let mut codes = self.inner.pairing_codes.lock().unwrap();
-        codes.retain(|_, value| value.expires_at > Instant::now());
-        if let Some(code) = codes.keys().next().cloned() {
-            return code;
-        }
-        drop(codes);
-        self.create_pairing_code()
+        codes.retain(|_, value| value.expires_at > Utc::now());
+        codes.keys().next().cloned()
     }
 
-    pub fn refresh_pairing_code(&self) -> String {
-        self.clear_pairing_codes();
+    pub fn restore_pairing_code(&self, code: &str, expires_at: DateTime<Utc>) {
+        if expires_at <= Utc::now() {
+            return;
+        }
+        let mut codes = self.inner.pairing_codes.lock().unwrap();
+        codes.retain(|_, value| value.expires_at > Utc::now());
+        codes.insert(
+            code.to_string(),
+            PairingCodeEntry { expires_at },
+        );
+    }
+
+    pub fn ensure_pairing_code(&self) -> String {
+        if let Some(code) = self.active_pairing_code() {
+            return code;
+        }
         self.create_pairing_code()
     }
 
     pub fn consume_pairing_code(&self, code: &str) -> bool {
         let mut codes = self.inner.pairing_codes.lock().unwrap();
-        codes.retain(|_, value| value.expires_at > Instant::now());
+        codes.retain(|_, value| value.expires_at > Utc::now());
         if let Some(entry) = codes.remove(code) {
-            return entry.expires_at > Instant::now();
+            return entry.expires_at > Utc::now();
         }
         false
     }
 
     pub fn clear_pairing_codes(&self) {
         self.inner.clear_pairing_codes();
+    }
+
+    pub fn relay_state(&self) -> RelayTransportState {
+        self.inner.relay_state.clone()
+    }
+
+    pub async fn set_relay_controller(&self, controller: RelayTransportController) {
+        let mut guard = self.inner.relay_controller.lock().await;
+        *guard = Some(controller);
+    }
+
+    pub async fn take_relay_controller(&self) -> Option<RelayTransportController> {
+        self.inner.relay_controller.lock().await.take()
+    }
+
+    pub async fn set_e2ee_public_key_b64(&self, value: String) {
+        let mut guard = self.inner.e2ee_public_key_b64.write().await;
+        *guard = Some(value);
+    }
+
+    pub async fn clear_e2ee_public_key(&self) {
+        let mut guard = self.inner.e2ee_public_key_b64.write().await;
+        *guard = None;
+    }
+
+    pub async fn e2ee_public_key_b64(&self) -> Option<String> {
+        self.inner.e2ee_public_key_b64.read().await.clone()
     }
 
     pub fn mark_turn_active(&self, session_id: &str) {

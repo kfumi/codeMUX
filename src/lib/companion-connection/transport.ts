@@ -3,7 +3,7 @@ import type {
   CompanionConnectionProfile,
   ConnectionReachability,
 } from './types';
-import { CompanionConnectionError, CompanionTransportNotImplementedError } from './types';
+import { CompanionConnectionError } from './types';
 
 const TRANSPORT_PRIORITY: CompanionConnectionEntry['type'][] = ['direct', 'lan', 'relay'];
 
@@ -49,7 +49,7 @@ export function connectionBaseUrl(connection: CompanionConnectionEntry): string 
     case 'direct':
       return directBaseUrl(connection);
     case 'relay':
-      throw new CompanionTransportNotImplementedError('relay');
+      return `relay://${connection.endpoint}`;
     default: {
       const exhaustive: never = connection;
       return exhaustive;

@@ -18,10 +18,10 @@ import {
 import {
   buildRestUrl,
   buildWsUrl,
+  connectionBaseUrl,
   resolveActiveConnection,
 } from './transport';
 import type { CompanionConnectionProfile, CompanionOfferV1 } from './types';
-import { CompanionTransportNotImplementedError } from './types';
 
 const sampleOffer: CompanionOfferV1 = {
   v: 1,
@@ -163,7 +163,7 @@ describe('transport resolution', () => {
     );
   });
 
-  it('throws for relay transport until implemented', () => {
+  it('builds relay placeholder base URL', () => {
     const relay = {
       id: 'relay:1',
       type: 'relay' as const,
@@ -171,6 +171,6 @@ describe('transport resolution', () => {
       useTls: true,
       desktopPublicKeyB64: 'abc',
     };
-    expect(() => buildRestUrl(relay, '/api/health')).toThrow(CompanionTransportNotImplementedError);
+    expect(connectionBaseUrl(relay)).toBe('relay://relay.example:443');
   });
 });

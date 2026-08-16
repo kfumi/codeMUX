@@ -2,10 +2,19 @@ import type {
   CompanionConnectionProfile,
   CompanionConnectionEntry,
   LegacyCompanionConnection,
+  CompanionOfferV1,
 } from './types';
 
 export function connectionIdForLan(baseUrl: string): string {
   return `lan:${baseUrl.replace(/\/$/, '')}`;
+}
+
+export function connectionIdForRelay(desktopId: string): string {
+  return `relay:${desktopId}`;
+}
+
+export function connectionIdForDirect(host: string, port: number, useTls: boolean): string {
+  return `direct:${useTls ? 'https' : 'http'}://${host}:${port}`;
 }
 
 function legacyDesktopId(baseUrl: string): string {
@@ -88,5 +97,95 @@ export function buildProfileFromPairing(args: {
       },
     ],
     preferredConnectionId: connectionIdForLan(baseUrl),
+  };
+}
+
+export function buildProfileFromOffer(args: {
+  offer: CompanionOfferV1;
+  baseUrl: string;
+  deviceId: string;
+  token: string;
+  label?: string;
+}): CompanionConnectionProfile {
+  const connections: CompanionConnectionEntry[] = [];
+  const normalizedBaseUrl = args.baseUrl.replace(/\/$/, '');
+
+  if (args.offer.lan) {
+    const lanBaseUrl = `http://${args.offer.lan.host}:${args.offer.lan.port}`;
+    connections.push({
+      id: connectionIdForLan(lanBaseUrl),
+      type: 'lan',
+      baseUrl: lanBaseUrl,
+    });
+  } else if (normalizedBaseUrl) {
+    connections.push({
+      id: connectionIdForLan(normalizedBaseUrl),
+      type: 'lan',
+      baseUrl: normalizedBaseUrl,
+    });
+  }
+
+  if (args.offer.relay && args.offer.desktopPublicKeyB64) {
+    connections.push({
+      id: connectionIdForRelay(args.offer.desktopId),
+      type: 'relay',
+      endpoint: args.offer.relay.endpoint,
+      useTls: args.offer.relay.useTls ?? false,
+      desktopPublicKeyB64: args.offer.desktopPublicKeyB64,
+    });
+  }
+
+  if (connections.length === 0) {
+    throw new Error('Offer has no usable connections');
+  }
+
+  return {
+    desktopId: args.offer.desktopId,
+    deviceId: args.deviceId,
+    token: args.token,
+    label: args.label,
+    connections,
+    preferredConnectionId: connections[0]?.id,
+  };
+}
+
+export function addDirectConnection(
+  profile: CompanionConnectionProfile,
+  args: { host: string; port: number; useTls: boolean },
+): CompanionConnectionProfile {
+  const id = connectionIdForDirect(args.host, args.port, args.useTls);
+  if (profile.connections.some((connection) => connection.id === id)) {
+    return profile;
+  }
+  return {
+    ...profile,
+    connections: [
+      ...profile.connections,
+      {
+        id,
+        type: 'direct',
+        host: args.host.trim(),
+        port: args.port,
+        useTls: args.useTls,
+      },
+    ],
+  };
+}
+
+export function removeConnection(
+  profile: CompanionConnectionProfile,
+  connectionId: string,
+): CompanionConnectionProfile {
+  const connections = profile.connections.filter((connection) => connection.id !== connectionId);
+  if (connections.length === profile.connections.length) {
+    return profile;
+  }
+  const preferredConnectionId = profile.preferredConnectionId === connectionId
+    ? connections[0]?.id
+    : profile.preferredConnectionId;
+  return {
+    ...profile,
+    connections,
+    preferredConnectionId,
   };
 }

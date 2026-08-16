@@ -43,6 +43,10 @@ axum = { version = "0.8", features = ["ws"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "cors", "trace", "set-header"] }
 local-ip-address = "0.6"
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+futures-util = "0.3"
+base64 = "0.22"
+sodiumoxide = "0.2"
 dirs = "5"
 tempfile = "3"
 tracing = { version = "0.1", optional = true }

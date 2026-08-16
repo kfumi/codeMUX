@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronRight, Plus, RefreshCw } from 'lucide-react';
+import { ChevronRight, Plus, RefreshCw, Settings2 } from 'lucide-react';
+import { summarizeActiveConnection } from '@shared/lib/companion-connection';
+
+import { ConnectionSettings } from './ConnectionSettings';
 
 import { CreateSessionSheet } from './CreateSessionSheet';
 import { DesktopOfflineOverlay } from './DesktopOfflineOverlay';
@@ -12,14 +15,19 @@ interface SessionListProps {
   connection: CompanionConnection;
   onOpenSession: (sessionId: string) => void;
   onDisconnected: (reason?: string) => void;
+  onConnectionUpdated?: (connection: CompanionConnection) => void;
 }
 
-export function SessionList({ connection, onOpenSession, onDisconnected }: SessionListProps) {
+export function SessionList({ connection, onOpenSession, onDisconnected, onConnectionUpdated }: SessionListProps) {
   const [sessions, setSessions] = useState<MobileSession[]>([]);
   const [projects, setProjects] = useState<MobileProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [connectionSummary, setConnectionSummary] = useState(connection.label ?? connection.desktopId);
+  const [profile, setProfile] = useState(connection);
+  const activeConnection = profile;
 
   const handleAuthFailure = useCallback(() => {
     void (async () => {
@@ -31,14 +39,14 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
   const handleUnpair = useCallback(() => {
     void (async () => {
       try {
-        await revokePairing(connection);
+        await revokePairing(activeConnection);
       } catch {
         // Best effort: still clear local credentials if desktop is unreachable.
       }
       await clearConnection();
       onDisconnected();
     })();
-  }, [connection, onDisconnected]);
+  }, [activeConnection, onDisconnected]);
 
   const refreshRef = useRef<() => Promise<void>>(async () => {});
 
@@ -48,7 +56,7 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
     reconnecting,
     reconnect,
     reportUnreachable,
-  } = useDesktopReachability(connection, {
+  } = useDesktopReachability(activeConnection, {
     onAuthFailure: handleAuthFailure,
     onRecovered: () => {
       void refreshRef.current();
@@ -60,8 +68,8 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
     setError(null);
     try {
       const [nextSessions, nextProjects] = await Promise.all([
-        listSessions(connection),
-        listProjects(connection),
+        listSessions(activeConnection),
+        listProjects(activeConnection),
       ]);
       setSessions(nextSessions);
       setProjects(nextProjects);
@@ -83,9 +91,21 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
     } finally {
       setLoading(false);
     }
-  }, [connection, handleAuthFailure, reportUnreachable]);
+  }, [activeConnection, handleAuthFailure, reportUnreachable]);
 
   refreshRef.current = refresh;
+
+  useEffect(() => {
+    setProfile(connection);
+  }, [connection]);
+
+  useEffect(() => {
+    void (async () => {
+      const { buildReachabilityMap } = await import('@shared/lib/companion-connection');
+      const reachability = await buildReachabilityMap(profile);
+      setConnectionSummary(summarizeActiveConnection(profile, reachability));
+    })();
+  }, [profile]);
 
   useEffect(() => {
     void refresh();
@@ -95,16 +115,24 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
       }
     }, 15000);
     return () => window.clearInterval(timer);
-  }, [connection.baseUrl, connection.token, offline, refresh]);
+  }, [activeConnection.desktopId, activeConnection.token, offline, refresh]);
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
       <header className="mobile-safe-header flex shrink-0 items-center justify-between border-b border-border px-5">
         <div>
           <div className="text-lg font-semibold">会话</div>
-          <div className="text-xs text-muted-foreground">{connection.baseUrl}</div>
+          <div className="text-xs text-muted-foreground">{connectionSummary}</div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="rounded-md border border-border/60 p-2 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="连接设置"
+          >
+            <Settings2 className="h-4 w-4" />
+          </button>
           <button
             type="button"
             className="rounded-md border border-border/60 p-2 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
@@ -176,7 +204,7 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
       </footer>
 
       <CreateSessionSheet
-        connection={connection}
+        connection={activeConnection}
         projects={projects}
         open={createOpen && !offline}
         onClose={() => setCreateOpen(false)}
@@ -184,6 +212,18 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
           void refresh().then(() => onOpenSession(sessionId));
         }}
       />
+
+      {settingsOpen ? (
+        <ConnectionSettings
+          profile={profile}
+          onUpdated={(next) => {
+            setProfile(next);
+            onConnectionUpdated?.(next);
+            setSettingsOpen(false);
+          }}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
 
       {offline ? (
         <DesktopOfflineOverlay

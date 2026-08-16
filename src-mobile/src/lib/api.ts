@@ -1,7 +1,14 @@
 import {
+  buildReachabilityMap,
+  buildRestUrl,
+  companionHttpRequest,
+  isRelayConnection,
   normalizeStoredConnection,
-  resolveProfileRestUrl,
+  resolveActiveConnection,
   resolveProfileWsUrl,
+  type CompanionConnectionProfile,
+  type CompanionOfferV1,
+  type ConnectionReachability,
 } from '@shared/lib/companion-connection';
 
 import type { CompanionConnection } from './storage';
@@ -73,12 +80,291 @@ export function formatPairingClaimError(error: unknown): string {
   return String(error);
 }
 
-function profileFor(connection: CompanionConnection) {
+function asProfile(connection: CompanionConnection): CompanionConnectionProfile {
   return normalizeStoredConnection(connection);
 }
 
-function apiUrl(connection: CompanionConnection, path: string): string {
-  return resolveProfileRestUrl(profileFor(connection), path);
+let cachedReachability: ConnectionReachability | null = null;
+let reachabilityProfileKey: string | null = null;
+
+function profileCacheKey(profile: CompanionConnectionProfile): string {
+  return `${profile.desktopId}:${profile.token}:${profile.connections.map((item) => item.id).join(',')}`;
+}
+
+async function getReachability(profile: CompanionConnectionProfile): Promise<ConnectionReachability> {
+  const key = profileCacheKey(profile);
+  if (cachedReachability && reachabilityProfileKey === key) {
+    return cachedReachability;
+  }
+  const next = await buildReachabilityMap(profile);
+  cachedReachability = next;
+  reachabilityProfileKey = key;
+  return next;
+}
+
+export function invalidateReachabilityCache(): void {
+  cachedReachability = null;
+  reachabilityProfileKey = null;
+}
+
+async function requestJson<T>(
+  profile: CompanionConnectionProfile,
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  const reachability = await getReachability(profile);
+  const response = await companionHttpRequest(profile, path, init, reachability);
+  if (response.status < 200 || response.status >= 300) {
+    let message = `Request failed (${response.status})`;
+    try {
+      const body = JSON.parse(response.body) as { error?: string };
+      if (typeof body.error === 'string') {
+        message = body.error;
+      }
+    } catch {
+      // ignore
+    }
+    throw new ApiRequestError(response.status, message);
+  }
+  if (!response.body.trim()) {
+    return undefined as T;
+  }
+  return JSON.parse(response.body) as T;
+}
+
+async function requestVoid(
+  profile: CompanionConnectionProfile,
+  path: string,
+  init?: RequestInit,
+): Promise<void> {
+  await requestJson(profile, path, init);
+}
+
+function authHeaders(token: string): HeadersInit {
+  return {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
+}
+
+function relayProfileFromOffer(offer: CompanionOfferV1): CompanionConnectionProfile {
+  return {
+    desktopId: offer.desktopId,
+    deviceId: '',
+    token: '',
+    connections: [{
+      id: `relay:${offer.desktopId}`,
+      type: 'relay',
+      endpoint: offer.relay!.endpoint,
+      useTls: offer.relay!.useTls ?? false,
+      desktopPublicKeyB64: offer.desktopPublicKeyB64!,
+    }],
+  };
+}
+
+export async function claimPairing(
+  baseUrl: string,
+  code: string,
+  name?: string,
+): Promise<{ token: string; deviceId: string }> {
+  const url = `${baseUrl.replace(/\/$/, '')}/api/pair/claim`;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 3000);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, name }),
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: response.statusText }));
+      const message = typeof body.error === 'string' ? body.error : `Request failed (${response.status})`;
+      throw new ApiRequestError(response.status, message);
+    }
+    return response.json() as Promise<{ token: string; deviceId: string }>;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('连接超时，桌面端无响应');
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+export async function claimPairingResolved(
+  input: {
+    baseUrl: string;
+    pairingCode: string;
+    offer?: CompanionOfferV1;
+  },
+  name?: string,
+): Promise<{ token: string; deviceId: string; usedRelay: boolean }> {
+  const offer = input.offer;
+  if (offer?.relay && offer.desktopPublicKeyB64) {
+    try {
+      if (input.baseUrl) {
+        const result = await claimPairing(input.baseUrl, input.pairingCode, name);
+        return { ...result, usedRelay: false };
+      }
+    } catch {
+      // fall through to relay
+    }
+    const profile = relayProfileFromOffer(offer);
+    const result = await requestJson<{ token: string; deviceId: string }>(profile, '/api/pair/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: input.pairingCode, name }),
+    });
+    return { ...result, usedRelay: true };
+  }
+  const result = await claimPairing(input.baseUrl, input.pairingCode, name);
+  return { ...result, usedRelay: false };
+}
+
+export async function revokePairing(connection: CompanionConnection): Promise<void> {
+  const profile = asProfile(connection);
+  await requestVoid(profile, '/api/pair/device', {
+    method: 'DELETE',
+    headers: authHeaders(profile.token),
+  });
+}
+
+export async function fetchBootstrap(connection: CompanionConnection): Promise<MobileBootstrap> {
+  const profile = asProfile(connection);
+  return requestJson<MobileBootstrap>(profile, '/api/bootstrap', {
+    headers: authHeaders(profile.token),
+  });
+}
+
+export async function pingDesktopHealth(baseUrl: string): Promise<void> {
+  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/health`, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Health check failed (${response.status})`);
+  }
+}
+
+export async function checkDesktopReachability(connection: CompanionConnection): Promise<void> {
+  invalidateReachabilityCache();
+  const profile = asProfile(connection);
+  const reachability = await getReachability(profile);
+  const active = resolveActiveConnection(profile, reachability);
+  if (isRelayConnection(active)) {
+    await fetchBootstrap(connection);
+    return;
+  }
+  await pingDesktopHealth(buildRestUrl(active, ''));
+  await fetchBootstrap(connection);
+}
+
+export async function listSessions(connection: CompanionConnection): Promise<MobileSession[]> {
+  const profile = asProfile(connection);
+  return requestJson<MobileSession[]>(profile, '/api/sessions', {
+    headers: authHeaders(profile.token),
+  });
+}
+
+export async function listProjects(connection: CompanionConnection): Promise<MobileProject[]> {
+  const profile = asProfile(connection);
+  return requestJson<MobileProject[]>(profile, '/api/projects', {
+    headers: authHeaders(profile.token),
+  });
+}
+
+export async function fetchSessionEvents(
+  connection: CompanionConnection,
+  sessionId: string,
+  after = -1,
+): Promise<unknown[]> {
+  const profile = asProfile(connection);
+  const query = after >= 0 ? `?after=${after}` : '';
+  return requestJson<unknown[]>(profile, `/api/sessions/${sessionId}/events${query}`, {
+    headers: authHeaders(profile.token),
+  });
+}
+
+export async function sendSessionMessage(
+  connection: CompanionConnection,
+  sessionId: string,
+  prompt: string,
+): Promise<void> {
+  const profile = asProfile(connection);
+  await requestVoid(profile, `/api/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    headers: authHeaders(profile.token),
+    body: JSON.stringify({ prompt }),
+  });
+}
+
+export async function createSession(
+  connection: CompanionConnection,
+  payload: {
+    title: string;
+    agentKind?: string;
+    projectId?: string;
+    providerId?: string;
+    model?: string;
+    reasoningEffort?: string;
+    permissionConfig?: string;
+    planMode?: string;
+    mode?: string;
+  },
+): Promise<MobileSession> {
+  const profile = asProfile(connection);
+  return requestJson<MobileSession>(profile, '/api/sessions', {
+    method: 'POST',
+    headers: authHeaders(profile.token),
+    body: JSON.stringify({
+      title: payload.title,
+      agentKind: payload.agentKind,
+      projectId: payload.projectId,
+      providerId: payload.providerId,
+      model: payload.model,
+      reasoningEffort: payload.reasoningEffort,
+      permissionConfig: payload.permissionConfig,
+      planMode: payload.planMode,
+      mode: payload.mode ?? 'agent',
+    }),
+  });
+}
+
+export async function respondPermission(
+  connection: CompanionConnection,
+  sessionId: string,
+  requestId: string,
+  response: Record<string, unknown>,
+): Promise<void> {
+  const profile = asProfile(connection);
+  await requestVoid(profile, '/api/permissions/respond', {
+    method: 'POST',
+    headers: authHeaders(profile.token),
+    body: JSON.stringify({ sessionId, requestId, response }),
+  });
+}
+
+export async function respondUserInput(
+  connection: CompanionConnection,
+  sessionId: string,
+  toolUseId: string,
+  response: unknown,
+): Promise<void> {
+  const profile = asProfile(connection);
+  await requestVoid(profile, '/api/interactive/user-input', {
+    method: 'POST',
+    headers: authHeaders(profile.token),
+    body: JSON.stringify({ sessionId, toolUseId, response }),
+  });
+}
+
+export function buildWsUrl(connection: CompanionConnection, sessionId: string): string {
+  const profile = asProfile(connection);
+  const active = resolveActiveConnection(profile);
+  if (active.type === 'relay') {
+    throw new Error('WebSocket is not available over relay; use polling fallback');
+  }
+  return resolveProfileWsUrl(profile, sessionId);
 }
 
 export function isAuthError(error: unknown): boolean {
@@ -106,185 +392,8 @@ export function isConnectivityError(error: unknown): boolean {
     || message.includes('connection refused')
     || message.includes('econnrefused')
     || message.includes('fetch failed')
-    || message.includes('连接超时');
-}
-
-const REQUEST_TIMEOUT_MS = 3000;
-
-async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal, cache: 'no-store' });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('连接超时，桌面端无响应');
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
-
-function authHeaders(token: string): HeadersInit {
-  return {
-    Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  };
-}
-
-async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetchWithTimeout(url, init);
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: response.statusText }));
-    const message = typeof body.error === 'string' ? body.error : `Request failed (${response.status})`;
-    throw new ApiRequestError(response.status, message);
-  }
-  const text = await response.text();
-  if (!text.trim()) {
-    return undefined as T;
-  }
-  return JSON.parse(text) as T;
-}
-
-async function requestVoid(url: string, init?: RequestInit): Promise<void> {
-  const response = await fetchWithTimeout(url, init);
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: response.statusText }));
-    const message = typeof body.error === 'string' ? body.error : `Request failed (${response.status})`;
-    throw new ApiRequestError(response.status, message);
-  }
-}
-
-export async function claimPairing(
-  baseUrl: string,
-  code: string,
-  name?: string,
-): Promise<{ token: string; deviceId: string }> {
-  const result = await requestJson<{ token: string; deviceId: string }>(`${baseUrl}/api/pair/claim`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, name }),
-  });
-  return result;
-}
-
-export async function revokePairing(connection: CompanionConnection): Promise<void> {
-  await requestVoid(apiUrl(connection, '/api/pair/device'), {
-    method: 'DELETE',
-    headers: authHeaders(connection.token),
-  });
-}
-
-export async function fetchBootstrap(connection: CompanionConnection): Promise<MobileBootstrap> {
-  return requestJson<MobileBootstrap>(apiUrl(connection, '/api/bootstrap'), {
-    headers: authHeaders(connection.token),
-  });
-}
-
-export async function pingDesktopHealth(baseUrl: string): Promise<void> {
-  await requestJson<{ ok: boolean }>(`${baseUrl.replace(/\/$/, '')}/api/health`);
-}
-
-export async function checkDesktopReachability(connection: CompanionConnection): Promise<void> {
-  await pingDesktopHealth(connection.baseUrl);
-  await fetchBootstrap(connection);
-}
-
-export async function listSessions(connection: CompanionConnection): Promise<MobileSession[]> {
-  return requestJson<MobileSession[]>(apiUrl(connection, '/api/sessions'), {
-    headers: authHeaders(connection.token),
-  });
-}
-
-export async function listProjects(connection: CompanionConnection): Promise<MobileProject[]> {
-  return requestJson<MobileProject[]>(apiUrl(connection, '/api/projects'), {
-    headers: authHeaders(connection.token),
-  });
-}
-
-export async function fetchSessionEvents(
-  connection: CompanionConnection,
-  sessionId: string,
-  after = -1,
-): Promise<unknown[]> {
-  const query = after >= 0 ? `?after=${after}` : '';
-  return requestJson<unknown[]>(`${apiUrl(connection, `/api/sessions/${sessionId}/events`)}${query}`, {
-    headers: authHeaders(connection.token),
-  });
-}
-
-export async function sendSessionMessage(
-  connection: CompanionConnection,
-  sessionId: string,
-  prompt: string,
-): Promise<void> {
-  await requestVoid(apiUrl(connection, `/api/sessions/${sessionId}/messages`), {
-    method: 'POST',
-    headers: authHeaders(connection.token),
-    body: JSON.stringify({ prompt }),
-  });
-}
-
-export async function createSession(
-  connection: CompanionConnection,
-  payload: {
-    title: string;
-    agentKind?: string;
-    projectId?: string;
-    providerId?: string;
-    model?: string;
-    reasoningEffort?: string;
-    permissionConfig?: string;
-    planMode?: string;
-    mode?: string;
-  },
-): Promise<MobileSession> {
-  return requestJson<MobileSession>(apiUrl(connection, '/api/sessions'), {
-    method: 'POST',
-    headers: authHeaders(connection.token),
-    body: JSON.stringify({
-      title: payload.title,
-      agentKind: payload.agentKind,
-      projectId: payload.projectId,
-      providerId: payload.providerId,
-      model: payload.model,
-      reasoningEffort: payload.reasoningEffort,
-      permissionConfig: payload.permissionConfig,
-      planMode: payload.planMode,
-      mode: payload.mode ?? 'agent',
-    }),
-  });
-}
-
-export async function respondPermission(
-  connection: CompanionConnection,
-  sessionId: string,
-  requestId: string,
-  response: Record<string, unknown>,
-): Promise<void> {
-  await requestVoid(apiUrl(connection, '/api/permissions/respond'), {
-    method: 'POST',
-    headers: authHeaders(connection.token),
-    body: JSON.stringify({ sessionId, requestId, response }),
-  });
-}
-
-export async function respondUserInput(
-  connection: CompanionConnection,
-  sessionId: string,
-  toolUseId: string,
-  response: unknown,
-): Promise<void> {
-  await requestVoid(apiUrl(connection, '/api/interactive/user-input'), {
-    method: 'POST',
-    headers: authHeaders(connection.token),
-    body: JSON.stringify({ sessionId, toolUseId, response }),
-  });
-}
-
-export function buildWsUrl(connection: CompanionConnection, sessionId: string): string {
-  return resolveProfileWsUrl(profileFor(connection), sessionId);
+    || message.includes('连接超时')
+    || message.includes('relay');
 }
 
 export function providerSupportsAgent(provider: MobileProvider, agentKind: string): boolean {

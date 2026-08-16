@@ -2,10 +2,9 @@ import type { CompanionConnectionProfile, LegacyCompanionConnection } from '@sha
 import {
   migrateLegacyConnection,
   normalizeStoredConnection,
-  profileToLegacyConnection,
 } from '@shared/lib/companion-connection';
 
-export type CompanionConnection = LegacyCompanionConnection;
+export type CompanionConnection = CompanionConnectionProfile;
 
 const DB_NAME = 'codemux-mobile';
 const STORE_NAME = 'connection';
@@ -48,10 +47,8 @@ export async function saveProfile(profile: CompanionConnectionProfile): Promise<
   });
 }
 
-export async function loadConnection(): Promise<CompanionConnection | null> {
-  const profile = await loadProfile();
-  if (!profile) return null;
-  return profileToLegacyConnection(profile);
+export async function loadConnection(): Promise<CompanionConnectionProfile | null> {
+  return loadProfile();
 }
 
 export async function saveConnection(

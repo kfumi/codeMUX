@@ -109,6 +109,7 @@ function App() {
       connection={screen.connection}
       onOpenSession={(sessionId) => setScreen({ kind: 'chat', connection: screen.connection, sessionId })}
       onDisconnected={(reason) => setScreen({ kind: 'pairing', notice: reason ?? null })}
+      onConnectionUpdated={(connection) => setScreen({ kind: 'sessions', connection })}
     />
   );
 }

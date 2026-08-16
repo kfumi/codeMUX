@@ -443,9 +443,10 @@ pub fn run() {
             if config_for_companion.enabled {
                 let app_handle = app.handle().clone();
                 let port = config_for_companion.port;
+                let listen_address = config_for_companion.listen_address.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) =
-                        companion::start_companion_server(app_handle.clone(), port).await
+                        companion::start_companion_server(app_handle.clone(), port, listen_address).await
                     {
                         warn!(target: "companion", "Failed to auto-start companion server: {}", error);
                         if let Some(state) = app_handle.try_state::<AppState>() {
@@ -624,6 +625,7 @@ pub fn run() {
             commands::perf::export_perf_snapshot,
             commands::companion::get_companion_status,
             commands::companion::set_companion_enabled,
+            commands::companion::set_companion_relay_enabled,
             commands::companion::revoke_companion_device,
             commands::companion::refresh_companion_pairing_code,
             commands::companion::get_companion_pairing_offer,

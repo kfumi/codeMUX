@@ -2,7 +2,9 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::config::types::{AgentConfigs, AgentDefaults, AgentKind};
-use crate::model_providers::{is_provider_usable, ModelProvider, ProviderModel, Protocol};
+use crate::model_providers::{is_provider_usable, ModelProvider, ProviderModel};
+#[cfg(test)]
+use crate::model_providers::Protocol;
 use crate::AppState;
 
 #[derive(Debug, Serialize)]
@@ -121,6 +123,7 @@ fn build_permission_presets(configs: &AgentConfigs) -> MobilePermissionPresets {
     }
 }
 
+#[cfg(test)]
 pub fn provider_supports_agent(provider: &MobileProvider, agent_kind: AgentKind) -> bool {
     let required = match agent_kind {
         AgentKind::ClaudeCode => Protocol::Anthropic,

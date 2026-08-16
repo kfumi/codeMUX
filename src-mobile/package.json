@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@streamdown/code": "^1.1.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "diff": "^7.0.0",
@@ -17,9 +18,9 @@
     "parse-diff": "^0.11.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "@streamdown/code": "^1.1.1",
     "streamdown": "^2.5.0",
-    "tailwind-merge": "^2.5.5"
+    "tailwind-merge": "^2.5.5",
+    "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.1",

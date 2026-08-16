@@ -4,10 +4,25 @@ use tauri::{AppHandle, State};
 
 use crate::companion::desktop_id::get_or_create_desktop_id;
 use crate::companion::offer::build_pairing_offer;
+use crate::companion::pairing_code::{
+    clear_persisted_pairing_code, ensure_persisted_pairing_code, refresh_persisted_pairing_code,
+    resolve_lan_ip,
+};
+use crate::companion::relay::{set_relay_enabled, RelayConnectionState};
 use crate::companion::{start_companion_server, stop_companion_server, CompanionState};
 use crate::config;
 use crate::db::operations::{self, PairedDevice};
 use crate::AppState;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompanionRelayStatus {
+    pub enabled: bool,
+    pub endpoint: String,
+    pub use_tls: bool,
+    pub connection_state: String,
+    pub desktop_public_key_b64: Option<String>,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,7 +32,18 @@ pub struct CompanionStatus {
     pub desktop_id: Option<String>,
     pub lan_ip: Option<String>,
     pub pairing_code: Option<String>,
+    pub pairing_code_expires_at: Option<String>,
     pub paired_devices: Vec<PairedDevice>,
+    pub relay: CompanionRelayStatus,
+}
+
+fn relay_connection_state_label(state: RelayConnectionState) -> &'static str {
+    match state {
+        RelayConnectionState::Disabled => "disabled",
+        RelayConnectionState::Connecting => "connecting",
+        RelayConnectionState::Connected => "connected",
+        RelayConnectionState::Error => "error",
+    }
 }
 
 fn ensure_desktop_id_persisted(app: &AppHandle, state: &AppState) -> Result<String, String> {
@@ -34,23 +60,53 @@ fn ensure_desktop_id_persisted(app: &AppHandle, state: &AppState) -> Result<Stri
     Ok(desktop_id)
 }
 
-fn build_companion_status(
+async fn build_companion_status(
     app: &AppHandle,
     state: &AppState,
     companion_state: &CompanionState,
 ) -> Result<CompanionStatus, String> {
     let desktop_id = ensure_desktop_id_persisted(app, state)?;
-    let config = state.config.lock().map_err(|error| error.to_string())?;
-    let port = config.companion.port;
     let enabled = companion_state.inner.is_enabled();
-    let pairing_code = if enabled {
-        Some(companion_state.ensure_pairing_code())
-    } else {
-        None
+    let detected_lan_ip = local_ip().ok().map(|ip| ip.to_string());
+
+    let (port, relay_config, paired_devices, lan_ip, pairing_code, pairing_code_expires_at, should_save_config) = {
+        let mut config = state.config.lock().map_err(|error| error.to_string())?;
+        let port = config.companion.port;
+        let relay_config = config.companion.relay.clone();
+        let db = state.db.lock().map_err(|error| error.to_string())?;
+        let paired_devices = operations::list_paired_devices(&db).map_err(|error| error.to_string())?;
+        let previous_lan_ip = config.companion.last_lan_ip.clone();
+        let lan_ip = resolve_lan_ip(&mut config.companion, detected_lan_ip);
+        let mut should_save_config = previous_lan_ip != config.companion.last_lan_ip;
+        let (pairing_code, pairing_code_expires_at) = if enabled {
+            let previous_code = config.companion.pairing_code.clone();
+            let code = ensure_persisted_pairing_code(&companion_state, &mut config.companion);
+            if config.companion.pairing_code != previous_code {
+                should_save_config = true;
+            }
+            let expires_at = config.companion.pairing_code_expires_at.clone();
+            (Some(code), expires_at)
+        } else {
+            (None, None)
+        };
+        (
+            port,
+            relay_config,
+            paired_devices,
+            lan_ip,
+            pairing_code,
+            pairing_code_expires_at,
+            should_save_config,
+        )
     };
-    let db = state.db.lock().map_err(|error| error.to_string())?;
-    let paired_devices = operations::list_paired_devices(&db).map_err(|error| error.to_string())?;
-    let lan_ip = local_ip().ok().map(|ip| ip.to_string());
+
+    if should_save_config {
+        let config = state.config.lock().map_err(|error| error.to_string())?;
+        config::save_config(app, &config)?;
+    }
+
+    let relay_state = companion_state.relay_state().get().await;
+    let desktop_public_key_b64 = companion_state.e2ee_public_key_b64().await;
 
     Ok(CompanionStatus {
         enabled,
@@ -58,7 +114,15 @@ fn build_companion_status(
         desktop_id: Some(desktop_id),
         lan_ip,
         pairing_code,
+        pairing_code_expires_at,
         paired_devices,
+        relay: CompanionRelayStatus {
+            enabled: relay_config.enabled,
+            endpoint: relay_config.endpoint,
+            use_tls: relay_config.use_tls,
+            connection_state: relay_connection_state_label(relay_state).to_string(),
+            desktop_public_key_b64,
+        },
     })
 }
 
@@ -68,7 +132,7 @@ pub async fn get_companion_status(
     state: State<'_, AppState>,
     companion_state: State<'_, CompanionState>,
 ) -> Result<CompanionStatus, String> {
-    build_companion_status(&app, state.inner(), &companion_state)
+    build_companion_status(&app, state.inner(), &companion_state).await
 }
 
 #[tauri::command]
@@ -82,17 +146,21 @@ pub async fn set_companion_enabled(
         let mut config = state.config.lock().map_err(|error| error.to_string())?;
         config.companion.enabled = enabled;
         let _ = get_or_create_desktop_id(&mut config.companion);
+        if !enabled {
+            clear_persisted_pairing_code(&mut config.companion);
+        }
         config::save_config(&app, &config)?;
     }
 
     if enabled {
-        let port = state
-            .config
-            .lock()
-            .map_err(|error| error.to_string())?
-            .companion
-            .port;
-        if let Err(error) = start_companion_server(app.clone(), port).await {
+        let (port, listen_address) = {
+            let config = state.config.lock().map_err(|error| error.to_string())?;
+            (
+                config.companion.port,
+                config.companion.listen_address.clone(),
+            )
+        };
+        if let Err(error) = start_companion_server(app.clone(), port, listen_address).await {
             let mut config = state.config.lock().map_err(|error| error.to_string())?;
             config.companion.enabled = false;
             config::save_config(&app, &config)?;
@@ -107,7 +175,18 @@ pub async fn set_companion_enabled(
         companion_state.clear_pairing_codes();
     }
 
-    build_companion_status(&app, state.inner(), &companion_state)
+    build_companion_status(&app, state.inner(), &companion_state).await
+}
+
+#[tauri::command]
+pub async fn set_companion_relay_enabled(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    companion_state: State<'_, CompanionState>,
+    enabled: bool,
+) -> Result<CompanionStatus, String> {
+    set_relay_enabled(&app, &companion_state, enabled).await?;
+    build_companion_status(&app, state.inner(), &companion_state).await
 }
 
 #[tauri::command]
@@ -122,7 +201,7 @@ pub async fn revoke_companion_device(
         let db = state.db.lock().map_err(|error| error.to_string())?;
         operations::delete_paired_device(&db, &device_id).map_err(|error| error.to_string())?;
     }
-    build_companion_status(&app, state.inner(), &companion_state)
+    build_companion_status(&app, state.inner(), &companion_state).await
 }
 
 #[tauri::command]
@@ -134,8 +213,12 @@ pub async fn refresh_companion_pairing_code(
     if !companion_state.inner.is_enabled() {
         return Err("Companion server is not enabled".to_string());
     }
-    companion_state.refresh_pairing_code();
-    build_companion_status(&app, state.inner(), &companion_state)
+    {
+        let mut config = state.config.lock().map_err(|error| error.to_string())?;
+        refresh_persisted_pairing_code(&companion_state, &mut config.companion);
+        config::save_config(&app, &config)?;
+    }
+    build_companion_status(&app, state.inner(), &companion_state).await
 }
 
 #[tauri::command]
@@ -145,14 +228,44 @@ pub async fn get_companion_pairing_offer(
     companion_state: State<'_, CompanionState>,
 ) -> Result<crate::companion::offer::CompanionPairingOffer, String> {
     let _ = ensure_desktop_id_persisted(&app, state.inner())?;
-    let lan_ip = local_ip().ok().map(|ip| ip.to_string());
-    let config = state.config.lock().map_err(|error| error.to_string())?;
-    let desktop_id = config
-        .companion
-        .desktop_id
-        .clone()
-        .unwrap_or_default();
-    let port = config.companion.port;
-    drop(config);
-    build_pairing_offer(&companion_state, desktop_id, port, lan_ip)
+    let detected_lan_ip = local_ip().ok().map(|ip| ip.to_string());
+    let (desktop_id, port, relay, lan_ip) = {
+        let mut config = state.config.lock().map_err(|error| error.to_string())?;
+        let mut should_save = false;
+        if companion_state.inner.is_enabled() {
+            let previous_code = config.companion.pairing_code.clone();
+            ensure_persisted_pairing_code(&companion_state, &mut config.companion);
+            if config.companion.pairing_code != previous_code {
+                should_save = true;
+            }
+        }
+        let previous_lan_ip = config.companion.last_lan_ip.clone();
+        let lan_ip = resolve_lan_ip(&mut config.companion, detected_lan_ip);
+        if config.companion.last_lan_ip != previous_lan_ip {
+            should_save = true;
+        }
+        let result = (
+            config
+                .companion
+                .desktop_id
+                .clone()
+                .unwrap_or_default(),
+            config.companion.port,
+            config.companion.relay.clone(),
+            lan_ip,
+        );
+        if should_save {
+            config::save_config(&app, &config)?;
+        }
+        result
+    };
+    let desktop_public_key_b64 = companion_state.e2ee_public_key_b64().await;
+    build_pairing_offer(
+        &companion_state,
+        desktop_id,
+        port,
+        lan_ip,
+        Some(relay),
+        desktop_public_key_b64,
+    )
 }
