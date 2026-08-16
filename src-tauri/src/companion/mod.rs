@@ -1,6 +1,8 @@
 pub mod actions;
 pub mod config;
+pub mod desktop_id;
 pub mod events;
+pub mod offer;
 pub mod pairing;
 pub mod server;
 pub mod state;

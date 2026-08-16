@@ -8,6 +8,7 @@ export interface PairedDevice {
 export interface CompanionStatus {
   enabled: boolean;
   port: number;
+  desktopId?: string | null;
   lanIp?: string | null;
   pairingCode?: string | null;
   pairedDevices: PairedDevice[];

@@ -15,6 +15,7 @@ import {
   isTerminalAgentEvent,
   mapCodexCompactedEvent,
   mapPersistedClaudeMessage,
+  hasVisibleConversationEvents,
   normalizeClaudeUserEvent,
   parseSdkUserMessage,
   shouldProcessTerminalEvent,
@@ -149,6 +150,8 @@ interface AgentState {
   acknowledgedFiles: Record<string, Set<string>>;
   /** Draft text for each session's composer input (preserved across session switches) */
   composerDrafts: Record<string, string>;
+  /** Sessions whose history load IPC has completed at least once */
+  sessionHistoryFetched: Record<string, boolean>;
   /** Messages submitted while a turn is active, kept out of provider history until dispatched. */
   queuedQueries: Record<string, QueuedAgentQuery[]>;
   /** Queue is paused after an interruption or failed dispatch. */
@@ -174,7 +177,7 @@ interface AgentState {
   /** Refresh token/context usage from the agent history file */
   refreshLatestTokenUsage: (sessionId: string, freshness: 'live_synced' | 'restored') => Promise<void>;
   /** Load historical messages for a session */
-  loadSessionMessages: (sessionId: string) => Promise<void>;
+  loadSessionMessages: (sessionId: string, options?: { force?: boolean }) => Promise<void>;
   /** Clear changed files for a session */
   clearChangedFiles: (sessionId: string) => void;
   /** Save composer draft text for a session */
@@ -1340,6 +1343,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
   fileOriginals: {},
   acknowledgedFiles: {},
   composerDrafts: {},
+  sessionHistoryFetched: {},
   queuedQueries: {},
   queuePaused: {},
   pendingPermissions: {},
@@ -2427,18 +2431,26 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     }
   },
 
-  loadSessionMessages: async (sessionId: string) => {
-    // An empty array is also a loaded history. Keeping it in the store avoids
-    // repeating the expensive IPC call for empty sessions after remounts.
-    const existing = get().events[sessionId];
-    if (existing) {
-      const hydrated = await hydrateSessionMessageAttachments(sessionId, existing);
-      if (sessionEventsNeedAttachmentHydration(existing, hydrated)) {
-        set((state) => ({
-          events: { ...state.events, [sessionId]: hydrated },
-        }));
+  loadSessionMessages: async (sessionId: string, options?: { force?: boolean }) => {
+    if (!options?.force) {
+      const existing = get().events[sessionId];
+      const historyFetched = get().sessionHistoryFetched[sessionId];
+      if (existing !== undefined) {
+        if (hasVisibleConversationEvents(existing)) {
+          const hydrated = await hydrateSessionMessageAttachments(sessionId, existing);
+          if (sessionEventsNeedAttachmentHydration(existing, hydrated)) {
+            set((state) => ({
+              events: { ...state.events, [sessionId]: hydrated },
+            }));
+          }
+          return;
+        }
+        if (historyFetched && existing.length === 0) {
+          return;
+        }
       }
-      return;
+    } else {
+      pendingSessionMessageLoads.delete(sessionId);
     }
 
     const pending = pendingSessionMessageLoads.get(sessionId);
@@ -2470,6 +2482,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
             eventTimestamps: state.eventTimestamps[sessionId]
               ? state.eventTimestamps
               : { ...state.eventTimestamps, [sessionId]: [] },
+            sessionHistoryFetched: { ...state.sessionHistoryFetched, [sessionId]: true },
           }));
           return;
         }
@@ -2479,9 +2492,14 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
 
         for (const raw of historyMessages) {
           const rawMsg = raw as Record<string, unknown>;
-          const ts = typeof rawMsg.timestamp === 'string'
+          let ts = typeof rawMsg.timestamp === 'string'
             ? new Date(rawMsg.timestamp).getTime() || 0
-            : 0;
+            : typeof rawMsg.timestamp === 'number'
+              ? rawMsg.timestamp
+              : 0;
+          if (ts === 0 && timestamps.length > 0) {
+            ts = timestamps[timestamps.length - 1] ?? 0;
+          }
 
           const event = isCodeMuxToolEvent(rawMsg)
             || isCodeMuxTurnEvent(rawMsg)
@@ -2502,6 +2520,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
           events: { ...state.events, [sessionId]: hydratedEvents },
           eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
           todos: { ...state.todos, [sessionId]: extractTodosFromEvents(hydratedEvents) },
+          sessionHistoryFetched: { ...state.sessionHistoryFetched, [sessionId]: true },
         }));
         await get().refreshLatestTokenUsage(sessionId, 'restored');
         logger.info('Loaded session events from agent JSONL', {

@@ -1,180 +1,219 @@
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ChevronDown, ChevronRight, Send } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { ArrowLeft, Send } from 'lucide-react';
 
+import { ChatMarkdown } from './chat/ChatMarkdown';
+import { ChatSeamRow } from './chat/ChatSeamRow';
+import { CompactProcessToggle } from './chat/CompactProcessToggle';
+import { DesktopOfflineOverlay } from './DesktopOfflineOverlay';
+import { DirectiveText } from './chat/DirectiveText';
+import { ExploreGroupRow } from './chat/ExploreGroupRow';
+import { ReasoningRow } from './chat/ReasoningRow';
+import { RuntimeSwitchRow } from './chat/RuntimeSwitchRow';
+import { SessionSummaryRow } from './chat/SessionSummaryRow';
+import { ToolCallRow } from './chat/ToolCallRow';
+import { ScrollToBottomButton, useChatScrollToBottom } from '../hooks/useChatScrollToBottom';
 import { useCompanionSocket } from '../hooks/useCompanionSocket';
-import { fetchSessionEvents, respondPermission, respondUserInput, sendSessionMessage } from '../lib/api';
-import type { CompanionConnection } from '../lib/storage';
+import { useDesktopReachability } from '../hooks/useDesktopReachability';
+import { fetchBootstrap, fetchSessionEvents, isAuthError, respondPermission, respondUserInput, revokePairing, sendSessionMessage } from '../lib/api';
+import { appendEvent, eventsToMessages, type ChatMessage } from '../lib/eventToMessages';
+import { buildDisplayRows, isSeamMessage, type DisplayRow } from '../lib/messageLayout';
+import {
+  cacheSessionEvents,
+  clearConnection,
+  maxEventSequence,
+  type CompanionConnection,
+} from '../lib/storage';
 import { cn } from '../lib/utils';
 
 interface ChatViewProps {
   connection: CompanionConnection;
   sessionId: string;
   onBack: () => void;
+  onDisconnected: (reason?: string) => void;
 }
 
-interface QuestionOption {
-  label: string;
-  description?: string;
+function applyEvents(messages: ChatMessage[], events: unknown[]): ChatMessage[] {
+  let next = messages;
+  for (const event of events) {
+    if (event && typeof event === 'object') {
+      next = appendEvent(next, event as Record<string, unknown>);
+    }
+  }
+  return next;
 }
 
-interface ChatItem {
-  id: string;
-  role: 'user' | 'assistant' | 'system' | 'permission' | 'question' | 'tool';
-  content: string;
-  requestId?: string;
-  toolUseId?: string;
-  questions?: Array<{ question: string; options: QuestionOption[] }>;
-  collapsed?: boolean;
-}
-
-function eventToChatItem(event: Record<string, unknown>): ChatItem | null {
-  const type = typeof event.type === 'string' ? event.type : '';
-  const id = typeof event.event_id === 'string' ? event.event_id : crypto.randomUUID();
-
-  if (type === 'user_message') {
-    const content = typeof event.content === 'string'
-      ? event.content
-      : JSON.stringify(event.content);
-    return { id, role: 'user', content };
-  }
-
-  if (type === 'assistant_message') {
-    const message = event.content as { content?: Array<{ type?: string; text?: string }> } | undefined;
-    const text = Array.isArray(message?.content)
-      ? message.content
-        .filter((block) => block.type === 'text' && block.text)
-        .map((block) => block.text)
-        .join('\n')
-      : '';
-    return text ? { id, role: 'assistant', content: text } : null;
-  }
-
-  if (type === 'system_event') {
-    const content = typeof event.content === 'string' ? event.content : type;
-    return { id, role: 'system', content };
-  }
-
-  if (type === 'permission_requested') {
-    const description = typeof event.description === 'string' ? event.description : '需要审批';
-    const requestId = typeof event.request_id === 'string' ? event.request_id : undefined;
-    return { id, role: 'permission', content: description, requestId };
-  }
-
-  if (type === 'user_input_requested') {
-    const toolUseId = typeof event.tool_use_id === 'string' ? event.tool_use_id : undefined;
-    const questions = Array.isArray(event.questions)
-      ? event.questions
-        .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
-        .map((entry) => ({
-          question: typeof entry.question === 'string' ? entry.question : '请回答',
-          options: Array.isArray(entry.options)
-            ? entry.options
-              .filter((option): option is Record<string, unknown> => Boolean(option) && typeof option === 'object')
-              .map((option) => ({
-                label: typeof option.label === 'string' ? option.label : '选项',
-                description: typeof option.description === 'string' ? option.description : undefined,
-              }))
-            : [],
-        }))
-      : [];
-    return {
-      id,
-      role: 'question',
-      content: questions[0]?.question ?? '需要你的回答',
-      toolUseId,
-      questions,
-    };
-  }
-
-  if (type === 'tool_started') {
-    const name = typeof event.name === 'string' ? event.name : 'tool';
-    return { id, role: 'tool', content: `工具开始：${name}`, collapsed: true };
-  }
-
-  if (type === 'tool_finished') {
-    const name = typeof event.name === 'string' ? event.name : 'tool';
-    const isError = event.is_error === true;
-    return {
-      id,
-      role: 'tool',
-      content: isError ? `工具失败：${name}` : `工具完成：${name}`,
-      collapsed: true,
-    };
-  }
-
-  if (type === 'text_delta' && typeof event.text === 'string') {
-    return { id: `${id}-delta`, role: 'assistant', content: event.text };
-  }
-
-  return null;
-}
-
-export function ChatView({ connection, sessionId, onBack }: ChatViewProps) {
-  const [items, setItems] = useState<ChatItem[]>([]);
+export function ChatView({ connection, sessionId, onBack, onDisconnected }: ChatViewProps) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [compactAiOutput, setCompactAiOutput] = useState(false);
+  const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
+  const viewportRef = useRef<HTMLDivElement>(null);
   const lastSequenceRef = useRef(-1);
-  const historyLoadedRef = useRef(false);
+  const rawEventsRef = useRef<unknown[]>([]);
 
-  const appendEvent = useCallback((event: Record<string, unknown>) => {
-    const sequence = typeof event.sequence === 'number' ? event.sequence : null;
-    if (sequence !== null) {
-      lastSequenceRef.current = Math.max(lastSequenceRef.current, sequence);
-    }
-
-    const item = eventToChatItem(event);
-    if (!item) return;
-
-    setItems((current) => {
-      if (item.role === 'assistant' && item.id.endsWith('-delta')) {
-        const last = current[current.length - 1];
-        if (last?.role === 'assistant' && last.id.endsWith('-delta')) {
-          return [...current.slice(0, -1), { ...last, content: last.content + item.content }];
-        }
-      }
-      const duplicate = current.some((entry) => entry.id === item.id);
-      if (duplicate && item.role !== 'assistant') {
-        return current;
-      }
-      return [...current, item];
+  const persistEvents = useCallback(async (events: unknown[]) => {
+    await cacheSessionEvents(sessionId, {
+      updatedAt: new Date().toISOString(),
+      lastSequence: maxEventSequence(events),
+      events,
     });
-  }, []);
+  }, [sessionId]);
+
+  const ingestEvents = useCallback((events: unknown[], replace = false) => {
+    if (replace) {
+      rawEventsRef.current = [...events];
+      setMessages(eventsToMessages(events));
+    } else if (events.length > 0) {
+      rawEventsRef.current = [...rawEventsRef.current, ...events];
+      setMessages((current) => applyEvents(current, events));
+    }
+    lastSequenceRef.current = maxEventSequence(rawEventsRef.current);
+    void persistEvents(rawEventsRef.current);
+  }, [persistEvents]);
+
+  const loadCompactSetting = useCallback(async () => {
+    try {
+      const bootstrap = await fetchBootstrap(connection);
+      setCompactAiOutput(Boolean(bootstrap.compactAiOutput));
+    } catch {
+      // Keep the previous setting when bootstrap is temporarily unavailable.
+    }
+  }, [connection]);
+
+  const loadHistory = useCallback(async (after = -1) => {
+    setError(null);
+    try {
+      const events = await fetchSessionEvents(connection, sessionId, after);
+      if (after < 0) {
+        ingestEvents(events, true);
+      } else if (events.length > 0) {
+        ingestEvents(events, false);
+      } else {
+        lastSequenceRef.current = maxEventSequence(rawEventsRef.current);
+      }
+      return true;
+    } catch (err) {
+      if (isAuthError(err)) {
+        await clearConnection();
+        onDisconnected('桌面端已撤销此设备或配对已失效，请重新配对。');
+        return false;
+      }
+      setError(String(err));
+      return false;
+    }
+  }, [connection, ingestEvents, onDisconnected, sessionId]);
+
+  const handleAuthFailure = useCallback(() => {
+    void (async () => {
+      await clearConnection();
+      onDisconnected('桌面端已撤销此设备或配对已失效，请重新配对。');
+    })();
+  }, [onDisconnected]);
+
+  const handleUnpair = useCallback(() => {
+    void (async () => {
+      try {
+        await revokePairing(connection);
+      } catch {
+        // Best effort when desktop is unreachable.
+      }
+      await clearConnection();
+      onDisconnected();
+    })();
+  }, [connection, onDisconnected]);
+
+  const {
+    offline,
+    detail,
+    reconnecting,
+    reconnect,
+    reportUnreachable,
+    check,
+  } = useDesktopReachability(connection, {
+    onAuthFailure: handleAuthFailure,
+    onRecovered: () => {
+      void loadCompactSetting();
+      void loadHistory(-1);
+    },
+  });
 
   useEffect(() => {
-    historyLoadedRef.current = false;
     lastSequenceRef.current = -1;
-    setItems([]);
+    rawEventsRef.current = [];
+    setMessages([]);
     setLoading(true);
     setError(null);
 
-    void fetchSessionEvents(connection, sessionId, -1)
-      .then((events) => {
-        for (const event of events) {
-          if (event && typeof event === 'object') {
-            appendEvent(event as Record<string, unknown>);
-          }
-        }
-        historyLoadedRef.current = true;
-      })
-      .catch((err) => setError(String(err)))
-      .finally(() => setLoading(false));
-  }, [appendEvent, connection, sessionId]);
+    void (async () => {
+      await Promise.all([loadCompactSetting(), loadHistory(-1)]);
+      setLoading(false);
+    })();
+  }, [connection, loadCompactSetting, loadHistory, sessionId]);
 
-  const { connected } = useCompanionSocket(connection, sessionId, appendEvent);
+  const appendIncomingEvent = useCallback((event: Record<string, unknown>) => {
+    rawEventsRef.current = [...rawEventsRef.current, event];
+    lastSequenceRef.current = maxEventSequence(rawEventsRef.current);
+    setMessages((current) => appendEvent(current, event));
+    void persistEvents(rawEventsRef.current);
+  }, [persistEvents]);
 
-  const pendingPermissions = useMemo(
-    () => items.filter((item) => item.role === 'permission' && item.requestId),
-    [items],
+  const handleReconnect = useCallback(() => {
+    void loadHistory(lastSequenceRef.current);
+  }, [loadHistory]);
+
+  const displayRows = useMemo(
+    () => buildDisplayRows(messages, { compactAiOutput, expandedTurnKeys }),
+    [compactAiOutput, expandedTurnKeys, messages],
   );
 
-  const pendingQuestions = useMemo(
-    () => items.filter((item) => item.role === 'question' && item.toolUseId),
-    [items],
-  );
+  const streamTick = useMemo(() => {
+    let tick = 0;
+    for (const message of messages) {
+      if ((message.kind === 'assistant' || message.kind === 'reasoning') && message.streaming) {
+        tick += message.content.length;
+      }
+    }
+    return tick;
+  }, [messages]);
+
+  const { isAtBottom, contentVisible, scrollToBottom } = useChatScrollToBottom(viewportRef, {
+    contentKey: sessionId,
+    loading,
+    contentLength: messages.length,
+    rowCount: displayRows.length,
+    streamTick,
+  });
+
+  const toggleTurnExpanded = useCallback((turnKey: string) => {
+    setExpandedTurnKeys((current) => {
+      const next = new Set(current);
+      if (next.has(turnKey)) {
+        next.delete(turnKey);
+      } else {
+        next.add(turnKey);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleToolCollapsed = useCallback((id: string) => {
+    setMessages((current) => current.map((message) => (
+      message.kind === 'tool' && message.id === id
+        ? { ...message, collapsed: !message.collapsed }
+        : message
+    )));
+  }, []);
+
+  const toggleReasoningCollapsed = useCallback((id: string) => {
+    setMessages((current) => current.map((message) => (
+      message.kind === 'reasoning' && message.id === id
+        ? { ...message, collapsed: !message.collapsed }
+        : message
+    )));
+  }, []);
 
   const handleSend = async (event: FormEvent) => {
     event.preventDefault();
@@ -185,7 +224,6 @@ export function ChatView({ connection, sessionId, onBack }: ChatViewProps) {
     try {
       await sendSessionMessage(connection, sessionId, text);
       setPrompt('');
-      setItems((current) => [...current, { id: crypto.randomUUID(), role: 'user', content: text }]);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -196,7 +234,9 @@ export function ChatView({ connection, sessionId, onBack }: ChatViewProps) {
   const handlePermission = async (requestId: string, allow: boolean) => {
     try {
       await respondPermission(connection, sessionId, requestId, { behavior: allow ? 'allow' : 'deny' });
-      setItems((current) => current.filter((item) => item.requestId !== requestId));
+      setMessages((current) => current.filter((message) => (
+        message.kind !== 'permission' || message.requestId !== requestId
+      )));
     } catch (err) {
       setError(String(err));
     }
@@ -205,128 +245,352 @@ export function ChatView({ connection, sessionId, onBack }: ChatViewProps) {
   const handleQuestion = async (toolUseId: string, answer: string) => {
     try {
       await respondUserInput(connection, sessionId, toolUseId, [answer]);
-      setItems((current) => current.filter((item) => item.toolUseId !== toolUseId));
+      setMessages((current) => current.filter((message) => (
+        message.kind !== 'question' || message.toolUseId !== toolUseId
+      )));
     } catch (err) {
       setError(String(err));
     }
   };
 
-  const toggleToolItem = (id: string) => {
-    setItems((current) => current.map((item) => (
-      item.id === id ? { ...item, collapsed: !item.collapsed } : item
-    )));
-  };
+  const renderMessage = useCallback((message: ChatMessage) => {
+    if (message.kind === 'user') {
+      return (
+        <div data-message-row className="flex w-full justify-end">
+          <div className="flex w-fit max-w-[83%] min-w-0 flex-col items-end gap-2">
+            {message.attachments?.length ? (
+              <div className="flex flex-wrap justify-end gap-2">
+                {message.attachments.map((attachment, index) => (
+                  <img
+                    key={`${message.id}-attachment-${index}`}
+                    src={attachment.dataUrl}
+                    alt={attachment.name ?? '附件图片'}
+                    className="h-20 w-20 rounded-lg border border-border/50 object-cover"
+                  />
+                ))}
+              </div>
+            ) : null}
+            {message.content ? (
+              <div
+                data-user-message-bubble
+                className="min-w-0 max-w-full whitespace-pre-wrap wrap-break-word rounded-xl rounded-tr-md border border-border/50 bg-muted px-4 py-2.5 text-sm leading-relaxed text-foreground"
+              >
+                <DirectiveText text={message.content} />
+              </div>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+
+    if (message.kind === 'assistant') {
+      return (
+        <div data-message-row className="flex w-full justify-start">
+          <div className="w-full min-w-0 space-y-2 text-sm leading-relaxed">
+            <ChatMarkdown content={message.content} streaming={message.streaming} />
+          </div>
+        </div>
+      );
+    }
+
+    if (message.kind === 'runtime_switch') {
+      return (
+        <div data-message-row className="flex w-full justify-center">
+          <RuntimeSwitchRow
+            fromKind={message.fromKind}
+            toKind={message.toKind}
+            briefing={message.briefing}
+          />
+        </div>
+      );
+    }
+
+    if (message.kind === 'system') {
+      if (isSeamMessage(message)) {
+        return (
+          <div data-message-row className="flex w-full justify-center">
+            <ChatSeamRow>{message.content}</ChatSeamRow>
+          </div>
+        );
+      }
+      return (
+        <div data-message-row className="flex w-full justify-center">
+          <div className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
+            {message.content}
+          </div>
+        </div>
+      );
+    }
+
+    if (message.kind === 'reasoning') {
+      return (
+        <div data-message-row className="flex w-full justify-start pl-1">
+          <ReasoningRow
+            content={message.content}
+            collapsed={message.streaming ? false : message.collapsed}
+            streaming={message.streaming}
+            onToggle={() => toggleReasoningCollapsed(message.id)}
+          />
+        </div>
+      );
+    }
+
+    if (message.kind === 'tool') {
+      return (
+        <div data-message-row className="flex w-full justify-start pl-1">
+          <ToolCallRow
+            name={message.name}
+            status={message.status}
+            input={message.input}
+            inputObj={message.inputObj}
+            result={message.result}
+            collapsed={message.collapsed}
+            onToggle={() => toggleToolCollapsed(message.id)}
+          />
+        </div>
+      );
+    }
+
+    if (message.kind === 'session_summary') {
+      return (
+        <div data-message-row className="flex w-full justify-start pl-1">
+          <SessionSummaryRow diffs={message.diffs} />
+        </div>
+      );
+    }
+
+    if (message.kind === 'permission') {
+      return (
+        <div
+          data-message-row
+          className="rounded-xl border border-warning/20 bg-[hsl(var(--warning)/0.06)] px-4 py-3 text-sm"
+        >
+          <div className="text-foreground">{message.description}</div>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              className="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground"
+              onClick={() => void handlePermission(message.requestId, true)}
+            >
+              允许
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-2 text-xs text-muted-foreground"
+              onClick={() => void handlePermission(message.requestId, false)}
+            >
+              拒绝
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (message.kind === 'question') {
+      const firstQuestion = message.questions[0];
+      const options = firstQuestion?.options.length
+        ? firstQuestion.options
+        : [{ label: '继续' }];
+      return (
+        <div
+          data-message-row
+          className="rounded-xl border border-border bg-[hsl(var(--surface-2))] px-4 py-3 text-sm"
+        >
+          <div className="font-medium text-foreground">
+            {firstQuestion?.question ?? '需要你的回答'}
+          </div>
+          <div className="mt-3 space-y-2">
+            {options.map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                className="block w-full rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-left text-xs transition-colors hover:bg-muted/60"
+                onClick={() => void handleQuestion(message.toolUseId, option.label)}
+              >
+                <div className="text-foreground">{option.label}</div>
+                {option.description ? (
+                  <div className="mt-1 text-muted-foreground">{option.description}</div>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  }, [handlePermission, handleQuestion, toggleReasoningCollapsed, toggleToolCollapsed]);
+
+  const renderDisplayRow = useCallback((row: DisplayRow) => {
+    if (row.kind === 'single') {
+      if (row.message.kind === 'assistant' && row.sessionSummaries?.length) {
+        return (
+          <div data-message-row className="flex w-full justify-start">
+            <div className="w-full min-w-0 space-y-2 text-sm leading-relaxed">
+              <ChatMarkdown content={row.message.content} />
+              <div className="mt-1">
+                <SessionSummaryRow diffs={row.sessionSummaries} />
+              </div>
+            </div>
+          </div>
+        );
+      }
+      return renderMessage(row.message);
+    }
+
+    if (row.kind === 'compact-toggle') {
+      return (
+        <CompactProcessToggle
+          expanded={expandedTurnKeys.has(row.turnKey)}
+          onToggle={() => toggleTurnExpanded(row.turnKey)}
+        />
+      );
+    }
+
+    const active = row.messages.some((message) => (
+      message.kind === 'tool' && message.status === 'running'
+    )) || row.messages.some((message) => message.kind === 'reasoning' && message.streaming);
+
+    return (
+      <ExploreGroupRow
+        toolNames={row.toolNames}
+        messages={row.messages}
+        active={active}
+        renderMessage={renderMessage}
+      />
+    );
+  }, [expandedTurnKeys, renderMessage, toggleTurnExpanded]);
+
+  const { connected } = useCompanionSocket(
+    offline ? null : connection,
+    offline ? null : sessionId,
+    appendIncomingEvent,
+    handleReconnect,
+    {
+      onConnectionLost: () => {
+        reportUnreachable('桌面端 WebSocket 已断开');
+        void check();
+      },
+    },
+  );
+
+  const pendingPermissions = useMemo(
+    () => messages.filter((message) => message.kind === 'permission'),
+    [messages],
+  );
+
+  const pendingQuestions = useMemo(
+    () => messages.filter((message) => message.kind === 'question'),
+    [messages],
+  );
 
   return (
-    <div className="flex min-h-dvh flex-col bg-slate-950 text-slate-100">
-      <header className="flex items-center gap-3 border-b border-white/10 px-4 pb-4 pt-10">
-        <button type="button" className="rounded-lg border border-white/10 p-2" onClick={onBack} aria-label="返回">
+    <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+      <header className="mobile-safe-header sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-background/95 px-4 backdrop-blur-sm">
+        <button
+          type="button"
+          className="rounded-md border border-border/60 p-2 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+          onClick={onBack}
+          aria-label="返回"
+        >
           <ArrowLeft className="h-4 w-4" />
         </button>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">会话</div>
-          <div className="text-xs text-slate-400">{connected ? '实时连接中' : '重连中…'}</div>
+          <div className="text-xs text-muted-foreground">
+            {offline ? '电脑端离线' : connected ? '已连接' : '连接中…'}
+          </div>
         </div>
       </header>
 
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-        {loading ? <div className="text-sm text-slate-400">加载历史…</div> : null}
-        {items.map((item) => (
-          <div
-            key={item.id}
-            className={cn(
-              'rounded-2xl px-4 py-3 text-sm leading-relaxed',
-              item.role === 'user' && 'ml-8 bg-sky-500/20',
-              item.role === 'assistant' && 'mr-4 bg-white/5',
-              item.role === 'system' && 'bg-amber-500/10 text-amber-100',
-              item.role === 'permission' && 'border border-amber-400/30 bg-amber-500/10',
-              item.role === 'question' && 'border border-sky-400/30 bg-sky-500/10',
-              item.role === 'tool' && 'border border-white/10 bg-white/5 text-slate-300',
-            )}
-          >
-            {item.role === 'tool' ? (
-              <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => toggleToolItem(item.id)}>
-                {item.collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                <span>{item.content}</span>
-              </button>
-            ) : item.role === 'assistant' ? (
-              <div className="prose prose-invert max-w-none prose-p:my-2 prose-pre:my-2">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown>
-              </div>
-            ) : (
-              item.content
-            )}
+      <div
+        ref={viewportRef}
+        className="min-h-0 flex-1 overflow-y-auto px-4 py-5"
+        style={{ maxWidth: 'var(--content-width)', marginInline: 'auto', width: '100%' }}
+      >
+        {loading ? (
+          <div className="text-sm text-muted-foreground">加载历史…</div>
+        ) : null}
+        {!loading && messages.length === 0 ? (
+          <div className="text-sm text-muted-foreground">暂无消息记录，发送第一条消息开始对话。</div>
+        ) : null}
 
-            {item.role === 'permission' && item.requestId ? (
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
-                  className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-medium text-slate-950"
-                  onClick={() => void handlePermission(item.requestId!, true)}
-                >
-                  允许
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg border border-white/10 px-3 py-2 text-xs"
-                  onClick={() => void handlePermission(item.requestId!, false)}
-                >
-                  拒绝
-                </button>
-              </div>
-            ) : null}
-
-            {item.role === 'question' && item.toolUseId ? (
-              <div className="mt-3 space-y-2">
-                {(item.questions?.[0]?.options.length ? item.questions[0].options : [{ label: '继续' }]).map((option) => (
-                  <button
-                    key={option.label}
-                    type="button"
-                    className="block w-full rounded-lg border border-white/10 px-3 py-2 text-left text-xs"
-                    onClick={() => void handleQuestion(item.toolUseId!, option.label)}
-                  >
-                    <div>{option.label}</div>
-                    {option.description ? <div className="mt-1 text-slate-400">{option.description}</div> : null}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ))}
+        <div
+          className={cn(
+            'flex min-h-min flex-col gap-5',
+            !contentVisible && !loading && messages.length > 0 && 'invisible',
+          )}
+        >
+          {displayRows.map((row) => (
+            <div key={row.kind === 'single' ? row.message.id : row.kind === 'explore' ? row.id : row.turnKey}>
+              {renderDisplayRow(row)}
+            </div>
+          ))}
+        </div>
       </div>
 
-      {pendingPermissions.length > 0 ? (
-        <div className="border-t border-amber-400/20 bg-amber-500/10 px-4 py-2 text-xs text-amber-100">
-          有 {pendingPermissions.length} 个待审批请求
-        </div>
-      ) : null}
-      {pendingQuestions.length > 0 ? (
-        <div className="border-t border-sky-400/20 bg-sky-500/10 px-4 py-2 text-xs text-sky-100">
-          有 {pendingQuestions.length} 个待回答问题
-        </div>
-      ) : null}
+      <div className="relative shrink-0 border-t border-border bg-background">
+        <ScrollToBottomButton
+          visible={!isAtBottom && !loading}
+          onClick={() => scrollToBottom()}
+        />
 
-      {error ? <div className="px-4 py-2 text-sm text-red-300">{error}</div> : null}
+        {pendingPermissions.length > 0 ? (
+          <div className="border-b border-warning/20 bg-[hsl(var(--warning)/0.06)] px-4 py-2 text-xs text-muted-foreground">
+            有 {pendingPermissions.length} 个待审批请求
+          </div>
+        ) : null}
+        {pendingQuestions.length > 0 ? (
+          <div className="border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+            有 {pendingQuestions.length} 个待回答问题
+          </div>
+        ) : null}
 
-      <form className="border-t border-white/10 p-4" onSubmit={(event) => void handleSend(event)}>
-        <div className="flex items-end gap-2">
-          <textarea
-            className="min-h-11 flex-1 resize-none rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-sky-400"
-            placeholder="发送消息…"
-            rows={1}
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-          />
-          <button
-            type="submit"
-            disabled={sending || !prompt.trim()}
-            className="rounded-2xl bg-sky-500 p-3 text-slate-950 disabled:opacity-50"
-            aria-label="发送"
-          >
-            <Send className="h-4 w-4" />
-          </button>
-        </div>
-      </form>
+        {error && !offline ? <div className="px-4 py-2 text-sm text-destructive">{error}</div> : null}
+
+        <form
+          className="bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3"
+          onSubmit={(event) => void handleSend(event)}
+        >
+          <div className="flex items-end gap-2" style={{ maxWidth: 'var(--content-width)', marginInline: 'auto' }}>
+            <textarea
+              className="min-h-11 flex-1 resize-none rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm leading-relaxed outline-none transition-colors focus:border-primary/60 focus:bg-muted/60"
+              placeholder="发送消息…"
+              rows={1}
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              disabled={offline}
+            />
+            <button
+              type="submit"
+              disabled={sending || !prompt.trim() || !connected || offline}
+              className={cn(
+                'rounded-xl bg-primary p-3 text-primary-foreground transition-opacity',
+                (sending || !prompt.trim() || !connected || offline) && 'opacity-50',
+              )}
+              aria-label="发送"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {offline ? (
+        <DesktopOfflineOverlay
+          detail={detail ?? error}
+          reconnecting={reconnecting}
+          onReconnect={() => {
+            void reconnect().then((recovered) => {
+              if (recovered) {
+                setLoading(true);
+                void loadHistory(-1).finally(() => setLoading(false));
+              }
+            });
+          }}
+          onUnpair={handleUnpair}
+        />
+      ) : null}
     </div>
   );
 }

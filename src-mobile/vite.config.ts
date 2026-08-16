@@ -4,10 +4,15 @@ import path from 'node:path';
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __MOBILE_BUILD_ID__: JSON.stringify(process.env.MOBILE_BUILD_ID ?? new Date().toISOString()),
+  },
   resolve: {
     alias: {
       '@mobile': path.resolve(__dirname, './src'),
-      '@shared': path.resolve(__dirname, '../src'),
+      '@shared/lib/agentPermissions': path.resolve(__dirname, '../src/lib/agentPermissions.ts'),
+      '@shared/lib/companion-connection': path.resolve(__dirname, '../src/lib/companion-connection/index.ts'),
+      '@shared/types/session': path.resolve(__dirname, '../src/types/session.ts'),
     },
   },
   server: {
@@ -17,5 +22,18 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return;
+          }
+          if (id.includes('streamdown') || id.includes('@streamdown')) {
+            return 'streamdown';
+          }
+        },
+      },
+    },
   },
 });

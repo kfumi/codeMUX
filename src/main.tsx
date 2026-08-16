@@ -3,11 +3,13 @@ import ReactDOM from "react-dom/client";
 import "@fontsource-variable/jetbrains-mono";
 import App from "./App";
 import { initializeOpenCodeFreeModels } from "./hooks/useAgentModels";
+import { initCompanionStreamBridge } from "./lib/companionStreamBridge";
 import { initLogging } from "./lib/logger";
 import "./styles/globals.css";
 import "./styles/hljs-theme.css";
 
 initLogging();
+initCompanionStreamBridge();
 void initializeOpenCodeFreeModels();
 
 // In production, block the native browser context menu (refresh, save-as, print, inspect, etc.)

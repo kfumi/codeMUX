@@ -614,7 +614,7 @@ export function CodeMuxComposer({
               </Popover>
                 {permissionSelector}
               </div>
-              <div className="flex min-w-0 items-center justify-end gap-2">
+              <div className="flex min-w-0 items-center justify-end">
                 {contextUsage ? (
                   <ContextDisplay
                     usedTokens={contextUsage.usedTokens}

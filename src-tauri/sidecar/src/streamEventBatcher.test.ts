@@ -24,8 +24,8 @@ describe('stream event transport batching', () => {
       type: 'codemux_event_batch',
       session_id: 'session-1',
       events: [
-        { type: 'text_delta', session_id: 'session-1', index: 0, text: 'a', event_id: 'event-1', sequence: expect.any(Number) },
-        { type: 'text_delta', session_id: 'session-1', index: 0, text: 'b', event_id: 'event-2', sequence: expect.any(Number) },
+        { type: 'text_delta', session_id: 'session-1', index: 0, text: 'a', event_id: 'event-1', sequence: expect.any(Number), timestamp: expect.any(String) },
+        { type: 'text_delta', session_id: 'session-1', index: 0, text: 'b', event_id: 'event-2', sequence: expect.any(Number), timestamp: expect.any(String) },
       ],
     });
   });
@@ -62,13 +62,14 @@ describe('stream event transport batching', () => {
         content_kind: 'text',
         event_id: expect.any(String),
         sequence: expect.any(Number),
+        timestamp: expect.any(String),
       },
       {
         type: 'codemux_event_batch',
         session_id: 'session-1',
         events: [
-          { type: 'text_delta', session_id: 'session-1', index: 0, text: 'hello', event_id: expect.any(String), sequence: expect.any(Number) },
-          { type: 'tool_input_delta', session_id: 'session-1', index: 1, partial_json: '{', event_id: expect.any(String), sequence: expect.any(Number) },
+          { type: 'text_delta', session_id: 'session-1', index: 0, text: 'hello', event_id: expect.any(String), sequence: expect.any(Number), timestamp: expect.any(String) },
+          { type: 'tool_input_delta', session_id: 'session-1', index: 1, partial_json: '{', event_id: expect.any(String), sequence: expect.any(Number), timestamp: expect.any(String) },
         ],
       },
     ]);
@@ -108,26 +109,27 @@ describe('stream event transport batching', () => {
 
     const events = writes.map((line) => JSON.parse(line));
     expect(events).toHaveLength(2);
-    expect(events[0]).toMatchObject({ type: 'assistant_message', event_id: expect.any(String), sequence: expect.any(Number) });
-    expect(events[1]).toMatchObject({ type: 'diagnostic', event_id: expect.any(String), sequence: expect.any(Number) });
+    expect(events[0]).toMatchObject({ type: 'assistant_message', event_id: expect.any(String), sequence: expect.any(Number), timestamp: expect.any(String) });
+    expect(events[1]).toMatchObject({ type: 'diagnostic', event_id: expect.any(String), sequence: expect.any(Number), timestamp: expect.any(String) });
     expect(events[1].sequence).toBe(events[0].sequence + 1);
   });
 
-  it('envelopes permission mode changes as CodeMUX domain events', () => {
+  it('envelopes user messages with timestamps', () => {
     const writes: string[] = [];
     vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
       writes.push(String(chunk));
       return true;
     });
 
-    emit({ type: 'permission_mode_changed', session_id: 'session-1', plan_mode: 'on' });
+    emit({ type: 'user_message', session_id: 'session-1', content: 'hello' });
 
     expect(JSON.parse(writes[0])).toMatchObject({
-      type: 'permission_mode_changed',
+      type: 'user_message',
       session_id: 'session-1',
-      plan_mode: 'on',
+      content: 'hello',
       event_id: expect.any(String),
       sequence: expect.any(Number),
+      timestamp: expect.any(String),
     });
   });
 });

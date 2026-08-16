@@ -2,6 +2,8 @@ use local_ip_address::local_ip;
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
+use crate::companion::desktop_id::get_or_create_desktop_id;
+use crate::companion::offer::build_pairing_offer;
 use crate::companion::{start_companion_server, stop_companion_server, CompanionState};
 use crate::config;
 use crate::db::operations::{self, PairedDevice};
@@ -12,22 +14,37 @@ use crate::AppState;
 pub struct CompanionStatus {
     pub enabled: bool,
     pub port: u16,
+    pub desktop_id: Option<String>,
     pub lan_ip: Option<String>,
     pub pairing_code: Option<String>,
     pub paired_devices: Vec<PairedDevice>,
 }
 
-#[tauri::command]
-pub async fn get_companion_status(
-    _app: AppHandle,
-    state: State<'_, AppState>,
-    companion_state: State<'_, CompanionState>,
+fn ensure_desktop_id_persisted(app: &AppHandle, state: &AppState) -> Result<String, String> {
+    let mut config = state.config.lock().map_err(|error| error.to_string())?;
+    let had_desktop_id = config
+        .companion
+        .desktop_id
+        .as_ref()
+        .is_some_and(|value| !value.trim().is_empty());
+    let desktop_id = get_or_create_desktop_id(&mut config.companion);
+    if !had_desktop_id {
+        config::save_config(app, &config)?;
+    }
+    Ok(desktop_id)
+}
+
+fn build_companion_status(
+    app: &AppHandle,
+    state: &AppState,
+    companion_state: &CompanionState,
 ) -> Result<CompanionStatus, String> {
+    let desktop_id = ensure_desktop_id_persisted(app, state)?;
     let config = state.config.lock().map_err(|error| error.to_string())?;
     let port = config.companion.port;
     let enabled = companion_state.inner.is_enabled();
     let pairing_code = if enabled {
-        Some(companion_state.create_pairing_code())
+        Some(companion_state.ensure_pairing_code())
     } else {
         None
     };
@@ -38,10 +55,20 @@ pub async fn get_companion_status(
     Ok(CompanionStatus {
         enabled,
         port,
+        desktop_id: Some(desktop_id),
         lan_ip,
         pairing_code,
         paired_devices,
     })
+}
+
+#[tauri::command]
+pub async fn get_companion_status(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    companion_state: State<'_, CompanionState>,
+) -> Result<CompanionStatus, String> {
+    build_companion_status(&app, state.inner(), &companion_state)
 }
 
 #[tauri::command]
@@ -54,6 +81,7 @@ pub async fn set_companion_enabled(
     {
         let mut config = state.config.lock().map_err(|error| error.to_string())?;
         config.companion.enabled = enabled;
+        let _ = get_or_create_desktop_id(&mut config.companion);
         config::save_config(&app, &config)?;
     }
 
@@ -64,7 +92,14 @@ pub async fn set_companion_enabled(
             .map_err(|error| error.to_string())?
             .companion
             .port;
-        start_companion_server(app.clone(), port).await?;
+        if let Err(error) = start_companion_server(app.clone(), port).await {
+            let mut config = state.config.lock().map_err(|error| error.to_string())?;
+            config.companion.enabled = false;
+            config::save_config(&app, &config)?;
+            companion_state.inner.set_enabled(false);
+            companion_state.clear_pairing_codes();
+            return Err(error);
+        }
     } else {
         stop_companion_server(app.clone()).await?;
         let db = state.db.lock().map_err(|error| error.to_string())?;
@@ -72,7 +107,7 @@ pub async fn set_companion_enabled(
         companion_state.clear_pairing_codes();
     }
 
-    get_companion_status(app, state, companion_state).await
+    build_companion_status(&app, state.inner(), &companion_state)
 }
 
 #[tauri::command]
@@ -87,7 +122,7 @@ pub async fn revoke_companion_device(
         let db = state.db.lock().map_err(|error| error.to_string())?;
         operations::delete_paired_device(&db, &device_id).map_err(|error| error.to_string())?;
     }
-    get_companion_status(app, state, companion_state).await
+    build_companion_status(&app, state.inner(), &companion_state)
 }
 
 #[tauri::command]
@@ -99,5 +134,25 @@ pub async fn refresh_companion_pairing_code(
     if !companion_state.inner.is_enabled() {
         return Err("Companion server is not enabled".to_string());
     }
-    get_companion_status(app, state, companion_state).await
+    companion_state.refresh_pairing_code();
+    build_companion_status(&app, state.inner(), &companion_state)
+}
+
+#[tauri::command]
+pub async fn get_companion_pairing_offer(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    companion_state: State<'_, CompanionState>,
+) -> Result<crate::companion::offer::CompanionPairingOffer, String> {
+    let _ = ensure_desktop_id_persisted(&app, state.inner())?;
+    let lan_ip = local_ip().ok().map(|ip| ip.to_string());
+    let config = state.config.lock().map_err(|error| error.to_string())?;
+    let desktop_id = config
+        .companion
+        .desktop_id
+        .clone()
+        .unwrap_or_default();
+    let port = config.companion.port;
+    drop(config);
+    build_pairing_offer(&companion_state, desktop_id, port, lan_ip)
 }

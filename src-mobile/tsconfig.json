@@ -16,8 +16,11 @@
     "noUnusedParameters": true,
     "baseUrl": ".",
     "paths": {
+      "@/*": ["../src/*"],
       "@mobile/*": ["src/*"],
-      "@shared/*": ["../src/*"]
+      "@shared/lib/agentPermissions": ["../src/lib/agentPermissions.ts"],
+      "@shared/lib/companion-connection": ["../src/lib/companion-connection/index.ts"],
+      "@shared/types/session": ["../src/types/session.ts"]
     }
   },
   "include": ["src"]

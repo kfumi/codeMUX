@@ -4,6 +4,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::agent::commands::{send_command_to_session, AgentState};
 use crate::agent_runtime::opencode::OpenCodeRuntime;
+use crate::companion::CompanionState;
 use crate::db::operations;
 use crate::AppState;
 
@@ -38,6 +39,7 @@ pub async fn send_companion_message(
 ) -> Result<(), String> {
     let app_state = app.state::<AppState>();
     let agent_state = app.state::<AgentState>();
+    let companion_state = app.state::<CompanionState>();
 
     crate::agent::commands::reject_read_only_session(&app_state, session_id)?;
 
@@ -47,10 +49,16 @@ pub async fn send_companion_message(
     };
 
     if sidecar_running {
+        if companion_state.is_turn_active(session_id) {
+            companion_state.enqueue_message(session_id, prompt.to_string());
+            return Ok(());
+        }
+        companion_state.mark_turn_active(session_id);
         let cmd = OpenCodeRuntime::send_input_command(session_id, prompt.to_string(), None);
         return send_command_to_session(&agent_state, session_id, cmd).await;
     }
 
+    companion_state.mark_turn_active(session_id);
     let cwd = resolve_session_cwd(app_state.inner(), session_id)?;
     let channel = tauri::ipc::Channel::new(|_| Ok(()));
     let reasoning_effort = {
@@ -71,6 +79,7 @@ pub async fn send_companion_message(
         reasoning_effort,
         None,
         None,
+        Some(false),
     )
     .await
 }

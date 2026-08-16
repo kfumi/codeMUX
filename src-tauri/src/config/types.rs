@@ -86,6 +86,8 @@ pub struct CompanionConfig {
     pub enabled: bool,
     #[serde(default = "default_companion_port")]
     pub port: u16,
+    #[serde(default)]
+    pub desktop_id: Option<String>,
 }
 
 impl Default for CompanionConfig {
@@ -93,6 +95,7 @@ impl Default for CompanionConfig {
         Self {
             enabled: false,
             port: default_companion_port(),
+            desktop_id: None,
         }
     }
 }

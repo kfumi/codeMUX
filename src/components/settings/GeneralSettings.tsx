@@ -9,7 +9,6 @@ import { Button } from '../ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Switch } from '../ui/switch';
 import { NotificationSettingsSection } from './NotificationSettingsSection';
-import { MobileCompanionSettings } from './MobileCompanionSettings';
 
 export function GeneralSettings() {
   const [configDir, setConfigDir] = useState<string>('');
@@ -148,8 +147,6 @@ export function GeneralSettings() {
           </Button>
         </div>
       </div>
-
-      <MobileCompanionSettings />
     </div>
   );
 }

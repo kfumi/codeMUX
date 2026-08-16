@@ -11,6 +11,15 @@ import {
 } from '../lib/api';
 import type { CompanionConnection } from '../lib/storage';
 import { cn } from '../lib/utils';
+import {
+  buildDefaultPermissionConfig,
+  mapExecutionModeToPermissionConfig,
+  resolveEffectivePermissionConfig,
+  serializePermissionConfig,
+  type AgentExecutionMode,
+  type AgentPlanMode,
+} from '@shared/lib/agentPermissions';
+import type { AgentKind } from '@shared/types/session';
 
 const AGENT_KINDS = [
   { id: 'claude_code', label: 'Claude Code' },
@@ -25,6 +34,23 @@ const REASONING_LABELS: Record<string, string> = {
   high: '高',
   xhigh: '极高',
   max: '最高',
+};
+
+const PERMISSION_OPTIONS: Record<'claude_code' | 'codex' | 'opencode', Array<{ mode: AgentExecutionMode; label: string }>> = {
+  claude_code: [
+    { mode: 'confirm_before_edit', label: '变更前确认' },
+    { mode: 'auto_edit', label: '自动编辑' },
+    { mode: 'plan', label: '计划模式' },
+    { mode: 'full_access', label: '完全访问' },
+  ],
+  codex: [
+    { mode: 'plan', label: '计划模式' },
+    { mode: 'full_access', label: '完全访问' },
+  ],
+  opencode: [
+    { mode: 'plan', label: '计划模式' },
+    { mode: 'full_access', label: '完全访问' },
+  ],
 };
 
 interface CreateSessionSheetProps {
@@ -49,7 +75,8 @@ export function CreateSessionSheet({
   const [providerId, setProviderId] = useState('');
   const [model, setModel] = useState('');
   const [reasoningEffort, setReasoningEffort] = useState('high');
-  const [planMode, setPlanMode] = useState<'off' | 'on'>('off');
+  const [planMode, setPlanMode] = useState<AgentPlanMode>('off');
+  const [permissionMode, setPermissionMode] = useState<AgentExecutionMode>('confirm_before_edit');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,14 +98,10 @@ export function CreateSessionSheet({
     const provider = resolveDefaultProvider(bootstrap, agentKind);
     setProviderId(provider?.id ?? '');
     setModel(provider?.defaultModel || provider?.models[0]?.id || '');
-    const preset = bootstrap.permissionPresets[agentKind];
-    if (
-      agentKind === 'opencode'
-      && preset
-      && typeof preset === 'object'
-      && 'permissionMode' in preset
-      && preset.permissionMode === 'plan'
-    ) {
+    const defaultConfig = buildDefaultPermissionConfig(agentKind as AgentKind);
+    const defaultMode = PERMISSION_OPTIONS[agentKind][0]?.mode ?? 'confirm_before_edit';
+    setPermissionMode(defaultMode);
+    if (agentKind === 'opencode' && defaultConfig.kind === 'opencode' && defaultConfig.permissionMode === 'plan') {
       setPlanMode('on');
     } else {
       setPlanMode('off');
@@ -115,7 +138,11 @@ export function CreateSessionSheet({
     setLoading(true);
     setError(null);
     try {
-      const permissionPreset = bootstrap?.permissionPresets[agentKind] ?? {};
+      const permissionConfig = resolveEffectivePermissionConfig(
+        agentKind as AgentKind,
+        mapExecutionModeToPermissionConfig(agentKind as AgentKind, permissionMode),
+        permissionMode === 'plan' ? 'on' : planMode,
+      );
       const session = await createSession(connection, {
         title: title.trim(),
         agentKind,
@@ -123,9 +150,9 @@ export function CreateSessionSheet({
         providerId,
         model,
         reasoningEffort,
-        planMode,
+        planMode: permissionMode === 'plan' ? 'on' : planMode,
         mode: 'agent',
-        permissionConfig: JSON.stringify(permissionPreset),
+        permissionConfig: JSON.stringify(serializePermissionConfig(agentKind as AgentKind, permissionConfig)),
       });
       onCreated(session.id);
       onClose();
@@ -136,30 +163,32 @@ export function CreateSessionSheet({
     }
   };
 
+  const inputClassName = 'w-full rounded-xl border border-border bg-muted/40 px-4 py-3 outline-none transition-colors focus:border-primary/60 focus:bg-muted/60';
+
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-black/60">
-      <div className="max-h-[88dvh] w-full overflow-y-auto rounded-t-3xl bg-slate-950 px-5 pb-8 pt-5 text-slate-100">
+      <div className="max-h-[88dvh] w-full overflow-y-auto rounded-t-3xl border-t border-border bg-background px-5 pb-8 pt-5 text-foreground">
         <div className="mb-4 flex items-center justify-between">
           <div className="text-base font-semibold">新建会话</div>
-          <button type="button" className="rounded-lg border border-white/10 p-2" onClick={onClose} aria-label="关闭">
+          <button type="button" className="rounded-md border border-border/60 p-2 text-muted-foreground" onClick={onClose} aria-label="关闭">
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <div className="space-y-4">
           <label className="block space-y-2 text-sm">
-            <span className="text-slate-300">标题</span>
+            <span className="text-muted-foreground">标题</span>
             <input
-              className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 outline-none focus:border-sky-400"
+              className={inputClassName}
               value={title}
               onChange={(event) => setTitle(event.target.value)}
             />
           </label>
 
           <label className="block space-y-2 text-sm">
-            <span className="text-slate-300">项目</span>
+            <span className="text-muted-foreground">项目</span>
             <select
-              className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 outline-none"
+              className={inputClassName}
               value={projectId}
               onChange={(event) => setProjectId(event.target.value)}
             >
@@ -173,9 +202,9 @@ export function CreateSessionSheet({
           </label>
 
           <label className="block space-y-2 text-sm">
-            <span className="text-slate-300">智能体种类</span>
+            <span className="text-muted-foreground">智能体种类</span>
             <select
-              className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 outline-none"
+              className={inputClassName}
               value={agentKind}
               onChange={(event) => setAgentKind(event.target.value as typeof agentKind)}
             >
@@ -188,9 +217,9 @@ export function CreateSessionSheet({
           </label>
 
           <label className="block space-y-2 text-sm">
-            <span className="text-slate-300">供应商</span>
+            <span className="text-muted-foreground">供应商</span>
             <select
-              className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 outline-none"
+              className={inputClassName}
               value={providerId}
               onChange={(event) => {
                 setProviderId(event.target.value);
@@ -208,9 +237,9 @@ export function CreateSessionSheet({
           </label>
 
           <label className="block space-y-2 text-sm">
-            <span className="text-slate-300">模型</span>
+            <span className="text-muted-foreground">模型</span>
             <select
-              className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 outline-none"
+              className={inputClassName}
               value={model}
               onChange={(event) => setModel(event.target.value)}
             >
@@ -223,9 +252,9 @@ export function CreateSessionSheet({
           </label>
 
           <label className="block space-y-2 text-sm">
-            <span className="text-slate-300">思考强度</span>
+            <span className="text-muted-foreground">思考强度</span>
             <select
-              className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 outline-none"
+              className={inputClassName}
               value={reasoningEffort}
               onChange={(event) => setReasoningEffort(event.target.value)}
             >
@@ -237,22 +266,49 @@ export function CreateSessionSheet({
             </select>
           </label>
 
-          <label className="flex items-center justify-between rounded-xl border border-white/10 px-4 py-3 text-sm">
-            <span className="text-slate-300">Plan 模式</span>
-            <input
-              type="checkbox"
-              checked={planMode === 'on'}
-              onChange={(event) => setPlanMode(event.target.checked ? 'on' : 'off')}
-            />
+          <label className="block space-y-2 text-sm">
+            <span className="text-muted-foreground">权限模式</span>
+            <select
+              className={inputClassName}
+              value={permissionMode}
+              onChange={(event) => {
+                const nextMode = event.target.value as AgentExecutionMode;
+                setPermissionMode(nextMode);
+                if (nextMode === 'plan') {
+                  setPlanMode('on');
+                }
+              }}
+            >
+              {PERMISSION_OPTIONS[agentKind].map((option) => (
+                <option key={option.mode} value={option.mode}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </label>
 
-          {error ? <div className="rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div> : null}
+          {agentKind !== 'opencode' && permissionMode !== 'plan' ? (
+            <label className="flex items-center justify-between rounded-xl border border-border px-4 py-3 text-sm">
+              <span className="text-muted-foreground">Plan 模式</span>
+              <input
+                type="checkbox"
+                checked={planMode === 'on'}
+                onChange={(event) => setPlanMode(event.target.checked ? 'on' : 'off')}
+              />
+            </label>
+          ) : null}
+
+          {error ? (
+            <div className="rounded-xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {error}
+            </div>
+          ) : null}
 
           <button
             type="button"
             disabled={loading || projects.length === 0 || providers.length === 0}
             className={cn(
-              'w-full rounded-xl bg-sky-500 px-4 py-3 text-sm font-medium text-slate-950',
+              'w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground',
               (loading || projects.length === 0 || providers.length === 0) && 'opacity-60',
             )}
             onClick={() => void handleSubmit()}

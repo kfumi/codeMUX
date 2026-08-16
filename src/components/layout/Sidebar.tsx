@@ -6,6 +6,7 @@ import { createLogger, serializeError } from '../../lib/logger';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
+import { CompanionSidebarButton } from '../companion/CompanionSidebarButton';
 import { SessionList } from '../session/SessionList';
 import { ChatSearchDialog } from './ChatSearchDialog';
 import { ImportSessionsDialog } from './ImportSessionsDialog';
@@ -108,6 +109,7 @@ export function Sidebar({
           </TooltipContent>
         </Tooltip>
         <div className="flex-1" />
+        <CompanionSidebarButton />
         <button
           onClick={onOpenSettings}
           className="flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-ui-title text-[hsl(var(--sidebar-fg))]/66 transition-colors duration-150 hover:bg-[hsl(var(--sidebar-muted))]/78 hover:text-[hsl(var(--sidebar-fg))]"

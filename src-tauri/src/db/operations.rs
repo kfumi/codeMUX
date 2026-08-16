@@ -1333,6 +1333,12 @@ pub fn append_snapshot_events(
                 "session_id".to_string(),
                 Value::String(session_id.to_string()),
             );
+            if !object.contains_key("timestamp") {
+                object.insert(
+                    "timestamp".to_string(),
+                    Value::String(Utc::now().to_rfc3339()),
+                );
+            }
         }
         let sequence = next_sequence + offset as i64;
         let event_id = snapshot_event

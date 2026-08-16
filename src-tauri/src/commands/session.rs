@@ -8,7 +8,7 @@ use crate::agent::native_cleanup::{
 use crate::config::types::AgentKind;
 use crate::db::operations::{self, NativeSessionRef};
 use crate::AppState;
-use log::{debug, info, warn};
+use log::{info, warn};
 use std::str::FromStr;
 use tauri::{AppHandle, State};
 
@@ -161,7 +161,6 @@ pub fn update_session_title(
     session_id: String,
     title: String,
 ) -> Result<(), String> {
-    debug!(target: "session", "Updating session title session_id={} title={}", session_id, title);
     let db = state.db.lock().unwrap();
     operations::update_session_title(&db, &session_id, &title).map_err(|e| e.to_string())
 }

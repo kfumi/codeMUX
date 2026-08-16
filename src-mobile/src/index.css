@@ -1,7 +1,67 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-ui);
+  --font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --text-ui-body: var(--ui-font-size);
+  --text-code: var(--code-font-size);
+  --text-sm: var(--text-ui-body);
+  --text-sm--line-height: 1.5;
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-xl: calc(var(--radius) + 2px);
+}
+
+:root {
+  --font-ui: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+  --ui-font-size: 14px;
+  --code-font-size: 13px;
+  --content-width: 52rem;
+  --background: 0 0% 6.7%;
+  --foreground: 0 0% 93%;
+  --card: 0 0% 10%;
+  --card-foreground: 0 0% 93%;
+  --primary: 209 92% 58%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 15%;
+  --secondary-foreground: 0 0% 90%;
+  --muted: 0 0% 14%;
+  --muted-foreground: 0 0% 65%;
+  --accent: 0 0% 16%;
+  --accent-foreground: 0 0% 92%;
+  --destructive: 358 74% 70%;
+  --success: 136 56% 47%;
+  --warning: 38 94% 58%;
+  --border: 0 0% 18%;
+  --input: 0 0% 21%;
+  --ring: 209 92% 58%;
+  --radius: 0.5rem;
+  --surface-1: 0 0% 8%;
+  --surface-2: 0 0% 11%;
+  --surface-3: 0 0% 15%;
+  --codemux-link: 211 100% 72%;
+  --codemux-directive-accent: 221 83% 46%;
+  --codemux-directive-border: 214 100% 82%;
+  --codemux-directive-bg: 214 100% 93%;
 }
 
 html,
@@ -12,13 +72,138 @@ body,
 
 body {
   margin: 0;
-  background: #020617;
-  color: #f8fafc;
-  font-family: var(--font-sans);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-ui);
+  font-size: var(--ui-font-size);
+  -webkit-font-smoothing: antialiased;
+}
+
+.mobile-safe-header {
+  --mobile-header-padding: 0.75rem;
+  padding-top: calc(env(safe-area-inset-top, 0px) + var(--mobile-header-padding));
+  padding-bottom: var(--mobile-header-padding);
 }
 
 button,
 textarea,
-input {
+input,
+select {
   font: inherit;
+}
+
+::selection {
+  background: hsl(var(--primary) / 0.22);
+  color: inherit;
+}
+
+/* Markdown — aligned with desktop aui-md */
+.aui-md {
+  font-size: var(--ui-font-size);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.aui-md > :first-child {
+  margin-top: 0;
+}
+
+.aui-md > :last-child {
+  margin-bottom: 0;
+}
+
+.aui-md p {
+  margin: 0.5rem 0;
+}
+
+.aui-md h1 {
+  margin: 1.25rem 0 0.5rem;
+  font-size: calc(var(--ui-font-size) + 6px);
+  font-weight: 600;
+}
+
+.aui-md h2 {
+  margin: 1.25rem 0 0.5rem;
+  font-size: calc(var(--ui-font-size) + 4px);
+  font-weight: 600;
+}
+
+.aui-md h3 {
+  margin: 1rem 0 0.375rem;
+  font-size: calc(var(--ui-font-size) + 2px);
+  font-weight: 600;
+}
+
+.aui-md ul,
+.aui-md ol {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.aui-md li {
+  margin: 0.25rem 0;
+}
+
+.aui-md a {
+  color: hsl(var(--codemux-link));
+  text-decoration: none;
+}
+
+.aui-md a:hover {
+  color: hsl(var(--codemux-link) / 0.82);
+}
+
+.aui-md code {
+  font-family: var(--font-mono);
+  font-size: var(--code-font-size);
+  border-radius: var(--radius-sm);
+  background: hsl(var(--muted) / 0.8);
+  padding: 0.1rem 0.35rem;
+}
+
+.aui-md pre {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--surface-2));
+}
+
+.aui-md pre code {
+  display: block;
+  padding: 0.875rem 1rem;
+  background: transparent;
+  font-size: var(--code-font-size);
+  line-height: 1.55;
+}
+
+.aui-md blockquote {
+  margin: 0.75rem 0;
+  padding-left: 0.875rem;
+  border-left: 3px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+
+.aui-md table {
+  width: 100%;
+  margin: 1rem 0;
+  border-collapse: collapse;
+  font-size: var(--ui-font-size);
+}
+
+.aui-md th,
+.aui-md td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.aui-md th {
+  background: hsl(var(--muted) / 0.5);
+}
+
+.aui-md hr {
+  margin: 1rem 0;
+  border: none;
+  border-top: 1px solid hsl(var(--border));
 }

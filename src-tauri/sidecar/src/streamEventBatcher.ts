@@ -144,9 +144,13 @@ function withCodeMuxEnvelope(value: unknown): unknown {
   }
 
   const { event: _legacyEvent, ...wireEvent } = event;
+  const timestamp = typeof event.timestamp === 'string' && event.timestamp.length > 0
+    ? event.timestamp
+    : new Date().toISOString();
   return {
     ...wireEvent,
     event_id: eventId,
+    timestamp,
     ...(sequence !== undefined ? { sequence } : {}),
   };
 }

@@ -1,11 +1,12 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
@@ -13,11 +14,14 @@ use tauri::{AppHandle, Manager};
 use tokio::sync::oneshot;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::companion::actions::{
     respond_companion_permission, send_companion_message, send_companion_tool_response,
 };
 use crate::companion::config::build_mobile_bootstrap;
+use crate::companion::desktop_id::get_or_create_desktop_id;
+use crate::companion::offer::build_pairing_offer;
 use crate::companion::pairing::complete_pairing;
 use crate::companion::state::{CompanionBroadcastEvent, CompanionState};
 use crate::config::types::AgentKind;
@@ -96,11 +100,11 @@ pub async fn start_companion_server(
     app: AppHandle,
     port: u16,
 ) -> Result<(), String> {
-    stop_companion_server(app.clone()).await?;
-
     let companion_state = app.state::<CompanionState>();
-    let companion_for_shutdown = companion_state.inner.clone();
-    companion_state.inner.set_enabled(true);
+    let _lifecycle_guard = companion_state.inner.lifecycle_lock.lock().await;
+
+    stop_companion_server_inner(&companion_state).await?;
+
     {
         let mut stored_port = companion_state.inner.port.write().await;
         *stored_port = port;
@@ -111,18 +115,21 @@ pub async fn start_companion_server(
     let router = build_router(ctx, static_dir);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|error| format!("Failed to bind companion server on port {}: {}", port, error))?;
+    let listener = bind_listener_with_retry(addr).await?;
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let (stopped_tx, stopped_rx) = oneshot::channel::<()>();
     {
         let mut guard = companion_state.inner.shutdown_tx.lock().unwrap();
         *guard = Some(shutdown_tx);
+        let mut waiter = companion_state.inner.stopped_waiter.lock().unwrap();
+        *waiter = Some(stopped_rx);
     }
 
+    companion_state.inner.set_enabled(true);
     info!(target: "companion", "Companion server listening on {}", addr);
 
+    let companion_for_shutdown = companion_state.inner.clone();
     tokio::spawn(async move {
         let result = axum::serve(listener, router)
             .with_graceful_shutdown(async {
@@ -134,6 +141,7 @@ pub async fn start_companion_server(
         }
         companion_for_shutdown.set_enabled(false);
         companion_for_shutdown.clear_pairing_codes();
+        let _ = stopped_tx.send(());
     });
 
     Ok(())
@@ -141,19 +149,95 @@ pub async fn start_companion_server(
 
 pub async fn stop_companion_server(app: AppHandle) -> Result<(), String> {
     let companion_state = app.state::<CompanionState>();
+    let _lifecycle_guard = companion_state.inner.lifecycle_lock.lock().await;
+    stop_companion_server_inner(&companion_state).await
+}
+
+async fn stop_companion_server_inner(companion_state: &CompanionState) -> Result<(), String> {
     let shutdown_tx = companion_state.inner.shutdown_tx.lock().unwrap().take();
+    let stopped_rx = companion_state.inner.stopped_waiter.lock().unwrap().take();
     if let Some(tx) = shutdown_tx {
         let _ = tx.send(());
+    }
+    if let Some(rx) = stopped_rx {
+        match tokio::time::timeout(Duration::from_secs(5), rx).await {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) | Err(_) => {
+                warn!(
+                    target: "companion",
+                    "Companion server shutdown did not complete in time; waiting before rebind"
+                );
+                tokio::time::sleep(Duration::from_millis(400)).await;
+            }
+        }
     }
     companion_state.inner.set_enabled(false);
     companion_state.clear_pairing_codes();
     Ok(())
 }
 
+async fn bind_listener_with_retry(addr: SocketAddr) -> Result<tokio::net::TcpListener, String> {
+    const MAX_ATTEMPTS: usize = 6;
+    let mut last_error = String::new();
+
+    for attempt in 0..MAX_ATTEMPTS {
+        match bind_reusable_listener(addr).await {
+            Ok(listener) => return Ok(listener),
+            Err(error) => {
+                last_error = error;
+                if attempt + 1 < MAX_ATTEMPTS {
+                    let delay_ms = 150_u64 * (attempt as u64 + 1);
+                    warn!(
+                        target: "companion",
+                        "Companion bind attempt {} failed on {}: {}; retrying in {}ms",
+                        attempt + 1,
+                        addr,
+                        last_error,
+                        delay_ms
+                    );
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "Failed to bind companion server on port {}: {}",
+        addr.port(),
+        last_error
+    ))
+}
+
+async fn bind_reusable_listener(addr: SocketAddr) -> Result<tokio::net::TcpListener, String> {
+    let domain = if addr.is_ipv6() {
+        socket2::Domain::IPV6
+    } else {
+        socket2::Domain::IPV4
+    };
+    let socket = socket2::Socket::new(domain, socket2::Type::STREAM, None)
+        .map_err(|error| error.to_string())?;
+    socket
+        .set_reuse_address(true)
+        .map_err(|error| error.to_string())?;
+    socket
+        .bind(&addr.into())
+        .map_err(|error| error.to_string())?;
+    socket
+        .listen(1024)
+        .map_err(|error| error.to_string())?;
+    socket
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
+    let std_listener: std::net::TcpListener = socket.into();
+    tokio::net::TcpListener::from_std(std_listener).map_err(|error| error.to_string())
+}
+
 fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
     let api = Router::new()
         .route("/health", get(health))
+        .route("/pair/offer", get(pair_offer))
         .route("/pair/claim", post(pair_claim))
+        .route("/pair/device", delete(pair_revoke_self))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{session_id}/events", get(session_events))
         .route("/sessions/{session_id}/messages", post(send_message))
@@ -169,12 +253,44 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
     Router::new()
         .nest("/api", api)
         .fallback_service(static_service)
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store"),
+        ))
         .layer(CorsLayer::permissive())
         .with_state(ctx)
 }
 
 async fn health() -> impl IntoResponse {
     Json(serde_json::json!({ "ok": true }))
+}
+
+async fn pair_offer(State(ctx): State<ServerContext>) -> Result<Json<crate::companion::offer::CompanionPairingOffer>, ApiError> {
+    let companion_state = ctx.app.state::<CompanionState>();
+    let app_state = ctx.app.state::<AppState>();
+    let mut config = app_state
+        .config
+        .lock()
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let had_desktop_id = config
+        .companion
+        .desktop_id
+        .as_ref()
+        .is_some_and(|value| !value.trim().is_empty());
+    let desktop_id = get_or_create_desktop_id(&mut config.companion);
+    let port = config.companion.port;
+    if !had_desktop_id {
+        crate::config::save_config(&ctx.app, &config)
+            .map_err(|error| ApiError::internal(error))?;
+    }
+    drop(config);
+
+    let lan_ip = local_ip_address::local_ip()
+        .ok()
+        .map(|ip| ip.to_string());
+    build_pairing_offer(&companion_state, desktop_id, port, lan_ip)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error))
 }
 
 async fn pair_claim(
@@ -193,6 +309,18 @@ async fn pair_claim(
         token: result.token,
         device_id: result.device_id,
     }))
+}
+
+async fn pair_revoke_self(
+    State(ctx): State<ServerContext>,
+    headers: HeaderMap,
+) -> Result<StatusCode, ApiError> {
+    let device = authorize_device(&ctx, &headers)?;
+    let app_state = ctx.app.state::<AppState>();
+    let db = app_state.db.lock().map_err(|error| ApiError::internal(error.to_string()))?;
+    operations::delete_paired_device(&db, &device.id)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn list_sessions(State(ctx): State<ServerContext>, headers: HeaderMap) -> Result<Json<Vec<operations::Session>>, ApiError> {
@@ -264,16 +392,19 @@ async fn session_events(
 ) -> Result<Json<Vec<serde_json::Value>>, ApiError> {
     authorize(&ctx, &headers)?;
     let app_state = ctx.app.state::<AppState>();
-    let db = app_state.db.lock().map_err(|error| ApiError::internal(error.to_string()))?;
     let after = query.after.unwrap_or(-1);
-    let events = if after < 0 {
-        operations::get_session_snapshot(&db, &session_id)
-            .map_err(|error| ApiError::internal(error.to_string()))?
-            .unwrap_or_default()
-    } else {
-        operations::get_session_events_after(&db, &session_id, after)
-            .map_err(|error| ApiError::internal(error.to_string()))?
-    };
+    if after < 0 {
+        let events = crate::agent::history_import::load_session_events(app_state, session_id)
+            .await
+            .map_err(ApiError::internal)?;
+        return Ok(Json(events));
+    }
+    let db = app_state
+        .db
+        .lock()
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let events = operations::get_session_events_after(&db, &session_id, after)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
     Ok(Json(events))
 }
 
@@ -401,17 +532,24 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
 }
 
 fn authorize(ctx: &ServerContext, headers: &HeaderMap) -> Result<(), ApiError> {
+    authorize_device(ctx, headers).map(|_| ())
+}
+
+fn authorize_device(ctx: &ServerContext, headers: &HeaderMap) -> Result<operations::PairedDevice, ApiError> {
     let token = extract_bearer_token(headers).ok_or_else(|| ApiError::unauthorized("Missing token"))?;
-    authorize_token(ctx, &token)
+    authorize_token_device(ctx, &token)
 }
 
 fn authorize_token(ctx: &ServerContext, token: &str) -> Result<(), ApiError> {
+    authorize_token_device(ctx, token).map(|_| ())
+}
+
+fn authorize_token_device(ctx: &ServerContext, token: &str) -> Result<operations::PairedDevice, ApiError> {
     let app_state = ctx.app.state::<AppState>();
     let db = app_state.db.lock().map_err(|error| ApiError::internal(error.to_string()))?;
     operations::verify_pairing_token(&db, token)
         .map_err(|error| ApiError::internal(error.to_string()))?
-        .ok_or_else(|| ApiError::unauthorized("Invalid token"))?;
-    Ok(())
+        .ok_or_else(|| ApiError::unauthorized("Invalid token"))
 }
 
 fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {

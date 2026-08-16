@@ -10,6 +10,7 @@ use crate::AppState;
 pub struct MobileBootstrap {
     pub default_agent_kind: String,
     pub active_provider_id: Option<String>,
+    pub compact_ai_output: bool,
     pub providers: Vec<MobileProvider>,
     pub agent_defaults: MobileAgentDefaults,
     pub reasoning_efforts: Vec<&'static str>,
@@ -56,6 +57,7 @@ pub fn build_mobile_bootstrap(state: &AppState) -> MobileBootstrap {
     MobileBootstrap {
         default_agent_kind: config.agent_defaults.default_agent_kind.as_str().to_string(),
         active_provider_id: config.active_provider_id.clone(),
+        compact_ai_output: config.compact_ai_output,
         providers: config
             .model_providers
             .iter()

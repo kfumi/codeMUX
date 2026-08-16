@@ -444,8 +444,16 @@ pub fn run() {
                 let app_handle = app.handle().clone();
                 let port = config_for_companion.port;
                 tauri::async_runtime::spawn(async move {
-                    if let Err(error) = companion::start_companion_server(app_handle, port).await {
+                    if let Err(error) =
+                        companion::start_companion_server(app_handle.clone(), port).await
+                    {
                         warn!(target: "companion", "Failed to auto-start companion server: {}", error);
+                        if let Some(state) = app_handle.try_state::<AppState>() {
+                            if let Ok(mut config) = state.config.lock() {
+                                config.companion.enabled = false;
+                                let _ = config::save_config(&app_handle, &config);
+                            }
+                        }
                     }
                 });
             }
@@ -618,6 +626,7 @@ pub fn run() {
             commands::companion::set_companion_enabled,
             commands::companion::revoke_companion_device,
             commands::companion::refresh_companion_pairing_code,
+            commands::companion::get_companion_pairing_offer,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

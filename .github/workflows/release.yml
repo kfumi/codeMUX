@@ -161,6 +161,9 @@ jobs:
         working-directory: src-tauri/sidecar
         run: npm run build
 
+      - name: Build mobile companion
+        run: npm run build:mobile
+
       - name: Build and publish Tauri app
         uses: tauri-apps/tauri-action@v0
         env:

@@ -146,6 +146,7 @@ run("node", prepareArgs);
 if (!skipBuild) {
   stopProjectOpenCodeProcesses();
   run("npm", ["run", "build"]);
+  run("npm", ["run", "build:mobile"]);
   run("npm", ["run", "build"], { cwd: path.join(tauriDir, "sidecar") });
   run("npx", ["tauri", "build"], {
     env: {

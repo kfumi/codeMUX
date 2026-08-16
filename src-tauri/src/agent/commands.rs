@@ -12,7 +12,7 @@ use crate::model_providers::{
 use crate::provider_profiles::types::AgentTimeouts;
 use log::{debug, info, warn};
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{oneshot, Mutex};
 
 use super::context_usage::{
@@ -2742,14 +2742,17 @@ async fn ensure_sidecar_for_session(
     agent_state: &State<'_, AgentState>,
     session_id: &str,
     channel: tauri::ipc::Channel<String>,
+    replace_event_channel: bool,
 ) -> Result<(), String> {
     let channel_handle = {
         let sidecars = agent_state.sidecars.lock().await;
         sidecars.get(session_id).map(SidecarHandle::channel_handle)
     };
     if let Some(channel_handle) = channel_handle {
-        let mut current_channel = channel_handle.lock().await;
-        *current_channel = channel;
+        if replace_event_channel {
+            let mut current_channel = channel_handle.lock().await;
+            *current_channel = channel;
+        }
         info!(target: "agent", "Reusing existing sidecar for session_id={}", session_id);
         return Ok(());
     }
@@ -2797,6 +2800,19 @@ async fn ensure_sidecar_for_session(
                         &app_for_companion,
                         &event_for_companion,
                     );
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&event) {
+                        let session_id = value
+                            .get("session_id")
+                            .and_then(|item| item.as_str())
+                            .unwrap_or(session_id_clone.as_str());
+                        let _ = app_handle.emit(
+                            "agent-session-stream-event",
+                            serde_json::json!({
+                                "sessionId": session_id,
+                                "payload": event,
+                            }),
+                        );
+                    }
                     let ch = shared_channel.lock().await;
                     let _ = ch.send(event);
                 }
@@ -3436,7 +3452,7 @@ pub async fn ensure_agent_session(
         runtime_config.model_limits,
     )?;
 
-    ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
+    ensure_sidecar_for_session(app, &agent_state, &session_id, channel, true).await?;
 
     let stderr_lines = {
         let sidecars = agent_state.sidecars.lock().await;
@@ -3493,7 +3509,9 @@ pub async fn start_agent_session(
     reasoning_effort: Option<String>,
     input_payload: Option<serde_json::Value>,
     display_content: Option<String>,
+    replace_event_channel: Option<bool>,
 ) -> Result<(), String> {
+    let replace_event_channel = replace_event_channel.unwrap_or(true);
     reject_read_only_session(&state, &session_id)?;
     let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
     crate::log_ctx::with_ctx(ctx, || async {
@@ -3541,7 +3559,7 @@ pub async fn start_agent_session(
             runtime_config.model_limits,
         )?;
 
-        ensure_sidecar_for_session(app, &agent_state, &session_id, channel).await?;
+        ensure_sidecar_for_session(app, &agent_state, &session_id, channel, replace_event_channel).await?;
 
         send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 

@@ -11,6 +11,25 @@ import { stripAttachmentEnrichmentContext } from '../lib/attachmentEnrichment';
 
 export const INTERRUPT_MARKER = '[Request interrupted by user]';
 
+const VISIBLE_CONVERSATION_EVENT_KINDS = new Set([
+  'user',
+  'assistant',
+  'result',
+  'tool',
+  'permission',
+  'ask_user_question',
+  'session_summary',
+  'compact',
+  'runtime_switch',
+  'error',
+]);
+
+export function hasVisibleConversationEvents(
+  events: Array<{ kind: string }>,
+): boolean {
+  return events.some((event) => VISIBLE_CONVERSATION_EVENT_KINDS.has(event.kind));
+}
+
 const CODEX_COLLABORATION_POLICY_RE = /<codemux-codex-collaboration-policy>[\s\S]*?<\/codemux-codex-collaboration-policy>\s*/g;
 
 export type SessionSummaryDiff = {
