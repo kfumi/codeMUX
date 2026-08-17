@@ -8,7 +8,7 @@ use crate::companion::pairing_code::{
     clear_persisted_pairing_code, ensure_persisted_pairing_code, refresh_persisted_pairing_code,
     resolve_lan_ip,
 };
-use crate::companion::relay::{set_relay_enabled, RelayConnectionState};
+use crate::companion::relay::{set_relay_config, set_relay_enabled, RelayConnectionState};
 use crate::companion::{start_companion_server, stop_companion_server, CompanionState};
 use crate::config;
 use crate::db::operations::{self, PairedDevice};
@@ -190,17 +190,14 @@ pub async fn set_companion_relay_enabled(
 }
 
 #[tauri::command]
-pub async fn revoke_companion_device(
+pub async fn set_companion_relay_config(
     app: AppHandle,
     state: State<'_, AppState>,
     companion_state: State<'_, CompanionState>,
-    device_id: String,
+    endpoint: String,
+    use_tls: bool,
 ) -> Result<CompanionStatus, String> {
-    let device_id = device_id.clone();
-    {
-        let db = state.db.lock().map_err(|error| error.to_string())?;
-        operations::delete_paired_device(&db, &device_id).map_err(|error| error.to_string())?;
-    }
+    set_relay_config(&app, &companion_state, endpoint, use_tls).await?;
     build_companion_status(&app, state.inner(), &companion_state).await
 }
 

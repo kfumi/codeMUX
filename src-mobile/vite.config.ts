@@ -4,9 +4,6 @@ import path from 'node:path';
 
 export default defineConfig({
   plugins: [react()],
-  define: {
-    __MOBILE_BUILD_ID__: JSON.stringify(process.env.MOBILE_BUILD_ID ?? new Date().toISOString()),
-  },
   resolve: {
     alias: {
       '@mobile': path.resolve(__dirname, './src'),

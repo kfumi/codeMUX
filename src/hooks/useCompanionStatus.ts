@@ -14,14 +14,9 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [refreshingDevices, setRefreshingDevices] = useState(false);
 
-  const loadStatus = useCallback(async (devicesOnly = false) => {
-    if (devicesOnly) {
-      setRefreshingDevices(true);
-    } else {
-      setLoading(true);
-    }
+  const loadStatus = useCallback(async () => {
+    setLoading(true);
     setError(null);
     try {
       const next = await companionApi.getStatus();
@@ -29,11 +24,7 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
     } catch (err) {
       setError(String(err));
     } finally {
-      if (devicesOnly) {
-        setRefreshingDevices(false);
-      } else {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   }, []);
 
@@ -44,7 +35,7 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
   useEffect(() => {
     if (!polling) return undefined;
     const timer = window.setInterval(() => {
-      void loadStatus(true);
+      void loadStatus();
     }, pollIntervalMs);
     return () => window.clearInterval(timer);
   }, [loadStatus, pollIntervalMs, polling]);
@@ -79,21 +70,6 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
     }
   }, []);
 
-  const revokeDevice = useCallback(async (deviceId: string) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const next = await companionApi.revokeDevice(deviceId);
-      setStatus(next);
-      return next;
-    } catch (err) {
-      setError(String(err));
-      throw err;
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
   const setRelayEnabled = useCallback(async (enabled: boolean) => {
     setBusy(true);
     setError(null);
@@ -109,16 +85,30 @@ export function useCompanionStatus(options: UseCompanionStatusOptions = {}) {
     }
   }, []);
 
+  const setRelayConfig = useCallback(async (endpoint: string, useTls: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await companionApi.setRelayConfig(endpoint, useTls);
+      setStatus(next);
+      return next;
+    } catch (err) {
+      setError(String(err));
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   return {
     status,
     loading,
     busy,
     error,
-    refreshingDevices,
     loadStatus,
     setEnabled,
     refreshPairingCode,
-    revokeDevice,
     setRelayEnabled,
+    setRelayConfig,
   };
 }

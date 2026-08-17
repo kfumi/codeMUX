@@ -799,12 +799,12 @@ export const companionApi = {
   getStatus: (): Promise<CompanionStatus> => invokeLogged('get_companion_status'),
   setEnabled: (enabled: boolean): Promise<CompanionStatus> =>
     invokeLogged('set_companion_enabled', { enabled }),
-  revokeDevice: (deviceId: string): Promise<CompanionStatus> =>
-    invokeLogged('revoke_companion_device', { deviceId }),
   refreshPairingCode: (): Promise<CompanionStatus> =>
     invokeLogged('refresh_companion_pairing_code'),
   setRelayEnabled: (enabled: boolean): Promise<CompanionStatus> =>
     invokeLogged('set_companion_relay_enabled', { enabled }),
+  setRelayConfig: (endpoint: string, useTls: boolean): Promise<CompanionStatus> =>
+    invokeLogged('set_companion_relay_config', { endpoint, useTls }),
 };
 
 export const usageApi = {

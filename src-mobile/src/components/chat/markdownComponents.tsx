@@ -51,7 +51,7 @@ export const MOBILE_MARKDOWN_COMPONENTS = {
     </a>
   ),
   table: ({ className, ...props }: TableHTMLAttributes<HTMLTableElement>) => (
-    <div className="my-4 overflow-x-auto rounded-md border border-border bg-background">
+    <div className="my-4 overflow-x-auto rounded-md">
       <table className={cn('w-full border-collapse text-sm', className)} {...props} />
     </div>
   ),

@@ -6,7 +6,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
@@ -241,7 +241,6 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
         .route("/health", get(health))
         .route("/pair/offer", get(pair_offer))
         .route("/pair/claim", post(pair_claim))
-        .route("/pair/device", delete(pair_revoke_self))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{session_id}/events", get(session_events))
         .route("/sessions/{session_id}/messages", post(send_message))
@@ -313,7 +312,9 @@ async fn pair_claim(
     Json(body): Json<PairClaimRequest>,
 ) -> Result<Json<PairClaimResponse>, ApiError> {
     let companion_state = ctx.app.state::<CompanionState>();
-    if !companion_state.consume_pairing_code(&body.code) {
+    // 配对码随二维码下发，扫码即自动 claim：校验但不作废，
+    // 二维码本身 5 分钟过期，窗口内允许多次尝试（PWA 刷新/重试）。
+    if !companion_state.validate_pairing_code(&body.code) {
         return Err(ApiError::bad_request("Invalid or expired pairing code"));
     }
 
@@ -324,18 +325,6 @@ async fn pair_claim(
         token: result.token,
         device_id: result.device_id,
     }))
-}
-
-async fn pair_revoke_self(
-    State(ctx): State<ServerContext>,
-    headers: HeaderMap,
-) -> Result<StatusCode, ApiError> {
-    let device = authorize_device(&ctx, &headers)?;
-    let app_state = ctx.app.state::<AppState>();
-    let db = app_state.db.lock().map_err(|error| ApiError::internal(error.to_string()))?;
-    operations::delete_paired_device(&db, &device.id)
-        .map_err(|error| ApiError::internal(error.to_string()))?;
-    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn list_sessions(State(ctx): State<ServerContext>, headers: HeaderMap) -> Result<Json<Vec<operations::Session>>, ApiError> {

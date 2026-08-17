@@ -4,14 +4,17 @@
   "version": "0.2.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/copy-mobile-dist.mjs && vite",
     "build": "tsc && vite build",
     "build:mobile": "cd src-mobile && npm ci && npm run build && cd .. && node scripts/copy-mobile-dist.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "release:prepare": "node scripts/prepare-release.mjs",
     "release:ship": "node scripts/release-ship.mjs",
-    "release:local": "node scripts/release-local.mjs"
+    "release:local": "node scripts/release-local.mjs",
+    "relay:configure": "node scripts/relay/configure-desktop.mjs",
+    "relay:pack-vps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/relay/pack-for-vps.ps1",
+    "relay:pack-full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/relay/pack-full-deploy.ps1"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.14.24",

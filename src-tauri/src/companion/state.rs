@@ -118,13 +118,10 @@ impl CompanionState {
         self.create_pairing_code()
     }
 
-    pub fn consume_pairing_code(&self, code: &str) -> bool {
+    pub fn validate_pairing_code(&self, code: &str) -> bool {
         let mut codes = self.inner.pairing_codes.lock().unwrap();
         codes.retain(|_, value| value.expires_at > Utc::now());
-        if let Some(entry) = codes.remove(code) {
-            return entry.expires_at > Utc::now();
-        }
-        false
+        codes.contains_key(code)
     }
 
     pub fn clear_pairing_codes(&self) {

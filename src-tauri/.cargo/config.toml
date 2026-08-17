@@ -1,2 +1,4 @@
-[build]
-rustflags = ["--cfg", "tokio_unstable"]
+[target.x86_64-pc-windows-msvc]
+# libsodium-sys 在 debug 构建下链接其自带的 MSVC Debug CRT 静态库（LIBCMTD），
+# 与 Rust 默认的 Release CRT（/MT）冲突，产生 LNK4098。此处按链接器建议忽略该警告。
+rustflags = ["--cfg", "tokio_unstable", "-C", "link-arg=/IGNORE:4098"]

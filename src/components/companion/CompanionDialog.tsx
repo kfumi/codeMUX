@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react';
-import { Copy, RefreshCw, Smartphone, Square, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Copy, RefreshCw, Smartphone, Square } from 'lucide-react';
 import QRCode from 'react-qr-code';
 
-import { buildPairingUrl, companionVisualStateLabel, formatDeviceDetails, getCompanionVisualState, relayStateLabel } from '../../lib/companion';
+import { buildPairingUrl, companionVisualStateLabel, getCompanionVisualState, relayStateLabel } from '../../lib/companion';
+import { formatRelayEndpoint, isRelayEndpointValid, parseRelayEndpoint } from '../../lib/companion-relay';
 import type { useCompanionStatus } from '../../hooks/useCompanionStatus';
-import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
+import { Input } from '../ui/input';
 import {
   Dialog,
   DialogContent,
@@ -22,12 +23,13 @@ interface CompanionDialogProps {
   controller: CompanionController;
 }
 
-function StatusBadge({ visualState }: { visualState: ReturnType<typeof getCompanionVisualState> }) {
+function StatusBadge({ visualState, latestDeviceName }: { visualState: ReturnType<typeof getCompanionVisualState>; latestDeviceName?: string | null }) {
   if (visualState === 'paired') {
     return (
       <span className="inline-flex items-center gap-1.5 text-sm text-foreground/80">
         <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--success))]" />
         {companionVisualStateLabel(visualState)}
+        {latestDeviceName ? <span className="text-xs text-foreground/55">· {latestDeviceName}</span> : null}
       </span>
     );
   }
@@ -61,17 +63,31 @@ export function CompanionDialog({ open, onOpenChange, controller }: CompanionDia
     loading,
     busy,
     error,
-    refreshingDevices,
-    loadStatus,
     setEnabled,
     refreshPairingCode,
-    revokeDevice,
     setRelayEnabled,
+    setRelayConfig,
   } = controller;
   const [copied, setCopied] = useState(false);
+  const [relayHost, setRelayHost] = useState('');
+  const [relayPort, setRelayPort] = useState('443');
+  const [relayUseTls, setRelayUseTls] = useState(true);
 
   const pairingUrl = useMemo(() => (status ? buildPairingUrl(status) : null), [status]);
   const visualState = getCompanionVisualState(status);
+  const relayEndpointDraft = formatRelayEndpoint(relayHost, relayPort);
+  const relayEndpointValid = isRelayEndpointValid(relayEndpointDraft);
+  const relayConfigDirty = status
+    ? relayEndpointDraft !== status.relay.endpoint || relayUseTls !== status.relay.useTls
+    : relayEndpointValid;
+
+  useEffect(() => {
+    if (!status) return;
+    const parsed = parseRelayEndpoint(status.relay.endpoint);
+    setRelayHost(parsed.host);
+    setRelayPort(parsed.port);
+    setRelayUseTls(status.relay.useTls);
+  }, [status?.relay.endpoint, status?.relay.useTls]);
 
   const handleCopyUrl = async () => {
     if (!pairingUrl) return;
@@ -112,7 +128,7 @@ export function CompanionDialog({ open, onOpenChange, controller }: CompanionDia
           ) : null}
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-muted/25 px-4 py-3">
-            <StatusBadge visualState={visualState} />
+            <StatusBadge visualState={visualState} latestDeviceName={status?.pairedDevices[0]?.name} />
             {status?.enabled ? (
               <Button
                 type="button"
@@ -139,7 +155,8 @@ export function CompanionDialog({ open, onOpenChange, controller }: CompanionDia
                 <div>
                   <div className="text-sm font-medium text-foreground/90">手机扫码连接</div>
                   <p className="mt-1 text-xs text-foreground/55">
-                    使用手机相机或浏览器扫描二维码，配对码 5 分钟内有效。
+                    手机扫码或打开链接后将自动连接并进入会话列表，5 分钟内有效。
+                    {status?.relay.enabled ? ' 跨网链接走公网地址。' : null}
                   </p>
                 </div>
 
@@ -186,12 +203,6 @@ export function CompanionDialog({ open, onOpenChange, controller }: CompanionDia
                         {copied ? '已复制' : '复制链接'}
                       </Button>
                     </div>
-                    <div className="text-sm text-foreground/70">
-                      配对码：
-                      <span className="ml-2 font-mono text-lg tracking-[0.3em] text-foreground">
-                        {status?.pairingCode ?? '------'}
-                      </span>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -201,7 +212,7 @@ export function CompanionDialog({ open, onOpenChange, controller }: CompanionDia
                   <div>
                     <div className="text-sm font-medium text-foreground/90">公网中继</div>
                     <p className="mt-1 text-xs text-foreground/55">
-                      开启后桌面主动连接中继，跨网流量经端到端加密；中继无法读取明文。
+                      填写公网可达的中继地址后启用。桌面主动连接中继，跨网流量经端到端加密。
                     </p>
                   </div>
                   {status?.relay.enabled ? (
@@ -217,8 +228,64 @@ export function CompanionDialog({ open, onOpenChange, controller }: CompanionDia
                     </span>
                   ) : null}
                 </div>
+
+                <div className="grid grid-cols-[1fr_96px] gap-2">
+                  <Input
+                    value={relayHost}
+                    onChange={(event) => setRelayHost(event.target.value)}
+                    placeholder="中继主机，如 relay.example.com"
+                    disabled={busy || status?.relay.enabled}
+                  />
+                  <Input
+                    value={relayPort}
+                    onChange={(event) => setRelayPort(event.target.value)}
+                    placeholder="端口"
+                    inputMode="numeric"
+                    disabled={busy || status?.relay.enabled}
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-sm text-foreground/80">
+                  <input
+                    type="checkbox"
+                    checked={relayUseTls}
+                    onChange={(event) => setRelayUseTls(event.target.checked)}
+                    disabled={busy || status?.relay.enabled}
+                  />
+                  使用 TLS（wss）
+                </label>
+
                 <div className="flex flex-wrap gap-2">
-                  {status?.relay.enabled ? (
+                  {!status?.relay.enabled ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={busy || !relayEndpointValid || !relayConfigDirty}
+                        onClick={() => {
+                          void setRelayConfig(relayEndpointDraft, relayUseTls);
+                        }}
+                      >
+                        保存端点
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={busy || !relayEndpointValid}
+                        onClick={() => {
+                          void (async () => {
+                            if (relayConfigDirty) {
+                              await setRelayConfig(relayEndpointDraft, relayUseTls);
+                            }
+                            await setRelayEnabled(true);
+                          })();
+                        }}
+                      >
+                        启用中继
+                      </Button>
+                    </>
+                  ) : (
                     <Button
                       type="button"
                       variant="outline"
@@ -232,88 +299,19 @@ export function CompanionDialog({ open, onOpenChange, controller }: CompanionDia
                     >
                       关闭中继
                     </Button>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => {
-                        void setRelayEnabled(true);
-                      }}
-                    >
-                      启用中继
-                    </Button>
                   )}
                 </div>
+
                 {status?.relay.enabled ? (
                   <div className="text-xs text-foreground/55">
-                    中继端点：{status.relay.endpoint}
+                    当前端点：{status.relay.endpoint}
                     {status.relay.useTls ? '（TLS）' : ''}
                   </div>
+                ) : !relayEndpointValid && relayHost.trim() ? (
+                  <div className="text-xs text-destructive">
+                    请填写有效的主机与端口（1–65535）
+                  </div>
                 ) : null}
-              </div>
-
-              <div className="space-y-2 border-t border-border/50 pt-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="text-sm font-medium text-foreground/90">已配对设备</div>
-                    <p className="mt-1 text-xs text-foreground/50">
-                      已授权可连接的设备。仅关闭手机不会自动移除；手机端「断开配对」或点击右侧撤销才会移除。
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={busy || refreshingDevices}
-                    onClick={() => {
-                      void loadStatus(true);
-                    }}
-                  >
-                    <RefreshCw className={cn('mr-1 h-3.5 w-3.5', refreshingDevices && 'animate-spin')} />
-                    刷新
-                  </Button>
-                </div>
-                {(status?.pairedDevices.length ?? 0) === 0 ? (
-                  <p className="text-xs text-foreground/50">暂无已配对设备</p>
-                ) : (
-                  <div className="space-y-2">
-                    {status?.pairedDevices.map((device) => {
-                      const details = formatDeviceDetails(device);
-                      return (
-                        <div
-                          key={device.id}
-                          className="flex items-start justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="text-sm text-foreground/85">{device.name}</div>
-                            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs leading-relaxed text-foreground/50">
-                              <span className="font-mono break-all">ID {details.id}</span>
-                              <span className="whitespace-nowrap">配对于 {details.pairedAt}</span>
-                              <span className="whitespace-nowrap">
-                                {details.online ? '在线' : `最近请求 ${details.lastSeen}`}
-                              </span>
-                            </div>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="shrink-0"
-                            aria-label={`撤销 ${device.name}`}
-                            disabled={busy}
-                            onClick={() => {
-                              void revokeDevice(device.id);
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             </>
           ) : (

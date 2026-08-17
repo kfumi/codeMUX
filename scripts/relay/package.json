@@ -1,0 +1,11 @@
+{
+  "name": "codemux-companion-relay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node ../companion-relay.mjs --port 8787"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

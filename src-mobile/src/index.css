@@ -1,5 +1,59 @@
 @import "tailwindcss";
 
+/* streamdown 的类名写在 node_modules 里，Tailwind 4 默认不扫描，需显式声明来源 */
+@source "../../node_modules/streamdown/dist/*.js";
+@source "../../node_modules/@streamdown/code/dist/*.js";
+
+/* 代码块只保留最外层容器边框：去掉 gap/内边距，避免 header 与代码之间出现空白带 */
+[data-streamdown="code-block"] {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+}
+[data-streamdown="code-block-header"] {
+  color: var(--color-foreground);
+  background-color: hsl(var(--muted) / 0.8);
+  padding-block: calc(var(--spacing) * 2);
+  padding-inline: calc(var(--spacing) * 4);
+  border-radius: 0;
+}
+[data-streamdown="code-block-actions"] {
+  border-width: 0;
+  background: transparent;
+}
+/* streamdown 用 sticky -mt-10 把复制按钮叠到 header 上，那是按 gap-2 算的；去掉 gap 后改为与 h-8 header 对齐 */
+[data-streamdown="code-block"] > :has([data-streamdown="code-block-actions"]) {
+  top: 0;
+  margin-top: -2rem;
+  padding-inline: calc(var(--spacing) * 2);
+}
+[data-streamdown="code-block-body"] {
+  margin: 0;
+  border: none;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+/* streamdown 默认 table-wrapper 自带外层卡片边框，内层再套一层；只保留表格网格 */
+[data-streamdown="table-wrapper"] {
+  gap: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+[data-streamdown="table-wrapper"] > div {
+  border: none;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: var(--font-ui);
   --font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -36,6 +90,37 @@
   --ui-font-size: 14px;
   --code-font-size: 13px;
   --content-width: 52rem;
+  /* 浅色主题（对齐桌面 globals.css :root） */
+  --background: 0 0% 99%;
+  --foreground: 0 0% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 12%;
+  --primary: 209 99% 40%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 94%;
+  --secondary-foreground: 0 0% 15%;
+  --muted: 0 0% 95%;
+  --muted-foreground: 0 0% 40%;
+  --accent: 0 0% 92%;
+  --accent-foreground: 0 0% 12%;
+  --destructive: 358 70% 62%;
+  --success: 142 55% 40%;
+  --warning: 38 88% 55%;
+  --border: 0 0% 88%;
+  --input: 0 0% 84%;
+  --ring: 209 99% 40%;
+  --radius: 0.5rem;
+  --surface-1: 0 0% 100%;
+  --surface-2: 0 0% 97%;
+  --surface-3: 0 0% 92%;
+  --codemux-link: 209 99% 40%;
+  --codemux-directive-accent: 221 83% 46%;
+  --codemux-directive-border: 214 100% 82%;
+  --codemux-directive-bg: 214 100% 93%;
+}
+
+.dark {
+  /* 深色主题（对齐桌面 globals.css .dark） */
   --background: 0 0% 6.7%;
   --foreground: 0 0% 93%;
   --card: 0 0% 10%;
@@ -54,14 +139,13 @@
   --border: 0 0% 18%;
   --input: 0 0% 21%;
   --ring: 209 92% 58%;
-  --radius: 0.5rem;
   --surface-1: 0 0% 8%;
   --surface-2: 0 0% 11%;
   --surface-3: 0 0% 15%;
   --codemux-link: 211 100% 72%;
-  --codemux-directive-accent: 221 83% 46%;
-  --codemux-directive-border: 214 100% 82%;
-  --codemux-directive-bg: 214 100% 93%;
+  --codemux-directive-accent: 211 100% 72%;
+  --codemux-directive-border: 211 68% 43%;
+  --codemux-directive-bg: 211 68% 28%;
 }
 
 html,
@@ -177,6 +261,18 @@ select {
   line-height: 1.55;
 }
 
+/* streamdown 代码块内的 pre 不再单独描边/留白，否则会与外层容器叠出双边框和上下空隙 */
+.aui-md [data-streamdown="code-block"] pre {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.aui-md [data-streamdown="code-block"] pre code {
+  padding: 0.75rem 1rem;
+}
+
 .aui-md blockquote {
   margin: 0.75rem 0;
   padding-left: 0.875rem;
@@ -186,9 +282,15 @@ select {
 
 .aui-md table {
   width: 100%;
-  margin: 1rem 0;
+  margin: 0;
   border-collapse: collapse;
   font-size: var(--ui-font-size);
+}
+
+.aui-md thead,
+.aui-md tbody,
+.aui-md tr {
+  border: none;
 }
 
 .aui-md th,
@@ -196,6 +298,8 @@ select {
   border: 1px solid hsl(var(--border));
   padding: 0.5rem 0.75rem;
   text-align: left;
+  word-break: normal;
+  overflow-wrap: anywhere;
 }
 
 .aui-md th {

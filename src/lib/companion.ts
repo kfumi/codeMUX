@@ -1,5 +1,6 @@
 import { buildCompanionOfferUrl } from './companion-connection';
 import type { CompanionOfferV1 } from './companion-connection';
+import { buildRelayBaseUrl } from './companion-relay';
 import type { CompanionStatus, PairedDevice } from '../types/companion';
 
 export type CompanionVisualState = 'idle' | 'waiting' | 'reconnecting' | 'paired';
@@ -53,13 +54,17 @@ export function buildPairingUrl(status: CompanionStatus): string | null {
   const offer = buildPairingOfferFromStatus(status);
   if (!offer) return null;
 
+  // 启用中继时链接外壳走公网地址，便于跨网扫码；#offer= 内仍保留 lan + relay 供择优连接
+  if (status.relay?.enabled) {
+    const relayBaseUrl = buildRelayBaseUrl(status.relay.endpoint, status.relay.useTls);
+    if (relayBaseUrl) {
+      return buildCompanionOfferUrl(offer, relayBaseUrl);
+    }
+  }
+
   if (status.lanIp) {
     const baseUrl = `http://${status.lanIp}:${status.port}`;
     return buildCompanionOfferUrl(offer, baseUrl);
-  }
-
-  if (status.relay?.enabled) {
-    return buildCompanionOfferUrl(offer, `http://127.0.0.1:${status.port}`);
   }
 
   return null;
@@ -71,24 +76,6 @@ export function buildLegacyPairingUrl(status: CompanionStatus): string | null {
   const url = new URL(`http://${status.lanIp}:${status.port}/`);
   url.searchParams.set('code', status.pairingCode);
   return url.toString();
-}
-
-export function formatRelativeTime(value: string): string {
-  const date = new Date(value);
-  const diffMs = Date.now() - date.getTime();
-  if (diffMs < 60_000) return '刚刚';
-  if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)} 分钟前`;
-  if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3_600_000)} 小时前`;
-  return date.toLocaleString();
-}
-
-export function formatDeviceDetails(device: PairedDevice) {
-  return {
-    id: device.id,
-    pairedAt: new Date(device.paired_at).toLocaleString(),
-    lastSeen: device.last_seen_at ? formatRelativeTime(device.last_seen_at) : '尚未请求',
-    online: isPairedDeviceOnline(device),
-  };
 }
 
 export function relayStateLabel(state: CompanionStatus['relay']['connectionState']): string {

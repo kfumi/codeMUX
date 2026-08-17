@@ -224,14 +224,6 @@ export async function claimPairingResolved(
   return { ...result, usedRelay: false };
 }
 
-export async function revokePairing(connection: CompanionConnection): Promise<void> {
-  const profile = asProfile(connection);
-  await requestVoid(profile, '/api/pair/device', {
-    method: 'DELETE',
-    headers: authHeaders(profile.token),
-  });
-}
-
 export async function fetchBootstrap(connection: CompanionConnection): Promise<MobileBootstrap> {
   const profile = asProfile(connection);
   return requestJson<MobileBootstrap>(profile, '/api/bootstrap', {

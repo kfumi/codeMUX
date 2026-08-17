@@ -81,7 +81,7 @@ fn default_companion_port() -> u16 {
 }
 
 fn default_relay_endpoint() -> String {
-    "localhost:8787".to_string()
+    String::new()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

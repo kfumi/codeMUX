@@ -14,7 +14,7 @@ import { ToolCallRow } from './chat/ToolCallRow';
 import { ScrollToBottomButton, useChatScrollToBottom } from '../hooks/useChatScrollToBottom';
 import { useCompanionSocket } from '../hooks/useCompanionSocket';
 import { useDesktopReachability } from '../hooks/useDesktopReachability';
-import { fetchBootstrap, fetchSessionEvents, isAuthError, respondPermission, respondUserInput, revokePairing, sendSessionMessage } from '../lib/api';
+import { fetchBootstrap, fetchSessionEvents, isAuthError, respondPermission, respondUserInput, sendSessionMessage } from '../lib/api';
 import { appendEvent, eventsToMessages, type ChatMessage } from '../lib/eventToMessages';
 import { buildDisplayRows, isSeamMessage, type DisplayRow } from '../lib/messageLayout';
 import {
@@ -112,18 +112,6 @@ export function ChatView({ connection, sessionId, onBack, onDisconnected }: Chat
       onDisconnected('桌面端已撤销此设备或配对已失效，请重新配对。');
     })();
   }, [onDisconnected]);
-
-  const handleUnpair = useCallback(() => {
-    void (async () => {
-      try {
-        await revokePairing(connection);
-      } catch {
-        // Best effort when desktop is unreachable.
-      }
-      await clearConnection();
-      onDisconnected();
-    })();
-  }, [connection, onDisconnected]);
 
   const {
     offline,
@@ -588,7 +576,6 @@ export function ChatView({ connection, sessionId, onBack, onDisconnected }: Chat
               }
             });
           }}
-          onUnpair={handleUnpair}
         />
       ) : null}
     </div>

@@ -55,11 +55,56 @@ pub async fn sync_relay_transport(
     Ok(())
 }
 
+pub fn validate_relay_endpoint(endpoint: &str) -> Result<(), String> {
+    let trimmed = endpoint.trim();
+    if trimmed.is_empty() {
+        return Err("请先填写中继端点".to_string());
+    }
+    let (host, port_str) = trimmed
+        .rsplit_once(':')
+        .ok_or_else(|| "中继端点格式应为 host:port".to_string())?;
+    if host.trim().is_empty() {
+        return Err("中继主机不能为空".to_string());
+    }
+    let port: u16 = port_str
+        .parse()
+        .map_err(|_| "中继端口无效".to_string())?;
+    if port == 0 {
+        return Err("中继端口无效".to_string());
+    }
+    Ok(())
+}
+
+pub async fn set_relay_config(
+    app: &AppHandle,
+    companion_state: &CompanionState,
+    endpoint: String,
+    use_tls: bool,
+) -> Result<(), String> {
+    validate_relay_endpoint(&endpoint)?;
+    {
+        let app_state = app.state::<AppState>();
+        let mut config = app_state.config.lock().map_err(|error| error.to_string())?;
+        config.companion.relay.endpoint = endpoint.trim().to_string();
+        config.companion.relay.use_tls = use_tls;
+        crate::config::save_config(app, &config)?;
+    }
+    sync_relay_transport(app, companion_state).await
+}
+
 pub async fn set_relay_enabled(
     app: &AppHandle,
     companion_state: &CompanionState,
     enabled: bool,
 ) -> Result<(), String> {
+    if enabled {
+        let endpoint = {
+            let app_state = app.state::<AppState>();
+            let config = app_state.config.lock().map_err(|error| error.to_string())?;
+            config.companion.relay.endpoint.clone()
+        };
+        validate_relay_endpoint(&endpoint)?;
+    }
     {
         let app_state = app.state::<AppState>();
         let mut config = app_state.config.lock().map_err(|error| error.to_string())?;

@@ -18,7 +18,7 @@ const baseStatus: CompanionStatus = {
   pairedDevices: [],
   relay: {
     enabled: false,
-    endpoint: 'localhost:8787',
+    endpoint: '',
     useTls: false,
     connectionState: 'disabled',
   },
@@ -39,6 +39,23 @@ describe('buildPairingUrl', () => {
       desktopId: undefined,
     };
     expect(buildPairingUrl(status)).toBeNull();
+  });
+
+  it('uses relay base url when relay is enabled', () => {
+    const status: CompanionStatus = {
+      ...baseStatus,
+      relay: {
+        enabled: true,
+        endpoint: 'relay.fumi-blog.top:443',
+        useTls: true,
+        connectionState: 'connected',
+      },
+    };
+    const url = buildPairingUrl(status);
+    expect(url).toMatch(/^https:\/\/relay\.fumi-blog\.top:443\/#offer=/);
+    const offer = parseCompanionOfferFromUrl(url!);
+    expect(offer?.lan?.host).toBe('192.168.1.10');
+    expect(offer?.relay?.endpoint).toBe('relay.fumi-blog.top:443');
   });
 });
 

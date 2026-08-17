@@ -626,7 +626,7 @@ pub fn run() {
             commands::companion::get_companion_status,
             commands::companion::set_companion_enabled,
             commands::companion::set_companion_relay_enabled,
-            commands::companion::revoke_companion_device,
+            commands::companion::set_companion_relay_config,
             commands::companion::refresh_companion_pairing_code,
             commands::companion::get_companion_pairing_offer,
         ])

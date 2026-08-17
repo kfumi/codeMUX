@@ -1,0 +1,15 @@
+{
+  "scripts": {
+    "dev": {
+      "command": "npm run tauri dev"
+    },
+    "build mobile": {
+      "command": "npm run build:mobile"
+    }
+  },
+  "metadataGeneration": {
+    "commitMessage": {
+      "instructions": "Always generate git commit messages in Simplified Chinese.\nUse Conventional Commits format: <type>(<scope>): <subject>. Types: feat, fix, docs, style, refactor, perf, test, chore. Scope is optional. Subject in Chinese, imperative, no period at end. Body must be a list of changes with '- ' prefix, each item on a new line."
+    }
+  }
+}

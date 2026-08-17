@@ -6,14 +6,12 @@ interface DesktopOfflineOverlayProps {
   detail?: string | null;
   reconnecting?: boolean;
   onReconnect: () => void;
-  onUnpair?: () => void;
 }
 
 export function DesktopOfflineOverlay({
   detail,
   reconnecting = false,
   onReconnect,
-  onUnpair,
 }: DesktopOfflineOverlayProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-background/80 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-6 backdrop-blur-sm sm:items-center">
@@ -73,16 +71,6 @@ export function DesktopOfflineOverlay({
             {reconnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             重新连接
           </button>
-
-          {onUnpair ? (
-            <button
-              type="button"
-              className="w-full rounded-xl border border-border px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-              onClick={() => void onUnpair()}
-            >
-              断开配对
-            </button>
-          ) : null}
         </div>
       </div>
     </div>

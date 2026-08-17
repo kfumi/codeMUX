@@ -1251,14 +1251,6 @@ pub fn insert_paired_device(
     Ok(())
 }
 
-pub fn delete_paired_device(conn: &Connection, device_id: &str) -> Result<()> {
-    conn.execute(
-        "DELETE FROM companion_paired_devices WHERE id = ?1",
-        [device_id],
-    )?;
-    Ok(())
-}
-
 pub fn delete_all_paired_devices(conn: &Connection) -> Result<()> {
     conn.execute("DELETE FROM companion_paired_devices", [])?;
     Ok(())
