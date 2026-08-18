@@ -171,6 +171,30 @@ describe('TerminalPanel lifecycle', () => {
     expect(mocks.detachMock).not.toHaveBeenCalled();
   });
 
+  it('starts a replacement terminal only when attach reports a missing session', async () => {
+    mocks.attachMock.mockRejectedValueOnce('Terminal session not found');
+    mocks.startMock.mockResolvedValueOnce('terminal-b');
+    render(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+      />,
+    );
+
+    await waitFor(() => expect(mocks.startMock).toHaveBeenCalledWith(
+      'D:/project/app',
+      100,
+      30,
+      expect.any(Function),
+    ));
+    expect(mocks.startMock).toHaveBeenCalledTimes(1);
+    expect(mocks.setTerminalIdMock).toHaveBeenCalledWith(
+      'session-a:terminal:D:/project/app',
+      'terminal-b',
+    );
+  });
+
   it('does not leak a second terminal during StrictMode effect replay', async () => {
     const view = render(
       <StrictMode>

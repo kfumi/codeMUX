@@ -133,6 +133,9 @@ export function TerminalPanel({
         terminal.writeln(`[进程已退出${event.code == null ? '' : `: ${event.code}`}]`);
       }
     };
+    const reportError = (error: unknown) => {
+      if (!disposed) setError(String(error));
+    };
 
     const disposeTerminalSession = (connectedTerminalId: string) => {
       const shouldClose = !useSidePanelStore.getState().isTabPresent(tabId);
@@ -191,13 +194,13 @@ export function TerminalPanel({
 
     const dataDisposable = terminal.onData((data) => {
       const terminalId = terminalIdRef.current;
-      if (terminalId) void terminalApi.write(terminalId, data);
+      if (terminalId) void terminalApi.write(terminalId, data).catch(reportError);
     });
 
     const resizeObserver = new ResizeObserver(() => {
       fit.fit();
       const terminalId = terminalIdRef.current;
-      if (terminalId) void terminalApi.resize(terminalId, terminal.cols, terminal.rows);
+      if (terminalId) void terminalApi.resize(terminalId, terminal.cols, terminal.rows).catch(reportError);
     });
     resizeObserver.observe(container);
 
@@ -206,7 +209,11 @@ export function TerminalPanel({
       dataDisposable.dispose();
       resizeObserver.disconnect();
       const terminalId = terminalIdRef.current;
-      if (terminalId) void disposeTerminalSession(terminalId).catch(() => {});
+      if (terminalId) {
+        void disposeTerminalSession(terminalId).catch((error) => {
+          console.error('Terminal session cleanup failed', error);
+        });
+      }
       terminal.dispose();
       terminalRef.current = null;
       fitRef.current = null;

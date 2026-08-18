@@ -24,64 +24,51 @@ pub struct TerminalState {
 #[serde(tag = "type", rename_all = "camelCase")]
 enum TerminalEvent {
     Output {
+        #[serde(rename = "terminalId")]
         terminal_id: String,
         data: String,
     },
     Exit {
+        #[serde(rename = "terminalId")]
         terminal_id: String,
         code: Option<u32>,
     },
     Error {
+        #[serde(rename = "terminalId")]
         terminal_id: String,
         error: String,
     },
 }
 
 struct TerminalOutputBuffer {
-    chunks: VecDeque<String>,
-    bytes: usize,
+    bytes: VecDeque<u8>,
     max_bytes: usize,
 }
 
 impl TerminalOutputBuffer {
     fn new(max_bytes: usize) -> Self {
         Self {
-            chunks: VecDeque::new(),
-            bytes: 0,
+            bytes: VecDeque::new(),
             max_bytes: max_bytes.max(1),
         }
     }
 
-    fn push(&mut self, data: &str) {
-        let data = if data.len() > self.max_bytes {
-            String::from_utf8_lossy(&data.as_bytes()[data.len() - self.max_bytes..]).into_owned()
-        } else {
-            data.to_string()
-        };
+    fn push(&mut self, data: &[u8]) {
+        let start = data.len().saturating_sub(self.max_bytes);
+        self.bytes.extend(&data[start..]);
 
-        self.bytes += data.len();
-        self.chunks.push_back(data);
-
-        while self.bytes > self.max_bytes {
-            let overflow = self.bytes - self.max_bytes;
-            let Some(front) = self.chunks.front_mut() else {
-                self.bytes = 0;
-                break;
-            };
-
-            if front.len() <= overflow {
-                self.bytes -= front.len();
-                self.chunks.pop_front();
-            } else {
-                let trimmed = String::from_utf8_lossy(&front.as_bytes()[overflow..]).into_owned();
-                self.bytes -= overflow;
-                *front = trimmed;
-            }
+        while self.bytes.len() > self.max_bytes {
+            self.bytes.pop_front();
         }
     }
 
     fn snapshot(&self) -> String {
-        self.chunks.iter().map(String::as_str).collect()
+        let bytes: Vec<u8> = self.bytes.iter().copied().collect();
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
+    fn clear(&mut self) {
+        self.bytes.clear();
     }
 }
 
@@ -107,13 +94,71 @@ fn send_event(channel: &tauri::ipc::Channel<String>, event: TerminalEvent) {
     }
 }
 
+fn bind_output_channel(
+    output: &Arc<Mutex<TerminalOutputState>>,
+    terminal_id: &str,
+    channel: tauri::ipc::Channel<String>,
+) -> Result<(), String> {
+    let mut output = output
+        .lock()
+        .map_err(|_| "Terminal output state poisoned".to_string())?;
+    output.channel = Some(channel);
+    let replay = output.buffer.snapshot();
+    if !replay.is_empty() {
+        if let Some(channel) = output.channel.as_ref() {
+            send_event(
+                channel,
+                TerminalEvent::Output {
+                    terminal_id: terminal_id.to_string(),
+                    data: replay,
+                },
+            );
+        }
+    }
+    output.buffer.clear();
+    if let Some(exit_event) = output.exit_event.clone() {
+        if let Some(channel) = output.channel.as_ref() {
+            send_event(channel, exit_event);
+        }
+    }
+
+    Ok(())
+}
+
+fn detach_output_channel(output: &Arc<Mutex<TerminalOutputState>>) -> Result<(), String> {
+    output
+        .lock()
+        .map_err(|_| "Terminal output state poisoned".to_string())?
+        .channel = None;
+    Ok(())
+}
+
+fn resize_master(
+    master: &Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    master
+        .lock()
+        .map_err(|_| "Terminal master poisoned".to_string())?
+        .resize(PtySize {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|error| format!("Failed to resize terminal: {}", error))
+}
+
 fn publish_event(output: &Arc<Mutex<TerminalOutputState>>, event: TerminalEvent) {
     let Ok(mut output) = output.lock() else {
         return;
     };
 
-    if let TerminalEvent::Output { data, .. } = &event {
-        output.buffer.push(data);
+    if output.channel.is_none() {
+        if let TerminalEvent::Output { data, .. } = &event {
+            output.buffer.push(data.as_bytes());
+        }
     }
     if matches!(&event, TerminalEvent::Exit { .. }) {
         output.exit_event = Some(event.clone());
@@ -272,36 +317,18 @@ pub fn attach_terminal_session(
         (session.master.clone(), session.output.clone())
     };
 
-    master
-        .lock()
-        .map_err(|_| "Terminal master poisoned".to_string())?
-        .resize(PtySize {
-            rows: rows.max(1),
-            cols: cols.max(1),
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|error| format!("Failed to resize terminal: {}", error))?;
+    let resize_result = resize_master(&master, cols, rows);
 
-    let mut output = output
-        .lock()
-        .map_err(|_| "Terminal output state poisoned".to_string())?;
-    output.channel = Some(channel);
-    let replay = output.buffer.snapshot();
-    if !replay.is_empty() {
-        if let Some(channel) = output.channel.as_ref() {
-            send_event(
-                channel,
-                TerminalEvent::Output {
-                    terminal_id: terminal_id.clone(),
-                    data: replay,
-                },
-            );
-        }
-    }
-    if let Some(exit_event) = output.exit_event.clone() {
-        if let Some(channel) = output.channel.as_ref() {
-            send_event(channel, exit_event);
+    bind_output_channel(&output, &terminal_id, channel)?;
+
+    if let Err(error) = resize_result {
+        let exited = output
+            .lock()
+            .map_err(|_| "Terminal output state poisoned".to_string())?
+            .exit_event
+            .is_some();
+        if !exited {
+            return Err(error);
         }
     }
 
@@ -325,12 +352,7 @@ pub fn detach_terminal_session(
             .clone()
     };
 
-    output
-        .lock()
-        .map_err(|_| "Terminal output state poisoned".to_string())?
-        .channel = None;
-
-    Ok(())
+    detach_output_channel(&output)
 }
 
 #[tauri::command]
@@ -339,17 +361,17 @@ pub fn write_terminal_session(
     terminal_id: String,
     data: String,
 ) -> Result<(), String> {
-    let writer = {
+    let (writer, output) = {
         let sessions = state
             .sessions
             .lock()
             .map_err(|_| "Terminal state poisoned".to_string())?;
         sessions
             .get(&terminal_id)
+            .map(|session| (session.writer.clone(), session.output.clone()))
             .ok_or_else(|| "Terminal session not found".to_string())?
-            .writer
-            .clone()
     };
+    ensure_attached(&output)?;
 
     let result = writer
         .lock()
@@ -366,29 +388,31 @@ pub fn resize_terminal_session(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let master = {
+    let (master, output) = {
         let sessions = state
             .sessions
             .lock()
             .map_err(|_| "Terminal state poisoned".to_string())?;
         sessions
             .get(&terminal_id)
+            .map(|session| (session.master.clone(), session.output.clone()))
             .ok_or_else(|| "Terminal session not found".to_string())?
-            .master
-            .clone()
     };
+    ensure_attached(&output)?;
 
-    let result = master
+    resize_master(&master, cols, rows)
+}
+
+fn ensure_attached(output: &Arc<Mutex<TerminalOutputState>>) -> Result<(), String> {
+    if output
         .lock()
-        .map_err(|_| "Terminal master poisoned".to_string())?
-        .resize(PtySize {
-            rows: rows.max(1),
-            cols: cols.max(1),
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| format!("Failed to resize terminal: {}", e));
-    result
+        .map_err(|_| "Terminal output state poisoned".to_string())?
+        .channel
+        .is_none()
+    {
+        return Err("Terminal session is detached".to_string());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -429,14 +453,18 @@ impl Drop for TerminalState {
 
 #[cfg(test)]
 mod tests {
-    use super::TerminalOutputBuffer;
+    use super::{
+        bind_output_channel, detach_output_channel, publish_event, TerminalEvent,
+        TerminalOutputBuffer, TerminalOutputState,
+    };
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn keeps_only_the_latest_output_within_the_byte_limit() {
         let mut buffer = TerminalOutputBuffer::new(8);
 
-        buffer.push("1234");
-        buffer.push("567890");
+        buffer.push(b"1234");
+        buffer.push(b"567890");
 
         assert_eq!(buffer.snapshot(), "34567890");
     }
@@ -445,8 +473,91 @@ mod tests {
     fn truncates_a_single_oversized_chunk_to_the_latest_bytes() {
         let mut buffer = TerminalOutputBuffer::new(4);
 
-        buffer.push("abcdef");
+        buffer.push(b"abcdef");
 
         assert_eq!(buffer.snapshot(), "cdef");
+    }
+
+    #[test]
+    fn rejects_io_when_the_terminal_is_detached() {
+        let output = Arc::new(Mutex::new(TerminalOutputState::new(
+            tauri::ipc::Channel::new(|_| Ok(())),
+        )));
+
+        detach_output_channel(&output).unwrap();
+
+        assert_eq!(
+            super::ensure_attached(&output),
+            Err("Terminal session is detached".to_string())
+        );
+    }
+
+    #[test]
+    fn replays_only_detached_output_and_clears_it_after_binding() {
+        let received = Arc::new(Mutex::new(Vec::<tauri::ipc::InvokeResponseBody>::new()));
+        let initial_received = received.clone();
+        let initial_channel = tauri::ipc::Channel::new(move |payload| {
+            initial_received.lock().unwrap().push(payload);
+            Ok(())
+        });
+        let output = Arc::new(Mutex::new(TerminalOutputState::new(initial_channel)));
+
+        publish_event(
+            &output,
+            TerminalEvent::Output {
+                terminal_id: "terminal-1".to_string(),
+                data: "live".to_string(),
+            },
+        );
+        assert_eq!(output.lock().unwrap().buffer.snapshot(), "");
+
+        detach_output_channel(&output).unwrap();
+        publish_event(
+            &output,
+            TerminalEvent::Output {
+                terminal_id: "terminal-1".to_string(),
+                data: "offline".to_string(),
+            },
+        );
+        publish_event(
+            &output,
+            TerminalEvent::Exit {
+                terminal_id: "terminal-1".to_string(),
+                code: None,
+            },
+        );
+
+        let reconnect_received = received.clone();
+        let reconnect_channel = tauri::ipc::Channel::new(move |payload| {
+            reconnect_received.lock().unwrap().push(payload);
+            Ok(())
+        });
+        bind_output_channel(&output, "terminal-1", reconnect_channel).unwrap();
+
+        let messages = received.lock().unwrap();
+        let body_as_json = |body: &tauri::ipc::InvokeResponseBody| match body {
+            tauri::ipc::InvokeResponseBody::Json(payload) => {
+                let payload =
+                    serde_json::from_str::<String>(payload).unwrap_or_else(|_| payload.clone());
+                serde_json::from_str(&payload).unwrap()
+            }
+            tauri::ipc::InvokeResponseBody::Raw(payload) => {
+                serde_json::from_slice(payload).unwrap()
+            }
+        };
+        let json_messages: Vec<serde_json::Value> = messages.iter().map(body_as_json).collect();
+        let replay = json_messages
+            .iter()
+            .find(|message| message["data"] == "offline")
+            .unwrap();
+        let exit = json_messages
+            .iter()
+            .find(|message| message["type"] == "exit")
+            .unwrap();
+        assert_eq!(replay["type"], "output");
+        assert_eq!(replay["terminalId"], "terminal-1");
+        assert_eq!(replay["data"], "offline");
+        assert_eq!(exit["type"], "exit");
+        assert_eq!(output.lock().unwrap().buffer.snapshot(), "");
     }
 }
