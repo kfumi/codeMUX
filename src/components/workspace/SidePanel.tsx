@@ -210,7 +210,12 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
             activeTab.kind === 'review' ? (
               <ReviewPanel key={activeTab.id} projectPath={activeTab.projectPath ?? projectPath ?? ''} />
             ) : activeTab.kind === 'terminal' ? (
-              <TerminalPanel key={activeTab.id} tabId={activeTab.id} projectPath={activeTab.projectPath ?? projectPath ?? ''} />
+              <TerminalPanel
+                key={activeTab.id}
+                tabId={activeTab.id}
+                terminalId={activeTab.terminalId}
+                projectPath={activeTab.projectPath ?? projectPath ?? ''}
+              />
             ) : activeTab.kind === 'diff' ? (
               <div key={activeTab.id} className="h-full overflow-auto">
                 <DiffView oldContent={activeTab.diffOldContent ?? ''} newContent={activeTab.diffNewContent ?? ''} />

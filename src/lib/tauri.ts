@@ -27,6 +27,21 @@ import { usePerfStore } from '../stores/perfStore';
 const logger = createLogger('tauri');
 const agentChannels = new Map<string, Channel<string>>();
 const agentEventListeners = new Map<string, (event: string) => void>();
+const terminalLifecycleQueues = new Map<string, Promise<void>>();
+
+function queueTerminalLifecycle(terminalId: string, operation: () => Promise<void>): Promise<void> {
+  const previous = terminalLifecycleQueues.get(terminalId) ?? Promise.resolve();
+  const next = previous
+    .catch(() => {})
+    .then(operation)
+    .finally(() => {
+      if (terminalLifecycleQueues.get(terminalId) === next) {
+        terminalLifecycleQueues.delete(terminalId);
+      }
+    });
+  terminalLifecycleQueues.set(terminalId, next);
+  return next;
+}
 
 export interface FileTreeNode {
   name: string;
@@ -498,12 +513,7 @@ export const gitApi = {
 };
 
 export const terminalApi = {
-  start: (
-    projectPath: string,
-    cols: number,
-    rows: number,
-    onEvent: (event: TerminalEvent) => void,
-  ): Promise<string> => {
+  createChannel: (onEvent: (event: TerminalEvent) => void): Channel<string> => {
     const channel = new Channel<string>();
     channel.onmessage = (event: string) => {
       try {
@@ -512,14 +522,40 @@ export const terminalApi = {
         onEvent({ type: 'error', terminalId: '', error: event });
       }
     };
+    return channel;
+  },
+  start: (
+    projectPath: string,
+    cols: number,
+    rows: number,
+    onEvent: (event: TerminalEvent) => void,
+  ): Promise<string> => {
+    const channel = terminalApi.createChannel(onEvent);
     return invokeLogged('start_terminal_session', { projectPath, cols, rows, channel });
   },
+  attach: (
+    terminalId: string,
+    cols: number,
+    rows: number,
+    onEvent: (event: TerminalEvent) => void,
+  ): Promise<void> => {
+    const channel = terminalApi.createChannel(onEvent);
+    return queueTerminalLifecycle(terminalId, () =>
+      invokeLogged('attach_terminal_session', { terminalId, cols, rows, channel }),
+    );
+  },
+  detach: (terminalId: string): Promise<void> =>
+    queueTerminalLifecycle(terminalId, () =>
+      invokeLogged('detach_terminal_session', { terminalId }),
+    ),
   write: (terminalId: string, data: string): Promise<void> =>
     invokeLogged('write_terminal_session', { terminalId, data }),
   resize: (terminalId: string, cols: number, rows: number): Promise<void> =>
     invokeLogged('resize_terminal_session', { terminalId, cols, rows }),
   close: (terminalId: string): Promise<void> =>
-    invokeLogged('close_terminal_session', { terminalId }),
+    queueTerminalLifecycle(terminalId, () =>
+      invokeLogged('close_terminal_session', { terminalId }),
+    ),
 };
 
 export const mcpApi = {

@@ -246,6 +246,44 @@ describe('terminalApi', () => {
       channel: expect.any(Object),
     }));
   });
+
+  it('attaches and detaches an existing terminal session', async () => {
+    invokeMock.mockResolvedValue(undefined);
+    const { terminalApi } = await import('./tauri');
+
+    await terminalApi.attach('terminal-1', 120, 30, () => {});
+    await terminalApi.detach('terminal-1');
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'attach_terminal_session', expect.objectContaining({
+      terminalId: 'terminal-1',
+      cols: 120,
+      rows: 30,
+      channel: expect.any(Object),
+    }));
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'detach_terminal_session', {
+      terminalId: 'terminal-1',
+    });
+  });
+
+  it('serializes lifecycle operations for one terminal', async () => {
+    let resolveAttach: (() => void) | undefined;
+    invokeMock
+      .mockImplementationOnce(() => new Promise<void>((resolve) => {
+        resolveAttach = resolve;
+      }))
+      .mockResolvedValue(undefined);
+    const { terminalApi } = await import('./tauri');
+
+    const attachPromise = terminalApi.attach('terminal-queued', 120, 30, () => {});
+    const detachPromise = terminalApi.detach('terminal-queued');
+    await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledTimes(1));
+    resolveAttach?.();
+    await Promise.all([attachPromise, detachPromise]);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'detach_terminal_session', {
+      terminalId: 'terminal-queued',
+    });
+  });
 });
 
 describe('agentApi', () => {

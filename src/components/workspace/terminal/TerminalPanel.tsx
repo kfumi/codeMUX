@@ -43,11 +43,55 @@ function terminalTheme() {
     };
 }
 
-export function TerminalPanel({ tabId, projectPath }: { tabId: string; projectPath: string }) {
+function isTerminalNotFoundError(error: unknown): boolean {
+  return String(error).includes('Terminal session not found');
+}
+
+const pendingTerminalStarts = new Map<string, Promise<string>>();
+
+function getOrStartTerminal(
+  tabId: string,
+  projectPath: string,
+  cols: number,
+  rows: number,
+  onEvent: (event: TerminalEvent) => void,
+): { promise: Promise<string>; reusedPendingStart: boolean } {
+  const pending = pendingTerminalStarts.get(tabId);
+  if (pending) {
+    return { promise: pending, reusedPendingStart: true };
+  }
+
+  const promise = terminalApi.start(projectPath, cols, rows, onEvent).then(
+    (connectedTerminalId) => {
+      if (pendingTerminalStarts.get(tabId) === promise) {
+        pendingTerminalStarts.delete(tabId);
+      }
+      return connectedTerminalId;
+    },
+    (error) => {
+      if (pendingTerminalStarts.get(tabId) === promise) {
+        pendingTerminalStarts.delete(tabId);
+      }
+      throw error;
+    },
+  );
+  pendingTerminalStarts.set(tabId, promise);
+  return { promise, reusedPendingStart: false };
+}
+
+export function TerminalPanel({
+  tabId,
+  terminalId,
+  projectPath,
+}: {
+  tabId: string;
+  terminalId?: string;
+  projectPath: string;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const terminalIdRef = useRef<string | null>(null);
+  const terminalIdRef = useRef<string | null>(terminalId ?? null);
   const setTerminalId = useSidePanelStore((state) => state.setTerminalId);
   const theme = useSettingsStore((state) => state.config?.theme);
   const codeFontSize = useAppearanceStore((state) => state.prefs.codeFontSize);
@@ -90,16 +134,60 @@ export function TerminalPanel({ tabId, projectPath }: { tabId: string; projectPa
       }
     };
 
-    terminalApi.start(projectPath, terminal.cols || 100, terminal.rows || 30, handleEvent)
-      .then((terminalId) => {
-        if (disposed) {
-          void terminalApi.close(terminalId);
-          return;
+    const disposeTerminalSession = (connectedTerminalId: string) => {
+      const shouldClose = !useSidePanelStore.getState().isTabPresent(tabId);
+      return shouldClose
+        ? terminalApi.close(connectedTerminalId)
+        : terminalApi.detach(connectedTerminalId);
+    };
+
+    const connect = async () => {
+      let connectedTerminalId = terminalIdRef.current;
+
+      try {
+        if (connectedTerminalId) {
+          try {
+            await terminalApi.attach(connectedTerminalId, terminal.cols || 100, terminal.rows || 30, handleEvent);
+          } catch (attachError) {
+            if (!isTerminalNotFoundError(attachError) || disposed) {
+              throw attachError;
+            }
+            connectedTerminalId = await terminalApi.start(projectPath, terminal.cols || 100, terminal.rows || 30, handleEvent);
+          }
+        } else {
+          const pendingStart = getOrStartTerminal(
+            tabId,
+            projectPath,
+            terminal.cols || 100,
+            terminal.rows || 30,
+            handleEvent,
+          );
+          connectedTerminalId = await pendingStart.promise;
+          if (pendingStart.reusedPendingStart) {
+            if (disposed) {
+              if (!useSidePanelStore.getState().isTabPresent(tabId)) {
+                await terminalApi.close(connectedTerminalId);
+              }
+              return;
+            }
+            await terminalApi.attach(connectedTerminalId, terminal.cols || 100, terminal.rows || 30, handleEvent);
+          }
         }
-        terminalIdRef.current = terminalId;
-        setTerminalId(tabId, terminalId);
-      })
-      .catch((err) => setError(String(err)));
+
+        terminalIdRef.current = connectedTerminalId;
+        setTerminalId(tabId, connectedTerminalId);
+
+        if (disposed) {
+          if (!useSidePanelStore.getState().isTabPresent(tabId)) {
+            await terminalApi.close(connectedTerminalId);
+          }
+        }
+      } catch (err) {
+        if (!disposed) setError(String(err));
+      }
+    };
+
+    void connect();
 
     const dataDisposable = terminal.onData((data) => {
       const terminalId = terminalIdRef.current;
@@ -118,7 +206,7 @@ export function TerminalPanel({ tabId, projectPath }: { tabId: string; projectPa
       dataDisposable.dispose();
       resizeObserver.disconnect();
       const terminalId = terminalIdRef.current;
-      if (terminalId) void terminalApi.close(terminalId);
+      if (terminalId) void disposeTerminalSession(terminalId).catch(() => {});
       terminal.dispose();
       terminalRef.current = null;
       fitRef.current = null;

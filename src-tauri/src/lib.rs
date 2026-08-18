@@ -575,6 +575,8 @@ pub fn run() {
             commands::git::generate_git_commit_message,
             commands::git::generate_pull_request_description,
             commands::terminal::start_terminal_session,
+            commands::terminal::attach_terminal_session,
+            commands::terminal::detach_terminal_session,
             commands::terminal::write_terminal_session,
             commands::terminal::resize_terminal_session,
             commands::terminal::close_terminal_session,

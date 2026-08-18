@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 
+import { terminalApi } from '../lib/tauri';
 import { useNavigationStore, type SidePanelNavigationState } from './navigationStore';
 
 export type SidePanelTabKind = 'review' | 'terminal' | 'plan' | 'diff';
@@ -47,6 +48,7 @@ interface SidePanelState {
   setPanelWidth: (width: number, splitContainerWidth?: number) => void;
   setResizing: (isResizing: boolean) => void;
   setTerminalId: (tabId: string, terminalId: string) => void;
+  isTabPresent: (tabId: string) => boolean;
   restoreNavigation: (navigation: SidePanelNavigationState) => void;
   reset: () => void;
 }
@@ -225,6 +227,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     const closedIndex = state.tabs.findIndex((tab) => tab.id === tabId);
     if (closedIndex === -1) return;
 
+    const closedTab = state.tabs[closedIndex];
     const tabs = state.tabs.filter((tab) => tab.id !== tabId);
     const activeTabId =
       state.activeTabId !== tabId
@@ -238,6 +241,9 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
       activeTabId,
       isOpen: true,
     });
+    if (closedTab.kind === 'terminal' && closedTab.terminalId) {
+      void terminalApi.close(closedTab.terminalId).catch(() => {});
+    }
     recordNavigation(get());
   },
 
@@ -253,6 +259,14 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     set((state) => ({
       tabs: state.tabs.map((tab) => (tab.id === tabId ? { ...tab, terminalId } : tab)),
     }));
+  },
+
+  isTabPresent: (tabId: string) => {
+    const state = get();
+    return state.tabs.some((tab) => tab.id === tabId)
+      || Object.entries(state.scopes).some(([scopeId, snapshot]) =>
+        scopeId !== state.activeScopeId && snapshot.tabs.some((tab) => tab.id === tabId),
+      );
   },
 
   restoreNavigation: (navigation: SidePanelNavigationState) => {
