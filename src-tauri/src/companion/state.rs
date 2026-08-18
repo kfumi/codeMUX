@@ -20,6 +20,12 @@ pub struct PairingCodeEntry {
     pub expires_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone)]
+pub struct QueuedCompanionMessage {
+    pub prompt: String,
+    pub input_payload: Option<serde_json::Value>,
+}
+
 pub struct CompanionInner {
     pub event_tx: broadcast::Sender<CompanionBroadcastEvent>,
     pub pairing_codes: Mutex<HashMap<String, PairingCodeEntry>>,
@@ -29,7 +35,7 @@ pub struct CompanionInner {
     pub port: RwLock<u16>,
     pub enabled: AtomicBool,
     pub turn_active: Mutex<HashSet<String>>,
-    pub message_queues: Mutex<HashMap<String, VecDeque<String>>>,
+    pub message_queues: Mutex<HashMap<String, VecDeque<QueuedCompanionMessage>>>,
     pub relay_controller: tokio::sync::Mutex<Option<RelayTransportController>>,
     pub relay_state: RelayTransportState,
     pub e2ee_public_key_b64: RwLock<Option<String>>,
@@ -171,15 +177,23 @@ impl CompanionState {
             .contains(session_id)
     }
 
-    pub fn enqueue_message(&self, session_id: &str, prompt: String) {
+    pub fn enqueue_message(
+        &self,
+        session_id: &str,
+        prompt: String,
+        input_payload: Option<serde_json::Value>,
+    ) {
         let mut queues = self.inner.message_queues.lock().unwrap();
         queues
             .entry(session_id.to_string())
             .or_default()
-            .push_back(prompt);
+            .push_back(QueuedCompanionMessage {
+                prompt,
+                input_payload,
+            });
     }
 
-    pub fn finish_turn(&self, session_id: &str) -> Vec<String> {
+    pub fn finish_turn(&self, session_id: &str) -> Vec<QueuedCompanionMessage> {
         self.inner
             .turn_active
             .lock()

@@ -21,6 +21,7 @@ New-Item -ItemType Directory -Path $staging | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $staging 'mobile-web') | Out-Null
 
 Copy-Item (Join-Path $Root 'scripts\companion-relay.mjs') (Join-Path $staging 'companion-relay.mjs')
+Copy-Item (Join-Path $Root 'scripts\companion-relay-bridge.mjs') (Join-Path $staging 'companion-relay-bridge.mjs')
 Copy-Item (Join-Path $Root 'scripts\relay\package.json') (Join-Path $staging 'package.json')
 Copy-Item (Join-Path $Root 'scripts\relay\baota-install.sh') (Join-Path $staging 'baota-install.sh')
 Copy-Item (Join-Path $Root 'scripts\relay\baota-nginx-snippet.conf') (Join-Path $staging 'baota-nginx-snippet.conf')

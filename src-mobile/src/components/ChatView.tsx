@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, Send } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
 
 import { ChatMarkdown } from './chat/ChatMarkdown';
 import { ChatSeamRow } from './chat/ChatSeamRow';
@@ -11,12 +11,29 @@ import { ReasoningRow } from './chat/ReasoningRow';
 import { RuntimeSwitchRow } from './chat/RuntimeSwitchRow';
 import { SessionSummaryRow } from './chat/SessionSummaryRow';
 import { ToolCallRow } from './chat/ToolCallRow';
+import { ThinkingGroupRow } from './chat/ThinkingGroupRow';
+import { MobileComposer } from './MobileComposer';
 import { ScrollToBottomButton, useChatScrollToBottom } from '../hooks/useChatScrollToBottom';
 import { useCompanionSocket } from '../hooks/useCompanionSocket';
 import { useDesktopReachability } from '../hooks/useDesktopReachability';
-import { fetchBootstrap, fetchSessionEvents, isAuthError, respondPermission, respondUserInput, sendSessionMessage } from '../lib/api';
+import {
+  fetchBootstrap,
+  fetchSessionEvents,
+  interruptSession,
+  isAuthError,
+  respondPermission,
+  respondUserInput,
+  sendSessionMessage,
+  type MobileBootstrap,
+  type MobileInputPayload,
+  type MobileSession,
+  type MobileSessionSettingsPatch,
+  updateSessionSettings,
+} from '../lib/api';
 import { appendEvent, eventsToMessages, type ChatMessage } from '../lib/eventToMessages';
 import { buildDisplayRows, isSeamMessage, type DisplayRow } from '../lib/messageLayout';
+import { buildMobilePermissionResponse } from '../lib/permissionResponse';
+import { buildTurnDurationMap } from '../lib/turnDuration';
 import {
   cacheSessionEvents,
   clearConnection,
@@ -27,7 +44,7 @@ import { cn } from '../lib/utils';
 
 interface ChatViewProps {
   connection: CompanionConnection;
-  sessionId: string;
+  session: MobileSession;
   onBack: () => void;
   onDisconnected: (reason?: string) => void;
 }
@@ -42,14 +59,31 @@ function applyEvents(messages: ChatMessage[], events: unknown[]): ChatMessage[] 
   return next;
 }
 
-export function ChatView({ connection, sessionId, onBack, onDisconnected }: ChatViewProps) {
+function hasActiveTurn(events: unknown[]): boolean {
+  let active = false;
+  for (const rawEvent of events) {
+    if (!rawEvent || typeof rawEvent !== 'object') continue;
+    const eventType = (rawEvent as Record<string, unknown>).type;
+    if (eventType === 'user_message') active = true;
+    if (eventType === 'turn_finished') active = false;
+  }
+  return active;
+}
+
+export function ChatView({ connection, session: initialSession, onBack, onDisconnected }: ChatViewProps) {
+  const sessionId = initialSession.id;
+  const [session, setSession] = useState<MobileSession>(initialSession);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bootstrap, setBootstrap] = useState<MobileBootstrap | null>(null);
   const [compactAiOutput, setCompactAiOutput] = useState(false);
+  const [turnDurationsByUserId, setTurnDurationsByUserId] = useState<ReadonlyMap<string, number>>(
+    () => new Map(),
+  );
   const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
+  const [rawEventsRevision, setRawEventsRevision] = useState(0);
   const viewportRef = useRef<HTMLDivElement>(null);
   const lastSequenceRef = useRef(-1);
   const rawEventsRef = useRef<unknown[]>([]);
@@ -71,13 +105,16 @@ export function ChatView({ connection, sessionId, onBack, onDisconnected }: Chat
       setMessages((current) => applyEvents(current, events));
     }
     lastSequenceRef.current = maxEventSequence(rawEventsRef.current);
+    setRawEventsRevision((current) => current + 1);
+    setTurnDurationsByUserId(buildTurnDurationMap(rawEventsRef.current));
     void persistEvents(rawEventsRef.current);
   }, [persistEvents]);
 
-  const loadCompactSetting = useCallback(async () => {
+  const loadBootstrap = useCallback(async () => {
     try {
-      const bootstrap = await fetchBootstrap(connection);
-      setCompactAiOutput(Boolean(bootstrap.compactAiOutput));
+      const nextBootstrap = await fetchBootstrap(connection);
+      setBootstrap(nextBootstrap);
+      setCompactAiOutput(Boolean(nextBootstrap.compactAiOutput));
     } catch {
       // Keep the previous setting when bootstrap is temporarily unavailable.
     }
@@ -123,7 +160,7 @@ export function ChatView({ connection, sessionId, onBack, onDisconnected }: Chat
   } = useDesktopReachability(connection, {
     onAuthFailure: handleAuthFailure,
     onRecovered: () => {
-      void loadCompactSetting();
+      void loadBootstrap();
       void loadHistory(-1);
     },
   });
@@ -134,16 +171,21 @@ export function ChatView({ connection, sessionId, onBack, onDisconnected }: Chat
     setMessages([]);
     setLoading(true);
     setError(null);
+    setBootstrap(null);
+    setTurnDurationsByUserId(new Map());
+    setRawEventsRevision((current) => current + 1);
 
     void (async () => {
-      await Promise.all([loadCompactSetting(), loadHistory(-1)]);
+      await Promise.all([loadBootstrap(), loadHistory(-1)]);
       setLoading(false);
     })();
-  }, [connection, loadCompactSetting, loadHistory, sessionId]);
+  }, [connection, loadBootstrap, loadHistory, sessionId]);
 
   const appendIncomingEvent = useCallback((event: Record<string, unknown>) => {
     rawEventsRef.current = [...rawEventsRef.current, event];
     lastSequenceRef.current = maxEventSequence(rawEventsRef.current);
+    setRawEventsRevision((current) => current + 1);
+    setTurnDurationsByUserId(buildTurnDurationMap(rawEventsRef.current));
     setMessages((current) => appendEvent(current, event));
     void persistEvents(rawEventsRef.current);
   }, [persistEvents]);
@@ -153,8 +195,17 @@ export function ChatView({ connection, sessionId, onBack, onDisconnected }: Chat
   }, [loadHistory]);
 
   const displayRows = useMemo(
-    () => buildDisplayRows(messages, { compactAiOutput, expandedTurnKeys }),
-    [compactAiOutput, expandedTurnKeys, messages],
+    () => buildDisplayRows(messages, {
+      compactAiOutput,
+      expandedTurnKeys,
+      turnDurationsByUserId,
+    }),
+    [compactAiOutput, expandedTurnKeys, messages, turnDurationsByUserId],
+  );
+
+  const running = useMemo(
+    () => sending || hasActiveTurn(rawEventsRef.current),
+    [rawEventsRevision, sending],
   );
 
   const streamTick = useMemo(() => {
@@ -203,25 +254,48 @@ export function ChatView({ connection, sessionId, onBack, onDisconnected }: Chat
     )));
   }, []);
 
-  const handleSend = async (event: FormEvent) => {
-    event.preventDefault();
-    const text = prompt.trim();
-    if (!text) return;
+  const handleComposerSend = useCallback(async (text: string, inputPayload: MobileInputPayload) => {
     setSending(true);
     setError(null);
     try {
-      await sendSessionMessage(connection, sessionId, text);
-      setPrompt('');
+      await sendSessionMessage(connection, sessionId, text, inputPayload);
     } catch (err) {
       setError(String(err));
+      throw err;
     } finally {
       setSending(false);
     }
-  };
+  }, [connection, sessionId]);
+
+  const handleComposerStop = useCallback(async () => {
+    setError(null);
+    try {
+      await interruptSession(connection, sessionId);
+    } catch (err) {
+      setError(String(err));
+      throw err;
+    }
+  }, [connection, sessionId]);
+
+  const handleSettingsChange = useCallback(async (settings: MobileSessionSettingsPatch) => {
+    setError(null);
+    try {
+      const nextSession = await updateSessionSettings(connection, sessionId, settings);
+      setSession(nextSession);
+    } catch (err) {
+      setError(String(err));
+      throw err;
+    }
+  }, [connection, sessionId]);
 
   const handlePermission = async (requestId: string, allow: boolean) => {
     try {
-      await respondPermission(connection, sessionId, requestId, { behavior: allow ? 'allow' : 'deny' });
+      await respondPermission(
+        connection,
+        sessionId,
+        requestId,
+        buildMobilePermissionResponse(session.agent_kind, allow),
+      );
       setMessages((current) => current.filter((message) => (
         message.kind !== 'permission' || message.requestId !== requestId
       )));
@@ -430,8 +504,17 @@ export function ChatView({ connection, sessionId, onBack, onDisconnected }: Chat
       return (
         <CompactProcessToggle
           expanded={expandedTurnKeys.has(row.turnKey)}
+          durationMs={row.durationMs}
           onToggle={() => toggleTurnExpanded(row.turnKey)}
         />
+      );
+    }
+
+    if (row.kind === 'thinking') {
+      return (
+        <div data-message-row className="flex w-full justify-start pl-1">
+          <ThinkingGroupRow messages={row.messages} />
+        </div>
       );
     }
 
@@ -484,10 +567,7 @@ export function ChatView({ connection, sessionId, onBack, onDisconnected }: Chat
           <ArrowLeft className="h-4 w-4" />
         </button>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">会话</div>
-          <div className="text-xs text-muted-foreground">
-            {offline ? '电脑端离线' : connected ? '已连接' : '连接中…'}
-          </div>
+          <div className="truncate text-sm font-medium">{session.title || '会话'}</div>
         </div>
       </header>
 
@@ -510,7 +590,15 @@ export function ChatView({ connection, sessionId, onBack, onDisconnected }: Chat
           )}
         >
           {displayRows.map((row) => (
-            <div key={row.kind === 'single' ? row.message.id : row.kind === 'explore' ? row.id : row.turnKey}>
+            <div
+              key={
+                row.kind === 'single'
+                  ? row.message.id
+                  : row.kind === 'explore' || row.kind === 'thinking'
+                    ? row.id
+                    : row.turnKey
+              }
+            >
               {renderDisplayRow(row)}
             </div>
           ))}
@@ -536,32 +624,19 @@ export function ChatView({ connection, sessionId, onBack, onDisconnected }: Chat
 
         {error && !offline ? <div className="px-4 py-2 text-sm text-destructive">{error}</div> : null}
 
-        <form
-          className="bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3"
-          onSubmit={(event) => void handleSend(event)}
-        >
-          <div className="flex items-end gap-2" style={{ maxWidth: 'var(--content-width)', marginInline: 'auto' }}>
-            <textarea
-              className="min-h-11 flex-1 resize-none rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm leading-relaxed outline-none transition-colors focus:border-primary/60 focus:bg-muted/60"
-              placeholder="发送消息…"
-              rows={1}
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              disabled={offline}
-            />
-            <button
-              type="submit"
-              disabled={sending || !prompt.trim() || !connected || offline}
-              className={cn(
-                'rounded-xl bg-primary p-3 text-primary-foreground transition-opacity',
-                (sending || !prompt.trim() || !connected || offline) && 'opacity-50',
-              )}
-              aria-label="发送"
-            >
-              <Send className="h-4 w-4" />
-            </button>
-          </div>
-        </form>
+        <div className="bg-[linear-gradient(180deg,hsl(var(--background)/0),hsl(var(--background))_24%,hsl(var(--background)))]" style={{ maxWidth: 'var(--content-width)', marginInline: 'auto' }}>
+          <MobileComposer
+            connection={connection}
+            session={session}
+            bootstrap={bootstrap}
+            connected={connected}
+            offline={offline}
+            running={running}
+            onSend={handleComposerSend}
+            onStop={handleComposerStop}
+            onSettingsChange={handleSettingsChange}
+          />
+        </div>
       </div>
 
       {offline ? (

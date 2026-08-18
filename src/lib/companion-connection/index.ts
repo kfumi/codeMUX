@@ -38,6 +38,7 @@ export {
   buildRestUrl,
   buildWsUrl,
   connectionBaseUrl,
+  isHttpUrlBlockedBySecurePage,
   resolveActiveConnection,
   resolveProfileRestUrl,
   resolveProfileWsUrl,

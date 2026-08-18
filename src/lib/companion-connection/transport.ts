@@ -12,6 +12,23 @@ function directBaseUrl(connection: Extract<CompanionConnectionEntry, { type: 'di
   return `${protocol}://${connection.host}:${connection.port}`;
 }
 
+export function isHttpUrlBlockedBySecurePage(url: string, pageProtocol?: string): boolean {
+  const currentProtocol = pageProtocol
+    ?? (typeof window !== 'undefined' ? window.location.protocol : undefined);
+  if (currentProtocol !== 'https:') return false;
+  try {
+    return new URL(url).protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function isConnectionAllowedInCurrentPage(connection: CompanionConnectionEntry): boolean {
+  if (connection.type === 'relay') return true;
+  const baseUrl = connection.type === 'lan' ? connection.baseUrl : directBaseUrl(connection);
+  return !isHttpUrlBlockedBySecurePage(baseUrl);
+}
+
 export function resolveActiveConnection(
   profile: CompanionConnectionProfile,
   reachability: ConnectionReachability = {},
@@ -19,7 +36,7 @@ export function resolveActiveConnection(
   const preferred = profile.preferredConnectionId
     ? profile.connections.find((connection) => connection.id === profile.preferredConnectionId)
     : undefined;
-  if (preferred && reachability[preferred.id] !== false) {
+  if (preferred && reachability[preferred.id] !== false && isConnectionAllowedInCurrentPage(preferred)) {
     return preferred;
   }
 
@@ -27,10 +44,11 @@ export function resolveActiveConnection(
     const candidate = profile.connections.find((connection) => connection.type === type);
     if (!candidate) continue;
     if (reachability[candidate.id] === false) continue;
+    if (!isConnectionAllowedInCurrentPage(candidate)) continue;
     return candidate;
   }
 
-  const fallback = profile.connections[0];
+  const fallback = profile.connections.find(isConnectionAllowedInCurrentPage) ?? profile.connections[0];
   if (!fallback) {
     throw new CompanionConnectionError('No companion connections configured');
   }

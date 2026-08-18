@@ -4,12 +4,50 @@ import { ChevronDown, Compass, Loader2 } from 'lucide-react';
 import type { ChatMessage } from '../../lib/eventToMessages';
 import { buildToolGroupSummary } from '../../lib/toolHeaderSummary';
 import { cn } from '../../lib/utils';
+import { ThinkingGroupRow } from './ThinkingGroupRow';
 
 interface ExploreGroupRowProps {
   toolNames: string[];
   messages: ChatMessage[];
   renderMessage: (message: ChatMessage) => ReactNode;
   active?: boolean;
+}
+
+type ExploreContent =
+  | {
+      kind: 'thinking';
+      id: string;
+      messages: Extract<ChatMessage, { kind: 'reasoning' }>[];
+    }
+  | { kind: 'message'; message: ChatMessage };
+
+function buildExploreContents(messages: ChatMessage[]): ExploreContent[] {
+  const contents: ExploreContent[] = [];
+  let reasoningMessages: Extract<ChatMessage, { kind: 'reasoning' }>[] = [];
+
+  const flushReasoning = () => {
+    if (reasoningMessages.length === 0) {
+      return;
+    }
+    contents.push({
+      kind: 'thinking',
+      id: reasoningMessages[0]?.id ?? `thinking-${contents.length}`,
+      messages: reasoningMessages,
+    });
+    reasoningMessages = [];
+  };
+
+  for (const message of messages) {
+    if (message.kind === 'reasoning') {
+      reasoningMessages.push(message);
+      continue;
+    }
+    flushReasoning();
+    contents.push({ kind: 'message', message });
+  }
+
+  flushReasoning();
+  return contents;
 }
 
 export function ExploreGroupRow({
@@ -20,6 +58,7 @@ export function ExploreGroupRow({
 }: ExploreGroupRowProps) {
   const [open, setOpen] = useState(false);
   const summary = buildToolGroupSummary(toolNames, toolNames.length);
+  const contents = buildExploreContents(messages);
 
   return (
     <div className="w-full py-1">
@@ -49,8 +88,14 @@ export function ExploreGroupRow({
       </button>
       {open ? (
         <div className="mt-2 space-y-2 border-l border-muted-foreground/18 pl-5">
-          {messages.map((message) => (
-            <div key={message.id}>{renderMessage(message)}</div>
+          {contents.map((content) => (
+            <div key={content.kind === 'thinking' ? content.id : content.message.id}>
+              {content.kind === 'thinking' ? (
+                <ThinkingGroupRow messages={content.messages} />
+              ) : (
+                renderMessage(content.message)
+              )}
+            </div>
           ))}
         </div>
       ) : null}

@@ -1,11 +1,14 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
+import { formatElapsed } from '../../lib/turnDuration';
+
 interface CompactProcessToggleProps {
   expanded: boolean;
+  durationMs?: number;
   onToggle: () => void;
 }
 
-export function CompactProcessToggle({ expanded, onToggle }: CompactProcessToggleProps) {
+export function CompactProcessToggle({ expanded, durationMs, onToggle }: CompactProcessToggleProps) {
   return (
     <div className={expanded ? 'pb-2' : 'pb-1'}>
       <button
@@ -16,6 +19,7 @@ export function CompactProcessToggle({ expanded, onToggle }: CompactProcessToggl
         onClick={onToggle}
       >
         <span>已处理</span>
+        {durationMs != null ? <span className="tabular-nums">{formatElapsed(durationMs)}</span> : null}
         {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
       </button>
       {expanded ? <div className="mt-1.5 border-b border-border/40" /> : null}

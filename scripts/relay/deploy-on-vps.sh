@@ -7,6 +7,7 @@ REPO_RELAY="$(cd "$(dirname "$0")" && pwd)"
 echo "==> 安装目录: $RELAY_DIR"
 mkdir -p "$RELAY_DIR"
 cp "$REPO_RELAY/companion-relay.mjs" "$RELAY_DIR/companion-relay.mjs"
+cp "$REPO_RELAY/companion-relay-bridge.mjs" "$RELAY_DIR/companion-relay-bridge.mjs"
 cp "$REPO_RELAY/package.json" "$RELAY_DIR/package.json"
 cd "$RELAY_DIR"
 npm install --omit=dev

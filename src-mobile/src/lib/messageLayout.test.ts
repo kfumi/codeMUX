@@ -45,6 +45,18 @@ describe('buildDisplayRows', () => {
     expect(explore?.kind === 'explore' && explore.toolNames).toEqual(['Read']);
   });
 
+  it('renders a reasoning-only process as a thinking row', () => {
+    const rows = buildDisplayRows([
+      user('u1', 'hi'),
+      reasoning('r1'),
+      assistant('a1', 'done'),
+    ], { compactAiOutput: false, expandedTurnKeys: new Set() });
+
+    expect(rows.map((row) => row.kind)).toEqual(['single', 'thinking', 'single']);
+    const thinking = rows.find((row) => row.kind === 'thinking');
+    expect(thinking?.kind === 'thinking' && thinking.messages.map((message) => message.id)).toEqual(['r1']);
+  });
+
   it('keeps write tools outside explore groups', () => {
     const rows = buildDisplayRows([
       user('u1', 'hi'),
@@ -77,6 +89,21 @@ describe('buildDisplayRows', () => {
     ], { compactAiOutput: true, expandedTurnKeys: new Set(['u1']) });
 
     expect(rows.map((row) => row.kind)).toEqual(['single', 'compact-toggle', 'explore', 'single']);
+  });
+
+  it('passes the completed turn duration to the compact process toggle', () => {
+    const rows = buildDisplayRows([
+      user('u1', 'hi'),
+      reasoning('r1'),
+      assistant('a1', 'done'),
+    ], {
+      compactAiOutput: true,
+      expandedTurnKeys: new Set(),
+      turnDurationsByUserId: new Map([['u1', 12_000]]),
+    });
+
+    const toggle = rows.find((row) => row.kind === 'compact-toggle');
+    expect(toggle?.kind === 'compact-toggle' && toggle.durationMs).toBe(12_000);
   });
 
   it('attaches session summary to the final assistant answer', () => {

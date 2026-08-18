@@ -1733,11 +1733,21 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     expect(payload).toEqual({
       text: 'look at this',
+      attachments: [
+        {
+          type: 'image',
+          name: 'screenshot.png',
+          mediaType: 'image/png',
+          dataUrl: 'data:image/png;base64,abc123',
+          size: undefined,
+        },
+      ],
       images: [
         {
           name: 'screenshot.png',
           mediaType: 'image/png',
           dataUrl: 'data:image/png;base64,abc123',
+          size: undefined,
         },
       ],
     });
@@ -1774,16 +1784,34 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     expect(payload).toEqual({
       text: 'compare these',
+      attachments: [
+        {
+          type: 'image',
+          name: 'first.png',
+          mediaType: 'image/png',
+          dataUrl: 'data:image/png;base64,first',
+          size: undefined,
+        },
+        {
+          type: 'image',
+          name: 'second.jpg',
+          mediaType: 'image/jpeg',
+          dataUrl: 'data:image/jpeg;base64,second',
+          size: undefined,
+        },
+      ],
       images: [
         {
           name: 'first.png',
           mediaType: 'image/png',
           dataUrl: 'data:image/png;base64,first',
+          size: undefined,
         },
         {
           name: 'second.jpg',
           mediaType: 'image/jpeg',
           dataUrl: 'data:image/jpeg;base64,second',
+          size: undefined,
         },
       ],
     });

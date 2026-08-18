@@ -6,7 +6,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
@@ -17,9 +17,11 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::companion::actions::{
-    respond_companion_permission, send_companion_message, send_companion_tool_response,
+    interrupt_companion_session, respond_companion_permission, send_companion_message,
+    send_companion_tool_response, update_companion_settings, CompanionSettingsUpdate,
 };
 use crate::companion::config::build_mobile_bootstrap;
+use crate::companion::context::build_composer_context;
 use crate::companion::desktop_id::get_or_create_desktop_id;
 use crate::companion::offer::build_pairing_offer;
 use crate::companion::pairing::complete_pairing;
@@ -51,6 +53,40 @@ struct PairClaimResponse {
 #[serde(rename_all = "camelCase")]
 struct SendMessageRequest {
     prompt: String,
+    input_payload: Option<serde_json::Value>,
+}
+
+fn has_sendable_input(prompt: &str, input_payload: Option<&serde_json::Value>) -> bool {
+    if !prompt.trim().is_empty() {
+        return true;
+    }
+    let Some(payload) = input_payload else {
+        return false;
+    };
+    if payload
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|text| !text.trim().is_empty())
+    {
+        return true;
+    }
+    ["attachments", "images"].iter().any(|field| {
+        payload
+            .get(*field)
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|items| !items.is_empty())
+    })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionSettingsRequest {
+    agent_kind: String,
+    provider_id: Option<String>,
+    model: Option<String>,
+    reasoning_effort: Option<String>,
+    permission_config: serde_json::Value,
+    plan_mode: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -244,6 +280,9 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{session_id}/events", get(session_events))
         .route("/sessions/{session_id}/messages", post(send_message))
+        .route("/sessions/{session_id}/composer-context", get(composer_context))
+        .route("/sessions/{session_id}/settings", patch(update_session_settings))
+        .route("/sessions/{session_id}/interrupt", post(interrupt_session))
         .route("/projects", get(list_projects))
         .route("/bootstrap", get(bootstrap))
         .route("/permissions/respond", post(permission_respond))
@@ -419,13 +458,75 @@ async fn send_message(
     Json(body): Json<SendMessageRequest>,
 ) -> Result<StatusCode, ApiError> {
     authorize(&ctx, &headers)?;
-    if body.prompt.trim().is_empty() {
+    if !has_sendable_input(&body.prompt, body.input_payload.as_ref()) {
         return Err(ApiError::bad_request("Prompt cannot be empty"));
     }
-    send_companion_message(&ctx.app, &session_id, body.prompt.trim())
+    send_companion_message(
+        &ctx.app,
+        &session_id,
+        body.prompt.trim(),
+        body.input_payload,
+    )
         .await
         .map_err(ApiError::bad_request)?;
     Ok(StatusCode::ACCEPTED)
+}
+
+async fn composer_context(
+    State(ctx): State<ServerContext>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+) -> Result<Json<crate::companion::context::ComposerContext>, ApiError> {
+    authorize(&ctx, &headers)?;
+    let app_state = ctx.app.state::<AppState>();
+    build_composer_context(app_state.inner(), &session_id)
+        .await
+        .map(Json)
+        .map_err(ApiError::bad_request)
+}
+
+async fn update_session_settings(
+    State(ctx): State<ServerContext>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+    Json(body): Json<SessionSettingsRequest>,
+) -> Result<Json<operations::Session>, ApiError> {
+    authorize(&ctx, &headers)?;
+    let agent_kind = AgentKind::from_str(&body.agent_kind)
+        .map_err(ApiError::bad_request)?;
+    let session = update_companion_settings(
+        &ctx.app,
+        &session_id,
+        CompanionSettingsUpdate {
+            agent_kind,
+            provider_id: body.provider_id,
+            model: body.model,
+            reasoning_effort: body.reasoning_effort,
+            permission_config: body.permission_config,
+            plan_mode: body.plan_mode,
+        },
+    )
+    .await
+    .map_err(|error| {
+        if error.contains("正在运行") {
+            ApiError::conflict(error)
+        } else {
+            ApiError::bad_request(error)
+        }
+    })?;
+    Ok(Json(session))
+}
+
+async fn interrupt_session(
+    State(ctx): State<ServerContext>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    authorize(&ctx, &headers)?;
+    interrupt_companion_session(&ctx.app, &session_id)
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn list_projects(
@@ -578,6 +679,13 @@ impl ApiError {
         }
     }
 
+    fn conflict(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            message: message.into(),
+        }
+    }
+
     fn unauthorized(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
@@ -616,4 +724,83 @@ fn parse_listen_addr(listen_address: &str, port: u16) -> Result<SocketAddr, Stri
     format!("{trimmed}:{port}")
         .parse::<SocketAddr>()
         .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{has_sendable_input, SendMessageRequest, SessionSettingsRequest};
+
+    #[test]
+    fn accepts_attachment_only_mobile_messages() {
+        let payload = serde_json::json!({
+            "text": "",
+            "attachments": [{
+                "type": "image",
+                "name": "screen.png",
+                "mediaType": "image/png",
+                "dataUrl": "data:image/png;base64,abc"
+            }]
+        });
+
+        assert!(has_sendable_input("", Some(&payload)));
+    }
+
+    #[test]
+    fn rejects_mobile_messages_without_text_or_model_attachments() {
+        let payload = serde_json::json!({
+            "text": "",
+            "historyAttachments": [{
+                "type": "image",
+                "name": "screen.png"
+            }]
+        });
+
+        assert!(!has_sendable_input("", Some(&payload)));
+    }
+
+    #[test]
+    fn deserializes_mobile_message_input_payload() {
+        let request: SendMessageRequest = serde_json::from_value(serde_json::json!({
+            "prompt": "请分析这张图",
+            "inputPayload": {
+                "text": "请分析这张图",
+                "attachments": [{
+                    "type": "image",
+                    "name": "screen.png",
+                    "mediaType": "image/png",
+                    "dataUrl": "data:image/png;base64,abc"
+                }]
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(request.prompt, "请分析这张图");
+        assert_eq!(
+            request
+                .input_payload
+                .and_then(|payload| payload["attachments"][0]["name"].as_str().map(str::to_string)),
+            Some("screen.png".to_string())
+        );
+    }
+
+    #[test]
+    fn deserializes_atomic_mobile_settings_request() {
+        let request: SessionSettingsRequest = serde_json::from_value(serde_json::json!({
+            "agentKind": "codex",
+            "providerId": "provider-1",
+            "model": "gpt-5",
+            "reasoningEffort": "high",
+            "permissionConfig": {
+                "kind": "codex",
+                "sandboxMode": "workspace-write"
+            },
+            "planMode": "off"
+        }))
+        .unwrap();
+
+        assert_eq!(request.agent_kind, "codex");
+        assert_eq!(request.provider_id.as_deref(), Some("provider-1"));
+        assert_eq!(request.permission_config["kind"], "codex");
+        assert_eq!(request.plan_mode, "off");
+    }
 }

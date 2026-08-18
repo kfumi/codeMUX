@@ -113,6 +113,10 @@
   --surface-1: 0 0% 100%;
   --surface-2: 0 0% 97%;
   --surface-3: 0 0% 92%;
+  --surface-shadow: 0 0% 10%;
+  --surface-shadow-strong: 0 0% 0%;
+  --surface-edge: 0 0% 84%;
+  --surface-glow: 209 99% 40%;
   --codemux-link: 209 99% 40%;
   --codemux-directive-accent: 221 83% 46%;
   --codemux-directive-border: 214 100% 82%;
@@ -142,6 +146,10 @@
   --surface-1: 0 0% 8%;
   --surface-2: 0 0% 11%;
   --surface-3: 0 0% 15%;
+  --surface-shadow: 0 0% 2%;
+  --surface-shadow-strong: 0 0% 0%;
+  --surface-edge: 0 0% 19%;
+  --surface-glow: 209 92% 58%;
   --codemux-link: 211 100% 72%;
   --codemux-directive-accent: 211 100% 72%;
   --codemux-directive-border: 211 68% 43%;

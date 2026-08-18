@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildCompanionOfferUrl,
@@ -21,6 +21,7 @@ import {
   connectionBaseUrl,
   resolveActiveConnection,
 } from './transport';
+import { probeConnectionReachability } from './reachability';
 import type { CompanionConnectionProfile, CompanionOfferV1 } from './types';
 
 const sampleOffer: CompanionOfferV1 = {
@@ -153,6 +154,55 @@ describe('transport resolution', () => {
       'lan:1': true,
     });
     expect(active.type).toBe('lan');
+  });
+
+  it('prefers relay over HTTP LAN from an HTTPS page', () => {
+    const relayProfile: CompanionConnectionProfile = {
+      ...profile,
+      connections: [
+        ...profile.connections,
+        {
+          id: 'relay:1',
+          type: 'relay',
+          endpoint: 'relay.example:443',
+          useTls: true,
+          desktopPublicKeyB64: 'abc',
+        },
+      ],
+    };
+    vi.stubGlobal('window', {
+      location: { protocol: 'https:' },
+      setTimeout,
+      clearTimeout,
+    });
+    try {
+      expect(resolveActiveConnection(relayProfile, {
+        'lan:1': true,
+        'relay:1': true,
+      }).type).toBe('relay');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('does not probe HTTP LAN from an HTTPS page', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('window', {
+      location: { protocol: 'https:' },
+      setTimeout,
+      clearTimeout,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await expect(probeConnectionReachability({
+        id: 'lan:secure-page',
+        type: 'lan',
+        baseUrl: 'http://198.18.0.1:9241',
+      })).resolves.toBe(false);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('builds REST and WS URLs for lan', () => {

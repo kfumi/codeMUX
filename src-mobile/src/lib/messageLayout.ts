@@ -3,12 +3,14 @@ import { isFileMutationTool } from './toolHeaderSummary';
 
 export type DisplayRow =
   | { kind: 'single'; message: ChatMessage; sessionSummaries?: SessionSummaryDiff[] }
+  | { kind: 'thinking'; id: string; messages: Extract<ChatMessage, { kind: 'reasoning' }>[] }
   | { kind: 'explore'; id: string; messages: ChatMessage[]; toolNames: string[] }
-  | { kind: 'compact-toggle'; turnKey: string; processCount: number };
+  | { kind: 'compact-toggle'; turnKey: string; processCount: number; durationMs?: number };
 
 export interface BuildDisplayRowsOptions {
   compactAiOutput: boolean;
   expandedTurnKeys: ReadonlySet<string>;
+  turnDurationsByUserId?: ReadonlyMap<string, number>;
 }
 
 /** Boundary markers that must stay visible outside compact process folds. */
@@ -92,6 +94,17 @@ function groupExploreRows(messages: ChatMessage[]): DisplayRow[] {
     const toolNames = buffer
       .filter((message): message is Extract<ChatMessage, { kind: 'tool' }> => message.kind === 'tool')
       .map((message) => message.name);
+    if (toolNames.length === 0) {
+      rows.push({
+        kind: 'thinking',
+        id: buffer[0]?.id ?? `thinking-${rows.length}`,
+        messages: buffer.filter(
+          (message): message is Extract<ChatMessage, { kind: 'reasoning' }> => message.kind === 'reasoning',
+        ),
+      });
+      buffer = [];
+      return;
+    }
     rows.push({
       kind: 'explore',
       id: buffer[0]?.id ?? `explore-${rows.length}`,
@@ -176,7 +189,12 @@ function emitTurnRows(
     const expanded = options.expandedTurnKeys.has(turnKey);
 
     if (options.compactAiOutput && process.length > 0) {
-      rows.push({ kind: 'compact-toggle', turnKey, processCount: process.length });
+      rows.push({
+        kind: 'compact-toggle',
+        turnKey,
+        processCount: process.length,
+        durationMs: options.turnDurationsByUserId?.get(turnKey),
+      });
       if (expanded) {
         rows.push(...groupExploreRows(process));
       }

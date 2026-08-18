@@ -1005,6 +1005,46 @@ pub fn update_session_agent_kind(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn update_session_settings(
+    conn: &mut Connection,
+    session_id: &str,
+    agent_kind: AgentKind,
+    permission_config: &str,
+    plan_mode: &str,
+    provider_id: Option<&str>,
+    model: Option<&str>,
+    reasoning_effort: Option<&str>,
+) -> Result<()> {
+    let transaction = conn.transaction()?;
+    let now = Utc::now().to_rfc3339();
+    let changed = transaction.execute(
+        "UPDATE sessions SET
+            agent_kind = ?1,
+            permission_config = ?2,
+            plan_mode = ?3,
+            provider_id = ?4,
+            model = ?5,
+            reasoning_effort = COALESCE(?6, reasoning_effort, 'high'),
+            updated_at = ?7
+         WHERE id = ?8",
+        params![
+            agent_kind.as_str(),
+            permission_config,
+            plan_mode,
+            provider_id,
+            model,
+            reasoning_effort,
+            now,
+            session_id,
+        ],
+    )?;
+    if changed == 0 {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+    transaction.commit()
+}
+
 pub fn insert_session_runtime_switch(
     conn: &Connection,
     session_id: &str,
@@ -1251,11 +1291,6 @@ pub fn insert_paired_device(
     Ok(())
 }
 
-pub fn delete_all_paired_devices(conn: &Connection) -> Result<()> {
-    conn.execute("DELETE FROM companion_paired_devices", [])?;
-    Ok(())
-}
-
 pub fn verify_pairing_token(conn: &Connection, token: &str) -> Result<Option<PairedDevice>> {
     let token_hash = hash_pairing_token(token);
     let mut stmt = conn.prepare(
@@ -1366,8 +1401,8 @@ mod tests {
         insert_session_runtime_switch, list_native_sessions_for_cleanup,
         session_has_runtime_switch, set_session_pinned, set_session_read_only, unarchive_session,
         update_session_agent_kind, update_session_provider, update_session_reasoning_effort,
-        upsert_agent_session_mapping, upsert_session_kind_model_selection, ImportedSessionSnapshot,
-        SessionKindModelSelection,
+        update_session_settings, upsert_agent_session_mapping, upsert_session_kind_model_selection,
+        ImportedSessionSnapshot, SessionKindModelSelection,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -1755,6 +1790,37 @@ mod tests {
 
         let sessions = get_all_sessions(&conn).unwrap();
         assert_eq!(sessions[0].reasoning_effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn updates_all_session_settings_in_one_transaction() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, agent_kind, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["session-1", "Test", "claude_code", "agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+
+        update_session_settings(
+            &mut conn,
+            "session-1",
+            AgentKind::Codex,
+            r#"{"kind":"codex","sandboxMode":"workspace-write"}"#,
+            "on",
+            Some("provider-1"),
+            Some("gpt-5"),
+            Some("medium"),
+        )
+        .unwrap();
+
+        let session = get_session(&conn, "session-1").unwrap().unwrap();
+        assert_eq!(session.agent_kind, AgentKind::Codex);
+        assert_eq!(session.provider_id.as_deref(), Some("provider-1"));
+        assert_eq!(session.model.as_deref(), Some("gpt-5"));
+        assert_eq!(session.reasoning_effort.as_deref(), Some("medium"));
+        assert_eq!(session.permission_config.as_deref(), Some(r#"{"kind":"codex","sandboxMode":"workspace-write"}"#));
+        assert_eq!(session.plan_mode.as_deref(), Some("on"));
     }
 
     #[test]

@@ -8,6 +8,7 @@ if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
 New-Item -ItemType Directory -Path $staging | Out-Null
 
 Copy-Item (Join-Path $Root 'scripts\companion-relay.mjs') (Join-Path $staging 'companion-relay.mjs')
+Copy-Item (Join-Path $Root 'scripts\companion-relay-bridge.mjs') (Join-Path $staging 'companion-relay-bridge.mjs')
 Copy-Item (Join-Path $Root 'scripts\relay\package.json') (Join-Path $staging 'package.json')
 Copy-Item (Join-Path $Root 'scripts\relay\deploy-on-vps.sh') (Join-Path $staging 'deploy-on-vps.sh')
 Copy-Item (Join-Path $Root 'scripts\relay\baota-install.sh') (Join-Path $staging 'baota-install.sh')

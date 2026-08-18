@@ -45,11 +45,26 @@ impl RelayTransportState {
 pub struct RelayTransportController {
     stop_tx: mpsc::Sender<()>,
     state: RelayTransportState,
+    data_tasks: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
+}
+
+async fn abort_data_tasks(
+    data_tasks: &Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
+) {
+    let handles = {
+        let mut tasks = data_tasks.lock().await;
+        tasks.drain().map(|(_, handle)| handle).collect::<Vec<_>>()
+    };
+    for handle in handles {
+        handle.abort();
+        let _ = handle.await;
+    }
 }
 
 impl RelayTransportController {
     pub async fn stop(self) {
         let _ = self.stop_tx.send(()).await;
+        abort_data_tasks(&self.data_tasks).await;
         self.state.set(RelayConnectionState::Disabled).await;
     }
 }
@@ -57,9 +72,18 @@ impl RelayTransportController {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ControlMessage {
-    Sync { connection_ids: Vec<String> },
-    Connected { connection_id: String },
-    Disconnected { connection_id: String },
+    Sync {
+        #[serde(rename = "connectionIds")]
+        connection_ids: Vec<String>,
+    },
+    Connected {
+        #[serde(rename = "connectionId")]
+        connection_id: String,
+    },
+    Disconnected {
+        #[serde(rename = "connectionId")]
+        connection_id: String,
+    },
     Ping,
     Pong,
 }
@@ -92,6 +116,7 @@ pub fn start_relay_transport(
         Arc::new(Mutex::new(HashMap::new()));
 
     let state_for_task = state.clone();
+    let data_tasks_for_task = data_tasks.clone();
     tokio::spawn(async move {
         let mut attempt = 0u32;
         loop {
@@ -115,7 +140,7 @@ pub fn start_relay_transport(
                     state_for_task.set(RelayConnectionState::Connected).await;
                     info!(target: "companion", "Relay control connected: {}", control_url);
                     let (mut write, mut read) = ws.split();
-                    let data_tasks_for_read = data_tasks.clone();
+                    let data_tasks_for_read = data_tasks_for_task.clone();
                     let endpoint_for_data = endpoint.clone();
                     let server_id_for_data = server_id.clone();
                     let companion_port_for_data = companion_port;
@@ -196,7 +221,11 @@ pub fn start_relay_transport(
         state_for_task.set(RelayConnectionState::Disabled).await;
     });
 
-    RelayTransportController { stop_tx, state }
+    RelayTransportController {
+        stop_tx,
+        state,
+        data_tasks,
+    }
 }
 
 async fn spawn_data_socket(
@@ -259,5 +288,47 @@ async fn spawn_data_socket(
     let mut tasks = data_tasks.lock().await;
     if let Some(previous) = tasks.insert(connection_id, handle) {
         previous.abort();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_camel_case_relay_control_fields() {
+        let connected = serde_json::from_str::<ControlMessage>(
+            r#"{"type":"connected","connectionId":"connection-1"}"#,
+        )
+        .expect("connected control message should parse");
+        assert!(matches!(
+            connected,
+            ControlMessage::Connected { connection_id } if connection_id == "connection-1"
+        ));
+
+        let sync = serde_json::from_str::<ControlMessage>(
+            r#"{"type":"sync","connectionIds":["connection-1"]}"#,
+        )
+        .expect("sync control message should parse");
+        assert!(matches!(
+            sync,
+            ControlMessage::Sync { connection_ids } if connection_ids == vec!["connection-1"]
+        ));
+    }
+
+    #[tokio::test]
+    async fn aborts_all_data_tasks() {
+        let data_tasks: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        data_tasks.lock().await.insert(
+            "connection-1".to_string(),
+            tokio::spawn(async {
+                std::future::pending::<()>().await;
+            }),
+        );
+
+        abort_data_tasks(&data_tasks).await;
+
+        assert!(data_tasks.lock().await.is_empty());
     }
 }

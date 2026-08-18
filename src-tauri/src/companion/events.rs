@@ -94,12 +94,15 @@ fn maybe_finish_turn_and_drain_queue(
     if session_id.is_empty() {
         return;
     }
+    let companion_state = app.state::<CompanionState>();
     let event_type = event.get("type").and_then(|item| item.as_str()).unwrap_or("");
+    if event_type == "user_message" {
+        companion_state.mark_turn_active(session_id);
+    }
     if event_type != "turn_finished" {
         return;
     }
 
-    let companion_state = app.state::<CompanionState>();
     let queued = companion_state.finish_turn(session_id);
     if queued.is_empty() {
         return;
@@ -108,8 +111,15 @@ fn maybe_finish_turn_and_drain_queue(
     let app = app.clone();
     let session_id = session_id.to_string();
     tauri::async_runtime::spawn(async move {
-        for prompt in queued {
-            if let Err(error) = send_companion_message(&app, &session_id, &prompt).await {
+        for message in queued {
+            if let Err(error) = send_companion_message(
+                &app,
+                &session_id,
+                &message.prompt,
+                message.input_payload,
+            )
+            .await
+            {
                 warn!(
                     target: "companion",
                     "Failed to dispatch queued companion message for session_id={}: {}",

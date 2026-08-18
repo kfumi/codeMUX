@@ -8,6 +8,7 @@ cd "$INSTALL_DIR"
 
 echo "==> Relay 安装目录: $(pwd)"
 test -f companion-relay.mjs || { echo "缺少 companion-relay.mjs"; exit 1; }
+test -f companion-relay-bridge.mjs || { echo "缺少 companion-relay-bridge.mjs"; exit 1; }
 
 if ! command -v node >/dev/null 2>&1; then
   echo "请先在宝塔软件商店安装 Node.js 20+"

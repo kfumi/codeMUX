@@ -3,6 +3,7 @@ import {
   buildRestUrl,
   companionHttpRequest,
   isRelayConnection,
+  isHttpUrlBlockedBySecurePage,
   normalizeStoredConnection,
   resolveActiveConnection,
   resolveProfileWsUrl,
@@ -12,6 +13,7 @@ import {
 } from '@shared/lib/companion-connection';
 
 import type { CompanionConnection } from './storage';
+import type { MobilePermissionResponse } from './permissionResponse';
 
 export interface MobileBootstrap {
   defaultAgentKind: string;
@@ -53,8 +55,60 @@ export interface MobileSession {
   provider_id?: string | null;
   model?: string | null;
   reasoning_effort?: string | null;
+  permission_config?: string | null;
+  plan_mode?: string | null;
   project_id?: string | null;
+  origin?: string;
+  is_read_only?: boolean;
+  is_archived?: boolean;
+  is_pinned?: boolean;
   updated_at: string;
+}
+
+export type MobileAgentKind = 'claude_code' | 'codex' | 'opencode';
+
+export interface MobileInputAttachment {
+  type: 'image';
+  name: string;
+  mediaType: string;
+  dataUrl: string;
+  size?: number;
+}
+
+export interface MobileInputPayload {
+  text: string;
+  images?: Array<Omit<MobileInputAttachment, 'type'>>;
+  attachments?: MobileInputAttachment[];
+}
+
+export interface MobileComposerFile {
+  name: string;
+  path: string;
+  kind: 'file' | 'directory';
+}
+
+export interface MobileComposerCommand {
+  name: string;
+  description: string;
+  category: 'session' | 'builtin' | 'skill';
+  handler: 'local' | 'prompt';
+  prompt?: string | null;
+  filePath?: string | null;
+  scope?: 'project' | 'global' | null;
+}
+
+export interface MobileComposerContext {
+  files: MobileComposerFile[];
+  commands: MobileComposerCommand[];
+}
+
+export interface MobileSessionSettingsPatch {
+  agentKind: MobileAgentKind;
+  providerId?: string | null;
+  model?: string | null;
+  reasoningEffort?: string | null;
+  permissionConfig: Record<string, unknown>;
+  planMode: 'on' | 'off';
 }
 
 export interface MobileProject {
@@ -162,6 +216,10 @@ function relayProfileFromOffer(offer: CompanionOfferV1): CompanionConnectionProf
   };
 }
 
+export function shouldAttemptDirectPairing(baseUrl: string, pageProtocol?: string): boolean {
+  return Boolean(baseUrl.trim()) && !isHttpUrlBlockedBySecurePage(baseUrl, pageProtocol);
+}
+
 export async function claimPairing(
   baseUrl: string,
   code: string,
@@ -205,7 +263,7 @@ export async function claimPairingResolved(
   const offer = input.offer;
   if (offer?.relay && offer.desktopPublicKeyB64) {
     try {
-      if (input.baseUrl) {
+      if (shouldAttemptDirectPairing(input.baseUrl)) {
         const result = await claimPairing(input.baseUrl, input.pairingCode, name);
         return { ...result, usedRelay: false };
       }
@@ -277,16 +335,51 @@ export async function fetchSessionEvents(
   });
 }
 
+export async function fetchComposerContext(
+  connection: CompanionConnection,
+  sessionId: string,
+): Promise<MobileComposerContext> {
+  const profile = asProfile(connection);
+  return requestJson<MobileComposerContext>(profile, `/api/sessions/${sessionId}/composer-context`, {
+    headers: authHeaders(profile.token),
+  });
+}
+
 export async function sendSessionMessage(
   connection: CompanionConnection,
   sessionId: string,
   prompt: string,
+  inputPayload?: MobileInputPayload,
 ): Promise<void> {
   const profile = asProfile(connection);
   await requestVoid(profile, `/api/sessions/${sessionId}/messages`, {
     method: 'POST',
     headers: authHeaders(profile.token),
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, inputPayload }),
+  });
+}
+
+export async function updateSessionSettings(
+  connection: CompanionConnection,
+  sessionId: string,
+  settings: MobileSessionSettingsPatch,
+): Promise<MobileSession> {
+  const profile = asProfile(connection);
+  return requestJson<MobileSession>(profile, `/api/sessions/${sessionId}/settings`, {
+    method: 'PATCH',
+    headers: authHeaders(profile.token),
+    body: JSON.stringify(settings),
+  });
+}
+
+export async function interruptSession(
+  connection: CompanionConnection,
+  sessionId: string,
+): Promise<void> {
+  const profile = asProfile(connection);
+  await requestVoid(profile, `/api/sessions/${sessionId}/interrupt`, {
+    method: 'POST',
+    headers: authHeaders(profile.token),
   });
 }
 
@@ -326,7 +419,7 @@ export async function respondPermission(
   connection: CompanionConnection,
   sessionId: string,
   requestId: string,
-  response: Record<string, unknown>,
+  response: MobilePermissionResponse,
 ): Promise<void> {
   const profile = asProfile(connection);
   await requestVoid(profile, '/api/permissions/respond', {

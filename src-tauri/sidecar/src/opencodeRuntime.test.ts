@@ -821,7 +821,7 @@ describe('OpenCodeRuntime', () => {
     expect(client.createSession).not.toHaveBeenCalled();
   });
 
-  it('normalizes conflicting prompt and payload text using payload text as the source of truth', async () => {
+  it('normalizes conflicting prompt and payload text using the command prompt as the source of truth', async () => {
     const { port, client } = createPort();
     const runtime = new OpenCodeRuntime(createConfig(), port);
     await runtime.start();
@@ -831,8 +831,12 @@ describe('OpenCodeRuntime', () => {
 
     expect(client.prompt).toHaveBeenCalledWith({
       sessionId: 'opencode-new',
-      prompt: 'payload text',
-      inputPayload,
+      prompt: 'prompt text',
+      inputPayload: {
+        text: 'prompt text',
+        attachments: [],
+        images: [],
+      },
       images: [],
       provider: 'codemux-openai',
       model: 'gpt-5',
@@ -935,8 +939,28 @@ describe('OpenCodeRuntime', () => {
     expect(client.prompt).toHaveBeenCalledWith({
       sessionId: 'opencode-new',
       prompt: 'hello',
-      inputPayload,
-      images: inputPayload.images,
+      inputPayload: {
+        text: 'hello',
+        attachments: [{
+          type: 'image',
+          name: 'diagram.png',
+          mediaType: 'image/png',
+          dataUrl: 'data:image/png;base64,abc',
+          size: undefined,
+        }],
+        images: [{
+          name: 'diagram.png',
+          mediaType: 'image/png',
+          dataUrl: 'data:image/png;base64,abc',
+          size: undefined,
+        }],
+      },
+      images: [{
+        name: 'diagram.png',
+        mediaType: 'image/png',
+        dataUrl: 'data:image/png;base64,abc',
+        size: undefined,
+      }],
       provider: 'codemux-openai',
       model: 'gpt-5',
       agent: 'build',

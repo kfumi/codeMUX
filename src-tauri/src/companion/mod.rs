@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod config;
+pub mod context;
 pub mod desktop_id;
 pub mod e2ee;
 pub mod events;

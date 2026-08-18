@@ -18,6 +18,8 @@ interface HttpTunnelResponse {
   body: string;
 }
 
+const RELAY_HANDSHAKE_TIMEOUT_MS = 5_000;
+
 export class RelayTunnelClient {
   private socket: WebSocket | null = null;
   private channel = new ClientChannel();
@@ -58,25 +60,55 @@ export class RelayTunnelClient {
       const socket = new WebSocket(url);
       this.socket = socket;
       socket.binaryType = 'arraybuffer';
+      let settled = false;
+      let handshakeTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
+
+      const clearHandshakeTimer = () => {
+        if (handshakeTimer !== undefined) {
+          globalThis.clearTimeout(handshakeTimer);
+          handshakeTimer = undefined;
+        }
+      };
 
       const fail = (error: Error) => {
-        socket.close();
+        if (settled) return;
+        settled = true;
+        clearHandshakeTimer();
+        try {
+          socket.close();
+        } catch {
+          // Ignore close errors while failing the handshake.
+        }
         reject(error);
       };
 
+      const succeed = () => {
+        if (settled) return;
+        settled = true;
+        clearHandshakeTimer();
+        resolve();
+      };
+
+      handshakeTimer = globalThis.setTimeout(() => {
+        fail(new Error('Relay handshake timed out'));
+      }, RELAY_HANDSHAKE_TIMEOUT_MS);
+
       socket.onopen = () => {
-        socket.send(this.channel.createHello());
+        if (settled) return;
+        try {
+          socket.send(this.channel.createHello());
+        } catch (error) {
+          fail(error instanceof Error ? error : new Error(String(error)));
+        }
       };
 
       socket.onmessage = (event) => {
         if (typeof event.data === 'string') {
-          if (!this.channel.isOpen()) {
-            try {
-              this.channel.handleReady(event.data, this.connection.desktopPublicKeyB64);
-              resolve();
-            } catch (error) {
-              fail(error instanceof Error ? error : new Error(String(error)));
-            }
+          try {
+            this.channel.handleReady(event.data, this.connection.desktopPublicKeyB64);
+            succeed();
+          } catch (error) {
+            fail(error instanceof Error ? error : new Error(String(error)));
           }
           return;
         }
@@ -101,6 +133,11 @@ export class RelayTunnelClient {
 
       socket.onclose = () => {
         this.socket = null;
+        if (!settled) {
+          settled = true;
+          clearHandshakeTimer();
+          reject(new Error('Relay connection closed before handshake'));
+        }
         for (const waiter of this.pending.values()) {
           waiter.reject(new Error('Relay connection closed'));
         }

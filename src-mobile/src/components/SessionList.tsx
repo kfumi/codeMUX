@@ -12,7 +12,7 @@ import { cn } from '../lib/utils';
 
 interface SessionListProps {
   connection: CompanionConnection;
-  onOpenSession: (sessionId: string) => void;
+  onOpenSession: (session: MobileSession) => void;
   onDisconnected: (reason?: string) => void;
 }
 
@@ -32,7 +32,7 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
     })();
   }, [onDisconnected]);
 
-  const refreshRef = useRef<() => Promise<void>>(async () => {});
+  const refreshRef = useRef<() => Promise<MobileSession[]>>(async () => []);
 
   const {
     offline,
@@ -47,14 +47,16 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
     },
   });
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<MobileSession[]> => {
     setLoading(true);
     setError(null);
+    let nextSessions: MobileSession[] = [];
     try {
-      const [nextSessions, nextProjects] = await Promise.all([
+      const [loadedSessions, nextProjects] = await Promise.all([
         listSessions(connection),
         listProjects(connection),
       ]);
+      nextSessions = loadedSessions;
       setSessions(nextSessions);
       setProjects(nextProjects);
       await cacheSessionList({
@@ -69,12 +71,13 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
     } catch (err) {
       if (isAuthError(err)) {
         handleAuthFailure();
-        return;
+        return [];
       }
       reportUnreachable(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
+    return nextSessions;
   }, [connection, handleAuthFailure, reportUnreachable]);
 
   refreshRef.current = refresh;
@@ -150,7 +153,7 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
                 key={session.id}
                 type="button"
                 className="flex w-full items-center justify-between rounded-xl border border-border/60 bg-[hsl(var(--surface-2))] px-4 py-3 text-left transition-colors hover:bg-muted/40"
-                onClick={() => onOpenSession(session.id)}
+                onClick={() => onOpenSession(session)}
               >
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium">{session.title}</div>
@@ -174,7 +177,10 @@ export function SessionList({ connection, onOpenSession, onDisconnected }: Sessi
         open={createOpen && !offline}
         onClose={() => setCreateOpen(false)}
         onCreated={(sessionId) => {
-          void refresh().then(() => onOpenSession(sessionId));
+          void refresh().then((nextSessions) => {
+            const created = nextSessions.find((session) => session.id === sessionId);
+            if (created) onOpenSession(created);
+          });
         }}
       />
 

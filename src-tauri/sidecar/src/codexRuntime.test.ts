@@ -769,7 +769,7 @@ describe('CodexSessionRuntime', () => {
           ? event.events
           : [event])
         .filter((event) => ['content_started', 'text_delta', 'reasoning_delta', 'content_finished'].includes(event.type))
-        .map(({ event_id: _eventId, ...event }) => event);
+        .map(({ event_id: _eventId, timestamp: _timestamp, ...event }) => event);
 
       expect(streamEvents).toEqual([
         {
@@ -841,7 +841,8 @@ describe('CodexSessionRuntime', () => {
       const emittedEvents = writes
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
-        .map((line) => JSON.parse(line));
+        .map((line) => JSON.parse(line))
+        .map(({ timestamp: _timestamp, ...event }) => event);
 
       expect(emittedEvents).toEqual([
         {
@@ -898,7 +899,8 @@ describe('CodexSessionRuntime', () => {
       const emittedEvents = writes
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
-        .map((line) => JSON.parse(line));
+        .map((line) => JSON.parse(line))
+        .map(({ timestamp: _timestamp, ...event }) => event);
 
       expect(emittedEvents).toEqual([
         {
@@ -978,7 +980,8 @@ describe('CodexSessionRuntime', () => {
       const emittedEvents = writes
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
-        .map((line) => JSON.parse(line));
+        .map((line) => JSON.parse(line))
+        ;
 
       expect(emittedEvents).toEqual([
         expect.objectContaining({
@@ -1601,7 +1604,8 @@ describe('CodexSessionRuntime', () => {
       const emittedEvents = writes
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
-        .map((line) => JSON.parse(line));
+        .map((line) => JSON.parse(line))
+        .map(({ timestamp: _timestamp, ...event }) => event);
 
       expect(emittedEvents).toEqual([
         {

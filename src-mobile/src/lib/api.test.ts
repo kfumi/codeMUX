@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { ApiRequestError, isAuthError, providerSupportsAgent, resolveDefaultProvider, type MobileBootstrap } from './api';
+import {
+  ApiRequestError,
+  isAuthError,
+  providerSupportsAgent,
+  resolveDefaultProvider,
+  shouldAttemptDirectPairing,
+  type MobileBootstrap,
+} from './api';
 
 const bootstrap: MobileBootstrap = {
   defaultAgentKind: 'claude_code',
@@ -69,6 +76,92 @@ describe('request helpers', () => {
     )).resolves.toBeUndefined();
     globalThis.fetch = originalFetch;
   });
+
+  it('sends input payload images with the mobile message', async () => {
+    const originalFetch = globalThis.fetch;
+    let requestBody = '';
+    globalThis.fetch = async (_input, init) => {
+      requestBody = String(init?.body ?? '');
+      return new Response(null, { status: 202 });
+    };
+
+    const { sendSessionMessage } = await import('./api');
+    await sendSessionMessage(
+      {
+        desktopId: 'desktop-1',
+        deviceId: 'device',
+        token: 'token',
+        connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
+      },
+      'session-1',
+      '请查看这张图',
+      {
+        text: '请查看这张图',
+        attachments: [{
+          type: 'image',
+          name: 'screen.png',
+          mediaType: 'image/png',
+          dataUrl: 'data:image/png;base64,abc',
+        }],
+      },
+    );
+
+    expect(JSON.parse(requestBody)).toMatchObject({
+      prompt: '请查看这张图',
+      inputPayload: {
+        text: '请查看这张图',
+        attachments: [{
+          type: 'image',
+          name: 'screen.png',
+          mediaType: 'image/png',
+          dataUrl: 'data:image/png;base64,abc',
+        }],
+      },
+    });
+    globalThis.fetch = originalFetch;
+  });
+
+  it('patches all session settings atomically', async () => {
+    const originalFetch = globalThis.fetch;
+    let requestMethod = '';
+    let requestBody = '';
+    globalThis.fetch = async (_input, init) => {
+      requestMethod = init?.method ?? '';
+      requestBody = String(init?.body ?? '');
+      return Response.json({
+        id: 'session-1',
+        title: 'Test',
+        agent_kind: 'codex',
+        updated_at: '2026-08-18T00:00:00Z',
+      });
+    };
+
+    const { updateSessionSettings } = await import('./api');
+    await expect(updateSessionSettings(
+      {
+        desktopId: 'desktop-1',
+        deviceId: 'device',
+        token: 'token',
+        connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
+      },
+      'session-1',
+      {
+        agentKind: 'codex',
+        providerId: 'provider-1',
+        model: 'gpt-5',
+        reasoningEffort: 'high',
+        permissionConfig: { kind: 'codex', sandboxMode: 'danger-full-access' },
+        planMode: 'off',
+      },
+    )).resolves.toMatchObject({ agent_kind: 'codex' });
+    expect(requestMethod).toBe('PATCH');
+    expect(JSON.parse(requestBody)).toMatchObject({
+      agentKind: 'codex',
+      model: 'gpt-5',
+      planMode: 'off',
+    });
+    globalThis.fetch = originalFetch;
+  });
 });
 
 describe('isAuthError', () => {
@@ -84,6 +177,14 @@ describe('formatPairingClaimError', () => {
     expect(formatPairingClaimError(new RequestError(400, 'Invalid or expired pairing code'))).toBe(
       '配对码无效或已过期，请让桌面刷新二维码',
     );
+  });
+});
+
+describe('pairing transport selection', () => {
+  it('skips HTTP desktop pairing from an HTTPS page', () => {
+    expect(shouldAttemptDirectPairing('http://198.18.0.1:9241', 'https:')).toBe(false);
+    expect(shouldAttemptDirectPairing('https://198.18.0.1:9241', 'https:')).toBe(true);
+    expect(shouldAttemptDirectPairing('http://198.18.0.1:9241', 'http:')).toBe(true);
   });
 });
 

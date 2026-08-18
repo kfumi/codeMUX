@@ -418,7 +418,7 @@ pub async fn switch_session_agent_kind(
     Ok(updated)
 }
 
-async fn cleanup_native_sessions_best_effort(
+pub(crate) async fn cleanup_native_sessions_best_effort(
     app: &AppHandle,
     state: &AppState,
     agent_state: &AgentState,

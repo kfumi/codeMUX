@@ -23,7 +23,7 @@ type Screen =
   | { kind: 'boot' }
   | { kind: 'pairing'; notice?: string | null; parsedPairing?: ParsedPairingInput | null }
   | { kind: 'sessions'; connection: CompanionConnection }
-  | { kind: 'chat'; connection: CompanionConnection; sessionId: string };
+  | { kind: 'chat'; connection: CompanionConnection; session: import('./lib/api').MobileSession };
 
 function clearOfferFromUrl() {
   if (!window.location.hash.includes('offer=')) return;
@@ -113,7 +113,7 @@ function App() {
     return (
       <ChatView
         connection={screen.connection}
-        sessionId={screen.sessionId}
+        session={screen.session}
         onBack={() => setScreen({ kind: 'sessions', connection: screen.connection })}
         onDisconnected={(reason) => setScreen({ kind: 'pairing', parsedPairing: null, notice: reason ?? null })}
       />
@@ -123,7 +123,7 @@ function App() {
   return (
     <SessionList
       connection={screen.connection}
-      onOpenSession={(sessionId) => setScreen({ kind: 'chat', connection: screen.connection, sessionId })}
+      onOpenSession={(session) => setScreen({ kind: 'chat', connection: screen.connection, session })}
       onDisconnected={(reason) => setScreen({ kind: 'pairing', parsedPairing: null, notice: reason ?? null })}
     />
   );

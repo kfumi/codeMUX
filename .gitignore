@@ -32,3 +32,4 @@ src-tauri/target/
 out/
 .superpowers/
 log/
+*.zip

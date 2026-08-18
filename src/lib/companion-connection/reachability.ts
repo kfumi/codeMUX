@@ -3,7 +3,7 @@ import type {
   CompanionConnectionProfile,
   ConnectionReachability,
 } from './types';
-import { buildRestUrl } from './transport';
+import { buildRestUrl, isHttpUrlBlockedBySecurePage } from './transport';
 
 const HEALTH_TIMEOUT_MS = 3000;
 
@@ -29,6 +29,9 @@ export async function probeConnectionReachability(
     return true;
   }
   const healthUrl = buildRestUrl(connection, '/api/health');
+  if (isHttpUrlBlockedBySecurePage(healthUrl)) {
+    return false;
+  }
   return probeHealth(healthUrl);
 }
 

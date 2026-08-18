@@ -53,7 +53,7 @@ fn is_imported_session(state: &crate::AppState, session_id: &str) -> Result<bool
 }
 
 pub(crate) fn reject_read_only_session(
-    state: &State<'_, crate::AppState>,
+    state: &crate::AppState,
     session_id: &str,
 ) -> Result<(), String> {
     let db = state.db.lock().unwrap();
@@ -2739,7 +2739,7 @@ async fn mapping_generation_is_current(
 
 async fn ensure_sidecar_for_session(
     app: AppHandle,
-    agent_state: &State<'_, AgentState>,
+    agent_state: &AgentState,
     session_id: &str,
     channel: tauri::ipc::Channel<String>,
     replace_event_channel: bool,
@@ -3370,7 +3370,7 @@ fn build_update_permissions_command(
 }
 
 pub(crate) async fn send_command_to_session(
-    agent_state: &State<'_, AgentState>,
+    agent_state: &AgentState,
     session_id: &str,
     cmd: serde_json::Value,
 ) -> Result<(), String> {
@@ -3388,7 +3388,7 @@ pub(crate) async fn send_command_to_session(
 
 pub async fn send_permission_update_to_session(
     state: &crate::AppState,
-    agent_state: &State<'_, AgentState>,
+    agent_state: &AgentState,
     session_id: &str,
 ) -> Result<bool, String> {
     let cmd = build_update_permissions_command(state, session_id)?;
@@ -3407,6 +3407,88 @@ pub async fn send_permission_update_to_session(
         debug!(target: "agent", "Runtime permission update skipped; no active sidecar for session_id={}", session_id);
         Ok(false)
     }
+}
+
+pub async fn interrupt_agent_session_for_companion(
+    state: &crate::AppState,
+    agent_state: &AgentState,
+    session_id: &str,
+) -> Result<(), String> {
+    reject_read_only_session(state, session_id)?;
+    let ctx = crate::log_ctx::LogCtx::with_session(session_id);
+    crate::log_ctx::with_ctx(ctx, || async {
+        crate::log_ctx!(info, target: "agent", "Companion interrupt requested");
+        let lifecycle_lock = session_lifecycle_lock(agent_state, session_id).await;
+        let _lifecycle_guard = lifecycle_lock.lock().await;
+        invalidate_session_generation(agent_state, session_id).await;
+        let sidecar = {
+            let mut sidecars = agent_state.sidecars.lock().await;
+            sidecars.remove(session_id)
+        };
+        if let Some(handle) = sidecar {
+            let _ = handle
+                .send_command(&OpenCodeRuntime::interrupt_command().to_string())
+                .await;
+            agent_state
+                .sidecars
+                .lock()
+                .await
+                .insert(session_id.to_string(), handle);
+            crate::log_ctx!(info, target: "agent", "Companion interrupt command sent");
+        } else {
+            crate::log_ctx!(info, target: "agent", "Companion interrupt skipped; no active sidecar");
+        }
+        Ok(())
+    })
+    .await
+}
+
+pub async fn ensure_agent_session_for_companion(
+    app: &AppHandle,
+    state: &crate::AppState,
+    agent_state: &AgentState,
+    session_id: &str,
+    cwd: String,
+    reasoning_effort: Option<String>,
+) -> Result<(), String> {
+    reject_read_only_session(state, session_id)?;
+    let lifecycle_lock = session_lifecycle_lock(agent_state, session_id).await;
+    let _lifecycle_guard = lifecycle_lock.lock().await;
+    let agent_kind = resolve_session_agent_kind(state, session_id)?;
+    let runtime_config = resolve_active_runtime_config(state, session_id)?;
+    let runtime_generation = if agent_kind == "opencode" {
+        Some(begin_session_generation(agent_state, session_id).await)
+    } else {
+        None
+    };
+    let skill_cwd = resolve_skill_cwd(state, session_id, &cwd)?;
+    preload_project_skills(skill_cwd, &agent_kind).await?;
+    let ensure_cmd = build_ensure_session_command(
+        state,
+        session_id,
+        &agent_kind,
+        cwd,
+        runtime_config.api_key,
+        runtime_config.base_url,
+        runtime_config.model,
+        reasoning_effort,
+        runtime_config.codex_needs_proxy,
+        runtime_config.provider,
+        runtime_config.credential_source,
+        runtime_generation,
+        runtime_config.timeouts,
+        runtime_config.model_limits,
+    )?;
+    let channel = tauri::ipc::Channel::new(|_| Ok(()));
+    ensure_sidecar_for_session(
+        app.clone(),
+        agent_state,
+        session_id,
+        channel,
+        false,
+    )
+    .await?;
+    send_command_to_session(agent_state, session_id, ensure_cmd).await
 }
 
 #[tauri::command]
@@ -3579,33 +3661,7 @@ pub async fn interrupt_agent_session(
     agent_state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
-    reject_read_only_session(&state, &session_id)?;
-    let ctx = crate::log_ctx::LogCtx::with_session(&session_id);
-    crate::log_ctx::with_ctx(ctx, || async {
-        crate::log_ctx!(info, target: "agent", "Interrupt requested");
-        let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
-        let _lifecycle_guard = lifecycle_lock.lock().await;
-        invalidate_session_generation(agent_state.inner(), &session_id).await;
-        let sidecar = {
-            let mut sidecars = agent_state.sidecars.lock().await;
-            sidecars.remove(&session_id)
-        };
-        if let Some(handle) = sidecar {
-            let _ = handle
-                .send_command(&OpenCodeRuntime::interrupt_command().to_string())
-                .await;
-            agent_state
-                .sidecars
-                .lock()
-                .await
-                .insert(session_id.clone(), handle);
-            crate::log_ctx!(info, target: "agent", "Interrupt command sent, sidecar kept alive");
-        } else {
-            crate::log_ctx!(info, target: "agent", "Interrupt skipped; no active sidecar");
-        }
-        Ok(())
-    })
-    .await
+    interrupt_agent_session_for_companion(state.inner(), agent_state.inner(), &session_id).await
 }
 
 #[tauri::command]

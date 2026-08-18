@@ -170,8 +170,9 @@ pub async fn set_companion_enabled(
         }
     } else {
         stop_companion_server(app.clone()).await?;
-        let db = state.db.lock().map_err(|error| error.to_string())?;
-        operations::delete_all_paired_devices(&db).map_err(|error| error.to_string())?;
+        // Stopping the companion should disconnect existing clients without
+        // revoking their pairing tokens, so a short desktop restart can
+        // recover automatically.
         companion_state.clear_pairing_codes();
     }
 
