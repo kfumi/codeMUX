@@ -8,6 +8,7 @@ import type {
   ImageRecognitionConfig,
   AppConfig,
   BuiltinProviderTemplate,
+  GitSettings,
   ModelProvider,
   NotificationSettings,
   Provider,
@@ -68,6 +69,12 @@ export interface GitRepositoryState {
 
 export interface GitCommitMessageSuggestion {
   message: string;
+}
+
+export interface GitPullRequestSuggestion {
+  title: string;
+  body: string;
+  base: string;
 }
 
 export type TerminalEvent =
@@ -430,6 +437,8 @@ export const configApi = {
     invokeLogged('set_attachment_enrichment', { enrichment }),
   setNotificationSettings: (settings: NotificationSettings): Promise<void> =>
     invokeLogged('set_notification_settings', { settings }),
+  setGitSettings: (settings: GitSettings): Promise<void> =>
+    invokeLogged('set_git_settings', { settings }),
   setDefaultOpenTarget: (target: OpenTarget): Promise<void> =>
     invokeLogged('set_default_open_target', { target }),
   testProvider: (apiKey: string, baseUrl: string): Promise<string> =>
@@ -484,6 +493,8 @@ export const gitApi = {
     invokeLogged('push_git_branch', { projectPath }),
   generateCommitMessage: (projectPath: string): Promise<GitCommitMessageSuggestion> =>
     invokeLogged('generate_git_commit_message', { projectPath }),
+  generatePullRequestDescription: (projectPath: string): Promise<GitPullRequestSuggestion> =>
+    invokeLogged('generate_pull_request_description', { projectPath }),
 };
 
 export const terminalApi = {

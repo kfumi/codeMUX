@@ -163,6 +163,30 @@ impl Default for NotificationSettings {
     }
 }
 
+/// Git 相关设置：提交信息 / PR 描述的 AI 生成指引与所用模型。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitSettingsConfig {
+    #[serde(default)]
+    pub commit_instructions: String,
+    #[serde(default)]
+    pub pull_request_instructions: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(default)]
+    pub model: String,
+}
+
+impl Default for GitSettingsConfig {
+    fn default() -> Self {
+        Self {
+            commit_instructions: String::new(),
+            pull_request_instructions: String::new(),
+            provider_id: None,
+            model: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
     pub id: String,
@@ -380,6 +404,8 @@ pub struct AppConfig {
     pub default_open_target: String,
     #[serde(default)]
     pub notifications: NotificationSettings,
+    #[serde(default)]
+    pub git: GitSettingsConfig,
     pub theme: Theme,
     #[serde(default)]
     pub attachment_enrichment: AttachmentEnrichmentConfig,
@@ -408,6 +434,7 @@ impl Default for AppConfig {
             compact_ai_output: false,
             default_open_target: default_open_target(),
             notifications: NotificationSettings::default(),
+            git: GitSettingsConfig::default(),
             theme: Theme::System,
             attachment_enrichment: AttachmentEnrichmentConfig::default(),
             companion: CompanionConfig::default(),
@@ -465,6 +492,22 @@ mod tests {
         let config: AppConfig = serde_json::from_value(raw).unwrap();
 
         assert_eq!(config.default_open_target, "file_explorer");
+    }
+
+    #[test]
+    fn old_config_json_deserializes_with_git_defaults() {
+        let raw = serde_json::json!({
+            "providers": [],
+            "active_provider_id": null,
+            "theme": "System"
+        });
+
+        let config: AppConfig = serde_json::from_value(raw).unwrap();
+
+        assert_eq!(config.git.commit_instructions, "");
+        assert_eq!(config.git.pull_request_instructions, "");
+        assert_eq!(config.git.provider_id, None);
+        assert_eq!(config.git.model, "");
     }
 
     #[test]

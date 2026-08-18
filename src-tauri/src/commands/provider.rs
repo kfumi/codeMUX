@@ -1,7 +1,7 @@
 use crate::config;
 use crate::config::types::{
     AgentKind, AppConfig, AttachmentEnrichmentConfig, ClaudeCodeAgentConfigUpdate,
-    CodexAgentConfigUpdate, NotificationSettings, Provider, Theme,
+    CodexAgentConfigUpdate, GitSettingsConfig, NotificationSettings, Provider, Theme,
 };
 use crate::AppState;
 use futures::StreamExt;
@@ -365,6 +365,48 @@ pub fn set_default_open_target(
     info!(target: "provider", "Setting default open target target={}", target);
     let mut config = state.config.lock().unwrap();
     config.default_open_target = target;
+    config::save_config(&app, &config)?;
+    Ok(())
+}
+
+const MAX_GIT_INSTRUCTIONS_CHARS: usize = 8_000;
+
+#[tauri::command]
+pub fn set_git_settings(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    mut settings: GitSettingsConfig,
+) -> Result<(), String> {
+    settings.commit_instructions = settings.commit_instructions.trim().to_string();
+    settings.pull_request_instructions = settings.pull_request_instructions.trim().to_string();
+    settings.model = settings.model.trim().to_string();
+    if settings.commit_instructions.chars().count() > MAX_GIT_INSTRUCTIONS_CHARS {
+        return Err("提交说明过长（最多 8000 字符）".to_string());
+    }
+    if settings.pull_request_instructions.chars().count() > MAX_GIT_INSTRUCTIONS_CHARS {
+        return Err("拉取请求指令过长（最多 8000 字符）".to_string());
+    }
+
+    info!(
+        target: "provider",
+        "Setting git settings commit_len={} pr_len={} provider_id={:?} model={}",
+        settings.commit_instructions.chars().count(),
+        settings.pull_request_instructions.chars().count(),
+        settings.provider_id,
+        settings.model
+    );
+    let mut config = state.config.lock().unwrap();
+    if let Some(provider_id) = settings.provider_id.as_deref() {
+        let provider = config
+            .model_providers
+            .iter()
+            .find(|provider| provider.id == provider_id);
+        match provider {
+            Some(provider) if provider.enabled => {}
+            _ => return Err("所选供应商不存在或已禁用".to_string()),
+        }
+    }
+    config.git = settings;
     config::save_config(&app, &config)?;
     Ok(())
 }

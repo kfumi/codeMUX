@@ -104,6 +104,13 @@ export const DEFAULT_IMAGE_RECOGNITION_CONFIG: ImageRecognitionConfig = {
 /** @deprecated */
 export const DEFAULT_ATTACHMENT_ENRICHMENT_CONFIG = DEFAULT_IMAGE_RECOGNITION_CONFIG;
 
+export interface GitSettings {
+  commit_instructions: string;
+  pull_request_instructions: string;
+  provider_id?: string | null;
+  model: string;
+}
+
 export interface ModelProvider {
   id: string;
   name: string;
@@ -151,6 +158,7 @@ export interface AppConfig {
   compact_ai_output: boolean;
   default_open_target: OpenTarget;
   notifications: NotificationSettings;
+  git?: GitSettings;
   theme: Theme;
   attachment_enrichment?: AttachmentEnrichmentConfig;
   /** Cleared on load; kept optional for transitional UI code. */

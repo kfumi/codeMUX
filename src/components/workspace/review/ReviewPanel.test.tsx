@@ -17,6 +17,7 @@ const gitApiMock = vi.hoisted(() => ({
   commitChanges: vi.fn(),
   pushBranch: vi.fn(),
   generateCommitMessage: vi.fn(),
+  generatePullRequestDescription: vi.fn(),
 }));
 
 vi.mock('../../../lib/tauri', async () => {
@@ -67,6 +68,11 @@ describe('ReviewPanel git actions', () => {
     gitApiMock.commitChanges.mockResolvedValue('abc1234');
     gitApiMock.pushBranch.mockResolvedValue(undefined);
     gitApiMock.generateCommitMessage.mockResolvedValue({ message: 'feat: 更新应用' });
+    gitApiMock.generatePullRequestDescription.mockResolvedValue({
+      title: 'feat: 新增 Git 生成设置',
+      body: '本分支新增 Git 设置面板。',
+      base: 'master',
+    });
   });
 
   it('loads repository state and switches branches', async () => {
@@ -79,6 +85,11 @@ describe('ReviewPanel git actions', () => {
     await waitFor(() => expect(gitApiMock.checkoutBranch).toHaveBeenCalledWith('D:/project/app', 'feature/git-panel'));
     await waitFor(() => expect(gitApiMock.getRepositoryState).toHaveBeenCalledTimes(2));
   });
+
+  const openGitActions = async (itemTestId: string) => {
+    fireEvent.pointerDown(screen.getByTestId('git-actions-trigger'));
+    fireEvent.click(await screen.findByTestId(itemTestId));
+  };
 
   it('creates a branch from the branch dialog', async () => {
     render(<ReviewPanel projectPath="D:/project/app" />);
@@ -142,7 +153,7 @@ describe('ReviewPanel git actions', () => {
     render(<ReviewPanel projectPath="D:/project/app" />);
 
     await screen.findByText('App.tsx');
-    fireEvent.click(screen.getByTestId('git-action-trigger'));
+    await openGitActions('git-actions-commit');
     fireEvent.click(screen.getByTestId('git-commit-generate'));
 
     await waitFor(() => {
@@ -154,7 +165,7 @@ describe('ReviewPanel git actions', () => {
     render(<ReviewPanel projectPath="D:/project/app" />);
 
     await screen.findByText('App.tsx');
-    fireEvent.click(screen.getByTestId('git-action-trigger'));
+    await openGitActions('git-actions-commit');
     const input = screen.getByTestId('git-commit-message');
     fireEvent.change(input, { target: { value: 'feat: update app' } });
     fireEvent.click(screen.getByTestId('git-commit-submit'));
@@ -167,7 +178,7 @@ describe('ReviewPanel git actions', () => {
     render(<ReviewPanel projectPath="D:/project/app" />);
 
     await screen.findByText('App.tsx');
-    fireEvent.click(screen.getByTestId('git-action-trigger'));
+    await openGitActions('git-actions-commit');
     const input = screen.getByTestId('git-commit-message');
     const message = 'feat: 更新审查面板\n\n补充多行提交说明';
     fireEvent.change(input, { target: { value: message } });
@@ -190,7 +201,7 @@ describe('ReviewPanel git actions', () => {
     render(<ReviewPanel projectPath="D:/project/app" />);
 
     await screen.findByText('推送');
-    fireEvent.click(screen.getByTestId('git-action-trigger'));
+    await openGitActions('git-actions-push');
     fireEvent.click(screen.getByTestId('git-push-submit'));
 
     await waitFor(() => expect(gitApiMock.pushBranch).toHaveBeenCalledWith('D:/project/app'));
@@ -209,7 +220,7 @@ describe('ReviewPanel git actions', () => {
     render(<ReviewPanel projectPath="D:/project/app" />);
 
     await screen.findByText('App.tsx');
-    fireEvent.click(screen.getByTestId('git-action-trigger'));
+    await openGitActions('git-actions-commit');
     fireEvent.change(screen.getByTestId('git-commit-message'), { target: { value: 'feat: update app' } });
     fireEvent.click(screen.getByTestId('git-commit-submit'));
 
@@ -221,11 +232,36 @@ describe('ReviewPanel git actions', () => {
     render(<ReviewPanel projectPath="D:/project/app" />);
 
     await screen.findByText('App.tsx');
-    fireEvent.click(screen.getByTestId('git-action-trigger'));
+    await openGitActions('git-actions-commit');
     fireEvent.change(screen.getByTestId('git-commit-message'), { target: { value: 'feat: update app' } });
     fireEvent.click(screen.getByTestId('git-commit-push-submit'));
 
     await waitFor(() => expect(gitApiMock.commitChanges).toHaveBeenCalledWith('D:/project/app', 'feat: update app'));
     await waitFor(() => expect(gitApiMock.pushBranch).toHaveBeenCalledWith('D:/project/app'));
+  });
+
+  it('generates a pull request description from the branch bar', async () => {
+    render(<ReviewPanel projectPath="D:/project/app" />);
+
+    await screen.findByText('App.tsx');
+    await openGitActions('git-actions-pr');
+
+    await waitFor(() => expect(gitApiMock.generatePullRequestDescription).toHaveBeenCalledWith('D:/project/app'));
+    await waitFor(() => {
+      expect((screen.getByTestId('git-pr-title') as HTMLInputElement).value).toBe('feat: 新增 Git 生成设置');
+    });
+    expect((screen.getByTestId('git-pr-body') as HTMLTextAreaElement).value).toBe('本分支新增 Git 设置面板。');
+    expect(screen.getByText('基准分支: master')).toBeTruthy();
+  });
+
+  it('shows a PR generation error from the backend', async () => {
+    gitApiMock.generatePullRequestDescription.mockRejectedValueOnce('当前分支即基准分支，没有可生成 PR 的提交差异');
+
+    render(<ReviewPanel projectPath="D:/project/app" />);
+
+    await screen.findByText('App.tsx');
+    await openGitActions('git-actions-pr');
+
+    await waitFor(() => expect(screen.getByText('当前分支即基准分支，没有可生成 PR 的提交差异')).toBeTruthy());
   });
 });

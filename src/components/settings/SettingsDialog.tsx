@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Archive, ArrowLeft, BarChart3, Bot, FileText, Image, Info, Palette, Plug, Puzzle, Server, Settings, Terminal } from 'lucide-react';
+import { Archive, ArrowLeft, BarChart3, Bot, FileText, GitBranch, Image, Info, Palette, Plug, Puzzle, Server, Settings, Terminal } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
 import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
@@ -8,6 +8,7 @@ import { AgentRuntimeSettingsPanel } from './AgentRuntimeSettings';
 import { ArchivedSessionsPanel } from './ArchivedSessionsPanel';
 import { EnvironmentSettings } from './EnvironmentSettings';
 import { GeneralSettings } from './GeneralSettings';
+import { GitSettings } from './GitSettings';
 import { ImageRecognitionSettings } from './ImageRecognitionSettings';
 import { LogSettings } from './LogSettings';
 import { McpSettingsPanel } from './McpSettings';
@@ -20,7 +21,7 @@ interface SettingsViewProps {
   onBack: () => void;
 }
 
-export type SettingsTab = 'general' | 'appearance' | 'provider' | 'image-recognition' | 'agent-runtime' | 'mcp' | 'skills' | 'usage' | 'archive' | 'system-tools' | 'logs' | 'about';
+export type SettingsTab = 'general' | 'appearance' | 'provider' | 'image-recognition' | 'agent-runtime' | 'mcp' | 'skills' | 'git' | 'usage' | 'archive' | 'system-tools' | 'logs' | 'about';
 
 interface SettingsSidebarProps {
   activeTab: SettingsTab;
@@ -41,6 +42,7 @@ const primaryTabs = [
   { id: 'agent-runtime' as const, label: '智能体运行时', description: '统一管理默认智能体、会话权限、托管 SDK Runtime 和外部 CLI 诊断。', icon: Bot },
   { id: 'mcp' as const, label: 'MCP', description: '管理 MCP 服务器，为智能体扩展工具与能力。', icon: Server },
   { id: 'skills' as const, label: 'Skills', description: '查看、卸载已安装的 skills，从各智能体工具导入。', icon: Puzzle },
+  { id: 'git' as const, label: 'Git', description: '自定义提交信息与拉取请求的 AI 生成指引。', icon: GitBranch },
   { id: 'usage' as const, label: '使用统计', description: '查看会话活跃度、Token 用量与模型分布。', icon: BarChart3 },
   { id: 'archive' as const, label: '已归档对话', description: '查询、取消归档、删除归档会话。', icon: Archive },
 ];
@@ -123,6 +125,7 @@ export function SettingsContent({ activeTab, onTabChange }: SettingsContentProps
         )}
         {activeTab === 'mcp' && <McpSettingsPanel />}
         {activeTab === 'skills' && <SkillsSettingsPanel />}
+        {activeTab === 'git' && <GitSettings />}
         {activeTab === 'usage' && <UsageStatistics />}
         {activeTab === 'archive' && <ArchivedSessionsPanel />}
         {activeTab === 'system-tools' && <EnvironmentSettings />}

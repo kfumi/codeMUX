@@ -3,6 +3,7 @@ import type {
   AgentConfigMap,
   AgentConfigUpdateMap,
   AppConfig,
+  GitSettings,
   ImageRecognitionConfig,
   ModelProvider,
   NotificationSettings,
@@ -13,6 +14,7 @@ import { useNewSessionStore } from './newSessionStore';
 import { getDefaultAgentKind } from '../types/agentRegistry';
 import type { AgentKind } from '../types/session';
 import { normalizeNotificationSettings } from '../lib/notificationSettings';
+import { normalizeGitSettings } from '../lib/gitSettings';
 import { normalizeOpenTarget, type OpenTarget } from '../lib/openTargets';
 import { getActiveModelProvider, selectEndpoint } from '../lib/modelProviders';
 
@@ -52,6 +54,7 @@ interface SettingsState {
   setAttachmentEnrichment: (enrichment: ImageRecognitionConfig) => Promise<void>;
   setDefaultOpenTarget: (target: OpenTarget) => Promise<void>;
   setNotificationSettings: (settings: NotificationSettings) => Promise<void>;
+  setGitSettings: (settings: GitSettings) => Promise<void>;
   setActiveProvider: (providerId: string) => Promise<void>;
   upsertModelProvider: (provider: ModelProvider) => Promise<void>;
   deleteModelProvider: (providerId: string) => Promise<void>;
@@ -84,6 +87,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         model_providers: rawConfig.model_providers ?? [],
         default_open_target: normalizeOpenTarget(rawConfig.default_open_target),
         notifications: normalizeNotificationSettings(rawConfig.notifications),
+        git: normalizeGitSettings(rawConfig.git),
       };
       useNewSessionStore.getState().setSelectedAgentKind(config.agent_defaults.default_agent_kind);
       set({ config, isLoading: false });
@@ -173,6 +177,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set((state) => ({
         config: state.config && previousNotifications
           ? { ...state.config, notifications: previousNotifications }
+          : state.config,
+        error: String(error),
+      }));
+    }
+  },
+
+  setGitSettings: async (settings: GitSettings) => {
+    const previousGit = get().config?.git;
+    const nextSettings = normalizeGitSettings(settings);
+    set((state) => ({
+      config: state.config ? { ...state.config, git: nextSettings } : state.config,
+      error: null,
+    }));
+
+    try {
+      await configApi.setGitSettings(nextSettings);
+    } catch (error) {
+      set((state) => ({
+        config: state.config && previousGit
+          ? { ...state.config, git: previousGit }
           : state.config,
         error: String(error),
       }));

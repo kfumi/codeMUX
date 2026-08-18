@@ -12,6 +12,8 @@ use tauri::State;
 /// Empty tree hash — the tree object git uses for a repo with zero commits.
 const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf899d69f3612f4bf";
 const COMMIT_MESSAGE_DIFF_LIMIT: usize = 12_000;
+const PR_COMMIT_LOG_LIMIT: usize = 200;
+const PR_DIFF_LIMIT: usize = 20_000;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,6 +64,15 @@ pub struct GitRepositoryState {
 #[serde(rename_all = "camelCase")]
 pub struct GitCommitMessageSuggestion {
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPullRequestSuggestion {
+    pub title: String,
+    pub body: String,
+    /// 检测到的基准分支，供前端展示。
+    pub base: String,
 }
 
 fn run_git(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
@@ -683,14 +694,25 @@ pub fn push_git_branch_in_project(project_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn build_commit_message_prompt(stat: &str, diff: &str, truncated: bool) -> String {
+pub fn build_commit_message_prompt(
+    stat: &str,
+    diff: &str,
+    truncated: bool,
+    instructions: &str,
+) -> String {
+    let custom = if instructions.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n用户自定义提交指引（必须遵守）:\n{}\n", instructions.trim())
+    };
     format!(
-        "请根据以下 staged diff 生成一条 Git 提交信息。只输出提交信息本身，不输出解释、代码块或引号。提交信息必须使用中文描述，并遵循 Conventional Commits 格式。\n\n格式要求：\n<type>(可选 scope): <中文标题，标题不超过 72 个字符>\n\n- <中文要点 1>\n- <中文要点 2>\n\n要求：\n1. 第一行必须是 Conventional Commits 标题，例如：feat: 增加分支切换入口、fix: 修复提交信息生成失败、docs: 更新使用说明。\n2. 标题后必须空一行，再输出 1 到 4 条中文要点，每条以 \"- \" 开头。\n3. 不要输出快捷键、解释说明、Markdown 代码围栏或多余前后缀。{}\n\n统计:\n{}\n\nDiff:\n{}",
+        "请根据以下 staged diff 生成一条 Git 提交信息。只输出提交信息本身，不输出解释、代码块或引号。提交信息必须使用中文描述，并遵循 Conventional Commits 格式。\n\n格式要求：\n<type>(可选 scope): <中文标题，标题不超过 72 个字符>\n\n- <中文要点 1>\n- <中文要点 2>\n\n要求：\n1. 第一行必须是 Conventional Commits 标题，例如：feat: 增加分支切换入口、fix: 修复提交信息生成失败、docs: 更新使用说明。\n2. 标题后必须空一行，再输出 1 到 4 条中文要点，每条以 \"- \" 开头。\n3. 不要输出快捷键、解释说明、Markdown 代码围栏或多余前后缀。{}{}\n\n统计:\n{}\n\nDiff:\n{}",
         if truncated {
             "Diff 内容已截断，请基于可见内容概括。"
         } else {
             ""
         },
+        custom,
         stat.trim(),
         diff.trim()
     )
@@ -710,7 +732,10 @@ fn suggest_commit_message_from_prompt(prompt: &str) -> String {
     }
 }
 
-pub fn build_commit_message_prompt_in_project(project_path: &Path) -> Result<String, String> {
+pub fn build_commit_message_prompt_in_project(
+    project_path: &Path,
+    instructions: &str,
+) -> Result<String, String> {
     let root = project_path
         .canonicalize()
         .map_err(|e| format!("Project path not found: {}", e))?;
@@ -737,20 +762,33 @@ pub fn build_commit_message_prompt_in_project(project_path: &Path) -> Result<Str
     } else {
         raw_diff
     };
-    Ok(build_commit_message_prompt(&stat, &diff, truncated))
+    Ok(build_commit_message_prompt(&stat, &diff, truncated, instructions))
 }
 
 fn select_commit_message_provider(config: &AppConfig) -> Result<Provider, String> {
     use crate::model_providers::{effective_api_key, select_endpoint, Protocol};
 
+    // 优先使用 Git 设置里指定的供应商，否则回落 active_provider_id → 第一个。
     let model_provider = config
-        .active_provider_id
+        .git
+        .provider_id
         .as_deref()
         .and_then(|id| {
             config
                 .model_providers
                 .iter()
-                .find(|provider| provider.id == id)
+                .find(|provider| provider.id == id && provider.enabled)
+        })
+        .or_else(|| {
+            config
+                .active_provider_id
+                .as_deref()
+                .and_then(|id| {
+                    config
+                        .model_providers
+                        .iter()
+                        .find(|provider| provider.id == id)
+                })
         })
         .or_else(|| config.model_providers.first())
         .ok_or_else(|| "请先配置 AI 供应商".to_string())?;
@@ -758,6 +796,20 @@ fn select_commit_message_provider(config: &AppConfig) -> Result<Provider, String
     if !model_provider.enabled {
         return Err("当前供应商已禁用".to_string());
     }
+
+    // 优先使用 Git 设置里指定的模型（需存在于该供应商），否则回落默认模型。
+    let configured_model = config.git.model.trim();
+    let selected_model = if configured_model.is_empty() {
+        model_provider.default_model.clone()
+    } else if model_provider
+        .models
+        .iter()
+        .any(|candidate| candidate.id == configured_model)
+    {
+        configured_model.to_string()
+    } else {
+        model_provider.default_model.clone()
+    };
 
     let anthropic = select_endpoint(model_provider, Protocol::Anthropic);
     let openai = select_endpoint(model_provider, Protocol::OpenaiCompatible);
@@ -769,7 +821,7 @@ fn select_commit_message_provider(config: &AppConfig) -> Result<Provider, String
     if api_key.is_empty() {
         return Err("请先配置 AI 供应商 API Key".to_string());
     }
-    if model_provider.default_model.trim().is_empty() {
+    if selected_model.trim().is_empty() {
         return Err("请先配置 AI 供应商默认模型".to_string());
     }
     let anthropic_base_url = anthropic
@@ -788,7 +840,7 @@ fn select_commit_message_provider(config: &AppConfig) -> Result<Provider, String
         api_key,
         anthropic_base_url,
         openai_base_url,
-        default_model: model_provider.default_model.clone(),
+        default_model: selected_model,
         models: model_provider
             .models
             .iter()
@@ -867,9 +919,8 @@ fn clean_commit_message(raw: &str) -> Result<String, String> {
     }
 }
 
-fn parse_anthropic_commit_message_response(body: &serde_json::Value) -> Result<String, String> {
-    let text = body
-        .get("content")
+fn anthropic_response_text(body: &serde_json::Value) -> Result<String, String> {
+    body.get("content")
         .and_then(|content| content.as_array())
         .and_then(|content| {
             content
@@ -877,22 +928,29 @@ fn parse_anthropic_commit_message_response(body: &serde_json::Value) -> Result<S
                 .filter_map(|item| item.get("text").and_then(|text| text.as_str()))
                 .find(|text| !text.trim().is_empty())
         })
-        .ok_or_else(|| "AI 响应缺少提交信息".to_string())?;
-
-    clean_commit_message(text)
+        .map(|text| text.to_string())
+        .ok_or_else(|| "AI 响应缺少提交信息".to_string())
 }
 
-fn parse_openai_commit_message_response(body: &serde_json::Value) -> Result<String, String> {
-    let text = body
-        .get("choices")
+fn openai_response_text(body: &serde_json::Value) -> Result<String, String> {
+    body.get("choices")
         .and_then(|choices| choices.as_array())
         .and_then(|choices| choices.first())
         .and_then(|choice| choice.get("message"))
         .and_then(|message| message.get("content"))
         .and_then(|content| content.as_str())
-        .ok_or_else(|| "AI 响应缺少提交信息".to_string())?;
+        .map(|text| text.to_string())
+        .ok_or_else(|| "AI 响应缺少提交信息".to_string())
+}
 
-    clean_commit_message(text)
+#[cfg(test)]
+fn parse_anthropic_commit_message_response(body: &serde_json::Value) -> Result<String, String> {
+    clean_commit_message(&anthropic_response_text(body)?)
+}
+
+#[cfg(test)]
+fn parse_openai_commit_message_response(body: &serde_json::Value) -> Result<String, String> {
+    clean_commit_message(&openai_response_text(body)?)
 }
 
 fn http_status_error(status: reqwest::StatusCode, body: &str) -> String {
@@ -909,6 +967,7 @@ async fn generate_with_anthropic(
     client: &reqwest::Client,
     provider: &Provider,
     prompt: &str,
+    max_tokens: u32,
 ) -> Result<String, String> {
     let url = format!(
         "{}/v1/messages",
@@ -916,7 +975,7 @@ async fn generate_with_anthropic(
     );
     let body = serde_json::json!({
         "model": provider.default_model,
-        "max_tokens": 220,
+        "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}]
     });
 
@@ -947,13 +1006,14 @@ async fn generate_with_anthropic(
 
     let body: serde_json::Value =
         serde_json::from_str(&body_text).map_err(|_| "AI 响应不是有效 JSON".to_string())?;
-    parse_anthropic_commit_message_response(&body)
+    anthropic_response_text(&body)
 }
 
 async fn generate_with_openai(
     client: &reqwest::Client,
     provider: &Provider,
     prompt: &str,
+    max_tokens: u32,
 ) -> Result<String, String> {
     let url = format!(
         "{}/v1/chat/completions",
@@ -961,7 +1021,7 @@ async fn generate_with_openai(
     );
     let body = serde_json::json!({
         "model": provider.default_model,
-        "max_tokens": 220,
+        "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}]
     });
 
@@ -994,18 +1054,23 @@ async fn generate_with_openai(
 
     let body: serde_json::Value =
         serde_json::from_str(&body_text).map_err(|_| "AI 响应不是有效 JSON".to_string())?;
-    parse_openai_commit_message_response(&body)
+    openai_response_text(&body)
 }
 
-async fn request_commit_message(provider: &Provider, prompt: &str) -> Result<String, String> {
+/// 通用 LLM 单次生成：Anthropic 优先，仅认证失败回落 OpenAI 兼容端点，返回原始文本。
+async fn request_llm_generation(
+    provider: &Provider,
+    prompt: &str,
+    max_tokens: u32,
+) -> Result<String, String> {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
     if !provider.anthropic_base_url.trim().is_empty() {
-        match generate_with_anthropic(&client, provider, prompt).await {
-            Ok(message) => return Ok(message),
+        match generate_with_anthropic(&client, provider, prompt, max_tokens).await {
+            Ok(text) => return Ok(text),
             Err(err) => {
                 if err.contains("认证失败") || provider.openai_base_url.trim().is_empty() {
                     return Err(err);
@@ -1015,21 +1080,242 @@ async fn request_commit_message(provider: &Provider, prompt: &str) -> Result<Str
     }
 
     if !provider.openai_base_url.trim().is_empty() {
-        return generate_with_openai(&client, provider, prompt).await;
+        return generate_with_openai(&client, provider, prompt, max_tokens).await;
     }
 
     Err("请先配置 AI 供应商 Base URL".to_string())
+}
+
+async fn request_commit_message(provider: &Provider, prompt: &str) -> Result<String, String> {
+    clean_commit_message(&request_llm_generation(provider, prompt, 220).await?)
 }
 
 pub async fn generate_git_commit_message_in_project(
     project_path: &Path,
     config: &AppConfig,
 ) -> Result<GitCommitMessageSuggestion, String> {
-    let prompt = build_commit_message_prompt_in_project(project_path)?;
+    let prompt =
+        build_commit_message_prompt_in_project(project_path, &config.git.commit_instructions)?;
     let provider = select_commit_message_provider(config)?;
     let message = request_commit_message(&provider, &prompt).await?;
 
     Ok(GitCommitMessageSuggestion { message })
+}
+
+/// 检测 PR 的基准分支：优先远程默认分支，其次本地/远程 main、master。
+fn detect_pr_base_branch(root: &Path) -> Result<String, String> {
+    if let Ok(output) = run_git(root, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]) {
+        let name = String::from_utf8_lossy(&output).trim().to_string();
+        let name = name.strip_prefix("origin/").unwrap_or(&name).to_string();
+        if !name.is_empty() {
+            return Ok(name);
+        }
+    }
+
+    for candidate in ["main", "master", "origin/main", "origin/master"] {
+        if run_git(
+            root,
+            &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{}", candidate)],
+        )
+        .is_ok()
+            || run_git(
+                root,
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("refs/remotes/{}", candidate),
+                ],
+            )
+            .is_ok()
+        {
+            return Ok(candidate.to_string());
+        }
+    }
+
+    Err("未找到可用的基准分支（main/master）".to_string())
+}
+
+#[derive(Debug)]
+struct PrContext {
+    commits: String,
+    stat: String,
+    diff: String,
+    truncated: bool,
+}
+
+fn collect_pr_context(root: &Path, base: &str) -> Result<PrContext, String> {
+    let commits = String::from_utf8_lossy(&run_git(
+        root,
+        &[
+            "log",
+            "--oneline",
+            "--no-decorate",
+            &format!("-n{}", PR_COMMIT_LOG_LIMIT),
+            &format!("{}..HEAD", base),
+        ],
+    )?)
+    .to_string();
+    if commits.trim().is_empty() {
+        return Err("当前分支相对基准分支没有新提交".to_string());
+    }
+
+    let stat = String::from_utf8_lossy(&run_git(
+        root,
+        &["diff", "--stat", &format!("{}...HEAD", base)],
+    )?)
+    .to_string();
+    let raw_diff = String::from_utf8_lossy(&run_git(
+        root,
+        &[
+            "diff",
+            &format!("{}...HEAD", base),
+            "--unified=3",
+            "--no-ext-diff",
+        ],
+    )?)
+    .to_string();
+    let truncated = raw_diff.len() > PR_DIFF_LIMIT;
+    let diff = if truncated {
+        raw_diff.chars().take(PR_DIFF_LIMIT).collect::<String>()
+    } else {
+        raw_diff
+    };
+
+    Ok(PrContext {
+        commits,
+        stat,
+        diff,
+        truncated,
+    })
+}
+
+pub fn build_pull_request_prompt(
+    base: &str,
+    branch: &str,
+    commits: &str,
+    stat: &str,
+    diff: &str,
+    truncated: bool,
+    instructions: &str,
+) -> String {
+    let custom = if instructions.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n用户自定义 PR 指引（必须遵守）:\n{}\n", instructions.trim())
+    };
+    format!(
+        "请根据以下分支的提交记录与 diff，生成一个拉取请求（Pull Request）的标题和描述。使用中文撰写，只输出规定格式的内容，不输出解释、代码块或引号。\n\n格式要求：\nPR_TITLE: <一行中文标题，不超过 50 个字符，概括分支核心目的>\n\nPR_DESCRIPTION:\n<Markdown 中文描述：先用一段概述说明目的，再用 \"- \" 要点列出主要变更、动机与影响；如有破坏性变更或迁移步骤请单独说明>{}{}\n\n基准分支: {}\n当前分支: {}\n\n提交记录:\n{}\n\n文件变更统计:\n{}\n\nDiff:\n{}",
+        if truncated {
+            "Diff 内容已截断，请基于可见内容概括。"
+        } else {
+            ""
+        },
+        custom,
+        base,
+        branch,
+        commits.trim(),
+        stat.trim(),
+        diff.trim()
+    )
+}
+
+fn parse_pull_request_suggestion(
+    raw: &str,
+    base: &str,
+) -> Result<GitPullRequestSuggestion, String> {
+    let text = if raw.trim().starts_with("```") {
+        raw.trim()
+            .lines()
+            .skip(1)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .trim_end_matches("```")
+            .trim()
+            .to_string()
+    } else {
+        raw.trim().to_string()
+    };
+
+    let mut title: Option<String> = None;
+    let mut body = String::new();
+    let mut in_body = false;
+    for line in text.lines() {
+        if in_body {
+            body.push_str(line);
+            body.push('\n');
+        } else if let Some(rest) = line.trim().strip_prefix("PR_TITLE:") {
+            title = Some(rest.trim().to_string());
+        } else if line.trim().starts_with("PR_DESCRIPTION:") {
+            let rest = line.trim().strip_prefix("PR_DESCRIPTION:").unwrap_or("");
+            let rest = rest.trim();
+            if !rest.is_empty() {
+                body.push_str(rest);
+                body.push('\n');
+            }
+            in_body = true;
+        }
+    }
+
+    let title = match title {
+        Some(title) if !title.trim().is_empty() => title,
+        // 兜底：模型未按格式输出时取第一个非空行作为标题。
+        _ => text
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .unwrap_or_default()
+            .to_string(),
+    };
+    let body = body.trim().to_string();
+    if title.is_empty() || body.is_empty() {
+        return Err("AI 未返回可用的 PR 标题/描述".to_string());
+    }
+
+    Ok(GitPullRequestSuggestion {
+        title,
+        body,
+        base: base.to_string(),
+    })
+}
+
+pub async fn generate_pull_request_description_in_project(
+    project_path: &Path,
+    config: &AppConfig,
+) -> Result<GitPullRequestSuggestion, String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    if !is_inside_git_repo(&root) {
+        return Err("当前项目不是 Git 仓库".to_string());
+    }
+
+    let current_output = run_git(&root, &["branch", "--show-current"])?;
+    let branch = String::from_utf8_lossy(&current_output).trim().to_string();
+    if branch.is_empty() {
+        return Err("当前处于 detached HEAD，无法生成 PR 描述".to_string());
+    }
+
+    let base = detect_pr_base_branch(&root)?;
+    if base == branch {
+        return Err("当前分支即基准分支，没有可生成 PR 的提交差异".to_string());
+    }
+
+    let context = collect_pr_context(&root, &base)?;
+    let prompt = build_pull_request_prompt(
+        &base,
+        &branch,
+        &context.commits,
+        &context.stat,
+        &context.diff,
+        context.truncated,
+        &config.git.pull_request_instructions,
+    );
+    let provider = select_commit_message_provider(config)?;
+    let raw = request_llm_generation(&provider, &prompt, 1024).await?;
+
+    parse_pull_request_suggestion(&raw, &base)
 }
 
 pub fn read_git_changed_files_for_tree(
@@ -1232,15 +1518,26 @@ pub async fn generate_git_commit_message(
     generate_git_commit_message_in_project(Path::new(&project_path), &config).await
 }
 
+#[tauri::command]
+pub async fn generate_pull_request_description(
+    state: State<'_, AppState>,
+    project_path: String,
+) -> Result<GitPullRequestSuggestion, String> {
+    let config = state.config.lock().unwrap().clone();
+    generate_pull_request_description_in_project(Path::new(&project_path), &config).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         build_commit_message_prompt, build_commit_message_prompt_in_project,
-        checkout_git_branch_in_project, clean_commit_message, commit_git_changes_in_project,
-        create_git_branch_in_project, decode_text_bytes, parse_anthropic_commit_message_response,
-        parse_openai_commit_message_response, push_git_branch_in_project,
-        read_git_changed_files_for_tree, read_git_repository_state, read_git_status_change_detail,
-        read_git_status_changes, revert_git_status_changes_in_project,
+        build_pull_request_prompt, checkout_git_branch_in_project, clean_commit_message,
+        collect_pr_context, commit_git_changes_in_project, create_git_branch_in_project,
+        decode_text_bytes, detect_pr_base_branch,
+        generate_pull_request_description_in_project, parse_anthropic_commit_message_response,
+        parse_openai_commit_message_response, parse_pull_request_suggestion,
+        push_git_branch_in_project, read_git_changed_files_for_tree, read_git_repository_state,
+        read_git_status_change_detail, read_git_status_changes, revert_git_status_changes_in_project,
         select_commit_message_provider, stage_git_status_changes_for_paths,
         unstage_git_status_changes_for_paths, GitStatusArea,
     };
@@ -1542,6 +1839,7 @@ mod tests {
             " src/main.ts | 2 +-\n",
             "diff --git a/src/main.ts b/src/main.ts\n+new\n-old\n",
             false,
+            "",
         );
 
         assert!(prompt.contains("只输出提交信息本身"));
@@ -1551,6 +1849,21 @@ mod tests {
         assert!(prompt.contains("src/main.ts | 2 +-"));
         assert!(prompt.contains("diff --git"));
         assert!(prompt.contains("Conventional Commits"));
+        assert!(!prompt.contains("用户自定义提交指引"));
+    }
+
+    #[test]
+    fn git_commit_message_prompt_injects_custom_instructions() {
+        let prompt = build_commit_message_prompt(
+            " src/main.ts | 2 +-\n",
+            "diff --git a/src/main.ts b/src/main.ts\n+new\n-old\n",
+            false,
+            "提交说明必须包含工单号",
+        );
+
+        assert!(prompt.contains("用户自定义提交指引（必须遵守）"));
+        assert!(prompt.contains("提交说明必须包含工单号"));
+        assert!(prompt.contains("统计:"));
     }
 
     #[test]
@@ -1567,7 +1880,7 @@ mod tests {
             .output()
             .unwrap();
 
-        let err = build_commit_message_prompt_in_project(&project).unwrap_err();
+        let err = build_commit_message_prompt_in_project(&project, "").unwrap_err();
 
         assert!(err.contains("没有已暂存修改可生成提交信息"));
 
@@ -1692,6 +2005,100 @@ mod tests {
     }
 
     #[test]
+    fn git_commit_message_provider_prefers_git_settings() {
+        let primary = crate::model_providers::ModelProvider {
+            id: "primary".to_string(),
+            name: "Primary".to_string(),
+            enabled: true,
+            api_key: "key".to_string(),
+            api_key_configured: false,
+            endpoints: vec![crate::model_providers::ProtocolEndpoint {
+                protocol: crate::model_providers::Protocol::OpenaiCompatible,
+                base_url: "https://api.openai.com".to_string(),
+                api_key_override: None,
+                codex_needs_proxy: None,
+            }],
+            models: vec![
+                crate::model_providers::ProviderModel {
+                    id: "gpt-default".to_string(),
+                    name: None,
+                    context_1m: None,
+                    context_window: None,
+                    max_input_tokens: None,
+                    max_output_tokens: None,
+                    input_modalities: None,
+                    supports_vision: None,
+                },
+                crate::model_providers::ProviderModel {
+                    id: "gpt-fast".to_string(),
+                    name: None,
+                    context_1m: None,
+                    context_window: None,
+                    max_input_tokens: None,
+                    max_output_tokens: None,
+                    input_modalities: None,
+                    supports_vision: None,
+                },
+            ],
+            default_model: "gpt-default".to_string(),
+            builtin_template_id: None,
+            opencode_provider_key: None,
+            opencode_npm: None,
+        };
+        let other = crate::model_providers::ModelProvider {
+            id: "other".to_string(),
+            name: "Other".to_string(),
+            enabled: true,
+            api_key: "key".to_string(),
+            api_key_configured: false,
+            endpoints: vec![crate::model_providers::ProtocolEndpoint {
+                protocol: crate::model_providers::Protocol::Anthropic,
+                base_url: "https://api.anthropic.com".to_string(),
+                api_key_override: None,
+                codex_needs_proxy: None,
+            }],
+            models: vec![crate::model_providers::ProviderModel {
+                id: "claude-test".to_string(),
+                name: None,
+                context_1m: None,
+                context_window: None,
+                max_input_tokens: None,
+                max_output_tokens: None,
+                input_modalities: None,
+                supports_vision: None,
+            }],
+            default_model: "claude-test".to_string(),
+            builtin_template_id: None,
+            opencode_provider_key: None,
+            opencode_npm: None,
+        };
+        let mut config = AppConfig {
+            model_providers: vec![primary, other],
+            active_provider_id: Some("other".to_string()),
+            ..AppConfig::default()
+        };
+
+        // 指定的供应商与模型优先于 active_provider_id。
+        config.git.provider_id = Some("primary".to_string());
+        config.git.model = "gpt-fast".to_string();
+        let provider = select_commit_message_provider(&config).unwrap();
+        assert_eq!(provider.id, "primary");
+        assert_eq!(provider.default_model, "gpt-fast");
+
+        // 模型不在供应商列表时回落默认模型。
+        config.git.model = "gpt-missing".to_string();
+        let provider = select_commit_message_provider(&config).unwrap();
+        assert_eq!(provider.default_model, "gpt-default");
+
+        // 未配置时回落 active_provider_id。
+        config.git.provider_id = None;
+        config.git.model = String::new();
+        let provider = select_commit_message_provider(&config).unwrap();
+        assert_eq!(provider.id, "other");
+        assert_eq!(provider.default_model, "claude-test");
+    }
+
+    #[test]
     fn git_tree_diff_tracks_modified_added_and_deleted_files_without_committing() {
         if !git_available() {
             return;
@@ -1758,6 +2165,212 @@ mod tests {
         assert_eq!(deleted.status, "deleted");
         assert_eq!(deleted.original_content.as_deref(), Some("gone\n"));
         assert_eq!(deleted.current_content, "");
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_pull_request_prompt_includes_context_and_instructions() {
+        let prompt = build_pull_request_prompt(
+            "main",
+            "feature/git-settings",
+            "abc1234 feat: 新增 Git 设置\nabc1235 test: 补充测试\n",
+            " src/main.ts | 2 +-\n",
+            "diff --git a/src/main.ts b/src/main.ts\n+new\n-old\n",
+            true,
+            "PR 描述必须包含测试步骤",
+        );
+
+        assert!(prompt.contains("拉取请求（Pull Request）的标题和描述"));
+        assert!(prompt.contains("PR_TITLE:"));
+        assert!(prompt.contains("PR_DESCRIPTION:"));
+        assert!(prompt.contains("基准分支: main"));
+        assert!(prompt.contains("当前分支: feature/git-settings"));
+        assert!(prompt.contains("abc1234 feat: 新增 Git 设置"));
+        assert!(prompt.contains("src/main.ts | 2 +-"));
+        assert!(prompt.contains("diff --git"));
+        assert!(prompt.contains("Diff 内容已截断"));
+        assert!(prompt.contains("用户自定义 PR 指引（必须遵守）"));
+        assert!(prompt.contains("PR 描述必须包含测试步骤"));
+    }
+
+    #[test]
+    fn git_pull_request_prompt_omits_instructions_when_empty() {
+        let prompt = build_pull_request_prompt(
+            "main",
+            "feature/git-settings",
+            "abc1234 feat: 新增 Git 设置\n",
+            " src/main.ts | 2 +-\n",
+            "diff --git a/src/main.ts b/src/main.ts\n+new\n",
+            false,
+            "",
+        );
+
+        assert!(!prompt.contains("用户自定义 PR 指引"));
+        assert!(!prompt.contains("Diff 内容已截断"));
+    }
+
+    #[test]
+    fn git_pull_request_parser_splits_title_and_body() {
+        let raw = "```\nPR_TITLE: feat: 新增 Git 生成设置\n\nPR_DESCRIPTION:\n本分支新增 Git 设置面板。\n\n- 支持自定义提交指引\n- 支持 PR 描述生成\n```";
+
+        let suggestion = parse_pull_request_suggestion(raw, "main").unwrap();
+
+        assert_eq!(suggestion.title, "feat: 新增 Git 生成设置");
+        assert_eq!(suggestion.base, "main");
+        assert!(suggestion.body.contains("本分支新增 Git 设置面板。"));
+        assert!(suggestion.body.contains("- 支持 PR 描述生成"));
+        assert!(!suggestion.body.contains("PR_TITLE"));
+    }
+
+    #[test]
+    fn git_pull_request_parser_falls_back_and_errors() {
+        // 无标记时取第一个非空行为标题。
+        let suggestion = parse_pull_request_suggestion(
+            "一行标题\n\nPR_DESCRIPTION:\n描述内容",
+            "main",
+        )
+        .unwrap();
+        assert_eq!(suggestion.title, "一行标题");
+        assert_eq!(suggestion.body, "描述内容");
+
+        // 标题或描述缺失时报错。
+        let err = parse_pull_request_suggestion("PR_TITLE: 只有标题", "main").unwrap_err();
+        assert!(err.contains("AI 未返回可用的 PR 标题/描述"));
+    }
+
+    #[test]
+    fn git_pr_base_branch_detects_main_and_rejects_default_branch() {
+        if !git_available() {
+            return;
+        }
+
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+        let default_branch = Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["branch", "--show-current"])
+            .output()
+            .unwrap();
+        let default_branch = String::from_utf8_lossy(&default_branch.stdout)
+            .trim()
+            .to_string();
+        if default_branch != "main" {
+            Command::new("git")
+                .arg("-C")
+                .arg(&project)
+                .args(["branch", "main"])
+                .output()
+                .unwrap();
+        }
+
+        let base = detect_pr_base_branch(&project).unwrap();
+        assert_eq!(base, "main");
+
+        // 在基准分支本身上生成应报错（无网络调用，错误在采集/选模型前抛出）。
+        let blocking = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let err = blocking
+            .block_on(generate_pull_request_description_in_project(
+                &project,
+                &AppConfig::default(),
+            ))
+            .unwrap_err();
+        assert!(err.contains("基准分支"));
+
+        // 切到 feature 分支并追加提交后可采集上下文。
+        create_git_branch_in_project(&project, "feature/pr-desc", true).unwrap();
+        fs::write(project.join("NOTES.md"), "notes\n").unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["commit", "-m", "feat: add notes"])
+            .output()
+            .unwrap();
+        let context = collect_pr_context(&project, "main").unwrap();
+        assert!(context.commits.contains("feat: add notes"));
+        assert!(context.stat.contains("NOTES.md"));
+
+        // 无新提交的分支应报错。
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["checkout", "-q", "main"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["branch", "feature/empty"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["checkout", "-q", "feature/empty"])
+            .output()
+            .unwrap();
+        let err = collect_pr_context(&project, "main").unwrap_err();
+        assert!(err.contains("没有新提交"));
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[tokio::test]
+    async fn git_pr_generation_requires_provider_credentials() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+        let default_branch = Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["branch", "--show-current"])
+            .output()
+            .unwrap();
+        let default_branch = String::from_utf8_lossy(&default_branch.stdout)
+            .trim()
+            .to_string();
+        if default_branch != "main" {
+            Command::new("git")
+                .arg("-C")
+                .arg(&project)
+                .args(["branch", "main"])
+                .output()
+                .unwrap();
+        }
+        create_git_branch_in_project(&project, "feature/no-provider", true).unwrap();
+        fs::write(project.join("NOTE2.md"), "x\n").unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["commit", "-m", "feat: x"])
+            .output()
+            .unwrap();
+
+        // 未配置供应商时在选模型阶段报错（不做真实网络调用）。
+        let err = generate_pull_request_description_in_project(&project, &AppConfig::default())
+            .await
+            .unwrap_err();
+        assert!(err.contains("供应商"));
 
         let _ = fs::remove_dir_all(project);
     }

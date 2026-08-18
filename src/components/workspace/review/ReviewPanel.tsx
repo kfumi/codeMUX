@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronUp, RefreshCw, Trash2, Undo2, Upload } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { gitApi, type GitRepositoryState, type GitStatusArea, type GitStatusChange } from '../../../lib/tauri';
+import { gitApi, type GitPullRequestSuggestion, type GitRepositoryState, type GitStatusArea, type GitStatusChange } from '../../../lib/tauri';
 import { cn } from '../../../lib/utils';
 import { DiffView } from '../../preview/DiffView';
 import { ConfirmDialog } from '../../ui/confirm-dialog';
@@ -65,6 +65,9 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
   const [revertTarget, setRevertTarget] = useState<{ type: 'single' | 'all'; filePath?: string; name?: string } | null>(null);
   const [commitMessage, setCommitMessage] = useState('');
   const [commitError, setCommitError] = useState<string | null>(null);
+  const [prSuggestion, setPrSuggestion] = useState<GitPullRequestSuggestion | null>(null);
+  const [prError, setPrError] = useState<string | null>(null);
+  const lastBranchRef = useRef<string | null | undefined>(undefined);
 
   const load = useCallback(async () => {
     if (!projectPath) return;
@@ -81,6 +84,12 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       setStagedFiles(nextStagedFiles);
       setFileDetails({});
       setExpandedPath((current) => (current && nextFiles.some((file) => file.path === current) ? current : null));
+      // 分支切换后旧 suggestion 失效，清空避免误展示。
+      if (lastBranchRef.current !== undefined && lastBranchRef.current !== nextState.currentBranch) {
+        setPrSuggestion(null);
+        setPrError(null);
+      }
+      lastBranchRef.current = nextState.currentBranch;
     } catch (err) {
       setError(String(err));
       setRepositoryState(null);
@@ -243,6 +252,19 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     }
   }, [load, projectPath]);
 
+  const generatePullRequestDescription = useCallback(async () => {
+    if (!projectPath) return;
+    setMutatingKey('pr:generate');
+    setPrError(null);
+    try {
+      setPrSuggestion(await gitApi.generatePullRequestDescription(projectPath));
+    } catch (err) {
+      setPrError(String(err));
+    } finally {
+      setMutatingKey(null);
+    }
+  }, [projectPath]);
+
   const totals = useMemo(() => files.reduce(
     (acc, file) => ({
       additions: acc.additions + file.additions,
@@ -263,6 +285,9 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
         generatingCommitMessage={mutatingKey === 'commit:generate'}
         committing={mutatingKey === 'commit' || mutatingKey === 'commit:push'}
         pushing={mutatingKey === 'push' || mutatingKey === 'commit:push'}
+        prSuggestion={prSuggestion}
+        prGenerating={mutatingKey === 'pr:generate'}
+        prError={prError}
         onRefresh={() => void load()}
         onCheckout={(branchName) => void checkoutBranch(branchName)}
         onCreateBranch={() => setBranchDialogOpen(true)}
@@ -270,6 +295,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
         onGenerateCommitMessage={() => void generateCommitMessage()}
         onCommit={(options) => void commitChanges(options)}
         onPush={() => void pushBranch()}
+        onGeneratePullRequest={() => void generatePullRequestDescription()}
       />
       <GitBranchDialog
         open={branchDialogOpen}
