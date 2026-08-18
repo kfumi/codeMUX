@@ -1,7 +1,16 @@
 import { useMemo, useState } from 'react';
-import { ChevronDown, GitBranch, GitCommitHorizontal, GitPullRequest, Plus, RefreshCw, UploadCloud } from 'lucide-react';
+import {
+  ChevronDown,
+  GitCommitHorizontal,
+  GitPullRequest,
+  RefreshCw,
+  Trash2,
+  Undo2,
+  Upload,
+  UploadCloud,
+} from 'lucide-react';
 
-import type { GitPullRequestSuggestion, GitRepositoryState } from '../../../lib/tauri';
+import type { GitPullRequestSuggestion, GitRepositoryState, GitStatusArea } from '../../../lib/tauri';
 import { cn } from '../../../lib/utils';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../../ui/dropdown-menu';
 import { TooltipHint } from '../../ui/tooltip';
@@ -10,6 +19,9 @@ import { GitPullRequestPopover } from './GitPullRequestPopover';
 
 interface GitBranchBarProps {
   state: GitRepositoryState | null;
+  area: GitStatusArea;
+  totals: { additions: number; deletions: number };
+  fileCount: number;
   loading: boolean;
   mutating: boolean;
   stagedCount: number;
@@ -22,8 +34,9 @@ interface GitBranchBarProps {
   prGenerating: boolean;
   prError: string | null;
   onRefresh: () => void;
-  onCheckout: (branchName: string) => void;
-  onCreateBranch: () => void;
+  onAreaChange: (area: GitStatusArea) => void;
+  onStageAll: () => void;
+  onRevertAll: () => void;
   onCommitMessageChange: (message: string) => void;
   onGenerateCommitMessage: () => void;
   onCommit: (options: { includeUnstaged: boolean; pushAfter: boolean }) => void;
@@ -33,6 +46,9 @@ interface GitBranchBarProps {
 
 export function GitBranchBar({
   state,
+  area,
+  totals,
+  fileCount,
   loading,
   mutating,
   stagedCount,
@@ -45,8 +61,9 @@ export function GitBranchBar({
   prGenerating,
   prError,
   onRefresh,
-  onCheckout,
-  onCreateBranch,
+  onAreaChange,
+  onStageAll,
+  onRevertAll,
   onCommitMessageChange,
   onGenerateCommitMessage,
   onCommit,
@@ -57,7 +74,6 @@ export function GitBranchBar({
   const [prOpen, setPrOpen] = useState(false);
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [modeOverride, setModeOverride] = useState<'commit' | 'push' | 'pr' | null>(null);
-  const current = state?.detached ? 'detached HEAD' : state?.currentBranch ?? '无分支';
   const actionMode = useMemo<'commit' | 'push' | null>(() => {
     if (!state) return null;
     if (state.hasUncommittedChanges || stagedCount > 0) return 'commit';
@@ -104,43 +120,75 @@ export function GitBranchBar({
   );
 
   return (
-    <div className="flex min-h-12 shrink-0 items-center justify-between gap-2 px-4 py-2">
-      <div className="flex min-w-0 items-center gap-2">
-        <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="切换分支"
-              data-testid="git-branch-trigger"
-              className="flex max-w-52 items-center gap-2 truncate rounded-lg border border-border/42 bg-background/80 px-2.5 py-1.5 text-sm text-foreground/86 transition-colors hover:bg-muted/45 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={loading || mutating || !state}
-            >
-              <span className="truncate">{current}</span>
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent className="z-260 min-w-48">
-            {(state?.branches ?? []).map((branch) => (
-              <DropdownMenuItem
-                key={branch.name}
-                onClick={() => {
-                  if (!branch.current) onCheckout(branch.name);
-                }}
-              >
-                <span className={cn('truncate', branch.current && 'font-medium text-primary')}>
-                  {branch.name}
-                </span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        {state?.hasUncommittedChanges && (
-          <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-            有未提交修改
-          </span>
-        )}
-      </div>
+    <div className="flex min-h-11 shrink-0 items-center justify-between gap-2 border-b border-border/25 px-4 py-1.5">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={`审查范围：${area === 'unstaged' ? '未提交' : '已暂存'}`}
+            data-testid="git-review-scope-trigger"
+            className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-sm font-medium text-foreground/88 transition-colors hover:bg-muted/45 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={loading || mutating || !state}
+          >
+            <span>{area === 'unstaged' ? '未提交' : '已暂存'}</span>
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/70" />
+            <span className="ml-1 flex items-center gap-1 font-mono text-[10px] font-medium">
+              <span className="text-[hsl(var(--success))]">+{totals.additions}</span>
+              <span className="text-[hsl(var(--destructive))]">-{totals.deletions}</span>
+            </span>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="z-260 min-w-32">
+          <DropdownMenuItem
+            onClick={() => onAreaChange('unstaged')}
+            className={area === 'unstaged' ? 'font-medium text-primary' : undefined}
+          >
+            未提交
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => onAreaChange('staged')}
+            className={area === 'staged' ? 'font-medium text-primary' : undefined}
+          >
+            已暂存
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
       <div className="flex items-center gap-1">
+        <TooltipHint content={area === 'unstaged' ? '全部暂存' : '全部取消暂存'}>
+          <button
+            type="button"
+            aria-label={area === 'unstaged' ? '全部暂存' : '全部取消暂存'}
+            onClick={onStageAll}
+            disabled={loading || mutating || fileCount === 0}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            {area === 'unstaged' ? <Upload className="h-3.5 w-3.5" /> : <Undo2 className="h-3.5 w-3.5" />}
+          </button>
+        </TooltipHint>
+        <TooltipHint content="全部还原">
+          <button
+            type="button"
+            aria-label="全部还原"
+            data-testid="git-revert-all"
+            onClick={onRevertAll}
+            disabled={loading || mutating || fileCount === 0}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </TooltipHint>
+        <TooltipHint content="刷新">
+          <button
+            type="button"
+            aria-label="刷新"
+            onClick={onRefresh}
+            disabled={loading}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground disabled:opacity-50"
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+          </button>
+        </TooltipHint>
         <div className="flex items-center">
           {effectiveMode === 'pr' ? (
             <GitPullRequestPopover
@@ -217,28 +265,6 @@ export function GitBranchBar({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <TooltipHint content="新建分支">
-          <button
-            type="button"
-            aria-label="新建分支"
-            data-testid="git-branch-create"
-            onClick={onCreateBranch}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
-        </TooltipHint>
-        <TooltipHint content="刷新">
-          <button
-            type="button"
-            aria-label="刷新"
-            onClick={onRefresh}
-            disabled={loading}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground disabled:opacity-50"
-          >
-            <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
-          </button>
-        </TooltipHint>
       </div>
     </div>
   );
