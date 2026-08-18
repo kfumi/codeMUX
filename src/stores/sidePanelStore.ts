@@ -19,6 +19,7 @@ export interface SidePanelTab {
 
 interface SidePanelSnapshot {
   isOpen: boolean;
+  isExpanded: boolean;
   panelWidth: number;
   tabs: SidePanelTab[];
   activeTabId: string | null;
@@ -28,6 +29,7 @@ interface SidePanelState {
   activeScopeId: string;
   scopes: Record<string, SidePanelSnapshot>;
   isOpen: boolean;
+  isExpanded: boolean;
   panelWidth: number;
   isResizing: boolean;
   tabs: SidePanelTab[];
@@ -39,6 +41,7 @@ interface SidePanelState {
   openPlanTab: (planFilePath: string, planContent: string) => void;
   openDiffTab: (filePath: string, oldContent: string, newContent: string) => void;
   closePanel: () => void;
+  toggleExpanded: () => void;
   setActiveTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
   setPanelWidth: (width: number, splitContainerWidth?: number) => void;
@@ -57,6 +60,7 @@ const DEFAULT_SCOPE_ID = 'global';
 function defaultSnapshot(): SidePanelSnapshot {
   return {
     isOpen: false,
+    isExpanded: false,
     panelWidth: PANEL_WIDTH_DEFAULT,
     tabs: [],
     activeTabId: null,
@@ -66,6 +70,7 @@ function defaultSnapshot(): SidePanelSnapshot {
 function snapshotFromState(state: SidePanelState): SidePanelSnapshot {
   return {
     isOpen: state.isOpen,
+    isExpanded: state.isExpanded,
     panelWidth: state.panelWidth,
     tabs: state.tabs,
     activeTabId: state.activeTabId,
@@ -126,6 +131,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   activeScopeId: DEFAULT_SCOPE_ID,
   scopes: {},
   isOpen: false,
+  isExpanded: false,
   panelWidth: PANEL_WIDTH_DEFAULT,
   isResizing: false,
   tabs: [],
@@ -201,9 +207,11 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   },
 
   closePanel: () => {
-    set({ isOpen: false });
+    set({ isOpen: false, isExpanded: false });
     recordNavigation(get());
   },
+
+  toggleExpanded: () => set((state) => ({ isExpanded: !state.isExpanded })),
 
   setActiveTab: (tabId: string) => {
     if (get().tabs.some((tab) => tab.id === tabId)) {
@@ -276,6 +284,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     activeScopeId: DEFAULT_SCOPE_ID,
     scopes: {},
     isOpen: false,
+    isExpanded: false,
     panelWidth: PANEL_WIDTH_DEFAULT,
     isResizing: false,
     tabs: [],

@@ -32,6 +32,14 @@ Follow `.editorconfig`: spaces, LF endings, UTF-8, final newline, 2-space indent
 
 For UI work, prefer existing components in `src/components/ui/` (shadcn/ui built on Radix UI) before creating custom controls or raw HTML elements. Use their variants and sizes, such as `Button` with `variant="ghost"`, whenever they fit the interaction.
 
+### UI Typography
+
+- New UI must inherit the global font family from `var(--font-ui)`; do not hard-code a font family unless the content is intentionally code.
+- Use the project's dynamic typography utilities (`text-ui-micro`, `text-ui-caption`, `text-ui-meta`, `text-ui-compact`, `text-ui-body`, and `text-ui-title`) for UI text so it follows the user's global interface font-size setting.
+- Avoid hard-coded text sizes such as `text-[11px]` or inline `font-size` in UI components. The Tailwind `text-xs` through `text-3xl` utilities are also mapped to the global UI scale and may be used where their semantic size fits.
+- For code, paths, and numeric diff statistics that intentionally use the code style, use `font-mono text-code` so they follow the global code-font-size setting.
+- Tooltips should use the shared `TooltipHint` component rather than ad hoc `title` attributes or one-off tooltip implementations.
+
 ## Testing Guidelines
 
 Tests use Vitest and Testing Library. Name tests `*.test.ts` or `*.test.tsx` and colocate them near covered code. Add focused tests for stores, parsing, sidecar transforms, Rust-adjacent TypeScript behavior, and React behavior. Keep tests deterministic; avoid local paths unless path handling is under test. Whenever you modify code, add or update the colocated tests that cover it.

@@ -1,4 +1,4 @@
-import { ChevronRight, FileSearch, FileCode, FileText, Plus, Terminal, X } from 'lucide-react';
+import { ChevronRight, FileSearch, FileCode, FileText, Maximize2, Minimize2, Plus, Terminal, X } from 'lucide-react';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 
 import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
@@ -20,6 +20,7 @@ interface SidePanelProps {
 
 export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
   const isOpen = useSidePanelStore((state) => state.isOpen);
+  const isExpanded = useSidePanelStore((state) => state.isExpanded);
   const panelWidth = useSidePanelStore((state) => state.panelWidth);
   const isResizing = useSidePanelStore((state) => state.isResizing);
   const tabs = useSidePanelStore((state) => state.tabs);
@@ -29,6 +30,7 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
   const setActiveTab = useSidePanelStore((state) => state.setActiveTab);
   const closeTab = useSidePanelStore((state) => state.closeTab);
   const closePanel = useSidePanelStore((state) => state.closePanel);
+  const toggleExpanded = useSidePanelStore((state) => state.toggleExpanded);
   const openReviewTab = useSidePanelStore((state) => state.openReviewTab);
   const openTerminalTab = useSidePanelStore((state) => state.openTerminalTab);
   const setScope = useSidePanelStore((state) => state.setScope);
@@ -114,17 +116,18 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
     <aside
       ref={panelRef}
       className={cn(
-        `relative h-full shrink-0 overflow-hidden border-l ${LAYOUT_DIVIDER_CLASS} bg-background`,
+        `relative h-full overflow-hidden border-l ${LAYOUT_DIVIDER_CLASS} bg-background`,
+        isExpanded ? 'absolute inset-y-0 right-0 z-30 w-full shadow-[-18px_0_40px_-28px_hsl(var(--surface-shadow-strong)/0.5)]' : 'shrink-0',
         isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
       )}
-      style={{ width: isOpen ? panelWidth : 0 }}
+      style={{ width: isExpanded ? '100%' : isOpen ? panelWidth : 0 }}
     >
       <div className="group absolute inset-y-0 left-0 z-20 w-2 cursor-col-resize" onMouseDown={handleMouseDown}>
         <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-primary/22" />
       </div>
 
       <div className="flex h-full w-full min-w-0 flex-col pl-2">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/25 px-3">
+        <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-border/25 px-1">
           <TooltipHint content="收起面板">
             <button
               aria-label="收起面板"
@@ -147,46 +150,59 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
             ))}
           </div>
 
-          {projectPath ? (
-            <DropdownMenu>
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label="打开标签"
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
-                      >
-                        <Plus className="h-4 w-4" />
-                      </button>
-                    </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent>打开标签</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              <DropdownMenuContent align="end" className="z-190 min-w-32">
-                <DropdownMenuItem onClick={openReview} icon={<FileSearch className="h-3.5 w-3.5" />}>
-                  审查
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={openTerminal} icon={<Terminal className="h-3.5 w-3.5" />}>
-                  终端
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
-            <TooltipHint content="请先选择项目">
-              <span aria-label="请先选择项目">
-                <button
-                  type="button"
-                  className="flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-lg text-muted-foreground opacity-45"
-                  disabled
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </span>
+          <div className="flex shrink-0 items-center gap-0.5">
+            {projectPath ? (
+              <DropdownMenu>
+                <TooltipProvider delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="打开标签"
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>打开标签</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <DropdownMenuContent align="end" className="z-190 min-w-32">
+                  <DropdownMenuItem onClick={openReview} icon={<FileSearch className="h-3.5 w-3.5" />}>
+                    审查
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={openTerminal} icon={<Terminal className="h-3.5 w-3.5" />}>
+                    终端
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <TooltipHint content="请先选择项目">
+                <span aria-label="请先选择项目">
+                  <button
+                    type="button"
+                    className="flex h-7 w-7 cursor-not-allowed items-center justify-center rounded-lg text-muted-foreground opacity-45"
+                    disabled
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </span>
+              </TooltipHint>
+            )}
+            <TooltipHint content={isExpanded ? '恢复面宽' : '展开预览'}>
+              <button
+                type="button"
+                data-testid="side-panel-expand-toggle"
+                aria-label={isExpanded ? '恢复面宽' : '展开预览'}
+                onClick={toggleExpanded}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
+              >
+                {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+              </button>
             </TooltipHint>
-          )}
+          </div>
         </div>
 
         <div className="min-h-0 flex-1">
@@ -231,7 +247,7 @@ function TabButton({
   return (
     <button
       className={cn(
-        'group flex h-8 max-w-56 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-sm transition-colors',
+        'group flex h-7 max-w-56 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors',
         active
           ? 'border-border/55 bg-muted/45 text-foreground'
           : 'border-transparent text-muted-foreground/70 hover:bg-muted/35 hover:text-foreground/86',

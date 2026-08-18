@@ -16,6 +16,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { ProjectOpenTargetButton } from './ProjectOpenTargetButton';
 import { RoundedPanelIcon } from './RoundedPanelIcon';
+import { GitEnvironmentPopover } from '../workspace/review/GitEnvironmentPopover';
 
 type AppWindowLike = {
   isMaximized(): Promise<boolean>;
@@ -164,7 +165,10 @@ export function TitleBar({
           </div>
         ) : null}
         {projectOpenPath ? (
-          <ProjectOpenTargetButton projectPath={projectOpenPath} />
+          <>
+            <ProjectOpenTargetButton projectPath={projectOpenPath} />
+            <GitEnvironmentPopover projectPath={projectOpenPath} />
+          </>
         ) : null}
         {sidePanelAvailable && (
           <Tooltip>
@@ -202,7 +206,7 @@ export function TitleBar({
               <p>主题切换</p>
             </TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="end" className="z-[180] min-w-[136px]">
+          <DropdownMenuContent align="end" className="z-180 min-w-34">
             {themeOptions.map(({ value, label, Icon }) => (
               <DropdownMenuItem
                 key={value}

@@ -94,6 +94,16 @@ describe('side panel store', () => {
     });
   });
 
+  it('toggles one expanded state for the panel width', () => {
+    const store = useSidePanelStore.getState();
+
+    expect(useSidePanelStore.getState().isExpanded).toBe(false);
+    store.toggleExpanded();
+    expect(useSidePanelStore.getState().isExpanded).toBe(true);
+    store.toggleExpanded();
+    expect(useSidePanelStore.getState().isExpanded).toBe(false);
+  });
+
   it('keeps tabs and panel visibility scoped to each conversation', () => {
     const store = useSidePanelStore.getState();
 

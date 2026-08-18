@@ -1,14 +1,12 @@
-import { ChevronDown, ChevronUp, RefreshCw, Trash2, Undo2, Upload } from 'lucide-react';
+import { ChevronDown, ChevronUp, Trash2, Undo2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { gitApi, type GitPullRequestSuggestion, type GitRepositoryState, type GitStatusArea, type GitStatusChange } from '../../../lib/tauri';
 import { cn } from '../../../lib/utils';
 import { DiffView } from '../../preview/DiffView';
 import { ConfirmDialog } from '../../ui/confirm-dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
 import { TooltipHint } from '../../ui/tooltip';
 import { GitBranchBar } from './GitBranchBar';
-import { GitBranchDialog } from './GitBranchDialog';
 import { FileTypeIcon } from '../../assistant-ui/file-type-icon';
 
 function displayPath(filePath: string, projectPath: string): string {
@@ -60,8 +58,6 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
   const [loading, setLoading] = useState(false);
   const [mutatingKey, setMutatingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [branchDialogOpen, setBranchDialogOpen] = useState(false);
-  const [branchError, setBranchError] = useState<string | null>(null);
   const [revertTarget, setRevertTarget] = useState<{ type: 'single' | 'all'; filePath?: string; name?: string } | null>(null);
   const [commitMessage, setCommitMessage] = useState('');
   const [commitError, setCommitError] = useState<string | null>(null);
@@ -151,35 +147,6 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       setMutatingKey(null);
     }
   }, [area, load, projectPath]);
-
-  const checkoutBranch = useCallback(async (branchName: string) => {
-    if (!projectPath) return;
-    setMutatingKey(`branch:${branchName}`);
-    setError(null);
-    try {
-      await gitApi.checkoutBranch(projectPath, branchName);
-      await load();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setMutatingKey(null);
-    }
-  }, [load, projectPath]);
-
-  const createBranch = useCallback(async (branchName: string, checkout: boolean) => {
-    if (!projectPath) return;
-    setMutatingKey('branch:create');
-    setBranchError(null);
-    try {
-      await gitApi.createBranch(projectPath, branchName, checkout);
-      setBranchDialogOpen(false);
-      await load();
-    } catch (err) {
-      setBranchError(String(err));
-    } finally {
-      setMutatingKey(null);
-    }
-  }, [load, projectPath]);
 
   const runRevertAction = useCallback(async () => {
     if (!projectPath || !revertTarget) return;
@@ -277,6 +244,9 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     <div className="flex h-full flex-col">
       <GitBranchBar
         state={repositoryState}
+        area={area}
+        totals={totals}
+        fileCount={files.length}
         loading={loading}
         mutating={mutatingKey != null}
         stagedCount={stagedFiles.length}
@@ -289,77 +259,18 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
         prGenerating={mutatingKey === 'pr:generate'}
         prError={prError}
         onRefresh={() => void load()}
-        onCheckout={(branchName) => void checkoutBranch(branchName)}
-        onCreateBranch={() => setBranchDialogOpen(true)}
+        onAreaChange={(nextArea) => {
+          setExpandedPath(null);
+          setArea(nextArea);
+        }}
+        onStageAll={() => void runStageAction()}
+        onRevertAll={() => setRevertTarget({ type: 'all' })}
         onCommitMessageChange={setCommitMessage}
         onGenerateCommitMessage={() => void generateCommitMessage()}
         onCommit={(options) => void commitChanges(options)}
         onPush={() => void pushBranch()}
         onGeneratePullRequest={() => void generatePullRequestDescription()}
       />
-      <GitBranchDialog
-        open={branchDialogOpen}
-        loading={mutatingKey === 'branch:create'}
-        error={branchError}
-        onOpenChange={setBranchDialogOpen}
-        onCreate={(branchName, checkout) => void createBranch(branchName, checkout)}
-      />
-      <div className="flex h-15 shrink-0 items-center justify-between gap-2 px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <Select
-            value={area}
-            onValueChange={(value) => {
-              setExpandedPath(null);
-              setArea(value as GitStatusArea);
-            }}
-          >
-            <SelectTrigger
-              className="h-9 w-34 rounded-lg border-border/45 bg-background/92 px-3 text-sm shadow-sm"
-              aria-label="选择审查范围"
-            >
-              <SelectValue placeholder="审查范围" />
-            </SelectTrigger>
-            <SelectContent align="start" className="z-260">
-              <SelectItem value="unstaged">未暂存</SelectItem>
-              <SelectItem value="staged">已暂存</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <TooltipHint content={area === 'unstaged' ? '全部暂存' : '全部取消暂存'}>
-            <button
-              className="flex h-8 items-center gap-1.5 rounded-lg border border-border/42 bg-background/80 px-2.5 text-xs text-foreground/82 transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-45"
-              onClick={() => void runStageAction()}
-              disabled={loading || files.length === 0 || mutatingKey != null}
-              aria-label={area === 'unstaged' ? '全部暂存' : '全部取消暂存'}
-            >
-              {area === 'unstaged' ? <Upload className="h-3.5 w-3.5" /> : <Undo2 className="h-3.5 w-3.5" />}
-              <span className="hidden xl:inline">{area === 'unstaged' ? '全部暂存' : '全部取消暂存'}</span>
-            </button>
-          </TooltipHint>
-          <TooltipHint content="全部还原">
-            <button
-              className="flex h-8 items-center gap-1.5 rounded-lg border border-border/42 bg-background/80 px-2.5 text-xs text-destructive transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-45"
-              onClick={() => setRevertTarget({ type: 'all' })}
-              disabled={loading || files.length === 0 || mutatingKey != null}
-              aria-label="全部还原"
-              data-testid="git-revert-all"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              <span className="hidden xl:inline">全部还原</span>
-            </button>
-          </TooltipHint>
-        </div>
-
-        <button
-          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/45 hover:text-foreground"
-          onClick={() => void load()}
-          disabled={loading}
-        >
-          <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-          刷新
-        </button>
-      </div>
-
       <div className="min-h-0 flex-1 overflow-y-auto border-t border-border/25 py-2">
         {error ? (
           <div className="px-4 py-6 text-sm text-destructive">{error}</div>
@@ -377,7 +288,7 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
               <div key={file.path} className="border-b border-border/18 last:border-b-0">
                 <div
                   className={cn(
-                    'flex w-full items-center gap-2 px-4 py-2 text-left transition-colors',
+                    'flex w-full items-center gap-2 px-2 py-2 text-left transition-colors',
                     expanded ? 'bg-muted/52' : 'hover:bg-muted/28',
                   )}
                 >

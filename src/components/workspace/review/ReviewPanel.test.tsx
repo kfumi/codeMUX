@@ -75,32 +75,10 @@ describe('ReviewPanel git actions', () => {
     });
   });
 
-  it('loads repository state and switches branches', async () => {
-    render(<ReviewPanel projectPath="D:/project/app" />);
-
-    await screen.findByText('master');
-    fireEvent.pointerDown(screen.getByTestId('git-branch-trigger'));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'feature/git-panel' }));
-
-    await waitFor(() => expect(gitApiMock.checkoutBranch).toHaveBeenCalledWith('D:/project/app', 'feature/git-panel'));
-    await waitFor(() => expect(gitApiMock.getRepositoryState).toHaveBeenCalledTimes(2));
-  });
-
   const openGitActions = async (itemTestId: string) => {
     fireEvent.pointerDown(screen.getByTestId('git-actions-trigger'));
     fireEvent.click(await screen.findByTestId(itemTestId));
   };
-
-  it('creates a branch from the branch dialog', async () => {
-    render(<ReviewPanel projectPath="D:/project/app" />);
-
-    await screen.findByText('master');
-    fireEvent.click(screen.getByTestId('git-branch-create'));
-    fireEvent.change(screen.getByTestId('git-branch-name'), { target: { value: 'feature/new-work' } });
-    fireEvent.click(screen.getByTestId('git-branch-submit'));
-
-    await waitFor(() => expect(gitApiMock.createBranch).toHaveBeenCalledWith('D:/project/app', 'feature/new-work', true));
-  });
 
   it('stages all unstaged files and refreshes the review list', async () => {
     render(<ReviewPanel projectPath="D:/project/app" />);
@@ -110,6 +88,17 @@ describe('ReviewPanel git actions', () => {
 
     await waitFor(() => expect(gitApiMock.stageStatusChanges).toHaveBeenCalledWith('D:/project/app', undefined));
     await waitFor(() => expect(gitApiMock.getStatusChanges).toHaveBeenCalledTimes(4));
+  });
+
+  it('keeps the review scope in the compact toolbar without a separate area selector row', async () => {
+    render(<ReviewPanel projectPath="D:/project/app" />);
+
+    await screen.findByText('App.tsx');
+
+    expect(screen.getByRole('button', { name: '审查范围：未提交' })).toBeTruthy();
+    expect(screen.queryByRole('combobox', { name: '选择审查范围' })).toBeNull();
+    expect(screen.getByRole('button', { name: '全部暂存' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '全部还原' })).toBeTruthy();
   });
 
   it('stages a single unstaged file', async () => {
@@ -246,6 +235,8 @@ describe('ReviewPanel git actions', () => {
     await screen.findByText('App.tsx');
     await openGitActions('git-actions-pr');
 
+    expect(gitApiMock.generatePullRequestDescription).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('git-pr-generate'));
     await waitFor(() => expect(gitApiMock.generatePullRequestDescription).toHaveBeenCalledWith('D:/project/app'));
     await waitFor(() => {
       expect((screen.getByTestId('git-pr-title') as HTMLInputElement).value).toBe('feat: 新增 Git 生成设置');
@@ -262,6 +253,8 @@ describe('ReviewPanel git actions', () => {
     await screen.findByText('App.tsx');
     await openGitActions('git-actions-pr');
 
+    expect(gitApiMock.generatePullRequestDescription).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('git-pr-generate'));
     await waitFor(() => expect(screen.getByText('当前分支即基准分支，没有可生成 PR 的提交差异')).toBeTruthy());
   });
 });
