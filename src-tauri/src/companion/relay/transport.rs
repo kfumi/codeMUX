@@ -48,9 +48,7 @@ pub struct RelayTransportController {
     data_tasks: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
 
-async fn abort_data_tasks(
-    data_tasks: &Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
-) {
+async fn abort_data_tasks(data_tasks: &Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>) {
     let handles = {
         let mut tasks = data_tasks.lock().await;
         tasks.drain().map(|(_, handle)| handle).collect::<Vec<_>>()
@@ -88,7 +86,13 @@ enum ControlMessage {
     Pong,
 }
 
-fn build_relay_url(endpoint: &str, use_tls: bool, server_id: &str, role: &str, connection_id: Option<&str>) -> Result<String, String> {
+fn build_relay_url(
+    endpoint: &str,
+    use_tls: bool,
+    server_id: &str,
+    role: &str,
+    connection_id: Option<&str>,
+) -> Result<String, String> {
     let trimmed = endpoint.trim();
     let (host, port) = if let Some((host, port)) = trimmed.rsplit_once(':') {
         (host, port.parse::<u16>().map_err(|_| "Invalid relay port")?)
@@ -124,7 +128,8 @@ pub fn start_relay_transport(
                 break;
             }
             state_for_task.set(RelayConnectionState::Connecting).await;
-            let control_url = match build_relay_url(&endpoint, use_tls, &server_id, "server", None) {
+            let control_url = match build_relay_url(&endpoint, use_tls, &server_id, "server", None)
+            {
                 Ok(url) => url,
                 Err(error) => {
                     warn!(target: "companion", "Invalid relay URL: {}", error);
@@ -239,7 +244,13 @@ async fn spawn_data_socket(
 ) {
     let connection_id_for_task = connection_id.clone();
     let handle = tokio::spawn(async move {
-        let url = match build_relay_url(&endpoint, use_tls, &server_id, "server", Some(&connection_id_for_task)) {
+        let url = match build_relay_url(
+            &endpoint,
+            use_tls,
+            &server_id,
+            "server",
+            Some(&connection_id_for_task),
+        ) {
             Ok(url) => url,
             Err(_) => return,
         };
@@ -267,7 +278,9 @@ async fn spawn_data_socket(
                     }
                     match channel.decrypt_inbound(&payload) {
                         Ok(plaintext) => {
-                            if let Ok(response) = handle_tunnel_payload(&client, &base, &plaintext).await {
+                            if let Ok(response) =
+                                handle_tunnel_payload(&client, &base, &plaintext).await
+                            {
                                 if let Ok(encrypted) = channel.encrypt_outbound(&response) {
                                     let _ = write.send(Message::Binary(encrypted.into())).await;
                                 }

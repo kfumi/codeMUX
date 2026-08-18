@@ -275,16 +275,22 @@ pub async fn load_session_events(
 
     let native_events = match agent_kind {
         AgentKind::ClaudeCode => {
-            crate::agent::commands::load_claude_session_events(state.clone(), app_session_id.clone())
-                .await
+            crate::agent::commands::load_claude_session_events(
+                state.clone(),
+                app_session_id.clone(),
+            )
+            .await
         }
         AgentKind::Codex => {
             crate::agent::commands::load_codex_session_events(state.clone(), app_session_id.clone())
                 .await
         }
         AgentKind::Opencode => {
-            crate::agent::commands::load_opencode_session_events(state.clone(), app_session_id.clone())
-                .await
+            crate::agent::commands::load_opencode_session_events(
+                state.clone(),
+                app_session_id.clone(),
+            )
+            .await
         }
         AgentKind::GeminiCli => Ok(Vec::new()),
     }?;

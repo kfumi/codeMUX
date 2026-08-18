@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Cpu, GitCommitHorizontal, GitPullRequest } from 'lucide-react';
 
 import { resolveModelDisplayName } from '../../lib/providerModels';
+import { gitApi } from '../../lib/tauri';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { ProviderBrandIcon } from './ProviderBrandIcon';
+import { Button } from '../ui/button';
 import {
   Select,
   SelectContent,
@@ -23,6 +25,16 @@ export function GitSettings() {
   const setGitSettings = useSettingsStore((state) => state.setGitSettings);
   const [commitDraft, setCommitDraft] = useState<string | null>(null);
   const [pullRequestDraft, setPullRequestDraft] = useState<string | null>(null);
+  const [giteeToken, setGiteeToken] = useState('');
+  const [giteeConfigured, setGiteeConfigured] = useState(false);
+  const [giteeMessage, setGiteeMessage] = useState<string | null>(null);
+  const [giteeSaving, setGiteeSaving] = useState(false);
+
+  useEffect(() => {
+    void gitApi.getGiteeCredentialStatus()
+      .then(setGiteeConfigured)
+      .catch(() => setGiteeConfigured(false));
+  }, []);
 
   if (!config) return null;
 
@@ -113,6 +125,72 @@ export function GitSettings() {
             onChange={(event) => setPullRequestDraft(event.target.value)}
             onBlur={savePullRequestDraft}
           />
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <label className="text-sm text-foreground/74">Gitee 凭据</label>
+        <div className="space-y-3 rounded-xl bg-muted/40 p-4">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground/90">Gitee Personal Access Token</div>
+            <p className="mt-1 text-xs leading-relaxed text-foreground/60">
+              Token 仅保存到系统凭据存储，用于推送后创建 Pull Request。
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="password"
+              aria-label="Gitee Personal Access Token"
+              data-testid="gitee-token"
+              value={giteeToken}
+              onChange={(event) => setGiteeToken(event.target.value)}
+              placeholder={giteeConfigured ? '已配置，输入新 Token 可替换' : '输入 Gitee Token'}
+              className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            <Button
+              type="button"
+              size="sm"
+              data-testid="gitee-token-save"
+              disabled={giteeSaving || !giteeToken.trim()}
+              onClick={() => {
+                setGiteeSaving(true);
+                setGiteeMessage(null);
+                void gitApi.setGiteeToken(giteeToken)
+                  .then(() => {
+                    setGiteeToken('');
+                    setGiteeConfigured(true);
+                    setGiteeMessage('Gitee Token 已保存');
+                  })
+                  .catch((error) => setGiteeMessage(String(error)))
+                  .finally(() => setGiteeSaving(false));
+              }}
+            >
+              保存
+            </Button>
+            {giteeConfigured && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="gitee-token-clear"
+                disabled={giteeSaving}
+                onClick={() => {
+                  setGiteeSaving(true);
+                  setGiteeMessage(null);
+                  void gitApi.clearGiteeToken()
+                    .then(() => {
+                      setGiteeConfigured(false);
+                      setGiteeMessage('Gitee Token 已清除');
+                    })
+                    .catch((error) => setGiteeMessage(String(error)))
+                    .finally(() => setGiteeSaving(false));
+                }}
+              >
+                清除
+              </Button>
+            )}
+          </div>
+          {giteeMessage && <p className="text-xs text-muted-foreground">{giteeMessage}</p>}
         </div>
       </div>
     </div>

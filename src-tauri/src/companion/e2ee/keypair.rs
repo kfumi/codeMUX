@@ -46,7 +46,10 @@ pub fn load_or_create_e2ee_keypair(app_data_dir: &PathBuf) -> Result<E2eeKeyPair
                     let secret_key = decode_secret_key_b64(&parsed.secret_key_b64)?;
                     let public_key_b64 = export_public_key_b64(&public_key);
                     return Ok(E2eeKeyPairBundle {
-                        key_pair: KeyPair { public_key, secret_key },
+                        key_pair: KeyPair {
+                            public_key,
+                            secret_key,
+                        },
                         public_key_b64,
                     });
                 }
@@ -65,8 +68,14 @@ pub fn load_or_create_e2ee_keypair(app_data_dir: &PathBuf) -> Result<E2eeKeyPair
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    fs::write(&path, serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?)
-        .map_err(|error| error.to_string())?;
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
 
-    Ok(E2eeKeyPairBundle { key_pair, public_key_b64 })
+    Ok(E2eeKeyPairBundle {
+        key_pair,
+        public_key_b64,
+    })
 }

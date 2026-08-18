@@ -2,9 +2,9 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::config::types::{AgentConfigs, AgentDefaults, AgentKind};
-use crate::model_providers::{is_provider_usable, ModelProvider, ProviderModel};
 #[cfg(test)]
 use crate::model_providers::Protocol;
+use crate::model_providers::{is_provider_usable, ModelProvider, ProviderModel};
 use crate::AppState;
 
 #[derive(Debug, Serialize)]
@@ -58,7 +58,11 @@ pub struct MobilePermissionPresets {
 pub fn build_mobile_bootstrap(state: &AppState) -> MobileBootstrap {
     let config = state.config.lock().expect("config lock poisoned");
     MobileBootstrap {
-        default_agent_kind: config.agent_defaults.default_agent_kind.as_str().to_string(),
+        default_agent_kind: config
+            .agent_defaults
+            .default_agent_kind
+            .as_str()
+            .to_string(),
         active_provider_id: config.active_provider_id.clone(),
         compact_ai_output: config.compact_ai_output,
         providers: config
@@ -134,7 +138,10 @@ pub fn provider_supports_agent(provider: &MobileProvider, agent_kind: AgentKind)
     };
     provider.enabled
         && provider.configured
-        && provider.protocols.iter().any(|protocol| protocol == required.as_str())
+        && provider
+            .protocols
+            .iter()
+            .any(|protocol| protocol == required.as_str())
 }
 
 #[cfg(test)]
@@ -154,10 +161,7 @@ mod tests {
             models: vec![],
             protocols: vec!["anthropic".to_string()],
         };
-        assert!(provider_supports_agent(
-            &provider,
-            AgentKind::ClaudeCode
-        ));
+        assert!(provider_supports_agent(&provider, AgentKind::ClaudeCode));
         assert!(!provider_supports_agent(&provider, AgentKind::Codex));
     }
 }

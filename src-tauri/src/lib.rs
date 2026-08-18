@@ -4,6 +4,7 @@ mod commands;
 mod companion;
 mod config;
 mod db;
+mod forge;
 mod log_ctx;
 mod mcp;
 mod model_providers;
@@ -560,6 +561,10 @@ pub fn run() {
             commands::file::open_project_path,
             commands::file::list_directory,
             commands::file::read_home_file,
+            commands::forge::create_pull_request,
+            commands::forge::get_gitee_credential_status,
+            commands::forge::set_gitee_token,
+            commands::forge::clear_gitee_token,
             commands::git::get_git_changed_files,
             commands::git::get_git_changed_files_since_head,
             commands::git::get_git_repository_state,

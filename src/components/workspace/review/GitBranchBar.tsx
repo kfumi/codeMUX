@@ -10,7 +10,12 @@ import {
   UploadCloud,
 } from 'lucide-react';
 
-import type { GitPullRequestSuggestion, GitRepositoryState, GitStatusArea } from '../../../lib/tauri';
+import type {
+  CreatePullRequestResult,
+  GitPullRequestSuggestion,
+  GitRepositoryState,
+  GitStatusArea,
+} from '../../../lib/tauri';
 import { cn } from '../../../lib/utils';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../../ui/dropdown-menu';
 import { TooltipHint } from '../../ui/tooltip';
@@ -33,6 +38,10 @@ interface GitBranchBarProps {
   prSuggestion: GitPullRequestSuggestion | null;
   prGenerating: boolean;
   prError: string | null;
+  prBase: string;
+  prCreating: boolean;
+  prCreateError: string | null;
+  prResult: CreatePullRequestResult | null;
   onRefresh: () => void;
   onAreaChange: (area: GitStatusArea) => void;
   onStageAll: () => void;
@@ -42,6 +51,8 @@ interface GitBranchBarProps {
   onCommit: (options: { includeUnstaged: boolean; pushAfter: boolean }) => void;
   onPush: () => void;
   onGeneratePullRequest: () => void;
+  onPrBaseChange: (base: string) => void;
+  onCreatePullRequest: (request: { title: string; body: string; base: string }) => void;
 }
 
 export function GitBranchBar({
@@ -60,6 +71,10 @@ export function GitBranchBar({
   prSuggestion,
   prGenerating,
   prError,
+  prBase,
+  prCreating,
+  prCreateError,
+  prResult,
   onRefresh,
   onAreaChange,
   onStageAll,
@@ -69,6 +84,8 @@ export function GitBranchBar({
   onCommit,
   onPush,
   onGeneratePullRequest,
+  onPrBaseChange,
+  onCreatePullRequest,
 }: GitBranchBarProps) {
   const [actionOpen, setActionOpen] = useState(false);
   const [prOpen, setPrOpen] = useState(false);
@@ -190,12 +207,19 @@ export function GitBranchBar({
             <GitPullRequestPopover
               trigger={mainTrigger}
               branch={state?.currentBranch ?? null}
+              branches={state?.branches ?? []}
+              base={prBase}
               suggestion={prSuggestion}
               generating={prGenerating}
+              creating={prCreating}
               error={prError}
+              createError={prCreateError}
+              result={prResult}
               open={prOpen}
               onOpenChange={handlePrOpenChange}
               onGenerate={onGeneratePullRequest}
+              onBaseChange={onPrBaseChange}
+              onCreate={onCreatePullRequest}
             />
           ) : (
             <GitActionPopover

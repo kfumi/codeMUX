@@ -92,6 +92,7 @@ export function TerminalPanel({
   const terminalRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const terminalIdRef = useRef<string | null>(terminalId ?? null);
+  const connectedRef = useRef(false);
   const setTerminalId = useSidePanelStore((state) => state.setTerminalId);
   const theme = useSettingsStore((state) => state.config?.theme);
   const codeFontSize = useAppearanceStore((state) => state.prefs.codeFontSize);
@@ -178,6 +179,7 @@ export function TerminalPanel({
         }
 
         terminalIdRef.current = connectedTerminalId;
+        connectedRef.current = true;
         setTerminalId(tabId, connectedTerminalId);
 
         if (disposed) {
@@ -194,13 +196,15 @@ export function TerminalPanel({
 
     const dataDisposable = terminal.onData((data) => {
       const terminalId = terminalIdRef.current;
-      if (terminalId) void terminalApi.write(terminalId, data).catch(reportError);
+      if (connectedRef.current && terminalId) void terminalApi.write(terminalId, data).catch(reportError);
     });
 
     const resizeObserver = new ResizeObserver(() => {
       fit.fit();
       const terminalId = terminalIdRef.current;
-      if (terminalId) void terminalApi.resize(terminalId, terminal.cols, terminal.rows).catch(reportError);
+      if (connectedRef.current && terminalId) {
+        void terminalApi.resize(terminalId, terminal.cols, terminal.rows).catch(reportError);
+      }
     });
     resizeObserver.observe(container);
 
@@ -208,6 +212,7 @@ export function TerminalPanel({
       disposed = true;
       dataDisposable.dispose();
       resizeObserver.disconnect();
+      connectedRef.current = false;
       const terminalId = terminalIdRef.current;
       if (terminalId) {
         void disposeTerminalSession(terminalId).catch((error) => {

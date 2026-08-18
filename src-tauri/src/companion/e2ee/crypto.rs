@@ -24,7 +24,10 @@ pub fn init() {
 pub fn generate_keypair() -> KeyPair {
     init();
     let (public_key, secret_key) = box_::gen_keypair();
-    KeyPair { public_key, secret_key }
+    KeyPair {
+        public_key,
+        secret_key,
+    }
 }
 
 pub fn export_public_key_b64(public_key: &PublicKey) -> String {
@@ -61,7 +64,8 @@ pub fn decrypt(precomputed: &box_::PrecomputedKey, payload: &[u8]) -> Result<Vec
     }
     let (nonce_bytes, ciphertext) = payload.split_at(box_::NONCEBYTES);
     let nonce = box_::Nonce::from_slice(nonce_bytes).ok_or_else(|| "Invalid nonce".to_string())?;
-    box_::open_precomputed(ciphertext, &nonce, precomputed).map_err(|_| "Decryption failed".to_string())
+    box_::open_precomputed(ciphertext, &nonce, precomputed)
+        .map_err(|_| "Decryption failed".to_string())
 }
 
 #[cfg(test)]

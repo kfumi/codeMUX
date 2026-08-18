@@ -45,15 +45,9 @@ pub async fn handle_tunnel_payload(
             if let Some(body) = body {
                 request = request.body(body);
             }
-            let response = request
-                .send()
-                .await
-                .map_err(|error| error.to_string())?;
+            let response = request.send().await.map_err(|error| error.to_string())?;
             let status = response.status().as_u16();
-            let response_body = response
-                .text()
-                .await
-                .map_err(|error| error.to_string())?;
+            let response_body = response.text().await.map_err(|error| error.to_string())?;
             let payload = json!({
                 "type": "http_res",
                 "id": id,

@@ -1,7 +1,14 @@
 import { ChevronDown, ChevronUp, Trash2, Undo2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { gitApi, type GitPullRequestSuggestion, type GitRepositoryState, type GitStatusArea, type GitStatusChange } from '../../../lib/tauri';
+import {
+  gitApi,
+  type CreatePullRequestResult,
+  type GitPullRequestSuggestion,
+  type GitRepositoryState,
+  type GitStatusArea,
+  type GitStatusChange,
+} from '../../../lib/tauri';
 import { cn } from '../../../lib/utils';
 import { DiffView } from '../../preview/DiffView';
 import { ConfirmDialog } from '../../ui/confirm-dialog';
@@ -63,6 +70,9 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
   const [commitError, setCommitError] = useState<string | null>(null);
   const [prSuggestion, setPrSuggestion] = useState<GitPullRequestSuggestion | null>(null);
   const [prError, setPrError] = useState<string | null>(null);
+  const [prBase, setPrBase] = useState('');
+  const [prCreateError, setPrCreateError] = useState<string | null>(null);
+  const [prResult, setPrResult] = useState<CreatePullRequestResult | null>(null);
   const lastBranchRef = useRef<string | null | undefined>(undefined);
 
   const load = useCallback(async () => {
@@ -84,6 +94,9 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
       if (lastBranchRef.current !== undefined && lastBranchRef.current !== nextState.currentBranch) {
         setPrSuggestion(null);
         setPrError(null);
+        setPrCreateError(null);
+        setPrResult(null);
+        setPrBase('');
       }
       lastBranchRef.current = nextState.currentBranch;
     } catch (err) {
@@ -101,6 +114,14 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (prBase || !repositoryState?.currentBranch) return;
+    const fallback = repositoryState.branches.find(
+      (branch) => !branch.current && (branch.name === 'main' || branch.name === 'master'),
+    ) ?? repositoryState.branches.find((branch) => !branch.current);
+    if (fallback) setPrBase(fallback.name);
+  }, [prBase, repositoryState]);
 
   const toggleFile = useCallback((file: GitStatusChange) => {
     setExpandedPath((current) => (current === file.path ? null : file.path));
@@ -224,9 +245,25 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
     setMutatingKey('pr:generate');
     setPrError(null);
     try {
-      setPrSuggestion(await gitApi.generatePullRequestDescription(projectPath));
+      const suggestion = await gitApi.generatePullRequestDescription(projectPath);
+      setPrSuggestion(suggestion);
+      setPrBase((current) => current || suggestion.base);
     } catch (err) {
       setPrError(String(err));
+    } finally {
+      setMutatingKey(null);
+    }
+  }, [projectPath]);
+
+  const createPullRequest = useCallback(async (request: { title: string; body: string; base: string }) => {
+    if (!projectPath) return;
+    setMutatingKey('pr:create');
+    setPrCreateError(null);
+    setPrResult(null);
+    try {
+      setPrResult(await gitApi.createPullRequest({ projectPath, ...request }));
+    } catch (err) {
+      setPrCreateError(String(err));
     } finally {
       setMutatingKey(null);
     }
@@ -258,6 +295,10 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
         prSuggestion={prSuggestion}
         prGenerating={mutatingKey === 'pr:generate'}
         prError={prError}
+        prBase={prBase}
+        prCreating={mutatingKey === 'pr:create'}
+        prCreateError={prCreateError}
+        prResult={prResult}
         onRefresh={() => void load()}
         onAreaChange={(nextArea) => {
           setExpandedPath(null);
@@ -270,6 +311,12 @@ export function ReviewPanel({ projectPath }: { projectPath: string }) {
         onCommit={(options) => void commitChanges(options)}
         onPush={() => void pushBranch()}
         onGeneratePullRequest={() => void generatePullRequestDescription()}
+        onPrBaseChange={(base) => {
+          setPrBase(base);
+          setPrCreateError(null);
+          setPrResult(null);
+        }}
+        onCreatePullRequest={(request) => void createPullRequest(request)}
       />
       <div className="min-h-0 flex-1 overflow-y-auto border-t border-border/25 py-2">
         {error ? (

@@ -1392,17 +1392,18 @@ pub fn append_snapshot_events(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_snapshot_events, archive_session, create_forked_session, current_native_sessions_for_kinds,
-        delete_agent_session_mapping, delete_session_message_attachments_from_index,
-        get_agent_distribution, get_agent_session_mapping, get_all_archived_sessions,
-        get_all_sessions, get_model_distribution, get_session, get_session_events_after,
-        get_session_kind_model_selection,
-        get_session_snapshot, get_usage_heatmap, get_usage_overview, import_session_snapshot,
-        insert_session_runtime_switch, list_native_sessions_for_cleanup,
-        session_has_runtime_switch, set_session_pinned, set_session_read_only, unarchive_session,
-        update_session_agent_kind, update_session_provider, update_session_reasoning_effort,
-        update_session_settings, upsert_agent_session_mapping, upsert_session_kind_model_selection,
-        ImportedSessionSnapshot, SessionKindModelSelection,
+        append_snapshot_events, archive_session, create_forked_session,
+        current_native_sessions_for_kinds, delete_agent_session_mapping,
+        delete_session_message_attachments_from_index, get_agent_distribution,
+        get_agent_session_mapping, get_all_archived_sessions, get_all_sessions,
+        get_model_distribution, get_session, get_session_events_after,
+        get_session_kind_model_selection, get_session_snapshot, get_usage_heatmap,
+        get_usage_overview, import_session_snapshot, insert_session_runtime_switch,
+        list_native_sessions_for_cleanup, session_has_runtime_switch, set_session_pinned,
+        set_session_read_only, unarchive_session, update_session_agent_kind,
+        update_session_provider, update_session_reasoning_effort, update_session_settings,
+        upsert_agent_session_mapping, upsert_session_kind_model_selection, ImportedSessionSnapshot,
+        SessionKindModelSelection,
     };
     use crate::config::types::AgentKind;
     use crate::db::schema::initialize_database;
@@ -1819,7 +1820,10 @@ mod tests {
         assert_eq!(session.provider_id.as_deref(), Some("provider-1"));
         assert_eq!(session.model.as_deref(), Some("gpt-5"));
         assert_eq!(session.reasoning_effort.as_deref(), Some("medium"));
-        assert_eq!(session.permission_config.as_deref(), Some(r#"{"kind":"codex","sandboxMode":"workspace-write"}"#));
+        assert_eq!(
+            session.permission_config.as_deref(),
+            Some(r#"{"kind":"codex","sandboxMode":"workspace-write"}"#)
+        );
         assert_eq!(session.plan_mode.as_deref(), Some("on"));
     }
 
@@ -2305,9 +2309,11 @@ mod tests {
         initialize_database(&conn).unwrap();
         insert_test_session(&conn, "session-1", "claude_code");
 
-        let first = serde_json::json!({ "type": "user_message", "event_id": "e1", "content": "hi" });
+        let first =
+            serde_json::json!({ "type": "user_message", "event_id": "e1", "content": "hi" });
         append_snapshot_events(&mut conn, "session-1", &[first]).unwrap();
-        let second = serde_json::json!({ "type": "assistant_message", "event_id": "e2", "content": [] });
+        let second =
+            serde_json::json!({ "type": "assistant_message", "event_id": "e2", "content": [] });
         append_snapshot_events(&mut conn, "session-1", &[second]).unwrap();
 
         let events = get_session_events_after(&conn, "session-1", -1).unwrap();

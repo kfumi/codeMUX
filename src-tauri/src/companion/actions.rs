@@ -287,12 +287,8 @@ pub async fn interrupt_companion_session(app: &AppHandle, session_id: &str) -> R
     let app_state = app.state::<AppState>();
     let agent_state = app.state::<AgentState>();
     let companion_state = app.state::<CompanionState>();
-    interrupt_agent_session_for_companion(
-        app_state.inner(),
-        agent_state.inner(),
-        session_id,
-    )
-    .await?;
+    interrupt_agent_session_for_companion(app_state.inner(), agent_state.inner(), session_id)
+        .await?;
     let _ = companion_state.finish_turn(session_id);
     Ok(())
 }

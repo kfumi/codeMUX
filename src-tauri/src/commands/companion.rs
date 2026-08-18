@@ -69,12 +69,21 @@ async fn build_companion_status(
     let enabled = companion_state.inner.is_enabled();
     let detected_lan_ip = local_ip().ok().map(|ip| ip.to_string());
 
-    let (port, relay_config, paired_devices, lan_ip, pairing_code, pairing_code_expires_at, should_save_config) = {
+    let (
+        port,
+        relay_config,
+        paired_devices,
+        lan_ip,
+        pairing_code,
+        pairing_code_expires_at,
+        should_save_config,
+    ) = {
         let mut config = state.config.lock().map_err(|error| error.to_string())?;
         let port = config.companion.port;
         let relay_config = config.companion.relay.clone();
         let db = state.db.lock().map_err(|error| error.to_string())?;
-        let paired_devices = operations::list_paired_devices(&db).map_err(|error| error.to_string())?;
+        let paired_devices =
+            operations::list_paired_devices(&db).map_err(|error| error.to_string())?;
         let previous_lan_ip = config.companion.last_lan_ip.clone();
         let lan_ip = resolve_lan_ip(&mut config.companion, detected_lan_ip);
         let mut should_save_config = previous_lan_ip != config.companion.last_lan_ip;
@@ -243,11 +252,7 @@ pub async fn get_companion_pairing_offer(
             should_save = true;
         }
         let result = (
-            config
-                .companion
-                .desktop_id
-                .clone()
-                .unwrap_or_default(),
+            config.companion.desktop_id.clone().unwrap_or_default(),
             config.companion.port,
             config.companion.relay.clone(),
             lan_ip,

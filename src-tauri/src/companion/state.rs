@@ -91,7 +91,8 @@ impl CompanionState {
             .map(|_| rand::thread_rng().gen_range(0..10).to_string())
             .collect();
         let entry = PairingCodeEntry {
-            expires_at: Utc::now() + chrono::Duration::seconds(crate::companion::pairing_code::PAIRING_CODE_TTL_SECS),
+            expires_at: Utc::now()
+                + chrono::Duration::seconds(crate::companion::pairing_code::PAIRING_CODE_TTL_SECS),
         };
         let mut codes = self.inner.pairing_codes.lock().unwrap();
         codes.retain(|_, value| value.expires_at > Utc::now());
@@ -111,10 +112,7 @@ impl CompanionState {
         }
         let mut codes = self.inner.pairing_codes.lock().unwrap();
         codes.retain(|_, value| value.expires_at > Utc::now());
-        codes.insert(
-            code.to_string(),
-            PairingCodeEntry { expires_at },
-        );
+        codes.insert(code.to_string(), PairingCodeEntry { expires_at });
     }
 
     pub fn ensure_pairing_code(&self) -> String {
@@ -170,11 +168,7 @@ impl CompanionState {
     }
 
     pub fn is_turn_active(&self, session_id: &str) -> bool {
-        self.inner
-            .turn_active
-            .lock()
-            .unwrap()
-            .contains(session_id)
+        self.inner.turn_active.lock().unwrap().contains(session_id)
     }
 
     pub fn enqueue_message(
@@ -194,11 +188,7 @@ impl CompanionState {
     }
 
     pub fn finish_turn(&self, session_id: &str) -> Vec<QueuedCompanionMessage> {
-        self.inner
-            .turn_active
-            .lock()
-            .unwrap()
-            .remove(session_id);
+        self.inner.turn_active.lock().unwrap().remove(session_id);
         self.inner
             .message_queues
             .lock()

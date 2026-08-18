@@ -3,7 +3,11 @@ use uuid::Uuid;
 use crate::config::types::CompanionConfig;
 
 pub fn get_or_create_desktop_id(config: &mut CompanionConfig) -> String {
-    if let Some(id) = config.desktop_id.as_ref().map(|value| value.trim().to_string()) {
+    if let Some(id) = config
+        .desktop_id
+        .as_ref()
+        .map(|value| value.trim().to_string())
+    {
         if !id.is_empty() {
             return id;
         }
@@ -23,7 +27,10 @@ mod tests {
             desktop_id: Some("cmx_desktop_existing".to_string()),
             ..CompanionConfig::default()
         };
-        assert_eq!(get_or_create_desktop_id(&mut config), "cmx_desktop_existing");
+        assert_eq!(
+            get_or_create_desktop_id(&mut config),
+            "cmx_desktop_existing"
+        );
     }
 
     #[test]

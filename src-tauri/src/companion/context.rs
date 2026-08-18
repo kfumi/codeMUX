@@ -72,10 +72,7 @@ pub async fn build_composer_context(
     };
 
     let token_usage = match crate::agent::commands::load_latest_token_usage_for_session(
-        state,
-        session_id,
-        agent_kind,
-        "restored",
+        state, session_id, agent_kind, "restored",
     )
     .await
     {

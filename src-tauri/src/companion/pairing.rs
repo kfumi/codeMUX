@@ -17,7 +17,11 @@ pub fn complete_pairing(
     let token = format!("cmx_{}", Uuid::new_v4());
     let token_hash = hash_pairing_token(&token);
     let name = device_name.unwrap_or("Mobile Device").trim();
-    let name = if name.is_empty() { "Mobile Device" } else { name };
+    let name = if name.is_empty() {
+        "Mobile Device"
+    } else {
+        name
+    };
     let paired_at = Utc::now().to_rfc3339();
 
     let db = state.db.lock().map_err(|error| error.to_string())?;

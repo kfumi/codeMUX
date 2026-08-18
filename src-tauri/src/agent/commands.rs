@@ -1129,7 +1129,8 @@ pub async fn load_agent_latest_token_usage(
     let agent_kind = AgentKind::from_str(&agent_kind)?;
     let freshness = freshness.unwrap_or_else(|| "restored".to_string());
 
-    load_latest_token_usage_for_session(state.inner(), &app_session_id, agent_kind, &freshness).await
+    load_latest_token_usage_for_session(state.inner(), &app_session_id, agent_kind, &freshness)
+        .await
 }
 
 pub(crate) async fn load_latest_token_usage_for_session(
@@ -3490,14 +3491,7 @@ pub async fn ensure_agent_session_for_companion(
         runtime_config.model_limits,
     )?;
     let channel = tauri::ipc::Channel::new(|_| Ok(()));
-    ensure_sidecar_for_session(
-        app.clone(),
-        agent_state,
-        session_id,
-        channel,
-        false,
-    )
-    .await?;
+    ensure_sidecar_for_session(app.clone(), agent_state, session_id, channel, false).await?;
     send_command_to_session(agent_state, session_id, ensure_cmd).await
 }
 
@@ -3651,7 +3645,14 @@ pub async fn start_agent_session(
             runtime_config.model_limits,
         )?;
 
-        ensure_sidecar_for_session(app, &agent_state, &session_id, channel, replace_event_channel).await?;
+        ensure_sidecar_for_session(
+            app,
+            &agent_state,
+            &session_id,
+            channel,
+            replace_event_channel,
+        )
+        .await?;
 
         send_command_to_session(&agent_state, &session_id, ensure_cmd).await?;
 

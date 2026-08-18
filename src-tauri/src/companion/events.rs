@@ -34,7 +34,10 @@ pub fn handle_sidecar_event_for_companion(app: &AppHandle, raw_event: &str) {
         return;
     };
 
-    let event_type = value.get("type").and_then(|item| item.as_str()).unwrap_or("");
+    let event_type = value
+        .get("type")
+        .and_then(|item| item.as_str())
+        .unwrap_or("");
     if event_type == "codemux_event_batch" {
         let session_id = value
             .get("session_id")
@@ -86,16 +89,15 @@ pub fn handle_sidecar_event_for_companion(app: &AppHandle, raw_event: &str) {
     broadcast_event(&companion_state, &session_id, value);
 }
 
-fn maybe_finish_turn_and_drain_queue(
-    app: &AppHandle,
-    session_id: &str,
-    event: &serde_json::Value,
-) {
+fn maybe_finish_turn_and_drain_queue(app: &AppHandle, session_id: &str, event: &serde_json::Value) {
     if session_id.is_empty() {
         return;
     }
     let companion_state = app.state::<CompanionState>();
-    let event_type = event.get("type").and_then(|item| item.as_str()).unwrap_or("");
+    let event_type = event
+        .get("type")
+        .and_then(|item| item.as_str())
+        .unwrap_or("");
     if event_type == "user_message" {
         companion_state.mark_turn_active(session_id);
     }
@@ -112,13 +114,9 @@ fn maybe_finish_turn_and_drain_queue(
     let session_id = session_id.to_string();
     tauri::async_runtime::spawn(async move {
         for message in queued {
-            if let Err(error) = send_companion_message(
-                &app,
-                &session_id,
-                &message.prompt,
-                message.input_payload,
-            )
-            .await
+            if let Err(error) =
+                send_companion_message(&app, &session_id, &message.prompt, message.input_payload)
+                    .await
             {
                 warn!(
                     target: "companion",
@@ -139,11 +137,7 @@ fn broadcast_event(companion_state: &CompanionState, session_id: &str, event: se
     let _ = companion_state.inner.event_tx.send(payload);
 }
 
-fn persist_domain_events(
-    app: &AppHandle,
-    session_id: &str,
-    events: &[serde_json::Value],
-) {
+fn persist_domain_events(app: &AppHandle, session_id: &str, events: &[serde_json::Value]) {
     if session_id.is_empty() || events.is_empty() {
         return;
     }
@@ -154,9 +148,7 @@ fn persist_domain_events(
         Err(_) => return,
     };
 
-    if let Err(error) =
-        crate::db::operations::append_snapshot_events(&mut db, session_id, events)
-    {
+    if let Err(error) = crate::db::operations::append_snapshot_events(&mut db, session_id, events) {
         warn!(
             target: "companion",
             "Failed to persist snapshot events for session_id={}: {}",

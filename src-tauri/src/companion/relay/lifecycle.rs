@@ -66,9 +66,7 @@ pub fn validate_relay_endpoint(endpoint: &str) -> Result<(), String> {
     if host.trim().is_empty() {
         return Err("中继主机不能为空".to_string());
     }
-    let port: u16 = port_str
-        .parse()
-        .map_err(|_| "中继端口无效".to_string())?;
+    let port: u16 = port_str.parse().map_err(|_| "中继端口无效".to_string())?;
     if port == 0 {
         return Err("中继端口无效".to_string());
     }

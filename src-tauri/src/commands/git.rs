@@ -680,6 +680,7 @@ pub fn push_git_branch_in_project(project_path: &Path) -> Result<(), String> {
         return Err("当前处于 detached HEAD，无法推送分支".to_string());
     }
 
+    let remote = preferred_remote_name(&root)?;
     if run_git(
         &root,
         &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
@@ -688,10 +689,108 @@ pub fn push_git_branch_in_project(project_path: &Path) -> Result<(), String> {
     {
         run_git(&root, &["push"])?;
     } else {
-        run_git(&root, &["push", "-u", "origin", &current_branch])?;
+        run_git(&root, &["push", "-u", &remote, &current_branch])?;
     }
 
     Ok(())
+}
+
+pub(crate) fn current_branch_in_project(project_path: &Path) -> Result<String, String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    let output = run_git(&root, &["branch", "--show-current"])?;
+    let branch = String::from_utf8_lossy(&output).trim().to_string();
+    if branch.is_empty() {
+        return Err("当前处于 detached HEAD，无法创建 PR".to_string());
+    }
+    Ok(branch)
+}
+
+pub(crate) fn ensure_pr_worktree_clean(project_path: &Path) -> Result<(), String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    let output = run_git(&root, &["status", "--porcelain", "--untracked-files=all"])?;
+    if !String::from_utf8_lossy(&output).trim().is_empty() {
+        return Err("工作区存在未提交改动，请先提交或还原后再创建 PR".to_string());
+    }
+    Ok(())
+}
+
+pub(crate) fn repository_remote_in_project(
+    project_path: &Path,
+) -> Result<(String, String), String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    let remote = preferred_remote_name(&root)?;
+    let url = String::from_utf8_lossy(&run_git(&root, &["remote", "get-url", &remote])?)
+        .trim()
+        .to_string();
+    if url.is_empty() {
+        return Err(format!("Git 远程 {} 没有配置地址", remote));
+    }
+    Ok((remote, url))
+}
+
+pub(crate) fn pr_base_branch_in_project(project_path: &Path) -> Result<String, String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    detect_pr_base_branch(&root)
+}
+
+pub(crate) fn has_commits_since_base(project_path: &Path, base: &str) -> Result<bool, String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    let output = run_git(&root, &["rev-list", "-n", "1", &format!("{}..HEAD", base)])?;
+    Ok(!String::from_utf8_lossy(&output).trim().is_empty())
+}
+
+pub(crate) fn recent_commit_title_in_project(project_path: &Path) -> Result<String, String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    let output = run_git(&root, &["log", "-1", "--format=%s"])?;
+    Ok(String::from_utf8_lossy(&output).trim().to_string())
+}
+
+pub(crate) fn recent_commits_body_in_project(
+    project_path: &Path,
+    base: &str,
+) -> Result<String, String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    let output = run_git(
+        &root,
+        &[
+            "log",
+            "--format=- %s",
+            "-n",
+            "20",
+            &format!("{}..HEAD", base),
+        ],
+    )?;
+    Ok(String::from_utf8_lossy(&output).trim().to_string())
+}
+
+fn preferred_remote_name(root: &Path) -> Result<String, String> {
+    let output = run_git(root, &["remote"])?;
+    let remote_text = String::from_utf8_lossy(&output);
+    let remotes: Vec<&str> = remote_text
+        .lines()
+        .filter(|line| !line.is_empty())
+        .collect();
+    if remotes.iter().any(|remote| *remote == "origin") {
+        return Ok("origin".to_string());
+    }
+    remotes
+        .first()
+        .map(|remote| (*remote).to_string())
+        .ok_or_else(|| "当前仓库没有配置 Git 远程".to_string())
 }
 
 pub fn build_commit_message_prompt(
@@ -703,7 +802,10 @@ pub fn build_commit_message_prompt(
     let custom = if instructions.trim().is_empty() {
         String::new()
     } else {
-        format!("\n用户自定义提交指引（必须遵守）:\n{}\n", instructions.trim())
+        format!(
+            "\n用户自定义提交指引（必须遵守）:\n{}\n",
+            instructions.trim()
+        )
     };
     format!(
         "请根据以下 staged diff 生成一条 Git 提交信息。只输出提交信息本身，不输出解释、代码块或引号。提交信息必须使用中文描述，并遵循 Conventional Commits 格式。\n\n格式要求：\n<type>(可选 scope): <中文标题，标题不超过 72 个字符>\n\n- <中文要点 1>\n- <中文要点 2>\n\n要求：\n1. 第一行必须是 Conventional Commits 标题，例如：feat: 增加分支切换入口、fix: 修复提交信息生成失败、docs: 更新使用说明。\n2. 标题后必须空一行，再输出 1 到 4 条中文要点，每条以 \"- \" 开头。\n3. 不要输出快捷键、解释说明、Markdown 代码围栏或多余前后缀。{}{}\n\n统计:\n{}\n\nDiff:\n{}",
@@ -762,7 +864,12 @@ pub fn build_commit_message_prompt_in_project(
     } else {
         raw_diff
     };
-    Ok(build_commit_message_prompt(&stat, &diff, truncated, instructions))
+    Ok(build_commit_message_prompt(
+        &stat,
+        &diff,
+        truncated,
+        instructions,
+    ))
 }
 
 fn select_commit_message_provider(config: &AppConfig) -> Result<Provider, String> {
@@ -780,15 +887,12 @@ fn select_commit_message_provider(config: &AppConfig) -> Result<Provider, String
                 .find(|provider| provider.id == id && provider.enabled)
         })
         .or_else(|| {
-            config
-                .active_provider_id
-                .as_deref()
-                .and_then(|id| {
-                    config
-                        .model_providers
-                        .iter()
-                        .find(|provider| provider.id == id)
-                })
+            config.active_provider_id.as_deref().and_then(|id| {
+                config
+                    .model_providers
+                    .iter()
+                    .find(|provider| provider.id == id)
+            })
         })
         .or_else(|| config.model_providers.first())
         .ok_or_else(|| "请先配置 AI 供应商".to_string())?;
@@ -1103,8 +1207,11 @@ pub async fn generate_git_commit_message_in_project(
 }
 
 /// 检测 PR 的基准分支：优先远程默认分支，其次本地/远程 main、master。
-fn detect_pr_base_branch(root: &Path) -> Result<String, String> {
-    if let Ok(output) = run_git(root, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]) {
+pub(crate) fn detect_pr_base_branch(root: &Path) -> Result<String, String> {
+    if let Ok(output) = run_git(
+        root,
+        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    ) {
         let name = String::from_utf8_lossy(&output).trim().to_string();
         let name = name.strip_prefix("origin/").unwrap_or(&name).to_string();
         if !name.is_empty() {
@@ -1115,7 +1222,12 @@ fn detect_pr_base_branch(root: &Path) -> Result<String, String> {
     for candidate in ["main", "master", "origin/main", "origin/master"] {
         if run_git(
             root,
-            &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{}", candidate)],
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{}", candidate),
+            ],
         )
         .is_ok()
             || run_git(
@@ -1202,7 +1314,10 @@ pub fn build_pull_request_prompt(
     let custom = if instructions.trim().is_empty() {
         String::new()
     } else {
-        format!("\n用户自定义 PR 指引（必须遵守）:\n{}\n", instructions.trim())
+        format!(
+            "\n用户自定义 PR 指引（必须遵守）:\n{}\n",
+            instructions.trim()
+        )
     };
     format!(
         "请根据以下分支的提交记录与 diff，生成一个拉取请求（Pull Request）的标题和描述。使用中文撰写，只输出规定格式的内容，不输出解释、代码块或引号。\n\n格式要求：\nPR_TITLE: <一行中文标题，不超过 50 个字符，概括分支核心目的>\n\nPR_DESCRIPTION:\n<Markdown 中文描述：先用一段概述说明目的，再用 \"- \" 要点列出主要变更、动机与影响；如有破坏性变更或迁移步骤请单独说明>{}{}\n\n基准分支: {}\n当前分支: {}\n\n提交记录:\n{}\n\n文件变更统计:\n{}\n\nDiff:\n{}",
@@ -1533,13 +1648,12 @@ mod tests {
         build_commit_message_prompt, build_commit_message_prompt_in_project,
         build_pull_request_prompt, checkout_git_branch_in_project, clean_commit_message,
         collect_pr_context, commit_git_changes_in_project, create_git_branch_in_project,
-        decode_text_bytes, detect_pr_base_branch,
-        generate_pull_request_description_in_project, parse_anthropic_commit_message_response,
-        parse_openai_commit_message_response, parse_pull_request_suggestion,
-        push_git_branch_in_project, read_git_changed_files_for_tree, read_git_repository_state,
-        read_git_status_change_detail, read_git_status_changes, revert_git_status_changes_in_project,
-        select_commit_message_provider, stage_git_status_changes_for_paths,
-        unstage_git_status_changes_for_paths, GitStatusArea,
+        decode_text_bytes, detect_pr_base_branch, generate_pull_request_description_in_project,
+        parse_anthropic_commit_message_response, parse_openai_commit_message_response,
+        parse_pull_request_suggestion, push_git_branch_in_project, read_git_changed_files_for_tree,
+        read_git_repository_state, read_git_status_change_detail, read_git_status_changes,
+        revert_git_status_changes_in_project, select_commit_message_provider,
+        stage_git_status_changes_for_paths, unstage_git_status_changes_for_paths, GitStatusArea,
     };
     use crate::config::types::AppConfig;
     use std::fs;
@@ -2226,11 +2340,8 @@ mod tests {
     #[test]
     fn git_pull_request_parser_falls_back_and_errors() {
         // 无标记时取第一个非空行为标题。
-        let suggestion = parse_pull_request_suggestion(
-            "一行标题\n\nPR_DESCRIPTION:\n描述内容",
-            "main",
-        )
-        .unwrap();
+        let suggestion =
+            parse_pull_request_suggestion("一行标题\n\nPR_DESCRIPTION:\n描述内容", "main").unwrap();
         assert_eq!(suggestion.title, "一行标题");
         assert_eq!(suggestion.body, "描述内容");
 
@@ -2244,7 +2355,6 @@ mod tests {
         if !git_available() {
             return;
         }
-
 
         let project = temp_project();
         init_project_with_commit(&project);

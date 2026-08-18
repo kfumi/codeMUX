@@ -76,7 +76,7 @@
 
 - 内置 `Review` 面板查看 `staged` / `unstaged` 改动
 - 内置 `Terminal` 面板在项目目录直接开 PTY 终端
-- Git 分支管理：分支切换、新建分支、AI 辅助生成 Commit Message、Commit / Push 一站式操作
+- Git 分支管理：分支切换、新建分支、AI 辅助生成 Commit Message、Commit / Push 与创建 Pull Request
 - 右侧 Side Panel 支持多标签切换
 - 输入、代码审查、文件变更、终端不用再来回切应用
 
@@ -286,7 +286,16 @@ Skills 以 `~/.codemux/skills/` 作为单一数据源；Windows 下按 symlink �
 进入项目会话后，可在右侧 Side Panel 打开：
 
 - `审查`：查看并操作 Git 改动、切换分支、提交并推送
+- `创建 Pull Request`：选择 base 分支，生成或编辑标题/正文，推送当前分支并创建 GitHub、GitLab 或 Gitee PR
 - `终端`：在项目根目录打开内置终端
+
+创建 Pull Request 的使用要求：
+
+- 当前分支必须是普通分支，并且相对 base 分支至少有一个已提交的 commit。
+- 工作区必须干净；未提交改动不会被自动 commit，需要先在审查面板提交。
+- GitHub 使用本机 `gh` 登录，GitLab 使用本机 `glab` 登录。
+- Gitee 需要在设置 → Git 中配置 Personal Access Token；Token 只保存到系统凭据存储。
+- 流程固定为检查、补全标题/正文、检查重复 PR、推送分支、创建 PR；推送或创建失败后可以安全重试。
 
 ### 6. 查看使用统计
 

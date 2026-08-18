@@ -92,6 +92,23 @@ export interface GitPullRequestSuggestion {
   base: string;
 }
 
+export type ForgePlatform = 'github' | 'gitlab' | 'gitee';
+
+export interface CreatePullRequestRequest {
+  projectPath: string;
+  title: string;
+  body: string;
+  base: string;
+}
+
+export interface CreatePullRequestResult {
+  platform: ForgePlatform;
+  url: string;
+  number: number;
+  head: string;
+  base: string;
+}
+
 export type TerminalEvent =
   | { type: 'output'; terminalId: string; data: string }
   | { type: 'exit'; terminalId: string; code: number | null }
@@ -510,6 +527,11 @@ export const gitApi = {
     invokeLogged('generate_git_commit_message', { projectPath }),
   generatePullRequestDescription: (projectPath: string): Promise<GitPullRequestSuggestion> =>
     invokeLogged('generate_pull_request_description', { projectPath }),
+  createPullRequest: (request: CreatePullRequestRequest): Promise<CreatePullRequestResult> =>
+    invokeLogged('create_pull_request', { request }),
+  getGiteeCredentialStatus: (): Promise<boolean> => invokeLogged('get_gitee_credential_status'),
+  setGiteeToken: (token: string): Promise<void> => invokeLogged('set_gitee_token', { token }),
+  clearGiteeToken: (): Promise<void> => invokeLogged('clear_gitee_token'),
 };
 
 export const terminalApi = {

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
@@ -166,7 +166,8 @@ pub async fn start_companion_server(
     companion_state.inner.set_enabled(true);
     info!(target: "companion", "Companion server listening on {}", addr);
 
-    if let Err(error) = crate::companion::relay::sync_relay_transport(&app, &companion_state).await {
+    if let Err(error) = crate::companion::relay::sync_relay_transport(&app, &companion_state).await
+    {
         warn!(target: "companion", "Failed to start relay transport: {}", error);
     }
 
@@ -262,9 +263,7 @@ async fn bind_reusable_listener(addr: SocketAddr) -> Result<tokio::net::TcpListe
     socket
         .bind(&addr.into())
         .map_err(|error| error.to_string())?;
-    socket
-        .listen(1024)
-        .map_err(|error| error.to_string())?;
+    socket.listen(1024).map_err(|error| error.to_string())?;
     socket
         .set_nonblocking(true)
         .map_err(|error| error.to_string())?;
@@ -281,8 +280,14 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
         .route("/sessions/{session_id}/events", get(session_events))
         .route("/sessions/{session_id}/state", get(session_runtime_state))
         .route("/sessions/{session_id}/messages", post(send_message))
-        .route("/sessions/{session_id}/composer-context", get(composer_context))
-        .route("/sessions/{session_id}/settings", patch(update_session_settings))
+        .route(
+            "/sessions/{session_id}/composer-context",
+            get(composer_context),
+        )
+        .route(
+            "/sessions/{session_id}/settings",
+            patch(update_session_settings),
+        )
         .route("/sessions/{session_id}/interrupt", post(interrupt_session))
         .route("/projects", get(list_projects))
         .route("/bootstrap", get(bootstrap))
@@ -308,7 +313,9 @@ async fn health() -> impl IntoResponse {
     Json(serde_json::json!({ "ok": true }))
 }
 
-async fn pair_offer(State(ctx): State<ServerContext>) -> Result<Json<crate::companion::offer::CompanionPairingOffer>, ApiError> {
+async fn pair_offer(
+    State(ctx): State<ServerContext>,
+) -> Result<Json<crate::companion::offer::CompanionPairingOffer>, ApiError> {
     let companion_state = ctx.app.state::<CompanionState>();
     let (desktop_id, port, relay) = {
         let app_state = ctx.app.state::<AppState>();
@@ -331,9 +338,7 @@ async fn pair_offer(State(ctx): State<ServerContext>) -> Result<Json<crate::comp
         (desktop_id, port, relay)
     };
 
-    let lan_ip = local_ip_address::local_ip()
-        .ok()
-        .map(|ip| ip.to_string());
+    let lan_ip = local_ip_address::local_ip().ok().map(|ip| ip.to_string());
     let desktop_public_key_b64 = companion_state.e2ee_public_key_b64().await;
     build_pairing_offer(
         &companion_state,
@@ -343,8 +348,8 @@ async fn pair_offer(State(ctx): State<ServerContext>) -> Result<Json<crate::comp
         Some(relay),
         desktop_public_key_b64,
     )
-        .map(Json)
-        .map_err(|error| ApiError::bad_request(error))
+    .map(Json)
+    .map_err(|error| ApiError::bad_request(error))
 }
 
 async fn pair_claim(
@@ -367,11 +372,18 @@ async fn pair_claim(
     }))
 }
 
-async fn list_sessions(State(ctx): State<ServerContext>, headers: HeaderMap) -> Result<Json<Vec<operations::Session>>, ApiError> {
+async fn list_sessions(
+    State(ctx): State<ServerContext>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<operations::Session>>, ApiError> {
     authorize(&ctx, &headers)?;
     let app_state = ctx.app.state::<AppState>();
-    let db = app_state.db.lock().map_err(|error| ApiError::internal(error.to_string()))?;
-    let sessions = operations::get_all_sessions(&db).map_err(|error| ApiError::internal(error.to_string()))?;
+    let db = app_state
+        .db
+        .lock()
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let sessions =
+        operations::get_all_sessions(&db).map_err(|error| ApiError::internal(error.to_string()))?;
     Ok(Json(sessions))
 }
 
@@ -384,7 +396,10 @@ async fn create_session(
     let app_state = ctx.app.state::<AppState>();
     let agent_kind = AgentKind::from_str(body.agent_kind.as_deref().unwrap_or("claude_code"))
         .map_err(|error| ApiError::bad_request(error))?;
-    let db = app_state.db.lock().map_err(|error| ApiError::internal(error.to_string()))?;
+    let db = app_state
+        .db
+        .lock()
+        .map_err(|error| ApiError::internal(error.to_string()))?;
     let session = match body.project_id.as_deref() {
         Some(project_id) => operations::create_session_for_project_with_permissions(
             &db,
@@ -480,8 +495,8 @@ async fn send_message(
         body.prompt.trim(),
         body.input_payload,
     )
-        .await
-        .map_err(ApiError::bad_request)?;
+    .await
+    .map_err(ApiError::bad_request)?;
     Ok(StatusCode::ACCEPTED)
 }
 
@@ -505,8 +520,7 @@ async fn update_session_settings(
     Json(body): Json<SessionSettingsRequest>,
 ) -> Result<Json<operations::Session>, ApiError> {
     authorize(&ctx, &headers)?;
-    let agent_kind = AgentKind::from_str(&body.agent_kind)
-        .map_err(ApiError::bad_request)?;
+    let agent_kind = AgentKind::from_str(&body.agent_kind).map_err(ApiError::bad_request)?;
     let session = update_companion_settings(
         &ctx.app,
         &session_id,
@@ -548,8 +562,12 @@ async fn list_projects(
 ) -> Result<Json<Vec<operations::Project>>, ApiError> {
     authorize(&ctx, &headers)?;
     let app_state = ctx.app.state::<AppState>();
-    let db = app_state.db.lock().map_err(|error| ApiError::internal(error.to_string()))?;
-    let projects = operations::get_all_projects(&db).map_err(|error| ApiError::internal(error.to_string()))?;
+    let db = app_state
+        .db
+        .lock()
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let projects =
+        operations::get_all_projects(&db).map_err(|error| ApiError::internal(error.to_string()))?;
     Ok(Json(projects))
 }
 
@@ -605,7 +623,11 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
             .db
             .lock()
             .ok()
-            .and_then(|db| operations::get_session_snapshot(&db, &session_id).ok().flatten())
+            .and_then(|db| {
+                operations::get_session_snapshot(&db, &session_id)
+                    .ok()
+                    .flatten()
+            })
             .unwrap_or_default();
         events
     } else {
@@ -613,8 +635,13 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
     };
 
     for event in initial_events {
-        let payload = serde_json::json!({ "type": "event", "sessionId": session_id, "event": event });
-        if socket.send(Message::Text(payload.to_string().into())).await.is_err() {
+        let payload =
+            serde_json::json!({ "type": "event", "sessionId": session_id, "event": event });
+        if socket
+            .send(Message::Text(payload.to_string().into()))
+            .await
+            .is_err()
+        {
             return;
         }
     }
@@ -677,8 +704,12 @@ fn authorize(ctx: &ServerContext, headers: &HeaderMap) -> Result<(), ApiError> {
     authorize_device(ctx, headers).map(|_| ())
 }
 
-fn authorize_device(ctx: &ServerContext, headers: &HeaderMap) -> Result<operations::PairedDevice, ApiError> {
-    let token = extract_bearer_token(headers).ok_or_else(|| ApiError::unauthorized("Missing token"))?;
+fn authorize_device(
+    ctx: &ServerContext,
+    headers: &HeaderMap,
+) -> Result<operations::PairedDevice, ApiError> {
+    let token =
+        extract_bearer_token(headers).ok_or_else(|| ApiError::unauthorized("Missing token"))?;
     authorize_token_device(ctx, &token)
 }
 
@@ -686,9 +717,15 @@ fn authorize_token(ctx: &ServerContext, token: &str) -> Result<(), ApiError> {
     authorize_token_device(ctx, token).map(|_| ())
 }
 
-fn authorize_token_device(ctx: &ServerContext, token: &str) -> Result<operations::PairedDevice, ApiError> {
+fn authorize_token_device(
+    ctx: &ServerContext,
+    token: &str,
+) -> Result<operations::PairedDevice, ApiError> {
     let app_state = ctx.app.state::<AppState>();
-    let db = app_state.db.lock().map_err(|error| ApiError::internal(error.to_string()))?;
+    let db = app_state
+        .db
+        .lock()
+        .map_err(|error| ApiError::internal(error.to_string()))?;
     operations::verify_pairing_token(&db, token)
         .map_err(|error| ApiError::internal(error.to_string()))?
         .ok_or_else(|| ApiError::unauthorized("Invalid token"))
@@ -756,7 +793,9 @@ fn parse_listen_addr(listen_address: &str, port: u16) -> Result<SocketAddr, Stri
         return Ok(SocketAddr::from(([0, 0, 0, 0], port)));
     }
     if trimmed.contains(':') {
-        return trimmed.parse::<SocketAddr>().map_err(|error| error.to_string());
+        return trimmed
+            .parse::<SocketAddr>()
+            .map_err(|error| error.to_string());
     }
     format!("{trimmed}:{port}")
         .parse::<SocketAddr>()
@@ -815,7 +854,9 @@ mod tests {
         assert_eq!(
             request
                 .input_payload
-                .and_then(|payload| payload["attachments"][0]["name"].as_str().map(str::to_string)),
+                .and_then(|payload| payload["attachments"][0]["name"]
+                    .as_str()
+                    .map(str::to_string)),
             Some("screen.png".to_string())
         );
     }

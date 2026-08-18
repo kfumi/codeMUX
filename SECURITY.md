@@ -37,11 +37,14 @@ CodeMUX 作为桌面应用，有以下安全特性：
 
 - **本地优先**：所有数据存储在本地 SQLite 数据库，不上传到云端
 - **API Key 本地存储**：AI 提供商的 API Key 存储在本地配置文件中
+- **Forge 凭据隔离**：Gitee Personal Access Token 使用操作系统凭据存储，不写入普通配置文件、不传入前端日志
 - **无远程代码执行**：应用不执行远程加载的代码
 - **Sidecar 进程隔离**：Agent 运行在独立的 Node.js 子进程中
 
 ### 用户注意事项
 
 - 请妥善保管你的 API Key，不要分享给他人
+- GitHub / GitLab 创建 PR 依赖本机 `gh` / `glab` 的登录状态；请确认 CLI 登录的是正确账号
+- Gitee Token 需要具备创建 Pull Request 的权限，使用完成后可在设置中清除
 - MCP 服务器配置中的 URL 和命令可能执行本地代码，请确认来源可信
 - 安装第三方 Skills 前请检查其内容

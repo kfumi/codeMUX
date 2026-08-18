@@ -74,11 +74,13 @@ mod tests {
         let companion_state = CompanionState::new();
         let mut config = CompanionConfig::default();
         config.pairing_code = Some("123456".to_string());
-        config.pairing_code_expires_at =
-            Some((Utc::now() + Duration::minutes(4)).to_rfc3339());
+        config.pairing_code_expires_at = Some((Utc::now() + Duration::minutes(4)).to_rfc3339());
 
         let code = ensure_persisted_pairing_code(&companion_state, &mut config);
         assert_eq!(code, "123456");
-        assert_eq!(companion_state.active_pairing_code().as_deref(), Some("123456"));
+        assert_eq!(
+            companion_state.active_pairing_code().as_deref(),
+            Some("123456")
+        );
     }
 }

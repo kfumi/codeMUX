@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::crypto::{
-    decrypt, derive_shared_key, encrypt, import_public_key_b64, KeyPair,
-};
+use super::crypto::{decrypt, derive_shared_key, encrypt, import_public_key_b64, KeyPair};
 use sodiumoxide::crypto::box_;
 
 #[derive(Debug)]
@@ -54,7 +52,9 @@ impl DaemonChannel {
         let parsed: HelloMessage = serde_json::from_str(text)
             .map_err(|error| E2eeHandshakeError::InvalidHello(error.to_string()))?;
         if parsed.message_type != "e2ee_hello" {
-            return Err(E2eeHandshakeError::InvalidHello("Expected e2ee_hello".to_string()));
+            return Err(E2eeHandshakeError::InvalidHello(
+                "Expected e2ee_hello".to_string(),
+            ));
         }
         let client_public = import_public_key_b64(&parsed.key)
             .map_err(|error| E2eeHandshakeError::InvalidHello(error))?;
@@ -62,9 +62,12 @@ impl DaemonChannel {
 
         if let Some(existing) = &self.client_public_key {
             if existing == &client_public_bytes {
-                return Ok(Some(serde_json::to_string(&ReadyMessage {
-                    message_type: "e2ee_ready",
-                }).unwrap()));
+                return Ok(Some(
+                    serde_json::to_string(&ReadyMessage {
+                        message_type: "e2ee_ready",
+                    })
+                    .unwrap(),
+                ));
             }
             return Err(E2eeHandshakeError::KeyMismatch);
         }
@@ -112,7 +115,8 @@ mod tests {
     fn handshake_and_rehello() {
         let daemon = generate_keypair();
         let client = generate_keypair();
-        let client_public_b64 = crate::companion::e2ee::crypto::export_public_key_b64(&client.public_key);
+        let client_public_b64 =
+            crate::companion::e2ee::crypto::export_public_key_b64(&client.public_key);
         let hello = serde_json::json!({
             "type": "e2ee_hello",
             "key": client_public_b64,

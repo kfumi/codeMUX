@@ -28,12 +28,22 @@ describe('GitPullRequestPopover', () => {
     <GitPullRequestPopover
       trigger={<button type="button" data-testid="pr-trigger">打开</button>}
       branch="feature/git-settings"
+      branches={[
+        { name: 'main', current: false },
+        { name: 'feature/git-settings', current: true },
+      ]}
+      base="main"
       suggestion={null}
       generating={false}
+      creating={false}
       error={null}
+      createError={null}
+      result={null}
       open
       onOpenChange={() => {}}
       onGenerate={() => {}}
+      onBaseChange={() => {}}
+      onCreate={() => {}}
       {...overrides}
     />,
   );
@@ -65,7 +75,7 @@ describe('GitPullRequestPopover', () => {
     renderPopover({ suggestion, generating: true });
 
     const generateButton = screen.getByTestId('git-pr-generate');
-    expect(generateButton.textContent).toContain('重新生成');
+    expect(generateButton.textContent).toContain('生成中');
     expect(generateButton.hasAttribute('disabled')).toBe(true);
   });
 

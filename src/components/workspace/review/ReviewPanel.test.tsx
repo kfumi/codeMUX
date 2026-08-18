@@ -18,6 +18,7 @@ const gitApiMock = vi.hoisted(() => ({
   pushBranch: vi.fn(),
   generateCommitMessage: vi.fn(),
   generatePullRequestDescription: vi.fn(),
+  createPullRequest: vi.fn(),
 }));
 
 vi.mock('../../../lib/tauri', async () => {
@@ -71,6 +72,13 @@ describe('ReviewPanel git actions', () => {
     gitApiMock.generatePullRequestDescription.mockResolvedValue({
       title: 'feat: 新增 Git 生成设置',
       body: '本分支新增 Git 设置面板。',
+      base: 'master',
+    });
+    gitApiMock.createPullRequest.mockResolvedValue({
+      platform: 'github',
+      url: 'https://github.com/acme/app/pull/12',
+      number: 12,
+      head: 'feature/git-panel',
       base: 'master',
     });
   });
@@ -256,5 +264,27 @@ describe('ReviewPanel git actions', () => {
     expect(gitApiMock.generatePullRequestDescription).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('git-pr-generate'));
     await waitFor(() => expect(screen.getByText('当前分支即基准分支，没有可生成 PR 的提交差异')).toBeTruthy());
+  });
+
+  it('creates a pull request from the edited PR content', async () => {
+    render(<ReviewPanel projectPath="D:/project/app" />);
+
+    await screen.findByText('App.tsx');
+    await openGitActions('git-actions-pr');
+    fireEvent.change(screen.getByTestId('git-pr-title'), { target: { value: 'feat: create PR' } });
+    fireEvent.change(screen.getByTestId('git-pr-body'), { target: { value: 'PR description' } });
+    fireEvent.click(screen.getByTestId('git-pr-create'));
+
+    await waitFor(() =>
+      expect(gitApiMock.createPullRequest).toHaveBeenCalledWith({
+        projectPath: 'D:/project/app',
+        title: 'feat: create PR',
+        body: 'PR description',
+        base: 'feature/git-panel',
+      }),
+    );
+    expect((await screen.findByRole('link', { name: '打开 PR' })).getAttribute('href')).toBe(
+      'https://github.com/acme/app/pull/12',
+    );
   });
 });

@@ -7,6 +7,13 @@ import type { AppConfig } from '../../types/provider';
 import { GitSettings } from './GitSettings';
 
 const setGitSettingsMock = vi.fn();
+const gitApiMock = vi.hoisted(() => ({
+  getGiteeCredentialStatus: vi.fn(),
+  setGiteeToken: vi.fn(),
+  clearGiteeToken: vi.fn(),
+}));
+
+vi.mock('../../lib/tauri', () => ({ gitApi: gitApiMock }));
 
 const baseConfig: AppConfig = {
   providers: [],
@@ -68,6 +75,9 @@ describe('GitSettings', () => {
       config: structuredClone(baseConfig),
       setGitSettings: setGitSettingsMock,
     } as Partial<ReturnType<typeof useSettingsStore.getState>>);
+    gitApiMock.getGiteeCredentialStatus.mockResolvedValue(false);
+    gitApiMock.setGiteeToken.mockResolvedValue(undefined);
+    gitApiMock.clearGiteeToken.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -84,6 +94,16 @@ describe('GitSettings', () => {
 
     expect(screen.getByText('已添加到提交信息生成提示中')).toBeTruthy();
     expect(screen.getByText('已添加到 PR 标题/描述生成提示中')).toBeTruthy();
+  });
+
+  it('stores the Gitee token without displaying an existing token', async () => {
+    render(<GitSettings />);
+
+    const tokenInput = screen.getByTestId('gitee-token') as HTMLInputElement;
+    fireEvent.change(tokenInput, { target: { value: 'gitee-secret' } });
+    fireEvent.click(screen.getByTestId('gitee-token-save'));
+
+    expect(gitApiMock.setGiteeToken).toHaveBeenCalledWith('gitee-secret');
   });
 
   it('saves commit instructions on blur when modified', () => {

@@ -19,10 +19,13 @@ const mocks = vi.hoisted(() => {
     attachMock: vi.fn(() => Promise.resolve()),
     detachMock: vi.fn(() => Promise.resolve()),
     closeMock: vi.fn(() => Promise.resolve()),
+    writeMock: vi.fn(() => Promise.resolve()),
+    resizeMock: vi.fn(() => Promise.resolve()),
     setTerminalIdMock: sidePanelState.setTerminalId,
     isTabPresentMock: sidePanelState.isTabPresent,
     useSidePanelStore,
     terminalWrites: [] as string[],
+    resizeObserverCallback: null as (() => void) | null,
   };
 });
 
@@ -32,8 +35,8 @@ vi.mock('../../../lib/tauri', () => ({
     attach: mocks.attachMock,
     detach: mocks.detachMock,
     close: mocks.closeMock,
-    write: vi.fn(() => Promise.resolve()),
-    resize: vi.fn(() => Promise.resolve()),
+    write: mocks.writeMock,
+    resize: mocks.resizeMock,
   },
 }));
 
@@ -107,6 +110,10 @@ describe('TerminalPanel lifecycle', () => {
     vi.stubGlobal(
       'ResizeObserver',
       class {
+        constructor(callback: () => void) {
+          mocks.resizeObserverCallback = callback;
+        }
+
         observe() {}
         disconnect() {}
       },
@@ -115,10 +122,13 @@ describe('TerminalPanel lifecycle', () => {
     mocks.attachMock.mockClear();
     mocks.detachMock.mockClear();
     mocks.closeMock.mockClear();
+    mocks.writeMock.mockClear();
+    mocks.resizeMock.mockClear();
     mocks.setTerminalIdMock.mockClear();
     mocks.isTabPresentMock.mockClear();
     mocks.isTabPresentMock.mockReturnValue(true);
     mocks.terminalWrites.length = 0;
+    mocks.resizeObserverCallback = null;
   });
 
   afterEach(() => {
@@ -193,6 +203,26 @@ describe('TerminalPanel lifecycle', () => {
       'session-a:terminal:D:/project/app',
       'terminal-b',
     );
+  });
+
+  it('does not resize an existing terminal before attach finishes', async () => {
+    let resolveAttach: (() => void) | undefined;
+    mocks.attachMock.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      resolveAttach = resolve;
+    }));
+    render(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+      />,
+    );
+
+    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalled());
+    mocks.resizeObserverCallback?.();
+
+    expect(mocks.resizeMock).not.toHaveBeenCalled();
+    resolveAttach?.();
   });
 
   it('does not leak a second terminal during StrictMode effect replay', async () => {
