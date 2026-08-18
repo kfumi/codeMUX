@@ -2,17 +2,26 @@ import { useEffect, useRef, useState } from 'react';
 
 import { normalizeStoredConnection, resolveActiveConnection } from '@shared/lib/companion-connection';
 
-import { buildWsUrl, fetchSessionEvents } from '../lib/api';
+import { buildWsUrl, fetchSessionEvents, fetchSessionRuntimeState } from '../lib/api';
 import type { CompanionConnection } from '../lib/storage';
 
-export interface WsEnvelope {
+export interface WsEventEnvelope {
   type: 'event';
   sessionId: string;
   event: Record<string, unknown>;
 }
 
+export interface WsStateEnvelope {
+  type: 'state';
+  sessionId: string;
+  running: boolean;
+}
+
+export type WsEnvelope = WsEventEnvelope | WsStateEnvelope;
+
 interface UseCompanionSocketOptions {
   onConnectionLost?: () => void;
+  onRuntimeState?: (running: boolean) => void;
 }
 
 export function useCompanionSocket(
@@ -26,10 +35,12 @@ export function useCompanionSocket(
   const onEventRef = useRef(onEvent);
   const onReconnectRef = useRef(onReconnect);
   const onConnectionLostRef = useRef(options.onConnectionLost);
+  const onRuntimeStateRef = useRef(options.onRuntimeState);
   const wasConnectedRef = useRef(false);
   onEventRef.current = onEvent;
   onReconnectRef.current = onReconnect;
   onConnectionLostRef.current = options.onConnectionLost;
+  onRuntimeStateRef.current = options.onRuntimeState;
 
   useEffect(() => {
     if (!connection || !sessionId) {
@@ -47,12 +58,16 @@ export function useCompanionSocket(
 
       const poll = async () => {
         try {
-          const events = await fetchSessionEvents(connection, sessionId, after);
+          const [events, runtimeState] = await Promise.all([
+            fetchSessionEvents(connection, sessionId, after),
+            fetchSessionRuntimeState(connection, sessionId),
+          ]);
           if (!activePoll) return;
           if (!wasConnectedRef.current) {
             wasConnectedRef.current = true;
             setConnected(true);
           }
+          onRuntimeStateRef.current?.(runtimeState.running);
           for (const event of events) {
             if (event && typeof event === 'object') {
               const record = event as Record<string, unknown>;
@@ -119,6 +134,8 @@ export function useCompanionSocket(
           const payload = JSON.parse(String(message.data)) as WsEnvelope;
           if (payload.type === 'event' && payload.event) {
             onEventRef.current(payload.event);
+          } else if (payload.type === 'state' && typeof payload.running === 'boolean') {
+            onRuntimeStateRef.current?.(payload.running);
           }
         } catch {
           // ignore malformed frames

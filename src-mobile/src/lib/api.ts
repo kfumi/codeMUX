@@ -14,6 +14,7 @@ import {
 
 import type { CompanionConnection } from './storage';
 import type { MobilePermissionResponse } from './permissionResponse';
+import type { MobileTokenUsage } from './contextUsage';
 
 export interface MobileBootstrap {
   defaultAgentKind: string;
@@ -36,6 +37,7 @@ export interface MobileBootstrap {
 export interface MobileProvider {
   id: string;
   name: string;
+  templateId?: string | null;
   enabled: boolean;
   configured: boolean;
   defaultModel: string;
@@ -63,6 +65,10 @@ export interface MobileSession {
   is_archived?: boolean;
   is_pinned?: boolean;
   updated_at: string;
+}
+
+export interface MobileSessionRuntimeState {
+  running: boolean;
 }
 
 export type MobileAgentKind = 'claude_code' | 'codex' | 'opencode';
@@ -100,6 +106,7 @@ export interface MobileComposerCommand {
 export interface MobileComposerContext {
   files: MobileComposerFile[];
   commands: MobileComposerCommand[];
+  tokenUsage?: MobileTokenUsage | null;
 }
 
 export interface MobileSessionSettingsPatch {
@@ -331,6 +338,16 @@ export async function fetchSessionEvents(
   const profile = asProfile(connection);
   const query = after >= 0 ? `?after=${after}` : '';
   return requestJson<unknown[]>(profile, `/api/sessions/${sessionId}/events${query}`, {
+    headers: authHeaders(profile.token),
+  });
+}
+
+export async function fetchSessionRuntimeState(
+  connection: CompanionConnection,
+  sessionId: string,
+): Promise<MobileSessionRuntimeState> {
+  const profile = asProfile(connection);
+  return requestJson<MobileSessionRuntimeState>(profile, `/api/sessions/${sessionId}/state`, {
     headers: authHeaders(profile.token),
   });
 }

@@ -24,6 +24,7 @@ pub struct MobileBootstrap {
 pub struct MobileProvider {
     pub id: String,
     pub name: String,
+    pub template_id: Option<String>,
     pub enabled: bool,
     pub configured: bool,
     pub default_model: String,
@@ -86,6 +87,7 @@ fn sanitize_provider(provider: &ModelProvider) -> MobileProvider {
     MobileProvider {
         id: provider.id.clone(),
         name: provider.name.clone(),
+        template_id: provider.builtin_template_id.clone(),
         enabled: provider.enabled,
         configured: is_provider_configured(provider),
         default_model: provider.default_model.clone(),
@@ -145,6 +147,7 @@ mod tests {
         let provider = MobileProvider {
             id: "p1".to_string(),
             name: "Anthropic".to_string(),
+            template_id: None,
             enabled: true,
             configured: true,
             default_model: "sonnet".to_string(),

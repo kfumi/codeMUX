@@ -7,6 +7,7 @@ CodeMUX is a Tauri 2 desktop app: React/Vite frontend, Rust backend, and TypeScr
 - `src/` contains frontend components, stores, utilities, types, hooks, styles, and tests.
 - `src-tauri/src/` contains Rust commands, config, database, MCP, skills, and agent runtimes.
 - `src-tauri/sidecar/` contains the Node/TypeScript agent sidecar.
+- `src-mobile/` contains the mobile web app (its own Vite build and tests); it is embedded into the desktop app via `npm run build:mobile`.
 - `public/` and `src-tauri/icons/` hold static web and app assets.
 - `docs/` contains architecture specs and plans.
 
@@ -18,11 +19,12 @@ CodeMUX is a Tauri 2 desktop app: React/Vite frontend, Rust backend, and TypeScr
 - `npm run tauri dev` runs the desktop app in development mode.
 - `$env:RUSTFLAGS="--cfg tokio_unstable"; npm run tauri dev -- --features tokio-console` runs with tokio-console tracing (requires the `.cargo/config.toml` in `src-tauri/` to also set `rustflags = ["--cfg", "tokio_unstable"]`;`.cargo/config.toml` is already committed, so the RUSTFLAGS env var is only needed as a fallback if that file doesn't apply).
 - `npm run build` type-checks `src/` and builds the Vite app.
+- `npm run build:mobile` builds `src-mobile/` (installs deps, runs `tsc && vite build`) and copies the output to `dist-mobile/`, which the desktop app loads.
 - `cd src-tauri/sidecar && npm run build` compiles sidecar TypeScript.
 - `cd src-tauri && cargo fmt --all -- --check` verifies Rust formatting.
 - `cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings` runs Rust lints.
 - `cd src-tauri && cargo check --all-targets --all-features` checks Rust compilation.
-- `npx vitest run` runs root TypeScript/React tests; run the same command in `src-tauri/sidecar/` for sidecar tests.
+- `npx vitest run` runs root TypeScript/React tests; run the same command in `src-tauri/sidecar/` for sidecar tests and in `src-mobile/` for mobile tests.
 
 ## Coding Style & Naming Conventions
 
@@ -32,7 +34,14 @@ For UI work, prefer existing components in `src/components/ui/` (shadcn/ui built
 
 ## Testing Guidelines
 
-Tests use Vitest and Testing Library. Name tests `*.test.ts` or `*.test.tsx` and colocate them near covered code. Add focused tests for stores, parsing, sidecar transforms, Rust-adjacent TypeScript behavior, and React behavior. Keep tests deterministic; avoid local paths unless path handling is under test.
+Tests use Vitest and Testing Library. Name tests `*.test.ts` or `*.test.tsx` and colocate them near covered code. Add focused tests for stores, parsing, sidecar transforms, Rust-adjacent TypeScript behavior, and React behavior. Keep tests deterministic; avoid local paths unless path handling is under test. Whenever you modify code, add or update the colocated tests that cover it.
+
+**Test selection — run affected tests during iteration, full suite at the gate:**
+
+- After each code change, run the *affected* tests rather than the full suite (147 test files; a full run takes minutes). The affected set is the colocated test of each changed file plus the tests of any module that (transitively) imports the changed module. Pass vitest file filters, e.g. `npx vitest run src/lib/modelProviders`, or use `npx vitest` watch mode, which reruns only tests related to saved changes.
+- Do not rely solely on a changed file's own test: cross-module regressions (e.g. changing a store breaks component tests elsewhere) are caught only by including dependent tests or the full suite.
+- Run the full suite before committing or opening a PR: `npx vitest run` at the repo root and `npx vitest run` in `src-tauri/sidecar/`. A full-suite pass is the finishing gate, not the per-iteration default.
+- If you modify code under `src-mobile/`, run its tests (`npx vitest run` in `src-mobile/`) and then run `npm run build:mobile`. The desktop app loads `dist-mobile/`, which is only refreshed by that build — mobile changes do not take effect otherwise.
 
 ## Commit & Pull Request Guidelines
 

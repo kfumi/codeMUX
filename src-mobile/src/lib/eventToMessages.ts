@@ -2,6 +2,8 @@ import { createId } from './utils';
 import {
   extractUserMessageParts,
   isAgentInjectedUserMessage,
+  isCompactSummaryText,
+  isHiddenTranscriptUserMessage,
   isSwitchBriefingOnlyMessage,
   type UserAttachmentPreview,
 } from './userMessageDisplay';
@@ -21,8 +23,22 @@ export interface SessionSummaryDiff {
 }
 
 export type ChatMessage =
-  | { kind: 'user'; id: string; content: string; attachments?: UserAttachmentPreview[] }
-  | { kind: 'assistant'; id: string; content: string; streaming?: boolean }
+  | {
+      kind: 'user';
+      id: string;
+      content: string;
+      attachments?: UserAttachmentPreview[];
+      timestamp?: number;
+      sourceUuid?: string;
+    }
+  | {
+      kind: 'assistant';
+      id: string;
+      content: string;
+      streaming?: boolean;
+      timestamp?: number;
+      sourceUuid?: string;
+    }
   | { kind: 'system'; id: string; content: string }
   | {
       kind: 'runtime_switch';
@@ -94,6 +110,30 @@ type ContentBlock = {
 
 function eventId(event: Record<string, unknown>): string {
   return typeof event.event_id === 'string' ? event.event_id : createId();
+}
+
+function eventMetadata(event: Record<string, unknown>): { timestamp?: number; sourceUuid?: string } {
+  const timestamp = parseTimestamp(event.timestamp);
+  const sourceUuid = typeof event.uuid === 'string'
+    ? event.uuid
+    : typeof event.event_id === 'string'
+      ? event.event_id
+      : undefined;
+  return {
+    ...(timestamp !== undefined ? { timestamp } : {}),
+    ...(sourceUuid ? { sourceUuid } : {}),
+  };
+}
+
+function parseTimestamp(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
 function contentBlocks(event: Record<string, unknown>): ContentBlock[] {
@@ -234,6 +274,7 @@ function parseAssistantEvent(event: Record<string, unknown>, id: string): ChatMe
     return [];
   }
 
+  const metadata = eventMetadata(event);
   const messages: ChatMessage[] = [];
   let textParts: string[] = [];
 
@@ -244,6 +285,7 @@ function parseAssistantEvent(event: Record<string, unknown>, id: string): ChatMe
         kind: 'assistant',
         id: `${id}-text-${messages.length}`,
         content: text,
+        ...metadata,
       });
     }
     textParts = [];
@@ -257,6 +299,7 @@ function parseAssistantEvent(event: Record<string, unknown>, id: string): ChatMe
         id: `${id}-thinking-${index}`,
         content: block.thinking,
         collapsed: true,
+        ...metadata,
       });
       continue;
     }
@@ -341,6 +384,9 @@ export function eventToMessages(event: Record<string, unknown>): ChatMessage[] {
   }
 
   if (type === 'user_message') {
+    if (isHiddenTranscriptUserMessage(event)) {
+      return [];
+    }
     const { text, attachments } = extractUserText(event);
     if (!text && attachments.length === 0) {
       return [];
@@ -348,10 +394,23 @@ export function eventToMessages(event: Record<string, unknown>): ChatMessage[] {
     if (text && (isAgentInjectedUserMessage(text) || isSwitchBriefingOnlyMessage(text))) {
       return [];
     }
-    return [{ kind: 'user', id, content: text, ...(attachments.length > 0 ? { attachments } : {}) }];
+    return [{
+      kind: 'user',
+      id,
+      content: text,
+      ...(attachments.length > 0 ? { attachments } : {}),
+      ...eventMetadata(event),
+    }];
   }
 
   if (type === 'assistant_message') {
+    if (contentBlocks(event).some((block) => (
+      block.type === 'text'
+      && typeof block.text === 'string'
+      && isCompactSummaryText(block.text)
+    ))) {
+      return [];
+    }
     return parseAssistantEvent(event, id);
   }
 
@@ -413,11 +472,18 @@ export function eventToMessages(event: Record<string, unknown>): ChatMessage[] {
       content: event.text,
       collapsed: true,
       streaming: true,
+      ...eventMetadata(event),
     }];
   }
 
   if (type === 'text_delta' && typeof event.text === 'string') {
-    return [{ kind: 'assistant', id: `${id}-delta`, content: event.text, streaming: true }];
+    return [{
+      kind: 'assistant',
+      id: `${id}-delta`,
+      content: event.text,
+      streaming: true,
+      ...eventMetadata(event),
+    }];
   }
 
   if (type === 'error') {

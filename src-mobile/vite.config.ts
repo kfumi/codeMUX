@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
+      '@': path.resolve(__dirname, '../src'),
       '@mobile': path.resolve(__dirname, './src'),
       '@shared/lib/agentPermissions': path.resolve(__dirname, '../src/lib/agentPermissions.ts'),
       '@shared/lib/companion-connection': path.resolve(__dirname, '../src/lib/companion-connection/index.ts'),

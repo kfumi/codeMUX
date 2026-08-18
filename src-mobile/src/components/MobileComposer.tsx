@@ -8,7 +8,6 @@ import {
   CircleGauge,
   ClipboardList,
   Cpu,
-  Gauge,
   ImagePlus,
   LoaderCircle,
   Plus,
@@ -16,7 +15,6 @@ import {
   Shield,
   ShieldCheck,
   Square,
-  Sparkles,
   Terminal,
   X,
   type LucideIcon,
@@ -36,7 +34,11 @@ import {
   type MobileSessionSettingsPatch,
 } from '../lib/api';
 import type { CompanionConnection } from '../lib/storage';
+import { buildMobileContextUsage, formatMobileTokens, type MobileContextUsage } from '../lib/contextUsage';
 import { cn } from '../lib/utils';
+import { ProviderBrandIcon } from '@/components/settings/ProviderBrandIcon';
+import { AgentBrandIcon } from '@/components/agent/AgentBrandIcon';
+import { getAgentDefinition } from '@/types/agentRegistry';
 import {
   mapExecutionModeToPermissionConfig,
   resolveEffectivePermissionConfig,
@@ -77,12 +79,6 @@ const REASONING_LABELS: Record<string, string> = {
 };
 
 type ComposerMenu = 'add' | 'agent' | 'context' | 'model' | 'permission' | 'reasoning' | null;
-
-const AGENT_ICONS: Record<MobileAgentKind, LucideIcon> = {
-  claude_code: Brain,
-  codex: Bot,
-  opencode: Sparkles,
-};
 
 const PERMISSION_ICONS: Record<AgentExecutionMode, LucideIcon> = {
   confirm_before_edit: Shield,
@@ -247,14 +243,18 @@ function ToolbarMenuButton({
   active = false,
   disabled = false,
   icon: Icon,
+  iconNode,
   label,
+  labelText,
   onClick,
   tone = 'default',
 }: {
   active?: boolean;
   disabled?: boolean;
   icon: LucideIcon;
+  iconNode?: ReactNode;
   label: string;
+  labelText?: string;
   onClick: () => void;
   tone?: 'default' | 'warning';
 }) {
@@ -267,12 +267,14 @@ function ToolbarMenuButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-transparent text-muted-foreground/78 transition-all duration-150 hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 active:scale-95 disabled:pointer-events-none disabled:opacity-45',
+        'inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-transparent text-muted-foreground/78 transition-all duration-150 hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 active:scale-95 disabled:pointer-events-none disabled:opacity-45',
+        labelText ? 'min-w-0 max-w-[min(9rem,30vw)] gap-1.5 px-2' : 'w-8',
         active && 'bg-muted/70 text-foreground',
         tone === 'warning' && 'border-orange-500/25 text-orange-500 hover:bg-orange-500/10 hover:text-orange-400',
       )}
     >
-      <Icon className="h-4 w-4" strokeWidth={1.9} />
+      {iconNode ?? <Icon className="h-4 w-4 shrink-0" strokeWidth={1.9} />}
+      {labelText ? <span className="min-w-0 truncate text-[11px] font-medium">{labelText}</span> : null}
     </button>
   );
 }
@@ -304,6 +306,7 @@ function ToolbarMenuItem({
   active = false,
   description,
   icon: Icon,
+  iconNode,
   label,
   onClick,
   tone = 'default',
@@ -311,6 +314,7 @@ function ToolbarMenuItem({
   active?: boolean;
   description?: string;
   icon: LucideIcon;
+  iconNode?: ReactNode;
   label: string;
   onClick: () => void;
   tone?: 'default' | 'warning';
@@ -326,7 +330,12 @@ function ToolbarMenuItem({
         active && 'bg-muted/66',
       )}
     >
-      <Icon className={cn('h-4 w-4 shrink-0 text-muted-foreground', tone === 'warning' && 'text-orange-500')} strokeWidth={1.9} />
+      {iconNode ?? (
+        <Icon
+          className={cn('h-4 w-4 shrink-0 text-muted-foreground', tone === 'warning' && 'text-orange-500')}
+          strokeWidth={1.9}
+        />
+      )}
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs font-medium text-foreground">{label}</span>
         {description ? <span className="block truncate text-[11px] leading-4 text-muted-foreground">{description}</span> : null}
@@ -336,7 +345,62 @@ function ToolbarMenuItem({
   );
 }
 
-function ContextIndicator({ loading, ready }: { loading: boolean; ready: boolean }) {
+function ModelBottomSheet({
+  children,
+  onClose,
+}: {
+  children: ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-end bg-black/55"
+      role="presentation"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mobile-model-sheet-title"
+        className="max-h-[min(78dvh,36rem)] w-full overflow-hidden rounded-t-3xl border border-b-0 border-border/75 bg-[hsl(var(--surface-2))] text-foreground shadow-[0_-20px_54px_-28px_hsl(var(--surface-shadow-strong)/0.72)]"
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-border/45 px-4 pb-3 pt-3">
+          <div className="min-w-0">
+            <div id="mobile-model-sheet-title" className="text-sm font-semibold">选择模型</div>
+            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">选择供应商后切换可用模型</div>
+          </div>
+          <button
+            type="button"
+            aria-label="关闭模型选择"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="max-h-[calc(78dvh-4.75rem)] overflow-y-auto overscroll-contain px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ContextIndicator({
+  loading,
+  ready,
+  usage,
+}: {
+  loading: boolean;
+  ready: boolean;
+  usage: MobileContextUsage | null;
+}) {
+  if (usage) {
+    return <UsageRing percentage={usage.percentage * 100} />;
+  }
+
   return (
     <span className="relative inline-flex h-5 w-5 items-center justify-center">
       <CircleGauge className={cn(
@@ -345,6 +409,94 @@ function ContextIndicator({ loading, ready }: { loading: boolean; ready: boolean
       )} strokeWidth={1.8} />
       {ready && !loading ? <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-success" /> : null}
     </span>
+  );
+}
+
+function UsageRing({ percentage }: { percentage: number }) {
+  const size = 24;
+  const strokeWidth = 2.5;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (percentage / 100) * circumference;
+  const stroke = getProgressColor(percentage);
+
+  return (
+    <span className="relative inline-flex h-4 w-4 items-center justify-center" aria-hidden="true">
+      <svg className="-rotate-90" width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="hsl(var(--muted))"
+          strokeWidth={strokeWidth}
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+        />
+      </svg>
+    </span>
+  );
+}
+
+function getProgressColor(percentage: number): string {
+  if (percentage >= 90) return 'hsl(var(--destructive))';
+  if (percentage >= 70) return 'hsl(var(--warning))';
+  return 'hsl(var(--success))';
+}
+
+function ContextUsageSummary({ usage }: { usage: MobileContextUsage | null }) {
+  return (
+    <>
+      <div className="flex items-center justify-between px-4 py-3">
+        <span className="text-sm font-medium text-foreground">上下文</span>
+        <span className="text-sm font-medium text-foreground">
+          {usage ? `${Math.round(usage.percentage * 100)}%` : '--'}
+        </span>
+      </div>
+      {usage ? (
+        <div className="border-t border-border/45 px-4 py-3">
+          <div className="space-y-2">
+            {([
+              ['输入', usage.inputTokens],
+              ['缓存', usage.cachedTokens],
+              ['输出', usage.outputTokens],
+            ] as Array<[string, number]>)
+              .filter(([, value]) => value > 0)
+              .map(([label, value]) => (
+                <ContextStatRow key={label} label={label} value={value} />
+              ))}
+          </div>
+          <div className="mt-3 flex items-center justify-between border-t border-border/45 pt-3 text-sm">
+            <span className="font-medium text-foreground">总计</span>
+            <span className="font-medium text-foreground">
+              {formatMobileTokens(usage.usedTokens)} / {formatMobileTokens(usage.totalTokens)}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="border-t border-border/45 px-4 py-3 text-sm text-muted-foreground">
+          暂无 token 用量
+        </div>
+      )}
+    </>
+  );
+}
+
+function ContextStatRow({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex items-center justify-between gap-3 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium text-foreground">{formatMobileTokens(value)}</span>
+    </div>
   );
 }
 
@@ -392,6 +544,7 @@ export function MobileComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const contextRequestRef = useRef(0);
 
   useEffect(() => {
     setAgentKind(sessionAgentKind);
@@ -410,29 +563,37 @@ export function MobileComposer({
     sessionAgentKind,
   ]);
 
-  useEffect(() => {
-    let active = true;
+  const refreshContext = useCallback(async () => {
+    const requestId = contextRequestRef.current + 1;
+    contextRequestRef.current = requestId;
     if (offline) {
       setContext(null);
-      return () => {
-        active = false;
-      };
+      setContextLoading(false);
+      return;
     }
     setContextLoading(true);
-    void fetchComposerContext(connection, session.id)
-      .then((next) => {
-        if (active) setContext(next);
-      })
-      .catch(() => {
-        if (active) setContext({ files: [], commands: [] });
-      })
-      .finally(() => {
-        if (active) setContextLoading(false);
-      });
-    return () => {
-      active = false;
-    };
+    try {
+      const next = await fetchComposerContext(connection, session.id);
+      if (contextRequestRef.current === requestId) {
+        setContext(next);
+      }
+    } catch {
+      if (contextRequestRef.current === requestId) {
+        setContext({ files: [], commands: [], tokenUsage: null });
+      }
+    } finally {
+      if (contextRequestRef.current === requestId) {
+        setContextLoading(false);
+      }
+    }
   }, [connection, offline, session.id]);
+
+  useEffect(() => {
+    void refreshContext();
+    return () => {
+      contextRequestRef.current += 1;
+    };
+  }, [refreshContext]);
 
   useEffect(() => {
     if (!openMenu) return undefined;
@@ -478,13 +639,17 @@ export function MobileComposer({
     && !running
     && !busy
     && canSubmitComposer(text, attachments.length);
-  const SelectedAgentIcon = AGENT_ICONS[agentKind];
   const SelectedPermissionIcon = PERMISSION_ICONS[permissionMode];
   const selectedAgent = AGENT_OPTIONS.find((option) => option.id === agentKind);
+  const selectedAgentDefinition = getAgentDefinition(agentKind);
   const selectedPermission = PERMISSION_OPTIONS[agentKind].find((option) => option.mode === permissionMode);
   const selectedModel = models.find((entry) => entry.id === model);
   const selectedModelLabel = selectedModel?.name ?? selectedModel?.id ?? (model || '模型');
   const selectedProviderLabel = selectedProvider?.name ?? '供应商';
+  const contextUsage = useMemo(
+    () => buildMobileContextUsage(context?.tokenUsage, model),
+    [context?.tokenUsage, model],
+  );
 
   const commitSettings = useCallback(async (settings: MobileSessionSettingsPatch) => {
     setError(null);
@@ -843,36 +1008,24 @@ export function MobileComposer({
               aria-haspopup="menu"
               aria-expanded={openMenu === 'context'}
               disabled={offline}
-              onClick={() => setOpenMenu((current) => current === 'context' ? null : 'context')}
+              onClick={() => {
+                setOpenMenu((current) => current === 'context' ? null : 'context');
+                void refreshContext();
+              }}
               className={cn(
                 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-transparent transition-all duration-150 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 active:scale-95 disabled:pointer-events-none disabled:opacity-45',
                 openMenu === 'context' && 'bg-muted/70',
               )}
             >
-              <ContextIndicator loading={contextLoading} ready={Boolean(context)} />
+              <ContextIndicator
+                loading={contextLoading}
+                ready={Boolean(context)}
+                usage={contextUsage}
+              />
             </button>
             {openMenu === 'context' ? (
-              <ToolbarPopover className="w-60">
-                <div className="flex items-center justify-between px-2.5 pb-2 pt-1">
-                  <div>
-                    <div className="text-xs font-semibold text-foreground">上下文</div>
-                    <div className="mt-0.5 text-[11px] text-muted-foreground">项目文件和可用命令</div>
-                  </div>
-                  <ContextIndicator loading={contextLoading} ready={Boolean(context)} />
-                </div>
-                <div className="grid grid-cols-2 gap-1.5 border-t border-border/45 px-2.5 py-2.5">
-                  <div className="rounded-lg bg-muted/42 px-2.5 py-2">
-                    <div className="text-[11px] text-muted-foreground">文件</div>
-                    <div className="mt-0.5 text-sm font-semibold text-foreground">{context?.files.length ?? 0}</div>
-                  </div>
-                  <div className="rounded-lg bg-muted/42 px-2.5 py-2">
-                    <div className="text-[11px] text-muted-foreground">命令</div>
-                    <div className="mt-0.5 text-sm font-semibold text-foreground">{context?.commands.length ?? 0}</div>
-                  </div>
-                </div>
-                <div className="border-t border-border/45 px-2.5 py-2 text-[11px] text-muted-foreground">
-                  {contextLoading ? '正在同步桌面端上下文…' : context ? '上下文已同步，可使用 @ 引用文件或 / 调用命令' : '暂未加载上下文'}
-                </div>
+              <ToolbarPopover className="w-56">
+                <ContextUsageSummary usage={contextUsage} />
               </ToolbarPopover>
             ) : null}
           </div>
@@ -881,7 +1034,8 @@ export function MobileComposer({
             <ToolbarMenuButton
               active={openMenu === 'agent'}
               disabled={!canEditSettings || !bootstrap}
-              icon={SelectedAgentIcon}
+              icon={Bot}
+              iconNode={selectedAgentDefinition ? <AgentBrandIcon agent={selectedAgentDefinition} size="sm" /> : undefined}
               label={`智能体：${selectedAgent?.label ?? agentKind}`}
               onClick={() => setOpenMenu((current) => current === 'agent' ? null : 'agent')}
             />
@@ -892,9 +1046,9 @@ export function MobileComposer({
                   <ToolbarMenuItem
                     key={option.id}
                     active={agentKind === option.id}
-                    icon={AGENT_ICONS[option.id]}
+                    icon={Bot}
+                    iconNode={getAgentDefinition(option.id) ? <AgentBrandIcon agent={getAgentDefinition(option.id)!} size="sm" /> : undefined}
                     label={option.label}
-                    description={option.id === 'claude_code' ? 'Claude Code' : option.id === 'codex' ? 'Codex Agent' : 'OpenCode Agent'}
                     onClick={() => {
                       handleAgentChange(option.id);
                       setOpenMenu(null);
@@ -910,76 +1064,25 @@ export function MobileComposer({
               active={openMenu === 'model'}
               disabled={!canEditSettings || models.length === 0}
               icon={Cpu}
+              iconNode={
+                <ProviderBrandIcon
+                  templateId={selectedProvider?.templateId ?? selectedProvider?.id}
+                  name={selectedProvider?.name}
+                  className="h-4 w-4 rounded-md"
+                  size={14}
+                />
+              }
               label={`模型：${selectedModelLabel}`}
+              labelText={selectedModelLabel}
               onClick={() => setOpenMenu((current) => current === 'model' ? null : 'model')}
             />
-            {openMenu === 'model' ? (
-              <ToolbarPopover align="right" className="w-[min(21rem,calc(100vw-2rem))]">
-                <div className="px-2.5 pb-2 pt-1">
-                  <div className="text-xs font-semibold text-foreground">模型</div>
-                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{selectedProviderLabel} · {selectedModelLabel}</div>
-                </div>
-                {providers.length > 1 ? (
-                  <div className="flex gap-1 overflow-x-auto border-y border-border/45 px-2.5 py-2">
-                    {providers.map((provider) => (
-                      <button
-                        key={provider.id}
-                        type="button"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => handleProviderChange(provider.id)}
-                        className={cn(
-                          'shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
-                          provider.id === providerId
-                            ? 'bg-foreground text-background'
-                            : 'bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground',
-                        )}
-                      >
-                        {provider.name}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="max-h-56 overflow-y-auto py-1">
-                  {models.length === 0 ? (
-                    <div className="px-3 py-4 text-center text-xs text-muted-foreground">没有可用模型</div>
-                  ) : (
-                    models.map((entry) => (
-                      <button
-                        key={entry.id}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={entry.id === model}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => {
-                          handleModelChange(entry.id);
-                          setOpenMenu(null);
-                        }}
-                        className={cn(
-                          'flex min-h-10 w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/56',
-                          entry.id === model && 'bg-muted/66',
-                        )}
-                      >
-                        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted/72 text-muted-foreground">
-                          <Cpu className="h-3.5 w-3.5" />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-xs font-medium text-foreground">{entry.name ?? entry.id}</span>
-                          <span className="block truncate text-[11px] text-muted-foreground">{entry.id}</span>
-                        </span>
-                        {entry.id === model ? <Check className="h-3.5 w-3.5 shrink-0 text-foreground/75" /> : null}
-                      </button>
-                    ))
-                  )}
-                </div>
-              </ToolbarPopover>
-            ) : null}
           </div>
 
           <div className="relative">
             <ToolbarMenuButton
               active={openMenu === 'reasoning'}
               disabled={!canEditSettings}
-              icon={Gauge}
+              icon={Brain}
               label={`思考强度：${REASONING_LABELS[reasoningEffort] ?? reasoningEffort}`}
               onClick={() => setOpenMenu((current) => current === 'reasoning' ? null : 'reasoning')}
             />
@@ -990,9 +1093,8 @@ export function MobileComposer({
                   <ToolbarMenuItem
                     key={effort}
                     active={reasoningEffort === effort}
-                    icon={Gauge}
+                    icon={Brain}
                     label={REASONING_LABELS[effort] ?? effort}
-                    description={effort === 'none' ? '关闭额外思考' : '控制 Agent 的推理深度'}
                     onClick={() => {
                       handleReasoningChange(effort);
                       setOpenMenu(null);
@@ -1033,6 +1135,74 @@ export function MobileComposer({
           </div>
         </div>
       </div>
+      {openMenu === 'model' ? (
+        <ModelBottomSheet onClose={() => setOpenMenu(null)}>
+          <div className="px-2 pb-2">
+            <div className="truncate text-xs font-semibold text-foreground">{selectedProviderLabel}</div>
+            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{selectedModelLabel}</div>
+          </div>
+          {providers.length > 1 ? (
+            <div className="flex gap-2 overflow-x-auto border-y border-border/45 px-2 py-2">
+              {providers.map((provider) => (
+                <button
+                  key={provider.id}
+                  type="button"
+                  aria-pressed={provider.id === providerId}
+                  onClick={() => handleProviderChange(provider.id)}
+                  className={cn(
+                    'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11px] font-medium transition-colors',
+                    provider.id === providerId
+                      ? 'bg-foreground text-background'
+                      : 'bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground',
+                  )}
+                >
+                  <ProviderBrandIcon
+                    templateId={provider.templateId ?? provider.id}
+                    name={provider.name}
+                    className="h-4 w-4 rounded-sm"
+                    size={12}
+                  />
+                  <span className="max-w-32 truncate">{provider.name}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div className="py-1">
+            {models.length === 0 ? (
+              <div className="px-3 py-6 text-center text-xs text-muted-foreground">没有可用模型</div>
+            ) : (
+              models.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={entry.id === model}
+                  onClick={() => {
+                    handleModelChange(entry.id);
+                    setOpenMenu(null);
+                  }}
+                  className={cn(
+                    'flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-muted/56 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45',
+                    entry.id === model && 'bg-muted/66',
+                  )}
+                >
+                  <ProviderBrandIcon
+                    templateId={selectedProvider?.templateId ?? selectedProvider?.id}
+                    name={selectedProvider?.name}
+                    className="h-8 w-8 rounded-lg"
+                    size={16}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-foreground">{entry.name ?? entry.id}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{entry.id}</span>
+                  </span>
+                  {entry.id === model ? <Check className="h-4 w-4 shrink-0 text-foreground/75" /> : null}
+                </button>
+              ))
+            )}
+          </div>
+        </ModelBottomSheet>
+      ) : null}
       {error ? <div className="mt-1.5 px-1 text-xs text-destructive">{error}</div> : null}
       {contextOpen && activeTrigger && suggestions.length === 0 && !contextLoading ? (
         <div className="mt-1 px-1 text-xs text-muted-foreground">

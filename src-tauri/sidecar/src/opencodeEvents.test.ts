@@ -11,6 +11,26 @@ describe('OpenCode event normalization', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'assistant_message', agent_id: 'agent-1', session_id: 'codemux-session-1', agent_session_id: 'opencode-session-1', opencode_session_id: 'opencode-session-1', provider_message_id: 'message-1', sequence: 7, content: [{ type: 'text', text: 'Hello' }] });
   });
+  it('routes streaming events through the CodeMUX session instead of the native session', () => {
+    const events = toCodeMuxEvent({
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'opencode-session-1',
+        partID: 'part-stream-1',
+        messageID: 'message-1',
+        field: 'text',
+        delta: 'Hello',
+      },
+    }, context({
+      streamingParts: new Map(),
+      nextSection: { kind: 'idle' },
+      idleStreamKind: { kind: 'text' },
+    }));
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ type: 'content_started', session_id: 'codemux-session-1' });
+    expect(events[1]).toMatchObject({ type: 'text_delta', session_id: 'codemux-session-1' });
+  });
   it('does not expose text parts belonging to a user message as assistant output', () => {
     const userMessageUpdated = {
       type: 'message.updated',

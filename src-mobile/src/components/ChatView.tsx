@@ -7,6 +7,7 @@ import { CompactProcessToggle } from './chat/CompactProcessToggle';
 import { DesktopOfflineOverlay } from './DesktopOfflineOverlay';
 import { DirectiveText } from './chat/DirectiveText';
 import { ExploreGroupRow } from './chat/ExploreGroupRow';
+import { MessageFooter } from './chat/MessageFooter';
 import { ReasoningRow } from './chat/ReasoningRow';
 import { RuntimeSwitchRow } from './chat/RuntimeSwitchRow';
 import { SessionSummaryRow } from './chat/SessionSummaryRow';
@@ -31,8 +32,14 @@ import {
   updateSessionSettings,
 } from '../lib/api';
 import { appendEvent, eventsToMessages, type ChatMessage } from '../lib/eventToMessages';
-import { buildDisplayRows, isSeamMessage, type DisplayRow } from '../lib/messageLayout';
+import {
+  buildDisplayRows,
+  isSeamMessage,
+  type DisplayRow,
+  type MessageFooterData,
+} from '../lib/messageLayout';
 import { buildMobilePermissionResponse } from '../lib/permissionResponse';
+import { resolveMobileRunningState } from '../lib/runtimeState';
 import { buildTurnDurationMap } from '../lib/turnDuration';
 import {
   cacheSessionEvents,
@@ -59,17 +66,6 @@ function applyEvents(messages: ChatMessage[], events: unknown[]): ChatMessage[] 
   return next;
 }
 
-function hasActiveTurn(events: unknown[]): boolean {
-  let active = false;
-  for (const rawEvent of events) {
-    if (!rawEvent || typeof rawEvent !== 'object') continue;
-    const eventType = (rawEvent as Record<string, unknown>).type;
-    if (eventType === 'user_message') active = true;
-    if (eventType === 'turn_finished') active = false;
-  }
-  return active;
-}
-
 export function ChatView({ connection, session: initialSession, onBack, onDisconnected }: ChatViewProps) {
   const sessionId = initialSession.id;
   const [session, setSession] = useState<MobileSession>(initialSession);
@@ -79,11 +75,11 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
   const [error, setError] = useState<string | null>(null);
   const [bootstrap, setBootstrap] = useState<MobileBootstrap | null>(null);
   const [compactAiOutput, setCompactAiOutput] = useState(false);
+  const [desktopRunning, setDesktopRunning] = useState(false);
   const [turnDurationsByUserId, setTurnDurationsByUserId] = useState<ReadonlyMap<string, number>>(
     () => new Map(),
   );
   const [expandedTurnKeys, setExpandedTurnKeys] = useState<Set<string>>(() => new Set());
-  const [rawEventsRevision, setRawEventsRevision] = useState(0);
   const viewportRef = useRef<HTMLDivElement>(null);
   const lastSequenceRef = useRef(-1);
   const rawEventsRef = useRef<unknown[]>([]);
@@ -105,7 +101,6 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
       setMessages((current) => applyEvents(current, events));
     }
     lastSequenceRef.current = maxEventSequence(rawEventsRef.current);
-    setRawEventsRevision((current) => current + 1);
     setTurnDurationsByUserId(buildTurnDurationMap(rawEventsRef.current));
     void persistEvents(rawEventsRef.current);
   }, [persistEvents]);
@@ -172,8 +167,8 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
     setLoading(true);
     setError(null);
     setBootstrap(null);
+    setDesktopRunning(false);
     setTurnDurationsByUserId(new Map());
-    setRawEventsRevision((current) => current + 1);
 
     void (async () => {
       await Promise.all([loadBootstrap(), loadHistory(-1)]);
@@ -184,7 +179,6 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
   const appendIncomingEvent = useCallback((event: Record<string, unknown>) => {
     rawEventsRef.current = [...rawEventsRef.current, event];
     lastSequenceRef.current = maxEventSequence(rawEventsRef.current);
-    setRawEventsRevision((current) => current + 1);
     setTurnDurationsByUserId(buildTurnDurationMap(rawEventsRef.current));
     setMessages((current) => appendEvent(current, event));
     void persistEvents(rawEventsRef.current);
@@ -203,10 +197,7 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
     [compactAiOutput, expandedTurnKeys, messages, turnDurationsByUserId],
   );
 
-  const running = useMemo(
-    () => sending || hasActiveTurn(rawEventsRef.current),
-    [rawEventsRevision, sending],
-  );
+  const running = resolveMobileRunningState({ sending, desktopRunning });
 
   const streamTick = useMemo(() => {
     let tick = 0;
@@ -315,7 +306,7 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
     }
   };
 
-  const renderMessage = useCallback((message: ChatMessage) => {
+  const renderMessage = useCallback((message: ChatMessage, footer?: MessageFooterData) => {
     if (message.kind === 'user') {
       return (
         <div data-message-row className="flex w-full justify-end">
@@ -340,6 +331,15 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
                 <DirectiveText text={message.content} />
               </div>
             ) : null}
+            {footer ? (
+              <MessageFooter
+                content={message.content}
+                timestamp={footer.timestamp}
+                durationMs={footer.durationMs}
+                sourceUuid={footer.sourceUuid}
+                align="end"
+              />
+            ) : null}
           </div>
         </div>
       );
@@ -350,6 +350,14 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
         <div data-message-row className="flex w-full justify-start">
           <div className="w-full min-w-0 space-y-2 text-sm leading-relaxed">
             <ChatMarkdown content={message.content} streaming={message.streaming} />
+            {!message.streaming && footer ? (
+              <MessageFooter
+                content={message.content}
+                timestamp={footer.timestamp}
+                durationMs={footer.durationMs}
+                sourceUuid={footer.sourceUuid}
+              />
+            ) : null}
           </div>
         </div>
       );
@@ -493,11 +501,19 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
               <div className="mt-1">
                 <SessionSummaryRow diffs={row.sessionSummaries} />
               </div>
+              {row.footer ? (
+                <MessageFooter
+                  content={row.message.content}
+                  timestamp={row.footer.timestamp}
+                  durationMs={row.footer.durationMs}
+                  sourceUuid={row.footer.sourceUuid}
+                />
+              ) : null}
             </div>
           </div>
         );
       }
-      return renderMessage(row.message);
+      return renderMessage(row.message, row.footer);
     }
 
     if (row.kind === 'compact-toggle') {
@@ -538,6 +554,7 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
     appendIncomingEvent,
     handleReconnect,
     {
+      onRuntimeState: setDesktopRunning,
       onConnectionLost: () => {
         reportUnreachable('桌面端 WebSocket 已断开');
         void check();

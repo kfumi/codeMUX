@@ -279,6 +279,7 @@ fn build_router(ctx: ServerContext, static_dir: PathBuf) -> Router {
         .route("/pair/claim", post(pair_claim))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{session_id}/events", get(session_events))
+        .route("/sessions/{session_id}/state", get(session_runtime_state))
         .route("/sessions/{session_id}/messages", post(send_message))
         .route("/sessions/{session_id}/composer-context", get(composer_context))
         .route("/sessions/{session_id}/settings", patch(update_session_settings))
@@ -451,6 +452,18 @@ async fn session_events(
     Ok(Json(events))
 }
 
+async fn session_runtime_state(
+    State(ctx): State<ServerContext>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize(&ctx, &headers)?;
+    let companion_state = ctx.app.state::<CompanionState>();
+    Ok(Json(serde_json::json!({
+        "running": companion_state.is_turn_active(&session_id),
+    })))
+}
+
 async fn send_message(
     State(ctx): State<ServerContext>,
     headers: HeaderMap,
@@ -605,6 +618,18 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
             return;
         }
     }
+    let state_payload = serde_json::json!({
+        "type": "state",
+        "sessionId": session_id,
+        "running": companion_state.is_turn_active(&session_id),
+    });
+    if socket
+        .send(Message::Text(state_payload.to_string().into()))
+        .await
+        .is_err()
+    {
+        return;
+    }
 
     loop {
         tokio::select! {
@@ -624,6 +649,18 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
                     Ok(CompanionBroadcastEvent { session_id: event_session_id, event }) if event_session_id == session_id => {
                         let payload = serde_json::json!({ "type": "event", "sessionId": session_id, "event": event });
                         if socket.send(Message::Text(payload.to_string().into())).await.is_err() {
+                            break;
+                        }
+                        let state_payload = serde_json::json!({
+                            "type": "state",
+                            "sessionId": session_id,
+                            "running": companion_state.is_turn_active(&session_id),
+                        });
+                        if socket
+                            .send(Message::Text(state_payload.to_string().into()))
+                            .await
+                            .is_err()
+                        {
                             break;
                         }
                     }

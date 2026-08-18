@@ -154,11 +154,11 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
           const text = partState.deltaText?.join('') ?? readString(properties.delta) ?? readString(part.text) ?? '';
           partState.deltaText = [];
           if (partState.kind === 'thinking') {
-            events.push(buildStreamEvent(sessionId, { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }));
+            events.push(buildStreamEvent(context.sessionId, { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }));
             if (text) {
-              events.push(buildStreamEvent(sessionId, { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: text } }));
+              events.push(buildStreamEvent(context.sessionId, { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: text } }));
             }
-            events.push(buildStreamEvent(sessionId, { type: 'content_block_stop', index: 0 }));
+            events.push(buildStreamEvent(context.sessionId, { type: 'content_block_stop', index: 0 }));
           }
           if (hasVisibleContent(text)) {
             events.push(buildAssistantEnvelope(context, sessionId, [{
@@ -176,7 +176,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
           // part (start marker + end marker); the start-marker arrival must not
           // emit a stop without a matching start.
           if (partState.started) {
-            events.push(buildStreamEvent(sessionId, { type: 'content_block_stop', index: partState.index }));
+            events.push(buildStreamEvent(context.sessionId, { type: 'content_block_stop', index: partState.index }));
           }
           const text = readString(properties.delta) ?? readString(part.text) ?? '';
           if (hasVisibleContent(text)) {
@@ -293,7 +293,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
 
       if (!partState.started) {
         partState.started = true;
-        events.push(buildStreamEvent(sessionId, {
+        events.push(buildStreamEvent(context.sessionId, {
           type: 'content_block_start',
           index: partState.index,
           content_block: partState.kind === 'thinking'
@@ -301,7 +301,7 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
             : { type: 'text', text: '' },
         }));
       }
-      events.push(buildStreamEvent(sessionId, {
+      events.push(buildStreamEvent(context.sessionId, {
         type: 'content_block_delta',
         index: partState.index,
         delta: partState.kind === 'thinking'
@@ -424,13 +424,13 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
         }
         if (!partState.started) {
           partState.started = true;
-          events.push(buildStreamEvent(sessionId, {
+          events.push(buildStreamEvent(context.sessionId, {
             type: 'content_block_start',
             index: partState.index,
             content_block: { type: 'thinking', thinking: '' },
           }));
         }
-        events.push(buildStreamEvent(sessionId, {
+        events.push(buildStreamEvent(context.sessionId, {
           type: 'content_block_delta',
           index: partState.index,
           delta: { type: 'thinking_delta', thinking: deltaText },

@@ -40,6 +40,69 @@ describe('buildTurnDurationMap', () => {
 
     expect(durations.get('u1')).toBe(12_500);
   });
+
+  it('uses the final completion after intermediate OpenCode results in one turn', () => {
+    const durations = buildTurnDurationMap([
+      {
+        type: 'user_message',
+        event_id: 'u1',
+        timestamp: '2026-08-17T15:00:00.000Z',
+      },
+      {
+        type: 'assistant_message',
+        event_id: 'a-process-1',
+      },
+      {
+        type: 'turn_finished',
+        duration_ms: 19_000,
+        timestamp: '2026-08-17T15:00:19.000Z',
+      },
+      {
+        type: 'system_event',
+        subtype: 'compact_boundary',
+        timestamp: '2026-08-17T15:00:20.000Z',
+      },
+      {
+        type: 'assistant_message',
+        event_id: 'a-final',
+      },
+      {
+        type: 'turn_finished',
+        duration_ms: 55_000,
+        timestamp: '2026-08-17T15:00:55.000Z',
+      },
+    ]);
+
+    expect(durations.get('u1')).toBe(55_000);
+  });
+
+  it('does not start a new turn for a hidden compact summary user event', () => {
+    const durations = buildTurnDurationMap([
+      {
+        type: 'user_message',
+        event_id: 'u1',
+        content: 'request',
+      },
+      {
+        type: 'turn_finished',
+        duration_ms: 19_000,
+      },
+      {
+        type: 'user_message',
+        event_id: 'compact-summary',
+        content: 'This session is being continued from a previous conversation that ran out of context.',
+        isCompactSummary: true,
+        isVisibleInTranscriptOnly: true,
+      },
+      {
+        type: 'turn_finished',
+        duration_ms: 55_000,
+      },
+    ]);
+
+    expect(durations.get('u1')).toBe(55_000);
+    expect(durations.has('compact-summary')).toBe(false);
+  });
 });
 
 describe('formatElapsed', () => {

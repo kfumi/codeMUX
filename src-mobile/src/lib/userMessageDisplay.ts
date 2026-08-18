@@ -1,5 +1,8 @@
 const ATTACHMENT_CONTEXT_BLOCK_PATTERN = /<attachment_context>[\s\S]*?<\/attachment_context>\s*/gi;
 const CODEX_COLLABORATION_POLICY_RE = /<codemux-codex-collaboration-policy>[\s\S]*?<\/codemux-codex-collaboration-policy>\s*/g;
+const CLAUDE_COMPACT_SUMMARY_PREFIX = 'This session is being continued from a previous conversation that ran out of context.';
+const CODEX_COMPACT_SUMMARY_PREFIX = 'Another language model started to solve this problem and produced a summary';
+const CLAUDE_LOCAL_COMPACT_STDOUT_RE = /^\s*<local-command-stdout>\s*Compacted\s*<\/local-command-stdout>\s*$/i;
 
 export interface UserAttachmentPreview {
   dataUrl: string;
@@ -47,6 +50,38 @@ export function isAgentInjectedUserMessage(text: string): boolean {
     )
     || normalized.startsWith('Base directory for this skill: ')
   );
+}
+
+export function isHiddenTranscriptUserMessage(event: Record<string, unknown>): boolean {
+  if (event.isCompactSummary === true || event.isVisibleInTranscriptOnly === true) {
+    return true;
+  }
+
+  const content = event.content;
+  if (Array.isArray(content) && content.length > 0) {
+    const blocks = content.filter((block): block is Record<string, unknown> => (
+      Boolean(block) && typeof block === 'object' && !Array.isArray(block)
+    ));
+    if (blocks.length === content.length && blocks.every((block) => block.type === 'tool_result')) {
+      return true;
+    }
+  }
+
+  const text = typeof content === 'string'
+    ? content.trimStart()
+    : extractUserMessageParts(content).text.trimStart();
+  return (
+    isCompactSummaryText(text)
+    || text === '/compact'
+    || CLAUDE_LOCAL_COMPACT_STDOUT_RE.test(text)
+    || text.startsWith('<task-notification>')
+  );
+}
+
+export function isCompactSummaryText(text: string): boolean {
+  const normalized = text.trimStart();
+  return normalized.startsWith(CLAUDE_COMPACT_SUMMARY_PREFIX)
+    || normalized.startsWith(CODEX_COMPACT_SUMMARY_PREFIX);
 }
 
 export function formatUserMessageText(text: string): string {

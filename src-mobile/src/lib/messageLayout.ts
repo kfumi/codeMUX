@@ -1,8 +1,19 @@
 import type { ChatMessage, SessionSummaryDiff } from './eventToMessages';
 import { isFileMutationTool } from './toolHeaderSummary';
 
+export interface MessageFooterData {
+  timestamp?: number;
+  durationMs?: number;
+  sourceUuid?: string;
+}
+
 export type DisplayRow =
-  | { kind: 'single'; message: ChatMessage; sessionSummaries?: SessionSummaryDiff[] }
+  | {
+      kind: 'single';
+      message: ChatMessage;
+      sessionSummaries?: SessionSummaryDiff[];
+      footer?: MessageFooterData;
+    }
   | { kind: 'thinking'; id: string; messages: Extract<ChatMessage, { kind: 'reasoning' }>[] }
   | { kind: 'explore'; id: string; messages: ChatMessage[]; toolNames: string[] }
   | { kind: 'compact-toggle'; turnKey: string; processCount: number; durationMs?: number };
@@ -65,9 +76,11 @@ function coalesceSessionSummaryDiffs(
   return [...latestByFile.values()];
 }
 
-function splitTurnSegment(segment: ChatMessage[]): { process: ChatMessage[]; answer?: ChatMessage } {
+function splitTurnSegment(
+  segment: ChatMessage[],
+): { process: ChatMessage[]; answer?: Extract<ChatMessage, { kind: 'assistant' }> } {
   const process: ChatMessage[] = [];
-  let answer: ChatMessage | undefined;
+  let answer: Extract<ChatMessage, { kind: 'assistant' }> | undefined;
 
   for (const message of segment) {
     if (message.kind === 'assistant') {
@@ -188,7 +201,8 @@ function emitTurnRows(
     const { process, answer } = splitTurnSegment(piece.messages);
     const expanded = options.expandedTurnKeys.has(turnKey);
 
-    if (options.compactAiOutput && process.length > 0) {
+    const hasNonReasoningProcess = process.some((message) => message.kind !== 'reasoning');
+    if (options.compactAiOutput && hasNonReasoningProcess) {
       rows.push({
         kind: 'compact-toggle',
         turnKey,
@@ -203,10 +217,20 @@ function emitTurnRows(
     }
 
     if (answer) {
+      const durationMs = options.turnDurationsByUserId?.get(turnKey);
       rows.push({
         kind: 'single',
         message: answer,
         ...(index === lastAnswerPieceIndex && sessionSummaries.length > 0 ? { sessionSummaries } : {}),
+        ...(index === lastAnswerPieceIndex && durationMs != null
+          ? {
+              footer: {
+                ...(answer.timestamp != null ? { timestamp: answer.timestamp } : {}),
+                ...(answer.sourceUuid ? { sourceUuid: answer.sourceUuid } : {}),
+                durationMs,
+              },
+            }
+          : {}),
       });
     }
   });
@@ -240,7 +264,14 @@ export function buildDisplayRows(
   for (const message of messages) {
     if (message.kind === 'user') {
       flushSegment();
-      rows.push({ kind: 'single', message });
+      rows.push({
+        kind: 'single',
+        message,
+        footer: {
+          ...(message.timestamp != null ? { timestamp: message.timestamp } : {}),
+          ...(message.sourceUuid ? { sourceUuid: message.sourceUuid } : {}),
+        },
+      });
       turnKey = message.id;
       turnIndex += 1;
       continue;

@@ -1,3 +1,5 @@
+import { isHiddenTranscriptUserMessage } from './userMessageDisplay';
+
 export function buildTurnDurationMap(events: readonly unknown[]): Map<string, number> {
   const durations = new Map<string, number>();
   let activeTurn: { userId: string; startedAt?: number } | undefined;
@@ -7,6 +9,9 @@ export function buildTurnDurationMap(events: readonly unknown[]): Map<string, nu
     const type = typeof event.type === 'string' ? event.type : '';
 
     if (type === 'user_message') {
+      if (isHiddenTranscriptUserMessage(event)) {
+        continue;
+      }
       const userId = typeof event.event_id === 'string' ? event.event_id : undefined;
       activeTurn = userId
         ? { userId, startedAt: parseTimestamp(event.timestamp) }
@@ -32,7 +37,6 @@ export function buildTurnDurationMap(events: readonly unknown[]): Map<string, nu
     if (duration !== undefined) {
       durations.set(activeTurn.userId, duration);
     }
-    activeTurn = undefined;
   }
 
   return durations;

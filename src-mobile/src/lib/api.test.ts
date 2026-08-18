@@ -77,6 +77,29 @@ describe('request helpers', () => {
     globalThis.fetch = originalFetch;
   });
 
+  it('reads the desktop runtime state from the session state endpoint', async () => {
+    const originalFetch = globalThis.fetch;
+    let requestUrl = '';
+    globalThis.fetch = async (input) => {
+      requestUrl = String(input);
+      return Response.json({ running: false });
+    };
+
+    const { fetchSessionRuntimeState } = await import('./api');
+    await expect(fetchSessionRuntimeState(
+      {
+        desktopId: 'desktop-1',
+        deviceId: 'device',
+        token: 'token',
+        connections: [{ id: 'lan:1', type: 'lan', baseUrl: 'http://localhost:9240' }],
+      },
+      'session-1',
+    )).resolves.toEqual({ running: false });
+
+    expect(requestUrl).toContain('/api/sessions/session-1/state');
+    globalThis.fetch = originalFetch;
+  });
+
   it('sends input payload images with the mobile message', async () => {
     const originalFetch = globalThis.fetch;
     let requestBody = '';

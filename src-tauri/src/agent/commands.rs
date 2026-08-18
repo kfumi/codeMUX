@@ -1127,12 +1127,22 @@ pub async fn load_agent_latest_token_usage(
     freshness: Option<String>,
 ) -> Result<Option<ThreadTokenUsageSnapshot>, String> {
     let agent_kind = AgentKind::from_str(&agent_kind)?;
-    let Some(agent_session_id) = get_agent_session_id(state.inner(), &app_session_id, agent_kind)?
-    else {
+    let freshness = freshness.unwrap_or_else(|| "restored".to_string());
+
+    load_latest_token_usage_for_session(state.inner(), &app_session_id, agent_kind, &freshness).await
+}
+
+pub(crate) async fn load_latest_token_usage_for_session(
+    state: &crate::AppState,
+    app_session_id: &str,
+    agent_kind: AgentKind,
+    freshness: &str,
+) -> Result<Option<ThreadTokenUsageSnapshot>, String> {
+    let Some(agent_session_id) = get_agent_session_id(state, app_session_id, agent_kind)? else {
         return Ok(None);
     };
     let home = home_dir()?;
-    let freshness = freshness.unwrap_or_else(|| "restored".to_string());
+    let freshness = freshness.to_string();
 
     tokio::task::spawn_blocking(move || {
         load_latest_token_usage_for_agent_session(&home, agent_kind, &agent_session_id, &freshness)

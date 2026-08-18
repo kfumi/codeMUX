@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { appendEvent } from './eventToMessages';
+import { appendEvent, eventToMessages } from './eventToMessages';
 
 describe('appendEvent', () => {
   it('merges streaming assistant deltas', () => {
@@ -46,14 +46,63 @@ describe('appendEvent', () => {
     const messages = appendEvent([], {
       type: 'assistant_message',
       event_id: 'm1',
+      timestamp: '2026-08-18T07:00:02.000Z',
+      uuid: 'assistant-uuid-1',
       content: [
         { type: 'thinking', thinking: 'Let me think...' },
         { type: 'text', text: 'Done.' },
       ],
     });
     expect(messages).toHaveLength(2);
-    expect(messages[0]).toMatchObject({ kind: 'reasoning', content: 'Let me think...' });
-    expect(messages[1]).toMatchObject({ kind: 'assistant', content: 'Done.' });
+    expect(messages[0]).toMatchObject({
+      kind: 'reasoning',
+      content: 'Let me think...',
+      timestamp: Date.parse('2026-08-18T07:00:02.000Z'),
+      sourceUuid: 'assistant-uuid-1',
+    });
+    expect(messages[1]).toMatchObject({
+      kind: 'assistant',
+      content: 'Done.',
+      timestamp: Date.parse('2026-08-18T07:00:02.000Z'),
+      sourceUuid: 'assistant-uuid-1',
+    });
+  });
+
+  it('preserves user message metadata needed by the message footer', () => {
+    const messages = appendEvent([], {
+      type: 'user_message',
+      event_id: 'u-footer-1',
+      timestamp: '2026-08-18T07:00:00.000Z',
+      uuid: 'user-uuid-1',
+      content: 'Show the footer',
+    });
+
+    expect(messages[0]).toMatchObject({
+      kind: 'user',
+      timestamp: Date.parse('2026-08-18T07:00:00.000Z'),
+      sourceUuid: 'user-uuid-1',
+    });
+  });
+
+  it('hides compact summary user events like the desktop transcript', () => {
+    expect(eventToMessages({
+      type: 'user_message',
+      event_id: 'compact-summary-1',
+      content: 'This session is being continued from a previous conversation that ran out of context.',
+      isCompactSummary: true,
+      isVisibleInTranscriptOnly: true,
+    })).toEqual([]);
+  });
+
+  it('hides compact summary assistant events like the desktop transcript', () => {
+    expect(eventToMessages({
+      type: 'assistant_message',
+      event_id: 'compact-assistant-1',
+      content: [{
+        type: 'text',
+        text: 'Another language model started to solve this problem and produced a summary of its thinking process.',
+      }],
+    })).toEqual([]);
   });
 
   it('hides internal system_event subtypes without content', () => {

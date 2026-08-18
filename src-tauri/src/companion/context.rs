@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use log::warn;
 use serde::Serialize;
 
 use crate::config::types::AgentKind;
@@ -16,6 +17,7 @@ const MAX_DEPTH: usize = 5;
 pub struct ComposerContext {
     pub files: Vec<ComposerFile>,
     pub commands: Vec<ComposerCommand>,
+    pub token_usage: Option<crate::agent::context_usage::ThreadTokenUsageSnapshot>,
 }
 
 #[derive(Debug, Serialize)]
@@ -69,10 +71,31 @@ pub async fn build_composer_context(
         (session.agent_kind, project_path, global_skills)
     };
 
+    let token_usage = match crate::agent::commands::load_latest_token_usage_for_session(
+        state,
+        session_id,
+        agent_kind,
+        "restored",
+    )
+    .await
+    {
+        Ok(usage) => usage,
+        Err(error) => {
+            warn!(
+                target: "companion",
+                "Failed to load token usage for session {}: {}",
+                session_id,
+                error
+            );
+            None
+        }
+    };
+
     let Some(project_path) = project_path else {
         return Ok(ComposerContext {
             files: Vec::new(),
             commands: build_commands(agent_kind, Vec::new(), global_skills),
+            token_usage,
         });
     };
 
@@ -85,6 +108,7 @@ pub async fn build_composer_context(
         Ok(ComposerContext {
             files,
             commands: build_commands(agent_kind, skills, global_skills),
+            token_usage,
         })
     })
     .await
