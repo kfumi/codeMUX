@@ -245,6 +245,22 @@ describe('CodeMuxMarkdownLink', () => {
     });
   });
 
+  it('renders absolute paths inside inline code as clickable file links', async () => {
+    const { container } = render(
+      <Streamdown
+        mode="static"
+        components={{ a: CodeMuxMarkdownLink }}
+        rehypePlugins={CODEMUX_MARKDOWN_REHYPE_PLUGINS}
+        linkSafety={{ enabled: false }}
+      >
+        {'请查看 `D:/project/ai-code/codeMUX/src/App.tsx`。'}
+      </Streamdown>,
+    );
+
+    const links = await within(container).findAllByRole('link');
+    expect(links.map((link) => link.textContent)).toEqual(['App.tsx']);
+  });
+
   it('rejects paths outside the project, directories, and unqualified filenames', async () => {
     const { container } = render(
       <Streamdown

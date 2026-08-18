@@ -426,7 +426,7 @@ function rewritePlainFilePaths(node: unknown): void {
     return;
   }
 
-  if (node.tagName === 'a' || node.tagName === 'pre' || node.tagName === 'code') {
+  if (node.tagName === 'a' || node.tagName === 'pre') {
     return;
   }
 

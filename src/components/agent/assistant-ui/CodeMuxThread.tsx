@@ -246,7 +246,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
           {(scrollToBottomButton) => (
             <div
               data-testid="thread-content-shell"
-              className="mx-auto flex w-full flex-1 flex-col px-14 pt-5"
+              className="mx-auto flex w-full flex-1 flex-col px-20 pt-5"
               style={{ maxWidth: 'var(--content-width, 52rem)' }}
             >
               <CodeMuxThreadRenderContext.Provider value={threadRenderContextValue}>

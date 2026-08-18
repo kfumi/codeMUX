@@ -32,7 +32,7 @@ export function PlanPreviewPanel({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-15 shrink-0 items-center gap-3 border-b border-border/25 bg-[hsl(var(--surface-2))]/45 px-4">
+      <div className="flex h-15 shrink-0 items-center gap-3 border-b-2 border-border/60 bg-[hsl(var(--surface-2))]/45 px-4">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted/45 text-muted-foreground/80">
           <FileTypeIcon filePath={planFilePath ?? ''} className="h-4 w-4" />
         </div>
@@ -55,11 +55,11 @@ export function PlanPreviewPanel({
           markdown ? (
             <div
               data-testid="file-preview-markdown"
-              className="mx-auto w-full max-w-3xl px-6 py-5 text-sm leading-6 text-foreground/88"
+              className="mx-auto min-w-0 w-full max-w-3xl px-6 py-5 text-sm leading-6 text-foreground/88"
             >
               <Streamdown
                 mode="static"
-                className="aui-md"
+                className="aui-md min-w-0 max-w-full"
                 components={{ a: CodeMuxMarkdownLink } as never}
                 plugins={{ code }}
                 shikiTheme={['github-light', 'github-dark']}

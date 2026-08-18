@@ -2594,7 +2594,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     render(<Harness sessionId="session-nav" />);
 
     const shell = screen.getByTestId('thread-content-shell');
-    expect(shell.className).toContain('px-14');
+    expect(shell.className).toContain('px-20');
     expect(shell.className).not.toContain('pl-14');
     expect(shell.className).not.toContain('pr-4');
     expect((shell as HTMLElement).style.maxWidth).toBe('var(--content-width, 52rem)');

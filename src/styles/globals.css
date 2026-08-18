@@ -449,6 +449,25 @@ input[type='password']::-ms-reveal {
   color: hsl(var(--codemux-link) / 0.82) !important;
 }
 
+.aui-md {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.aui-md [data-streamdown="code-block"],
+.aui-md [data-streamdown="table-wrapper"],
+.aui-md pre,
+.aui-md table {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.aui-md pre {
+  overflow-x: auto;
+}
+
 .prose :where(code):not(:where([class~="not-prose"] *))::before,
 .prose :where(code):not(:where([class~="not-prose"] *))::after {
   content: none;
