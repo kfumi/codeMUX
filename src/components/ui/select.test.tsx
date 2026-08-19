@@ -60,7 +60,7 @@ describe('Select', () => {
       </Select>,
     );
 
-    expect(screen.getByRole('combobox', { name: '排序' }).className).toContain('focus-visible:ring-2');
+    expect(screen.getByRole('combobox', { name: '排序' }).className).toContain('focus-visible:ring-1');
     expect(screen.getByRole('combobox', { name: '排序' }).className).toContain('focus:ring-0');
   });
 });

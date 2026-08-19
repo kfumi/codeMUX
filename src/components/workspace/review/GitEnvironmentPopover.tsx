@@ -16,7 +16,94 @@ import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
 import { TooltipHint } from '../../ui/tooltip';
+import type { TodoItem } from '../../../types/agent';
 import { GitBranchDialog } from './GitBranchDialog';
+
+function getTodoStatusIcon(status: TodoItem['status']) {
+  switch (status) {
+    case 'completed':
+      return (
+        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[hsl(var(--success)/0.12)] text-[hsl(var(--success))]">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="2 5.5 4 7.5 8 3" />
+          </svg>
+        </span>
+      );
+    case 'in_progress':
+      return (
+        <span className="relative flex h-4 w-4 items-center justify-center">
+          <span className="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-[hsl(var(--warning)/0.4)]" />
+          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[hsl(var(--warning))]" />
+        </span>
+      );
+    case 'pending':
+      return <span className="h-2 w-2 rounded-full bg-muted-foreground/20" />;
+  }
+}
+
+/** 超过该数量时折叠前面的任务，仅展示最后 N 条 */
+const MAX_VISIBLE_TODOS = 5;
+
+function TodoSection({ todos }: { todos: TodoItem[] }) {
+  const [collapsed, setCollapsed] = useState(true);
+
+  if (todos.length === 0) return null;
+
+  const completed = todos.filter((todo) => todo.status === 'completed').length;
+  const total = todos.length;
+  const hiddenCount = todos.length - MAX_VISIBLE_TODOS;
+  const hasOverflow = hiddenCount > 0;
+  const visibleTodos = hasOverflow && collapsed ? todos.slice(-MAX_VISIBLE_TODOS) : todos;
+
+  return (
+    <div className="mt-1.5 border-t border-border/45 pt-1.5" data-testid="git-environment-todos">
+      <div className="flex items-center justify-between px-1.5 py-1">
+        <span className="text-xs font-medium text-muted-foreground">任务</span>
+        <span className="text-ui-meta text-muted-foreground/50 tabular-nums">{completed}/{total}</span>
+      </div>
+      {hasOverflow && collapsed && (
+        <button
+          type="button"
+          data-testid="git-environment-todos-expand"
+          onClick={() => setCollapsed(false)}
+          className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-muted-foreground/70 transition-colors hover:bg-muted/45 hover:text-foreground"
+        >
+          <ChevronDown className="h-3 w-3 rotate-[-90deg] transition-transform" />
+          展示前面 {hiddenCount} 条已完成/更早的任务
+        </button>
+      )}
+      <div className="space-y-0.5 px-1.5 pb-1">
+        {visibleTodos.map((todo, i) => (
+          <div key={i} className="flex items-start gap-2.5 rounded-md px-1 py-1 text-xs leading-relaxed">
+            <span className="mt-0.5 shrink-0">{getTodoStatusIcon(todo.status)}</span>
+            <span className={
+              todo.status === 'completed'
+                ? 'text-muted-foreground/40 line-through'
+                : todo.status === 'in_progress'
+                  ? 'text-foreground/90 font-medium'
+                  : 'text-foreground/60'
+            }>
+              {todo.status === 'in_progress' && todo.activeForm
+                ? todo.activeForm
+                : todo.content}
+            </span>
+          </div>
+        ))}
+        {hasOverflow && !collapsed && (
+          <button
+            type="button"
+            data-testid="git-environment-todos-collapse"
+            onClick={() => setCollapsed(true)}
+            className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-muted-foreground/70 transition-colors hover:bg-muted/45 hover:text-foreground"
+          >
+            <ChevronDown className="h-3 w-3 rotate-[-90deg] transition-transform" />
+            收起前面 {hiddenCount} 条
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function formatDelta(value: number): string {
   return value.toLocaleString('en-US');
@@ -32,14 +119,14 @@ function getTotals(files: GitStatusChange[]) {
   );
 }
 
-export function GitEnvironmentPopover({ projectPath }: { projectPath: string }) {
+export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath: string; todos?: TodoItem[] }) {
   const openReviewTab = useSidePanelStore((state) => state.openReviewTab);
   const [open, setOpen] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
   const [repositoryState, setRepositoryState] = useState<GitRepositoryState | null>(null);
   const [totals, setTotals] = useState({ additions: 0, deletions: 0 });
   const [branchQuery, setBranchQuery] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [branchLoading, setBranchLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [branchDialogOpen, setBranchDialogOpen] = useState(false);
@@ -52,7 +139,7 @@ export function GitEnvironmentPopover({ projectPath }: { projectPath: string }) 
     try {
       const [nextState, files] = await Promise.all([
         gitApi.getRepositoryState(projectPath),
-        gitApi.getStatusChanges(projectPath, 'unstaged'),
+        gitApi.getStatusChanges(projectPath, 'unstaged').catch(() => []),
       ]);
       setRepositoryState(nextState);
       setTotals(getTotals(files));
@@ -64,6 +151,8 @@ export function GitEnvironmentPopover({ projectPath }: { projectPath: string }) 
       setLoading(false);
     }
   }, [projectPath]);
+
+  const isGitRepo = repositoryState != null && error == null;
 
   useEffect(() => {
     if (open) void load();
@@ -118,7 +207,7 @@ export function GitEnvironmentPopover({ projectPath }: { projectPath: string }) 
               type="button"
               data-testid="git-environment-trigger"
               aria-label="切换摘要"
-              className="flex h-7 w-8 shrink-0 items-center justify-center rounded-md border border-border/44 bg-[hsl(var(--surface-2))]/70 text-foreground/58 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.035)] transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-foreground/52 transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground data-[state=open]:bg-foreground/8 data-[state=open]:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
             >
               <SlidersHorizontal className="h-3.5 w-3.5" />
             </button>
@@ -128,115 +217,108 @@ export function GitEnvironmentPopover({ projectPath }: { projectPath: string }) 
           align="end"
           side="bottom"
           sideOffset={8}
-          className="w-72 rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-[0_22px_58px_-34px_hsl(var(--surface-shadow-strong)/0.42)]"
+          className="w-84 rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-[0_22px_58px_-34px_hsl(var(--surface-shadow-strong)/0.42)]"
         >
-          <div className="flex items-center justify-between px-1.5 py-1">
-            <span className="text-xs font-medium text-muted-foreground">环境信息</span>
-            <TooltipHint content="新建分支">
+          {isGitRepo && (
+            <>
+              <div className="flex items-center justify-between px-1.5 py-1">
+                <span className="text-xs font-medium text-muted-foreground">环境信息</span>
+              </div>
+
               <button
                 type="button"
-                aria-label="新建分支"
-                onClick={() => setBranchDialogOpen(true)}
-                disabled={loading}
-                className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground disabled:opacity-45"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            </TooltipHint>
-          </div>
-
-          <button
-            type="button"
-            data-testid="git-environment-changes"
-            onClick={() => {
-              openReviewTab(projectPath);
-              setOpen(false);
-            }}
-            className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-muted/45"
-          >
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary">
-              <GitCommitHorizontal className="h-3 w-3" />
-            </span>
-            <span className="min-w-0 flex-1 text-xs text-muted-foreground">变更</span>
-            <span className="shrink-0 font-mono text-ui-caption">
-              <span className="text-[hsl(var(--success))]">+{formatDelta(totals.additions)}</span>
-              <span className="ml-2 text-[hsl(var(--destructive))]">-{formatDelta(totals.deletions)}</span>
-            </span>
-            <ChevronRight className="h-4 w-4 text-muted-foreground/55" />
-          </button>
-
-          <Popover open={branchOpen} onOpenChange={setBranchOpen}>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                data-testid="git-environment-branch"
+                data-testid="git-environment-changes"
+                onClick={() => {
+                  openReviewTab(projectPath);
+                  setOpen(false);
+                }}
                 className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-muted/45"
               >
-                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted/65 text-muted-foreground">
-                  <GitBranch className="h-3 w-3" />
+                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary">
+                  <GitCommitHorizontal className="h-3 w-3" />
                 </span>
-                <span className="min-w-0 flex-1">
-                  <TooltipHint content={currentBranch}>
-                    <span className="block truncate text-xs text-foreground/88">{currentBranch}</span>
-                  </TooltipHint>
+                <span className="min-w-0 flex-1 text-xs text-muted-foreground">变更</span>
+                <span className="shrink-0 font-mono text-ui-caption">
+                  <span className="text-[hsl(var(--success))]">+{formatDelta(totals.additions)}</span>
+                  <span className="ml-2 text-[hsl(var(--destructive))]">-{formatDelta(totals.deletions)}</span>
                 </span>
-                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/55" />
+                <ChevronRight className="h-4 w-4 text-muted-foreground/55" />
               </button>
-            </PopoverTrigger>
-            <PopoverContent
-              align="start"
-              side="left"
-              sideOffset={8}
-              className="w-64 rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-[0_22px_58px_-34px_hsl(var(--surface-shadow-strong)/0.42)]"
-            >
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/65" />
-                <Input
-                  value={branchQuery}
-                  onChange={(event) => setBranchQuery(event.target.value)}
-                  placeholder="搜索分支"
-                  aria-label="搜索分支"
-                  className="h-8 rounded-lg pl-8 text-xs"
-                  autoFocus
-                />
-              </div>
-              <div className="mt-2 max-h-56 overflow-y-auto">
-                {filteredBranches.map((branch) => (
-                  <button
-                    key={branch.name}
-                    type="button"
-                    disabled={branchLoading || branch.current}
-                    onClick={() => void checkoutBranch(branch.name)}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-55"
-                  >
-                    <GitBranch className={cn('h-3.5 w-3.5', branch.current ? 'text-primary' : 'text-muted-foreground')} />
-                    <TooltipHint content={branch.name}>
-                      <span className={cn('min-w-0 flex-1 truncate', branch.current && 'font-medium text-primary')}>
-                        {branch.name}
-                      </span>
-                    </TooltipHint>
-                    {branch.current && <span className="text-ui-micro text-muted-foreground">当前</span>}
-                  </button>
-                ))}
-              </div>
-              {branchError && <p className="px-2 py-1 text-xs text-destructive">{branchError}</p>}
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="mt-1 h-7 w-full justify-start gap-2 px-2 text-xs"
-                onClick={() => {
-                  setBranchOpen(false);
-                  setBranchDialogOpen(true);
-                }}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                创建并检出新分支...
-              </Button>
-            </PopoverContent>
-          </Popover>
 
-          {error && <p className="px-1.5 py-1 text-xs text-destructive">{error}</p>}
+              <Popover open={branchOpen} onOpenChange={setBranchOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    data-testid="git-environment-branch"
+                    className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-muted/45"
+                  >
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted/65 text-muted-foreground">
+                      <GitBranch className="h-3 w-3" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <TooltipHint content={currentBranch}>
+                        <span className="block truncate text-xs text-foreground/88">{currentBranch}</span>
+                      </TooltipHint>
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/55" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  side="left"
+                  sideOffset={8}
+                  className="w-64 rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-[0_22px_58px_-34px_hsl(var(--surface-shadow-strong)/0.42)]"
+                >
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/65" />
+                    <Input
+                      value={branchQuery}
+                      onChange={(event) => setBranchQuery(event.target.value)}
+                      placeholder="搜索分支"
+                      aria-label="搜索分支"
+                      className="h-8 rounded-lg pl-8 text-xs"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="mt-2 max-h-56 overflow-y-auto">
+                    {filteredBranches.map((branch) => (
+                      <button
+                        key={branch.name}
+                        type="button"
+                        disabled={branchLoading || branch.current}
+                        onClick={() => void checkoutBranch(branch.name)}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-55"
+                      >
+                        <GitBranch className={cn('h-3.5 w-3.5', branch.current ? 'text-primary' : 'text-muted-foreground')} />
+                        <TooltipHint content={branch.name}>
+                          <span className={cn('min-w-0 flex-1 truncate', branch.current && 'font-medium text-primary')}>
+                            {branch.name}
+                          </span>
+                        </TooltipHint>
+                        {branch.current && <span className="text-ui-micro text-muted-foreground">当前</span>}
+                      </button>
+                    ))}
+                  </div>
+                  {branchError && <p className="px-2 py-1 text-xs text-destructive">{branchError}</p>}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="mt-1 h-7 w-full justify-start gap-2 px-2 text-xs"
+                    onClick={() => {
+                      setBranchOpen(false);
+                      setBranchDialogOpen(true);
+                    }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    创建并检出新分支...
+                  </Button>
+                </PopoverContent>
+              </Popover>
+            </>
+          )}
+
+          <TodoSection todos={todos} />
         </PopoverContent>
       </Popover>
       <GitBranchDialog

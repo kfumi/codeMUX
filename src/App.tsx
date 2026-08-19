@@ -5,7 +5,6 @@ import { toast, Toaster } from 'sonner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { MainLayout } from './components/layout/MainLayout';
 import { Sidebar } from './components/layout/Sidebar';
-import { TodoList } from './components/agent/TodoList';
 import { TooltipProvider } from './components/ui/tooltip';
 import { useAgentNotifications } from './hooks/useAgentNotifications';
 import { useTheme } from './hooks/useTheme';
@@ -88,7 +87,7 @@ function App() {
   const setRestoring = useNavigationStore((state) => state.setRestoring);
   const activeView = navigationLocation.view;
   const settingsTab = navigationLocation.settingsTab;
-  const [perfOverlayVisible, setPerfOverlayVisible] = useState(true);
+  const [perfOverlayVisible, setPerfOverlayVisible] = useState(false);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const handler = (e: KeyboardEvent) => {
@@ -360,6 +359,7 @@ function App() {
           sidePanelProjectPath={activeView === 'app' ? sidePanelProjectPath : null}
           sidePanelScopeId={activeView === 'app' ? sidePanelScopeId : 'settings'}
           projectOpenPath={activeView === 'app' && activeSessionId ? sidePanelProjectPath : null}
+          todos={activeView === 'app' ? activeTodos : EMPTY_TODOS}
           titleBarNavigation={{
             canGoBack,
             canGoForward,
@@ -370,9 +370,6 @@ function App() {
             <Suspense fallback={null}>
               <SessionHeader sessionId={activeSessionId} />
             </Suspense>
-          ) : undefined}
-          titleBarControls={activeView === 'app' && activeSessionId && activeTodos.length > 0 ? (
-            <TodoList todos={activeTodos} dropdownSide="down" align="right" className="mr-1" />
           ) : undefined}
         >
           <ErrorBoundary>

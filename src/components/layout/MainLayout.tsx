@@ -4,6 +4,7 @@ import { useRef, useState, useCallback, useEffect, useLayoutEffect, type ReactNo
 import { cn } from '../../lib/utils';
 import { readLayoutPreferences, updateLayoutPreferences } from '../../lib/layoutPreferences';
 import { LAYOUT_DIVIDER_CLASS } from '../../lib/layoutTokens';
+import type { TodoItem } from '../../types/agent';
 import { SidePanel } from '../workspace/SidePanel';
 import { TooltipHint } from '../ui/tooltip';
 import { RoundedPanelIcon } from './RoundedPanelIcon';
@@ -29,12 +30,12 @@ interface MainLayoutProps {
   children: ReactNode;
   headerContent?: ReactNode;
   sidebarAccessory?: ReactNode;
-  titleBarControls?: ReactNode;
   titleBarNavigation?: TitleBarNavigation;
   projectOpenPath?: string | null;
   sidePanelAvailable?: boolean;
   sidePanelProjectPath?: string | null;
   sidePanelScopeId?: string;
+  todos?: TodoItem[];
 }
 
 export function MainLayout({
@@ -42,12 +43,12 @@ export function MainLayout({
   children,
   headerContent,
   sidebarAccessory,
-  titleBarControls,
   titleBarNavigation,
   projectOpenPath,
   sidePanelAvailable = true,
   sidePanelProjectPath,
   sidePanelScopeId = 'global',
+  todos,
 }: MainLayoutProps) {
   const initialSidebar = getInitialSidebarWidth();
   const [sidebarWidth, setSidebarWidth] = useState(initialSidebar.width);
@@ -199,9 +200,9 @@ export function MainLayout({
         <TitleBar
           leftContent={sidebarCollapsed ? sidebarControls : undefined}
           rightContent={headerContent}
-          controlsContent={titleBarControls}
           projectOpenPath={projectOpenPath}
           sidePanelAvailable={sidePanelAvailable}
+          todos={todos}
         />
 
         <main className="relative z-10 flex min-h-0 flex-1 overflow-hidden bg-[hsl(var(--sidebar-bg))]">

@@ -17,7 +17,7 @@ import {
 } from '../ui/select';
 
 const textareaClass =
-  'flex min-h-[110px] w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2';
+  'flex min-h-[110px] w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0';
 
 /** 生成模型 + 提交说明 + 拉取请求指令。 */
 export function GitSettings() {
@@ -145,7 +145,7 @@ export function GitSettings() {
               value={giteeToken}
               onChange={(event) => setGiteeToken(event.target.value)}
               placeholder={giteeConfigured ? '已配置，输入新 Token 可替换' : '输入 Gitee Token'}
-              className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
             <Button
               type="button"

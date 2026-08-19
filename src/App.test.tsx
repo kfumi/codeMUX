@@ -43,10 +43,6 @@ vi.mock('./components/layout/Sidebar', () => ({
   Sidebar: () => <div>sidebar</div>,
 }));
 
-vi.mock('./components/agent/TodoList', () => ({
-  TodoList: () => <div>todo-list</div>,
-}));
-
 vi.mock('./components/ui/tooltip', () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));

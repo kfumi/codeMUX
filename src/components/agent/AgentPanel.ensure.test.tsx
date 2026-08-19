@@ -41,10 +41,6 @@ vi.mock('../assistant-ui/context-display', () => ({
   ContextDisplay: () => null,
 }));
 
-vi.mock('./TodoList', () => ({
-  TodoList: () => null,
-}));
-
 vi.mock('./MarkdownRenderer', () => ({
   MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
 }));

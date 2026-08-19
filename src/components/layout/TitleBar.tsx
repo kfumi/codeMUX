@@ -12,11 +12,14 @@ import { cn } from '../../lib/utils';
 import { useSidePanelStore } from '../../stores/sidePanelStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Theme } from '../../types/provider';
+import type { TodoItem } from '../../types/agent';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { ProjectOpenTargetButton } from './ProjectOpenTargetButton';
 import { RoundedPanelIcon } from './RoundedPanelIcon';
 import { GitEnvironmentPopover } from '../workspace/review/GitEnvironmentPopover';
+
+const EMPTY_TODOS: TodoItem[] = [];
 
 type AppWindowLike = {
   isMaximized(): Promise<boolean>;
@@ -59,17 +62,17 @@ export interface TitleBarNavigation {
 interface TitleBarProps {
   leftContent?: ReactNode;
   rightContent?: ReactNode;
-  controlsContent?: ReactNode;
   projectOpenPath?: string | null;
   sidePanelAvailable?: boolean;
+  todos?: TodoItem[];
 }
 
 export function TitleBar({
   leftContent,
   rightContent,
-  controlsContent,
   projectOpenPath,
   sidePanelAvailable = true,
+  todos = EMPTY_TODOS,
 }: TitleBarProps) {
   const [appWindow, setAppWindow] = useState<AppWindowLike | null>(null);
   const [maximized, setMaximized] = useState(false);
@@ -159,15 +162,10 @@ export function TitleBar({
       <div className="min-w-2 flex-1" data-tauri-drag-region />
 
       <div className="flex h-full shrink-0 items-center gap-1">
-        {controlsContent ? (
-          <div className="hidden shrink-0 items-center min-[760px]:flex">
-            {controlsContent}
-          </div>
-        ) : null}
         {projectOpenPath ? (
           <>
             <ProjectOpenTargetButton projectPath={projectOpenPath} />
-            <GitEnvironmentPopover projectPath={projectOpenPath} />
+            <GitEnvironmentPopover projectPath={projectOpenPath} todos={todos} />
           </>
         ) : null}
         {sidePanelAvailable && (
