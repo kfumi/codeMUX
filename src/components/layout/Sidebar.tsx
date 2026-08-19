@@ -5,11 +5,13 @@ import { useEffect, useState } from 'react';
 import { createLogger, serializeError } from '../../lib/logger';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import type { Project } from '../../types/project';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { CompanionSidebarButton } from '../companion/CompanionSidebarButton';
 import { SessionList } from '../session/SessionList';
 import { ChatSearchDialog } from './ChatSearchDialog';
 import { ImportSessionsDialog } from './ImportSessionsDialog';
+import { ProjectExplorer } from '../workspace/ProjectExplorer';
 
 const logger = createLogger('Sidebar');
 
@@ -34,6 +36,7 @@ export function Sidebar({
   const port = proxyUrl?.match(/:(\d+)$/)?.[1];
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [explorerProject, setExplorerProject] = useState<Project | null>(null);
 
   useEffect(() => {
     fetchProjects();
@@ -55,6 +58,15 @@ export function Sidebar({
       logger.error('Failed to add project from dialog', undefined, serializeError(error));
     }
   };
+
+  if (explorerProject) {
+    return (
+      <ProjectExplorer
+        project={explorerProject}
+        onBack={() => setExplorerProject(null)}
+      />
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -89,6 +101,7 @@ export function Sidebar({
       <div className="flex-1 overflow-auto px-3 pb-3 scroll-smooth">
         <SessionList
           onNewSessionInProject={onNewSessionInProject}
+          onOpenProjectFiles={setExplorerProject}
           onAddProject={handleAddProject}
           onSelectSession={onSelectSession}
         />

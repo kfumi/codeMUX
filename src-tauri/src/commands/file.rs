@@ -445,13 +445,14 @@ pub struct FileNode {
 }
 
 /// List directory contents as a tree structure.
-/// Excludes common large/hidden directories. Default depth = 2, max depth = 5.
+/// Excludes common large directories. Hidden entries can be included by the caller.
 #[tauri::command]
 pub fn list_directory(
     _app: AppHandle,
     path: String,
     base_path: Option<String>,
     depth: Option<u32>,
+    include_hidden: Option<bool>,
 ) -> Result<Vec<FileNode>, String> {
     debug!(target: "file", "Listing directory path={} depth={}", path, depth.unwrap_or(2));
     // Use provided base_path as security base, or fall back to current_dir
@@ -477,13 +478,19 @@ pub fn list_directory(
 
     // Cap depth at 5 to prevent huge responses
     let max_depth = depth.unwrap_or(2).min(5);
-    list_dir_recursive(&canonical, max_depth, &canonical_base)
+    list_dir_recursive(
+        &canonical,
+        max_depth,
+        &canonical_base,
+        include_hidden.unwrap_or(false),
+    )
 }
 
 fn list_dir_recursive(
     dir: &std::path::Path,
     remaining_depth: u32,
     canonical_base: &std::path::Path,
+    include_hidden: bool,
 ) -> Result<Vec<FileNode>, String> {
     let excluded = [
         ".git",
@@ -509,11 +516,12 @@ fn list_dir_recursive(
         };
         let file_name = entry.file_name().to_string_lossy().to_string();
 
-        if excluded.contains(&file_name.as_str()) {
+        let is_excluded = excluded.contains(&file_name.as_str());
+        if is_excluded && !(include_hidden && file_name == ".git") {
             continue;
         }
-        // Skip all hidden files/dirs (starting with .)
-        if file_name.starts_with('.') {
+        // Skip hidden files/dirs unless the project explorer explicitly asks for them.
+        if !include_hidden && file_name.starts_with('.') {
             continue;
         }
 
@@ -546,11 +554,12 @@ fn list_dir_recursive(
             None => path_str,
         };
 
-        let children = if is_dir && remaining_depth > 0 {
+        let children = if is_dir && remaining_depth > 0 && !is_excluded {
             Some(list_dir_recursive(
                 &path,
                 remaining_depth - 1,
                 canonical_base,
+                include_hidden,
             )?)
         } else {
             None

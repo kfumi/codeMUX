@@ -3,10 +3,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSidePanelStore } from './sidePanelStore';
 import { useNavigationStore } from './navigationStore';
 
+const fileApiMock = vi.hoisted(() => ({
+  readFile: vi.fn(),
+  writeFile: vi.fn(),
+}));
+
+vi.mock('../lib/tauri', () => ({
+  fileApi: fileApiMock,
+}));
+
 describe('side panel store', () => {
   beforeEach(() => {
     useSidePanelStore.getState().reset();
     useNavigationStore.getState().reset();
+    fileApiMock.readFile.mockReset();
+    fileApiMock.writeFile.mockReset();
     vi.stubGlobal('window', { innerWidth: 1024 });
   });
 
@@ -42,6 +53,77 @@ describe('side panel store', () => {
       title: 'exit-plan.md',
       planFilePath: 'docs/superpowers/plans/exit-plan.md',
       planContent: '# 更新后的计划',
+    });
+  });
+
+  it('loads a file into a reusable tab and saves edited content', async () => {
+    fileApiMock.readFile.mockResolvedValue('const answer = 41;');
+    fileApiMock.writeFile.mockResolvedValue(undefined);
+    const store = useSidePanelStore.getState();
+
+    await store.openFileTab('D:/project/app', 'D:/project/app/src/main.ts');
+
+    let state = useSidePanelStore.getState();
+    expect(state.tabs).toHaveLength(1);
+    expect(state.tabs[0]).toMatchObject({
+      kind: 'file',
+      title: 'main.ts',
+      fileContent: 'const answer = 41;',
+      fileOriginalContent: 'const answer = 41;',
+      fileLoading: false,
+    });
+    expect(fileApiMock.readFile).toHaveBeenCalledWith(
+      'D:/project/app/src/main.ts',
+      'D:/project/app',
+    );
+
+    const tabId = state.tabs[0].id;
+    store.updateFileContent(tabId, 'const answer = 42;');
+    await store.saveFileTab(tabId);
+
+    state = useSidePanelStore.getState();
+    expect(fileApiMock.writeFile).toHaveBeenCalledWith(
+      'D:/project/app/src/main.ts',
+      'const answer = 42;',
+      'D:/project/app',
+    );
+    expect(state.tabs[0]).toMatchObject({
+      fileContent: 'const answer = 42;',
+      fileOriginalContent: 'const answer = 42;',
+      fileSaveState: 'saved',
+    });
+  });
+
+  it('reuses the same file tab for relative and absolute paths', async () => {
+    fileApiMock.readFile.mockResolvedValue('export const answer = 42;');
+    const store = useSidePanelStore.getState();
+
+    await store.openFileTab('D:/project/app', 'src/main.ts');
+    await store.openFileTab(undefined, 'D:/project/app/src/main.ts');
+
+    const state = useSidePanelStore.getState();
+    expect(state.tabs).toHaveLength(1);
+    expect(state.activeTabId).toBe(state.tabs[0].id);
+    expect(fileApiMock.readFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes one, other, or all tabs through the tab actions', async () => {
+    fileApiMock.readFile.mockResolvedValue('');
+    const store = useSidePanelStore.getState();
+
+    await store.openFileTab('D:/project/app', 'src/one.ts');
+    await store.openFileTab('D:/project/app', 'src/two.ts');
+    const secondTabId = useSidePanelStore.getState().activeTabId!;
+
+    store.closeOtherTabs(secondTabId);
+    expect(useSidePanelStore.getState().tabs).toHaveLength(1);
+
+    await store.openFileTab('D:/project/app', 'src/three.ts');
+    store.closeAllTabs();
+    expect(useSidePanelStore.getState()).toMatchObject({
+      tabs: [],
+      activeTabId: null,
+      isOpen: true,
     });
   });
 

@@ -504,8 +504,13 @@ export const fileApi = {
     invokeLogged('write_file', { path, content, basePath }),
   deleteFile: (path: string, basePath?: string): Promise<void> =>
     invokeLogged('delete_file', { path, basePath }),
-  listDirectory: (path: string, depth?: number, basePath?: string): Promise<FileTreeNode[]> =>
-    invokeLogged('list_directory', { path, depth, basePath }),
+  listDirectory: (
+    path: string,
+    depth?: number,
+    basePath?: string,
+    includeHidden = false,
+  ): Promise<FileTreeNode[]> =>
+    invokeLogged('list_directory', { path, depth, basePath, includeHidden }),
   openProjectPath: (path: string, target: OpenTarget): Promise<void> =>
     invokeLogged('open_project_path', { path, target }),
   readHomeFile: (relativePath: string): Promise<string> =>

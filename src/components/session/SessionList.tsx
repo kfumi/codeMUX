@@ -11,6 +11,7 @@ import { cn } from '../../lib/utils';
 
 interface SessionListProps {
   onNewSessionInProject: (projectId: string) => void;
+  onOpenProjectFiles?: (project: import('../../types/project').Project) => void;
   onAddProject: () => void;
   onSelectSession: (sessionId: string, projectId: string | null) => void;
 }
@@ -74,7 +75,12 @@ function SectionHeader({
   );
 }
 
-export function SessionList({ onNewSessionInProject, onAddProject, onSelectSession }: SessionListProps) {
+export function SessionList({
+  onNewSessionInProject,
+  onOpenProjectFiles = () => {},
+  onAddProject,
+  onSelectSession,
+}: SessionListProps) {
   const {
     sessions,
     activeSessionId,
@@ -199,6 +205,7 @@ export function SessionList({ onNewSessionInProject, onAddProject, onSelectSessi
               onDeleteSession={deleteSession}
               onRenameSession={updateSessionTitle}
               onNewSessionInProject={onNewSessionInProject}
+              onOpenProjectFiles={onOpenProjectFiles}
               onDeleteProject={deleteProject}
               onRenameProject={renameProject}
             />

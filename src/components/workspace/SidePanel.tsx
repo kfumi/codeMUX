@@ -7,11 +7,13 @@ import { cn } from '../../lib/utils';
 import { useSidePanelStore, type SidePanelTab } from '../../stores/sidePanelStore';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipHint, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui/context-menu';
 import { DiffView } from '../preview/DiffView';
 import { PlanPreviewPanel } from './plan/PlanPreviewPanel';
 import { ReviewPanel } from './review/ReviewPanel';
 import { TerminalPanel } from './terminal/TerminalPanel';
 import { FileTypeIcon } from '../assistant-ui/file-type-icon';
+import { FileEditorPanel } from './FileEditorPanel';
 
 interface SidePanelProps {
   projectPath?: string | null;
@@ -31,6 +33,8 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
   const setResizing = useSidePanelStore((state) => state.setResizing);
   const setActiveTab = useSidePanelStore((state) => state.setActiveTab);
   const closeTab = useSidePanelStore((state) => state.closeTab);
+  const closeOtherTabs = useSidePanelStore((state) => state.closeOtherTabs);
+  const closeAllTabs = useSidePanelStore((state) => state.closeAllTabs);
   const closePanel = useSidePanelStore((state) => state.closePanel);
   const toggleExpanded = useSidePanelStore((state) => state.toggleExpanded);
   const openReviewTab = useSidePanelStore((state) => state.openReviewTab);
@@ -164,6 +168,8 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
                 active={tab.id === activeTabId}
                 onClick={() => setActiveTab(tab.id)}
                 onClose={() => closeTab(tab.id)}
+                onCloseOther={() => closeOtherTabs(tab.id)}
+                onCloseAll={closeAllTabs}
               />
             ))}
           </div>
@@ -257,6 +263,8 @@ export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelP
                 planFilePath={activeTab.planFilePath}
                 planContent={activeTab.planContent}
               />
+            ) : activeTab.kind === 'file' ? (
+              <FileEditorPanel key={activeTab.id} tab={activeTab} />
             ) : null
           ) : (
             <SidePanelEmpty projectPath={projectPath} onOpenReview={openReview} onOpenTerminal={openTerminal} />
@@ -272,42 +280,61 @@ function TabButton({
   active,
   onClick,
   onClose,
+  onCloseOther,
+  onCloseAll,
 }: {
   tab: SidePanelTab;
   active: boolean;
   onClick: () => void;
   onClose: () => void;
+  onCloseOther: () => void;
+  onCloseAll: () => void;
 }) {
-  const Icon = tab.kind === 'review' ? FileSearch : tab.kind === 'terminal' ? Terminal : tab.kind === 'diff' ? FileCode : FileText;
+  const Icon = tab.kind === 'review'
+    ? FileSearch
+    : tab.kind === 'terminal'
+      ? Terminal
+      : tab.kind === 'diff'
+        ? FileCode
+        : FileText;
 
   return (
-    <button
-      className={cn(
-        'group flex h-7 max-w-56 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors',
-        active
-          ? 'border-border/55 bg-muted/45 text-foreground'
-          : 'border-transparent text-muted-foreground/70 hover:bg-muted/35 hover:text-foreground/86',
-      )}
-      onClick={onClick}
-    >
-      {tab.kind === 'plan' ? (
-        <FileTypeIcon filePath={tab.planFilePath ?? tab.title} />
-      ) : (
-        <Icon className="h-3.5 w-3.5 shrink-0" />
-      )}
-      <span className="truncate">{tab.title}</span>
-      <span
-        role="button"
-        tabIndex={-1}
-        className="ml-1 rounded p-0.5 text-muted-foreground/45 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
-        onClick={(event) => {
-          event.stopPropagation();
-          onClose();
-        }}
-      >
-        <X className="h-3 w-3" />
-      </span>
-    </button>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <button
+          className={cn(
+            'group flex h-7 max-w-56 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors',
+            active
+              ? 'border-border/55 bg-muted/45 text-foreground'
+              : 'border-transparent text-muted-foreground/70 hover:bg-muted/35 hover:text-foreground/86',
+          )}
+          onClick={onClick}
+        >
+          {tab.kind === 'plan' || tab.kind === 'file' ? (
+            <FileTypeIcon filePath={tab.kind === 'plan' ? tab.planFilePath ?? tab.title : tab.filePath ?? tab.title} />
+          ) : (
+            <Icon className="h-3.5 w-3.5 shrink-0" />
+          )}
+          <span className="truncate">{tab.title}</span>
+          <span
+            role="button"
+            tabIndex={-1}
+            className="ml-1 rounded p-0.5 text-muted-foreground/45 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+            onClick={(event) => {
+              event.stopPropagation();
+              onClose();
+            }}
+          >
+            <X className="h-3 w-3" />
+          </span>
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="min-w-36">
+        <ContextMenuItem onClick={onClose}>关闭标签</ContextMenuItem>
+        <ContextMenuItem onClick={onCloseOther}>关闭其他标签</ContextMenuItem>
+        <ContextMenuItem onClick={onCloseAll}>关闭所有标签</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

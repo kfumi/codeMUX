@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ChevronDown, ChevronRight, ChevronUp, Folder, FolderOpen, MessageSquarePlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, Folder, FolderOpen, FolderTree, MessageSquarePlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 
 import { Session } from '../../types/session';
 import { Project } from '../../types/project';
@@ -27,6 +27,7 @@ interface ProjectGroupProps {
   onDeleteSession: (sessionId: string) => void;
   onRenameSession: (sessionId: string, title: string) => void;
   onNewSessionInProject: (projectId: string) => void;
+  onOpenProjectFiles: (project: Project) => void;
   onDeleteProject: (projectId: string) => void;
   onRenameProject: (projectId: string, newName: string) => void;
 }
@@ -42,6 +43,7 @@ export function ProjectGroup({
   onDeleteSession,
   onRenameSession,
   onNewSessionInProject,
+  onOpenProjectFiles,
   onDeleteProject,
   onRenameProject,
 }: ProjectGroupProps) {
@@ -146,6 +148,19 @@ export function ProjectGroup({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={`打开项目 ${project.name} 的文件`}
+                className="rounded-md p-1 text-[hsl(var(--sidebar-fg))]/45 transition-all duration-200 hover:bg-[hsl(var(--sidebar-glow)/0.06)] hover:text-[hsl(var(--sidebar-glow))]"
+                onClick={() => onOpenProjectFiles(project)}
+              >
+                <FolderTree className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right"><p>打开项目文件</p></TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <button

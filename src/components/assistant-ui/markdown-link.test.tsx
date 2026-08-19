@@ -112,7 +112,7 @@ describe('CodeMuxMarkdownLink', () => {
     });
   });
 
-  it('opens a clicked local markdown file in the side panel preview tab', async () => {
+  it('opens a clicked local markdown file in the editable file tab', async () => {
     readFile.mockResolvedValue('# 设计文档\n\n- 已渲染');
 
     render(
@@ -128,9 +128,9 @@ describe('CodeMuxMarkdownLink', () => {
         isOpen: true,
         tabs: [
           expect.objectContaining({
-            kind: 'plan',
-            planFilePath: 'D:/project/ai-code/codeMUX/docs/superpowers/specs/2026-07-03-git-branch-management-design.md',
-            planContent: '# 设计文档\n\n- 已渲染',
+            kind: 'file',
+            filePath: 'D:/project/ai-code/codeMUX/docs/superpowers/specs/2026-07-03-git-branch-management-design.md',
+            fileContent: '# 设计文档\n\n- 已渲染',
           }),
         ],
       });
@@ -208,9 +208,9 @@ describe('CodeMuxMarkdownLink', () => {
 
     await waitFor(() => {
       expect(useSidePanelStore.getState().tabs[0]).toMatchObject({
-        kind: 'plan',
-        planFilePath: 'D:/project/ai-code/codeMUX/docs/design.md',
-        planContent: '# Streamdown 文件\n\n已打开。',
+        kind: 'file',
+        filePath: 'D:/project/ai-code/codeMUX/docs/design.md',
+        fileContent: '# Streamdown 文件\n\n已打开。',
       });
     });
   });

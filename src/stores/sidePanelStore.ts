@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 
+import { fileApi } from '../lib/tauri';
 import { useNavigationStore, type SidePanelNavigationState } from './navigationStore';
 
-export type SidePanelTabKind = 'review' | 'terminal' | 'plan' | 'diff';
+export type SidePanelTabKind = 'review' | 'terminal' | 'plan' | 'diff' | 'file';
 
 export interface SidePanelTab {
   id: string;
@@ -15,6 +16,12 @@ export interface SidePanelTab {
   diffFilePath?: string;
   diffOldContent?: string;
   diffNewContent?: string;
+  filePath?: string;
+  fileContent?: string;
+  fileOriginalContent?: string;
+  fileLoading?: boolean;
+  fileError?: string;
+  fileSaveState?: 'idle' | 'saving' | 'saved' | 'error';
 }
 
 interface SidePanelSnapshot {
@@ -40,10 +47,15 @@ interface SidePanelState {
   openTerminalTab: (projectPath: string) => void;
   openPlanTab: (planFilePath: string, planContent: string) => void;
   openDiffTab: (filePath: string, oldContent: string, newContent: string) => void;
+  openFileTab: (projectPath: string | undefined, filePath: string) => Promise<void>;
+  updateFileContent: (tabId: string, content: string) => void;
+  saveFileTab: (tabId: string) => Promise<void>;
   closePanel: () => void;
   toggleExpanded: () => void;
   setActiveTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
+  closeOtherTabs: (tabId: string) => void;
+  closeAllTabs: () => void;
   setPanelWidth: (width: number, splitContainerWidth?: number) => void;
   setResizing: (isResizing: boolean) => void;
   setTerminalId: (tabId: string, terminalId: string) => void;
@@ -121,10 +133,33 @@ function createDiffTab(scopeId: string, filePath: string, oldContent: string, ne
   };
 }
 
+function createFileTab(scopeId: string, projectPath: string | undefined, filePath: string): SidePanelTab {
+  return {
+    id: tabId(scopeId, 'file', fileTabKey(projectPath, filePath)),
+    kind: 'file',
+    title: getFileName(filePath) || '文件',
+    projectPath,
+    filePath,
+    fileLoading: true,
+    fileSaveState: 'idle',
+  };
+}
+
 function getFileName(path: string): string {
   const normalized = path.replace(/\\/g, '/');
   const parts = normalized.split('/');
   return parts[parts.length - 1] || path;
+}
+
+function fileTabKey(projectPath: string | undefined, filePath: string): string {
+  const normalizedPath = filePath.replace(/\\/g, '/').replace(/\/+/g, '/');
+  const normalizedProjectPath = projectPath?.replace(/\\/g, '/').replace(/\/+$/, '');
+  const isAbsolute = normalizedPath.startsWith('/') || /^[A-Za-z]:\//.test(normalizedPath);
+  const resolvedPath = !isAbsolute && normalizedProjectPath
+    ? `${normalizedProjectPath}/${normalizedPath.replace(/^\/+/, '')}`
+    : normalizedPath;
+
+  return /^[A-Za-z]:\//.test(resolvedPath) ? resolvedPath.toLowerCase() : resolvedPath;
 }
 
 function recordNavigation(state: Pick<SidePanelState, 'activeScopeId' | 'isOpen' | 'activeTabId'>): void {
@@ -219,6 +254,113 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     recordNavigation(get());
   },
 
+  openFileTab: async (projectPath: string | undefined, filePath: string) => {
+    const id = tabId(get().activeScopeId, 'file', fileTabKey(projectPath, filePath));
+    const existingTab = get().tabs.find((tab) => tab.id === id);
+
+    if (existingTab) {
+      set({ isOpen: true, activeTabId: id });
+      recordNavigation(get());
+      return;
+    }
+
+    const tab = createFileTab(get().activeScopeId, projectPath, filePath);
+    set((state) => ({
+      isOpen: true,
+      tabs: [...state.tabs, tab],
+      activeTabId: id,
+    }));
+    recordNavigation(get());
+
+    try {
+      const content = await fileApi.readFile(filePath, projectPath);
+      set((state) => ({
+        tabs: state.tabs.map((entry) => (
+          entry.id === id
+            ? {
+                ...entry,
+                fileContent: content,
+                fileOriginalContent: content,
+                fileLoading: false,
+                fileError: undefined,
+                fileSaveState: 'idle',
+              }
+            : entry
+        )),
+      }));
+    } catch (error) {
+      set((state) => ({
+        tabs: state.tabs.map((entry) => (
+          entry.id === id
+            ? {
+                ...entry,
+                fileLoading: false,
+                fileError: error instanceof Error ? error.message : String(error),
+                fileSaveState: 'error',
+              }
+            : entry
+        )),
+      }));
+    }
+  },
+
+  updateFileContent: (tabId: string, content: string) => {
+    set((state) => ({
+      tabs: state.tabs.map((tab) => (
+        tab.id === tabId
+          ? { ...tab, fileContent: content, fileSaveState: 'idle', fileError: undefined }
+          : tab
+      )),
+    }));
+  },
+
+  saveFileTab: async (tabId: string) => {
+    const tab = get().tabs.find((entry) => entry.id === tabId);
+    if (
+      !tab
+      || tab.kind !== 'file'
+      || !tab.filePath
+      || tab.fileContent === undefined
+      || tab.fileContent === tab.fileOriginalContent
+    ) {
+      return;
+    }
+
+    const contentToSave = tab.fileContent;
+    set((state) => ({
+      tabs: state.tabs.map((entry) => (
+        entry.id === tabId ? { ...entry, fileSaveState: 'saving', fileError: undefined } : entry
+      )),
+    }));
+
+    try {
+      await fileApi.writeFile(tab.filePath, contentToSave, tab.projectPath);
+      set((state) => ({
+        tabs: state.tabs.map((entry) => (
+          entry.id === tabId
+            ? {
+                ...entry,
+                fileOriginalContent: contentToSave,
+                fileSaveState: entry.fileContent === contentToSave ? 'saved' : 'idle',
+              }
+            : entry
+        )),
+      }));
+    } catch (error) {
+      set((state) => ({
+        tabs: state.tabs.map((entry) => (
+          entry.id === tabId
+            ? {
+                ...entry,
+                fileSaveState: 'error',
+                fileError: error instanceof Error ? error.message : String(error),
+              }
+            : entry
+        )),
+      }));
+    }
+  },
+
   closePanel: () => {
     set({ isOpen: false, isExpanded: false });
     recordNavigation(get());
@@ -249,6 +391,27 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     set({
       tabs,
       activeTabId,
+      isOpen: true,
+    });
+    recordNavigation(get());
+  },
+
+  closeOtherTabs: (tabId: string) => {
+    const state = get();
+    if (!state.tabs.some((tab) => tab.id === tabId)) return;
+
+    set({
+      tabs: state.tabs.filter((tab) => tab.id === tabId),
+      activeTabId: tabId,
+      isOpen: true,
+    });
+    recordNavigation(get());
+  },
+
+  closeAllTabs: () => {
+    set({
+      tabs: [],
+      activeTabId: null,
       isOpen: true,
     });
     recordNavigation(get());

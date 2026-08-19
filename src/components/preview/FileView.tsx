@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import hljs from 'highlight.js/lib/core';
 import bash from 'highlight.js/lib/languages/bash';
 import c from 'highlight.js/lib/languages/c';
@@ -74,25 +74,49 @@ function getLangFromPath(filePath?: string): string | undefined {
   return ext ? extMap[ext] : undefined;
 }
 
-export function FileView({ content, filePath }: FileViewProps) {
-  const highlighted = useMemo(() => {
-    const language = getLangFromPath(filePath);
-
-    try {
-      if (language && hljs.getLanguage(language)) {
-        return hljs.highlight(content, { language }).value;
-      }
-
-      return escapeHtml(content);
-    } catch {
-      return escapeHtml(content);
+function useHighlightTheme() {
+  useEffect(() => {
+    const id = 'hljs-theme';
+    let link = document.getElementById(id) as HTMLLinkElement | null;
+    if (!link) {
+      link = document.createElement('link');
+      link.id = id;
+      link.rel = 'stylesheet';
+      document.head.appendChild(link);
     }
-  }, [content, filePath]);
 
+    const updateTheme = () => {
+      link!.href = document.documentElement.classList.contains('dark')
+        ? 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css'
+        : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
+    };
+
+    updateTheme();
+    const observer = new MutationObserver(updateTheme);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+}
+
+function highlightFileContent(content: string, filePath?: string): string {
+  const language = getLangFromPath(filePath);
+
+  try {
+    if (language && hljs.getLanguage(language)) {
+      return hljs.highlight(content, { language }).value;
+    }
+
+    return escapeHtml(content);
+  } catch {
+    return escapeHtml(content);
+  }
+}
+
+function HighlightedLines({ highlighted }: { highlighted: string }) {
   const lines = useMemo(() => highlighted.split('\n'), [highlighted]);
 
   return (
-    <div className="overflow-x-auto font-mono text-code leading-relaxed">
+    <>
       {lines.map((line, index) => (
         <div key={index} className="whitespace-pre px-4 transition-colors hover:bg-muted/30">
           <span className="mr-4 inline-block w-8 select-none text-right tabular-nums text-muted-foreground/40">
@@ -101,6 +125,72 @@ export function FileView({ content, filePath }: FileViewProps) {
           <span dangerouslySetInnerHTML={{ __html: line || '&nbsp;' }} />
         </div>
       ))}
+    </>
+  );
+}
+
+export function FileView({ content, filePath }: FileViewProps) {
+  useHighlightTheme();
+  const highlighted = useMemo(() => highlightFileContent(content, filePath), [content, filePath]);
+
+  return (
+    <div className="overflow-x-auto font-mono text-code leading-relaxed">
+      <HighlightedLines highlighted={highlighted} />
+    </div>
+  );
+}
+
+export function EditableFileView({
+  content,
+  filePath,
+  onChange,
+}: FileViewProps & { onChange: (content: string) => void }) {
+  useHighlightTheme();
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const highlighted = useMemo(() => highlightFileContent(content, filePath), [content, filePath]);
+  const lineCount = content.split('\n').length;
+  const longestLine = Math.max(...content.split('\n').map((line) => line.length), 1);
+  const editorWidth = Math.max(640, longestLine * 8 + 80);
+  const editorHeight = Math.max(80, lineCount * 21 + 24);
+
+  return (
+    <div className="h-full overflow-auto">
+      <div
+        className="relative font-mono text-code leading-relaxed"
+        style={{ minWidth: editorWidth, minHeight: editorHeight }}
+      >
+        <div className="pointer-events-none absolute inset-0 select-none overflow-hidden py-3">
+          <HighlightedLines highlighted={highlighted} />
+        </div>
+        <textarea
+          ref={textareaRef}
+          value={content}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Tab') return;
+            event.preventDefault();
+            const target = event.currentTarget;
+            const start = target.selectionStart;
+            const end = target.selectionEnd;
+            const nextContent = `${content.slice(0, start)}  ${content.slice(end)}`;
+            onChange(nextContent);
+            requestAnimationFrame(() => {
+              textareaRef.current?.setSelectionRange(start + 2, start + 2);
+            });
+          }}
+          spellCheck={false}
+          wrap="off"
+          aria-label={`编辑 ${filePath ?? '文件'}`}
+          className="absolute inset-0 z-10 m-0 block resize-none overflow-hidden border-0 bg-transparent py-3 pl-16 pr-4 font-mono text-code leading-relaxed outline-none"
+          style={{
+            width: editorWidth,
+            height: editorHeight,
+            color: 'transparent',
+            caretColor: 'hsl(var(--foreground))',
+            WebkitTextFillColor: 'transparent',
+          }}
+        />
+      </div>
     </div>
   );
 }

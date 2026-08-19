@@ -3,7 +3,6 @@ import { open } from '@tauri-apps/plugin-shell';
 import { defaultRehypePlugins } from 'streamdown';
 
 import { cn } from '@/lib/utils';
-import { fileApi } from '@/lib/tauri';
 import { useProjectStore } from '@/stores/projectStore';
 import { usePreviewStore, type FileTreeNodeData } from '@/stores/previewStore';
 import { useSidePanelStore } from '@/stores/sidePanelStore';
@@ -25,7 +24,7 @@ export function CodeMuxMarkdownLink({
   children,
   ...props
 }: CodeMuxMarkdownLinkProps) {
-  const openPlanTab = useSidePanelStore((state) => state.openPlanTab);
+  const openFileTab = useSidePanelStore((state) => state.openFileTab);
   const fileLink = getLocalFileLinkDetails(href, children);
   const filePath = fileLink?.path ?? null;
 
@@ -43,15 +42,7 @@ export function CodeMuxMarkdownLink({
     }
 
     const basePath = resolveLocalMarkdownBasePath(filePath);
-    void fileApi
-      .readFile(filePath, basePath)
-      .then((content) => {
-        openPlanTab(filePath, content);
-      })
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        openPlanTab(filePath, `无法读取文件：${message}`);
-      });
+    void openFileTab(basePath, filePath);
   };
 
   const link = (

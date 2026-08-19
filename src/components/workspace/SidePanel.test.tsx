@@ -36,6 +36,8 @@ const sidePanelState = vi.hoisted(() => ({
   setResizing: vi.fn(),
   setActiveTab: vi.fn(),
   closeTab: vi.fn(),
+  closeOtherTabs: vi.fn(),
+  closeAllTabs: vi.fn(),
   closePanel: vi.fn(),
   toggleExpanded: vi.fn(),
   openReviewTab: vi.fn(),
