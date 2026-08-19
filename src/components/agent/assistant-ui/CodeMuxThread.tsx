@@ -16,7 +16,7 @@ import { Streamdown } from 'streamdown';
 
 import { MessageFooter, type MessageFooterStats } from '@/components/assistant-ui/message-footer';
 import { ToolGroup } from '@/components/assistant-ui/tool-group';
-import { CODEMUX_MARKDOWN_REHYPE_PLUGINS, CodeMuxMarkdownLink } from '@/components/assistant-ui/markdown-link';
+import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { Button } from '@/components/ui/button';
 import { TooltipHint } from '@/components/ui/tooltip';
 import {
@@ -105,9 +105,6 @@ const GROUP_BY_PART = (
     return [];
   }
   return GROUP_BY_PART_INNER(part, context);
-};
-const STREAMING_MARKDOWN_COMPONENTS = {
-  a: CodeMuxMarkdownLink,
 };
 const CodeMuxThreadRenderContext = createContext<CodeMuxThreadRenderContextValue | null>(null);
 const MESSAGE_COMPONENTS = {
@@ -1358,10 +1355,7 @@ function StreamingContent({ sessionId, events }: { sessionId: string; events: Ag
           >
             <Streamdown
               mode="streaming"
-              className="aui-md"
-              components={STREAMING_MARKDOWN_COMPONENTS}
-              rehypePlugins={CODEMUX_MARKDOWN_REHYPE_PLUGINS}
-              linkSafety={{ enabled: false }}
+              {...CODEMUX_MARKDOWN_STREAMDOWN_PROPS}
             >
               {visibleText}
             </Streamdown>

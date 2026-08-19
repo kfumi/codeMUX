@@ -1,7 +1,6 @@
 import type { AgentMessage } from '../../../stores/agentStore';
-import { MarkdownText } from '@/components/assistant-ui/markdown-text';
+import { MarkdownText, CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { Streamdown } from 'streamdown';
-import { code } from '@streamdown/code';
 import { useState } from 'react';
 import {
   ToolFallbackContent,
@@ -21,7 +20,6 @@ import { getCodeChangeFilePath, getCodeChangeStats, isCodeChangeTool, ToolCodeDi
 import { getDisplayableArgs, getShellCommand, getToolHeaderSummary, isShellCommandTool } from '../toolHeaderSummary';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipHint } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
-import { CODEMUX_MARKDOWN_REHYPE_PLUGINS, CodeMuxMarkdownLink } from '@/components/assistant-ui/markdown-link';
 import { cn } from '../../../lib/utils';
 import { parseUnifiedDiffPatch } from '../../../lib/diffStats';
 import { getProposedPlanPreview, getProposedPlanTitle, parseProposedPlan } from './proposedPlan';
@@ -76,10 +74,6 @@ type AskUserQuestionCardData = {
   }>;
 };
 
-const STATIC_MARKDOWN_COMPONENTS = {
-  a: CodeMuxMarkdownLink,
-};
-
 export function CodeMuxTextMessagePart({
   text,
   parsePlan = false,
@@ -114,13 +108,7 @@ function StaticMarkdownText({ text }: { text: string }) {
   return (
     <Streamdown
       mode="static"
-      className="aui-md"
-      components={STATIC_MARKDOWN_COMPONENTS as never}
-      plugins={{ code }}
-      shikiTheme={['github-light', 'github-dark']}
-      controls={{ code: { copy: true, download: false }, table: false } as never}
-      rehypePlugins={CODEMUX_MARKDOWN_REHYPE_PLUGINS}
-      linkSafety={{ enabled: false }}
+      {...CODEMUX_MARKDOWN_STREAMDOWN_PROPS}
     >
       {text}
     </Streamdown>

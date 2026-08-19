@@ -468,6 +468,19 @@ input[type='password']::-ms-reveal {
   overflow-x: auto;
 }
 
+/* 恢复常规 Markdown 列表缩进：streamdown 内置 ul/ol 用 list-inside 且无左内边距，
+   圆点紧贴消息边缘、折行文本无悬挂缩进。改为 outside + padding-inline-start。 */
+.aui-md [data-streamdown="unordered-list"],
+.aui-md [data-streamdown="ordered-list"] {
+  list-style-position: outside;
+  padding-inline-start: 1.5rem;
+  margin-block: 0.5rem;
+}
+
+.aui-md [data-streamdown="list-item"] {
+  padding-block: 0.125rem;
+}
+
 .prose :where(code):not(:where([class~="not-prose"] *))::before,
 .prose :where(code):not(:where([class~="not-prose"] *))::after {
   content: none;

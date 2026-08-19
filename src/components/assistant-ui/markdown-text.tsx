@@ -3,26 +3,11 @@
 import {
   StreamdownTextPrimitive,
 } from "@assistant-ui/react-streamdown";
+import type { StreamdownProps } from "streamdown";
 import { code } from "@streamdown/code";
 import { memo } from "react";
 import { cn } from "@/lib/utils";
 import { CODEMUX_MARKDOWN_REHYPE_PLUGINS, CodeMuxMarkdownLink } from "./markdown-link";
-
-const MarkdownTextImpl = () => {
-  return (
-    <StreamdownTextPrimitive
-      plugins={{ code }}
-      shikiTheme={["github-light", "github-dark"]}
-      className="aui-md"
-      components={defaultComponents as never}
-      rehypePlugins={CODEMUX_MARKDOWN_REHYPE_PLUGINS}
-      controls={{ code: { copy: true, download: false }, table: false } as never}
-      linkSafety={{ enabled: false }}
-    />
-  );
-};
-
-export const MarkdownText = memo(MarkdownTextImpl);
 
 const defaultComponents = {
   h1: ({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => (
@@ -62,7 +47,7 @@ const defaultComponents = {
     />
   ),
   h5: ({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => (
-    <h4
+    <h5
       className={cn(
         "aui-md-h5 mt-3 mb-1 text-sm font-semibold first:mt-0 last:mb-0",
         className,
@@ -71,7 +56,7 @@ const defaultComponents = {
     />
   ),
   h6: ({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => (
-    <h4
+    <h6
       className={cn(
         "aui-md-h6 mt-3 mb-1 text-sm font-medium first:mt-0 last:mb-0",
         className,
@@ -100,3 +85,44 @@ const defaultComponents = {
     </div>
   ),
 };
+
+/**
+ * 消息 Markdown 的统一渲染配置：流式期间（CodeMuxThread StreamingContent）与
+ * 完成后（MarkdownText / StaticMarkdownText / PlanPreviewPanel）必须共用同一份
+ * components / plugins / controls，否则流式结束切换组件时会出现样式跳变
+ * （标题字号、表格按钮、代码高亮闪变）。注意必须保持模块级常量——
+ * Streamdown 的 Block 级 memo 依赖 components 各 key 的函数引用稳定。
+ */
+export const CODEMUX_MARKDOWN_COMPONENTS = {
+  ...defaultComponents,
+  a: CodeMuxMarkdownLink,
+};
+
+export const CODEMUX_MARKDOWN_STREAMDOWN_PROPS: Omit<
+  StreamdownProps,
+  "children" | "mode"
+> = {
+  className: "aui-md",
+  components: CODEMUX_MARKDOWN_COMPONENTS as never,
+  plugins: { code },
+  shikiTheme: ["github-light", "github-dark"],
+  controls: { code: { copy: true, download: false }, table: false } as never,
+  rehypePlugins: CODEMUX_MARKDOWN_REHYPE_PLUGINS,
+  linkSafety: { enabled: false },
+};
+
+const MarkdownTextImpl = () => {
+  return (
+    <StreamdownTextPrimitive
+      plugins={{ code }}
+      shikiTheme={["github-light", "github-dark"]}
+      className="aui-md"
+      components={CODEMUX_MARKDOWN_COMPONENTS as never}
+      rehypePlugins={CODEMUX_MARKDOWN_REHYPE_PLUGINS}
+      controls={{ code: { copy: true, download: false }, table: false } as never}
+      linkSafety={{ enabled: false }}
+    />
+  );
+};
+
+export const MarkdownText = memo(MarkdownTextImpl);
