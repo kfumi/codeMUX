@@ -66,10 +66,6 @@ impl TerminalOutputBuffer {
         let bytes: Vec<u8> = self.bytes.iter().copied().collect();
         String::from_utf8_lossy(&bytes).into_owned()
     }
-
-    fn clear(&mut self) {
-        self.bytes.clear();
-    }
 }
 
 struct TerminalOutputState {
@@ -115,7 +111,6 @@ fn bind_output_channel(
             );
         }
     }
-    output.buffer.clear();
     if let Some(exit_event) = output.exit_event.clone() {
         if let Some(channel) = output.channel.as_ref() {
             send_event(channel, exit_event);
@@ -155,10 +150,8 @@ fn publish_event(output: &Arc<Mutex<TerminalOutputState>>, event: TerminalEvent)
         return;
     };
 
-    if output.channel.is_none() {
-        if let TerminalEvent::Output { data, .. } = &event {
-            output.buffer.push(data.as_bytes());
-        }
+    if let TerminalEvent::Output { data, .. } = &event {
+        output.buffer.push(data.as_bytes());
     }
     if matches!(&event, TerminalEvent::Exit { .. }) {
         output.exit_event = Some(event.clone());
@@ -493,7 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn replays_only_detached_output_and_clears_it_after_binding() {
+    fn replays_recent_output_when_binding_a_new_channel() {
         let received = Arc::new(Mutex::new(Vec::<tauri::ipc::InvokeResponseBody>::new()));
         let initial_received = received.clone();
         let initial_channel = tauri::ipc::Channel::new(move |payload| {
@@ -509,7 +502,7 @@ mod tests {
                 data: "live".to_string(),
             },
         );
-        assert_eq!(output.lock().unwrap().buffer.snapshot(), "");
+        assert_eq!(output.lock().unwrap().buffer.snapshot(), "live");
 
         detach_output_channel(&output).unwrap();
         publish_event(
@@ -548,7 +541,7 @@ mod tests {
         let json_messages: Vec<serde_json::Value> = messages.iter().map(body_as_json).collect();
         let replay = json_messages
             .iter()
-            .find(|message| message["data"] == "offline")
+            .find(|message| message["type"] == "output" && message["data"] == "liveoffline")
             .unwrap();
         let exit = json_messages
             .iter()
@@ -556,8 +549,8 @@ mod tests {
             .unwrap();
         assert_eq!(replay["type"], "output");
         assert_eq!(replay["terminalId"], "terminal-1");
-        assert_eq!(replay["data"], "offline");
+        assert_eq!(replay["data"], "liveoffline");
         assert_eq!(exit["type"], "exit");
-        assert_eq!(output.lock().unwrap().buffer.snapshot(), "");
+        assert_eq!(output.lock().unwrap().buffer.snapshot(), "liveoffline");
     }
 }

@@ -1,13 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const closeTerminalMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
-
-vi.mock('../lib/tauri', () => ({
-  terminalApi: {
-    close: closeTerminalMock,
-  },
-}));
-
 import { useSidePanelStore } from './sidePanelStore';
 import { useNavigationStore } from './navigationStore';
 
@@ -16,7 +8,6 @@ describe('side panel store', () => {
     useSidePanelStore.getState().reset();
     useNavigationStore.getState().reset();
     vi.stubGlobal('window', { innerWidth: 1024 });
-    closeTerminalMock.mockClear();
   });
 
   it('opens review and terminal tabs and activates the requested tab', () => {
@@ -163,20 +154,18 @@ describe('side panel store', () => {
     expect(useSidePanelStore.getState().isTabPresent(terminalTabId)).toBe(false);
   });
 
-  it('closes an inactive terminal when its tab is explicitly removed', () => {
+  it('assigns a new instance id when reopening a closed terminal', () => {
     const store = useSidePanelStore.getState();
 
     store.setScope('session-a');
     store.openTerminalTab('D:/project/a');
-    const terminalTabId = useSidePanelStore.getState().activeTabId!;
-    useSidePanelStore.setState((state) => ({
-      tabs: state.tabs.map((tab) => tab.id === terminalTabId ? { ...tab, terminalId: 'terminal-a' } : tab),
-    }));
-    store.openReviewTab('D:/project/a');
+    const firstTerminalTabId = useSidePanelStore.getState().activeTabId!;
 
-    useSidePanelStore.getState().closeTab(terminalTabId);
+    store.closeTab(firstTerminalTabId);
+    store.openTerminalTab('D:/project/a');
+    const secondTerminalTabId = useSidePanelStore.getState().activeTabId!;
 
-    expect(closeTerminalMock).toHaveBeenCalledWith('terminal-a');
+    expect(secondTerminalTabId).not.toBe(firstTerminalTabId);
   });
 
   it('lets the side panel grow until the conversation area reaches its minimum width', () => {

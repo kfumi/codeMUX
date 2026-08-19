@@ -284,6 +284,19 @@ describe('terminalApi', () => {
       terminalId: 'terminal-queued',
     });
   });
+
+  it('does not send terminal I/O after detach has been requested', async () => {
+    invokeMock.mockResolvedValue(undefined);
+    const { terminalApi } = await import('./tauri');
+
+    await terminalApi.attach('terminal-io', 120, 30, () => {});
+    await terminalApi.detach('terminal-io');
+    await terminalApi.write('terminal-io', 'input');
+    await terminalApi.resize('terminal-io', 100, 24);
+
+    expect(invokeMock).not.toHaveBeenCalledWith('write_terminal_session', expect.anything());
+    expect(invokeMock).not.toHaveBeenCalledWith('resize_terminal_session', expect.anything());
+  });
 });
 
 describe('agentApi', () => {

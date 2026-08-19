@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => {
     isTabPresentMock: sidePanelState.isTabPresent,
     useSidePanelStore,
     terminalWrites: [] as string[],
+    terminalBlurs: 0,
+    terminalRefreshes: 0,
     resizeObserverCallback: null as (() => void) | null,
   };
 });
@@ -63,6 +65,12 @@ vi.mock('@xterm/xterm', () => ({
     onData() {
       return { dispose() {} };
     }
+    blur() {
+      mocks.terminalBlurs += 1;
+    }
+    refresh() {
+      mocks.terminalRefreshes += 1;
+    }
     dispose() {}
     write(data: string) {
       mocks.terminalWrites.push(data);
@@ -94,13 +102,11 @@ function SessionSwitchHarness() {
       >
         切换会话
       </button>
-      {view !== 'away' && (
-        <TerminalPanel
-          tabId={tabId}
-          terminalId={view === 'back' ? 'terminal-a' : undefined}
-          projectPath="D:/project/app"
-        />
-      )}
+      <TerminalPanel
+        tabId={tabId}
+        projectPath="D:/project/app"
+        isActive={view !== 'away'}
+      />
     </>
   );
 }
@@ -128,6 +134,8 @@ describe('TerminalPanel lifecycle', () => {
     mocks.isTabPresentMock.mockClear();
     mocks.isTabPresentMock.mockReturnValue(true);
     mocks.terminalWrites.length = 0;
+    mocks.terminalBlurs = 0;
+    mocks.terminalRefreshes = 0;
     mocks.resizeObserverCallback = null;
   });
 
@@ -136,7 +144,7 @@ describe('TerminalPanel lifecycle', () => {
     vi.unstubAllGlobals();
   });
 
-  it('detaches on session switch and reattaches the existing terminal', async () => {
+  it('keeps the terminal mounted while switching sessions', async () => {
     const view = render(<SessionSwitchHarness />);
 
     await waitFor(() => expect(mocks.startMock).toHaveBeenCalledWith(
@@ -147,21 +155,12 @@ describe('TerminalPanel lifecycle', () => {
     ));
 
     fireEvent.click(view.getByRole('button', { name: '切换会话' }));
-    await waitFor(() => expect(mocks.detachMock).toHaveBeenCalledWith('terminal-a'));
+    expect(mocks.detachMock).not.toHaveBeenCalled();
     expect(mocks.closeMock).not.toHaveBeenCalled();
 
     fireEvent.click(view.getByRole('button', { name: '切换会话' }));
-    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalledWith(
-      'terminal-a',
-      100,
-      30,
-      expect.any(Function),
-    ));
     expect(mocks.startMock).toHaveBeenCalledTimes(1);
-
-    const onEvent = mocks.attachMock.mock.calls[0][3] as (event: { type: 'output'; terminalId: string; data: string }) => void;
-    onEvent({ type: 'output', terminalId: 'terminal-a', data: '后台输出\r\n' });
-    expect(mocks.terminalWrites).toContain('后台输出\r\n');
+    expect(mocks.attachMock).not.toHaveBeenCalled();
   });
 
   it('closes the terminal when its tab was explicitly removed', async () => {
@@ -223,6 +222,43 @@ describe('TerminalPanel lifecycle', () => {
 
     expect(mocks.resizeMock).not.toHaveBeenCalled();
     resolveAttach?.();
+    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalledTimes(1));
+    expect(mocks.resizeMock).not.toHaveBeenCalled();
+  });
+
+  it('does not reconnect when an existing terminal becomes visible again', async () => {
+    const view = render(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+      />,
+    );
+    await waitFor(() => expect(mocks.attachMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.setTerminalIdMock).toHaveBeenCalled());
+    const resizeCountBeforeVisibilityToggle = mocks.resizeMock.mock.calls.length;
+
+    view.rerender(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+        isActive={false}
+      />,
+    );
+    view.rerender(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+        isActive
+      />,
+    );
+    expect(mocks.attachMock).toHaveBeenCalledTimes(1);
+    expect(mocks.resizeMock).toHaveBeenCalledTimes(resizeCountBeforeVisibilityToggle);
+    expect(mocks.terminalBlurs).toBe(0);
+    expect(mocks.terminalRefreshes).toBe(0);
+    expect(mocks.detachMock).not.toHaveBeenCalled();
   });
 
   it('does not leak a second terminal during StrictMode effect replay', async () => {
@@ -245,6 +281,6 @@ describe('TerminalPanel lifecycle', () => {
     expect(mocks.closeMock).not.toHaveBeenCalled();
 
     view.unmount();
-    await waitFor(() => expect(mocks.detachMock).toHaveBeenCalledWith('terminal-a'));
+    expect(mocks.detachMock).not.toHaveBeenCalled();
   });
 });

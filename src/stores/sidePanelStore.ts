@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 
-import { terminalApi } from '../lib/tauri';
 import { useNavigationStore, type SidePanelNavigationState } from './navigationStore';
 
 export type SidePanelTabKind = 'review' | 'terminal' | 'plan' | 'diff';
@@ -58,6 +57,7 @@ const PANEL_WIDTH_MAX = 820;
 const PANEL_WIDTH_DEFAULT = 520;
 const MAIN_CONTENT_WIDTH_MIN = 440;
 const DEFAULT_SCOPE_ID = 'global';
+let terminalTabSequence = 0;
 
 function defaultSnapshot(): SidePanelSnapshot {
   return {
@@ -89,6 +89,14 @@ function createTab(scopeId: string, kind: SidePanelTabKind, projectPath: string)
     kind,
     title: kind === 'review' ? '审查' : kind === 'terminal' ? '终端' : '计划',
     projectPath,
+  };
+}
+
+function createTerminalTab(scopeId: string, projectPath: string): SidePanelTab {
+  terminalTabSequence += 1;
+  return {
+    ...createTab(scopeId, 'terminal', projectPath),
+    id: `${tabId(scopeId, 'terminal', projectPath)}:${terminalTabSequence}`,
   };
 }
 
@@ -175,12 +183,15 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   },
 
   openTerminalTab: (projectPath: string) => {
-    const id = tabId(get().activeScopeId, 'terminal', projectPath);
-    set((state) => ({
-      isOpen: true,
-      tabs: state.tabs.some((tab) => tab.id === id) ? state.tabs : [...state.tabs, createTab(state.activeScopeId, 'terminal', projectPath)],
-      activeTabId: id,
-    }));
+    set((state) => {
+      const existingTab = state.tabs.find((tab) => tab.kind === 'terminal' && tab.projectPath === projectPath);
+      const tab = existingTab ?? createTerminalTab(state.activeScopeId, projectPath);
+      return {
+        isOpen: true,
+        tabs: existingTab ? state.tabs : [...state.tabs, tab],
+        activeTabId: tab.id,
+      };
+    });
     recordNavigation(get());
   },
 
@@ -227,7 +238,6 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     const closedIndex = state.tabs.findIndex((tab) => tab.id === tabId);
     if (closedIndex === -1) return;
 
-    const closedTab = state.tabs[closedIndex];
     const tabs = state.tabs.filter((tab) => tab.id !== tabId);
     const activeTabId =
       state.activeTabId !== tabId
@@ -241,9 +251,6 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
       activeTabId,
       isOpen: true,
     });
-    if (closedTab.kind === 'terminal' && closedTab.terminalId) {
-      void terminalApi.close(closedTab.terminalId).catch(() => {});
-    }
     recordNavigation(get());
   },
 

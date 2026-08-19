@@ -24,6 +24,7 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
   const panelWidth = useSidePanelStore((state) => state.panelWidth);
   const isResizing = useSidePanelStore((state) => state.isResizing);
   const tabs = useSidePanelStore((state) => state.tabs);
+  const scopes = useSidePanelStore((state) => state.scopes);
   const activeTabId = useSidePanelStore((state) => state.activeTabId);
   const setPanelWidth = useSidePanelStore((state) => state.setPanelWidth);
   const setResizing = useSidePanelStore((state) => state.setResizing);
@@ -69,6 +70,18 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
   }, [setPanelWidth]);
 
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId) ?? null, [activeTabId, tabs]);
+  const terminalTabs = useMemo(() => {
+    const allTabs = [
+      ...tabs,
+      ...Object.values(scopes).flatMap((snapshot) => snapshot.tabs),
+    ];
+    const seen = new Set<string>();
+    return allTabs.filter((tab) => {
+      if (tab.kind !== 'terminal' || seen.has(tab.id)) return false;
+      seen.add(tab.id);
+      return true;
+    });
+  }, [scopes, tabs]);
 
   const openReview = useCallback(() => {
     if (projectPath) openReviewTab(projectPath);
@@ -205,28 +218,41 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
           </div>
         </div>
 
-        <div className="min-h-0 flex-1">
+        <div className="relative min-h-0 flex-1">
+          {terminalTabs.map((tab) => {
+            const isActive = isOpen && activeTab?.id === tab.id;
+            return (
+              <div
+                key={tab.id}
+                className={cn(
+                  'absolute inset-0',
+                  isActive ? 'pointer-events-auto z-10' : 'pointer-events-none invisible',
+                )}
+                aria-hidden={!isActive}
+              >
+                <TerminalPanel
+                  tabId={tab.id}
+                  terminalId={tab.terminalId}
+                  projectPath={tab.projectPath ?? projectPath ?? ''}
+                  isActive={isActive}
+                />
+              </div>
+            );
+          })}
           {activeTab ? (
             activeTab.kind === 'review' ? (
               <ReviewPanel key={activeTab.id} projectPath={activeTab.projectPath ?? projectPath ?? ''} />
-            ) : activeTab.kind === 'terminal' ? (
-              <TerminalPanel
-                key={activeTab.id}
-                tabId={activeTab.id}
-                terminalId={activeTab.terminalId}
-                projectPath={activeTab.projectPath ?? projectPath ?? ''}
-              />
             ) : activeTab.kind === 'diff' ? (
               <div key={activeTab.id} className="h-full overflow-auto">
                 <DiffView oldContent={activeTab.diffOldContent ?? ''} newContent={activeTab.diffNewContent ?? ''} />
               </div>
-            ) : (
+            ) : activeTab.kind === 'plan' ? (
               <PlanPreviewPanel
                 key={activeTab.id}
                 planFilePath={activeTab.planFilePath}
                 planContent={activeTab.planContent}
               />
-            )
+            ) : null
           ) : (
             <SidePanelEmpty projectPath={projectPath} onOpenReview={openReview} onOpenTerminal={openTerminal} />
           )}

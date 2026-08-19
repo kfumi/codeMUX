@@ -2,7 +2,7 @@ import '@xterm/xterm/css/xterm.css';
 
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal as XTerm } from '@xterm/xterm';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { terminalApi, type TerminalEvent } from '../../../lib/tauri';
 import { useAppearanceStore } from '../../../stores/appearanceStore';
@@ -83,16 +83,20 @@ export function TerminalPanel({
   tabId,
   terminalId,
   projectPath,
+  isActive = true,
 }: {
   tabId: string;
   terminalId?: string;
   projectPath: string;
+  isActive?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const terminalIdRef = useRef<string | null>(terminalId ?? null);
   const connectedRef = useRef(false);
+  const isActiveRef = useRef(isActive);
+  const lastSynchronizedSizeRef = useRef<{ terminalId: string; cols: number; rows: number } | null>(null);
   const setTerminalId = useSidePanelStore((state) => state.setTerminalId);
   const theme = useSettingsStore((state) => state.config?.theme);
   const codeFontSize = useAppearanceStore((state) => state.prefs.codeFontSize);
@@ -137,12 +141,30 @@ export function TerminalPanel({
     const reportError = (error: unknown) => {
       if (!disposed) setError(String(error));
     };
+    const resizeConnectedTerminal = () => {
+      if (!isActiveRef.current) return;
+
+      fit.fit();
+      const terminalId = terminalIdRef.current;
+      if (connectedRef.current && terminalId) {
+        const size = { terminalId, cols: terminal.cols, rows: terminal.rows };
+        const lastSize = lastSynchronizedSizeRef.current;
+        if (lastSize?.terminalId === size.terminalId && lastSize.cols === size.cols && lastSize.rows === size.rows) {
+          return;
+        }
+        lastSynchronizedSizeRef.current = size;
+        void terminalApi.resize(size.terminalId, size.cols, size.rows).catch((error) => {
+          if (lastSynchronizedSizeRef.current === size) {
+            lastSynchronizedSizeRef.current = null;
+          }
+          reportError(error);
+        });
+      }
+    };
 
     const disposeTerminalSession = (connectedTerminalId: string) => {
       const shouldClose = !useSidePanelStore.getState().isTabPresent(tabId);
-      return shouldClose
-        ? terminalApi.close(connectedTerminalId)
-        : terminalApi.detach(connectedTerminalId);
+      return shouldClose ? terminalApi.close(connectedTerminalId) : Promise.resolve();
     };
 
     const connect = async () => {
@@ -180,7 +202,13 @@ export function TerminalPanel({
 
         terminalIdRef.current = connectedTerminalId;
         connectedRef.current = true;
+        lastSynchronizedSizeRef.current = {
+          terminalId: connectedTerminalId,
+          cols: terminal.cols,
+          rows: terminal.rows,
+        };
         setTerminalId(tabId, connectedTerminalId);
+        resizeConnectedTerminal();
 
         if (disposed) {
           if (!useSidePanelStore.getState().isTabPresent(tabId)) {
@@ -199,13 +227,7 @@ export function TerminalPanel({
       if (connectedRef.current && terminalId) void terminalApi.write(terminalId, data).catch(reportError);
     });
 
-    const resizeObserver = new ResizeObserver(() => {
-      fit.fit();
-      const terminalId = terminalIdRef.current;
-      if (connectedRef.current && terminalId) {
-        void terminalApi.resize(terminalId, terminal.cols, terminal.rows).catch(reportError);
-      }
-    });
+    const resizeObserver = new ResizeObserver(resizeConnectedTerminal);
     resizeObserver.observe(container);
 
     return () => {
@@ -223,8 +245,13 @@ export function TerminalPanel({
       terminalRef.current = null;
       fitRef.current = null;
       terminalIdRef.current = null;
+      lastSynchronizedSizeRef.current = null;
     };
   }, [codeFontSize, projectPath, setTerminalId, tabId]);
+
+  useLayoutEffect(() => {
+    isActiveRef.current = isActive;
+  }, [isActive]);
 
   return (
     <div className="relative h-full bg-white dark:bg-[#111111]">

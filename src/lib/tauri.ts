@@ -28,6 +28,7 @@ const logger = createLogger('tauri');
 const agentChannels = new Map<string, Channel<string>>();
 const agentEventListeners = new Map<string, (event: string) => void>();
 const terminalLifecycleQueues = new Map<string, Promise<void>>();
+const terminalAttachmentStates = new Map<string, boolean>();
 
 function queueTerminalLifecycle(terminalId: string, operation: () => Promise<void>): Promise<void> {
   const previous = terminalLifecycleQueues.get(terminalId) ?? Promise.resolve();
@@ -41,6 +42,19 @@ function queueTerminalLifecycle(terminalId: string, operation: () => Promise<voi
     });
   terminalLifecycleQueues.set(terminalId, next);
   return next;
+}
+
+function queueTerminalIo(terminalId: string, operation: () => Promise<void>): Promise<void> {
+  if (terminalAttachmentStates.get(terminalId) !== true) {
+    return Promise.resolve();
+  }
+
+  return queueTerminalLifecycle(terminalId, () => {
+    if (terminalAttachmentStates.get(terminalId) !== true) {
+      return Promise.resolve();
+    }
+    return operation();
+  });
 }
 
 export interface FileTreeNode {
@@ -553,7 +567,10 @@ export const terminalApi = {
     onEvent: (event: TerminalEvent) => void,
   ): Promise<string> => {
     const channel = terminalApi.createChannel(onEvent);
-    return invokeLogged('start_terminal_session', { projectPath, cols, rows, channel });
+    return invokeLogged<string>('start_terminal_session', { projectPath, cols, rows, channel }).then((terminalId) => {
+      terminalAttachmentStates.set(terminalId, true);
+      return terminalId;
+    });
   },
   attach: (
     terminalId: string,
@@ -562,22 +579,38 @@ export const terminalApi = {
     onEvent: (event: TerminalEvent) => void,
   ): Promise<void> => {
     const channel = terminalApi.createChannel(onEvent);
+    terminalAttachmentStates.set(terminalId, true);
+    return queueTerminalLifecycle(terminalId, async () => {
+      try {
+        await invokeLogged('attach_terminal_session', { terminalId, cols, rows, channel });
+      } catch (error) {
+        terminalAttachmentStates.set(terminalId, false);
+        throw error;
+      }
+    });
+  },
+  detach: (terminalId: string): Promise<void> => {
+    terminalAttachmentStates.set(terminalId, false);
+    return queueTerminalLifecycle(terminalId, async () => {
+      if (terminalAttachmentStates.get(terminalId) === true) return;
+      await invokeLogged('detach_terminal_session', { terminalId });
+      terminalAttachmentStates.delete(terminalId);
+    });
+  },
+  write: (terminalId: string, data: string): Promise<void> =>
+    queueTerminalIo(terminalId, () =>
+      invokeLogged('write_terminal_session', { terminalId, data }),
+    ),
+  resize: (terminalId: string, cols: number, rows: number): Promise<void> =>
+    queueTerminalIo(terminalId, () =>
+      invokeLogged('resize_terminal_session', { terminalId, cols, rows }),
+    ),
+  close: (terminalId: string): Promise<void> => {
+    terminalAttachmentStates.delete(terminalId);
     return queueTerminalLifecycle(terminalId, () =>
-      invokeLogged('attach_terminal_session', { terminalId, cols, rows, channel }),
+      invokeLogged('close_terminal_session', { terminalId }),
     );
   },
-  detach: (terminalId: string): Promise<void> =>
-    queueTerminalLifecycle(terminalId, () =>
-      invokeLogged('detach_terminal_session', { terminalId }),
-    ),
-  write: (terminalId: string, data: string): Promise<void> =>
-    invokeLogged('write_terminal_session', { terminalId, data }),
-  resize: (terminalId: string, cols: number, rows: number): Promise<void> =>
-    invokeLogged('resize_terminal_session', { terminalId, cols, rows }),
-  close: (terminalId: string): Promise<void> =>
-    queueTerminalLifecycle(terminalId, () =>
-      invokeLogged('close_terminal_session', { terminalId }),
-    ),
 };
 
 export const mcpApi = {

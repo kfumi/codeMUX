@@ -16,6 +16,21 @@ const sidePanelState = vi.hoisted(() => ({
     projectPath: 'D:/project/app',
     terminalId: 'terminal-a',
   }],
+  scopes: {
+    'session-b': {
+      isOpen: true,
+      isExpanded: false,
+      panelWidth: 520,
+      tabs: [{
+        id: 'session-b:terminal:D:/project/app',
+        kind: 'terminal' as const,
+        title: '终端',
+        projectPath: 'D:/project/app',
+        terminalId: 'terminal-b',
+      }],
+      activeTabId: 'session-b:terminal:D:/project/app',
+    },
+  },
   activeTabId: 'session-a:terminal:D:/project/app',
   setPanelWidth: vi.fn(),
   setResizing: vi.fn(),
@@ -86,6 +101,9 @@ describe('SidePanel', () => {
     expect(terminalPanelMock).toHaveBeenCalledWith(
       expect.objectContaining({ terminalId: 'terminal-a' }),
     );
-    expect(screen.getByTestId('terminal-panel')).toBeTruthy();
+    expect(terminalPanelMock).toHaveBeenCalledWith(
+      expect.objectContaining({ terminalId: 'terminal-b', isActive: false }),
+    );
+    expect(screen.getAllByTestId('terminal-panel')).toHaveLength(2);
   });
 });
