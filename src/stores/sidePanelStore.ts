@@ -279,13 +279,16 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   restoreNavigation: (navigation: SidePanelNavigationState) => {
     set((state) => {
       const nextScopeId = navigation.scopeId || DEFAULT_SCOPE_ID;
-      const scopes = state.activeScopeId === nextScopeId
+      const isSameScope = state.activeScopeId === nextScopeId;
+      const scopes = isSameScope
         ? state.scopes
         : {
             ...state.scopes,
             [state.activeScopeId]: snapshotFromState(state),
           };
-      const next = scopes[nextScopeId] ?? defaultSnapshot();
+      const next = isSameScope
+        ? snapshotFromState(state)
+        : scopes[nextScopeId] ?? defaultSnapshot();
       const activeTabId = navigation.activeTabId && next.tabs.some((tab) => tab.id === navigation.activeTabId)
         ? navigation.activeTabId
         : null;

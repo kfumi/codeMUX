@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MainLayout } from './MainLayout';
@@ -15,7 +15,9 @@ vi.mock('./TitleBar', () => ({
 }));
 
 vi.mock('../workspace/SidePanel', () => ({
-  SidePanel: () => null,
+  SidePanel: ({ isVisible }: { isVisible?: boolean }) => (
+    <div data-testid="side-panel" data-visible={String(isVisible)} />
+  ),
 }));
 
 describe('MainLayout', () => {
@@ -102,5 +104,15 @@ describe('MainLayout', () => {
     expect(sidebar?.className).toContain('bg-[hsl(var(--surface-2)/0.88)]');
     expect(sidebar?.className).toContain('backdrop-blur-xl');
     expect(sidebar?.className).toContain('shadow-[inset_-1px_0_0_hsl(var(--foreground)/0.04)]');
+  });
+
+  it('keeps the side panel mounted while settings only hide it', () => {
+    render(
+      <MainLayout sidePanelAvailable={false}>
+        <div>content</div>
+      </MainLayout>,
+    );
+
+    expect(screen.getByTestId('side-panel').getAttribute('data-visible')).toBe('false');
   });
 });

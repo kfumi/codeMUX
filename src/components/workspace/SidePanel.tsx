@@ -16,9 +16,10 @@ import { FileTypeIcon } from '../assistant-ui/file-type-icon';
 interface SidePanelProps {
   projectPath?: string | null;
   scopeId: string;
+  isVisible?: boolean;
 }
 
-export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
+export function SidePanel({ projectPath, scopeId, isVisible = true }: SidePanelProps) {
   const isOpen = useSidePanelStore((state) => state.isOpen);
   const isExpanded = useSidePanelStore((state) => state.isExpanded);
   const panelWidth = useSidePanelStore((state) => state.panelWidth);
@@ -131,15 +132,19 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
       className={cn(
         `relative h-full overflow-hidden border-l ${LAYOUT_DIVIDER_CLASS} bg-background`,
         isExpanded ? 'absolute inset-y-0 right-0 z-30 w-full shadow-[-18px_0_40px_-28px_hsl(var(--surface-shadow-strong)/0.5)]' : 'shrink-0',
+        !isVisible && 'pointer-events-none invisible',
         isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
       )}
-      style={{ width: isExpanded ? '100%' : isOpen ? panelWidth : 0 }}
+      aria-hidden={!isVisible}
+      style={{ width: isVisible && isExpanded ? '100%' : isVisible && isOpen ? panelWidth : 0 }}
     >
-      <div className="group absolute inset-y-0 left-0 z-20 w-2 cursor-col-resize" onMouseDown={handleMouseDown}>
-        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-primary/22" />
-      </div>
+      <div
+        className="group absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize"
+        onMouseDown={handleMouseDown}
+        aria-hidden="true"
+      />
 
-      <div className="flex h-full w-full min-w-0 flex-col pl-2">
+      <div className="flex h-full w-full min-w-0 flex-col">
         <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-border/25 px-1">
           <TooltipHint content="收起面板">
             <button
@@ -220,13 +225,13 @@ export function SidePanel({ projectPath, scopeId }: SidePanelProps) {
 
         <div className="relative min-h-0 flex-1">
           {terminalTabs.map((tab) => {
-            const isActive = isOpen && activeTab?.id === tab.id;
+            const isActive = isVisible && isOpen && activeTab?.id === tab.id;
             return (
               <div
                 key={tab.id}
                 className={cn(
                   'absolute inset-0',
-                  isActive ? 'pointer-events-auto z-10' : 'pointer-events-none invisible',
+                  isActive ? 'pointer-events-auto visible z-30' : 'pointer-events-none invisible',
                 )}
                 aria-hidden={!isActive}
               >

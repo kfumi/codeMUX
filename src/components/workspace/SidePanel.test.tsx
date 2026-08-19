@@ -106,4 +106,13 @@ describe('SidePanel', () => {
     );
     expect(screen.getAllByTestId('terminal-panel')).toHaveLength(2);
   });
+
+  it('keeps terminal panels mounted but inactive while the side panel is hidden', () => {
+    render(<SidePanel projectPath="D:/project/app" scopeId="session-a" isVisible={false} />);
+
+    expect(terminalPanelMock).toHaveBeenCalledWith(
+      expect.objectContaining({ terminalId: 'terminal-a', isActive: false }),
+    );
+    expect(screen.getAllByTestId('terminal-panel')).toHaveLength(2);
+  });
 });

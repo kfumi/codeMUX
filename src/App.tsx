@@ -356,8 +356,8 @@ function App() {
           )}
           sidebarAccessory={activeView === 'settings' ? undefined : <UpdateEntry />}
           sidePanelAvailable={activeView === 'app'}
-          sidePanelProjectPath={activeView === 'app' ? sidePanelProjectPath : null}
-          sidePanelScopeId={activeView === 'app' ? sidePanelScopeId : 'settings'}
+          sidePanelProjectPath={sidePanelProjectPath}
+          sidePanelScopeId={sidePanelScopeId}
           projectOpenPath={activeView === 'app' && activeSessionId ? sidePanelProjectPath : null}
           todos={activeView === 'app' ? activeTodos : EMPTY_TODOS}
           titleBarNavigation={{

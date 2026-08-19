@@ -79,6 +79,130 @@ function getOrStartTerminal(
   return { promise, reusedPendingStart: false };
 }
 
+interface TerminalScrollbarMetrics {
+  clientHeight: number;
+  maxScroll: number;
+  thumbHeight: number;
+  thumbTop: number;
+}
+
+function TerminalScrollbar({
+  viewport,
+  isActive,
+}: {
+  viewport: HTMLElement | null;
+  isActive: boolean;
+}) {
+  const [metrics, setMetrics] = useState<TerminalScrollbarMetrics | null>(null);
+  const metricsRef = useRef<TerminalScrollbarMetrics | null>(null);
+
+  useLayoutEffect(() => {
+    if (!viewport || !isActive) {
+      setMetrics(null);
+      metricsRef.current = null;
+      return;
+    }
+
+    const syncMetrics = () => {
+      const clientHeight = viewport.clientHeight;
+      const scrollHeight = Math.max(viewport.scrollHeight, clientHeight);
+      const maxScroll = Math.max(0, scrollHeight - clientHeight);
+      const thumbHeight = maxScroll > 0
+        ? Math.max(28, (clientHeight * clientHeight) / scrollHeight)
+        : clientHeight;
+      const travel = Math.max(0, clientHeight - thumbHeight);
+      const nextMetrics = {
+        clientHeight,
+        maxScroll,
+        thumbHeight,
+        thumbTop: maxScroll > 0 ? (viewport.scrollTop / maxScroll) * travel : 0,
+      };
+
+      metricsRef.current = nextMetrics;
+      setMetrics(nextMetrics);
+    };
+
+    syncMetrics();
+    viewport.addEventListener('scroll', syncMetrics, { passive: true });
+    window.addEventListener('resize', syncMetrics);
+
+    const mutationObserver = new MutationObserver(syncMetrics);
+    mutationObserver.observe(viewport, {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+
+    return () => {
+      viewport.removeEventListener('scroll', syncMetrics);
+      window.removeEventListener('resize', syncMetrics);
+      mutationObserver.disconnect();
+    };
+  }, [isActive, viewport]);
+
+  if (!viewport || !isActive || !metrics || metrics.maxScroll <= 0) return null;
+
+  const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const track = event.currentTarget.parentElement;
+    const currentMetrics = metricsRef.current;
+    if (!track || !currentMetrics) return;
+
+    const trackRect = track.getBoundingClientRect();
+    const maxTravel = Math.max(0, trackRect.height - currentMetrics.thumbHeight);
+    if (maxTravel <= 0) return;
+
+    const startY = event.clientY;
+    const startScrollTop = viewport.scrollTop;
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      viewport.scrollTop = startScrollTop
+        + ((moveEvent.clientY - startY) / maxTravel) * currentMetrics.maxScroll;
+    };
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const page = Math.max(viewport.clientHeight * 0.9, 1);
+    if (event.key === 'ArrowDown') viewport.scrollTop += 40;
+    else if (event.key === 'ArrowUp') viewport.scrollTop -= 40;
+    else if (event.key === 'PageDown') viewport.scrollTop += page;
+    else if (event.key === 'PageUp') viewport.scrollTop -= page;
+    else if (event.key === 'Home') viewport.scrollTop = 0;
+    else if (event.key === 'End') viewport.scrollTop = metrics.maxScroll;
+    else return;
+    event.preventDefault();
+  };
+
+  return (
+    <div className="pointer-events-auto absolute inset-y-3 right-3 z-40 w-1.5 rounded-full">
+      <div
+        role="scrollbar"
+        aria-label="终端滚动条"
+        aria-orientation="vertical"
+        aria-valuemin={0}
+        aria-valuemax={metrics.maxScroll}
+        aria-valuenow={Math.round(viewport.scrollTop)}
+        tabIndex={0}
+        className="absolute left-0 right-0 cursor-grab rounded-full bg-muted-foreground/35 transition-colors hover:bg-muted-foreground/55 active:cursor-grabbing"
+        style={{ height: `${metrics.thumbHeight}px`, top: `${metrics.thumbTop}px` }}
+        onMouseDown={handleMouseDown}
+        onKeyDown={handleKeyDown}
+      />
+    </div>
+  );
+}
+
 export function TerminalPanel({
   tabId,
   terminalId,
@@ -97,6 +221,7 @@ export function TerminalPanel({
   const connectedRef = useRef(false);
   const isActiveRef = useRef(isActive);
   const lastSynchronizedSizeRef = useRef<{ terminalId: string; cols: number; rows: number } | null>(null);
+  const [viewport, setViewport] = useState<HTMLElement | null>(null);
   const setTerminalId = useSidePanelStore((state) => state.setTerminalId);
   const theme = useSettingsStore((state) => state.config?.theme);
   const codeFontSize = useAppearanceStore((state) => state.prefs.codeFontSize);
@@ -125,6 +250,19 @@ export function TerminalPanel({
     fit.fit();
     terminalRef.current = terminal;
     fitRef.current = fit;
+
+    const viewport = container.querySelector<HTMLElement>('.xterm-viewport');
+    setViewport(viewport);
+    const stopScrollbarMousePropagation = (event: MouseEvent) => {
+      if (!viewport) return;
+
+      const rect = viewport.getBoundingClientRect();
+      const scrollbarHitWidth = Math.max(16, viewport.offsetWidth - viewport.clientWidth);
+      if (event.clientX >= rect.right - scrollbarHitWidth) {
+        event.stopPropagation();
+      }
+    };
+    viewport?.addEventListener('mousedown', stopScrollbarMousePropagation, true);
 
     let disposed = false;
     const handleEvent = (event: TerminalEvent) => {
@@ -234,6 +372,8 @@ export function TerminalPanel({
       disposed = true;
       dataDisposable.dispose();
       resizeObserver.disconnect();
+      viewport?.removeEventListener('mousedown', stopScrollbarMousePropagation, true);
+      setViewport(null);
       connectedRef.current = false;
       const terminalId = terminalIdRef.current;
       if (terminalId) {
@@ -254,8 +394,9 @@ export function TerminalPanel({
   }, [isActive]);
 
   return (
-    <div className="relative h-full bg-white dark:bg-[#111111]">
-      <div ref={containerRef} className="h-full w-full overflow-hidden p-3" />
+    <div className="terminal-panel relative h-full min-h-0 min-w-0 bg-white dark:bg-[#111111]">
+      <div ref={containerRef} className="terminal-panel-container h-full min-h-0 min-w-0 w-full overflow-hidden p-3" />
+      <TerminalScrollbar viewport={viewport} isActive={isActive} />
       {error && (
         <div className="absolute inset-x-4 top-4 rounded-lg border border-destructive/30 bg-background/95 px-3 py-2 text-sm text-destructive shadow-sm">
           {error}

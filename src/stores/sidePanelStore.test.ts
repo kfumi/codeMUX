@@ -183,4 +183,25 @@ describe('side panel store', () => {
 
     expect(useSidePanelStore.getState().panelWidth).toBe(1180);
   });
+
+  it('does not clear the active scope when restoring its navigation', () => {
+    const store = useSidePanelStore.getState();
+
+    store.setScope('session-a');
+    store.openTerminalTab('D:/project/app');
+    const terminalTabId = useSidePanelStore.getState().activeTabId!;
+
+    store.restoreNavigation({
+      scopeId: 'session-a',
+      isOpen: true,
+      activeTabId: terminalTabId,
+    });
+
+    expect(useSidePanelStore.getState()).toMatchObject({
+      activeScopeId: 'session-a',
+      isOpen: true,
+      tabs: [{ kind: 'terminal', projectPath: 'D:/project/app' }],
+      activeTabId: terminalTabId,
+    });
+  });
 });

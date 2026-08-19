@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => {
     terminalWrites: [] as string[],
     terminalBlurs: 0,
     terminalRefreshes: 0,
+    terminalViewport: null as HTMLElement | null,
+    parentMouseDowns: 0,
     resizeObserverCallback: null as (() => void) | null,
   };
 });
@@ -61,7 +63,33 @@ vi.mock('@xterm/xterm', () => ({
     options = {};
 
     loadAddon() {}
-    open() {}
+      open(container: HTMLElement) {
+        const xterm = document.createElement('div');
+        xterm.className = 'xterm';
+        const viewport = document.createElement('div');
+        viewport.className = 'xterm-viewport';
+        Object.defineProperty(viewport, 'offsetWidth', { configurable: true, value: 200 });
+        Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 180 });
+        Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 300 });
+        Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 900 });
+        vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({
+          bottom: 300,
+          height: 300,
+          left: 0,
+          right: 200,
+          top: 0,
+          width: 200,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        });
+        xterm.addEventListener('mousedown', () => {
+          mocks.parentMouseDowns += 1;
+        });
+        xterm.appendChild(viewport);
+        container.appendChild(xterm);
+        mocks.terminalViewport = viewport;
+      }
     onData() {
       return { dispose() {} };
     }
@@ -136,6 +164,8 @@ describe('TerminalPanel lifecycle', () => {
     mocks.terminalWrites.length = 0;
     mocks.terminalBlurs = 0;
     mocks.terminalRefreshes = 0;
+    mocks.terminalViewport = null;
+    mocks.parentMouseDowns = 0;
     mocks.resizeObserverCallback = null;
   });
 
@@ -224,6 +254,53 @@ describe('TerminalPanel lifecycle', () => {
     resolveAttach?.();
     await waitFor(() => expect(mocks.attachMock).toHaveBeenCalledTimes(1));
     expect(mocks.resizeMock).not.toHaveBeenCalled();
+  });
+
+  it('does not let xterm consume scrollbar drag start events', async () => {
+    render(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+      />,
+    );
+
+    await waitFor(() => expect(mocks.terminalViewport).not.toBeNull());
+
+    fireEvent.mouseDown(mocks.terminalViewport!, { clientX: 195 });
+    expect(mocks.parentMouseDowns).toBe(0);
+
+    fireEvent.mouseDown(mocks.terminalViewport!, { clientX: 100 });
+    expect(mocks.parentMouseDowns).toBe(1);
+  });
+
+  it('provides a draggable scrollbar that controls the xterm viewport', async () => {
+    render(
+      <TerminalPanel
+        tabId="session-a:terminal:D:/project/app"
+        terminalId="terminal-a"
+        projectPath="D:/project/app"
+      />,
+    );
+
+    const scrollbar = await waitFor(() => screen.getByRole('scrollbar', { name: '终端滚动条' }));
+    const track = scrollbar.parentElement!;
+    vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({
+      bottom: 300,
+      height: 300,
+      left: 0,
+      right: 12,
+      top: 0,
+      width: 12,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.mouseDown(scrollbar, { clientY: 50 });
+    fireEvent.mouseMove(document, { clientY: 150 });
+    expect(mocks.terminalViewport?.scrollTop).toBe(300);
+    fireEvent.mouseUp(document);
   });
 
   it('does not reconnect when an existing terminal becomes visible again', async () => {
