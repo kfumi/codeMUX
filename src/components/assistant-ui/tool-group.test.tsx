@@ -42,6 +42,45 @@ describe('ToolGroupTrigger', () => {
     expect(container.querySelector('[data-slot="tool-group-trigger-icon"]')).toBeTruthy();
   });
 
+  it('shows a shimmer state while exploration is active', () => {
+    const { container } = render(
+      <ToolGroup startIndex={0} endIndex={1} toolNames={['Read', 'Bash']} active>
+        <div>工具详情</div>
+      </ToolGroup>,
+    );
+
+    const root = container.querySelector('[data-slot="tool-group-root"]');
+    const trigger = container.querySelector('[data-slot="tool-group-trigger"]');
+
+    expect(root?.getAttribute('data-active')).toBe('true');
+    expect(trigger?.getAttribute('data-active')).toBe('true');
+    expect(trigger?.getAttribute('aria-busy')).toBe('true');
+    expect(container.querySelector('[data-slot="tool-group-trigger-loader"]')).toBeNull();
+    expect(container.querySelector('[data-slot="tool-group-trigger-shimmer"]')?.className).toContain('shimmer');
+  });
+
+  it('renders live thinking inside the expanded exploration content', () => {
+    const { container } = render(
+      <ToolGroup
+        startIndex={0}
+        endIndex={0}
+        toolNames={['Read']}
+        liveContent={<div data-slot="live-thinking">正在思考</div>}
+      >
+        <div data-slot="tool-detail">工具详情</div>
+      </ToolGroup>,
+    );
+
+    const root = container.querySelector('[data-slot="tool-group-root"]');
+    const content = container.querySelector('[data-slot="tool-group-content"]');
+    const toolDetail = container.querySelector('[data-slot="tool-detail"]');
+    const liveThinking = container.querySelector('[data-slot="live-thinking"]');
+
+    expect(root?.getAttribute('data-state')).toBe('open');
+    expect(content?.contains(liveThinking)).toBe(true);
+    expect(toolDetail?.compareDocumentPosition(liveThinking!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it('summarizes MCP grouped tools by server name only', () => {
     const { container } = renderTrigger(['mcp__context7__resolve-library-id', 'mcp__context7__query_docs']);
 

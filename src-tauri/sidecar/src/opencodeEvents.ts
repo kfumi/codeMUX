@@ -24,6 +24,7 @@ export interface OpenCodeEventContext extends RuntimeEventContext {
   seenPayloadKeys?: ReadonlySet<string>;
   terminalSessionIds?: ReadonlySet<string>;
   terminalToolIds?: ReadonlySet<string>;
+  compactionBoundarySessionIds?: Set<string>;
   turnId?: number;
   assistantMessageIds?: ReadonlySet<string>;
   userMessageIds?: ReadonlySet<string>;
@@ -143,9 +144,11 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       const part = asRecord(properties.part);
       if (!part) break;
       const messageId = readString(part.messageID);
-      if (messageId && context.userMessageIds?.has(messageId)) break;
       const partId = readString(part.id);
       const partType = readString(part.type);
+      // OpenCode stores the compaction marker on the synthetic/user message
+      // that triggered compaction. It is still a control event, not user text.
+      if (messageId && context.userMessageIds?.has(messageId) && partType !== 'compaction') break;
       const partState = partId ? context.streamingParts?.get(partId) : undefined;
       if (partType === 'text' || partType === 'reasoning') {
         if (partState?.buffered) {
@@ -242,6 +245,8 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
           events.push(buildToolStartedEvent(context, callId, 'Task', { prompt, description, agent }));
         }
       } else if (partType === 'compaction') {
+        if (sessionId && context.compactionBoundarySessionIds?.has(sessionId)) break;
+        if (sessionId) context.compactionBoundarySessionIds?.add(sessionId);
         const auto = part.auto === true;
         const overflow = part.overflow === true;
         events.push(buildEnvelope({
@@ -345,6 +350,8 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
       }, context, sessionId));
       break;
     case 'session.next.compaction.ended':
+      if (sessionId && context.compactionBoundarySessionIds?.has(sessionId)) break;
+      if (sessionId) context.compactionBoundarySessionIds?.add(sessionId);
       events.push(buildEnvelope({
         type: 'system_event',
         subtype: 'compact_boundary',
@@ -352,6 +359,23 @@ export function toCodeMuxEvent(event: unknown, context: OpenCodeEventContext): C
         compact_metadata: {
           trigger: readString(properties.reason) === 'auto' ? 'auto' : 'manual',
           pre_tokens: 0,
+        },
+      }, context, sessionId));
+      break;
+    case 'session.compacted':
+      // Some OpenCode versions only publish this notification and omit the
+      // compaction part. Emit the boundary here, while deduplicating the
+      // versions that publish both events.
+      if (sessionId && context.compactionBoundarySessionIds?.has(sessionId)) break;
+      if (sessionId) context.compactionBoundarySessionIds?.add(sessionId);
+      events.push(buildEnvelope({
+        type: 'system_event',
+        subtype: 'compact_boundary',
+        content: 'Conversation compacted',
+        compact_metadata: {
+          trigger: readString(properties.reason) === 'auto' || properties.auto === true ? 'auto' : 'manual',
+          pre_tokens: readNumber(properties.pre_tokens) ?? readNumber(properties.preTokens) ?? 0,
+          ...(properties.overflow === true ? { overflow: true } : {}),
         },
       }, context, sessionId));
       break;

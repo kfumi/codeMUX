@@ -1,7 +1,7 @@
 "use client";
 
-import { memo, useCallback, useMemo, useRef, useState, type FC, type PropsWithChildren } from 'react';
-import { ChevronDownIcon, CompassIcon, LoaderIcon } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type FC, type PropsWithChildren, type ReactNode } from 'react';
+import { ChevronDownIcon, CompassIcon } from 'lucide-react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { useScrollLock } from '@assistant-ui/react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -91,8 +91,11 @@ function ToolGroupTrigger({
   return (
     <CollapsibleTrigger
       data-slot="tool-group-trigger"
+      data-active={active ? 'true' : 'false'}
+      aria-busy={active || undefined}
       className={cn(
         'aui-tool-group-trigger group/trigger flex items-center gap-2 text-sm font-normal text-muted-foreground/52 transition-colors hover:text-muted-foreground/78',
+        'data-[active=true]:text-muted-foreground/80',
         'group-data-[variant=outline]/tool-group-root:w-full group-data-[variant=outline]/tool-group-root:px-4',
         'group-data-[variant=muted]/tool-group-root:w-full group-data-[variant=muted]/tool-group-root:px-4',
         className,
@@ -102,9 +105,11 @@ function ToolGroupTrigger({
       <CompassIcon
         aria-hidden
         data-slot="tool-group-trigger-icon"
-        className="size-4 shrink-0"
+        className={cn(
+          'size-4 shrink-0',
+          active && 'text-[hsl(var(--primary)/0.78)]',
+        )}
       />
-      {active && <LoaderIcon data-slot="tool-group-trigger-loader" className="size-4 shrink-0 animate-spin" />}
       <span
         data-slot="tool-group-trigger-label"
         className={cn(
@@ -183,24 +188,54 @@ function ToolGroupContent({
   );
 }
 
-type ToolGroupComponent = FC<PropsWithChildren<{ startIndex: number; endIndex: number; toolNames?: string[] }>> & {
+type ToolGroupProps = {
+  startIndex: number;
+  endIndex: number;
+  toolNames?: string[];
+  active?: boolean;
+  liveContent?: ReactNode;
+  hideReasoningContent?: boolean;
+};
+
+type ToolGroupComponent = FC<PropsWithChildren<ToolGroupProps>> & {
   Root: typeof ToolGroupRoot;
   Trigger: typeof ToolGroupTrigger;
   Content: typeof ToolGroupContent;
 };
 
-const ToolGroupImpl: FC<PropsWithChildren<{ startIndex: number; endIndex: number; toolNames?: string[] }>> = ({
+const ToolGroupImpl: FC<PropsWithChildren<ToolGroupProps>> = ({
   children,
   startIndex,
   endIndex,
   toolNames,
+  active = false,
+  liveContent,
+  hideReasoningContent = false,
 }) => {
   const toolCount = endIndex - startIndex + 1;
+  const hasLiveContent = liveContent != null;
+  const [open, setOpen] = useState(hasLiveContent);
+
+  useEffect(() => {
+    if (hasLiveContent) {
+      setOpen(true);
+    }
+  }, [hasLiveContent]);
 
   return (
-    <ToolGroupRoot variant="ghost">
-      <ToolGroupTrigger count={toolCount} toolNames={toolNames} />
-      <ToolGroupContent>{children}</ToolGroupContent>
+    <ToolGroupRoot
+      variant="ghost"
+      open={open}
+      onOpenChange={setOpen}
+      data-active={active ? 'true' : 'false'}
+    >
+      <ToolGroupTrigger count={toolCount} toolNames={toolNames} active={active} />
+      <ToolGroupContent>
+        {hideReasoningContent ? (
+          <div className={'**:data-[slot="reasoning-root"]:hidden'}>{children}</div>
+        ) : children}
+        {liveContent}
+      </ToolGroupContent>
     </ToolGroupRoot>
   );
 };

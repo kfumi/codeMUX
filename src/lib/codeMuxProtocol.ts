@@ -15,6 +15,7 @@ type CodeMuxStreamEvent = {
 type CodeMuxToolEvent = {
   type: 'tool_started' | 'tool_finished';
   session_id?: string;
+  opencode_session_id?: string;
   timestamp?: string;
   tool_use_id?: string;
   name?: string;
@@ -29,6 +30,7 @@ type CodeMuxAssistantMessageEvent = {
   session_id?: string;
   content?: AgentAssistantMessage['message']['content'];
   provider_message_id?: string;
+  opencode_session_id?: string;
   provider_turn_id?: string;
   supersedes_provider_message_ids?: string[];
   usage?: AgentAssistantMessage['message']['usage'];
@@ -222,6 +224,7 @@ export function toLegacyToolMessage(event: CodeMuxToolEvent): AgentMessage {
         type: 'assistant',
         uuid: event.event_id ?? crypto.randomUUID(),
         session_id: event.session_id ?? '',
+        ...(event.opencode_session_id ? { opencode_session_id: event.opencode_session_id } : {}),
         message: {
           role: 'assistant',
           content: [{ type: 'tool_use', id: event.tool_use_id ?? '', name: event.name ?? 'unknown', input: event.input ?? {} }],
@@ -252,6 +255,7 @@ export function toLegacyAssistantMessage(event: CodeMuxAssistantMessageEvent): A
       type: 'assistant',
       uuid: event.provider_message_id ?? event.event_id ?? crypto.randomUUID(),
       session_id: event.session_id ?? '',
+      ...(event.opencode_session_id ? { opencode_session_id: event.opencode_session_id } : {}),
       ...(event.provider_turn_id ? { provider_turn_id: event.provider_turn_id } : {}),
       message: {
         role: 'assistant',

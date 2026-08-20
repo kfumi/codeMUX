@@ -208,6 +208,64 @@ describe('OpenCode event normalization', () => {
     });
   });
 
+  it('keeps a compaction part even when it belongs to a known user message', () => {
+    const events = toCodeMuxEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-session-1',
+        part: {
+          id: 'prt_compaction_user',
+          messageID: 'msg_user',
+          sessionID: 'opencode-session-1',
+          type: 'compaction',
+          auto: true,
+          overflow: false,
+        },
+      },
+    }, context({ userMessageIds: new Set(['msg_user']) }));
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'system_event',
+        subtype: 'compact_boundary',
+      }),
+    ]);
+    const sessionCompacted = toCodeMuxEvent({
+      type: 'session.compacted',
+      properties: { sessionID: 'opencode-session-1' },
+    }, context());
+    expect(sessionCompacted).toEqual([
+      expect.objectContaining({
+        type: 'system_event',
+        subtype: 'compact_boundary',
+      }),
+    ]);
+  });
+
+  it('deduplicates a session.compacted notification after its compaction part', () => {
+    const compactionBoundarySessionIds = new Set<string>();
+    const compactionPart = toCodeMuxEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'opencode-session-1',
+        part: {
+          id: 'prt_compaction_dedup',
+          messageID: 'msg_compaction_dedup',
+          sessionID: 'opencode-session-1',
+          type: 'compaction',
+          auto: true,
+        },
+      },
+    }, context({ compactionBoundarySessionIds }));
+    const sessionCompacted = toCodeMuxEvent({
+      type: 'session.compacted',
+      properties: { sessionID: 'opencode-session-1' },
+    }, context({ compactionBoundarySessionIds }));
+
+    expect(compactionPart).toHaveLength(1);
+    expect(sessionCompacted).toEqual([]);
+  });
+
   it('converts V2 native compaction lifecycle events into a compact boundary', () => {
     const started = toCodeMuxEvent({
       type: 'session.next.compaction.started',

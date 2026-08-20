@@ -616,6 +616,7 @@ function projectCodeMuxHistoryEvent(raw: Record<string, unknown>): Record<string
       type: 'assistant',
       uuid: raw.provider_message_id ?? raw.event_id,
       session_id: raw.session_id,
+      ...(typeof raw.opencode_session_id === 'string' ? { opencode_session_id: raw.opencode_session_id } : {}),
       ...(typeof raw.provider_turn_id === 'string' ? { provider_turn_id: raw.provider_turn_id } : {}),
       timestamp: raw.timestamp,
       message: {

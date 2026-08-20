@@ -2057,6 +2057,163 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     expect(longView.container.textContent).not.toContain('tokens');
   });
 
+  it('keeps live thinking inside the active explore group when a tool is already streaming', () => {
+    const sessionId = 'session-live-explore';
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: '检查项目接入方式' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'live-explore-tool',
+          session_id: sessionId,
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'live-explore-read', name: 'Read', input: { file_path: 'package.json' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    useAgentStore.setState((state) => ({
+      events: { ...state.events, [sessionId]: events },
+      eventTimestamps: { ...state.eventTimestamps, [sessionId]: [1, 2] },
+      isRunning: { ...state.isRunning, [sessionId]: true },
+      queryStartTime: { ...state.queryStartTime, [sessionId]: Date.now() },
+      streamingThinking: {
+        ...state.streamingThinking,
+        [sessionId]: '正在确认项目入口',
+      },
+    }));
+
+    const { container } = render(<Harness sessionId={sessionId} />);
+    const exploreRoot = container.querySelector('[data-slot="tool-group-root"]');
+
+    expect(exploreRoot?.getAttribute('data-active')).toBe('true');
+    expect(exploreRoot?.querySelectorAll('[data-slot="live-explore-reasoning"]')).toHaveLength(1);
+    expect(exploreRoot?.querySelectorAll('[data-slot="reasoning-trigger"]')).toHaveLength(0);
+    expect(exploreRoot?.textContent).toContain('正在确认项目入口');
+    expect(container.querySelector('[data-streaming-reasoning="true"]')).toBeNull();
+  });
+
+  it('suppresses the stale live preview once thinking is committed across assistant messages', () => {
+    const sessionId = 'session-live-explore-across-messages';
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: '检查项目接入方式' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'thinking-message',
+          session_id: sessionId,
+          message: {
+            role: 'assistant',
+            content: [{ type: 'thinking', thinking: '当前思考消息来自另一个 assistant event' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'explore-tool-message',
+          session_id: sessionId,
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'explore-read', name: 'Read', input: { file_path: 'package.json' } },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    useAgentStore.setState((state) => ({
+      events: { ...state.events, [sessionId]: events },
+      eventTimestamps: { ...state.eventTimestamps, [sessionId]: [1, 2, 3] },
+      isRunning: { ...state.isRunning, [sessionId]: true },
+      queryStartTime: { ...state.queryStartTime, [sessionId]: Date.now() },
+      streamingThinking: {
+        ...state.streamingThinking,
+        [sessionId]: '正在继续探索项目结构',
+      },
+    }));
+
+    const { container } = render(<Harness sessionId={sessionId} />);
+    const exploreRoot = container.querySelector('[data-slot="tool-group-root"]');
+
+    expect(exploreRoot?.getAttribute('data-active')).toBe('true');
+    expect(exploreRoot?.querySelector('[data-slot="live-explore-reasoning"]')).toBeNull();
+    expect(container.querySelector('[data-streaming-reasoning="true"]')).toBeNull();
+  });
+
+  it('does not render a stale live preview after an intervening answer segment', () => {
+    const sessionId = 'session-live-explore-after-answer';
+    const events: AgentMessage[] = [
+      { kind: 'user', data: { content: '检查项目接入方式' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'explore-before-answer',
+          session_id: sessionId,
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'explore-read-2', name: 'Read', input: { file_path: 'package.json' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'answer-before-thinking',
+          session_id: sessionId,
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '先说明当前检查范围。' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'thinking-after-answer',
+          session_id: sessionId,
+          message: {
+            role: 'assistant',
+            content: [{ type: 'thinking', thinking: '继续检查剩余入口' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    useAgentStore.setState((state) => ({
+      events: { ...state.events, [sessionId]: events },
+      eventTimestamps: { ...state.eventTimestamps, [sessionId]: [1, 2, 3, 4] },
+      isRunning: { ...state.isRunning, [sessionId]: true },
+      queryStartTime: { ...state.queryStartTime, [sessionId]: Date.now() },
+      streamingThinking: {
+        ...state.streamingThinking,
+        [sessionId]: '正在继续探索剩余入口',
+      },
+    }));
+
+    const { container } = render(<Harness sessionId={sessionId} />);
+    const exploreRoot = container.querySelector('[data-slot="tool-group-root"]');
+
+    expect(exploreRoot?.getAttribute('data-active')).toBe('true');
+    expect(exploreRoot?.querySelector('[data-slot="live-explore-reasoning"]')).toBeNull();
+    expect(container.querySelector('[data-streaming-reasoning="true"]')).toBeNull();
+  });
+
   it('keeps the live reasoning viewport pinned to the newest content', async () => {
     const thinking = 'streaming thinking that grows beyond the viewport';
 

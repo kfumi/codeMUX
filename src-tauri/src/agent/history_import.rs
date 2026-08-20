@@ -224,54 +224,10 @@ pub async fn load_session_events(
         return Ok(merged);
     }
 
-    if session
-        .as_ref()
-        .is_some_and(|session| session.origin == "imported" && !session.is_read_only)
-    {
-        let live_events = match agent_kind {
-            AgentKind::ClaudeCode => {
-                crate::agent::commands::load_claude_session_events(
-                    state.clone(),
-                    app_session_id.clone(),
-                )
-                .await
-            }
-            AgentKind::Codex => {
-                crate::agent::commands::load_codex_session_events(
-                    state.clone(),
-                    app_session_id.clone(),
-                )
-                .await
-            }
-            AgentKind::Opencode => {
-                crate::agent::commands::load_opencode_session_events(
-                    state.clone(),
-                    app_session_id.clone(),
-                )
-                .await
-            }
-            AgentKind::GeminiCli => Ok(Vec::new()),
-        };
-        if let Ok(events) = live_events {
-            if !events.is_empty() {
-                let mut db = state.db.lock().unwrap();
-                operations::replace_session_snapshot(&mut db, &app_session_id, &events)
-                    .map_err(|error| error.to_string())?;
-                return Ok(events);
-            }
-        }
-    }
-
     let snapshot = {
         let db = state.db.lock().unwrap();
         operations::get_session_snapshot(&db, &app_session_id).map_err(|error| error.to_string())?
     };
-
-    if let Some(ref events) = snapshot {
-        if snapshot_has_conversation_events(events) {
-            return Ok(events.clone());
-        }
-    }
 
     let native_events = match agent_kind {
         AgentKind::ClaudeCode => {
@@ -307,31 +263,6 @@ pub async fn load_session_events(
     }
 
     Ok(Vec::new())
-}
-
-pub(crate) fn snapshot_has_conversation_events(events: &[Value]) -> bool {
-    events.iter().any(is_conversation_history_event)
-}
-
-fn is_conversation_history_event(event: &Value) -> bool {
-    let Some(event_type) = event.get("type").and_then(Value::as_str) else {
-        return false;
-    };
-    match event_type {
-        "user_message" | "assistant_message" | "tool_started" | "tool_finished" => true,
-        "user" | "assistant" | "result" => true,
-        "system" | "system_event" => {
-            let subtype = event
-                .get("subtype")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            matches!(
-                subtype,
-                "compact_boundary" | "session_summary" | "runtime_switch" | "error"
-            )
-        }
-        _ => false,
-    }
 }
 
 fn parse_agent_kind_filter(value: Option<String>) -> Result<Option<AgentKind>, String> {
@@ -708,24 +639,5 @@ mod tests {
             .any(|event| event.get("type").and_then(Value::as_str) == Some("turn_finished")));
 
         let _ = fs::remove_dir_all(home);
-    }
-
-    #[test]
-    fn snapshot_has_conversation_events_ignores_connection_status_only_snapshots() {
-        let connected_only = vec![serde_json::json!({
-            "type": "system_event",
-            "subtype": "connected",
-            "status": "connected"
-        })];
-        assert!(!snapshot_has_conversation_events(&connected_only));
-
-        let with_user = vec![
-            connected_only[0].clone(),
-            serde_json::json!({
-                "type": "user",
-                "message": { "role": "user", "content": "hello" }
-            }),
-        ];
-        assert!(snapshot_has_conversation_events(&with_user));
     }
 }

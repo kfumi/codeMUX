@@ -15,7 +15,6 @@ import {
   isTerminalAgentEvent,
   mapCodexCompactedEvent,
   mapPersistedClaudeMessage,
-  hasVisibleConversationEvents,
   normalizeClaudeUserEvent,
   parseSdkUserMessage,
   shouldProcessTerminalEvent,
@@ -151,7 +150,6 @@ interface AgentState {
   /** Draft text for each session's composer input (preserved across session switches) */
   composerDrafts: Record<string, string>;
   /** Sessions whose history load IPC has completed at least once */
-  sessionHistoryFetched: Record<string, boolean>;
   /** Messages submitted while a turn is active, kept out of provider history until dispatched. */
   queuedQueries: Record<string, QueuedAgentQuery[]>;
   /** Queue is paused after an interruption or failed dispatch. */
@@ -219,17 +217,6 @@ async function hydrateSessionMessageAttachments(sessionId: string, events: Agent
     logger.warn('Failed to hydrate session message attachments', { sessionId }, serializeError(error));
     return events;
   }
-}
-
-function sessionEventsNeedAttachmentHydration(before: AgentMessage[], after: AgentMessage[]): boolean {
-  return after.some((event, index) => {
-    if (event.kind !== 'user' || before[index]?.kind !== 'user') {
-      return false;
-    }
-    const previousCount = before[index].data.attachments?.length ?? 0;
-    const nextCount = event.data.attachments?.length ?? 0;
-    return nextCount > previousCount;
-  });
 }
 
 const sessionsWithLiveTextStream = new Set<string>();
@@ -1343,7 +1330,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
   fileOriginals: {},
   acknowledgedFiles: {},
   composerDrafts: {},
-  sessionHistoryFetched: {},
   queuedQueries: {},
   queuePaused: {},
   pendingPermissions: {},
@@ -2021,21 +2007,18 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
               }
             }
             if (thinkingOnly) {
-              // Keep the live reasoning panel populated with full text while running;
-              // Thread also commits the thinking block. Prefer live panel for open streaming UX.
-              setSessionStreamPhase(sessionId, 'answer');
-              const fullThinking = thinkingBlock!.thinking;
-              const fullThinkingPreview = fullThinking.length > STREAMING_PREVIEW_MAX_CHARS
-                ? fullThinking.slice(-STREAMING_PREVIEW_MAX_CHARS)
-                : fullThinking;
-              if ((s.streamingThinking[sessionId] || '') !== fullThinkingPreview) {
-                updates.streamingThinking = { ...s.streamingThinking, [sessionId]: fullThinkingPreview };
+              // OpenCode commits a completed reasoning part before publishing its
+              // following tool calls. Keeping that part in the live buffer makes
+              // the thread append it after those tools, reversing the event order.
+              // The committed assistant event now owns this completed reasoning.
+              resetSessionStreamPhase(sessionId);
+              if (s.streamingThinking[sessionId]) {
+                updates.streamingThinking = { ...s.streamingThinking, [sessionId]: '' };
                 updates.streamingVersion = {
                   ...s.streamingVersion,
                   [sessionId]: (s.streamingVersion[sessionId] ?? 0) + 1,
                 };
               }
-              // Do NOT clear streamingThinking here — panel stays until answer text starts.
             } else if (textBlock) {
               setSessionStreamPhase(sessionId, 'answer');
               // Answer arrived: clear live reasoning so committed Thread panel + markdown take over.
@@ -2431,28 +2414,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     }
   },
 
-  loadSessionMessages: async (sessionId: string, options?: { force?: boolean }) => {
-    if (!options?.force) {
-      const existing = get().events[sessionId];
-      const historyFetched = get().sessionHistoryFetched[sessionId];
-      if (existing !== undefined) {
-        if (hasVisibleConversationEvents(existing)) {
-          const hydrated = await hydrateSessionMessageAttachments(sessionId, existing);
-          if (sessionEventsNeedAttachmentHydration(existing, hydrated)) {
-            set((state) => ({
-              events: { ...state.events, [sessionId]: hydrated },
-            }));
-          }
-          return;
-        }
-        if (historyFetched && existing.length === 0) {
-          return;
-        }
-      }
-    } else {
-      pendingSessionMessageLoads.delete(sessionId);
-    }
-
+  loadSessionMessages: async (sessionId: string, _options?: { force?: boolean }) => {
     const pending = pendingSessionMessageLoads.get(sessionId);
     if (pending) {
       return pending;
@@ -2482,7 +2444,6 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
             eventTimestamps: state.eventTimestamps[sessionId]
               ? state.eventTimestamps
               : { ...state.eventTimestamps, [sessionId]: [] },
-            sessionHistoryFetched: { ...state.sessionHistoryFetched, [sessionId]: true },
           }));
           return;
         }
@@ -2516,12 +2477,20 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
 
         const hydratedEvents = await hydrateSessionMessageAttachments(sessionId, events);
 
-        set((state) => ({
-          events: { ...state.events, [sessionId]: hydratedEvents },
-          eventTimestamps: { ...state.eventTimestamps, [sessionId]: timestamps },
-          todos: { ...state.todos, [sessionId]: extractTodosFromEvents(hydratedEvents) },
-          sessionHistoryFetched: { ...state.sessionHistoryFetched, [sessionId]: true },
-        }));
+        set((state) => {
+          const currentEvents = state.events[sessionId];
+          const keepLiveEvents = Boolean(state.isRunning[sessionId] && currentEvents?.length);
+          const nextEvents = keepLiveEvents ? currentEvents! : hydratedEvents;
+          const nextTimestamps = keepLiveEvents
+            ? state.eventTimestamps[sessionId] ?? timestamps
+            : timestamps;
+
+          return {
+            events: { ...state.events, [sessionId]: nextEvents },
+            eventTimestamps: { ...state.eventTimestamps, [sessionId]: nextTimestamps },
+            todos: { ...state.todos, [sessionId]: extractTodosFromEvents(nextEvents) },
+          };
+        });
         await get().refreshLatestTokenUsage(sessionId, 'restored');
         logger.info('Loaded session events from agent JSONL', {
           sessionId,

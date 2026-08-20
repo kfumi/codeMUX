@@ -897,6 +897,60 @@ describe('convertAgentEventsToAssistantMessages', () => {
     expect(messages[1]?.content).toEqual([{ type: 'text', text: '探活和 opencode 打的不是同一条路。' }]);
   });
 
+  it('keeps thinking with a later explore tool when narration arrives between them', () => {
+    const events: AgentMessage[] = [
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'opencode-thinking-message',
+          session_id: 'session-1',
+          opencode_session_id: 'opencode-session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'thinking', thinking: '先分析 SDK 接入方式' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'opencode-narration-message',
+          session_id: 'session-1',
+          opencode_session_id: 'opencode-session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '我先从 SDK 源码开始。' }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'opencode-tool-message',
+          session_id: 'session-1',
+          opencode_session_id: 'opencode-session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'webfetch-1', name: 'WebFetch', input: { url: 'https://example.com' } }],
+          },
+          parent_tool_use_id: null,
+        },
+      },
+    ];
+
+    const messages = convertAgentEventsToAssistantMessages(events);
+
+    expect(messages.map((message) => message.content.map((part) => part.type))).toEqual([
+      ['reasoning', 'tool-call'],
+      ['text'],
+    ]);
+  });
+
   it('ignores whitespace-only text inside a mixed process event', () => {
     const events: AgentMessage[] = [
       {

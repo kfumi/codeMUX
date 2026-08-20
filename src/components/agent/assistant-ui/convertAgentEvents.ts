@@ -40,6 +40,7 @@ export type CodeMuxAssistantMessage = {
     sourceEventIndices: number[];
     sourceKind: AgentMessage['kind'];
     sourceUuid?: string;
+    sourceOpenCodeSessionId?: string;
     sourceProviderTurnId?: string;
     isFinalAssistantMessage?: boolean;
     isSplitHead?: boolean;
@@ -475,7 +476,29 @@ function mergeIntoPreviousProcessMessage(
   insertionIndex: number,
   toolCallLocationById: Map<string, { messageIndex: number; partIndex: number }>,
 ): number | undefined {
-  const previousIndex = insertionIndex - 1;
+  let previousIndex = insertionIndex - 1;
+  let crossedNarration = false;
+  while (previousIndex >= 0) {
+    const candidate = messages[previousIndex];
+    if (isProcessOnlyAssistantMessage(candidate)) {
+      if (
+        crossedNarration
+        && candidate.metadata.sourceUuid !== nextMessage.metadata.sourceUuid
+        && candidate.metadata.sourceOpenCodeSessionId !== nextMessage.metadata.sourceOpenCodeSessionId
+      ) {
+        return undefined;
+      }
+      break;
+    }
+
+    if (!isNarrationOnlyAssistantMessage(candidate)) {
+      return undefined;
+    }
+
+    crossedNarration = true;
+    previousIndex -= 1;
+  }
+
   const previousMessage = messages[previousIndex];
 
   if (
@@ -907,6 +930,9 @@ function createMessage(
       sourceKind: event.kind,
       ...(extra?.isSplitHead === false ? { isSplitHead: false } : {}),
       ...(event.kind === 'assistant' && event.data.uuid ? { sourceUuid: event.data.uuid } : {}),
+      ...(event.kind === 'assistant' && event.data.opencode_session_id
+        ? { sourceOpenCodeSessionId: event.data.opencode_session_id }
+        : {}),
       ...(event.kind === 'assistant' && event.data.provider_turn_id
         ? { sourceProviderTurnId: event.data.provider_turn_id }
         : {}),

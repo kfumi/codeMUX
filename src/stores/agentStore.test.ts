@@ -265,7 +265,7 @@ describe('agent store Codex history loading', () => {
     expect(useAgentStore.getState().queuedQueries[session.id]).toEqual([]);
   });
 
-  it('deduplicates concurrent and empty Claude history loads', async () => {
+  it('deduplicates concurrent loads but refreshes history on later loads', async () => {
     const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('claude_code');
     let resolveHistory: ((events: Record<string, unknown>[]) => void) | undefined;
@@ -281,8 +281,42 @@ describe('agent store Codex history loading', () => {
     await Promise.all([first, second]);
 
     await useAgentStore.getState().loadSessionMessages(session.id);
-    expect(loadClaudeSessionEventsMock).toHaveBeenCalledTimes(1);
+    expect(loadClaudeSessionEventsMock).toHaveBeenCalledTimes(2);
     expect(useAgentStore.getState().events[session.id]).toEqual([]);
+  });
+
+  it('replaces a partial in-memory history snapshot with the latest persisted history', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+    const persistedUser = {
+      type: 'user',
+      uuid: 'persisted-user',
+      session_id: session.id,
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: '完整历史消息' }],
+      },
+    };
+
+    useAgentStore.setState((state) => ({
+      events: {
+        ...state.events,
+        [session.id]: [{ kind: 'user', data: { content: '旧的局部快照' } }],
+      },
+      eventTimestamps: {
+        ...state.eventTimestamps,
+        [session.id]: [1],
+      },
+    }));
+    loadClaudeSessionEventsMock.mockResolvedValueOnce([persistedUser]);
+
+    await useAgentStore.getState().loadSessionMessages(session.id);
+
+    expect(loadClaudeSessionEventsMock).toHaveBeenCalledTimes(1);
+    expect(useAgentStore.getState().events[session.id]?.[0]).toMatchObject({
+      kind: 'user',
+      data: { content: '完整历史消息' },
+    });
   });
 
   afterEach(() => {
@@ -1070,6 +1104,53 @@ describe('agent store Codex history loading', () => {
       requestAnimationFrameMock.mockRestore();
       vi.useRealTimers();
     }
+  });
+
+  it('clears committed thinking from the live buffer before following tools arrive', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: { type: 'content_block_start', content_block: { type: 'thinking' } },
+      }));
+      onEvent(JSON.stringify({
+        type: 'stream_event',
+        session_id: sessionId,
+        event: {
+          type: 'content_block_delta',
+          delta: { type: 'thinking_delta', thinking: '先确认测试数据的来源。' },
+        },
+      }));
+      onEvent(JSON.stringify({
+        type: 'assistant',
+        uuid: 'committed-thinking',
+        session_id: sessionId,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: '先确认测试数据的来源。' }],
+        },
+        parent_tool_use_id: null,
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, '测试数据是哪里来的？', 'D:\\project\\ai-code\\codeMUX');
+
+    expect(useAgentStore.getState().streamingThinking[session.id] ?? '').toBe('');
+    expect(useAgentStore.getState().events[session.id]).toContainEqual(
+      expect.objectContaining({
+        kind: 'assistant',
+        data: expect.objectContaining({
+          message: expect.objectContaining({
+            content: [{ type: 'thinking', thinking: '先确认测试数据的来源。' }],
+          }),
+        }),
+      }),
+    );
   });
 
   it('uses a trailing Claude thinking flush to avoid duplicate render commits', async () => {
