@@ -264,13 +264,11 @@ async fn spawn_data_socket(
 
         while let Some(message) = read.next().await {
             match message {
-                Ok(Message::Text(text)) => {
-                    if !channel.is_open() {
-                        if let Ok(Some(ready)) = channel.handle_hello(&text) {
-                            let _ = write.send(Message::Text(ready.into())).await;
-                        }
-                        continue;
+                Ok(Message::Text(text)) if !channel.is_open() => {
+                    if let Ok(Some(ready)) = channel.handle_hello(&text) {
+                        let _ = write.send(Message::Text(ready.into())).await;
                     }
+                    continue;
                 }
                 Ok(Message::Binary(payload)) => {
                     if !channel.is_open() {

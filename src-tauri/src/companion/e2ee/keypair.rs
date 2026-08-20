@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +21,7 @@ pub struct E2eeKeyPairBundle {
     pub public_key_b64: String,
 }
 
-fn keypair_path(app_data_dir: &PathBuf) -> PathBuf {
+fn keypair_path(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join(KEYPAIR_FILENAME)
 }
 
@@ -36,7 +36,7 @@ fn decode_secret_key_b64(value: &str) -> Result<SecretKey, String> {
     SecretKey::from_slice(&bytes).ok_or_else(|| "Invalid secret key length".to_string())
 }
 
-pub fn load_or_create_e2ee_keypair(app_data_dir: &PathBuf) -> Result<E2eeKeyPairBundle, String> {
+pub fn load_or_create_e2ee_keypair(app_data_dir: &Path) -> Result<E2eeKeyPairBundle, String> {
     let path = keypair_path(app_data_dir);
     if path.exists() {
         if let Ok(raw) = fs::read_to_string(&path) {

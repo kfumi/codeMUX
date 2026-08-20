@@ -970,6 +970,7 @@ pub fn get_session_kind_model_selection(
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_session_agent_kind(
     conn: &Connection,
     session_id: &str,
@@ -1077,7 +1078,7 @@ pub fn insert_session_runtime_switch(
 pub fn session_has_runtime_switch(conn: &Connection, session_id: &str) -> Result<bool> {
     let mut stmt =
         conn.prepare("SELECT 1 FROM session_runtime_switches WHERE session_id = ?1 LIMIT 1")?;
-    Ok(stmt.exists([session_id])?)
+    stmt.exists([session_id])
 }
 
 pub fn set_pending_switch_briefing(

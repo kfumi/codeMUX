@@ -56,8 +56,8 @@ impl DaemonChannel {
                 "Expected e2ee_hello".to_string(),
             ));
         }
-        let client_public = import_public_key_b64(&parsed.key)
-            .map_err(|error| E2eeHandshakeError::InvalidHello(error))?;
+        let client_public =
+            import_public_key_b64(&parsed.key).map_err(E2eeHandshakeError::InvalidHello)?;
         let client_public_bytes = client_public.as_ref().to_vec();
 
         if let Some(existing) = &self.client_public_key {

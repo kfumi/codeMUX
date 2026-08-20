@@ -13,15 +13,15 @@ pub fn get_system_fonts() -> Result<Vec<String>, String> {
 fn enumerate_system_fonts() -> Result<Vec<String>, Box<dyn std::error::Error>> {
     #[cfg(target_os = "windows")]
     {
-        return enumerate_windows_fonts();
+        enumerate_windows_fonts()
     }
     #[cfg(target_os = "macos")]
     {
-        return enumerate_macos_fonts();
+        enumerate_macos_fonts()
     }
     #[cfg(target_os = "linux")]
     {
-        return enumerate_linux_fonts();
+        enumerate_linux_fonts()
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
@@ -172,7 +172,7 @@ fn standardize_fonts(fonts: Vec<String>) -> Vec<String> {
         .filter(|font| !font.is_empty())
         .collect();
 
-    normalized.sort_by(|left, right| left.to_lowercase().cmp(&right.to_lowercase()));
+    normalized.sort_by_key(|font| font.to_lowercase());
 
     let mut deduped = Vec::new();
     let mut seen = std::collections::HashSet::new();

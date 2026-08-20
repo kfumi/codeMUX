@@ -129,10 +129,7 @@ pub fn required_protocol(agent_kind: AgentKind) -> Option<Protocol> {
     }
 }
 
-pub fn select_endpoint<'a>(
-    provider: &'a ModelProvider,
-    protocol: Protocol,
-) -> Option<&'a ProtocolEndpoint> {
+pub fn select_endpoint(provider: &ModelProvider, protocol: Protocol) -> Option<&ProtocolEndpoint> {
     provider
         .endpoints
         .iter()

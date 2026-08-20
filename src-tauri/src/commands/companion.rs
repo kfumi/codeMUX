@@ -89,7 +89,7 @@ async fn build_companion_status(
         let mut should_save_config = previous_lan_ip != config.companion.last_lan_ip;
         let (pairing_code, pairing_code_expires_at) = if enabled {
             let previous_code = config.companion.pairing_code.clone();
-            let code = ensure_persisted_pairing_code(&companion_state, &mut config.companion);
+            let code = ensure_persisted_pairing_code(companion_state, &mut config.companion);
             if config.companion.pairing_code != previous_code {
                 should_save_config = true;
             }

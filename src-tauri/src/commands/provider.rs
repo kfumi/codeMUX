@@ -306,11 +306,8 @@ pub fn set_attachment_enrichment(
     let mut config = state.config.lock().unwrap();
     let existing = config.attachment_enrichment.clone();
     if enrichment.api_key.trim().is_empty()
-        && existing.api_key.trim().is_empty()
-        && enrichment.api_key_configured
+        && (!existing.api_key.trim().is_empty() || enrichment.api_key_configured)
     {
-        enrichment.api_key = existing.api_key;
-    } else if enrichment.api_key.trim().is_empty() && !existing.api_key.trim().is_empty() {
         enrichment.api_key = existing.api_key;
     }
     enrichment.api_key_configured = false;

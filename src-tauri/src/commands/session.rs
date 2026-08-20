@@ -289,6 +289,7 @@ pub fn get_session_message_attachments(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn switch_session_agent_kind(
     app: AppHandle,
     state: State<'_, AppState>,

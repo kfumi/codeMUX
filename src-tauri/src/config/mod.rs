@@ -619,8 +619,10 @@ mod tests {
     fn rejects_save_when_active_provider_is_missing() {
         let temp_dir = temp_config_dir();
         let config_path = temp_dir.join("config.json");
-        let mut config = AppConfig::default();
-        config.active_provider_id = Some("missing".to_string());
+        let config = AppConfig {
+            active_provider_id: Some("missing".to_string()),
+            ..Default::default()
+        };
         let error = save_config_to_path(&config_path, &config).unwrap_err();
         assert!(error.contains("active_provider_id"));
         let _ = std::fs::remove_dir(&temp_dir);

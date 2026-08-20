@@ -164,7 +164,7 @@ impl Default for NotificationSettings {
 }
 
 /// Git 相关设置：提交信息 / PR 描述的 AI 生成指引与所用模型。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GitSettingsConfig {
     #[serde(default)]
     pub commit_instructions: String,
@@ -174,17 +174,6 @@ pub struct GitSettingsConfig {
     pub provider_id: Option<String>,
     #[serde(default)]
     pub model: String,
-}
-
-impl Default for GitSettingsConfig {
-    fn default() -> Self {
-        Self {
-            commit_instructions: String::new(),
-            pull_request_instructions: String::new(),
-            provider_id: None,
-            model: String::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

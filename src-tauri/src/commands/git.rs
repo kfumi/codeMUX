@@ -784,7 +784,7 @@ fn preferred_remote_name(root: &Path) -> Result<String, String> {
         .lines()
         .filter(|line| !line.is_empty())
         .collect();
-    if remotes.iter().any(|remote| *remote == "origin") {
+    if remotes.contains(&"origin") {
         return Ok("origin".to_string());
     }
     remotes

@@ -332,8 +332,7 @@ async fn pair_offer(
         let port = config.companion.port;
         let relay = config.companion.relay.clone();
         if !had_desktop_id {
-            crate::config::save_config(&ctx.app, &config)
-                .map_err(|error| ApiError::internal(error))?;
+            crate::config::save_config(&ctx.app, &config).map_err(ApiError::internal)?;
         }
         (desktop_id, port, relay)
     };
@@ -349,7 +348,7 @@ async fn pair_offer(
         desktop_public_key_b64,
     )
     .map(Json)
-    .map_err(|error| ApiError::bad_request(error))
+    .map_err(ApiError::bad_request)
 }
 
 async fn pair_claim(
@@ -364,8 +363,8 @@ async fn pair_claim(
     }
 
     let app_state = ctx.app.state::<AppState>();
-    let result = complete_pairing(app_state.inner(), body.name.as_deref())
-        .map_err(|error| ApiError::internal(error))?;
+    let result =
+        complete_pairing(app_state.inner(), body.name.as_deref()).map_err(ApiError::internal)?;
     Ok(Json(PairClaimResponse {
         token: result.token,
         device_id: result.device_id,
@@ -395,7 +394,7 @@ async fn create_session(
     authorize(&ctx, &headers)?;
     let app_state = ctx.app.state::<AppState>();
     let agent_kind = AgentKind::from_str(body.agent_kind.as_deref().unwrap_or("claude_code"))
-        .map_err(|error| ApiError::bad_request(error))?;
+        .map_err(ApiError::bad_request)?;
     let db = app_state
         .db
         .lock()
@@ -663,10 +662,12 @@ async fn handle_socket(mut socket: WebSocket, ctx: ServerContext, session_id: St
             incoming = socket.recv() => {
                 match incoming {
                     Some(Ok(Message::Close(_))) | None => break,
-                    Some(Ok(Message::Ping(payload))) => {
-                        if socket.send(Message::Pong(payload)).await.is_err() {
-                            break;
-                        }
+                    Some(Ok(Message::Ping(payload))) if socket
+                        .send(Message::Pong(payload.clone()))
+                        .await
+                        .is_err() =>
+                    {
+                        break;
                     }
                     _ => {}
                 }
