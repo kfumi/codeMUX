@@ -526,7 +526,7 @@ fn aggregate_opencode_tokens(
 ) -> Result<BTreeMap<String, DailyTokens>, String> {
     let mut session_daily: BTreeMap<String, DailyTokens> = BTreeMap::new();
 
-    let events = opencode_history::load_opencode_session_events(home, opencode_session_id)?;
+    let events = opencode_history::load_opencode_native_events(home, opencode_session_id)?;
 
     for event in events {
         if event.get("type").and_then(|v| v.as_str()) != Some("assistant") {

@@ -1,0 +1,35 @@
+{"timestamp":"2026-08-20T10:00:00.000Z","type":"session_meta","payload":{"id":"golden-codex-session","timestamp":"2026-08-20T10:00:00.000Z","cwd":"D:\\project\\demo","originator":"codex_cli_rs","cli_version":"0.48.0"}}
+{"timestamp":"2026-08-20T10:00:01.000Z","type":"turn_context","turn_id":"turn-1","payload":{"cwd":"D:\\project\\demo","model":"gpt-5-codex","effort":"medium","summary":"auto","approval_policy":"untrusted"}}
+{"timestamp":"2026-08-20T10:00:02.000Z","type":"event_msg","payload":{"type":"user_message","id":"msg-user-1","message":"帮我读取 README.md 并总结"}}
+{"timestamp":"2026-08-20T10:00:02.100Z","type":"response_item","payload":{"type":"message","role":"user","id":"msg-user-1","content":[{"type":"input_text","text":"帮我读取 README.md 并总结"}]}}
+{"timestamp":"2026-08-20T10:00:03.000Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"用户要读 README，先调用工具。"}]}}
+{"timestamp":"2026-08-20T10:00:04.000Z","type":"event_msg","payload":{"type":"agent_message","message":"我先读取 README.md。"}}
+{"timestamp":"2026-08-20T10:00:04.100Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"我先读取 README.md。"}]}}
+{"timestamp":"2026-08-20T10:00:05.000Z","type":"response_item","payload":{"type":"function_call","call_id":"call-read-1","name":"read_file","arguments":"{\"path\":\"README.md\"}"}}
+{"timestamp":"2026-08-20T10:00:05.100Z","type":"response_item","payload":{"type":"function_call","call_id":"call-read-1","name":"read_file","arguments":"{\"path\":\"README.md\"}"}}
+{"timestamp":"2026-08-20T10:00:06.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-read-1","output":"# Demo\n\nA demo project."}}
+{"timestamp":"2026-08-20T10:00:07.000Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"call-patch-1","name":"apply_patch","input":"*** Begin Patch\n*** Update File: README.md\n@@\n-A demo project.\n+A demo project (updated).\n*** End Patch"}}
+{"timestamp":"2026-08-20T10:00:08.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call-patch-1","output":"Success. Updated the following files:\nM README.md"}}
+{"timestamp":"2026-08-20T10:00:09.000Z","type":"event_msg","payload":{"type":"agent_message","message":"README 已总结并更新完毕：这是一个演示项目。"}}
+{"timestamp":"2026-08-20T10:00:10.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1200,"cached_input_tokens":300,"output_tokens":45,"reasoning_output_tokens":12},"model_context_window":200000}}}
+{"timestamp":"2026-08-20T10:00:11.000Z","type":"event_msg","payload":{"type":"task_complete","duration_ms":9500}}
+{"timestamp":"2026-08-20T10:05:00.000Z","type":"turn_context","turn_id":"turn-2","payload":{"cwd":"D:\\project\\demo","model":"gpt-5-codex","effort":"medium","summary":"auto"}}
+{"timestamp":"2026-08-20T10:05:01.000Z","type":"event_msg","payload":{"type":"user_message","id":"msg-user-2","message":"这张截图里是什么？"}}
+{"timestamp":"2026-08-20T10:05:01.100Z","type":"response_item","payload":{"type":"message","role":"user","id":"msg-user-2","content":[{"type":"input_text","text":"<image name=[Image #1] path=\"C:\\Users\\94910\\AppData\\Local\\Temp\\shot.png\">"},{"type":"input_image","image_url":"data:image/png;base64,aGlzdG9yaWY=","detail":"high"},{"type":"input_text","text":"</image>"},{"type":"input_text","text":"这张截图里是什么？"}]}}
+{"timestamp":"2026-08-20T10:05:02.000Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"分析图片内容。"}]}}
+{"timestamp":"2026-08-20T10:05:03.000Z","type":"event_msg","payload":{"type":"agent_message","message":"截图里是一个终端窗口。"}}
+{"timestamp":"2026-08-20T10:05:04.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":900,"cached_input_tokens":100,"output_tokens":20,"reasoning_output_tokens":5},"model_context_window":200000}}}
+{"timestamp":"2026-08-20T10:05:05.000Z","type":"event_msg","payload":{"type":"task_complete","duration_ms":4200}}
+{"timestamp":"2026-08-20T10:10:00.000Z","type":"turn_context","turn_id":"turn-3","payload":{"cwd":"D:\\project\\demo","model":"gpt-5-codex","effort":"medium","summary":"auto"}}
+{"timestamp":"2026-08-20T10:10:01.000Z","type":"event_msg","payload":{"type":"user_message","id":"msg-user-3","message":"再帮我重构一下代码"}}
+{"timestamp":"2026-08-20T10:10:02.000Z","type":"event_msg","payload":{"type":"agent_message","message":"正在分析代码结构……"}}
+{"timestamp":"2026-08-20T10:10:03.000Z","type":"event_msg","payload":{"type":"turn_aborted","reason":"user interrupted"}}
+{"timestamp":"2026-08-20T10:15:00.000Z","type":"turn_context","turn_id":"turn-4","payload":{"cwd":"D:\\project\\demo","model":"gpt-5-codex","effort":"medium","summary":"auto"}}
+{"timestamp":"2026-08-20T10:15:01.000Z","type":"event_msg","payload":{"type":"user_message","id":"msg-user-4","message":"帮我调用外部 API"}}
+{"timestamp":"2026-08-20T10:15:02.000Z","type":"event_msg","payload":{"type":"turn_failed","error":"upstream 502"}}
+{"timestamp":"2026-08-20T10:20:00.000Z","type":"compacted","payload":{"message":"Another language model started to solve this problem and produced a summary.","trigger":"auto","pre_tokens":40956,"post_tokens":2876}}
+{"timestamp":"2026-08-20T10:20:01.000Z","type":"turn_context","turn_id":"turn-5","payload":{"cwd":"D:\\project\\demo","model":"gpt-5-codex","effort":"medium","summary":"auto"}}
+{"timestamp":"2026-08-20T10:20:02.000Z","type":"event_msg","payload":{"type":"user_message","id":"msg-user-5","message":"继续刚才的任务"}}
+{"timestamp":"2026-08-20T10:20:03.000Z","type":"event_msg","payload":{"type":"agent_message","message":"好的，继续。"}}
+{"timestamp":"2026-08-20T10:20:04.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":3000,"cached_input_tokens":500,"output_tokens":30,"reasoning_output_tokens":8},"model_context_window":200000}}}
+{"timestamp":"2026-08-20T10:20:05.000Z","type":"event_msg","payload":{"type":"task_complete","duration_ms":2100}}

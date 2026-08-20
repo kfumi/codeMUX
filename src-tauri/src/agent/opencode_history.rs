@@ -1,6 +1,18 @@
-use crate::agent::context_usage::{ThreadTokenUsageSnapshot, TokenUsageBreakdown};
+use log::{debug, info};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
+use tauri::{AppHandle, State};
+use tokio::sync::oneshot;
+
+use super::history_events::normalize_history_events;
+use super::session_lifecycle::{
+    get_agent_session_id, home_dir, invalidate_session_generation,
+    parse_session_delete_result_event, session_lifecycle_lock, AgentState,
+};
+use super::{spawn_sidecar, SidecarHandle};
+use crate::agent::context_usage::{ThreadTokenUsageSnapshot, TokenUsageBreakdown};
+use crate::agent_runtime::opencode::OpenCodeRuntime;
+use crate::config::types::AgentKind;
 
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
@@ -913,7 +925,7 @@ mod tests {
     }
 }
 
-pub fn load_opencode_session_events(
+pub fn load_opencode_native_events(
     home: &std::path::Path,
     session_id: &str,
 ) -> Result<Vec<Value>, String> {
@@ -1578,4 +1590,134 @@ fn timestamp_string(timestamp: i64) -> String {
     chrono::DateTime::from_timestamp_millis(timestamp)
         .map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
         .unwrap_or_else(|| timestamp.to_string())
+}
+
+#[tauri::command]
+pub async fn load_opencode_session_events(
+    state: State<'_, crate::AppState>,
+    app_session_id: String,
+) -> Result<Vec<Value>, String> {
+    debug!(target: "agent", "Loading OpenCode SQLite session events for app_session_id={}", app_session_id);
+    let Some(opencode_session_id) =
+        get_agent_session_id(state.inner(), &app_session_id, AgentKind::Opencode)?
+    else {
+        info!(target: "agent", "No OpenCode mapping found for app_session_id={}", app_session_id);
+        return Ok(Vec::new());
+    };
+    let home = home_dir()?;
+    let events = tokio::task::spawn_blocking(move || {
+        load_opencode_native_events(&home, &opencode_session_id)
+    })
+    .await
+    .map_err(|error| format!("Failed to join OpenCode history loader: {}", error))??;
+    Ok(normalize_history_events(events, &app_session_id))
+}
+
+#[tauri::command]
+pub async fn delete_opencode_session(
+    app: AppHandle,
+    state: State<'_, crate::AppState>,
+    agent_state: State<'_, AgentState>,
+    app_session_id: String,
+) -> Result<(), String> {
+    debug!(target: "agent", "Deleting OpenCode session through the official SDK for app_session_id={}", app_session_id);
+    let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &app_session_id).await;
+    let _lifecycle_guard = lifecycle_lock.lock().await;
+    invalidate_session_generation(agent_state.inner(), &app_session_id).await;
+    let Some(opencode_session_id) =
+        get_agent_session_id(state.inner(), &app_session_id, AgentKind::Opencode)?
+    else {
+        return Ok(());
+    };
+    delete_opencode_native_session(
+        &app,
+        state.inner(),
+        agent_state.inner(),
+        &app_session_id,
+        &opencode_session_id,
+    )
+    .await
+}
+
+pub(crate) async fn delete_opencode_native_session(
+    app: &AppHandle,
+    state: &crate::AppState,
+    agent_state: &AgentState,
+    app_session_id: &str,
+    opencode_session_id: &str,
+) -> Result<(), String> {
+    let runtime_ref = state
+        .runtime_resolver
+        .resolve_runtime_ref(crate::runtime::Provider::OpenCode)
+        .ok_or_else(|| "OpenCode Runtime 未安装或不可用，请先在设置中安装".to_string())?;
+
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let command = OpenCodeRuntime::delete_session_command(
+        app_session_id,
+        opencode_session_id,
+        &request_id,
+        None,
+        &runtime_ref,
+    );
+    let active_sender = {
+        let sidecars = agent_state.sidecars.lock().await;
+        sidecars
+            .get(app_session_id)
+            .map(SidecarHandle::command_sender)
+    };
+
+    if let Some(sender) = active_sender {
+        let (result_sender, result_receiver) = oneshot::channel();
+        agent_state
+            .session_delete_waiters
+            .lock()
+            .await
+            .insert(request_id.clone(), result_sender);
+        if sender.send(command.to_string()).await.is_err() {
+            agent_state
+                .session_delete_waiters
+                .lock()
+                .await
+                .remove(&request_id);
+            return Err("Failed to send OpenCode session deletion command to sidecar".to_string());
+        }
+        return match tokio::time::timeout(std::time::Duration::from_secs(30), result_receiver).await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => {
+                Err("OpenCode sidecar stopped before confirming session deletion".to_string())
+            }
+            Err(_) => {
+                agent_state
+                    .session_delete_waiters
+                    .lock()
+                    .await
+                    .remove(&request_id);
+                Err("Timed out waiting for OpenCode session deletion".to_string())
+            }
+        };
+    }
+
+    // No session sidecar is alive after an app restart. Use a short-lived
+    // sidecar so the cleanup still goes through OpenCode's official SDK.
+    let (mut handle, mut events) = spawn_sidecar(app, tauri::ipc::Channel::new(|_| Ok(()))).await?;
+    let send_result = handle.send_command(&command.to_string()).await;
+    if let Err(error) = send_result {
+        handle.shutdown().await;
+        return Err(error);
+    }
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while let Some(event) = events.recv().await {
+            if let Some(result) = parse_session_delete_result_event(&event) {
+                if result.request_id == request_id {
+                    return result.result;
+                }
+            }
+        }
+        Err("OpenCode sidecar stopped before confirming session deletion".to_string())
+    })
+    .await
+    .map_err(|_| "Timed out waiting for OpenCode session deletion".to_string())?;
+    handle.shutdown().await;
+    result
 }

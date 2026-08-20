@@ -1,0 +1,286 @@
+[
+  {
+    "content": [
+      {
+        "text": "帮我读取 README.md 并总结",
+        "type": "text"
+      }
+    ],
+    "event_id": "msg-user-1",
+    "line_index": 2,
+    "provider_message_id": "msg-user-1",
+    "sequence": 0,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:00:02.000Z",
+    "type": "user_message",
+    "uuid": "msg-user-1"
+  },
+  {
+    "content": [
+      {
+        "thinking": "用户要读 README，先调用工具。",
+        "type": "thinking"
+      }
+    ],
+    "event_id": "codemux-history-golden-session-1",
+    "provider_turn_id": "turn-1",
+    "sequence": 1,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:00:03.000Z",
+    "type": "assistant_message"
+  },
+  {
+    "content": [
+      {
+        "text": "我先读取 README.md。",
+        "type": "text"
+      }
+    ],
+    "event_id": "codemux-history-golden-session-2",
+    "provider_turn_id": "turn-1",
+    "sequence": 2,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:00:04.000Z",
+    "type": "assistant_message"
+  },
+  {
+    "event_id": "codemux-history-golden-session-0",
+    "input": {
+      "path": "README.md"
+    },
+    "name": "read_file",
+    "sequence": 3,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:00:05.000Z",
+    "tool_use_id": "call-read-1",
+    "type": "tool_started"
+  },
+  {
+    "content": "# Demo\n\nA demo project.",
+    "event_id": "codemux-history-golden-session-1",
+    "is_error": false,
+    "sequence": 4,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:00:06.000Z",
+    "tool_use_id": "call-read-1",
+    "type": "tool_finished"
+  },
+  {
+    "event_id": "codemux-history-golden-session-2",
+    "input": {
+      "input": "*** Begin Patch\n*** Update File: README.md\n@@\n-A demo project.\n+A demo project (updated).\n*** End Patch"
+    },
+    "name": "apply_patch",
+    "sequence": 5,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:00:07.000Z",
+    "tool_use_id": "call-patch-1",
+    "type": "tool_started"
+  },
+  {
+    "content": "Success. Updated the following files:\nM README.md",
+    "event_id": "codemux-history-golden-session-3",
+    "is_error": false,
+    "sequence": 6,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:00:08.000Z",
+    "tool_use_id": "call-patch-1",
+    "type": "tool_finished"
+  },
+  {
+    "content": [
+      {
+        "text": "README 已总结并更新完毕：这是一个演示项目。",
+        "type": "text"
+      }
+    ],
+    "event_id": "codemux-history-golden-session-7",
+    "provider_turn_id": "turn-1",
+    "sequence": 7,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:00:09.000Z",
+    "type": "assistant_message"
+  },
+  {
+    "duration_ms": 9500,
+    "event_id": "codemux-history-golden-session-4",
+    "model_context_window": 200000,
+    "outcome": "completed",
+    "provider_turn_id": "turn-1",
+    "sequence": 8,
+    "session_id": "golden-session",
+    "type": "turn_finished"
+  },
+  {
+    "content": [
+      {
+        "source": {
+          "data": "aGlzdG9yaWY=",
+          "media_type": "image/png",
+          "type": "base64"
+        },
+        "type": "image"
+      },
+      {
+        "text": "这张截图里是什么？",
+        "type": "text"
+      }
+    ],
+    "event_id": "msg-user-2",
+    "line_index": 17,
+    "provider_message_id": "msg-user-2",
+    "sequence": 9,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:05:01.100Z",
+    "type": "user_message",
+    "uuid": "msg-user-2"
+  },
+  {
+    "content": [
+      {
+        "thinking": "分析图片内容。",
+        "type": "thinking"
+      }
+    ],
+    "event_id": "codemux-history-golden-session-10",
+    "provider_turn_id": "turn-2",
+    "sequence": 10,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:05:02.000Z",
+    "type": "assistant_message"
+  },
+  {
+    "content": [
+      {
+        "text": "截图里是一个终端窗口。",
+        "type": "text"
+      }
+    ],
+    "event_id": "codemux-history-golden-session-11",
+    "provider_turn_id": "turn-2",
+    "sequence": 11,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:05:03.000Z",
+    "type": "assistant_message"
+  },
+  {
+    "duration_ms": 4200,
+    "event_id": "codemux-history-golden-session-5",
+    "model_context_window": 200000,
+    "outcome": "completed",
+    "provider_turn_id": "turn-2",
+    "sequence": 12,
+    "session_id": "golden-session",
+    "type": "turn_finished"
+  },
+  {
+    "content": [
+      {
+        "text": "再帮我重构一下代码",
+        "type": "text"
+      }
+    ],
+    "event_id": "msg-user-3",
+    "line_index": 23,
+    "provider_message_id": "msg-user-3",
+    "sequence": 13,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:10:01.000Z",
+    "type": "user_message",
+    "uuid": "msg-user-3"
+  },
+  {
+    "content": [
+      {
+        "text": "正在分析代码结构……",
+        "type": "text"
+      }
+    ],
+    "event_id": "codemux-history-golden-session-14",
+    "provider_turn_id": "turn-3",
+    "sequence": 14,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:10:02.000Z",
+    "type": "assistant_message"
+  },
+  {
+    "duration_ms": null,
+    "event_id": "codemux-history-golden-session-6",
+    "outcome": "interrupted",
+    "provider_turn_id": "turn-3",
+    "reason": "user interrupted",
+    "sequence": 15,
+    "session_id": "golden-session",
+    "type": "turn_finished"
+  },
+  {
+    "content": [
+      {
+        "text": "帮我调用外部 API",
+        "type": "text"
+      }
+    ],
+    "event_id": "msg-user-4",
+    "line_index": 27,
+    "provider_message_id": "msg-user-4",
+    "sequence": 16,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:15:01.000Z",
+    "type": "user_message",
+    "uuid": "msg-user-4"
+  },
+  {
+    "compact_metadata": {
+      "post_tokens": 2876,
+      "pre_tokens": 40956,
+      "trigger": "auto"
+    },
+    "content": "Conversation compacted",
+    "event_id": "codemux-history-golden-session-17",
+    "sequence": 17,
+    "session_id": "golden-session",
+    "subtype": "compact_boundary",
+    "timestamp": "2026-08-20T10:20:00.000Z",
+    "type": "system_event"
+  },
+  {
+    "content": [
+      {
+        "text": "继续刚才的任务",
+        "type": "text"
+      }
+    ],
+    "event_id": "msg-user-5",
+    "line_index": 31,
+    "provider_message_id": "msg-user-5",
+    "sequence": 18,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:20:02.000Z",
+    "type": "user_message",
+    "uuid": "msg-user-5"
+  },
+  {
+    "content": [
+      {
+        "text": "好的，继续。",
+        "type": "text"
+      }
+    ],
+    "event_id": "codemux-history-golden-session-19",
+    "provider_turn_id": "turn-5",
+    "sequence": 19,
+    "session_id": "golden-session",
+    "timestamp": "2026-08-20T10:20:03.000Z",
+    "type": "assistant_message"
+  },
+  {
+    "duration_ms": 2100,
+    "event_id": "codemux-history-golden-session-7",
+    "model_context_window": 200000,
+    "outcome": "completed",
+    "provider_turn_id": "turn-5",
+    "sequence": 20,
+    "session_id": "golden-session",
+    "type": "turn_finished"
+  }
+]

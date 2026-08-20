@@ -408,10 +408,7 @@ fn discover_codex(home: &Path) -> Vec<DiscoveredSnapshot> {
                 .and_then(|payload| payload.get("cwd"))
                 .and_then(Value::as_str)
                 .map(ToOwned::to_owned);
-            let mut events = normalize_history_events(
-                convert_codex_history_values_to_events(&raw, &session_id),
-                &session_id,
-            );
+            let mut events = convert_codex_history_values_to_events(&raw, &session_id);
             if let Some(cwd) = cwd {
                 for event in &mut events {
                     if let Some(object) = event.as_object_mut() {
@@ -454,7 +451,7 @@ fn discover_opencode(home: &Path) -> Vec<DiscoveredSnapshot> {
     session_ids
         .filter_map(Result::ok)
         .filter_map(|session_id| {
-            let raw = opencode_history::load_opencode_session_events(home, &session_id).ok()?;
+            let raw = opencode_history::load_opencode_native_events(home, &session_id).ok()?;
             let events = normalize_history_events(raw, &session_id);
             if events.is_empty() {
                 return None;

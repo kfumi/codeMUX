@@ -350,11 +350,11 @@ mod tests {
         let briefing = build_switch_briefing(&events, AgentKind::Codex, AgentKind::ClaudeCode);
         let lines: Vec<&str> = briefing.lines().collect();
 
-        assert!(!lines.iter().any(|line| *line == "User: user-1"));
-        assert!(!lines.iter().any(|line| *line == "Assistant: assistant-2"));
-        assert!(lines.iter().any(|line| *line == "User: user-3"));
-        assert!(lines.iter().any(|line| *line == "Assistant: assistant-10"));
-        assert!(lines.iter().any(|line| *line == "User: user-10"));
+        assert!(!lines.contains(&"User: user-1"));
+        assert!(!lines.contains(&"Assistant: assistant-2"));
+        assert!(lines.contains(&"User: user-3"));
+        assert!(lines.contains(&"Assistant: assistant-10"));
+        assert!(lines.contains(&"User: user-10"));
     }
 
     #[test]

@@ -1,9 +1,17 @@
+pub mod attachments;
+pub mod claude_history;
+pub mod codex_history;
+pub mod codex_proxy;
 pub mod commands;
 pub mod context_usage;
+pub(crate) mod fork;
 pub(crate) mod history_events;
 pub mod history_import;
 pub(crate) mod native_cleanup;
+pub(crate) mod native_jsonl;
 pub(crate) mod opencode_history;
+pub(crate) mod rewind;
+pub(crate) mod session_lifecycle;
 pub(crate) mod switch_briefing;
 
 use log::{debug, info, warn};
