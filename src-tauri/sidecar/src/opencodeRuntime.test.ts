@@ -102,6 +102,25 @@ function deferred<T>() {
 }
 
 describe('OpenCodeRuntime', () => {
+  it('reuses a started runtime across lifecycle generation updates', async () => {
+    const { port } = createPort();
+    const runtime = new OpenCodeRuntime(createConfig(), port);
+
+    await runtime.start();
+
+    expect(runtime.canReuse(createConfig({
+      agentSessionId: 'opencode-new',
+      runtimeGeneration: 2,
+    }))).toBe(true);
+    expect(runtime.canReuse(createConfig({
+      agentSessionId: 'opencode-new',
+      model: 'gpt-5-mini',
+      runtimeGeneration: 2,
+    }))).toBe(false);
+
+    await runtime.shutdown();
+  });
+
   it('ignores OpenCode heartbeat events without emitting diagnostics or logs', async () => {
     const { port, client } = createPort();
     const emitted: unknown[] = [];
