@@ -12,3 +12,5 @@
 - [x] 双通道 dedup：notification 与 item lifecycle 不重复 emit 边界
 - [x] turn 结束前 flush 未配对的 compaction completion（兼容部分 build 行为）
 - [x] 单测覆盖 compact 发起与完成事件序列
+
+**实现说明（机制偏离）：** 双通道按互补语义实现——`contextCompaction` item lifecycle 为权威，`thread/compacted` notification 仅作补充（flush 未配对 item；无 item 时合成边界）。`pre_tokens` 取自当回合 turn usage（`input_tokens + cached_input_tokens`），协议不提供压缩后计数故 `post_tokens` 恒为 0。

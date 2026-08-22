@@ -380,6 +380,25 @@ function isReconnectingStreamStatus(event: AgentMessage): boolean {
   return event.kind === 'stream_status' && event.data.is_reconnecting;
 }
 
+/**
+ * Splices `incoming` over the most recent event accepted by `matches`,
+ * scanning backwards; appends when no replaceable placeholder exists.
+ * Keeps single-placeholder markers (reconnecting status, compacting hint)
+ * from stacking duplicates.
+ */
+function replaceLastOrAppend(
+  events: AgentMessage[],
+  incoming: AgentMessage,
+  matches: (entry: AgentMessage) => boolean,
+): AgentMessage[] {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (matches(events[i])) {
+      return [...events.slice(0, i), incoming, ...events.slice(i + 1)];
+    }
+  }
+  return [...events, incoming];
+}
+
 function queueStreamingDelta(
   sessionId: string,
   key: keyof StreamingBuffer,
@@ -2069,38 +2088,21 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
           const baseEvents = supersededAssistantIds && supersededAssistantIds.size > 0
             ? prev.filter((entry) => entry.kind !== 'assistant' || !supersededAssistantIds.has(entry.data.uuid))
             : prev;
-          // Replace the previous reconnecting status instead of stacking
+          // Replace the previous placeholder instead of stacking duplicates.
           let newEvents: AgentMessage[];
           if (event.kind === 'stream_status' && event.data.is_reconnecting) {
-            let replaceIdx = -1;
-            for (let i = baseEvents.length - 1; i >= 0; i--) {
-              const e = baseEvents[i];
-              if (isReconnectingStreamStatus(e)) {
-                replaceIdx = i;
-                break;
-              }
-            }
-            newEvents = replaceIdx >= 0
-              ? [...baseEvents.slice(0, replaceIdx), event, ...baseEvents.slice(replaceIdx + 1)]
-              : [...baseEvents, event];
+            newEvents = replaceLastOrAppend(baseEvents, event, isReconnectingStreamStatus);
           } else if (
             event.kind === 'compact' &&
             event.data.compact_metadata?.status === 'completed'
           ) {
             // A completed compaction replaces its own loading placeholder
             // instead of stacking a second compact marker.
-            let replaceIdx = -1;
-            for (let i = baseEvents.length - 1; i >= 0; i--) {
-              const e = baseEvents[i];
-              if (e.kind !== 'compact') continue;
-              if (e.data.compact_metadata?.status === 'compacting') {
-                replaceIdx = i;
-              }
-              break;
-            }
-            newEvents = replaceIdx >= 0
-              ? [...baseEvents.slice(0, replaceIdx), event, ...baseEvents.slice(replaceIdx + 1)]
-              : [...baseEvents, event];
+            newEvents = replaceLastOrAppend(
+              baseEvents,
+              event,
+              (entry) => entry.kind === 'compact' && entry.data.compact_metadata?.status === 'compacting',
+            );
           } else {
             newEvents = [...baseEvents, event];
           }

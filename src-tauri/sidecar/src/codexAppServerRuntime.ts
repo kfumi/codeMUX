@@ -951,9 +951,12 @@ export class CodexAppServerRuntime {
         return;
       }
       case 'thread/compacted': {
-        // Issue 08: deprecated double-channel completion signal. The
-        // contextCompaction item lifecycle is the authoritative boundary
-        // source; swallowing this notification keeps the boundary single.
+        // Issue 08: deprecated double-channel completion signal, kept as a
+        // complementary fallback. The contextCompaction item lifecycle stays
+        // authoritative; per-item dedup applies, and builds that emit no item
+        // lifecycle at all still get a boundary so the marker is never lost.
+        if (!turn) return;
+        this.completeCompactionFromNotification(turn);
         return;
       }
       case 'error': {
@@ -1138,6 +1141,11 @@ export class CodexAppServerRuntime {
       turn.emittedCompactionItemIds.add(itemId);
     }
     const trigger = turn.compactionTrigger === 'manual' ? 'manual' : 'auto';
+    // The app-server protocol carries no post-compaction token count on
+    // either channel; the last known context size (input + cached input) is
+    // the closest faithful `pre_tokens` value.
+    const usage = turn.usage;
+    const preTokens = usage ? usage.input_tokens + usage.cached_input_tokens : 0;
     process.stderr.write(
       `[codex-app-server] Compaction boundary: item=${itemId} status=${status} trigger=${trigger}\n`,
     );
@@ -1150,10 +1158,28 @@ export class CodexAppServerRuntime {
       compact_metadata: {
         trigger,
         status,
-        pre_tokens: 0,
+        pre_tokens: preTokens,
         post_tokens: 0,
       },
     });
+  }
+
+  /**
+   * Issue 08: `thread/compacted` (deprecated) complementary completion
+   * signal. The contextCompaction item lifecycle remains authoritative —
+   * pending items are flushed now (a later `item/completed` for the same ids
+   * is deduped), and builds that emit no item lifecycle at all still get a
+   * synthetic boundary.
+   */
+  private completeCompactionFromNotification(turn: ActiveTurnState): void {
+    if (turn.pendingCompactionItemIds.size > 0) {
+      this.flushPendingCompactionBoundaries(turn);
+      return;
+    }
+    if (turn.emittedCompactionItemIds.size > 0) {
+      return;
+    }
+    this.emitCompactionBoundary(turn, `thread-compacted:${turn.turnId ?? 'unknown'}`, 'completed');
   }
 
   /**
