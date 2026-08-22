@@ -161,7 +161,7 @@ CodeMUX 当前通过 `@openai/codex-sdk` 驱动 Codex Agent Kind。该路径在�
 | auto-review | on-request | workspace-write | guardian_subagent |
 | full-access | never | danger-full-access | — |
 
-> **修订（2026-08-22，对齐官方 ChatGPT Codex App）**：auto-review 档 `approvalsReviewer` 由 `auto_review` 改为官方值 `guardian_subagent`（对应官方「仅对检测到的风险操作请求批准」——低风险由守护子代理自动放行，检测到风险才询问）；默认档由 `full-access` 收紧为 `auto`（官方「请求批准」语义）；桌面选择器文案改为 请求批准 / 自动批准 / 完全访问，read-only 保留为 CodeMUX 额外入口。枚举 id 与存量快照迁移映射均不变。
+> **修订（2026-08-22，对齐官方 ChatGPT Codex App）**：auto-review 档 `approvalsReviewer` 由 `auto_review` 改为官方值 `guardian_subagent`（对应官方「帮我批准」——仅对检测到的风险操作请求批准，低风险由守护子代理自动放行）；默认档由 `full-access` 收紧为 `auto`（官方「请求批准」语义）；桌面选择器收敛为官方三档入口并逐字采用官方文案（请求批准 / 帮我批准 / 完全访问权限），read-only 不再常驻、仅存量 read-only 会话保留退出口。枚举 id 与存量快照迁移映射均不变。
 
 - **Plan Mode toggle**：独立 persisted 状态；开启时 `turn/start` 传 plan `collaborationMode`（自 `collaborationMode/list` 解析）；关闭时传 code/auto collaboration mode。
 - Plan turn 成功完成且 plan 文本存在 → emit 合成 **Plan Approval** Interactive Request（kind 区分于 tool approval）。

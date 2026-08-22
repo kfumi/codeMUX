@@ -43,7 +43,7 @@ describe('AgentPermissionSelector', () => {
     expect(onPlanModeChange).toHaveBeenCalledWith('on');
   });
 
-  it('shows the four Codex workflow tiers', () => {
+  it('shows the official three Codex approval tiers', () => {
     render(
       <AgentPermissionSelector
         agentKind="codex"
@@ -54,17 +54,43 @@ describe('AgentPermissionSelector', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
+    fireEvent.click(screen.getByRole('button', { name: '完全访问权限' }));
 
     const items = screen.getAllByRole('menuitemradio');
-    expect(items).toHaveLength(4);
-    expect(screen.getByText('只读模式')).toBeTruthy();
+    expect(items).toHaveLength(3);
     expect(screen.getByText('请求批准')).toBeTruthy();
-    expect(screen.getByText('自动批准')).toBeTruthy();
-    expect(screen.getAllByText('完全访问')).toHaveLength(2);
-    // Claude-only and OpenCode-only entries must not leak into Codex.
+    expect(screen.getByText('帮我批准')).toBeTruthy();
+    expect(screen.getAllByText('完全访问权限')).toHaveLength(2);
+    // read-only is no longer a standing entry; Claude/OpenCode-only entries
+    // must not leak into Codex either.
+    expect(screen.queryByText('只读模式')).toBeNull();
     expect(screen.queryByText('变更前确认')).toBeNull();
     expect(screen.queryByText('自动编辑')).toBeNull();
+  });
+
+  it('keeps a read-only exit hatch for sessions stored on the read-only tier', () => {
+    const onPermissionConfigChange = vi.fn();
+
+    render(
+      <AgentPermissionSelector
+        agentKind="codex"
+        permissionConfig={{ kind: 'codex', workflowMode: 'read-only', networkAccessEnabled: false }}
+        planMode="off"
+        onPermissionConfigChange={onPermissionConfigChange}
+        onPlanModeChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '只读模式' }));
+    expect(screen.getAllByRole('menuitemradio')).toHaveLength(4);
+    expect(screen.getByText('请求批准')).toBeTruthy();
+
+    fireEvent.click(screen.getAllByText('只读模式')[1]);
+    expect(onPermissionConfigChange).toHaveBeenCalledWith({
+      kind: 'codex',
+      workflowMode: 'read-only',
+      networkAccessEnabled: false,
+    });
   });
 
   it('switches Codex between workflow tiers with distinct configs', () => {
@@ -81,18 +107,18 @@ describe('AgentPermissionSelector', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
-    fireEvent.click(screen.getByText('只读模式'));
+    fireEvent.click(screen.getByRole('button', { name: '完全访问权限' }));
+    fireEvent.click(screen.getByText('请求批准'));
     expect(onPermissionConfigChange).toHaveBeenCalledWith({
       kind: 'codex',
-      workflowMode: 'read-only',
-      networkAccessEnabled: false,
+      workflowMode: 'auto',
+      networkAccessEnabled: true,
     });
     expect(onPlanModeChange).toHaveBeenCalledWith('off');
 
-    // The uncontrolled trigger keeps showing the last committed config.
-    fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
-    fireEvent.click(screen.getByText('自动批准'));
+    // The uncontrolled trigger keeps reflecting the (unchanged) prop config.
+    fireEvent.click(screen.getByRole('button', { name: '完全访问权限' }));
+    fireEvent.click(screen.getByText('帮我批准'));
     expect(onPermissionConfigChange).toHaveBeenLastCalledWith({
       kind: 'codex',
       workflowMode: 'auto-review',
@@ -148,7 +174,7 @@ describe('AgentPermissionSelector', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
+    fireEvent.click(screen.getByRole('button', { name: '完全访问权限' }));
     fireEvent.click(screen.getByText('请求批准'));
 
     expect(onModeChange).toHaveBeenCalledWith(

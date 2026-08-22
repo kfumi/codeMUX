@@ -66,18 +66,25 @@ const opencodeOptions: PermissionOption[] = [
   { mode: 'full_access', label: '完全访问', description: 'OpenCode 使用服务端按工具配置的权限规则。', icon: Shield, tone: 'warning' },
 ];
 
-// Workflow Mode tiers (ADR 0010): read-only / auto / auto-review / full-access.
-// Labels mirror the official ChatGPT Codex App approval selector — 请求批准 /
-// 自动批准（仅对检测到的风险操作请求批准）/ 完全访问 — with read-only kept as a
-// CodeMUX-only extra entry. Plan Mode is an orthogonal composer toggle
-// (Issue 07) — it only appears here while a legacy plan-mode session still
-// needs a way to switch back off.
+// Workflow Mode tiers (ADR 0010): auto / auto-review / full-access, worded
+// verbatim after the official ChatGPT Codex App approval selector. read-only
+// stays a valid internal enum (legacy snapshots migrate onto it) but only
+// surfaces as an exit hatch for sessions already stored on that tier. Plan
+// Mode is an orthogonal composer toggle (Issue 07) and follows the same
+// legacy-session-only pattern.
 const codexWorkflowOptions: PermissionOption[] = [
-  { mode: 'read_only', label: '只读模式', description: '只读探索代码库，不写入文件。', icon: Eye },
-  { mode: 'auto_edit', label: '请求批准', description: '工作区内读写，编辑与联网等操作先征求批准。', icon: BookOpen },
-  { mode: 'auto_review', label: '自动批准', description: '低风险操作由守护子代理自动放行，仅检测到风险时询问。', icon: FileSearch },
-  { mode: 'full_access', label: '完全访问', description: '跳过审批，允许不受限访问，风险更高。', icon: Shield, tone: 'warning' },
+  { mode: 'auto_edit', label: '请求批准', description: '编辑外部文件和使用互联网时始终询问', icon: BookOpen },
+  { mode: 'auto_review', label: '帮我批准', description: '仅对检测到的风险操作请求批准', icon: FileSearch },
+  { mode: 'full_access', label: '完全访问权限', description: '可不受限制地访问互联网和你电脑上的任何文件', icon: Shield, tone: 'warning' },
 ];
+
+/** Exit hatch for sessions whose stored snapshot is still on the read-only tier. */
+const codexReadOnlyOption: PermissionOption = {
+  mode: 'read_only',
+  label: '只读模式',
+  description: '只读探索代码库，不写入文件。',
+  icon: Eye,
+};
 
 const codexPlanOption: PermissionOption = {
   mode: 'plan',
@@ -108,16 +115,21 @@ export function AgentPermissionSelector({
     ? serializePermissionConfig(agentKind, permissionConfig)
     : buildDefaultPermissionConfig(agentKind);
   const selectedMode = inferExecutionMode(agentKind, normalized, planMode);
+  const codexWorkflowTier = normalized.kind === 'codex' ? normalized.workflowMode : null;
 
   const options = useMemo(() => {
     if (agentKind === 'opencode') return opencodeOptions;
     if (agentKind === 'codex') {
-      // Legacy plan-mode sessions keep the plan entry so they can switch back
-      // off; fresh sessions expose the pure four Workflow tiers.
-      return planMode === 'on' ? [codexPlanOption, ...codexWorkflowOptions] : codexWorkflowOptions;
+      // The official three-tier selector; sessions already stored on the
+      // read-only tier keep that entry as an exit hatch, and legacy plan-mode
+      // sessions keep the plan entry so they can switch back off.
+      const tierOptions = codexWorkflowTier === 'read-only'
+        ? [codexReadOnlyOption, ...codexWorkflowOptions]
+        : codexWorkflowOptions;
+      return planMode === 'on' ? [codexPlanOption, ...tierOptions] : tierOptions;
     }
     return claudeOptions;
-  }, [agentKind, planMode]);
+  }, [agentKind, planMode, codexWorkflowTier]);
   const selected = useMemo(
     () => options.find((option) => option.mode === selectedMode) ?? options[0],
     [options, selectedMode],
