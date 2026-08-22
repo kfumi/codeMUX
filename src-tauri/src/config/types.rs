@@ -57,7 +57,9 @@ fn default_claude_permission_mode() -> String {
 }
 
 fn default_codex_workflow_mode() -> String {
-    "full-access".to_string()
+    // Mirrors CODEX_DEFAULT_PERMISSIONS in the sidecar / frontend: the
+    // conservative 「请求批准」tier aligned with the official Codex App.
+    "auto".to_string()
 }
 
 fn default_notification_sound() -> String {

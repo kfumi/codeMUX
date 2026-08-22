@@ -59,13 +59,12 @@ describe('AgentPermissionSelector', () => {
     const items = screen.getAllByRole('menuitemradio');
     expect(items).toHaveLength(4);
     expect(screen.getByText('只读模式')).toBeTruthy();
-    expect(screen.getByText('自动模式')).toBeTruthy();
-    expect(screen.getByText('自动审查')).toBeTruthy();
+    expect(screen.getByText('请求批准')).toBeTruthy();
+    expect(screen.getByText('自动批准')).toBeTruthy();
     expect(screen.getAllByText('完全访问')).toHaveLength(2);
     // Claude-only and OpenCode-only entries must not leak into Codex.
     expect(screen.queryByText('变更前确认')).toBeNull();
     expect(screen.queryByText('自动编辑')).toBeNull();
-    expect(screen.queryByText('请求批准')).toBeNull();
   });
 
   it('switches Codex between workflow tiers with distinct configs', () => {
@@ -93,7 +92,7 @@ describe('AgentPermissionSelector', () => {
 
     // The uncontrolled trigger keeps showing the last committed config.
     fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
-    fireEvent.click(screen.getByText('自动审查'));
+    fireEvent.click(screen.getByText('自动批准'));
     expect(onPermissionConfigChange).toHaveBeenLastCalledWith({
       kind: 'codex',
       workflowMode: 'auto-review',
@@ -150,7 +149,7 @@ describe('AgentPermissionSelector', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
-    fireEvent.click(screen.getByText('自动模式'));
+    fireEvent.click(screen.getByText('请求批准'));
 
     expect(onModeChange).toHaveBeenCalledWith(
       { kind: 'codex', workflowMode: 'auto', networkAccessEnabled: true },
@@ -178,7 +177,7 @@ describe('AgentPermissionSelector', () => {
     );
 
     // workspace-write migrates to the auto workflow tier.
-    expect(screen.getByRole('button', { name: '自动模式' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '请求批准' })).toBeTruthy();
   });
 
   it('shows OpenCode plan and full-access modes without exposing Claude modes', () => {

@@ -59,7 +59,7 @@ CodeMUX 当前通过 `@openai/codex-sdk` 驱动 Codex Agent Kind。该路径在�
 
 16. As a Codex 用户，我希望在 composer 选择 read-only Workflow Mode，以便 agent 默认只读探索代码库。
 17. As a Codex 用户，我希望选择 auto Workflow Mode，以便 agent 在工作区内读写但危险操作仍可审批。
-18. As a Codex 用户，我希望选择 auto-review Workflow Mode，以便高风险操作经自动审查流。
+18. As a Codex 用户，我希望选择 auto-review Workflow Mode（自动批准），以便低风险操作由守护子代理自动放行、仅检测到的风险操作询问我。
 19. As a Codex 用户，我希望选择 full-access Workflow Mode，以便在信任环境下跳过审批（并理解风险）。
 20. As a Codex 用户，我希望 Workflow Mode 变更在下一 turn 生效（若 turn 进行中），以便行为可预期。
 21. As a Codex 用户，我希望 Workflow Mode 映射到正确的 sandbox 与 approvalPolicy，以便与 Codex 原生语义一致。
@@ -152,14 +152,16 @@ CodeMUX 当前通过 `@openai/codex-sdk` 驱动 Codex Agent Kind。该路径在�
 
 ### Permission Snapshot 与 turn 参数
 
-- **Workflow Mode → turn policy 映射**（四档）：
+- **Workflow Mode → turn policy 映射**（四档，已对齐官方 App 三档审批选择器）：
 
 | Workflow Mode | approvalPolicy | sandbox | approvalsReviewer |
 |---------------|----------------|---------|-------------------|
 | read-only | on-request | read-only | — |
 | auto | on-request | workspace-write | — |
-| auto-review | on-request | workspace-write | auto_review |
+| auto-review | on-request | workspace-write | guardian_subagent |
 | full-access | never | danger-full-access | — |
+
+> **修订（2026-08-22，对齐官方 ChatGPT Codex App）**：auto-review 档 `approvalsReviewer` 由 `auto_review` 改为官方值 `guardian_subagent`（对应官方「仅对检测到的风险操作请求批准」——低风险由守护子代理自动放行，检测到风险才询问）；默认档由 `full-access` 收紧为 `auto`（官方「请求批准」语义）；桌面选择器文案改为 请求批准 / 自动批准 / 完全访问，read-only 保留为 CodeMUX 额外入口。枚举 id 与存量快照迁移映射均不变。
 
 - **Plan Mode toggle**：独立 persisted 状态；开启时 `turn/start` 传 plan `collaborationMode`（自 `collaborationMode/list` 解析）；关闭时传 code/auto collaboration mode。
 - Plan turn 成功完成且 plan 文本存在 → emit 合成 **Plan Approval** Interactive Request（kind 区分于 tool approval）。

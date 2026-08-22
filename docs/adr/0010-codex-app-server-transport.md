@@ -15,7 +15,7 @@ Codex SDK 路径无法实现工具级 Interactive Request 审批、Plan Mode 闭
 1. **硬切，无 feature flag。** 合并即删除 SDK 加载链、`codexRuntime.ts`、`sdk_mode` 配置；不做用户可见的 transport 回退。
 2. **Runtime 包替换。** `@openai/codex-sdk` → `@openai/codex@<version>`，`candidate_binaries`（npm alias 提升/嵌套/vendor 多候选布局）校验 `codex` / `codex.exe`。
 3. **Session resume 尽力而为。** 优先 `thread/resume` 已有 `thr_*` mapping；失败则 mint 新 thread、替换 mapping，写 `system_event`（`native_session_rebuilt`）；CodeMUX Event 时间线不变。
-4. **Plan Mode 正交于 Workflow Mode。** Workflow Mode 四档（read-only / auto / auto-review / full-access）写入 Permission Snapshot；Plan Mode 为独立 composer toggle，经 `collaborationMode` + turn 完成后 Plan Approval（Implement / Dismiss）+ 自动 implementation turn。
+4. **Plan Mode 正交于 Workflow Mode。** Workflow Mode 四档（read-only / auto / auto-review / full-access）写入 Permission Snapshot（枚举 id 与展示文案后经修订对齐官方三档审批选择器，见文末修订节）；Plan Mode 为独立 composer toggle，经 `collaborationMode` + turn 完成后 Plan Approval（Implement / Dismiss）+ 自动 implementation turn。
 5. **首版能力范围。** 包含：turn、工具/问答/Plan 审批、`thread/compact/start`、fork（合并入主 runtime）、四档 Workflow、Plan toggle、Mobile Companion 全量对齐。不包含：`turn/steer`、`thread/inject_items`、`thread/rollback`、goals。
 6. **Compat 代理长期保留（第三方）。** 官方 OpenAI 不经代理；`codex_needs_proxy: true` 的供应商仍启动 `proxyManager`，app-server 配置 `base_url = http://127.0.0.1:15722`。逐步退役 compat 内的 plan block / interactive 逻辑，仅保留协议转换。
 7. **进程模型。** `ensure_session` spawn app-server，`delete_session` dispose；崩溃后按 Decision 3 恢复。
@@ -34,3 +34,18 @@ Codex SDK 路径无法实现工具级 Interactive Request 审批、Plan Mode 闭
 - `respond_to_permission` 必须新增 Codex handler；Mobile Companion 同步四档 Workflow 与 Plan toggle（ADR 0008 审批约束不变）。
 - Agent Kind Switch 仍用 Switch Briefing 文本注入，首版不依赖 `thread/inject_items`（ADR 0007 不变）。
 - 估算工作量 4–5 人月（单人）；硬切 PR 体积大，需 fake-app-server 单测 + 官方/第三方 upstream 分层 E2E。
+
+## 修订（2026-08-22）：Workflow Mode 对齐官方 ChatGPT Codex App 三档审批选择器
+
+迁移落地后将自研四档收敛的展示与参数对齐官方 App 的三档审批选择器语义：
+
+| 内部枚举（不变） | 参数下发 | 官方选择器入口 |
+|------------------|----------|----------------|
+| read-only | on-request + read-only | —（CodeMUX 保留的额外入口） |
+| auto | on-request + workspace-write | 「请求批准」（编辑/联网必问） |
+| auto-review | on-request + workspace-write + `approvalsReviewer: guardian_subagent` | 「仅对检测到的风险操作请求批准」——低风险由守护子代理自动放行，检测到风险才询问用户 |
+| full-access | never + danger-full-access | 「完全访问」 |
+
+- **reviewer 值替换**：auto-review 档的 `approvalsReviewer` 由 `auto_review` 改为官方新值 `guardian_subagent`；类型联合保留 `auto_review` 以兼容存量快照反序列化。
+- **默认档收紧**：默认 workflowMode 由 `full-access` 改为 `auto`（即官方保守默认「请求批准」，workspace-write + on-request），前后端 `CODEX_DEFAULT_PERMISSIONS` 与 Rust 侧 `default_codex_workflow_mode` serde 默认同步；`mapExecutionModeToPermissionConfig` 的 `full_access` 分支改为显式 full-access 配置，不再展开默认值。
+- **兼容性**：枚举 id 不改名、read-only 档保留，存量 permission snapshot 迁移映射（sandbox 三元组 → 档位）不受影响。

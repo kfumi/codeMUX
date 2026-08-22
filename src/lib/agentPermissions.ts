@@ -35,9 +35,11 @@ const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = [
 
 const CODEX_WORKFLOW_MODES: CodexWorkflowMode[] = ['read-only', 'auto', 'auto-review', 'full-access'];
 
-// Shared defaults — keep in sync with src-tauri/sidecar/src/agentPermissions.ts
+// Shared defaults — keep in sync with src-tauri/sidecar/src/agentPermissions.ts.
+// Default tier mirrors the official ChatGPT Codex App's conservative
+// 「请求批准」selector entry (workspace-write + on-request).
 const CODEX_DEFAULT_PERMISSIONS: Omit<CodexPermissionConfig, 'kind'> = {
-  workflowMode: 'full-access',
+  workflowMode: 'auto',
   networkAccessEnabled: true,
 };
 
@@ -80,9 +82,11 @@ export function mapExecutionModeToPermissionConfig(
         return { kind: 'codex', workflowMode: 'auto-review', networkAccessEnabled: true };
       case 'full_access':
       default:
-        // 'plan' never reaches here — Codex Plan Mode is an orthogonal toggle
-        // (ADR 0010) and callers flip it without touching the tier config.
-        return { kind: 'codex', ...CODEX_DEFAULT_PERMISSIONS };
+        // Explicit tier — do NOT spread CODEX_DEFAULT_PERMISSIONS here: the
+        // default is the conservative 「请求批准」tier, not 完全访问. 'plan'
+        // never reaches this branch either — Codex Plan Mode is an orthogonal
+        // toggle (ADR 0010) and callers flip it without touching the tier.
+        return { kind: 'codex', workflowMode: 'full-access', networkAccessEnabled: true };
     }
   }
 

@@ -66,13 +66,16 @@ const opencodeOptions: PermissionOption[] = [
   { mode: 'full_access', label: '完全访问', description: 'OpenCode 使用服务端按工具配置的权限规则。', icon: Shield, tone: 'warning' },
 ];
 
-// Workflow Mode four tiers (ADR 0010): read-only / auto / auto-review / full-access.
-// Plan Mode is an orthogonal composer toggle (Issue 07) — it only appears here
-// while a legacy plan-mode session still needs a way to switch back off.
+// Workflow Mode tiers (ADR 0010): read-only / auto / auto-review / full-access.
+// Labels mirror the official ChatGPT Codex App approval selector — 请求批准 /
+// 自动批准（仅对检测到的风险操作请求批准）/ 完全访问 — with read-only kept as a
+// CodeMUX-only extra entry. Plan Mode is an orthogonal composer toggle
+// (Issue 07) — it only appears here while a legacy plan-mode session still
+// needs a way to switch back off.
 const codexWorkflowOptions: PermissionOption[] = [
   { mode: 'read_only', label: '只读模式', description: '只读探索代码库，不写入文件。', icon: Eye },
-  { mode: 'auto_edit', label: '自动模式', description: '工作区内读写，危险操作仍需审批。', icon: BookOpen },
-  { mode: 'auto_review', label: '自动审查', description: '高风险操作经自动审查流处理。', icon: FileSearch },
+  { mode: 'auto_edit', label: '请求批准', description: '工作区内读写，编辑与联网等操作先征求批准。', icon: BookOpen },
+  { mode: 'auto_review', label: '自动批准', description: '低风险操作由守护子代理自动放行，仅检测到风险时询问。', icon: FileSearch },
   { mode: 'full_access', label: '完全访问', description: '跳过审批，允许不受限访问，风险更高。', icon: Shield, tone: 'warning' },
 ];
 

@@ -18,7 +18,7 @@ describe('agentPermissions', () => {
     });
     expect(buildDefaultPermissionConfig('codex')).toEqual({
       kind: 'codex',
-      workflowMode: 'full-access',
+      workflowMode: 'auto',
       networkAccessEnabled: true,
     });
     expect(buildDefaultPermissionConfig('opencode')).toEqual({
@@ -152,7 +152,7 @@ describe('agentPermissions', () => {
   it('serializes malformed or missing values to safe defaults', () => {
     expect(serializePermissionConfig('codex', { kind: 'codex', workflowMode: 'bad' })).toEqual({
       kind: 'codex',
-      workflowMode: 'full-access',
+      workflowMode: 'auto',
       networkAccessEnabled: true,
     });
     expect(serializePermissionConfig('claude_code', null)).toEqual({

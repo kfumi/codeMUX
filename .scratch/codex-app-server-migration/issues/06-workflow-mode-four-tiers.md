@@ -11,3 +11,5 @@
 - [x] Workflow Mode 持久化在 Session Permission Snapshot；Agent Kind Switch 进入 Codex 时按 ADR 0007 重置
 - [x] `update_permissions` 在 turn 进行中返回「下一 turn 生效」语义（若 applicable）
 - [x] 单测或集成测验证至少两档 policy 差异传入 turn/start
+
+**实现说明（修订，2026-08-22）：** 对齐官方 ChatGPT Codex App 三档审批选择器——auto-review 档 `approvalsReviewer` 由 `auto_review` 改为官方 `guardian_subagent`（低风险由守护子代理自动放行、检测到风险才询问），默认档由 `full-access` 收紧为 `auto`，桌面选择器文案改为 只读模式 / 请求批准 / 自动批准 / 完全访问。枚举 id 与 read-only 入口保留，存量 permission snapshot 迁移映射不变；详见 ADR 0010 修订节与 spec.md 映射表修订注。移动端 `MobileComposer` / `CreateSessionSheet` 的档位文案暂未同步（后续跟进）。

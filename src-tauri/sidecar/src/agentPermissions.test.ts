@@ -39,10 +39,10 @@ describe('sidecar agent permissions', () => {
     });
   });
 
-  it('uses full-access Codex defaults when no config is provided', () => {
+  it('uses the conservative auto-tier Codex defaults when no config is provided', () => {
     expect(buildCodexThreadPermissionOptions(undefined)).toEqual({
-      sandboxMode: 'danger-full-access',
-      approvalPolicy: 'never',
+      sandboxMode: 'workspace-write',
+      approvalPolicy: 'on-request',
       networkAccessEnabled: true,
     });
   });
@@ -75,7 +75,7 @@ describe('sidecar agent permissions', () => {
     });
   });
 
-  it('maps the auto-review workflow tier to workspace-write with the auto_review reviewer', () => {
+  it('maps the auto-review workflow tier to workspace-write with the guardian_subagent reviewer', () => {
     const config: SidecarPermissionConfig = {
       kind: 'codex',
       workflowMode: 'auto-review',
@@ -85,7 +85,7 @@ describe('sidecar agent permissions', () => {
     expect(buildCodexThreadPermissionOptions(config)).toEqual({
       sandboxMode: 'workspace-write',
       approvalPolicy: 'on-request',
-      approvalsReviewer: 'auto_review',
+      approvalsReviewer: 'guardian_subagent',
       networkAccessEnabled: true,
     });
   });
@@ -142,8 +142,8 @@ describe('sidecar agent permissions', () => {
     expect(describeCodexPermissionOptions({
       sandboxMode: 'workspace-write',
       approvalPolicy: 'on-request',
-      approvalsReviewer: 'auto_review',
+      approvalsReviewer: 'guardian_subagent',
       networkAccessEnabled: true,
-    })).toBe('workspace-write/on-request/auto_review/network-on');
+    })).toBe('workspace-write/on-request/guardian_subagent/network-on');
   });
 });

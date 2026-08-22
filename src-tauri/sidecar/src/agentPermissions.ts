@@ -20,7 +20,7 @@ export type CodexTurnPolicy = {
   approvalPolicy: CodexApprovalPolicy;
   networkAccessEnabled: boolean;
   /** Present only for the auto-review workflow tier. */
-  approvalsReviewer?: 'auto_review';
+  approvalsReviewer?: 'auto_review' | 'guardian_subagent';
 };
 
 const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = [
@@ -35,23 +35,31 @@ const CODEX_SANDBOX_MODES: CodexSandboxMode[] = ['read-only', 'workspace-write',
 const CODEX_APPROVAL_POLICIES: CodexApprovalPolicy[] = ['untrusted', 'on-request', 'never'];
 const CODEX_WORKFLOW_MODES: CodexWorkflowMode[] = ['read-only', 'auto', 'auto-review', 'full-access'];
 
-// Shared default triplets — keep in sync with src/lib/agentPermissions.ts
+// Shared default triplets — keep in sync with src/lib/agentPermissions.ts.
+// Default tier mirrors the official ChatGPT Codex App's conservative
+// 「请求批准」selector entry (workspace-write + on-request).
 const CODEX_DEFAULT_PERMISSIONS = {
-  workflowMode: 'full-access' as CodexWorkflowMode,
-  sandboxMode: 'danger-full-access' as CodexSandboxMode,
-  approvalPolicy: 'never' as CodexApprovalPolicy,
+  workflowMode: 'auto' as CodexWorkflowMode,
+  sandboxMode: 'workspace-write' as CodexSandboxMode,
+  approvalPolicy: 'on-request' as CodexApprovalPolicy,
   networkAccessEnabled: true,
 };
 
 /**
- * Workflow Mode four-tier mapping (ADR 0010 / spec Implementation Decisions):
+ * Workflow Mode four-tier mapping (ADR 0010 / spec Implementation Decisions),
+ * aligned with the official ChatGPT Codex App approval selector:
  *
- * | Workflow Mode | approvalPolicy | sandbox             | approvalsReviewer |
- * |---------------|----------------|---------------------|-------------------|
- * | read-only     | on-request     | read-only           | —                 |
- * | auto          | on-request     | workspace-write     | —                 |
- * | auto-review   | on-request     | workspace-write     | auto_review       |
- * | full-access   | never          | danger-full-access  | —                 |
+ * | Workflow Mode | approvalPolicy | sandbox             | approvalsReviewer  | official selector            |
+ * |---------------|----------------|---------------------|--------------------|------------------------------|
+ * | read-only     | on-request     | read-only           | —                  | — (CodeMUX extra)            |
+ * | auto          | on-request     | workspace-write     | —                  | 请求批准                       |
+ * | auto-review   | on-request     | workspace-write     | guardian_subagent  | 仅对检测到的风险操作请求批准（自动批准）   |
+ * | full-access   | never          | danger-full-access  | —                  | 完全访问                        |
+ *
+ * The auto-review tier sends the official `guardian_subagent` reviewer so
+ * low-risk operations are auto-approved by the guardian subagent and only
+ * detected-risk operations ask the user. Legacy `auto_review` stays in the
+ * reviewer union for snapshot compatibility.
  */
 const CODEX_WORKFLOW_TIER_POLICIES: Record<CodexWorkflowMode, Omit<CodexTurnPolicy, 'networkAccessEnabled'>> = {
   'read-only': {
@@ -65,7 +73,7 @@ const CODEX_WORKFLOW_TIER_POLICIES: Record<CodexWorkflowMode, Omit<CodexTurnPoli
   'auto-review': {
     sandboxMode: 'workspace-write',
     approvalPolicy: 'on-request',
-    approvalsReviewer: 'auto_review',
+    approvalsReviewer: 'guardian_subagent',
   },
   'full-access': {
     sandboxMode: 'danger-full-access',

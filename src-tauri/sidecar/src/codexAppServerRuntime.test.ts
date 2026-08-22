@@ -207,10 +207,11 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         const threadStarts = receivedRequests(readLog(), 'thread/start');
         expect(threadStarts).toHaveLength(1);
         expect(threadStarts[0]?.params).toMatchObject({ cwd });
-        // Default permission snapshot (no permissionConfig): full access, no approvals.
+        // Default permission snapshot (no permissionConfig): conservative
+        // auto tier — workspace-write with on-request approvals.
         expect(threadStarts[0]?.params).toMatchObject({
-          approvalPolicy: 'never',
-          sandbox: 'danger-full-access',
+          approvalPolicy: 'on-request',
+          sandbox: 'workspace-write',
         });
 
         expect(events).toContainEqual(
@@ -338,7 +339,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
   it(
     'runs a full turn: streams deltas, emits the assistant message, and finishes with usage',
     async () => {
-      const { runtime, events, readLog, ensureCommand } = await createHarness(DEFAULT_SCENARIO);
+      const { runtime, events, readLog, ensureCommand, cwd } = await createHarness(DEFAULT_SCENARIO);
       try {
         await runtime.ensure(ensureCommand({ reasoningEffort: 'high' }));
         events.length = 0;
@@ -351,8 +352,14 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
           threadId: 'thread_1',
           input: [{ type: 'text', text: 'Say hello', text_elements: [] }],
           effort: 'high',
-          approvalPolicy: 'never',
-          sandboxPolicy: { type: 'dangerFullAccess' },
+          approvalPolicy: 'on-request',
+          sandboxPolicy: {
+            type: 'workspaceWrite',
+            writableRoots: [cwd],
+            networkAccess: true,
+            excludeTmpdirEnvVar: false,
+            excludeSlashTmp: false,
+          },
         });
 
         expect(eventTypes(events)).toEqual([
@@ -370,7 +377,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
           subtype: 'init',
           session_id: 'sess_1',
           cwd: ensureCommand().cwd,
-          permissionMode: 'danger-full-access/never/network-on',
+          permissionMode: 'workspace-write/on-request/network-on',
         });
         expect(events[1]).toMatchObject({ type: 'content_started', index: 0, content_kind: 'text' });
         expect(events[2]).toMatchObject({ type: 'text_delta', index: 0, text: 'Hello' });
@@ -447,7 +454,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
   );
 
   it(
-    'maps the auto-review workflow tier onto turn/start with the auto_review approvals reviewer',
+    'maps the auto-review workflow tier onto turn/start with the guardian_subagent approvals reviewer',
     async () => {
       const { runtime, events, readLog, ensureCommand, cwd } = await createHarness(DEFAULT_SCENARIO);
       try {
@@ -465,7 +472,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         expect(threadStarts[0]?.params).toMatchObject({
           approvalPolicy: 'on-request',
           sandbox: 'workspace-write',
-          approvalsReviewer: 'auto_review',
+          approvalsReviewer: 'guardian_subagent',
         });
 
         events.length = 0;
@@ -474,7 +481,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         const turnStarts = receivedRequests(readLog(), 'turn/start');
         expect(turnStarts[0]?.params).toMatchObject({
           approvalPolicy: 'on-request',
-          approvalsReviewer: 'auto_review',
+          approvalsReviewer: 'guardian_subagent',
           sandboxPolicy: {
             type: 'workspaceWrite',
             writableRoots: [cwd],
@@ -485,7 +492,7 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
         });
         expect(events[0]).toMatchObject({
           type: 'system_event',
-          permissionMode: 'workspace-write/on-request/auto_review/network-on',
+          permissionMode: 'workspace-write/on-request/guardian_subagent/network-on',
         });
       } finally {
         await runtime.shutdown();
