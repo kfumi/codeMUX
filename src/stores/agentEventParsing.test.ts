@@ -7,6 +7,7 @@ import {
   mapPersistedClaudeMessage,
   normalizeClaudeUserEvent,
   parseSdkUserMessage,
+  projectNativeSessionRebuiltData,
   shouldProcessTerminalEvent,
   shouldSuppressLiveEventWhileStopped,
 } from './agentEventParsing';
@@ -16,6 +17,36 @@ describe('interrupt marker detection', () => {
     expect(isInterruptMarker(INTERRUPT_MARKER)).toBe(true);
     expect(isInterruptMarker(' [Request interrupted by user] ')).toBe(true);
     expect(isInterruptMarker('request interrupted by user')).toBe(false);
+  });
+});
+
+describe('projectNativeSessionRebuiltData', () => {
+  it('projects all rebuild fields from a raw system event', () => {
+    expect(
+      projectNativeSessionRebuiltData({
+        content: 'Codex 原生会话恢复失败，已重建会话。',
+        agent_kind: 'codex',
+        previous_agent_session_id: 'thr_old',
+        agent_session_id: 'thr_new',
+      }),
+    ).toEqual({
+      content: 'Codex 原生会话恢复失败，已重建会话。',
+      agent_kind: 'codex',
+      previous_agent_session_id: 'thr_old',
+      agent_session_id: 'thr_new',
+    });
+  });
+
+  it('falls back to the default hint and drops non-string fields', () => {
+    expect(projectNativeSessionRebuiltData({})).toEqual({ content: '原生会话已重建。' });
+    expect(
+      projectNativeSessionRebuiltData({
+        content: '   ',
+        agent_kind: 42,
+        previous_agent_session_id: null,
+        agent_session_id: undefined,
+      }),
+    ).toEqual({ content: '原生会话已重建。' });
   });
 });
 

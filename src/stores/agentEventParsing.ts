@@ -433,6 +433,24 @@ function mapRuntimeSwitch(raw: Record<string, unknown>): Extract<ParsedStoreEven
   };
 }
 
+export type NativeSessionRebuiltData = Extract<ParsedStoreEvent, { kind: 'native_session_rebuilt' }>['data'];
+
+/**
+ * Shared field projection for `native_session_rebuilt` system events.
+ * Used by both the persisted-history parser (type: 'system') and the live
+ * system_event converter in codeMuxProtocol so the two stay in sync.
+ */
+export function projectNativeSessionRebuiltData(raw: Record<string, unknown>): NativeSessionRebuiltData {
+  return {
+    content: typeof raw.content === 'string' && raw.content.trim() ? raw.content : '原生会话已重建。',
+    ...(typeof raw.agent_kind === 'string' ? { agent_kind: raw.agent_kind } : {}),
+    ...(typeof raw.previous_agent_session_id === 'string'
+      ? { previous_agent_session_id: raw.previous_agent_session_id }
+      : {}),
+    ...(typeof raw.agent_session_id === 'string' ? { agent_session_id: raw.agent_session_id } : {}),
+  };
+}
+
 function mapNativeSessionRebuilt(raw: Record<string, unknown>): Extract<ParsedStoreEvent, { kind: 'native_session_rebuilt' }> | null {
   if (raw.type !== 'system' || raw.subtype !== 'native_session_rebuilt') {
     return null;
@@ -440,14 +458,7 @@ function mapNativeSessionRebuilt(raw: Record<string, unknown>): Extract<ParsedSt
 
   return {
     kind: 'native_session_rebuilt',
-    data: {
-      content: typeof raw.content === 'string' && raw.content.trim() ? raw.content : '原生会话已重建。',
-      ...(typeof raw.agent_kind === 'string' ? { agent_kind: raw.agent_kind } : {}),
-      ...(typeof raw.previous_agent_session_id === 'string'
-        ? { previous_agent_session_id: raw.previous_agent_session_id }
-        : {}),
-      ...(typeof raw.agent_session_id === 'string' ? { agent_session_id: raw.agent_session_id } : {}),
-    },
+    data: projectNativeSessionRebuiltData(raw),
   };
 }
 

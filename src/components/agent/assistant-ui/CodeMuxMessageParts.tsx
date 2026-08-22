@@ -582,10 +582,7 @@ function isPermissionUpdateDeferredData(value: unknown): value is { eventKind: s
 
 function PermissionUpdateDeferredSeam({ event }: { event: Extract<AgentMessage, { kind: 'permission_update_deferred' }> }) {
   return (
-    <div
-      className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]"
-      title={event.data.content}
-    >
+    <div className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
       <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
         — {event.data.content} —
       </span>
@@ -653,14 +650,13 @@ function NativeSessionRebuiltSeam({ event }: { event: Extract<AgentMessage, { ki
   const caption = nativeSessionRebuiltCaption(event.data.agent_kind);
 
   return (
-    <div
-      className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]"
-      title={event.data.content}
-    >
-      <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
-        {caption}
-      </span>
-    </div>
+    <TooltipHint content={event.data.content}>
+      <div className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+        <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
+          {caption}
+        </span>
+      </div>
+    </TooltipHint>
   );
 }
 

@@ -1,4 +1,4 @@
-import { parseSdkUserMessage, type SessionSummaryEvent } from '@/stores/agentEventParsing';
+import { parseSdkUserMessage, projectNativeSessionRebuiltData, type SessionSummaryEvent } from '@/stores/agentEventParsing';
 import type { AgentMessage } from '@/stores/agentStore';
 import type { AgentAssistantMessage, AgentPermissionRequest, AgentSystemMessage } from '@/types/agent';
 
@@ -386,16 +386,7 @@ export function toLegacySystemMessage(event: CodeMuxSystemEvent): AgentMessage {
   if (event.subtype === 'native_session_rebuilt') {
     return {
       kind: 'native_session_rebuilt',
-      data: {
-        content: typeof event.content === 'string' && event.content.trim()
-          ? event.content
-          : '原生会话已重建。',
-        ...(typeof event.agent_kind === 'string' ? { agent_kind: event.agent_kind } : {}),
-        ...(typeof event.previous_agent_session_id === 'string'
-          ? { previous_agent_session_id: event.previous_agent_session_id }
-          : {}),
-        ...(typeof event.agent_session_id === 'string' ? { agent_session_id: event.agent_session_id } : {}),
-      },
+      data: projectNativeSessionRebuiltData(event),
     };
   }
   if (event.subtype === 'permission_update_deferred') {
