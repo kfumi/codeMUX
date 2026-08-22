@@ -1658,6 +1658,66 @@ describe('agent store Codex history loading', () => {
     ]);
   });
 
+  it('replaces the compacting placeholder when the completed compact boundary arrives', async () => {
+    startSessionMock.mockImplementationOnce(async (sessionId, _prompt, _cwd, onEvent) => {
+      onEvent(JSON.stringify({
+        type: 'system_event',
+        subtype: 'compact_boundary',
+        session_id: sessionId,
+        event_id: 'compact-loading',
+        content: 'Conversation compacted',
+        compact_metadata: { trigger: 'manual', status: 'compacting', pre_tokens: 0, post_tokens: 0 },
+      }));
+      onEvent(JSON.stringify({
+        type: 'system_event',
+        subtype: 'compact_boundary',
+        session_id: sessionId,
+        event_id: 'compact-done',
+        content: 'Conversation compacted',
+        compact_metadata: { trigger: 'manual', status: 'completed', pre_tokens: 0, post_tokens: 0 },
+      }));
+      onEvent(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        uuid: 'result-compact-live',
+        session_id: sessionId,
+        duration_ms: 1,
+        duration_api_ms: 1,
+        num_turns: 1,
+        result: '',
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+        },
+      }));
+    });
+
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    await useAgentStore
+      .getState()
+      .startQuery(session.id, '/compact', 'D:\\project\\ai-code\\codeMUX');
+
+    const compactEvents = useAgentStore
+      .getState()
+      .events[session.id]
+      .filter((event) => event.kind === 'compact');
+
+    // The completed boundary replaced its loading placeholder — no stacked marker.
+    expect(compactEvents).toHaveLength(1);
+    expect(compactEvents[0]).toMatchObject({
+      kind: 'compact',
+      data: expect.objectContaining({
+        compact_metadata: expect.objectContaining({
+          trigger: 'manual',
+          status: 'completed',
+        }),
+      }),
+    });
+  });
+
   it('processes batched stream events without appending the batch to the conversation event list', async () => {
     vi.useFakeTimers();
 

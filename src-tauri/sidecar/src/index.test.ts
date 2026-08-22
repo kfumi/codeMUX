@@ -238,6 +238,62 @@ describe('sidecar command dispatcher', () => {
     expect(opencode.respondToPermission).toHaveBeenCalledWith('permission-1', { approved: true }, 'session-1');
   });
 
+  it('routes Codex permission responses and pending question answers through the Codex runtime', async () => {
+    const codex = {
+      ...createRuntime(),
+      isPendingQuestion: vi.fn().mockReturnValue(true),
+      respondToQuestion: vi.fn().mockResolvedValue(undefined),
+    };
+    const emit = vi.fn();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: createRuntime(),
+      codexRuntime: codex,
+      createOpenCodeRuntime: vi.fn(() => createRuntime()),
+      emit,
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'codex', cwd: 'D:\\workspace', sessionId: 'codex-session' });
+    await dispatcher.dispatch({ type: 'respond_to_permission', requestId: 'permission-1', sessionId: 'codex-session', response: 'once' });
+    await dispatcher.dispatch({ type: 'tool_response', toolUseId: 'question-1', response: [['是']] });
+
+    await vi.waitFor(() => {
+      expect(codex.respondToPermission).toHaveBeenCalledWith('permission-1', 'once', 'codex-session');
+    });
+    await vi.waitFor(() => {
+      expect(codex.respondToQuestion).toHaveBeenCalledWith('question-1', [['是']]);
+    });
+  });
+
+  it('reports Codex runtime not initialized when permission responses are unsupported', async () => {
+    const codex = {
+      ensure: vi.fn().mockResolvedValue(undefined),
+      updatePermissions: vi.fn(),
+      sendInput: vi.fn().mockResolvedValue(undefined),
+      resetSession: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined),
+      shutdown: vi.fn().mockResolvedValue(undefined),
+    };
+    const emit = vi.fn();
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: createRuntime(),
+      codexRuntime: codex,
+      createOpenCodeRuntime: vi.fn(() => createRuntime()),
+      emit,
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({ type: 'ensure_session', agentKind: 'codex', cwd: 'D:\\workspace', sessionId: 'codex-session' });
+    await dispatcher.dispatch({ type: 'respond_to_permission', requestId: 'permission-1', sessionId: 'codex-session', response: 'once' });
+
+    expect(emit).toHaveBeenCalledWith({
+      type: 'sidecar_error',
+      error: 'Codex runtime is not initialized',
+    });
+  });
+
   it('forwards timeouts to the OpenCode runtime factory on ensure_session', async () => {
     const opencode = createRuntime();
     const createOpenCodeRuntime = vi.fn(() => opencode);

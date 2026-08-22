@@ -90,8 +90,9 @@ export type AgentMessage =
   | { kind: 'ask_user_question_timeout'; data: { tool_use_id: string; timeout_ms: number; message: string } }
   | { kind: 'permission'; data: AgentPermissionRequest }
   | { kind: 'permission_mode_changed'; data: AgentPermissionModeChanged }
-  | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
+  | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number; status?: 'compacting' | 'completed'; post_tokens?: number }; subtype: string; type: string } }
   | { kind: 'runtime_switch'; data: { from_kind?: string; to_kind?: string; content: string; briefing?: string } }
+  | { kind: 'native_session_rebuilt'; data: { content: string; agent_kind?: string; previous_agent_session_id?: string; agent_session_id?: string } }
   | { kind: 'session_summary'; data: SessionSummaryEvent }
   | { kind: 'mcp_status'; data: { servers: Record<string, string>; status?: string } }
   | { kind: 'proxy_status'; data: { running: boolean; port: number | null; upstreamBaseUrl: string | null } }
@@ -2077,6 +2078,24 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
                 replaceIdx = i;
                 break;
               }
+            }
+            newEvents = replaceIdx >= 0
+              ? [...baseEvents.slice(0, replaceIdx), event, ...baseEvents.slice(replaceIdx + 1)]
+              : [...baseEvents, event];
+          } else if (
+            event.kind === 'compact' &&
+            event.data.compact_metadata?.status === 'completed'
+          ) {
+            // A completed compaction replaces its own loading placeholder
+            // instead of stacking a second compact marker.
+            let replaceIdx = -1;
+            for (let i = baseEvents.length - 1; i >= 0; i--) {
+              const e = baseEvents[i];
+              if (e.kind !== 'compact') continue;
+              if (e.data.compact_metadata?.status === 'compacting') {
+                replaceIdx = i;
+              }
+              break;
             }
             newEvents = replaceIdx >= 0
               ? [...baseEvents.slice(0, replaceIdx), event, ...baseEvents.slice(replaceIdx + 1)]

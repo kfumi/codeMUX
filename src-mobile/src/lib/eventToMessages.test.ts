@@ -127,6 +127,19 @@ describe('appendEvent', () => {
     });
   });
 
+  it('renders the compacting state as a loading marker', () => {
+    const messages = appendEvent([], {
+      type: 'system_event',
+      event_id: 's2-loading',
+      subtype: 'compact_boundary',
+      compact_metadata: { status: 'compacting', pre_tokens: 0, post_tokens: 0 },
+    });
+    expect(messages[0]).toMatchObject({
+      kind: 'system',
+      content: expect.stringContaining('正在压缩上下文'),
+    });
+  });
+
   it('merges streaming reasoning deltas', () => {
     let messages = appendEvent([], {
       type: 'reasoning_delta',

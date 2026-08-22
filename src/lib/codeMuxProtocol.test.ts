@@ -102,6 +102,36 @@ describe('CodeMUX frontend protocol adapter', () => {
     });
   });
 
+  it('preserves the compaction lifecycle status in compact boundaries', () => {
+    expect(toLegacySystemMessage({
+      type: 'system_event',
+      subtype: 'compact_boundary',
+      compact_metadata: { trigger: 'manual', status: 'compacting', pre_tokens: 0, post_tokens: 0 },
+      event_id: 'event-loading',
+    })).toEqual({
+      kind: 'compact',
+      data: {
+        type: 'system',
+        subtype: 'compact_boundary',
+        compact_metadata: { trigger: 'manual', status: 'compacting', pre_tokens: 0, post_tokens: 0 },
+      },
+    });
+
+    expect(toLegacySystemMessage({
+      type: 'system_event',
+      subtype: 'compact_boundary',
+      compact_metadata: { trigger: 'manual', status: 'completed', pre_tokens: 0, post_tokens: 0 },
+      event_id: 'event-done',
+    })).toEqual({
+      kind: 'compact',
+      data: {
+        type: 'system',
+        subtype: 'compact_boundary',
+        compact_metadata: { trigger: 'manual', status: 'completed', pre_tokens: 0, post_tokens: 0 },
+      },
+    });
+  });
+
   it('maps runtime switch system events to a dedicated seam with briefing', () => {
     expect(toLegacySystemMessage({
       type: 'system_event',

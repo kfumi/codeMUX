@@ -16,7 +16,10 @@ import {
   isCodexToolResultError,
 } from './runtimeEvents.js';
 import { CodexTurnEventNormalizer, type CodexTurnOutcome, type CodexTurnSourceEvent } from './codexTurnEventNormalizer.js';
-import { shouldUseCodexChatCompatProxy } from './sessionRuntimeHelpers.js';
+import {
+  applyCodexWindowsSandboxPathCompatibility,
+  shouldUseCodexChatCompatProxy,
+} from './sessionRuntimeHelpers.js';
 import { proxyManager } from './proxyManager.js';
 import { emit } from './streamEventBatcher.js';
 import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
@@ -1317,27 +1320,7 @@ function resolveCompatProxyOverride(
   return explicitNeedsProxy;
 }
 
-export function applyCodexWindowsSandboxPathCompatibility(env: Record<string, string>): void {
-  if (process.platform !== 'win32') {
-    return;
-  }
-
-  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'Path';
-  const pathValue = env[pathKey];
-  if (!pathValue) {
-    return;
-  }
-
-  const filtered = pathValue
-    .split(';')
-    .filter((entry) => entry.trim().length > 0)
-    .filter((entry) => !entry.toLowerCase().includes('\\windowsapps'))
-    .join(';');
-
-  if (filtered) {
-    env[pathKey] = filtered;
-  }
-}
+export { applyCodexWindowsSandboxPathCompatibility };
 
 function isMissingResponsesCompletionError(message: string): boolean {
   const normalized = message.toLowerCase();

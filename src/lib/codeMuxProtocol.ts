@@ -374,6 +374,21 @@ export function toLegacySystemMessage(event: CodeMuxSystemEvent): AgentMessage {
       },
     };
   }
+  if (event.subtype === 'native_session_rebuilt') {
+    return {
+      kind: 'native_session_rebuilt',
+      data: {
+        content: typeof event.content === 'string' && event.content.trim()
+          ? event.content
+          : '原生会话已重建。',
+        ...(typeof event.agent_kind === 'string' ? { agent_kind: event.agent_kind } : {}),
+        ...(typeof event.previous_agent_session_id === 'string'
+          ? { previous_agent_session_id: event.previous_agent_session_id }
+          : {}),
+        ...(typeof event.agent_session_id === 'string' ? { agent_session_id: event.agent_session_id } : {}),
+      },
+    };
+  }
   return { kind: 'raw', data };
 }
 

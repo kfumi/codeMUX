@@ -1,17 +1,21 @@
 import {
+  BookOpen,
   Check,
   ChevronDown,
   ClipboardList,
+  Eye,
+  FileSearch,
   Hand,
   Shield,
   ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import {
   buildDefaultPermissionConfig,
   mapExecutionModeToPermissionConfig,
+  serializePermissionConfig,
   type AgentExecutionMode,
   type AgentPermissionConfig,
   type AgentPlanMode,
@@ -32,8 +36,6 @@ interface AgentPermissionSelectorProps {
   onPlanModeChange: (planMode: AgentPlanMode) => void;
   /** Atomic callback — updates both config and plan mode in a single call to avoid race conditions. */
   onModeChange?: (config: AgentPermissionConfig, planMode: AgentPlanMode) => void;
-  /** Called once when a legacy Codex config (e.g. workspace-write) is detected and needs migration. */
-  onLegacyConfigMigrate?: (migratedConfig: AgentPermissionConfig) => void;
   /** 紧凑模式：只显示图标，隐藏文字标签 */
   compact?: boolean;
   rawPermissionType?: string;
@@ -63,10 +65,22 @@ const opencodeOptions: PermissionOption[] = [
   { mode: 'full_access', label: '完全访问', description: 'OpenCode 使用服务端按工具配置的权限规则。', icon: Shield, tone: 'warning' },
 ];
 
-const codexOptions: PermissionOption[] = [
-  { mode: 'plan', label: '计划模式', description: '先分析和规划，不直接写入文件。', icon: ClipboardList },
-  { mode: 'full_access', label: '完全访问', description: '允许不受限访问文件和网络，风险更高。', icon: Shield, tone: 'warning' },
+// Workflow Mode four tiers (ADR 0010): read-only / auto / auto-review / full-access.
+// Plan Mode is an orthogonal composer toggle (Issue 07) — it only appears here
+// while a legacy plan-mode session still needs a way to switch back off.
+const codexWorkflowOptions: PermissionOption[] = [
+  { mode: 'read_only', label: '只读模式', description: '只读探索代码库，不写入文件。', icon: Eye },
+  { mode: 'auto_edit', label: '自动模式', description: '工作区内读写，危险操作仍需审批。', icon: BookOpen },
+  { mode: 'auto_review', label: '自动审查', description: '高风险操作经自动审查流处理。', icon: FileSearch },
+  { mode: 'full_access', label: '完全访问', description: '跳过审批，允许不受限访问，风险更高。', icon: Shield, tone: 'warning' },
 ];
+
+const codexPlanOption: PermissionOption = {
+  mode: 'plan',
+  label: '计划模式',
+  description: '先分析和规划，不直接写入文件。',
+  icon: ClipboardList,
+};
 
 export function AgentPermissionSelector({
   agentKind,
@@ -76,7 +90,6 @@ export function AgentPermissionSelector({
   onPermissionConfigChange,
   onPlanModeChange,
   onModeChange,
-  onLegacyConfigMigrate,
   compact,
   rawPermissionType,
   rawPermissionDescription,
@@ -85,31 +98,22 @@ export function AgentPermissionSelector({
   permissionResponsePending,
 }: AgentPermissionSelectorProps) {
   const [open, setOpen] = useState(false);
-  const normalized = permissionConfig ?? buildDefaultPermissionConfig(agentKind);
+  // Normalize through serializePermissionConfig so legacy Codex snapshots
+  // (sandbox/approval triples from the SDK era) migrate onto workflow tiers.
+  const normalized = permissionConfig
+    ? serializePermissionConfig(agentKind, permissionConfig)
+    : buildDefaultPermissionConfig(agentKind);
   const selectedMode = inferExecutionMode(agentKind, normalized, planMode);
 
-  // Auto-migrate legacy Codex configs (e.g. workspace-write) to the current default
-  // so the stored config matches what the UI displays.
-  const migratedRef = useRef(false);
-  useEffect(() => {
-    if (migratedRef.current) return;
-    if (
-      agentKind === 'codex' &&
-      normalized.kind === 'codex' &&
-      normalized.sandboxMode === 'workspace-write' &&
-      planMode !== 'on' &&
-      onLegacyConfigMigrate
-    ) {
-      migratedRef.current = true;
-      onLegacyConfigMigrate({
-        kind: 'codex',
-        sandboxMode: 'danger-full-access',
-        approvalPolicy: 'never',
-        networkAccessEnabled: true,
-      });
+  const options = useMemo(() => {
+    if (agentKind === 'opencode') return opencodeOptions;
+    if (agentKind === 'codex') {
+      // Legacy plan-mode sessions keep the plan entry so they can switch back
+      // off; fresh sessions expose the pure four Workflow tiers.
+      return planMode === 'on' ? [codexPlanOption, ...codexWorkflowOptions] : codexWorkflowOptions;
     }
-  }, [agentKind, normalized, planMode, onLegacyConfigMigrate]);
-  const options = agentKind === 'opencode' ? opencodeOptions : agentKind === 'codex' ? codexOptions : claudeOptions;
+    return claudeOptions;
+  }, [agentKind, planMode]);
   const selected = useMemo(
     () => options.find((option) => option.mode === selectedMode) ?? options[0],
     [options, selectedMode],
@@ -233,10 +237,18 @@ function inferExecutionMode(
   }
 
   if (agentKind === 'codex' && permissionConfig.kind === 'codex') {
-    if (planMode === 'on' || permissionConfig.sandboxMode === 'read-only') return 'plan';
-    // workspace-write is a legacy mode that maps to full_access in the simplified UI.
-    // The onLegacyConfigMigrate callback handles persisting the upgrade.
-    return 'full_access';
+    if (planMode === 'on') return 'plan';
+    switch (permissionConfig.workflowMode) {
+      case 'read-only':
+        return 'read_only';
+      case 'auto':
+        return 'auto_edit';
+      case 'auto-review':
+        return 'auto_review';
+      case 'full-access':
+      default:
+        return 'full_access';
+    }
   }
 
   if (agentKind === 'claude_code' && permissionConfig.kind === 'claude_code') {

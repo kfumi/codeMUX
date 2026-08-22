@@ -75,21 +75,12 @@ fn apply_agent_config_update(
             }
             if let Some(permission_config) = update.permission_config {
                 if !matches!(
-                    permission_config.sandbox_mode.as_str(),
-                    "read-only" | "workspace-write" | "danger-full-access"
+                    permission_config.workflow_mode.as_str(),
+                    "read-only" | "auto" | "auto-review" | "full-access"
                 ) {
                     return Err(format!(
-                        "Unsupported Codex sandboxMode: {}",
-                        permission_config.sandbox_mode
-                    ));
-                }
-                if !matches!(
-                    permission_config.approval_policy.as_str(),
-                    "untrusted" | "on-request" | "never"
-                ) {
-                    return Err(format!(
-                        "Unsupported Codex approvalPolicy: {}",
-                        permission_config.approval_policy
+                        "Unsupported Codex workflowMode: {}",
+                        permission_config.workflow_mode
                     ));
                 }
                 app_config.agent_configs.codex.permission_config = permission_config;

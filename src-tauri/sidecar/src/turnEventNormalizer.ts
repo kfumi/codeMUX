@@ -18,10 +18,18 @@ export type TurnSourceEvent =
   | { kind: 'tool_finished'; toolUseId: string; content: string; isError: boolean }
   | { kind: 'error'; subtype: string; message: string };
 
+export type TurnUsage = {
+  input_tokens: number;
+  output_tokens: number;
+  cached_input_tokens: number;
+  reasoning_output_tokens: number;
+};
+
 export type TurnOutcome = {
   outcome: 'completed' | 'failed' | 'interrupted' | 'cancelled';
   reason?: string;
   durationMs?: number;
+  usage?: TurnUsage;
 };
 
 export class TurnEventNormalizer {
@@ -126,6 +134,7 @@ export class TurnEventNormalizer {
     return [this.withSequence({
       type: 'turn_finished', session_id: this.sessionId, outcome: outcome.outcome,
       ...(outcome.reason ? { reason: outcome.reason } : {}),
+      ...(outcome.usage ? { usage: outcome.usage } : {}),
       ...(outcome.durationMs !== undefined ? { duration_ms: outcome.durationMs } : {}),
       event_id: this.eventIdFactory(), sequence: 0,
     })];

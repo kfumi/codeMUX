@@ -444,7 +444,17 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
   }
 
   if (isCompactData(data)) {
-    const preTokens = data.event.data.compact_metadata?.pre_tokens;
+    const metadata = data.event.data.compact_metadata;
+    if (metadata?.status === 'compacting') {
+      return (
+        <div className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
+          <span className="text-ui-caption text-muted-foreground tracking-normal font-medium animate-pulse">
+            — 正在压缩上下文… —
+          </span>
+        </div>
+      );
+    }
+    const preTokens = metadata?.pre_tokens;
     const tokenText = preTokens >= 1000 ? ` · 节省 ${(preTokens / 1000).toFixed(1)}k tokens` : preTokens > 0 ? ` · 节省 ${preTokens} tokens` : '';
     return (
       <div className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]">
@@ -457,6 +467,10 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
 
   if (isRuntimeSwitchData(data)) {
     return <RuntimeSwitchSeam event={data.event} />;
+  }
+
+  if (isNativeSessionRebuiltData(data)) {
+    return <NativeSessionRebuiltSeam event={data.event} />;
   }
 
   if (isSessionSummaryData(data)) {
@@ -544,6 +558,15 @@ function isRuntimeSwitchData(value: unknown): value is { eventKind: string; even
   );
 }
 
+function isNativeSessionRebuiltData(value: unknown): value is { eventKind: string; event: Extract<AgentMessage, { kind: 'native_session_rebuilt' }> } {
+  return (
+    isRecord(value) &&
+    value.eventKind === 'native_session_rebuilt' &&
+    isRecord(value.event) &&
+    value.event.kind === 'native_session_rebuilt'
+  );
+}
+
 function agentKindDisplayLabel(kind?: string): string | undefined {
   if (!kind) {
     return undefined;
@@ -592,6 +615,26 @@ function RuntimeSwitchSeam({ event }: { event: Extract<AgentMessage, { kind: 'ru
         </pre>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+function nativeSessionRebuiltCaption(agentKind?: string): string {
+  const label = agentKindDisplayLabel(agentKind);
+  return label ? `— ${label} 原生会话已重建 —` : '— 原生会话已重建 —';
+}
+
+function NativeSessionRebuiltSeam({ event }: { event: Extract<AgentMessage, { kind: 'native_session_rebuilt' }> }) {
+  const caption = nativeSessionRebuiltCaption(event.data.agent_kind);
+
+  return (
+    <div
+      className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]"
+      title={event.data.content}
+    >
+      <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
+        {caption}
+      </span>
+    </div>
   );
 }
 

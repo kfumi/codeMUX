@@ -47,15 +47,87 @@ describe('sidecar agent permissions', () => {
     });
   });
 
+  it('maps the read-only workflow tier to a read-only sandbox with approvals', () => {
+    const config: SidecarPermissionConfig = {
+      kind: 'codex',
+      workflowMode: 'read-only',
+      networkAccessEnabled: false,
+    };
+
+    expect(buildCodexThreadPermissionOptions(config)).toEqual({
+      sandboxMode: 'read-only',
+      approvalPolicy: 'on-request',
+      networkAccessEnabled: false,
+    });
+  });
+
+  it('maps the auto workflow tier to workspace-write with on-request approvals', () => {
+    const config: SidecarPermissionConfig = {
+      kind: 'codex',
+      workflowMode: 'auto',
+      networkAccessEnabled: true,
+    };
+
+    expect(buildCodexThreadPermissionOptions(config)).toEqual({
+      sandboxMode: 'workspace-write',
+      approvalPolicy: 'on-request',
+      networkAccessEnabled: true,
+    });
+  });
+
+  it('maps the auto-review workflow tier to workspace-write with the auto_review reviewer', () => {
+    const config: SidecarPermissionConfig = {
+      kind: 'codex',
+      workflowMode: 'auto-review',
+      networkAccessEnabled: true,
+    };
+
+    expect(buildCodexThreadPermissionOptions(config)).toEqual({
+      sandboxMode: 'workspace-write',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review',
+      networkAccessEnabled: true,
+    });
+  });
+
+  it('maps the full-access workflow tier to no approvals and full sandbox', () => {
+    const config: SidecarPermissionConfig = {
+      kind: 'codex',
+      workflowMode: 'full-access',
+      networkAccessEnabled: true,
+    };
+
+    expect(buildCodexThreadPermissionOptions(config)).toEqual({
+      sandboxMode: 'danger-full-access',
+      approvalPolicy: 'never',
+      networkAccessEnabled: true,
+    });
+  });
+
+  it('migrates legacy sandbox-only snapshots onto workflow tiers', () => {
+    expect(buildCodexThreadPermissionOptions({ kind: 'codex', sandboxMode: 'workspace-write' })).toMatchObject({
+      sandboxMode: 'workspace-write',
+      approvalPolicy: 'on-request',
+    });
+    expect(buildCodexThreadPermissionOptions({ kind: 'codex', sandboxMode: 'read-only' })).toMatchObject({
+      sandboxMode: 'read-only',
+      approvalPolicy: 'on-request',
+    });
+    expect(buildCodexThreadPermissionOptions({ kind: 'codex', sandboxMode: 'danger-full-access' })).toMatchObject({
+      sandboxMode: 'danger-full-access',
+      approvalPolicy: 'never',
+    });
+  });
+
   it('forces Codex plan mode to read-only approval settings', () => {
     const config: SidecarPermissionConfig = {
       kind: 'codex',
-      sandboxMode: 'danger-full-access',
-      approvalPolicy: 'never',
+      workflowMode: 'full-access',
       networkAccessEnabled: true,
     };
 
     expect(buildCodexThreadPermissionOptions(config, 'on')).toEqual({
+      workflowMode: 'read-only',
       sandboxMode: 'read-only',
       approvalPolicy: 'on-request',
       networkAccessEnabled: false,
@@ -68,5 +140,11 @@ describe('sidecar agent permissions', () => {
       approvalPolicy: 'on-request',
       networkAccessEnabled: false,
     })).toBe('read-only/on-request/network-off');
+    expect(describeCodexPermissionOptions({
+      sandboxMode: 'workspace-write',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review',
+      networkAccessEnabled: true,
+    })).toBe('workspace-write/on-request/auto_review/network-on');
   });
 });

@@ -54,7 +54,7 @@ impl NpmRuntimeSpec {
             Provider::ClaudeCode => {
                 vec![format!("@anthropic-ai/claude-agent-sdk@{}", version)]
             }
-            Provider::Codex => vec![format!("@openai/codex-sdk@{}", version)],
+            Provider::Codex => vec![format!("@openai/codex@{}", version)],
             Provider::OpenCode => vec![
                 format!("@opencode-ai/sdk@{}", version),
                 format!("opencode-ai@{}", version),
@@ -79,7 +79,7 @@ impl NpmRuntimeSpec {
 fn primary_package(provider: Provider) -> &'static str {
     match provider {
         Provider::ClaudeCode => "@anthropic-ai/claude-agent-sdk",
-        Provider::Codex => "@openai/codex-sdk",
+        Provider::Codex => "@openai/codex",
         Provider::OpenCode => "@opencode-ai/sdk",
     }
 }
@@ -106,7 +106,44 @@ fn key_binaries(provider: Provider) -> Vec<String> {
                 platform, arch, binary
             )]
         }
-        Provider::Codex => Vec::new(),
+        // `@openai/codex` 元包通过 npm alias（如 `@openai/codex-win32-x64` →
+        // `npm:@openai/codex@<version>-win32-x64`）分发平台二进制。alias 可能被
+        // npm 提升到顶层 node_modules，也可能嵌套在元包内；元包自身亦内置
+        // `vendor/<triple>/codex/<binary>` 兜底布局。三者任一存在即视为完整。
+        Provider::Codex => {
+            let platform = match Platform::current() {
+                Platform::Windows => "win32",
+                Platform::Macos => "darwin",
+                Platform::Linux => "linux",
+            };
+            let arch = match Arch::current() {
+                Arch::X64 => "x64",
+                Arch::Arm64 => "arm64",
+            };
+            let binary = if cfg!(target_os = "windows") {
+                "codex.exe"
+            } else {
+                "codex"
+            };
+            let target_triple = match (Platform::current(), Arch::current()) {
+                (Platform::Windows, Arch::X64) => "x86_64-pc-windows-msvc",
+                (Platform::Windows, Arch::Arm64) => "aarch64-pc-windows-msvc",
+                (Platform::Macos, Arch::X64) => "x86_64-apple-darwin",
+                (Platform::Macos, Arch::Arm64) => "aarch64-apple-darwin",
+                (Platform::Linux, Arch::X64) => "x86_64-unknown-linux-musl",
+                (Platform::Linux, Arch::Arm64) => "aarch64-unknown-linux-musl",
+            };
+            let vendor_path = format!("vendor/{}/codex/{}", target_triple, binary);
+            let platform_package = format!("@openai/codex-{}-{}", platform, arch);
+            vec![
+                format!("node_modules/{}/{}", platform_package, vendor_path),
+                format!(
+                    "node_modules/@openai/codex/node_modules/{}/{}",
+                    platform_package, vendor_path
+                ),
+                format!("node_modules/@openai/codex/{}", vendor_path),
+            ]
+        }
         Provider::OpenCode => {
             let binary = if cfg!(target_os = "windows") {
                 "opencode.exe"
@@ -612,7 +649,11 @@ where
         if !spec.key_files.iter().all(|file| dir.join(file).exists()) {
             return false;
         }
-        if !spec.key_binaries.iter().all(|file| dir.join(file).exists()) {
+        // key_binaries 为同一 CLI 的候选安装布局（npm alias 提升或嵌套）；
+        // 任一存在即通过。单一路径的 Provider 语义不变。
+        if !spec.key_binaries.is_empty()
+            && !spec.key_binaries.iter().any(|file| dir.join(file).exists())
+        {
             return false;
         }
         std::fs::read_to_string(dir.join(format!(
@@ -1007,6 +1048,36 @@ mod tests {
         fail: bool,
     }
 
+    fn write_runtime_layout(spec: &NpmRuntimeSpec, destination: &Path) -> Result<(), RuntimeError> {
+        let package_dir =
+            destination.join(format!("node_modules/{}", primary_package(spec.provider)));
+        std::fs::create_dir_all(&package_dir)
+            .map_err(|error| RuntimeError::io_failed(Some(spec.provider), error.to_string()))?;
+        std::fs::write(destination.join("package.json"), "{}")
+            .map_err(|error| RuntimeError::io_failed(Some(spec.provider), error.to_string()))?;
+        std::fs::write(
+            package_dir.join("package.json"),
+            format!(
+                r#"{{"name":"{}","version":"{}"}}"#,
+                primary_package(spec.provider),
+                spec.version
+            ),
+        )
+        .map_err(|error| RuntimeError::io_failed(Some(spec.provider), error.to_string()))?;
+        // 模拟首个候选二进制布局（npm alias 提升到顶层）。
+        if let Some(binary) = spec.key_binaries.first() {
+            let binary_path = destination.join(binary);
+            if let Some(parent) = binary_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| {
+                    RuntimeError::io_failed(Some(spec.provider), error.to_string())
+                })?;
+            }
+            std::fs::write(&binary_path, b"fake-binary")
+                .map_err(|error| RuntimeError::io_failed(Some(spec.provider), error.to_string()))?;
+        }
+        Ok(())
+    }
+
     #[async_trait]
     impl NpmInstaller for TestInstaller {
         async fn install(
@@ -1021,25 +1092,7 @@ mod tests {
                     "测试 npm 安装失败",
                 ));
             }
-            std::fs::create_dir_all(
-                destination.join(format!("node_modules/{}", primary_package(spec.provider))),
-            )
-            .map_err(|error| RuntimeError::io_failed(Some(spec.provider), error.to_string()))?;
-            std::fs::write(destination.join("package.json"), "{}")
-                .map_err(|error| RuntimeError::io_failed(Some(spec.provider), error.to_string()))?;
-            std::fs::write(
-                destination.join(format!(
-                    "node_modules/{}/package.json",
-                    primary_package(spec.provider)
-                )),
-                format!(
-                    r#"{{"name":"{}","version":"{}"}}"#,
-                    primary_package(spec.provider),
-                    spec.version
-                ),
-            )
-            .map_err(|error| RuntimeError::io_failed(Some(spec.provider), error.to_string()))?;
-            Ok(())
+            write_runtime_layout(spec, destination)
         }
     }
 
@@ -1073,7 +1126,7 @@ mod tests {
             NpmRuntimeSpec::for_version(Provider::Codex, "0.139.0")
                 .unwrap()
                 .packages,
-            vec!["@openai/codex-sdk@0.139.0"]
+            vec!["@openai/codex@0.139.0"]
         );
         assert_eq!(
             NpmRuntimeSpec::for_version(Provider::OpenCode, "1.18.3")
@@ -1081,6 +1134,29 @@ mod tests {
                 .packages,
             vec!["@opencode-ai/sdk@1.18.3", "opencode-ai@1.18.3"]
         );
+    }
+
+    #[test]
+    fn codex_runtime_validates_any_candidate_binary_layout() {
+        let spec = NpmRuntimeSpec::for_version(Provider::Codex, "0.139.0").unwrap();
+        assert!(
+            spec.key_binaries.len() >= 3,
+            "Codex key_binaries 应包含提升、嵌套与内置 vendor 三种候选布局"
+        );
+        assert!(
+            spec.key_binaries.iter().all(|path| path.contains("vendor")),
+            "Codex key_binaries 应指向平台 vendor 二进制：{:?}",
+            spec.key_binaries
+        );
+        let binary_name = if cfg!(target_os = "windows") {
+            "codex.exe"
+        } else {
+            "codex"
+        };
+        assert!(spec
+            .key_binaries
+            .iter()
+            .any(|path| path.ends_with(binary_name)));
     }
 
     #[test]
@@ -1158,13 +1234,8 @@ mod tests {
         let fs = Arc::new(TempRuntimeFileSystem::new());
         let version = "0.139.0";
         let old_dir = fs.version_dir(Provider::Codex, version);
-        std::fs::create_dir_all(old_dir.join("node_modules/@openai/codex-sdk")).unwrap();
-        std::fs::write(old_dir.join("package.json"), "old").unwrap();
-        std::fs::write(
-            old_dir.join("node_modules/@openai/codex-sdk/package.json"),
-            format!(r#"{{"name":"@openai/codex-sdk","version":"{}"}}"#, version),
-        )
-        .unwrap();
+        let old_spec = NpmRuntimeSpec::for_version(Provider::Codex, version).unwrap();
+        write_runtime_layout(&old_spec, &old_dir).unwrap();
         fs.write_current_version(Provider::Codex, version).unwrap();
 
         let spec = NpmRuntimeSpec::for_version(Provider::Codex, version).unwrap();
@@ -1182,7 +1253,39 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_to_string(old_dir.join("package.json")).unwrap(),
-            "old"
+            "{}"
         );
+    }
+
+    #[tokio::test]
+    async fn codex_integrity_requires_candidate_binary() {
+        let fs = Arc::new(TempRuntimeFileSystem::new());
+        let version = "0.139.0";
+        let spec = NpmRuntimeSpec::for_version(Provider::Codex, version).unwrap();
+
+        // 无任何二进制的布局应判为不完整。
+        let bare_dir = fs.version_dir(Provider::Codex, "0.1.0");
+        let bare_spec = NpmRuntimeSpec::for_version(Provider::Codex, "0.1.0").unwrap();
+        write_runtime_layout(&bare_spec, &bare_dir).unwrap();
+        for binary in &bare_spec.key_binaries {
+            let _ = std::fs::remove_file(bare_dir.join(binary));
+        }
+        let manager = test_manager(
+            fs.clone(),
+            Arc::new(TestInstaller { fail: true }),
+            spec.clone(),
+        );
+        assert!(!manager.verify_integrity(Provider::Codex, "0.1.0"));
+
+        // 仅存在内置 vendor 布局（alias 未安装）也应判为完整。
+        let nested_dir = fs.version_dir(Provider::Codex, "0.2.0");
+        let nested_spec = NpmRuntimeSpec::for_version(Provider::Codex, "0.2.0").unwrap();
+        write_runtime_layout(&nested_spec, &nested_dir).unwrap();
+        let _ = std::fs::remove_file(nested_dir.join(nested_spec.key_binaries.first().unwrap()));
+        let nested_binary = nested_spec.key_binaries.last().unwrap();
+        let nested_path = nested_dir.join(nested_binary);
+        std::fs::create_dir_all(nested_path.parent().unwrap()).unwrap();
+        std::fs::write(&nested_path, b"fake-binary").unwrap();
+        assert!(manager.verify_integrity(Provider::Codex, "0.2.0"));
     }
 }

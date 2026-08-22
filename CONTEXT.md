@@ -32,8 +32,20 @@ _Avoid_: 用 Fork 换驾驶席；把 Switch 做成新 Session
 _Avoid_: 完整历史导入, tool replay, 把权限审批当可迁移状态, 把 Briefing 当下一条用户消息的前缀, 用另一次模型调用或 native compact 生成 Briefing
 
 ### Permission Snapshot
-当前对 Active Agent Kind 生效的权限预设（Claude 的 permission mode、Codex 的 sandbox/approval、OpenCode 的 permission）。它从属于 Active Agent Kind，不是 Session 上可随身携带的意图。Agent Kind Switch 丢弃旧快照（含 plan 与原生「本会话已允许」），并换上进入种类的默认预设。
-_Avoid_: 跨种类翻译权限枚举；把 plan_mode 当切换后仍成立的会话意图
+当前对 Active Agent Kind 生效的权限预设（Claude 的 permission mode、Codex 的 Workflow Mode、OpenCode 的 permission）。它从属于 Active Agent Kind，不是 Session 上可随身携带的意图。Agent Kind Switch 丢弃旧快照（含 Plan Mode 与原生「本会话已允许」），并换上进入种类的默认预设。
+_Avoid_: 跨种类翻译权限枚举；把 Plan Mode 当切换后仍成立的会话意图
+
+### Workflow Mode
+Codex 的 sandbox 与 approval 工作流预设，取值为 read-only、auto、auto-review、full-access 四档之一。它是 Permission Snapshot 的一部分，与 Plan Mode 正交。
+_Avoid_: permission mode（当指 Claude 时）, 计划模式（当指 Plan Mode 时）, sandbox mode（单独当作 UI 选项时）
+
+### Plan Mode
+Codex 的协作模式开关：开启时 agent 以 plan collaboration 运行，产出计划后经 Plan Approval 等待用户 Implement 或 Dismiss；Implement 后自动进入 implementation turn 并关闭 Plan Mode。它与 Workflow Mode 正交，同属 Permission Snapshot，但不是 sandbox preset 的别名。
+_Avoid_: 计划模式（与 Workflow Mode 混用）, plan preset, 把 Plan Mode 等同于 read-only Workflow Mode
+
+### Plan Approval
+Plan Mode 下 turn 正常完成后挂起的 Interactive Request，等待用户 Implement（执行计划）或 Dismiss（放弃）。它不是 app-server 反向 RPC，而是应用层在 turn 完成后合成的审批请求。
+_Avoid_: plan permission, 计划确认对话框（未说明是 Interactive Request 时）
 
 ### Message UUID
 Agent 原生消息 UUID，用于标识一轮具体对话消息。前端 assistant message 的 `uuid` 作为跨层日志中的 message ID。
@@ -161,7 +173,10 @@ _Avoid_: 登录, 连接（当指长期信任时）
 | Agent Kind Switch / 智能体种类切换 | 用 fork/handoff/resume 称呼跨种类继续 |
 | Fork | 用 Fork 换驾驶席；把 Switch 做成新 Session |
 | Switch Briefing / 切换摘要 | 完整历史导入, tool replay |
-| Permission Snapshot / 权限快照 | 跨种类翻译权限枚举；切换后仍有效的 plan |
+| Permission Snapshot / 权限快照 | 跨种类翻译权限枚举；切换后仍有效的 Plan Mode |
+| Workflow Mode / 工作流模式 | sandbox mode（单独当作 Codex UI 选项时）；与 Plan Mode 混称 |
+| Plan Mode / 计划模式 | 与 Workflow Mode 混用；把 Plan Mode 当作 read-only 的别名 |
+| Plan Approval / 计划审批 | plan permission；未说明是 Interactive Request 时 |
 | Model Provider / 供应商 | Agent Provider Profile（指供应商配置时） |
 | Protocol Endpoint / 协议端点 | 把双协议拆成两个供应商 |
 | Active Provider | 按智能体分别激活的 profile；Agent Kind Switch 时沿用上一种类的供应商 |
@@ -183,6 +198,7 @@ _Avoid_: 登录, 连接（当指长期信任时）
 - 从 AgentProviderProfile 升级到 Model Provider 时不做自动迁移；旧 registry 丢弃，用户按内置模板重新配置。
 - Agent Kind Switch 的决策见 [ADR 0007](docs/adr/0007-agent-kind-switch-in-session.md)。
 - 移动端决策见 [ADR 0008](docs/adr/0008-mobile-companion.md)。
+- Codex App Server 迁移见 [ADR 0010](docs/adr/0010-codex-app-server-transport.md)。
 
 ## Out of Scope (for this feature's first cut)
 

@@ -56,3 +56,29 @@ export function shouldUseCodexChatCompatProxy(baseUrl?: string | null, explicitN
     return true;
   }
 }
+
+/**
+ * Windows sandbox 兼容：过滤 PATH 中的 WindowsApps 目录，避免 Codex 子进程
+ * 命中商店版 python/node shim 导致沙箱探测失败。
+ */
+export function applyCodexWindowsSandboxPathCompatibility(env: Record<string, string>): void {
+  if (process.platform !== 'win32') {
+    return;
+  }
+
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'Path';
+  const pathValue = env[pathKey];
+  if (!pathValue) {
+    return;
+  }
+
+  const filtered = pathValue
+    .split(';')
+    .filter((entry) => entry.trim().length > 0)
+    .filter((entry) => !entry.toLowerCase().includes('\\windowsapps'))
+    .join(';');
+
+  if (filtered) {
+    env[pathKey] = filtered;
+  }
+}

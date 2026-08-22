@@ -16,8 +16,7 @@ describe('agentPermissions', () => {
     });
     expect(buildDefaultPermissionConfig('codex')).toEqual({
       kind: 'codex',
-      sandboxMode: 'danger-full-access',
-      approvalPolicy: 'never',
+      workflowMode: 'full-access',
       networkAccessEnabled: true,
     });
     expect(buildDefaultPermissionConfig('opencode')).toEqual({
@@ -60,40 +59,66 @@ describe('agentPermissions', () => {
     });
   });
 
-  it('maps unified execution presets to native Codex sandbox and approval settings', () => {
-    expect(mapExecutionModeToPermissionConfig('codex', 'plan')).toEqual({
+  it('maps the four Codex workflow tiers to distinct permission configs', () => {
+    expect(mapExecutionModeToPermissionConfig('codex', 'read_only')).toEqual({
       kind: 'codex',
-      sandboxMode: 'read-only',
-      approvalPolicy: 'on-request',
+      workflowMode: 'read-only',
       networkAccessEnabled: false,
     });
-    expect(mapExecutionModeToPermissionConfig('codex', 'confirm_before_edit')).toEqual({
+    expect(mapExecutionModeToPermissionConfig('codex', 'auto_edit')).toEqual({
       kind: 'codex',
-      sandboxMode: 'danger-full-access',
-      approvalPolicy: 'never',
+      workflowMode: 'auto',
+      networkAccessEnabled: true,
+    });
+    expect(mapExecutionModeToPermissionConfig('codex', 'auto_review')).toEqual({
+      kind: 'codex',
+      workflowMode: 'auto-review',
       networkAccessEnabled: true,
     });
     expect(mapExecutionModeToPermissionConfig('codex', 'full_access')).toEqual({
       kind: 'codex',
-      sandboxMode: 'danger-full-access',
-      approvalPolicy: 'never',
+      workflowMode: 'full-access',
       networkAccessEnabled: true,
     });
   });
 
-  it('forces Codex plan mode to read-only approval settings', () => {
+  it('maps Codex plan mode to the read-only workflow tier', () => {
+    expect(mapExecutionModeToPermissionConfig('codex', 'plan')).toEqual({
+      kind: 'codex',
+      workflowMode: 'read-only',
+      networkAccessEnabled: false,
+    });
+  });
+
+  it('forces Codex plan mode to read-only workflow settings', () => {
     const configured: AgentPermissionConfig = {
       kind: 'codex',
-      sandboxMode: 'danger-full-access',
-      approvalPolicy: 'never',
+      workflowMode: 'full-access',
       networkAccessEnabled: true,
     };
 
     expect(resolveEffectivePermissionConfig('codex', configured, 'on')).toEqual({
       kind: 'codex',
-      sandboxMode: 'read-only',
-      approvalPolicy: 'on-request',
+      workflowMode: 'read-only',
       networkAccessEnabled: false,
+    });
+  });
+
+  it('migrates legacy Codex sandbox snapshots to workflow tiers', () => {
+    expect(serializePermissionConfig('codex', { kind: 'codex', sandboxMode: 'read-only' })).toEqual({
+      kind: 'codex',
+      workflowMode: 'read-only',
+      networkAccessEnabled: false,
+    });
+    expect(serializePermissionConfig('codex', { kind: 'codex', sandboxMode: 'workspace-write' })).toEqual({
+      kind: 'codex',
+      workflowMode: 'auto',
+      networkAccessEnabled: true,
+    });
+    expect(serializePermissionConfig('codex', { kind: 'codex', sandboxMode: 'danger-full-access' })).toEqual({
+      kind: 'codex',
+      workflowMode: 'full-access',
+      networkAccessEnabled: true,
     });
   });
 
@@ -111,10 +136,9 @@ describe('agentPermissions', () => {
   });
 
   it('serializes malformed or missing values to safe defaults', () => {
-    expect(serializePermissionConfig('codex', { kind: 'codex', sandboxMode: 'bad' })).toEqual({
+    expect(serializePermissionConfig('codex', { kind: 'codex', workflowMode: 'bad' })).toEqual({
       kind: 'codex',
-      sandboxMode: 'danger-full-access',
-      approvalPolicy: 'never',
+      workflowMode: 'full-access',
       networkAccessEnabled: true,
     });
     expect(serializePermissionConfig('claude_code', null)).toEqual({

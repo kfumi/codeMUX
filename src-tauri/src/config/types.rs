@@ -60,12 +60,8 @@ fn default_claude_permission_mode() -> String {
     "default".to_string()
 }
 
-fn default_codex_sandbox_mode() -> String {
-    "danger-full-access".to_string()
-}
-
-fn default_codex_approval_policy() -> String {
-    "never".to_string()
+fn default_codex_workflow_mode() -> String {
+    "full-access".to_string()
 }
 
 fn default_notification_sound() -> String {
@@ -223,10 +219,8 @@ impl Default for ClaudePermissionConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodexPermissionConfig {
-    #[serde(default = "default_codex_sandbox_mode", rename = "sandboxMode")]
-    pub sandbox_mode: String,
-    #[serde(default = "default_codex_approval_policy", rename = "approvalPolicy")]
-    pub approval_policy: String,
+    #[serde(default = "default_codex_workflow_mode", rename = "workflowMode")]
+    pub workflow_mode: String,
     #[serde(default = "default_true", rename = "networkAccessEnabled")]
     pub network_access_enabled: bool,
 }
@@ -234,8 +228,7 @@ pub struct CodexPermissionConfig {
 impl Default for CodexPermissionConfig {
     fn default() -> Self {
         Self {
-            sandbox_mode: default_codex_sandbox_mode(),
-            approval_policy: default_codex_approval_policy(),
+            workflow_mode: default_codex_workflow_mode(),
             network_access_enabled: true,
         }
     }

@@ -5,6 +5,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentPermissionSelector } from './AgentPermissionSelector';
 
+const CODEX_FULL_ACCESS = {
+  kind: 'codex',
+  workflowMode: 'full-access',
+  networkAccessEnabled: true,
+} as const;
+
 describe('AgentPermissionSelector', () => {
   afterEach(() => {
     cleanup();
@@ -37,69 +43,39 @@ describe('AgentPermissionSelector', () => {
     expect(onPlanModeChange).toHaveBeenCalledWith('on');
   });
 
-  it('shows only Codex plan and full-access modes', () => {
-    const onPermissionConfigChange = vi.fn();
-    const onPlanModeChange = vi.fn();
-
+  it('shows the four Codex workflow tiers', () => {
     render(
       <AgentPermissionSelector
         agentKind="codex"
-        permissionConfig={{
-          kind: 'codex',
-          sandboxMode: 'danger-full-access',
-          approvalPolicy: 'never',
-          networkAccessEnabled: true,
-        }}
-        planMode="on"
-        onPermissionConfigChange={onPermissionConfigChange}
-        onPlanModeChange={onPlanModeChange}
+        permissionConfig={{ ...CODEX_FULL_ACCESS }}
+        planMode="off"
+        onPermissionConfigChange={vi.fn()}
+        onPlanModeChange={vi.fn()}
       />,
     );
 
-    const triggerLabel = screen.getByText('计划模式');
-    const triggerButton = triggerLabel.closest('button');
+    fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
 
-    expect(triggerButton).toBeTruthy();
-    expect(triggerButton?.getAttribute('aria-label')).toBe('计划模式');
-
-    fireEvent.click(screen.getByRole('button', { name: '计划模式' }));
-
-    expect(triggerButton?.textContent).toContain('计划模式');
-    expect(screen.getAllByText('计划模式')).toHaveLength(2);
-    expect(screen.getByText('完全访问')).toBeTruthy();
-    expect(screen.queryByText('Codex 操作审批')).toBeNull();
-    expect(screen.queryByText('请求批准')).toBeNull();
+    const items = screen.getAllByRole('menuitemradio');
+    expect(items).toHaveLength(4);
+    expect(screen.getByText('只读模式')).toBeTruthy();
+    expect(screen.getByText('自动模式')).toBeTruthy();
+    expect(screen.getByText('自动审查')).toBeTruthy();
+    expect(screen.getAllByText('完全访问')).toHaveLength(2);
+    // Claude-only and OpenCode-only entries must not leak into Codex.
+    expect(screen.queryByText('变更前确认')).toBeNull();
     expect(screen.queryByText('自动编辑')).toBeNull();
-
-    const activeOption = screen.getAllByRole('menuitemradio').find((item) => item.getAttribute('aria-checked') === 'true');
-
-    expect(activeOption).toBeTruthy();
-    expect(activeOption?.textContent).toContain('计划模式');
-
-    fireEvent.click(screen.getByText('完全访问'));
-
-    expect(onPermissionConfigChange).toHaveBeenCalledWith({
-      kind: 'codex',
-      sandboxMode: 'danger-full-access',
-      approvalPolicy: 'never',
-      networkAccessEnabled: true,
-    });
-    expect(onPlanModeChange).toHaveBeenCalledWith('off');
+    expect(screen.queryByText('请求批准')).toBeNull();
   });
 
-  it('switches Codex to plan mode from full access', () => {
+  it('switches Codex between workflow tiers with distinct configs', () => {
     const onPermissionConfigChange = vi.fn();
     const onPlanModeChange = vi.fn();
 
     render(
       <AgentPermissionSelector
         agentKind="codex"
-        permissionConfig={{
-          kind: 'codex',
-          sandboxMode: 'danger-full-access',
-          approvalPolicy: 'never',
-          networkAccessEnabled: true,
-        }}
+        permissionConfig={{ ...CODEX_FULL_ACCESS }}
         planMode="off"
         onPermissionConfigChange={onPermissionConfigChange}
         onPlanModeChange={onPlanModeChange}
@@ -107,12 +83,53 @@ describe('AgentPermissionSelector', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
-    fireEvent.click(screen.getByText('计划模式'));
-
+    fireEvent.click(screen.getByText('只读模式'));
     expect(onPermissionConfigChange).toHaveBeenCalledWith({
       kind: 'codex',
-      sandboxMode: 'read-only',
-      approvalPolicy: 'on-request',
+      workflowMode: 'read-only',
+      networkAccessEnabled: false,
+    });
+    expect(onPlanModeChange).toHaveBeenCalledWith('off');
+
+    // The uncontrolled trigger keeps showing the last committed config.
+    fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
+    fireEvent.click(screen.getByText('自动审查'));
+    expect(onPermissionConfigChange).toHaveBeenLastCalledWith({
+      kind: 'codex',
+      workflowMode: 'auto-review',
+      networkAccessEnabled: true,
+    });
+    expect(onPlanModeChange).toHaveBeenLastCalledWith('off');
+  });
+
+  it('keeps the plan entry for legacy Codex plan-mode sessions', () => {
+    const onPermissionConfigChange = vi.fn();
+    const onPlanModeChange = vi.fn();
+
+    render(
+      <AgentPermissionSelector
+        agentKind="codex"
+        permissionConfig={{
+          kind: 'codex',
+          workflowMode: 'read-only',
+          networkAccessEnabled: false,
+        }}
+        planMode="on"
+        onPermissionConfigChange={onPermissionConfigChange}
+        onPlanModeChange={onPlanModeChange}
+      />,
+    );
+
+    const triggerButton = screen.getByRole('button', { name: '计划模式' });
+    expect(triggerButton.getAttribute('aria-label')).toBe('计划模式');
+
+    fireEvent.click(triggerButton);
+    expect(screen.getAllByRole('menuitemradio')).toHaveLength(5);
+
+    fireEvent.click(screen.getAllByText('计划模式')[1]);
+    expect(onPermissionConfigChange).toHaveBeenCalledWith({
+      kind: 'codex',
+      workflowMode: 'read-only',
       networkAccessEnabled: false,
     });
     expect(onPlanModeChange).toHaveBeenCalledWith('on');
@@ -126,12 +143,7 @@ describe('AgentPermissionSelector', () => {
     render(
       <AgentPermissionSelector
         agentKind="codex"
-        permissionConfig={{
-          kind: 'codex',
-          sandboxMode: 'danger-full-access',
-          approvalPolicy: 'never',
-          networkAccessEnabled: true,
-        }}
+        permissionConfig={{ ...CODEX_FULL_ACCESS }}
         planMode="off"
         onPermissionConfigChange={onPermissionConfigChange}
         onPlanModeChange={onPlanModeChange}
@@ -140,63 +152,35 @@ describe('AgentPermissionSelector', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
-    fireEvent.click(screen.getByText('计划模式'));
+    fireEvent.click(screen.getByText('自动模式'));
 
     expect(onModeChange).toHaveBeenCalledWith(
-      { kind: 'codex', sandboxMode: 'read-only', approvalPolicy: 'on-request', networkAccessEnabled: false },
-      'on',
+      { kind: 'codex', workflowMode: 'auto', networkAccessEnabled: true },
+      'off',
     );
     expect(onPermissionConfigChange).not.toHaveBeenCalled();
     expect(onPlanModeChange).not.toHaveBeenCalled();
   });
 
-  it('calls onLegacyConfigMigrate for legacy workspace-write Codex config', () => {
-    const onLegacyConfigMigrate = vi.fn();
-
+  it('migrates legacy sandbox-mode Codex configs onto workflow tiers', () => {
     render(
       <AgentPermissionSelector
         agentKind="codex"
+        // Legacy snapshot shape persisted by the SDK-era UI.
         permissionConfig={{
           kind: 'codex',
           sandboxMode: 'workspace-write',
           approvalPolicy: 'on-request',
           networkAccessEnabled: false,
-        }}
+        } as never}
         planMode="off"
         onPermissionConfigChange={vi.fn()}
         onPlanModeChange={vi.fn()}
-        onLegacyConfigMigrate={onLegacyConfigMigrate}
       />,
     );
 
-    expect(onLegacyConfigMigrate).toHaveBeenCalledWith({
-      kind: 'codex',
-      sandboxMode: 'danger-full-access',
-      approvalPolicy: 'never',
-      networkAccessEnabled: true,
-    });
-  });
-
-  it('does not call onLegacyConfigMigrate when plan mode is active', () => {
-    const onLegacyConfigMigrate = vi.fn();
-
-    render(
-      <AgentPermissionSelector
-        agentKind="codex"
-        permissionConfig={{
-          kind: 'codex',
-          sandboxMode: 'workspace-write',
-          approvalPolicy: 'on-request',
-          networkAccessEnabled: false,
-        }}
-        planMode="on"
-        onPermissionConfigChange={vi.fn()}
-        onPlanModeChange={vi.fn()}
-        onLegacyConfigMigrate={onLegacyConfigMigrate}
-      />,
-    );
-
-    expect(onLegacyConfigMigrate).not.toHaveBeenCalled();
+    // workspace-write migrates to the auto workflow tier.
+    expect(screen.getByRole('button', { name: '自动模式' })).toBeTruthy();
   });
 
   it('shows OpenCode plan and full-access modes without exposing Claude modes', () => {

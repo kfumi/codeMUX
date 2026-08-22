@@ -5,6 +5,7 @@ import * as os from 'node:os';
 import {
   loadProviderRuntime,
   resolveClaudeFromRuntime,
+  resolveCodexFromRuntime,
   resolveOpenCodeFromRuntime,
   injectRuntimePath,
   hasRuntimeRef,
@@ -26,6 +27,26 @@ function createRuntimePack(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'package.json'), '{}');
   fs.mkdirSync(path.join(dir, 'node_modules'), { recursive: true });
+}
+
+/** 构造 hoisted alias 布局下的 codex vendor 二进制路径。 */
+function hoistedCodexBinaryPath(runtimePath: string): string {
+  const archTag = process.arch === 'arm64' ? 'arm64' : 'x64';
+  const triple =
+    process.platform === 'win32'
+      ? process.arch === 'arm64' ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc'
+      : process.platform === 'darwin'
+        ? process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin'
+        : process.arch === 'arm64' ? 'aarch64-unknown-linux-musl' : 'x86_64-unknown-linux-musl';
+  return path.join(
+    runtimePath,
+    'node_modules',
+    `@openai/codex-${process.platform}-${archTag}`,
+    'vendor',
+    triple,
+    'codex',
+    process.platform === 'win32' ? 'codex.exe' : 'codex',
+  );
 }
 
 describe('runtimeLoader', () => {
@@ -204,10 +225,73 @@ describe('runtimeLoader', () => {
     });
   });
 
+  describe('resolveCodexFromRuntime', () => {
+    it('returns undefined when codex binary is not present', () => {
+      const runtimePath = path.join(tmpDir, 'codex', '0.139.0');
+      createRuntimePack(runtimePath);
+      const loaded = loadProviderRuntime(makeRef(runtimePath)) as RuntimeLoadResult;
+
+      expect(resolveCodexFromRuntime(loaded)).toBeUndefined();
+    });
+
+    it('resolves hoisted alias vendor binary', () => {
+      const runtimePath = path.join(tmpDir, 'codex', '0.139.0');
+      createRuntimePack(runtimePath);
+
+      const binaryPath = hoistedCodexBinaryPath(runtimePath);
+      fs.mkdirSync(path.dirname(binaryPath), { recursive: true });
+      fs.writeFileSync(binaryPath, 'binary');
+
+      const loaded = loadProviderRuntime(makeRef(runtimePath)) as RuntimeLoadResult;
+      const resolved = resolveCodexFromRuntime(loaded);
+      expect(resolved).toBe(binaryPath);
+    });
+
+    it('resolves nested alias vendor binary when hoisted layout missing', () => {
+      const runtimePath = path.join(tmpDir, 'codex', '0.139.0');
+      createRuntimePack(runtimePath);
+
+      // 嵌套布局 = hoisted 布局的 alias 段嵌套到 @openai/codex/node_modules 下。
+      const hoisted = hoistedCodexBinaryPath(runtimePath);
+      const relativeToNodeModules = path.relative(
+        path.join(runtimePath, 'node_modules'),
+        hoisted,
+      );
+      const nested = path.join(
+        runtimePath,
+        'node_modules',
+        '@openai',
+        'codex',
+        'node_modules',
+        relativeToNodeModules,
+      );
+      fs.mkdirSync(path.dirname(nested), { recursive: true });
+      fs.writeFileSync(nested, 'binary');
+
+      const loaded = loadProviderRuntime(makeRef(runtimePath)) as RuntimeLoadResult;
+      const resolved = resolveCodexFromRuntime(loaded);
+      expect(resolved).toBe(nested);
+    });
+
+    it('falls back to .bin shim', () => {
+      const runtimePath = path.join(tmpDir, 'codex', '0.139.0');
+      createRuntimePack(runtimePath);
+
+      const binDir = path.join(runtimePath, 'node_modules', '.bin');
+      fs.mkdirSync(binDir, { recursive: true });
+      const shimName = process.platform === 'win32' ? 'codex.cmd' : 'codex';
+      fs.writeFileSync(path.join(binDir, shimName), 'shim');
+
+      const loaded = loadProviderRuntime(makeRef(runtimePath)) as RuntimeLoadResult;
+      const resolved = resolveCodexFromRuntime(loaded);
+      expect(resolved).toBe(path.join(binDir, shimName));
+    });
+  });
+
   describe('sdkPackageName', () => {
     it('returns correct package name for each provider', () => {
       expect(sdkPackageName('claude_code')).toBe('@anthropic-ai/claude-agent-sdk');
-      expect(sdkPackageName('codex')).toBe('@openai/codex-sdk');
+      expect(sdkPackageName('codex')).toBe('@openai/codex');
       expect(sdkPackageName('opencode')).toBe('@opencode-ai/sdk');
     });
   });

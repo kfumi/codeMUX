@@ -8,6 +8,8 @@ import {
   CircleGauge,
   ClipboardList,
   Cpu,
+  Eye,
+  FileSearch,
   ImagePlus,
   LoaderCircle,
   Plus,
@@ -41,6 +43,7 @@ import { AgentBrandIcon } from '@/components/agent/AgentBrandIcon';
 import { getAgentDefinition } from '@/types/agentRegistry';
 import {
   mapExecutionModeToPermissionConfig,
+  resolveCodexWorkflowMode,
   resolveEffectivePermissionConfig,
   serializePermissionConfig,
   type AgentExecutionMode,
@@ -60,7 +63,9 @@ const PERMISSION_OPTIONS: Record<MobileAgentKind, Array<{ mode: AgentExecutionMo
     { mode: 'full_access', label: '完全访问' },
   ],
   codex: [
-    { mode: 'plan', label: '计划模式' },
+    { mode: 'read_only', label: '只读模式' },
+    { mode: 'auto_edit', label: '自动模式' },
+    { mode: 'auto_review', label: '自动审查' },
     { mode: 'full_access', label: '完全访问' },
   ],
   opencode: [
@@ -83,6 +88,8 @@ type ComposerMenu = 'add' | 'agent' | 'context' | 'model' | 'permission' | 'reas
 const PERMISSION_ICONS: Record<AgentExecutionMode, LucideIcon> = {
   confirm_before_edit: Shield,
   auto_edit: ShieldCheck,
+  read_only: Eye,
+  auto_review: FileSearch,
   plan: ClipboardList,
   full_access: Shield,
 };
@@ -160,7 +167,17 @@ function parsePermissionMode(
       return raw.permissionMode === 'plan' ? 'plan' : 'full_access';
     }
     if (agentKind === 'codex') {
-      return raw.sandboxMode === 'read-only' ? 'plan' : 'full_access';
+      switch (resolveCodexWorkflowMode(raw)) {
+        case 'read-only':
+          return 'read_only';
+        case 'auto':
+          return 'auto_edit';
+        case 'auto-review':
+          return 'auto_review';
+        case 'full-access':
+        default:
+          return 'full_access';
+      }
     }
     switch (raw.permissionMode) {
       case 'acceptEdits':

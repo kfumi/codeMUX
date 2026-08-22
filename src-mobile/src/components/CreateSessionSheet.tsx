@@ -44,7 +44,9 @@ const PERMISSION_OPTIONS: Record<'claude_code' | 'codex' | 'opencode', Array<{ m
     { mode: 'full_access', label: '完全访问' },
   ],
   codex: [
-    { mode: 'plan', label: '计划模式' },
+    { mode: 'read_only', label: '只读模式' },
+    { mode: 'auto_edit', label: '自动模式' },
+    { mode: 'auto_review', label: '自动审查' },
     { mode: 'full_access', label: '完全访问' },
   ],
   opencode: [

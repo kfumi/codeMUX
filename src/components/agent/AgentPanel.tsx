@@ -392,16 +392,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     await respondToPermission(sessionId, requestId, response);
   }, [agentKind, respondToPermission, sessionId, updateSessionPermissions]);
 
-  // Migrate legacy Codex configs (e.g. workspace-write) to the current default.
-  const handleLegacyConfigMigrate = useCallback((migratedConfig: AgentPermissionConfig) => {
-    if (isReadOnly) return;
-    updateSessionPermissions(sessionId, migratedConfig).catch((error) => {
-      useAgentStore.setState((state) => ({
-        error: { ...state.error, [sessionId]: String(error) },
-      }));
-    });
-  }, [isReadOnly, sessionId, updateSessionPermissions]);
-
   const showInfoDialog = useCallback((title: string, content: string) => {
     setInfoTitle(title);
     setInfoContent(content);
@@ -539,7 +529,6 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                       onPermissionConfigChange={handlePermissionConfigChange}
                       onPlanModeChange={handlePlanModeChange}
                       onModeChange={handleModeChange}
-                      onLegacyConfigMigrate={handleLegacyConfigMigrate}
                       disabled={isReadOnly}
                       compact={compact}
                     />

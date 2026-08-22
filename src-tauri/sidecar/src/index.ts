@@ -1663,11 +1663,17 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
         }
         return;
       case 'tool_response': {
-        const openCodeRuntime = getRuntimeFlavor(activeAgentKind) === 'opencode' ? activeOpenCodeRuntime : undefined;
+        const flavor = getRuntimeFlavor(activeAgentKind);
+        const openCodeRuntime = flavor === 'opencode' ? activeOpenCodeRuntime : undefined;
+        const codexQuestionRuntime = flavor === 'codex' ? options.codexRuntime : undefined;
         if (openCodeRuntime?.isPendingQuestion?.(cmd.toolUseId)) {
           const raw = Array.isArray(cmd.response) ? cmd.response : [];
           const answers = raw.map((a: unknown) => (Array.isArray(a) ? a : [String(a)]));
           openCodeRuntime.respondToQuestion?.(cmd.toolUseId, answers).catch((err: unknown) => emitError(err));
+        } else if (codexQuestionRuntime?.isPendingQuestion?.(cmd.toolUseId)) {
+          const raw = Array.isArray(cmd.response) ? cmd.response : [];
+          const answers = raw.map((a: unknown) => (Array.isArray(a) ? a : [String(a)]));
+          codexQuestionRuntime.respondToQuestion?.(cmd.toolUseId, answers).catch((err: unknown) => emitError(err));
         } else if (openCodeRuntime) {
           options.emit({ type: 'sidecar_error', error: 'OpenCode tool responses are server-managed/not supported' });
         } else if (!resolveClaudeToolResponse(cmd.toolUseId, cmd.response)) {
@@ -1683,9 +1689,15 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           }
           return;
         }
-        const current = flavor === 'opencode' ? activeOpenCodeRuntime : undefined;
+        const current = flavor === 'opencode'
+          ? activeOpenCodeRuntime
+          : flavor === 'codex'
+            ? options.codexRuntime
+            : undefined;
         if (!current?.respondToPermission) {
-          emitError('OpenCode runtime is not initialized');
+          emitError(flavor === 'codex'
+            ? 'Codex runtime is not initialized'
+            : 'OpenCode runtime is not initialized');
           return;
         }
         const runtimePendingResponses = pendingPermissionResponses.get(current) ?? new Map<string, Promise<void>>();

@@ -56,8 +56,9 @@ export type ParsedStoreEvent =
   | { kind: 'assistant'; data: AgentAssistantMessage }
   | { kind: 'tool_result'; data: AgentToolResult }
   | { kind: 'result'; data: AgentResultMessage }
-  | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number }; subtype: string; type: string } }
+  | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number; status?: 'compacting' | 'completed'; post_tokens?: number }; subtype: string; type: string } }
   | { kind: 'runtime_switch'; data: { from_kind?: string; to_kind?: string; content: string; briefing?: string } }
+  | { kind: 'native_session_rebuilt'; data: { content: string; agent_kind?: string; previous_agent_session_id?: string; agent_session_id?: string } }
   | { kind: 'session_summary'; data: SessionSummaryEvent }
   | { kind: 'file_snapshot'; data: { type: 'file_snapshot'; file_path: string; original_content: string; is_new: boolean; tool_use_id: string } };
 
@@ -432,6 +433,24 @@ function mapRuntimeSwitch(raw: Record<string, unknown>): Extract<ParsedStoreEven
   };
 }
 
+function mapNativeSessionRebuilt(raw: Record<string, unknown>): Extract<ParsedStoreEvent, { kind: 'native_session_rebuilt' }> | null {
+  if (raw.type !== 'system' || raw.subtype !== 'native_session_rebuilt') {
+    return null;
+  }
+
+  return {
+    kind: 'native_session_rebuilt',
+    data: {
+      content: typeof raw.content === 'string' && raw.content.trim() ? raw.content : '原生会话已重建。',
+      ...(typeof raw.agent_kind === 'string' ? { agent_kind: raw.agent_kind } : {}),
+      ...(typeof raw.previous_agent_session_id === 'string'
+        ? { previous_agent_session_id: raw.previous_agent_session_id }
+        : {}),
+      ...(typeof raw.agent_session_id === 'string' ? { agent_session_id: raw.agent_session_id } : {}),
+    },
+  };
+}
+
 function mapCompactBoundary(raw: Record<string, unknown>): Extract<ParsedStoreEvent, { kind: 'compact' }> | null {
   if (raw.type !== 'system' || raw.subtype !== 'compact_boundary') {
     return null;
@@ -536,6 +555,11 @@ export function mapPersistedClaudeMessage(
   const runtimeSwitchEvent = mapRuntimeSwitch(raw);
   if (runtimeSwitchEvent) {
     return runtimeSwitchEvent;
+  }
+
+  const nativeSessionRebuiltEvent = mapNativeSessionRebuilt(raw);
+  if (nativeSessionRebuiltEvent) {
+    return nativeSessionRebuiltEvent;
   }
 
   const sessionSummaryEvent = mapSessionSummary(raw);
@@ -651,6 +675,11 @@ function projectCodeMuxHistoryEvent(raw: Record<string, unknown>): Record<string
       ...(typeof raw.from_kind === 'string' ? { from_kind: raw.from_kind } : {}),
       ...(typeof raw.to_kind === 'string' ? { to_kind: raw.to_kind } : {}),
       ...(typeof raw.briefing === 'string' ? { briefing: raw.briefing } : {}),
+      ...(typeof raw.agent_kind === 'string' ? { agent_kind: raw.agent_kind } : {}),
+      ...(typeof raw.previous_agent_session_id === 'string'
+        ? { previous_agent_session_id: raw.previous_agent_session_id }
+        : {}),
+      ...(typeof raw.agent_session_id === 'string' ? { agent_session_id: raw.agent_session_id } : {}),
     };
   }
   return null;

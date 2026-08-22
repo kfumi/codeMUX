@@ -275,13 +275,89 @@ export function hasRuntimeRef(
   );
 }
 
-/** Provider 对应的 SDK 包名（用于诊断日志）。 */
+/**
+ * 从 Runtime 加载结果解析 Codex CLI 可执行文件路径。
+ *
+ * `@openai/codex` 元包通过 npm alias（`@openai/codex-<platform>-<arch>`）
+ * 分发平台二进制，实际位于 `vendor/<triple>/codex/<binary>`；alias 可能被
+ * 提升到顶层 node_modules，也可能嵌套在元包内；元包自身亦有内置 vendor
+ * 兜底布局。最后回退到 npm 生成的 `.bin` shim。
+ */
+export function resolveCodexFromRuntime(
+  loaded: RuntimeLoadResult,
+  platform: NodeJS.Platform = process.platform,
+  arch: NodeJS.Architecture = process.arch,
+): string | undefined {
+  const triple = codexTargetTriple(platform, arch);
+  const binaryName = platform === 'win32' ? 'codex.exe' : 'codex';
+  if (triple) {
+    const vendorRelative = ['vendor', triple, 'codex', binaryName];
+    const aliasPackage = `@openai/codex-${codexPlatformTag(platform)}-${codexArchTag(arch)}`;
+    const candidates = [
+      path.join(loaded.nodeModulesPath, aliasPackage, ...vendorRelative),
+      path.join(
+        loaded.nodeModulesPath,
+        '@openai',
+        'codex',
+        'node_modules',
+        aliasPackage,
+        ...vendorRelative,
+      ),
+      path.join(loaded.nodeModulesPath, '@openai', 'codex', ...vendorRelative),
+    ];
+    const found = candidates.find((candidate) => fs.existsSync(candidate));
+    if (found) return found;
+  }
+
+  const names =
+    platform === 'win32' ? ['codex.cmd', 'codex.exe', 'codex'] : ['codex'];
+  const dotBinDir = path.join(loaded.nodeModulesPath, '.bin');
+  for (const name of names) {
+    const candidate = path.join(dotBinDir, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+function codexPlatformTag(platform: NodeJS.Platform): string {
+  switch (platform) {
+    case 'win32':
+      return 'win32';
+    case 'darwin':
+      return 'darwin';
+    default:
+      return 'linux';
+  }
+}
+
+function codexArchTag(arch: NodeJS.Architecture): string {
+  return arch === 'arm64' ? 'arm64' : 'x64';
+}
+
+function codexTargetTriple(
+  platform: NodeJS.Platform,
+  arch: NodeJS.Architecture,
+): string | undefined {
+  const archTag = codexArchTag(arch);
+  switch (platform) {
+    case 'win32':
+      return archTag === 'arm64' ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc';
+    case 'darwin':
+      return archTag === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin';
+    case 'linux':
+      return archTag === 'arm64' ? 'aarch64-unknown-linux-musl' : 'x86_64-unknown-linux-musl';
+    default:
+      return undefined;
+  }
+}
+
+/** Provider 对应的 SDK/CLI 包名（用于诊断日志）。 */
 export function sdkPackageName(provider: Provider): string {
   switch (provider) {
     case 'claude_code':
       return '@anthropic-ai/claude-agent-sdk';
     case 'codex':
-      return '@openai/codex-sdk';
+      return '@openai/codex';
     case 'opencode':
       return '@opencode-ai/sdk';
   }

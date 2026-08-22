@@ -797,7 +797,7 @@ describe('CodeMuxComposer', () => {
     await vi.waitFor(() => {
       expect(updatePermissionsMock).toHaveBeenCalledWith(
         'session-1',
-        { kind: 'codex', sandboxMode: 'danger-full-access', approvalPolicy: 'never', networkAccessEnabled: true },
+        { kind: 'codex', workflowMode: 'full-access', networkAccessEnabled: true },
         'off',
       );
       expect(setComposerTextMock).toHaveBeenCalledWith('是，实施此计划');

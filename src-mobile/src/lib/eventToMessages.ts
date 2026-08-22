@@ -213,7 +213,10 @@ function parseSystemEvent(event: Record<string, unknown>, id: string): ChatMessa
   }
 
   if (subtype === 'compact_boundary') {
-    const metadata = event.compact_metadata as { pre_tokens?: number } | undefined;
+    const metadata = event.compact_metadata as { pre_tokens?: number; status?: string } | undefined;
+    if (metadata?.status === 'compacting') {
+      return { kind: 'system', id, content: '— 正在压缩上下文… —' };
+    }
     const preTokens = metadata?.pre_tokens ?? 0;
     const tokenText = preTokens >= 1000
       ? ` · 节省 ${(preTokens / 1000).toFixed(1)}k tokens`

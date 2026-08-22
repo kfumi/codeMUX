@@ -1,10 +1,9 @@
 import type { AgentKind } from '../types/session';
 
-export type AgentExecutionMode = 'confirm_before_edit' | 'auto_edit' | 'plan' | 'full_access';
+export type AgentExecutionMode = 'confirm_before_edit' | 'auto_edit' | 'plan' | 'full_access' | 'read_only' | 'auto_review';
 export type AgentPlanMode = 'off' | 'on';
 export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk' | 'bypassPermissions';
-export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
-export type CodexApprovalPolicy = 'untrusted' | 'on-request' | 'never';
+export type CodexWorkflowMode = 'read-only' | 'auto' | 'auto-review' | 'full-access';
 export type OpenCodePermissionMode = 'full_access' | 'plan';
 
 export type ClaudePermissionConfig = {
@@ -14,8 +13,7 @@ export type ClaudePermissionConfig = {
 
 export type CodexPermissionConfig = {
   kind: 'codex';
-  sandboxMode: CodexSandboxMode;
-  approvalPolicy: CodexApprovalPolicy;
+  workflowMode: CodexWorkflowMode;
   networkAccessEnabled: boolean;
 };
 
@@ -35,19 +33,16 @@ const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = [
   'bypassPermissions',
 ];
 
-const CODEX_SANDBOX_MODES: CodexSandboxMode[] = ['read-only', 'workspace-write', 'danger-full-access'];
-const CODEX_APPROVAL_POLICIES: CodexApprovalPolicy[] = ['untrusted', 'on-request', 'never'];
+const CODEX_WORKFLOW_MODES: CodexWorkflowMode[] = ['read-only', 'auto', 'auto-review', 'full-access'];
 
-// Shared default triplets — keep in sync with src-tauri/sidecar/src/agentPermissions.ts
+// Shared defaults — keep in sync with src-tauri/sidecar/src/agentPermissions.ts
 const CODEX_DEFAULT_PERMISSIONS: Omit<CodexPermissionConfig, 'kind'> = {
-  sandboxMode: 'danger-full-access',
-  approvalPolicy: 'never',
+  workflowMode: 'full-access',
   networkAccessEnabled: true,
 };
 
 const CODEX_PLAN_MODE_PERMISSIONS: Omit<CodexPermissionConfig, 'kind'> = {
-  sandboxMode: 'read-only',
-  approvalPolicy: 'on-request',
+  workflowMode: 'read-only',
   networkAccessEnabled: false,
 };
 
@@ -84,11 +79,14 @@ export function mapExecutionModeToPermissionConfig(
     switch (executionMode) {
       case 'plan':
         return { kind: 'codex', ...CODEX_PLAN_MODE_PERMISSIONS };
+      case 'read_only':
+        return { kind: 'codex', workflowMode: 'read-only', networkAccessEnabled: false };
+      case 'auto_edit':
+        return { kind: 'codex', workflowMode: 'auto', networkAccessEnabled: true };
+      case 'auto_review':
+        return { kind: 'codex', workflowMode: 'auto-review', networkAccessEnabled: true };
       case 'full_access':
-        return { kind: 'codex', ...CODEX_DEFAULT_PERMISSIONS };
       default:
-        // auto_edit, confirm_before_edit, and any future modes fall back to defaults.
-        // The Codex UI only exposes 'plan' and 'full_access'.
         return { kind: 'codex', ...CODEX_DEFAULT_PERMISSIONS };
     }
   }
@@ -146,9 +144,10 @@ export function serializePermissionConfig(agentKind: AgentKind, value: unknown):
   if (agentKind === 'codex') {
     return {
       kind: 'codex',
-      sandboxMode: isCodexSandboxMode(raw.sandboxMode) ? raw.sandboxMode : CODEX_DEFAULT_PERMISSIONS.sandboxMode,
-      approvalPolicy: isCodexApprovalPolicy(raw.approvalPolicy) ? raw.approvalPolicy : CODEX_DEFAULT_PERMISSIONS.approvalPolicy,
-      networkAccessEnabled: typeof raw.networkAccessEnabled === 'boolean' ? raw.networkAccessEnabled : CODEX_DEFAULT_PERMISSIONS.networkAccessEnabled,
+      workflowMode: resolveCodexWorkflowMode(raw),
+      networkAccessEnabled: typeof raw.networkAccessEnabled === 'boolean'
+        ? raw.networkAccessEnabled
+        : resolveCodexWorkflowMode(raw) === 'read-only' ? false : true,
     };
   }
 
@@ -156,6 +155,23 @@ export function serializePermissionConfig(agentKind: AgentKind, value: unknown):
     kind: 'claude_code',
     permissionMode: isClaudePermissionMode(raw.permissionMode) ? raw.permissionMode : 'default',
   };
+}
+
+/**
+ * Resolves the effective Workflow Mode tier from a stored config.
+ * Legacy snapshots that only carry the SDK-era sandbox/approval triple are
+ * migrated by sandbox mode: read-only → read-only, workspace-write → auto,
+ * danger-full-access → full-access.
+ */
+export function resolveCodexWorkflowMode(raw: Record<string, unknown>): CodexWorkflowMode {
+  if (isCodexWorkflowMode(raw.workflowMode)) {
+    return raw.workflowMode;
+  }
+  const sandboxMode = raw.sandboxMode;
+  if (sandboxMode === 'read-only') return 'read-only';
+  if (sandboxMode === 'workspace-write') return 'auto';
+  if (sandboxMode === 'danger-full-access') return 'full-access';
+  return CODEX_DEFAULT_PERMISSIONS.workflowMode;
 }
 
 function isOpenCodePermissionMode(value: unknown): value is OpenCodePermissionMode {
@@ -166,10 +182,6 @@ function isClaudePermissionMode(value: unknown): value is ClaudePermissionMode {
   return typeof value === 'string' && CLAUDE_PERMISSION_MODES.includes(value as ClaudePermissionMode);
 }
 
-function isCodexSandboxMode(value: unknown): value is CodexSandboxMode {
-  return typeof value === 'string' && CODEX_SANDBOX_MODES.includes(value as CodexSandboxMode);
-}
-
-function isCodexApprovalPolicy(value: unknown): value is CodexApprovalPolicy {
-  return typeof value === 'string' && CODEX_APPROVAL_POLICIES.includes(value as CodexApprovalPolicy);
+function isCodexWorkflowMode(value: unknown): value is CodexWorkflowMode {
+  return typeof value === 'string' && CODEX_WORKFLOW_MODES.includes(value as CodexWorkflowMode);
 }
