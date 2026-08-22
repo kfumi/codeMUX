@@ -481,11 +481,7 @@ function mergeIntoPreviousProcessMessage(
   while (previousIndex >= 0) {
     const candidate = messages[previousIndex];
     if (isProcessOnlyAssistantMessage(candidate)) {
-      if (
-        crossedNarration
-        && candidate.metadata.sourceUuid !== nextMessage.metadata.sourceUuid
-        && candidate.metadata.sourceOpenCodeSessionId !== nextMessage.metadata.sourceOpenCodeSessionId
-      ) {
+      if (crossedNarration && shouldNotMergeAcrossNarration(candidate, nextMessage)) {
         return undefined;
       }
       break;
@@ -528,6 +524,24 @@ function mergeIntoPreviousProcessMessage(
   }
 
   return previousIndex;
+}
+
+function shouldNotMergeAcrossNarration(
+  candidate: CodeMuxAssistantMessage,
+  nextMessage: CodeMuxAssistantMessage,
+): boolean {
+  const uuidDiffers = candidate.metadata.sourceUuid !== nextMessage.metadata.sourceUuid;
+  if (!uuidDiffers) {
+    return false;
+  }
+
+  const candidateSessionId = candidate.metadata.sourceOpenCodeSessionId;
+  const nextSessionId = nextMessage.metadata.sourceOpenCodeSessionId;
+  if (candidateSessionId == null && nextSessionId == null) {
+    return true;
+  }
+
+  return candidateSessionId !== nextSessionId;
 }
 
 function isProcessOnlyAssistantMessage(message: CodeMuxAssistantMessage): boolean {
