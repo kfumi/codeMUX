@@ -20,6 +20,7 @@ import {
 } from './runtimeLoader.js';
 import {
   AppServerTransport,
+  CODEX_APP_SERVER_DEFAULT_ARGS,
   type AppServerTransportOptions,
 } from './appServerTransport.js';
 import {
@@ -288,7 +289,17 @@ export class CodexAppServerRuntime {
     const transport = await this.connectTransport({
       executable,
       cwd,
-      env: buildAppServerEnv(requestedConfig),
+      // Session-scoped `-c` overrides must win over the user's global
+      // ~/.codex/config.toml, whose `model_provider`/`base_url` would otherwise
+      // pin every session to whatever upstream the standalone Codex CLI last
+      // selected (config wins over the OPENAI_BASE_URL env var).
+      args: [
+        // `config` (not requestedConfig): carries effectiveBaseUrl — the
+        // compat-proxy listening URL when codex_needs_proxy routing is on.
+        ...buildAppServerConfigOverrides(config),
+        ...CODEX_APP_SERVER_DEFAULT_ARGS,
+      ],
+      env: buildAppServerEnv(config),
       // The approval bridge registers an `mcpServer/elicitation/request`
       // handler, so the matching initialize capability must be declared.
       mcpServerElicitation: true,
@@ -1629,6 +1640,34 @@ function buildAppServerEnv(config: CodexSessionBootstrap): Record<string, string
   }
   applyCodexWindowsSandboxPathCompatibility(env as Record<string, string>);
   return env;
+}
+
+/**
+ * Session-scoped provider overrides passed as `-c key=value` flags (must
+ * precede the `app-server` subcommand). Registers a dedicated provider entry
+ * so a user's global `model_provider`/`model_providers.*` in
+ * ~/.codex/config.toml cannot redirect session traffic to another upstream.
+ */
+export const CODEMUX_APP_SERVER_PROVIDER_ID = 'codemux_session';
+
+export function buildAppServerConfigOverrides(
+  config: Pick<CodexSessionBootstrap, 'effectiveBaseUrl' | 'upstreamBaseUrl'>,
+): string[] {
+  const baseUrl = config.effectiveBaseUrl ?? config.upstreamBaseUrl;
+  if (!baseUrl) {
+    return [];
+  }
+  const prefix = `model_providers.${CODEMUX_APP_SERVER_PROVIDER_ID}`;
+  return [
+    '-c', `model_provider=${CODEMUX_APP_SERVER_PROVIDER_ID}`,
+    '-c', `${prefix}.name=${CODEMUX_APP_SERVER_PROVIDER_ID}`,
+    '-c', `${prefix}.base_url=${baseUrl}`,
+    '-c', `${prefix}.wire_api=responses`,
+    // Third-party providers take credentials from a named env var
+    // (buildAppServerEnv seeds OPENAI_API_KEY from the session's api_key);
+    // requires_openai_auth would demand the official ChatGPT/API-key login.
+    '-c', `${prefix}.env_key=OPENAI_API_KEY`,
+  ];
 }
 
 /**

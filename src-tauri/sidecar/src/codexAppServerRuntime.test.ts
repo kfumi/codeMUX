@@ -8,7 +8,7 @@ import {
   AppServerTransport,
   type AppServerTransportOptions,
 } from './appServerTransport.js';
-import { CodexAppServerRuntime } from './codexAppServerRuntime.js';
+import { CodexAppServerRuntime, buildAppServerConfigOverrides } from './codexAppServerRuntime.js';
 import { proxyManager } from './proxyManager.js';
 import type { SidecarCommand } from './types.js';
 
@@ -1906,4 +1906,34 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
     },
     20_000,
   );
+});
+
+describe('buildAppServerConfigOverrides', () => {
+  it('returns session-scoped provider overrides for the effective base URL', () => {
+    const overrides = buildAppServerConfigOverrides({
+      effectiveBaseUrl: 'http://127.0.0.1:15722',
+      upstreamBaseUrl: 'https://openrouter.ai/api/v1',
+    });
+    expect(overrides).toEqual([
+      '-c', 'model_provider=codemux_session',
+      '-c', 'model_providers.codemux_session.name=codemux_session',
+      '-c', 'model_providers.codemux_session.base_url=http://127.0.0.1:15722',
+      '-c', 'model_providers.codemux_session.wire_api=responses',
+      '-c', 'model_providers.codemux_session.env_key=OPENAI_API_KEY',
+    ]);
+  });
+
+  it('falls back to the upstream base URL when no compat proxy is active', () => {
+    const overrides = buildAppServerConfigOverrides({
+      upstreamBaseUrl: 'https://openrouter.ai/api/v1',
+    });
+    const baseUrlOverride = overrides.find((flag) => flag.includes('base_url='));
+    expect(baseUrlOverride).toBe(
+      'model_providers.codemux_session.base_url=https://openrouter.ai/api/v1',
+    );
+  });
+
+  it('returns no overrides when neither base URL is set', () => {
+    expect(buildAppServerConfigOverrides({})).toEqual([]);
+  });
 });

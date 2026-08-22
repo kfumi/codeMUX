@@ -33,6 +33,8 @@ describe('codexModelCatalog', () => {
     expect(buildCodexModelCatalogEntry('deepseek-v4-flash-free')).toMatchObject({
       slug: 'deepseek-v4-flash-free',
       display_name: 'Deepseek V4 Flash Free',
+      // codex 0.146.x only accepts 'freeform' here; providers whose
+      // /v1/responses rejects type:"custom" tools need codex_needs_proxy.
       apply_patch_tool_type: 'freeform',
       shell_type: 'shell_command',
       supported_in_api: true,

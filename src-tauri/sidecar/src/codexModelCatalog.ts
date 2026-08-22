@@ -76,6 +76,10 @@ export function buildCodexModelCatalogEntry(
     visibility: 'list',
     supported_in_api: true,
     priority: 1000,
+    // NOTE: codex 0.146.x only accepts 'freeform' here ('function' makes
+    // thread/resume fail with "unknown variant"). freeform emits a
+    // Responses-API type:"custom" tool, which some third-party endpoints
+    // (e.g. OpenRouter) reject — those providers need codex_needs_proxy.
     apply_patch_tool_type: 'freeform',
     supports_parallel_tool_calls: true,
     supports_reasoning_summaries: true,
