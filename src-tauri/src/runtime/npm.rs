@@ -38,7 +38,7 @@ pub struct NpmRuntimeSpec {
     pub version: String,
     pub packages: Vec<String>,
     pub key_files: Vec<String>,
-    pub key_binaries: Vec<String>,
+    pub candidate_binaries: Vec<String>,
 }
 
 impl NpmRuntimeSpec {
@@ -71,7 +71,7 @@ impl NpmRuntimeSpec {
             version: version.to_string(),
             packages,
             key_files,
-            key_binaries: key_binaries(provider),
+            candidate_binaries: candidate_binaries(provider),
         })
     }
 }
@@ -84,7 +84,7 @@ fn primary_package(provider: Provider) -> &'static str {
     }
 }
 
-fn key_binaries(provider: Provider) -> Vec<String> {
+fn candidate_binaries(provider: Provider) -> Vec<String> {
     match provider {
         Provider::ClaudeCode => {
             let platform = match Platform::current() {
@@ -649,10 +649,13 @@ where
         if !spec.key_files.iter().all(|file| dir.join(file).exists()) {
             return false;
         }
-        // key_binaries 为同一 CLI 的候选安装布局（npm alias 提升或嵌套）；
+        // candidate_binaries 为同一 CLI 的候选安装布局（npm alias 提升或嵌套）；
         // 任一存在即通过。单一路径的 Provider 语义不变。
-        if !spec.key_binaries.is_empty()
-            && !spec.key_binaries.iter().any(|file| dir.join(file).exists())
+        if !spec.candidate_binaries.is_empty()
+            && !spec
+                .candidate_binaries
+                .iter()
+                .any(|file| dir.join(file).exists())
         {
             return false;
         }
@@ -1065,7 +1068,7 @@ mod tests {
         )
         .map_err(|error| RuntimeError::io_failed(Some(spec.provider), error.to_string()))?;
         // 模拟首个候选二进制布局（npm alias 提升到顶层）。
-        if let Some(binary) = spec.key_binaries.first() {
+        if let Some(binary) = spec.candidate_binaries.first() {
             let binary_path = destination.join(binary);
             if let Some(parent) = binary_path.parent() {
                 std::fs::create_dir_all(parent).map_err(|error| {
@@ -1140,13 +1143,15 @@ mod tests {
     fn codex_runtime_validates_any_candidate_binary_layout() {
         let spec = NpmRuntimeSpec::for_version(Provider::Codex, "0.139.0").unwrap();
         assert!(
-            spec.key_binaries.len() >= 3,
-            "Codex key_binaries 应包含提升、嵌套与内置 vendor 三种候选布局"
+            spec.candidate_binaries.len() >= 3,
+            "Codex candidate_binaries 应包含提升、嵌套与内置 vendor 三种候选布局"
         );
         assert!(
-            spec.key_binaries.iter().all(|path| path.contains("vendor")),
-            "Codex key_binaries 应指向平台 vendor 二进制：{:?}",
-            spec.key_binaries
+            spec.candidate_binaries
+                .iter()
+                .all(|path| path.contains("vendor")),
+            "Codex candidate_binaries 应指向平台 vendor 二进制：{:?}",
+            spec.candidate_binaries
         );
         let binary_name = if cfg!(target_os = "windows") {
             "codex.exe"
@@ -1154,7 +1159,7 @@ mod tests {
             "codex"
         };
         assert!(spec
-            .key_binaries
+            .candidate_binaries
             .iter()
             .any(|path| path.ends_with(binary_name)));
     }
@@ -1267,7 +1272,7 @@ mod tests {
         let bare_dir = fs.version_dir(Provider::Codex, "0.1.0");
         let bare_spec = NpmRuntimeSpec::for_version(Provider::Codex, "0.1.0").unwrap();
         write_runtime_layout(&bare_spec, &bare_dir).unwrap();
-        for binary in &bare_spec.key_binaries {
+        for binary in &bare_spec.candidate_binaries {
             let _ = std::fs::remove_file(bare_dir.join(binary));
         }
         let manager = test_manager(
@@ -1281,8 +1286,9 @@ mod tests {
         let nested_dir = fs.version_dir(Provider::Codex, "0.2.0");
         let nested_spec = NpmRuntimeSpec::for_version(Provider::Codex, "0.2.0").unwrap();
         write_runtime_layout(&nested_spec, &nested_dir).unwrap();
-        let _ = std::fs::remove_file(nested_dir.join(nested_spec.key_binaries.first().unwrap()));
-        let nested_binary = nested_spec.key_binaries.last().unwrap();
+        let _ =
+            std::fs::remove_file(nested_dir.join(nested_spec.candidate_binaries.first().unwrap()));
+        let nested_binary = nested_spec.candidate_binaries.last().unwrap();
         let nested_path = nested_dir.join(nested_binary);
         std::fs::create_dir_all(nested_path.parent().unwrap()).unwrap();
         std::fs::write(&nested_path, b"fake-binary").unwrap();

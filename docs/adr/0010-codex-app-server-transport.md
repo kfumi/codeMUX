@@ -13,7 +13,7 @@ Codex SDK 路径无法实现工具级 Interactive Request 审批、Plan Mode 闭
 ## Decision
 
 1. **硬切，无 feature flag。** 合并即删除 SDK 加载链、`codexRuntime.ts`、`sdk_mode` 配置；不做用户可见的 transport 回退。
-2. **Runtime 包替换。** `@openai/codex-sdk` → `@openai/codex@<version>`，`key_binaries` 校验 `codex` / `codex.exe`。
+2. **Runtime 包替换。** `@openai/codex-sdk` → `@openai/codex@<version>`，`candidate_binaries`（npm alias 提升/嵌套/vendor 多候选布局）校验 `codex` / `codex.exe`。
 3. **Session resume 尽力而为。** 优先 `thread/resume` 已有 `thr_*` mapping；失败则 mint 新 thread、替换 mapping，写 `system_event`（`native_session_rebuilt`）；CodeMUX Event 时间线不变。
 4. **Plan Mode 正交于 Workflow Mode。** Workflow Mode 四档（read-only / auto / auto-review / full-access）写入 Permission Snapshot；Plan Mode 为独立 composer toggle，经 `collaborationMode` + turn 完成后 Plan Approval（Implement / Dismiss）+ 自动 implementation turn。
 5. **首版能力范围。** 包含：turn、工具/问答/Plan 审批、`thread/compact/start`、fork（合并入主 runtime）、四档 Workflow、Plan toggle、Mobile Companion 全量对齐。不包含：`turn/steer`、`thread/inject_items`、`thread/rollback`、goals。

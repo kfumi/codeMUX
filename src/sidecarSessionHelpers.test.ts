@@ -1,13 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
+  applyCodexWindowsSandboxPathCompatibility,
   buildMcpInstructions,
   getProviderMode,
   shouldUseCodexChatCompatProxy,
 } from '../src-tauri/sidecar/src/sessionRuntimeHelpers';
 import { getRuntimeFlavor } from '../src-tauri/sidecar/src/runtimeEvents';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('getProviderMode', () => {
   it('treats the default Anthropic endpoint as deferred-capable', () => {
@@ -52,6 +57,42 @@ describe('shouldUseCodexChatCompatProxy', () => {
   it('honors an explicit provider proxy override', () => {
     expect(shouldUseCodexChatCompatProxy('https://openrouter.ai/api/v1', false)).toBe(false);
     expect(shouldUseCodexChatCompatProxy('https://api.openai.com/v1', true)).toBe(true);
+  });
+});
+
+describe('applyCodexWindowsSandboxPathCompatibility', () => {
+  const stubPlatform = (platform: string) => {
+    vi.stubGlobal('process', { ...process, platform });
+  };
+
+  it('filters WindowsApps entries from PATH on win32', () => {
+    stubPlatform('win32');
+    const env: Record<string, string> = {
+      Path: 'C:\\Program Files\\nodejs;C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps;C:\\tools\\bin',
+    };
+    applyCodexWindowsSandboxPathCompatibility(env);
+    expect(env.Path).toBe('C:\\Program Files\\nodejs;C:\\tools\\bin');
+  });
+
+  it('is a no-op on non-Windows platforms', () => {
+    stubPlatform('linux');
+    const env: Record<string, string> = { Path: '/usr/local/bin:/mnt/c/WindowsApps' };
+    applyCodexWindowsSandboxPathCompatibility(env);
+    expect(env.Path).toBe('/usr/local/bin:/mnt/c/WindowsApps');
+  });
+
+  it('keeps the original PATH when every entry lives under WindowsApps', () => {
+    stubPlatform('win32');
+    const env: Record<string, string> = { path: 'C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps' };
+    applyCodexWindowsSandboxPathCompatibility(env);
+    expect(env.path).toBe('C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps');
+  });
+
+  it('matches the Path key case-insensitively and drops empty entries', () => {
+    stubPlatform('win32');
+    const env: Record<string, string> = { PATH: ';C:\\tools\\bin;;C:\\WindowsApps\\node.exe;' };
+    applyCodexWindowsSandboxPathCompatibility(env);
+    expect(env.PATH).toBe('C:\\tools\\bin');
   });
 });
 

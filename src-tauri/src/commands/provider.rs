@@ -805,11 +805,10 @@ async fn test_openai_stream(base_url: &str, api_key: &str, model: &str) -> Resul
 #[cfg(test)]
 mod tests {
     use super::{
-        agent_provider_profile_retired_err, apply_agent_config_update, build_model_urls,
-        model_info_from_json, redact_config_for_frontend, ModelInfo,
-        AGENT_PROVIDER_PROFILE_RETIRED,
+        agent_provider_profile_retired_err, build_model_urls, model_info_from_json,
+        redact_config_for_frontend, ModelInfo, AGENT_PROVIDER_PROFILE_RETIRED,
     };
-    use crate::config::types::{AgentKind, AppConfig};
+    use crate::config::types::AppConfig;
 
     #[test]
     fn redact_config_clears_model_provider_secrets() {

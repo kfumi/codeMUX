@@ -259,7 +259,7 @@ impl Default for ClaudeCodeAgentConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CodexAgentConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_provider_id: Option<String>,
@@ -269,17 +269,6 @@ pub struct CodexAgentConfig {
     pub permission_config: CodexPermissionConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeouts: Option<crate::provider_profiles::types::AgentTimeouts>,
-}
-
-impl Default for CodexAgentConfig {
-    fn default() -> Self {
-        Self {
-            default_provider_id: None,
-            default_model: None,
-            permission_config: CodexPermissionConfig::default(),
-            timeouts: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
