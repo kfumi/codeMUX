@@ -67,11 +67,11 @@ const opencodeOptions: PermissionOption[] = [
 ];
 
 // Workflow Mode tiers (ADR 0010): auto / auto-review / full-access, worded
-// verbatim after the official ChatGPT Codex App approval selector. read-only
-// stays a valid internal enum (legacy snapshots migrate onto it) but only
-// surfaces as an exit hatch for sessions already stored on that tier. Plan
-// Mode is an orthogonal composer toggle (Issue 07) and follows the same
-// legacy-session-only pattern.
+// after the official ChatGPT Codex App approval selector. read-only stays a
+// valid internal enum (legacy snapshots migrate onto it) but only surfaces as
+// an exit hatch for sessions already stored on that tier. The selector never
+// mirrors the orthogonal Plan toggle — its entry lives in the composer add
+// menu and its active indicator in the chip beside this dropdown.
 const codexWorkflowOptions: PermissionOption[] = [
   { mode: 'auto_edit', label: '请求批准', description: '编辑外部文件和使用互联网时始终询问', icon: BookOpen },
   { mode: 'auto_review', label: '帮我批准', description: '仅对检测到的风险操作请求批准', icon: FileSearch },
@@ -84,13 +84,6 @@ const codexReadOnlyOption: PermissionOption = {
   label: '只读模式',
   description: '只读探索代码库，不写入文件。',
   icon: Eye,
-};
-
-const codexPlanOption: PermissionOption = {
-  mode: 'plan',
-  label: '计划模式',
-  description: '先分析和规划，不直接写入文件。',
-  icon: ClipboardList,
 };
 
 export function AgentPermissionSelector({
@@ -121,15 +114,14 @@ export function AgentPermissionSelector({
     if (agentKind === 'opencode') return opencodeOptions;
     if (agentKind === 'codex') {
       // The official three-tier selector; sessions already stored on the
-      // read-only tier keep that entry as an exit hatch, and legacy plan-mode
-      // sessions keep the plan entry so they can switch back off.
-      const tierOptions = codexWorkflowTier === 'read-only'
+      // read-only tier keep that entry as an exit hatch. The orthogonal Plan
+      // toggle never injects an entry here.
+      return codexWorkflowTier === 'read-only'
         ? [codexReadOnlyOption, ...codexWorkflowOptions]
         : codexWorkflowOptions;
-      return planMode === 'on' ? [codexPlanOption, ...tierOptions] : tierOptions;
     }
     return claudeOptions;
-  }, [agentKind, planMode, codexWorkflowTier]);
+  }, [agentKind, codexWorkflowTier]);
   const selected = useMemo(
     () => options.find((option) => option.mode === selectedMode) ?? options[0],
     [options, selectedMode],
@@ -137,22 +129,13 @@ export function AgentPermissionSelector({
   const SelectedIcon = selected.icon;
 
   const selectMode = (mode: AgentExecutionMode) => {
-    // Codex Plan Mode is orthogonal (ADR 0010): flipping the toggle keeps the
-    // current Workflow tier snapshot instead of mapping to a tier.
-    if (agentKind === 'codex' && mode === 'plan') {
-      if (onModeChange && normalized.kind === 'codex') {
-        onModeChange(normalized, 'on');
-      } else {
-        onPlanModeChange('on');
-      }
-      setOpen(false);
-      return;
-    }
-
     const nextConfig = mapExecutionModeToPermissionConfig(agentKind, mode);
-    const nextPlanMode = (agentKind === 'claude_code' || agentKind === 'codex' || agentKind === 'opencode')
-      ? (mode === 'plan' ? 'on' as const : 'off' as const)
-      : planMode;
+    // Codex Plan Mode is orthogonal (ADR 0010 Decision 4): picking a Workflow
+    // tier never flips the plan toggle. Claude/OpenCode treat plan as a native
+    // permission mode, so their selection drives plan state directly.
+    const nextPlanMode = agentKind === 'codex'
+      ? planMode
+      : (mode === 'plan' ? 'on' as const : 'off' as const);
 
     // Prefer the atomic callback to avoid race conditions between
     // separate config and plan-mode state updates.
@@ -265,7 +248,8 @@ function inferExecutionMode(
   }
 
   if (agentKind === 'codex' && permissionConfig.kind === 'codex') {
-    if (planMode === 'on') return 'plan';
+    // Plan Mode is orthogonal (ADR 0010 Decision 4): the selector always
+    // reflects the stored Workflow tier, never the plan toggle.
     return codexWorkflowModeToExecutionMode(permissionConfig.workflowMode);
   }
 

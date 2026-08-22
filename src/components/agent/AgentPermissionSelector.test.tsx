@@ -127,7 +127,7 @@ describe('AgentPermissionSelector', () => {
     expect(onPlanModeChange).toHaveBeenLastCalledWith('off');
   });
 
-  it('keeps the plan entry for legacy Codex plan-mode sessions without touching the tier', () => {
+  it('keeps showing the stored workflow tier while plan mode is on (orthogonal)', () => {
     const onPermissionConfigChange = vi.fn();
     const onPlanModeChange = vi.fn();
 
@@ -145,16 +145,20 @@ describe('AgentPermissionSelector', () => {
       />,
     );
 
-    const triggerButton = screen.getByRole('button', { name: '计划模式' });
-    expect(triggerButton.getAttribute('aria-label')).toBe('计划模式');
+    // The selector mirrors the tier snapshot, never the plan toggle; the plan
+    // entry lives in the composer add menu, not here.
+    expect(screen.getByRole('button', { name: '只读模式' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '只读模式' }));
+    expect(screen.getAllByRole('menuitemradio')).toHaveLength(4);
+    expect(screen.queryByText('计划模式')).toBeNull();
 
-    fireEvent.click(triggerButton);
-    expect(screen.getAllByRole('menuitemradio')).toHaveLength(5);
-
-    // Issue 07: re-selecting plan only flips the toggle — the Workflow tier
-    // snapshot is never rewritten (ADR 0010 orthogonality).
-    fireEvent.click(screen.getAllByText('计划模式')[1]);
-    expect(onPermissionConfigChange).not.toHaveBeenCalled();
+    // Switching tiers preserves the orthogonal plan state (ADR 0010).
+    fireEvent.click(screen.getByText('请求批准'));
+    expect(onPermissionConfigChange).toHaveBeenCalledWith({
+      kind: 'codex',
+      workflowMode: 'auto',
+      networkAccessEnabled: true,
+    });
     expect(onPlanModeChange).toHaveBeenCalledWith('on');
   });
 

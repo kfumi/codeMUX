@@ -48,5 +48,5 @@ Codex SDK 路径无法实现工具级 Interactive Request 审批、Plan Mode 闭
 
 - **reviewer 值替换**：auto-review 档的 `approvalsReviewer` 由 `auto_review` 改为官方新值 `guardian_subagent`；类型联合保留 `auto_review` 以兼容存量快照反序列化。
 - **默认档收紧**：默认 workflowMode 由 `full-access` 改为 `auto`（即官方保守默认「请求批准」，workspace-write + on-request），前后端 `CODEX_DEFAULT_PERMISSIONS` 与 Rust 侧 `default_codex_workflow_mode` serde 默认同步；`mapExecutionModeToPermissionConfig` 的 `full_access` 分支改为显式 full-access 配置，不再展开默认值。
-- **选择器收敛**：桌面 `AgentPermissionSelector` 只展示官方三档入口并采用官方文案（请求批准 / 帮我批准 / 完全访问，第三档官方原文为「完全访问权限」，取短形）；read-only 不再常驻，仅存量 read-only 快照的会话保留退出口（与遗留 plan 入口同款模式）。计划模式入口移入 composer「+」菜单（`onActivatePlanMode`），独立「计划」toggle 按钮移除，开启后在权限下拉右侧显示可点击关闭的激活 chip。
+- **选择器收敛**：桌面 `AgentPermissionSelector` 只展示官方三档入口并采用官方文案（请求批准 / 帮我批准 / 完全访问，第三档官方原文为「完全访问权限」，取短形）；read-only 不再常驻，仅存量 read-only 快照的会话保留退出口（与遗留 plan 入口同款模式）。计划模式入口移入 composer「+」菜单（`onActivatePlanMode`），独立「计划」toggle 按钮移除，开启后在权限下拉右侧显示可点击关闭的激活 chip；权限选择器不再镜像 plan 状态（含切档不翻转 plan），始终显示当前 Workflow 档。
 - **兼容性**：枚举 id 不改名、read-only 档保留，存量 permission snapshot 迁移映射（sandbox 三元组 → 档位）不受影响。
