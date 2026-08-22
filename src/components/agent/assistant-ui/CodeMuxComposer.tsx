@@ -617,26 +617,23 @@ export function CodeMuxComposer({
                   </button>
                 </PopoverContent>
               </Popover>
-                {onTogglePlanMode ? (
-                  <TooltipHint content="计划模式：先规划再实施（与权限档位独立）">
+                {permissionSelector}
+                {planMode === 'on' && onTogglePlanMode ? (
+                  // Active Plan indicator — entry lives in the add (+) menu;
+                  // clicking the chip exits plan mode without touching the tier.
+                  <TooltipHint content="计划模式：先规划再实施（点击关闭）">
                     <button
                       type="button"
                       onClick={onTogglePlanMode}
-                      aria-pressed={planMode === 'on'}
-                      aria-label={planMode === 'on' ? '关闭计划模式' : '开启计划模式'}
-                      className={cn(
-                        'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-xs font-medium transition-all duration-200 outline-none focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
-                        planMode === 'on'
-                          ? 'border-primary/45 bg-primary/10 text-primary'
-                          : 'border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/78 hover:bg-muted/58 hover:text-foreground',
-                      )}
+                      aria-pressed="true"
+                      aria-label="关闭计划模式"
+                      className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-primary/45 bg-primary/10 px-2 text-xs font-medium text-primary transition-all duration-200 outline-none focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50"
                     >
                       <ListTodo className="h-3.5 w-3.5 shrink-0" />
                       <span className="truncate">计划</span>
                     </button>
                   </TooltipHint>
                 ) : null}
-                {permissionSelector}
               </div>
               <div className="flex min-w-0 items-center justify-end">
                 {contextUsage ? (

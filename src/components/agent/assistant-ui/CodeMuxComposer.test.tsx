@@ -331,6 +331,22 @@ describe('CodeMuxComposer', () => {
     expect(screen.getByText('计划模式')).toBeTruthy();
   });
 
+  it('shows the active plan indicator only while plan mode is on', () => {
+    const onTogglePlanMode = vi.fn();
+    const { rerender } = render(
+      <CodeMuxComposer sessionId="session-1" planMode="off" onTogglePlanMode={onTogglePlanMode} />,
+    );
+
+    // No standing plan toggle in the toolbar; entry lives in the add menu.
+    expect(screen.queryByRole('button', { name: '开启计划模式' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '关闭计划模式' })).toBeNull();
+
+    rerender(<CodeMuxComposer sessionId="session-1" planMode="on" onTogglePlanMode={onTogglePlanMode} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭计划模式' }));
+    expect(onTogglePlanMode).toHaveBeenCalledTimes(1);
+  });
+
   it('renders assistant-ui image attachment previews without a filename label', () => {
     render(<CodeMuxComposer sessionId="session-1" />);
 

@@ -75,7 +75,7 @@ const opencodeOptions: PermissionOption[] = [
 const codexWorkflowOptions: PermissionOption[] = [
   { mode: 'auto_edit', label: '请求批准', description: '编辑外部文件和使用互联网时始终询问', icon: BookOpen },
   { mode: 'auto_review', label: '帮我批准', description: '仅对检测到的风险操作请求批准', icon: FileSearch },
-  { mode: 'full_access', label: '完全访问权限', description: '可不受限制地访问互联网和你电脑上的任何文件', icon: Shield, tone: 'warning' },
+  { mode: 'full_access', label: '完全访问', description: '可不受限制地访问互联网和你电脑上的任何文件', icon: Shield, tone: 'warning' },
 ];
 
 /** Exit hatch for sessions whose stored snapshot is still on the read-only tier. */

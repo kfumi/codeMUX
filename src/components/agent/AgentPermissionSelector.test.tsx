@@ -54,13 +54,13 @@ describe('AgentPermissionSelector', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '完全访问权限' }));
+    fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
 
     const items = screen.getAllByRole('menuitemradio');
     expect(items).toHaveLength(3);
     expect(screen.getByText('请求批准')).toBeTruthy();
     expect(screen.getByText('帮我批准')).toBeTruthy();
-    expect(screen.getAllByText('完全访问权限')).toHaveLength(2);
+    expect(screen.getAllByText('完全访问')).toHaveLength(2);
     // read-only is no longer a standing entry; Claude/OpenCode-only entries
     // must not leak into Codex either.
     expect(screen.queryByText('只读模式')).toBeNull();
@@ -107,7 +107,7 @@ describe('AgentPermissionSelector', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '完全访问权限' }));
+    fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
     fireEvent.click(screen.getByText('请求批准'));
     expect(onPermissionConfigChange).toHaveBeenCalledWith({
       kind: 'codex',
@@ -117,7 +117,7 @@ describe('AgentPermissionSelector', () => {
     expect(onPlanModeChange).toHaveBeenCalledWith('off');
 
     // The uncontrolled trigger keeps reflecting the (unchanged) prop config.
-    fireEvent.click(screen.getByRole('button', { name: '完全访问权限' }));
+    fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
     fireEvent.click(screen.getByText('帮我批准'));
     expect(onPermissionConfigChange).toHaveBeenLastCalledWith({
       kind: 'codex',
@@ -174,7 +174,7 @@ describe('AgentPermissionSelector', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '完全访问权限' }));
+    fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
     fireEvent.click(screen.getByText('请求批准'));
 
     expect(onModeChange).toHaveBeenCalledWith(
