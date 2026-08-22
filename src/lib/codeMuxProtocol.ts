@@ -389,6 +389,17 @@ export function toLegacySystemMessage(event: CodeMuxSystemEvent): AgentMessage {
       },
     };
   }
+  if (event.subtype === 'permission_update_deferred') {
+    return {
+      kind: 'permission_update_deferred',
+      data: {
+        content: typeof event.content === 'string' && event.content.trim()
+          ? event.content
+          : '权限变更将在下一回合生效。',
+        ...(typeof event.agent_kind === 'string' ? { agent_kind: event.agent_kind } : {}),
+      },
+    };
+  }
   return { kind: 'raw', data };
 }
 

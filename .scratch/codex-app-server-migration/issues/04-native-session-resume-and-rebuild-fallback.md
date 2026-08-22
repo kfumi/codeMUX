@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] 有 mapping 时 ensure 走 `thread/resume` 而非总是 `thread/start`
-- [ ] resume 成功：同一 thread id 继续后续 turn
-- [ ] resume 失败：新建 thread、更新 agent_session_mapping、emit `native_session_rebuilt` System Event
-- [ ] 单测覆盖 resume 成功与失败降级路径
-- [ ] UI 可投影 System Event 为可读状态提示（非助手正文）
+- [x] 有 mapping 时 ensure 走 `thread/resume` 而非总是 `thread/start`
+- [x] resume 成功：同一 thread id 继续后续 turn
+- [x] resume 失败：新建 thread、更新 agent_session_mapping、emit `native_session_rebuilt` System Event
+- [x] 单测覆盖 resume 成功与失败降级路径
+- [x] UI 可投影 System Event 为可读状态提示（非助手正文）

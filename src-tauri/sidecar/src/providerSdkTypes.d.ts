@@ -15,33 +15,6 @@ declare module '@anthropic-ai/claude-agent-sdk' {
   export const startup: (...args: any[]) => Promise<WarmQuery>;
 }
 
-declare module '@openai/codex-sdk' {
-  export type Thread = any;
-  export type ThreadEvent = any;
-  export type ThreadItem = any;
-  export type Usage = any;
-  export type CommandExecutionItem = any;
-  export type FileChangeItem = {
-    type: 'file_change';
-    status: string;
-    changes: Array<{ kind: string; path: string }>;
-    [key: string]: any;
-  };
-  export type McpToolCallItem = any;
-  export type TodoListItem = {
-    type: 'todo_list';
-    id: string;
-    items: Array<{ text: string; completed: boolean; [key: string]: any }>;
-    [key: string]: any;
-  };
-  export type WebSearchItem = any;
-  export class Codex {
-    constructor(options: any);
-    startThread(options: any): Thread;
-    resumeThread(id: string, options: any): Thread;
-  }
-}
-
 declare module '@opencode-ai/sdk' {
   export type Config = any;
 }

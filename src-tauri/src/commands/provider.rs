@@ -61,12 +61,6 @@ fn apply_agent_config_update(
             let update: CodexAgentConfigUpdate = serde_json::from_value(config)
                 .map_err(|e| format!("Invalid Codex config: {}", e))?;
 
-            if let Some(sdk_mode) = update.sdk_mode {
-                if !matches!(sdk_mode.as_str(), "responses" | "agent") {
-                    return Err(format!("Unsupported Codex sdk_mode: {}", sdk_mode));
-                }
-                app_config.agent_configs.codex.sdk_mode = sdk_mode;
-            }
             if let Some(provider_id) = update.default_provider_id {
                 app_config.agent_configs.codex.default_provider_id = Some(provider_id);
             }
@@ -816,36 +810,6 @@ mod tests {
         AGENT_PROVIDER_PROFILE_RETIRED,
     };
     use crate::config::types::{AgentKind, AppConfig};
-
-    #[test]
-    fn codex_sdk_mode_can_be_updated() {
-        let mut app_config = AppConfig::default();
-
-        apply_agent_config_update(
-            &mut app_config,
-            AgentKind::Codex,
-            serde_json::json!({ "sdk_mode": "agent" }),
-        )
-        .unwrap();
-
-        assert_eq!(app_config.agent_configs.codex.sdk_mode, "agent");
-    }
-
-    #[test]
-    fn codex_sdk_mode_rejects_invalid_values_without_changing_config() {
-        let mut app_config = AppConfig::default();
-        app_config.agent_configs.codex.sdk_mode = "responses".to_string();
-
-        let error = apply_agent_config_update(
-            &mut app_config,
-            AgentKind::Codex,
-            serde_json::json!({ "sdk_mode": "invalid" }),
-        )
-        .unwrap_err();
-
-        assert_eq!(error, "Unsupported Codex sdk_mode: invalid");
-        assert_eq!(app_config.agent_configs.codex.sdk_mode, "responses");
-    }
 
     #[test]
     fn redact_config_clears_model_provider_secrets() {

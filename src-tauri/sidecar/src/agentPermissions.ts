@@ -43,13 +43,6 @@ const CODEX_DEFAULT_PERMISSIONS = {
   networkAccessEnabled: true,
 };
 
-const CODEX_PLAN_MODE_PERMISSIONS = {
-  workflowMode: 'read-only' as CodexWorkflowMode,
-  sandboxMode: 'read-only' as CodexSandboxMode,
-  approvalPolicy: 'on-request' as CodexApprovalPolicy,
-  networkAccessEnabled: false,
-};
-
 /**
  * Workflow Mode four-tier mapping (ADR 0010 / spec Implementation Decisions):
  *
@@ -97,11 +90,12 @@ export function buildClaudePermissionOptions(config: unknown, planMode: AgentPla
   };
 }
 
-export function buildCodexThreadPermissionOptions(config: unknown, planMode: AgentPlanMode = 'off'): CodexTurnPolicy {
-  if (planMode === 'on') {
-    return { ...CODEX_PLAN_MODE_PERMISSIONS };
-  }
-
+/**
+ * Resolves the turn policy for a Workflow Mode tier. Plan Mode is orthogonal
+ * (ADR 0010 Decision 4): it only swaps the collaborationMode sent with
+ * `turn/start`, never the sandbox/approval tier.
+ */
+export function buildCodexThreadPermissionOptions(config: unknown): CodexTurnPolicy {
   const raw = isRecord(config) ? config : {};
   const workflowMode = resolveCodexWorkflowMode(raw);
   const tier = CODEX_WORKFLOW_TIER_POLICIES[workflowMode];

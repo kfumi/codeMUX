@@ -6,9 +6,9 @@
 
 **Status:** ready-for-agent
 
-- [ ] `codex_needs_proxy: true` 时 proxyManager 启动 compat 代理
-- [ ] app-server provider 配置 base_url 指向本地 proxy listening URL（非真实 upstream 直连）
-- [ ] 切换 Model Provider / API 配置时 proxy 与 app-server 配置同步重配
-- [ ] 官方 OpenAI（`codex_needs_proxy: false`）不启动 compat 代理
-- [ ] 集成测或分层 E2E 覆盖至少一个内置 `codex_needs_proxy: true` 模板
-- [ ] compat 代理不可用时 emit 可读错误
+- [x] `codex_needs_proxy: true` 时 proxyManager 启动 compat 代理
+- [x] app-server provider 配置 base_url 指向本地 proxy listening URL（非真实 upstream 直连）
+- [x] 切换 Model Provider / API 配置时 proxy 与 app-server 配置同步重配
+- [x] 官方 OpenAI（`codex_needs_proxy: false`）不启动 compat 代理
+- [x] 集成测或分层 E2E 覆盖至少一个内置 `codex_needs_proxy: true` 模板
+- [x] compat 代理不可用时 emit 可读错误

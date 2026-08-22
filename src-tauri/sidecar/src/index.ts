@@ -14,7 +14,7 @@ import { loadProviderRuntime, isRuntimeError, type RuntimeLoadResult } from './r
 import { loadClaudeSdk, type ClaudeSdkModule } from './sdkLoader.js';
 import { shouldEmitDoneOnClaudeIteratorCompletion } from './claudeTurnCompletion.js';
 import { projectClaudeToolEvents } from './claudeToolEvents.js';
-import { CodexSessionRuntime, interruptActiveTurn } from './codexRuntime.js';
+import { CodexAppServerRuntime } from './codexAppServerRuntime.js';
 import { OpenCodeRuntime } from './opencodeRuntime.js';
 import { deleteOpenCodeSessionWithOfficialSdk, normalizeOpenCodeModelReference } from './opencodeSdk.js';
 import type { OpenCodePermissionResponse } from './opencodePermissions.js';
@@ -25,7 +25,6 @@ import {
 import { toClaudeTurnOutcome } from './claudeTurnOutcome.js';
 import { TurnEventNormalizer, type TurnOutcome, type TurnSourceEvent } from './turnEventNormalizer.js';
 import { proxyManager } from './proxyManager.js';
-import { resolveInteractiveToolResponse } from './interactiveToolResponses.js';
 import { emit } from './streamEventBatcher.js';
 import { ensureWorkingDirectory } from './defaultWorkingDirectory.js';
 import { mapToClaudeEffort, normalizeReasoningEffort, type ReasoningEffort } from './reasoningEffort.js';
@@ -1379,7 +1378,7 @@ function normalizePlanMode(value: unknown): AgentPlanMode {
 }
 
 const runtime = new SessionRuntime();
-const codexRuntime = new CodexSessionRuntime();
+const codexRuntime = new CodexAppServerRuntime();
 
 type SidecarRuntime = {
   ensure(cmd: EnsureSessionCommand): Promise<void>;
@@ -1654,7 +1653,6 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
       }
       case 'interrupt':
         try {
-          if (getRuntimeFlavor(activeAgentKind) === 'codex') interruptActiveTurn();
           const current = selectedRuntime();
           if (!current) throw new Error('OpenCode runtime is not initialized');
           await current.interrupt();
@@ -1676,8 +1674,8 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
           codexQuestionRuntime.respondToQuestion?.(cmd.toolUseId, answers).catch((err: unknown) => emitError(err));
         } else if (openCodeRuntime) {
           options.emit({ type: 'sidecar_error', error: 'OpenCode tool responses are server-managed/not supported' });
-        } else if (!resolveClaudeToolResponse(cmd.toolUseId, cmd.response)) {
-          resolveInteractiveToolResponse(cmd.toolUseId, cmd.response);
+        } else {
+          resolveClaudeToolResponse(cmd.toolUseId, cmd.response);
         }
         return;
       }

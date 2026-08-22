@@ -6,9 +6,9 @@
 
 **Status:** ready-for-agent
 
-- [ ] 注册并处理 `item/commandExecution/requestApproval`、`item/fileChange/requestApproval`、`item/tool/requestUserInput`（及别名）
-- [ ] MCP elicitation：可选 form 可响应；url 或必填字段策略性 decline
-- [ ] emit `permission_requested`（及问答 timeline 等价物）；用户响应 resolve app-server request Promise
-- [ ] sidecar `respond_to_permission` 新增 Codex 分支（Claude/OpenCode 行为不变）
-- [ ] Interactive Request 挂起期间符合 ADR 0004 空闲守卫策略（不误判 Engine Stall 超时）
-- [ ] fake-app-server 单测覆盖 approve / deny / cancel 路径
+- [x] 注册并处理 `item/commandExecution/requestApproval`、`item/fileChange/requestApproval`、`item/tool/requestUserInput`（及别名）
+- [x] MCP elicitation：可选 form 可响应；url 或必填字段策略性 decline
+- [x] emit `permission_requested`（及问答 timeline 等价物）；用户响应 resolve app-server request Promise
+- [x] sidecar `respond_to_permission` 新增 Codex 分支（Claude/OpenCode 行为不变）
+- [x] Interactive Request 挂起期间符合 ADR 0004 空闲守卫策略（不误判 Engine Stall 超时）
+- [x] fake-app-server 单测覆盖 approve / deny / cancel 路径

@@ -133,7 +133,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     }
   }, [session?.permission_config]);
   const configuredPermissionConfig = agentKind === 'codex'
-    ? config?.agent_configs.codex.permission_config
+    ? config?.agent_configs.codex?.permission_config
     : config?.agent_configs.claude_code.permission_config;
   const permissionConfig = useMemo(
     () => serializePermissionConfig(agentKind, rawPermissionConfig ?? configuredPermissionConfig),
@@ -536,7 +536,15 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                   pendingPermissions={pendingPermissions}
                   onPermissionResponse={handlePermissionResponse}
                   onStop={() => interrupt(sessionId)}
-                  onActivatePlanMode={() => handleModeChange(mapExecutionModeToPermissionConfig(agentKind, 'plan'), 'on')}
+                  onActivatePlanMode={() => {
+                    // Codex Plan Mode is orthogonal to the Workflow tier
+                    // (ADR 0010) — only flip the toggle, never the tier config.
+                    if (agentKind === 'codex') {
+                      handlePlanModeChange('on');
+                      return;
+                    }
+                    handleModeChange(mapExecutionModeToPermissionConfig(agentKind, 'plan'), 'on');
+                  }}
                 />
               </div>
             )}

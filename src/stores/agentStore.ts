@@ -93,6 +93,7 @@ export type AgentMessage =
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number; status?: 'compacting' | 'completed'; post_tokens?: number }; subtype: string; type: string } }
   | { kind: 'runtime_switch'; data: { from_kind?: string; to_kind?: string; content: string; briefing?: string } }
   | { kind: 'native_session_rebuilt'; data: { content: string; agent_kind?: string; previous_agent_session_id?: string; agent_session_id?: string } }
+  | { kind: 'permission_update_deferred'; data: { content: string; agent_kind?: string } }
   | { kind: 'session_summary'; data: SessionSummaryEvent }
   | { kind: 'mcp_status'; data: { servers: Record<string, string>; status?: string } }
   | { kind: 'proxy_status'; data: { running: boolean; port: number | null; upstreamBaseUrl: string | null } }

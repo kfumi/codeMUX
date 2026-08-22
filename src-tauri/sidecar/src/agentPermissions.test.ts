@@ -119,18 +119,17 @@ describe('sidecar agent permissions', () => {
     });
   });
 
-  it('forces Codex plan mode to read-only approval settings', () => {
+  it('keeps the workflow tier policy when plan mode is on (plan is orthogonal)', () => {
     const config: SidecarPermissionConfig = {
       kind: 'codex',
       workflowMode: 'full-access',
       networkAccessEnabled: true,
     };
 
-    expect(buildCodexThreadPermissionOptions(config, 'on')).toEqual({
-      workflowMode: 'read-only',
-      sandboxMode: 'read-only',
-      approvalPolicy: 'on-request',
-      networkAccessEnabled: false,
+    expect(buildCodexThreadPermissionOptions(config)).toEqual({
+      sandboxMode: 'danger-full-access',
+      approvalPolicy: 'never',
+      networkAccessEnabled: true,
     });
   });
 

@@ -17,7 +17,7 @@ npm 默认使用官方 registry `https://registry.npmjs.org`，用户已有的 n
 | Provider | 主 SDK | 额外包 |
 | --- | --- | --- |
 | Claude Code | `@anthropic-ai/claude-agent-sdk` | 平台原生 Claude CLI 依赖由 npm optional dependency 安装 |
-| Codex | `@openai/codex-sdk` | 无 |
+| Codex | `@openai/codex`（CLI，app-server 传输） | 无 |
 | OpenCode | `@opencode-ai/sdk` | `opencode-ai`，保留官方 postinstall 生成平台 CLI |
 
 安装时使用确切版本和 `--include=optional`，避免版本漂移并保留平台原生依赖。

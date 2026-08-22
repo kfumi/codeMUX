@@ -82,15 +82,7 @@ describe('agentPermissions', () => {
     });
   });
 
-  it('maps Codex plan mode to the read-only workflow tier', () => {
-    expect(mapExecutionModeToPermissionConfig('codex', 'plan')).toEqual({
-      kind: 'codex',
-      workflowMode: 'read-only',
-      networkAccessEnabled: false,
-    });
-  });
-
-  it('forces Codex plan mode to read-only workflow settings', () => {
+  it('keeps the Codex workflow tier when plan mode is on (plan is orthogonal)', () => {
     const configured: AgentPermissionConfig = {
       kind: 'codex',
       workflowMode: 'full-access',
@@ -99,8 +91,8 @@ describe('agentPermissions', () => {
 
     expect(resolveEffectivePermissionConfig('codex', configured, 'on')).toEqual({
       kind: 'codex',
-      workflowMode: 'read-only',
-      networkAccessEnabled: false,
+      workflowMode: 'full-access',
+      networkAccessEnabled: true,
     });
   });
 

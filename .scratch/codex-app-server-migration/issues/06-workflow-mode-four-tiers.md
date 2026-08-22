@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] 桌面 AgentPermissionSelector（或等价）展示 Codex 四档 Workflow Mode，移除旧两档 plan/full_access 专属路径
-- [ ] 四档映射符合 spec Implementation Decisions 表格（read-only / auto / auto-review / full-access）
-- [ ] Workflow Mode 持久化在 Session Permission Snapshot；Agent Kind Switch 进入 Codex 时按 ADR 0007 重置
-- [ ] `update_permissions` 在 turn 进行中返回「下一 turn 生效」语义（若 applicable）
-- [ ] 单测或集成测验证至少两档 policy 差异传入 turn/start
+- [x] 桌面 AgentPermissionSelector（或等价）展示 Codex 四档 Workflow Mode，移除旧两档 plan/full_access 专属路径
+- [x] 四档映射符合 spec Implementation Decisions 表格（read-only / auto / auto-review / full-access）
+- [x] Workflow Mode 持久化在 Session Permission Snapshot；Agent Kind Switch 进入 Codex 时按 ADR 0007 重置
+- [x] `update_permissions` 在 turn 进行中返回「下一 turn 生效」语义（若 applicable）
+- [x] 单测或集成测验证至少两档 policy 差异传入 turn/start

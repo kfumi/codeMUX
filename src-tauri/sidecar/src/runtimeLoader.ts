@@ -10,7 +10,7 @@
 //       @anthropic-ai/claude-agent-sdk/
 //       @anthropic-ai/claude-agent-sdk-win32-x64/
 //         claude.exe
-//       @openai/codex-sdk/
+//       @openai/codex/ (CLI binary used by the app-server transport)
 //       @opencode-ai/sdk/
 //       opencode-ai/
 //         bin/

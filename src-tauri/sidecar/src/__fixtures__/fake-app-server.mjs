@@ -29,6 +29,8 @@
 // }
 //
 // - `responses[method]` is spread into the JSON-RPC response (`result`/`error`).
+// - `responseSequences[method]` is an array of response configs consumed one
+//   per request (the last entry repeats); lets tests script different turns.
 // - `responses[method].thenNotifications`: scripted steps sent after the
 //   response is written (each with its own delayMs). A step may be a plain
 //   notification (`{ delayMs, method, params }`) or a server-initiated request
@@ -79,7 +81,23 @@ const DEFAULT_INITIALIZE_RESPONSE = {
   },
 };
 
+const sequenceQueues = new Map();
+
 function responseFor(method) {
+  const sequence = scenario.responseSequences?.[method];
+  if (Array.isArray(sequence)) {
+    let queue = sequenceQueues.get(method);
+    if (!queue) {
+      queue = [...sequence];
+      sequenceQueues.set(method, queue);
+    }
+    const next = queue.shift();
+    if (next !== undefined) {
+      return next;
+    }
+    // The last entry repeats once the queue drains.
+    return sequence[sequence.length - 1];
+  }
   const configured = scenario.responses?.[method];
   if (configured !== undefined) {
     return configured;
@@ -132,32 +150,28 @@ function handleMessage(message) {
   if (typeof message.method === 'string' && hasId) {
     // Client request. Hanging methods intentionally never respond.
     if (!Array.isArray(scenario.hang) || !scenario.hang.includes(message.method)) {
-      const configured = scenario.responses?.[message.method];
-      if (configured !== undefined && typeof configured === 'object') {
-        const { thenNotifications, thenExit, ...responsePayload } = configured;
-        respondTo(String(message.id), responsePayload);
-        for (const step of Array.isArray(thenNotifications) ? thenNotifications : []) {
-          const delay = typeof step.delayMs === 'number' ? step.delayMs : 0;
-          setTimeout(() => {
-            if (step.method) {
-              send({
-                method: step.method,
-                params: step.params ?? {},
-              });
-            }
-            if (step.serverRequest) {
-              sendServerRequest(step.serverRequest);
-            }
-          }, delay);
-        }
-        if (thenExit && typeof thenExit === 'object') {
-          const delay = typeof thenExit.delayMs === 'number' ? thenExit.delayMs : 0;
-          setTimeout(() => {
-            process.exit(typeof thenExit.code === 'number' ? thenExit.code : 0);
-          }, delay);
-        }
-      } else {
-        respondTo(String(message.id), responseFor(message.method));
+      const configured = responseFor(message.method);
+      const { thenNotifications, thenExit, ...responsePayload } = configured;
+      respondTo(String(message.id), responsePayload);
+      for (const step of Array.isArray(thenNotifications) ? thenNotifications : []) {
+        const delay = typeof step.delayMs === 'number' ? step.delayMs : 0;
+        setTimeout(() => {
+          if (step.method) {
+            send({
+              method: step.method,
+              params: step.params ?? {},
+            });
+          }
+          if (step.serverRequest) {
+            sendServerRequest(step.serverRequest);
+          }
+        }, delay);
+      }
+      if (thenExit && typeof thenExit === 'object') {
+        const delay = typeof thenExit.delayMs === 'number' ? thenExit.delayMs : 0;
+        setTimeout(() => {
+          process.exit(typeof thenExit.code === 'number' ? thenExit.code : 0);
+        }, delay);
       }
     }
     return;

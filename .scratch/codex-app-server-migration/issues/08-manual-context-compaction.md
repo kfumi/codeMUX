@@ -6,9 +6,9 @@
 
 **Status:** ready-for-agent
 
-- [ ] `/compact` slash command 路由到 native compact RPC
-- [ ] compaction timeline item 展示 loading 与 completed 状态
-- [ ] manual compact 标记 `trigger: manual`（或等价领域字段）
-- [ ] 双通道 dedup：notification 与 item lifecycle 不重复 emit 边界
-- [ ] turn 结束前 flush 未配对的 compaction completion（兼容部分 build 行为）
-- [ ] 单测覆盖 compact 发起与完成事件序列
+- [x] `/compact` slash command 路由到 native compact RPC
+- [x] compaction timeline item 展示 loading 与 completed 状态
+- [x] manual compact 标记 `trigger: manual`（或等价领域字段）
+- [x] 双通道 dedup：notification 与 item lifecycle 不重复 emit 边界
+- [x] turn 结束前 flush 未配对的 compaction completion（兼容部分 build 行为）
+- [x] 单测覆盖 compact 发起与完成事件序列

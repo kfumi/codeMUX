@@ -200,6 +200,40 @@ describe('appendEvent', () => {
     expect(messages.some((message) => message.kind === 'tool')).toBe(true);
   });
 
+  it('carries the command and plan markdown on approval cards', () => {
+    const messages = appendEvent([], {
+      type: 'permission_requested',
+      event_id: 'p2',
+      request_id: 'req-2',
+      permission_type: 'execute',
+      description: 'Codex 请求执行命令',
+      metadata: { title: '运行命令', command: 'npm test' },
+    });
+    expect(messages[0]).toMatchObject({
+      kind: 'permission',
+      requestId: 'req-2',
+      permissionType: 'execute',
+      command: 'npm test',
+    });
+    expect(messages[0]).not.toHaveProperty('planMarkdown');
+  });
+
+  it('marks Codex Plan Approval cards with the plan body', () => {
+    const messages = appendEvent([], {
+      type: 'permission_requested',
+      event_id: 'p3',
+      request_id: 'req-3',
+      permission_type: 'plan_approval',
+      description: 'Codex 已提交实施计划，请确认后执行。',
+      metadata: { presentation: 'plan-approval', title: '实施计划', plan: '## 计划\n\n1. 先写测试' },
+    });
+    expect(messages[0]).toMatchObject({
+      kind: 'permission',
+      permissionType: 'plan_approval',
+      planMarkdown: expect.stringContaining('先写测试'),
+    });
+  });
+
   it('parses session summary file changes', () => {
     const messages = appendEvent([], {
       type: 'system_event',

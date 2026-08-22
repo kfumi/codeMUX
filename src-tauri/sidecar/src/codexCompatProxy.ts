@@ -1,25 +1,21 @@
+// Codex compat proxy — Responses↔Chat protocol translation only (ADR 0010
+// Decision 6 / Issue 13). Plan-mode blocking and interactive user-input
+// interception are gone: turn policy and approvals are owned end-to-end by
+// the app-server runtime. Third-party providers flagged `codex_needs_proxy`
+// still route through this server so Chat-only gateways keep working.
+
 import { createServer, type IncomingMessage, type ServerResponse, type Server as HttpServer } from 'node:http';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
 import { convertResponsesToChatRequest } from './codexRequestTransform.js';
-import { convertChatStreamToResponsesEvents, parseChatCompletionSseStream, type ChatCompletionChunk } from './codexStreamTransform.js';
+import { convertChatStreamToResponsesEvents, parseChatCompletionSseStream } from './codexStreamTransform.js';
 import { CodexHistoryStore } from './codexHistory.js';
 import { isResponsesReasoningEnabled } from './codexReasoning.js';
 // Keep legacy imports for non-streaming path compatibility
 import { CodexChatHistory, convertChatCompletionToResponses } from './codexChatCompat.js';
 import crypto from 'node:crypto';
-import { isInteractiveToolTimeoutResponse, waitForInteractiveToolResponse } from './interactiveToolResponses.js';
-import {
-  buildRequestUserInputBlockedEvent,
-  getActiveCodexCollaborationPolicy,
-  resolveCodexCollaborationPolicy,
-  type CodexCollaborationPolicy,
-} from './codexCollaborationPolicy.js';
-import { getActivePermissionState } from './activePermissionState.js';
-
-const INTERACTIVE_USER_INPUT_TIMEOUT_MESSAGE = '等待用户回复超时，请重新发送消息继续';
 
 export type ProxyConfig = {
   apiKey: string;
@@ -45,12 +41,11 @@ export async function createCodexCompatProxyServer(
 ): Promise<ProxyServerHandle> {
   const historyStore = new CodexHistoryStore();
   const legacyHistory = new CodexChatHistory();
-  const emittedToolResultIds = new Set<string>();
   const configFingerprint = createConfigFingerprint(config);
   const server = createServer(async (req, res) => {
     try {
       proxyLog(`${req.method ?? 'UNKNOWN'} ${req.url ?? '/'}`);
-      await handleRequest(req, res, config, configFingerprint, historyStore, legacyHistory, emittedToolResultIds);
+      await handleRequest(req, res, config, configFingerprint, historyStore, legacyHistory);
     } catch (error) {
       proxyLog(`error ${req.method ?? 'UNKNOWN'} ${req.url ?? '/'}: ${error instanceof Error ? error.message : String(error)}`);
       writeJson(res, 500, {
@@ -114,7 +109,6 @@ async function handleRequest(
   configFingerprint: string,
   historyStore: CodexHistoryStore,
   legacyHistory: CodexChatHistory,
-  emittedToolResultIds: Set<string>,
 ): Promise<void> {
   if (req.method === 'GET' && isHealthPath(req.url ?? '/')) {
     writeJson(res, 200, { ok: true, configFingerprint });
@@ -147,35 +141,25 @@ async function handleRequest(
   }
 
   const requestBody = await readJsonBody(req) as Parameters<typeof convertResponsesToChatRequest>[0];
-  const collaborationPolicy = getCurrentCodexCollaborationPolicy();
-  const effectiveRequestBody = ensureInteractiveUserInputTool(requestBody, collaborationPolicy);
-  await emitToolResultEventsFromRequest(effectiveRequestBody, emittedToolResultIds);
-  proxyLog(`responses request ${summarizeResponsesRequest(effectiveRequestBody)}`);
-  if (Array.isArray(effectiveRequestBody.tools) && effectiveRequestBody.tools.length > 0) {
-    proxyLog(`responses tool names ${effectiveRequestBody.tools.map((tool) => summarizeToolName(tool)).join(', ')}`);
-    const missingResponseTools = effectiveRequestBody.tools.filter((tool) => summarizeToolName(tool) === '<missing>');
-    if (missingResponseTools.length > 0) {
-      proxyLog(`responses missing-name tools ${truncateForLog(JSON.stringify(missingResponseTools))}`);
-    }
-    proxyLog(`responses tools raw ${truncateForLog(JSON.stringify(effectiveRequestBody.tools.slice(0, 3)))}`);
-    persistDebugJson('last-codex-responses-request.json', effectiveRequestBody);
+  proxyLog(`responses request ${summarizeResponsesRequest(requestBody)}`);
+  if (Array.isArray(requestBody.tools) && requestBody.tools.length > 0) {
+    proxyLog(`responses tool names ${requestBody.tools.map((tool) => summarizeToolName(tool)).join(', ')}`);
+    persistDebugJson('last-codex-responses-request.json', requestBody);
   }
-  const chatRequest = convertResponsesToChatRequest(effectiveRequestBody, historyStore);
-  const reasoningEnabled = isResponsesReasoningEnabled(effectiveRequestBody as unknown as Record<string, unknown>);
-  let effectiveChatRequest = chatRequest;
+  const chatRequest = convertResponsesToChatRequest(requestBody, historyStore);
+  const reasoningEnabled = isResponsesReasoningEnabled(requestBody as unknown as Record<string, unknown>);
   // Extract and remove the metadata field so it doesn't get sent to the upstream API
   const previousMessageCount = (chatRequest as Record<string, unknown>)._previousMessageCount as number ?? 0;
   delete (chatRequest as Record<string, unknown>)._previousMessageCount;
   proxyLog(`chat request ${summarizeChatRequest(chatRequest)}`);
   if (Array.isArray(chatRequest.tools) && chatRequest.tools.length > 0) {
-    // proxyLog(`chat tool names ${chatRequest.tools.map((tool) => summarizeChatToolName(tool)).join(', ')}`);
     const missingChatTools = chatRequest.tools.filter((tool) => summarizeChatToolName(tool) === '<missing>');
     if (missingChatTools.length > 0) {
       proxyLog(`chat missing-name tools ${truncateForLog(JSON.stringify(missingChatTools))}`);
     }
-    proxyLog(`chat tools raw ${truncateForLog(JSON.stringify(chatRequest.tools.slice(0, 3)))}`);
     persistDebugJson('last-codex-chat-request.json', chatRequest);
   }
+
   // --- Streaming path: forward upstream SSE deltas as Responses API events ---
   if (requestBody.stream) {
     try {
@@ -206,8 +190,6 @@ async function handleRequest(
       });
 
       const events: Array<Record<string, unknown>> = [];
-      const toolCalls: StreamingToolCall[] = [];
-      const emittedToolCallIds = new Set<string>();
       let eventCount = 0;
       for await (const event of responsesEvents) {
         eventCount++;
@@ -217,48 +199,23 @@ async function handleRequest(
         if (event.type === 'response.output_item.done') {
           const item = event.item as Record<string, unknown> | undefined;
           if (item?.type === 'function_call') {
-            const call = {
-              id: String(item.call_id ?? item.id ?? ''),
-              name: String(item.name ?? ''),
-              namespace: typeof item.namespace === 'string' ? item.namespace : undefined,
-              arguments: String(item.arguments ?? ''),
-            };
-            toolCalls.push(call);
-            if (call.id) {
+            // Recorded so the next turn's request reconstruction includes the
+            // pending tool calls; the app-server surfaces the item itself.
+            const callId = String(item.call_id ?? item.id ?? '');
+            if (callId) {
               historyStore.recordStreamingToolCall(responseId, {
-                callId: call.id,
-                name: call.name,
-                namespace: call.namespace,
-                arguments: call.arguments,
+                callId,
+                name: String(item.name ?? ''),
+                namespace: typeof item.namespace === 'string' ? item.namespace : undefined,
+                arguments: String(item.arguments ?? ''),
               });
-              if (!isInteractiveUserInputToolCall(call)) {
-                await emitToolUseEvent(call, parseJsonObject(call.arguments));
-                emittedToolCallIds.add(call.id);
-              }
             }
           }
         }
       }
 
-      const interactiveToolCalls = toolCalls.filter(isInteractiveUserInputToolCall);
-      if (interactiveToolCalls.length > 0) {
-        proxyLog(`stream intercepted ${interactiveToolCalls.length} interactive user input tool calls`);
-        await handleInteractiveUserInputToolCalls({
-          res,
-          chatRequest,
-          config,
-          historyStore,
-          collaborationPolicy,
-          interactiveToolCalls,
-          reasoningEnabled,
-          toolContext,
-        });
-        return;
-      }
-
       forwardResponsesSseEvents(res, events);
       proxyLog(`stream completed: ${eventCount} events forwarded`);
-      await emitToolUseEventsFromStream(toolCalls, emittedToolCallIds);
     } catch (error) {
       proxyLog(`streaming error: ${error instanceof Error ? error.message : String(error)}`);
       if (!res.headersSent) {
@@ -277,35 +234,10 @@ async function handleRequest(
   }
 
   // --- Non-streaming path: wait for complete response ---
-  let completion = await fetchChatCompletion(chatRequest, config);
+  const completion = await fetchChatCompletion(chatRequest, config);
 
-  // Emit tool_use events for tool calls so the frontend renders them in real-time.
-  // The Codex SDK doesn't emit item events for function_call items from the proxy.
-  let toolCalls = completion.choices?.[0]?.message?.tool_calls;
-  if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-    const streamingToolCalls = chatToolCallsToStreamingToolCalls(toolCalls);
-    const interactiveToolCalls = streamingToolCalls.filter(isInteractiveUserInputToolCall);
-    if (interactiveToolCalls.length > 0) {
-      proxyLog(`non-stream intercepted ${interactiveToolCalls.length} interactive user input tool calls`);
-      const continuation = await continueAfterNonStreamingInteractiveToolCalls(
-        chatRequest,
-        config,
-        collaborationPolicy,
-        interactiveToolCalls,
-      );
-      completion = continuation.completion;
-      effectiveChatRequest = continuation.chatRequest;
-      toolCalls = completion.choices?.[0]?.message?.tool_calls;
-    } else {
-      const { activeSessionId } = await import('./codexRuntime.js');
-      proxyLog(`emitting ${streamingToolCalls.length} tool_use events, sessionId=${activeSessionId || '(empty)'}`);
-      for (const toolCall of streamingToolCalls) {
-        await emitToolUseEvent(toolCall, parseJsonObject(toolCall.arguments));
-      }
-    }
-  }
-
-  const compatResponse = convertChatCompletionToResponses(completion, effectiveRequestBody as Parameters<typeof convertChatCompletionToResponses>[1], legacyHistory);
+  const effectiveChatRequest = chatRequest;
+  const compatResponse = convertChatCompletionToResponses(completion, requestBody as Parameters<typeof convertChatCompletionToResponses>[1], legacyHistory);
 
   // Store messages in legacy history so the next request can reconstruct the full
   // conversation chain. Only store NEW messages from this turn — chatRequest.messages
@@ -315,8 +247,7 @@ async function handleRequest(
   for (const msg of effectiveChatRequest.messages.slice(previousMessageCount)) {
     historyMessages.push(msg as { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string });
   }
-  // Store the final assistant message from this turn. Synthetic tool-call
-  // assistant messages are already included in effectiveChatRequest.
+  // Store the final assistant message from this turn.
   const assistantMsg: { role: string; content?: string; tool_calls?: unknown[] } = { role: 'assistant' };
   if (compatResponse.output_text) {
     assistantMsg.content = compatResponse.output_text;
@@ -330,160 +261,6 @@ async function handleRequest(
 
   writeJson(res, 200, compatResponse);
 }
-
-async function emitToolResultEventsFromRequest(
-  requestBody: Parameters<typeof convertResponsesToChatRequest>[0],
-  emittedToolResultIds: Set<string>,
-): Promise<void> {
-  const inputItems = Array.isArray(requestBody.input) ? requestBody.input : [requestBody.input];
-  const functionCallOutputs = inputItems.filter(isFunctionCallOutputItem);
-
-  if (functionCallOutputs.length === 0) {
-    return;
-  }
-
-  try {
-    const { emitActiveCodexTurnEvent, activeSessionId } = await import('./codexRuntime.js');
-    for (const item of functionCallOutputs) {
-      const emittedKey = `${activeSessionId}\0${item.call_id}`;
-      if (emittedToolResultIds.has(emittedKey)) {
-        continue;
-      }
-      emittedToolResultIds.add(emittedKey);
-      emitActiveCodexTurnEvent({
-        kind: 'tool_finished',
-        toolUseId: item.call_id ?? '',
-        content: stringifyFunctionCallOutput(item.output),
-        isError: false,
-      });
-    }
-  } catch (error) {
-    proxyLog(`failed to emit tool_result event: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-function isFunctionCallOutputItem(
-  value: unknown,
-): value is { type: 'function_call_output'; call_id: string; output: unknown } {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    (value as Record<string, unknown>).type === 'function_call_output' &&
-    typeof (value as Record<string, unknown>).call_id === 'string'
-  );
-}
-
-function ensureInteractiveUserInputTool(
-  requestBody: Parameters<typeof convertResponsesToChatRequest>[0],
-  collaborationPolicy: CodexCollaborationPolicy,
-): Parameters<typeof convertResponsesToChatRequest>[0] {
-  if (collaborationPolicy.requestUserInputPolicy !== 'allow') {
-    return requestBody;
-  }
-
-  const tools = Array.isArray(requestBody.tools) ? requestBody.tools : [];
-  if (tools.some((tool) => summarizeToolName(tool) === 'request_user_input')) {
-    return requestBody;
-  }
-
-  return {
-    ...requestBody,
-    tools: [
-      ...tools,
-      buildRequestUserInputToolDefinition(),
-    ],
-  };
-}
-
-function buildRequestUserInputToolDefinition(): NonNullable<Parameters<typeof convertResponsesToChatRequest>[0]['tools']>[number] {
-  return {
-    type: 'function',
-    name: 'request_user_input',
-    description: 'Ask the user one to three short blocking questions and wait for their answers before continuing.',
-    parameters: {
-      type: 'object',
-      properties: {
-        questions: {
-          type: 'array',
-          minItems: 1,
-          maxItems: 3,
-          items: {
-            type: 'object',
-            properties: {
-              id: {
-                type: 'string',
-                description: 'Stable snake_case identifier for mapping the answer.',
-              },
-              header: {
-                type: 'string',
-                description: 'Short label, 12 characters or fewer.',
-              },
-              question: {
-                type: 'string',
-                description: 'Single-sentence question shown to the user.',
-              },
-              options: {
-                type: 'array',
-                minItems: 2,
-                maxItems: 3,
-                items: {
-                  type: 'object',
-                  properties: {
-                    label: {
-                      type: 'string',
-                      description: 'Short user-facing option label.',
-                    },
-                    description: {
-                      type: 'string',
-                      description: 'One short sentence explaining the impact of this choice.',
-                    },
-                  },
-                  required: ['label', 'description'],
-                  additionalProperties: false,
-                },
-              },
-            },
-            required: ['id', 'header', 'question', 'options'],
-            additionalProperties: false,
-          },
-        },
-      },
-      required: ['questions'],
-      additionalProperties: false,
-    },
-  };
-}
-
-function stringifyFunctionCallOutput(output: unknown): string {
-  if (typeof output === 'string') {
-    return output;
-  }
-
-  if (output == null) {
-    return '';
-  }
-
-  try {
-    return JSON.stringify(output, null, 2);
-  } catch {
-    return String(output);
-  }
-}
-
-type StreamingToolCall = {
-  id: string;
-  name: string;
-  namespace?: string;
-  arguments: string;
-};
-
-type InteractiveUserInputQuestion = {
-  question: string;
-  header?: string;
-  options: Array<{ label: string; description?: string }>;
-  multiSelect?: boolean;
-};
 
 function forwardResponsesSseEvents(res: ServerResponse, events: Array<Record<string, unknown>>): void {
   res.statusCode = 200;
@@ -511,351 +288,6 @@ function logStreamingEvent(event: Record<string, unknown>, eventCount: number): 
       proxyLog(`  output[0] type=${output[0].type} content_len=${JSON.stringify(output[0].content ?? output[0].summary ?? '').length}`);
     }
   }
-}
-
-async function emitToolUseEventsFromStream(
-  toolCalls: StreamingToolCall[],
-  emittedToolCallIds: ReadonlySet<string> = new Set(),
-): Promise<void> {
-  if (toolCalls.length === 0) {
-    return;
-  }
-
-  const { activeSessionId } = await import('./codexRuntime.js');
-  proxyLog(`emitting ${toolCalls.length} tool_use events from stream, sessionId=${activeSessionId || '(empty)'}`);
-  for (const tc of toolCalls) {
-    if (tc.id && emittedToolCallIds.has(tc.id)) {
-      continue;
-    }
-    await emitToolUseEvent(tc, parseJsonObject(tc.arguments));
-  }
-}
-
-async function handleInteractiveUserInputToolCalls({
-  res,
-  chatRequest,
-  config,
-  historyStore,
-  collaborationPolicy,
-  interactiveToolCalls,
-  reasoningEnabled,
-  toolContext,
-}: {
-  res: ServerResponse;
-  chatRequest: ReturnType<typeof convertResponsesToChatRequest>;
-  config: ProxyConfig;
-  historyStore: CodexHistoryStore;
-  collaborationPolicy: CodexCollaborationPolicy;
-  interactiveToolCalls: StreamingToolCall[];
-  reasoningEnabled: boolean;
-  toolContext: Map<string, { kind: 'function' | 'custom' | 'tool_search'; name: string }>;
-}): Promise<void> {
-  let continuationRequest = buildInteractiveContinuationChatRequest(
-    chatRequest,
-    interactiveToolCalls,
-    await resolveInteractiveUserInputToolCalls(interactiveToolCalls, collaborationPolicy),
-  );
-
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const responseId = `resp_${crypto.randomUUID()}`;
-    const messageId = `msg_${crypto.randomUUID()}`;
-    const reasoningId = `rs_${crypto.randomUUID()}`;
-    const { chunks, response: upstreamRes } = await streamChatCompletion(continuationRequest, config);
-    const responsesEvents = convertChatStreamToResponsesEvents(chunks, {
-      responseId,
-      model: upstreamRes.headers.get('x-model') || continuationRequest.model || 'unknown',
-      reasoningId,
-      messageId,
-      reasoningEnabled,
-      toolContext,
-    });
-
-    const events: Array<Record<string, unknown>> = [];
-    const continuationToolCalls: StreamingToolCall[] = [];
-    let eventCount = 0;
-    for await (const event of responsesEvents) {
-      eventCount++;
-      logStreamingEvent(event, eventCount);
-      events.push(event);
-
-      if (event.type === 'response.output_item.done') {
-        const item = event.item as Record<string, unknown> | undefined;
-        if (item?.type === 'function_call') {
-          const call = {
-            id: String(item.call_id ?? item.id ?? ''),
-            name: String(item.name ?? ''),
-            namespace: typeof item.namespace === 'string' ? item.namespace : undefined,
-            arguments: String(item.arguments ?? ''),
-          };
-          continuationToolCalls.push(call);
-          if (call.id) {
-            historyStore.recordStreamingToolCall(responseId, {
-              callId: call.id,
-              name: call.name,
-              namespace: call.namespace,
-              arguments: call.arguments,
-            });
-          }
-        }
-      }
-    }
-
-    const nextInteractiveToolCalls = continuationToolCalls.filter(isInteractiveUserInputToolCall);
-    if (nextInteractiveToolCalls.length === 0) {
-      forwardResponsesSseEvents(res, events);
-      proxyLog(`interactive continuation completed: ${eventCount} events forwarded`);
-      await emitToolUseEventsFromStream(continuationToolCalls);
-      return;
-    }
-
-    proxyLog(`stream intercepted ${nextInteractiveToolCalls.length} continuation interactive user input tool calls`);
-    continuationRequest = buildInteractiveContinuationChatRequest(
-      continuationRequest,
-      nextInteractiveToolCalls,
-      await resolveInteractiveUserInputToolCalls(nextInteractiveToolCalls, collaborationPolicy),
-    );
-  }
-
-  throw new Error('Too many consecutive interactive user input tool calls.');
-}
-
-async function continueAfterNonStreamingInteractiveToolCalls(
-  chatRequest: ReturnType<typeof convertResponsesToChatRequest>,
-  config: ProxyConfig,
-  collaborationPolicy: CodexCollaborationPolicy,
-  interactiveToolCalls: StreamingToolCall[],
-): Promise<{
-  completion: Parameters<typeof convertChatCompletionToResponses>[0];
-  chatRequest: ReturnType<typeof convertResponsesToChatRequest>;
-}> {
-  let continuationRequest = buildInteractiveContinuationChatRequest(
-    chatRequest,
-    interactiveToolCalls,
-    await resolveInteractiveUserInputToolCalls(interactiveToolCalls, collaborationPolicy),
-  );
-
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const completion = await fetchChatCompletion(continuationRequest, config);
-    const toolCalls = completion.choices?.[0]?.message?.tool_calls;
-    const nextInteractiveToolCalls = Array.isArray(toolCalls)
-      ? chatToolCallsToStreamingToolCalls(toolCalls).filter(isInteractiveUserInputToolCall)
-      : [];
-
-    if (nextInteractiveToolCalls.length === 0) {
-      return { completion, chatRequest: continuationRequest };
-    }
-
-    proxyLog(`non-stream intercepted ${nextInteractiveToolCalls.length} continuation interactive user input tool calls`);
-    continuationRequest = buildInteractiveContinuationChatRequest(
-      continuationRequest,
-      nextInteractiveToolCalls,
-      await resolveInteractiveUserInputToolCalls(nextInteractiveToolCalls, collaborationPolicy),
-    );
-  }
-
-  throw new Error('Too many consecutive interactive user input tool calls.');
-}
-
-async function resolveInteractiveUserInputToolCalls(
-  interactiveToolCalls: StreamingToolCall[],
-  collaborationPolicy: CodexCollaborationPolicy,
-): Promise<unknown[]> {
-  const responses: unknown[] = [];
-  const { emit: emitEvent, emitActiveCodexTurnEvent, activeSessionId, getActiveCodexQuestionTimeoutMs, suspendActiveTurnGuard, resumeActiveTurnGuard } = await import('./codexRuntime.js');
-
-  for (const toolCall of interactiveToolCalls) {
-    const currentPolicy = getCurrentCodexCollaborationPolicy(activeSessionId) ?? collaborationPolicy;
-    let response: unknown;
-    let isError = false;
-    if (currentPolicy.requestUserInputPolicy === 'block') {
-      response = {
-        answers: {},
-        blocked: true,
-        reason_code: 'request_user_input_blocked_in_default_mode',
-      };
-      isError = true;
-      emitEvent(buildRequestUserInputBlockedEvent(toolCall.id || null));
-    } else {
-      const input = parseJsonObject(toolCall.arguments);
-      const questions = parseInteractiveQuestions(input.questions);
-      emitActiveCodexTurnEvent({ kind: 'user_input_requested', toolUseId: toolCall.id, questions });
-      suspendActiveTurnGuard();
-      try {
-        response = await waitForInteractiveToolResponse(toolCall.id, {
-          sessionId: activeSessionId,
-          timeoutMs: getActiveCodexQuestionTimeoutMs(),
-        });
-      } finally {
-        resumeActiveTurnGuard();
-      }
-      if (isInteractiveToolTimeoutResponse(response)) {
-        isError = true;
-        emitActiveCodexTurnEvent({
-          kind: 'error', subtype: 'user_input_timeout', message: INTERACTIVE_USER_INPUT_TIMEOUT_MESSAGE,
-        });
-      }
-      persistInteractiveUserInputHistory(activeSessionId, toolCall, questions, response);
-    }
-
-    responses.push(response);
-    emitActiveCodexTurnEvent({
-      kind: 'tool_finished', toolUseId: toolCall.id, content: stringifyInteractiveToolResponse(response), isError,
-    });
-  }
-
-  return responses;
-}
-
-function getCurrentCodexCollaborationPolicy(sessionId?: string | null): CodexCollaborationPolicy {
-  const activeState = getActivePermissionState({ sessionId, agentKind: 'codex' });
-  if (activeState) {
-    return resolveCodexCollaborationPolicy({
-      planMode: activeState.planMode,
-      permissionConfig: activeState.permissionConfig,
-    });
-  }
-  return getActiveCodexCollaborationPolicy();
-}
-
-function persistInteractiveUserInputHistory(
-  appSessionId: string,
-  toolCall: StreamingToolCall,
-  questions: InteractiveUserInputQuestion[],
-  response: unknown,
-): void {
-  if (!appSessionId || !toolCall.id) {
-    return;
-  }
-
-  try {
-    const dir = getInteractiveEventsDir();
-    mkdirSync(dir, { recursive: true });
-    const filePath = path.join(dir, `${sanitizeFileSegment(appSessionId)}.jsonl`);
-    const now = new Date().toISOString();
-    const functionCall = {
-      timestamp: now,
-      type: 'response_item',
-      payload: {
-        type: 'function_call',
-        call_id: toolCall.id,
-        name: 'AskUserQuestion',
-        arguments: JSON.stringify({ questions }),
-      },
-    };
-    const functionCallOutput = {
-      timestamp: new Date(Date.now() + 1).toISOString(),
-      type: 'response_item',
-      payload: {
-        type: 'function_call_output',
-        call_id: toolCall.id,
-        output: stringifyInteractiveToolResponse(response),
-      },
-    };
-
-    appendFileSync(filePath, `${JSON.stringify(functionCall)}\n${JSON.stringify(functionCallOutput)}\n`, 'utf8');
-  } catch (error) {
-    proxyLog(`failed to persist interactive user input history: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-function getInteractiveEventsDir(): string {
-  return process.env.CODEMUX_CODEX_INTERACTIVE_EVENTS_DIR
-    || path.join(os.homedir(), '.codemux', 'codex-interactive-events');
-}
-
-function sanitizeFileSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_-]/g, '_');
-}
-
-function isInteractiveUserInputToolCall(toolCall: StreamingToolCall): boolean {
-  return toolCall.name === 'request_user_input'
-    || toolCall.name === 'askUserQuestion'
-    || toolCall.name === 'AskUserQuestion';
-}
-
-function chatToolCallsToStreamingToolCalls(toolCalls: unknown[]): StreamingToolCall[] {
-  return toolCalls
-    .filter((toolCall): toolCall is {
-      id?: string;
-      function?: { name?: string; arguments?: string };
-    } => Boolean(toolCall) && typeof toolCall === 'object')
-    .map((toolCall) => ({
-      id: toolCall.id ?? '',
-      name: toolCall.function?.name ?? 'tool',
-      arguments: toolCall.function?.arguments ?? '{}',
-    }));
-}
-
-function parseInteractiveQuestions(value: unknown): InteractiveUserInputQuestion[] {
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed as InteractiveUserInputQuestion[] : [];
-    } catch {
-      return [];
-    }
-  }
-
-  return Array.isArray(value) ? value as InteractiveUserInputQuestion[] : [];
-}
-
-function stringifyInteractiveToolResponse(response: unknown): string {
-  if (typeof response === 'string') {
-    return response;
-  }
-
-  if (response == null) {
-    return '';
-  }
-
-  return JSON.stringify(response);
-}
-
-function buildInteractiveContinuationChatRequest(
-  chatRequest: ReturnType<typeof convertResponsesToChatRequest>,
-  interactiveToolCalls: StreamingToolCall[],
-  responses: unknown[],
-): ReturnType<typeof convertResponsesToChatRequest> {
-  return {
-    ...chatRequest,
-    messages: [
-      ...chatRequest.messages,
-      {
-        role: 'assistant',
-        content: '',
-        tool_calls: interactiveToolCalls.map((toolCall) => ({
-          id: toolCall.id,
-          type: 'function',
-          function: {
-            name: toolCall.name,
-            arguments: toolCall.arguments,
-          },
-        })),
-      },
-      ...interactiveToolCalls.map((toolCall, index) => ({
-        role: 'tool',
-        tool_call_id: toolCall.id,
-        content: stringifyInteractiveToolResponse(responses[index]),
-      })),
-    ],
-  } as ReturnType<typeof convertResponsesToChatRequest>;
-}
-
-async function emitToolUseEvent(toolCall: StreamingToolCall, input: Record<string, unknown>): Promise<void> {
-  const { emitActiveCodexTurnEvent } = await import('./codexRuntime.js');
-  emitActiveCodexTurnEvent({ kind: 'tool_started', toolUseId: toolCall.id, name: toolCall.name, input });
-}
-
-function parseJsonObject(value: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(value || '{}');
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    // Fall through to the safe empty object expected by Chat Completions tools.
-  }
-  return {};
 }
 
 async function fetchChatCompletion(
@@ -1069,18 +501,6 @@ function writeJson(res: ServerResponse, statusCode: number, body: unknown): void
   res.statusCode = statusCode;
   res.setHeader('content-type', 'application/json');
   res.end(JSON.stringify(body));
-}
-
-function writeSse(res: ServerResponse, events: Array<Record<string, unknown>>): void {
-  res.statusCode = 200;
-  res.setHeader('content-type', 'text/event-stream; charset=utf-8');
-  res.setHeader('cache-control', 'no-cache, no-transform');
-  res.setHeader('connection', 'keep-alive');
-
-  for (const event of events) {
-    res.write(`data: ${JSON.stringify(event)}\n\n`);
-  }
-  res.end('data: [DONE]\n\n');
 }
 
 function proxyLog(message: string): void {

@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] compat 代理内 plan mode block 逻辑移除
-- [ ] compat 代理内 interactive tool / request_user_input 侧car 拦截移除（已由 app-server approval 接管）
-- [ ] 协议转换、健康检查、shutdown 核心路径保留且测试通过
-- [ ] 至少一个 `codex_needs_proxy: true` 供应商 regression 测试仍绿
-- [ ] 无功能回退：第三方 Codex turn + 审批 + Plan 在 slimdown 后仍可用
+- [x] compat 代理内 plan mode block 逻辑移除
+- [x] compat 代理内 interactive tool / request_user_input 侧car 拦截移除（已由 app-server approval 接管）
+- [x] 协议转换、健康检查、shutdown 核心路径保留且测试通过
+- [x] 至少一个 `codex_needs_proxy: true` 供应商 regression 测试仍绿
+- [x] 无功能回退：第三方 Codex turn + 审批 + Plan 在 slimdown 后仍可用

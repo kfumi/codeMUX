@@ -6,10 +6,10 @@
 
 **Status:** ready-for-agent
 
-- [ ] 移除 `@openai/codex-sdk` 依赖与 sidecar SDK loader 的 Codex 分支
-- [ ] 移除 SDK runtime 模块及仅 SDK 使用的测试/fixtures
-- [ ] 移除 `sdk_mode`（responses/agent）配置项与相关 UI/API
-- [ ] 移除 `codexCollaborationPolicy` 事后 block 与 plan 强制走 proxy 逻辑
-- [ ] sidecar dispatcher 中 Codex 仅路由至 app-server runtime
-- [ ] 全量相关 vitest 通过；无残留 SDK import
-- [ ] README / 文档中 Codex 集成描述更新为 app-server
+- [x] 移除 `@openai/codex-sdk` 依赖与 sidecar SDK loader 的 Codex 分支
+- [x] 移除 SDK runtime 模块及仅 SDK 使用的测试/fixtures
+- [x] 移除 `sdk_mode`（responses/agent）配置项与相关 UI/API
+- [x] 移除 `codexCollaborationPolicy` 事后 block 与 plan 强制走 proxy 逻辑
+- [x] sidecar dispatcher 中 Codex 仅路由至 app-server runtime
+- [x] 全量相关 vitest 通过；无残留 SDK import
+- [x] README / 文档中 Codex 集成描述更新为 app-server

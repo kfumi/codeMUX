@@ -9,11 +9,6 @@ export interface ClaudeSdkModule {
   startup: typeof import('@anthropic-ai/claude-agent-sdk').startup;
 }
 
-/** Codex SDK 模块导出。 */
-export interface CodexSdkModule {
-  Codex: typeof import('@openai/codex-sdk').Codex;
-}
-
 /** OpenCode SDK client 模块导出。 */
 export interface OpenCodeClientSdkModule {
   createOpencodeClient: typeof import('@opencode-ai/sdk/client').createOpencodeClient;
@@ -52,11 +47,6 @@ async function loadSdkModule<T>(
 /** 从托管 Runtime 加载 Claude Agent SDK。 */
 export function loadClaudeSdk(loaded: RuntimeLoadResult | null): Promise<ClaudeSdkModule> {
   return loadSdkModule<ClaudeSdkModule>(loaded, '@anthropic-ai/claude-agent-sdk', 'Claude Code');
-}
-
-/** 从托管 Runtime 加载 Codex SDK。 */
-export function loadCodexSdk(loaded: RuntimeLoadResult | null): Promise<CodexSdkModule> {
-  return loadSdkModule<CodexSdkModule>(loaded, '@openai/codex-sdk', 'Codex');
 }
 
 /** 从托管 Runtime 加载 OpenCode SDK client。 */

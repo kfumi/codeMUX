@@ -41,11 +41,6 @@ const CODEX_DEFAULT_PERMISSIONS: Omit<CodexPermissionConfig, 'kind'> = {
   networkAccessEnabled: true,
 };
 
-const CODEX_PLAN_MODE_PERMISSIONS: Omit<CodexPermissionConfig, 'kind'> = {
-  workflowMode: 'read-only',
-  networkAccessEnabled: false,
-};
-
 export function buildDefaultPermissionConfig(agentKind: AgentKind): AgentPermissionConfig {
   if (agentKind === 'opencode') {
     return { kind: 'opencode', permissionMode: 'full_access' };
@@ -77,8 +72,6 @@ export function mapExecutionModeToPermissionConfig(
 
   if (agentKind === 'codex') {
     switch (executionMode) {
-      case 'plan':
-        return { kind: 'codex', ...CODEX_PLAN_MODE_PERMISSIONS };
       case 'read_only':
         return { kind: 'codex', workflowMode: 'read-only', networkAccessEnabled: false };
       case 'auto_edit':
@@ -87,6 +80,8 @@ export function mapExecutionModeToPermissionConfig(
         return { kind: 'codex', workflowMode: 'auto-review', networkAccessEnabled: true };
       case 'full_access':
       default:
+        // 'plan' never reaches here — Codex Plan Mode is an orthogonal toggle
+        // (ADR 0010) and callers flip it without touching the tier config.
         return { kind: 'codex', ...CODEX_DEFAULT_PERMISSIONS };
     }
   }
@@ -116,15 +111,13 @@ export function resolveEffectivePermissionConfig(
     }
     return { kind: 'opencode', permissionMode: 'full_access' };
   }
-  if (agentKind === 'codex' && planMode === 'on') {
-    return { kind: 'codex', ...CODEX_PLAN_MODE_PERMISSIONS };
-  }
   if (agentKind === 'claude_code' && planMode === 'on') {
     return {
       kind: 'claude_code',
       permissionMode: 'plan',
     };
   }
+  // Codex: plan mode is orthogonal — the Workflow tier snapshot stands.
   return normalized;
 }
 

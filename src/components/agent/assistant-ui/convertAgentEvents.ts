@@ -8,7 +8,7 @@ import { buildConversationTurns } from '../../../lib/conversationTurns';
 
 type CodeMuxAssistantRole = 'user' | 'assistant' | 'system';
 
-type CodeMuxVisibleEventKind = Extract<AgentMessage['kind'], 'api_retry' | 'compact' | 'error' | 'runtime_switch' | 'native_session_rebuilt' | 'stream_status' | 'session_summary'>;
+type CodeMuxVisibleEventKind = Extract<AgentMessage['kind'], 'api_retry' | 'compact' | 'error' | 'runtime_switch' | 'native_session_rebuilt' | 'permission_update_deferred' | 'stream_status' | 'session_summary'>;
 
 type PersistedContentBlock = ContentBlock | Record<string, unknown> | null | undefined;
 
@@ -49,7 +49,7 @@ export type CodeMuxAssistantMessage = {
   };
 };
 
-const visibleEventKinds = ['api_retry', 'compact', 'error', 'runtime_switch', 'native_session_rebuilt', 'stream_status', 'session_summary'] as const satisfies readonly CodeMuxVisibleEventKind[];
+const visibleEventKinds = ['api_retry', 'compact', 'error', 'runtime_switch', 'native_session_rebuilt', 'permission_update_deferred', 'stream_status', 'session_summary'] as const satisfies readonly CodeMuxVisibleEventKind[];
 
 export function convertAgentEventsToAssistantMessages(
   events: AgentMessage[],

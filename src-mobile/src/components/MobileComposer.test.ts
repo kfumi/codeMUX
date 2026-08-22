@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildCommandInput, canSubmitComposer, findActiveComposerTrigger } from './MobileComposer';
+import { buildCommandInput, buildSettingsPatch, canSubmitComposer, findActiveComposerTrigger, parsePermissionMode } from './MobileComposer';
 
 describe('canSubmitComposer', () => {
   it('allows an image-only submission', () => {
@@ -48,5 +48,33 @@ describe('buildCommandInput', () => {
       handler: 'prompt',
       prompt: '/review {args}',
     }, 'auth flow', 'claude_code')).toBe('/review auth flow');
+  });
+});
+
+describe('parsePermissionMode', () => {
+  it('keeps the Codex workflow tier while the plan toggle is on (orthogonal)', () => {
+    const config = JSON.stringify({ kind: 'codex', workflowMode: 'full-access', networkAccessEnabled: true });
+    expect(parsePermissionMode('codex', config, 'on')).toBe('full_access');
+    expect(parsePermissionMode('codex', config, 'off')).toBe('full_access');
+    expect(parsePermissionMode('codex', JSON.stringify({ kind: 'codex', sandboxMode: 'workspace-write' }), 'on')).toBe('auto_edit');
+  });
+
+  it('still maps plan mode onto non-Codex permission modes', () => {
+    expect(parsePermissionMode('claude_code', null, 'on')).toBe('plan');
+    expect(parsePermissionMode('opencode', null, 'on')).toBe('plan');
+  });
+});
+
+describe('buildSettingsPatch', () => {
+  it('preserves the Codex workflow tier when plan mode is toggled on', () => {
+    const patch = buildSettingsPatch('codex', 'p1', 'gpt-5', 'high', 'auto_edit', 'on');
+    expect(patch.planMode).toBe('on');
+    expect(patch.permissionConfig).toMatchObject({ kind: 'codex', workflowMode: 'auto' });
+  });
+
+  it('serializes a full-access tier without forcing read-only under plan', () => {
+    const patch = buildSettingsPatch('codex', 'p1', 'gpt-5', 'high', 'full_access', 'on');
+    expect(patch.planMode).toBe('on');
+    expect(patch.permissionConfig).toMatchObject({ kind: 'codex', workflowMode: 'full-access', networkAccessEnabled: true });
   });
 });

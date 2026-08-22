@@ -3,6 +3,7 @@ import { useRef, useState, type KeyboardEvent } from 'react';
 
 import { cn } from '../../lib/utils';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 
 interface PermissionApprovalCardProps {
@@ -99,9 +100,14 @@ function isPlanApproval(request: AgentPermissionRequest): boolean {
   return request.permission_type === 'ExitPlanMode' || request.metadata?.presentation === 'plan-approval';
 }
 
+function getPlanMarkdown(request: AgentPermissionRequest): string | null {
+  const plan = request.metadata?.plan;
+  return typeof plan === 'string' && plan.trim() ? plan : null;
+}
+
 function getPermissionOptions(planApproval: boolean): PermissionApprovalOption[] {
   return planApproval
-    ? [{ response: 'once', label: '批准', description: '退出计划模式并开始实施。' }]
+    ? [{ response: 'once', label: '批准', description: '按计划开始实施。' }]
     : [
         { response: 'once', label: '允许', description: '仅允许这一次操作。' },
         { response: 'always', label: '始终允许匹配规则', description: '后续匹配到相同规则时不再询问。' },
@@ -177,6 +183,16 @@ function PermissionApprovalBody({
           <code>$ {command}</code>
         </pre>
       ) : null}
+
+      {planApproval ? (() => {
+        const planMarkdown = getPlanMarkdown(request);
+        if (!planMarkdown) return null;
+        return (
+          <div className="mt-1.5 max-h-64 overflow-auto rounded-lg border border-border/40 bg-background/72 px-3 py-2">
+            <MarkdownRenderer content={planMarkdown} />
+          </div>
+        );
+      })() : null}
 
       <div data-testid="permission-options" className="space-y-0 overflow-hidden rounded-lg border border-border/18 bg-[hsl(var(--surface-3))]/22">
         {options.map((option, index) => {

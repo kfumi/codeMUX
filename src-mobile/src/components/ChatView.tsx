@@ -38,7 +38,7 @@ import {
   type DisplayRow,
   type MessageFooterData,
 } from '../lib/messageLayout';
-import { buildMobilePermissionResponse } from '../lib/permissionResponse';
+import { buildMobilePermissionResponse, type MobilePermissionDecision } from '../lib/permissionResponse';
 import { resolveMobileRunningState } from '../lib/runtimeState';
 import { buildTurnDurationMap } from '../lib/turnDuration';
 import {
@@ -279,13 +279,13 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
     }
   }, [connection, sessionId]);
 
-  const handlePermission = async (requestId: string, allow: boolean) => {
+  const handlePermission = async (requestId: string, decision: MobilePermissionDecision) => {
     try {
       await respondPermission(
         connection,
         sessionId,
         requestId,
-        buildMobilePermissionResponse(session.agent_kind, allow),
+        buildMobilePermissionResponse(session.agent_kind, decision),
       );
       setMessages((current) => current.filter((message) => (
         message.kind !== 'permission' || message.requestId !== requestId
@@ -295,9 +295,9 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
     }
   };
 
-  const handleQuestion = async (toolUseId: string, answer: string) => {
+  const handleQuestion = async (toolUseId: string, answers: string[]) => {
     try {
-      await respondUserInput(connection, sessionId, toolUseId, [answer]);
+      await respondUserInput(connection, sessionId, toolUseId, answers);
       setMessages((current) => current.filter((message) => (
         message.kind !== 'question' || message.toolUseId !== toolUseId
       )));
@@ -430,61 +430,79 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
     }
 
     if (message.kind === 'permission') {
+      const isPlanApproval = message.permissionType === 'plan_approval'
+        || message.permissionType === 'ExitPlanMode';
       return (
         <div
           data-message-row
           className="rounded-xl border border-warning/20 bg-[hsl(var(--warning)/0.06)] px-4 py-3 text-sm"
         >
-          <div className="text-foreground">{message.description}</div>
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              className="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground"
-              onClick={() => void handlePermission(message.requestId, true)}
-            >
-              允许
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-border px-3 py-2 text-xs text-muted-foreground"
-              onClick={() => void handlePermission(message.requestId, false)}
-            >
-              拒绝
-            </button>
+          <div className="font-medium text-foreground">
+            {isPlanApproval ? '实施计划' : message.description}
           </div>
+          {message.command ? (
+            <pre className="mt-2 max-h-32 overflow-auto rounded-lg border border-border/50 bg-background/70 px-3 py-2 font-mono text-xs leading-5 text-foreground/90 whitespace-pre-wrap wrap-break-word">
+              <code>$ {message.command}</code>
+            </pre>
+          ) : null}
+          {message.planMarkdown ? (
+            <div className="mt-2 max-h-56 overflow-auto rounded-lg border border-border/50 bg-background/70 px-3 py-2 text-xs leading-relaxed text-foreground/90 whitespace-pre-wrap">
+              {message.planMarkdown}
+            </div>
+          ) : null}
+          {isPlanApproval ? (
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                className="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground"
+                onClick={() => void handlePermission(message.requestId, 'once')}
+              >
+                批准并实施
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-border px-3 py-2 text-xs text-muted-foreground"
+                onClick={() => void handlePermission(message.requestId, 'reject')}
+              >
+                忽略
+              </button>
+            </div>
+          ) : (
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                className="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground"
+                onClick={() => void handlePermission(message.requestId, 'once')}
+              >
+                允许一次
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-xs font-medium text-primary"
+                onClick={() => void handlePermission(message.requestId, 'always')}
+              >
+                始终允许
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-border px-3 py-2 text-xs text-muted-foreground"
+                onClick={() => void handlePermission(message.requestId, 'reject')}
+              >
+                拒绝
+              </button>
+            </div>
+          )}
         </div>
       );
     }
 
     if (message.kind === 'question') {
-      const firstQuestion = message.questions[0];
-      const options = firstQuestion?.options.length
-        ? firstQuestion.options
-        : [{ label: '继续' }];
       return (
-        <div
-          data-message-row
-          className="rounded-xl border border-border bg-[hsl(var(--surface-2))] px-4 py-3 text-sm"
-        >
-          <div className="font-medium text-foreground">
-            {firstQuestion?.question ?? '需要你的回答'}
-          </div>
-          <div className="mt-3 space-y-2">
-            {options.map((option) => (
-              <button
-                key={option.label}
-                type="button"
-                className="block w-full rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-left text-xs transition-colors hover:bg-muted/60"
-                onClick={() => void handleQuestion(message.toolUseId, option.label)}
-              >
-                <div className="text-foreground">{option.label}</div>
-                {option.description ? (
-                  <div className="mt-1 text-muted-foreground">{option.description}</div>
-                ) : null}
-              </button>
-            ))}
-          </div>
-        </div>
+        <MobileQuestionCard
+          key={message.id}
+          questions={message.questions}
+          onAnswer={(answers) => void handleQuestion(message.toolUseId, answers)}
+        />
       );
     }
 
@@ -670,6 +688,62 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Issue 12: question card with sequential multi-question support. Answers are
+ * collected per question and submitted positionally, matching the sidecar
+ * bridge's `string[][]` zip for app-server user-input requests.
+ */
+function MobileQuestionCard({ questions, onAnswer }: {
+  questions: Array<{ question: string; options: Array<{ label: string; description?: string }> }>;
+  onAnswer: (answers: string[]) => void;
+}) {
+  const [stepIndex, setStepIndex] = useState(0);
+  const [answers, setAnswers] = useState<string[]>([]);
+  const current = questions[stepIndex];
+  const options = current?.options.length ? current.options : [{ label: '继续' }];
+
+  const pick = (label: string) => {
+    const nextAnswers = [...answers, label];
+    if (stepIndex + 1 < questions.length) {
+      setAnswers(nextAnswers);
+      setStepIndex(stepIndex + 1);
+      return;
+    }
+    onAnswer(nextAnswers);
+  };
+
+  return (
+    <div
+      data-message-row
+      className="rounded-xl border border-border bg-[hsl(var(--surface-2))] px-4 py-3 text-sm"
+    >
+      {questions.length > 1 ? (
+        <div className="text-[11px] text-muted-foreground">
+          第 {stepIndex + 1} / {questions.length} 题
+        </div>
+      ) : null}
+      <div className="font-medium text-foreground">
+        {current?.question ?? '需要你的回答'}
+      </div>
+      <div className="mt-3 space-y-2">
+        {options.map((option) => (
+          <button
+            key={option.label}
+            type="button"
+            className="block w-full rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-left text-xs transition-colors hover:bg-muted/60"
+            onClick={() => pick(option.label)}
+          >
+            <div className="text-foreground">{option.label}</div>
+            {option.description ? (
+              <div className="mt-1 text-muted-foreground">{option.description}</div>
+            ) : null}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

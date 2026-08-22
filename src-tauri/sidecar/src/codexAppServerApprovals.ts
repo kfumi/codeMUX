@@ -410,6 +410,18 @@ export class CodexAppServerApprovalBridge {
 // Decision payload builders
 // ---------------------------------------------------------------------------
 
+/**
+ * Shared decline test: true when the response explicitly rejects the request.
+ * Used by the approval bridge and the Issue 07 Plan Approval synthesis.
+ */
+export function isDeclinedPermissionResponse(response: OpenCodePermissionResponse): boolean {
+  if (response === 'reject') return true;
+  if (typeof response === 'object' && response !== null) {
+    return response.approved === false;
+  }
+  return false;
+}
+
 function normalizePermissionDecision(response: OpenCodePermissionResponse): NormalizedPermissionDecision {
   if (response === 'once') return 'accept';
   if (response === 'always') return 'acceptForSession';

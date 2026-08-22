@@ -121,6 +121,18 @@ export function AgentPermissionSelector({
   const SelectedIcon = selected.icon;
 
   const selectMode = (mode: AgentExecutionMode) => {
+    // Codex Plan Mode is orthogonal (ADR 0010): flipping the toggle keeps the
+    // current Workflow tier snapshot instead of mapping to a tier.
+    if (agentKind === 'codex' && mode === 'plan') {
+      if (onModeChange && normalized.kind === 'codex') {
+        onModeChange(normalized, 'on');
+      } else {
+        onPlanModeChange('on');
+      }
+      setOpen(false);
+      return;
+    }
+
     const nextConfig = mapExecutionModeToPermissionConfig(agentKind, mode);
     const nextPlanMode = (agentKind === 'claude_code' || agentKind === 'codex' || agentKind === 'opencode')
       ? (mode === 'plan' ? 'on' as const : 'off' as const)

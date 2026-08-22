@@ -1,13 +1,14 @@
-// Codex App Server Runtime — Issue 03 (official upstream basic turn).
+// Codex App Server Runtime — ADR 0010 replacement seam.
 //
 // Drives `codex app-server --stdio` over the AppServerTransport JSON-RPC
 // connection: `ensure` spawns a long-lived app-server process and starts (or
 // resumes) a thread, `sendInput` runs a turn and normalizes app-server
 // notifications into the existing CodeMUX Event protocol via
-// CodexTurnEventNormalizer. Official OpenAI endpoints are dialed directly —
-// the compat proxy is never started here (third-party re-wiring lands with
-// Issue 09). The SDK-based CodexSessionRuntime stays in place until the
-// Issue 11 hard cut; this module is the replacement seam.
+// CodexTurnEventNormalizer. Official OpenAI endpoints are dialed directly;
+// providers flagged `codex_needs_proxy` route through the shared compat proxy
+// (Issue 09). Fork reuses this long-lived connection via `thread/fork`
+// (Issue 10). Plan Mode runs through `collaborationMode` presets and closes
+// with a synthetic Plan Approval Interactive Request (Issue 07).
 
 import type { SidecarCommand, SidecarModelLimits } from './types.js';
 import type { ProviderRuntimeRef } from './runtimeContract.js';
@@ -21,7 +22,10 @@ import {
   AppServerTransport,
   type AppServerTransportOptions,
 } from './appServerTransport.js';
-import { CodexAppServerApprovalBridge } from './codexAppServerApprovals.js';
+import {
+  CodexAppServerApprovalBridge,
+  isDeclinedPermissionResponse,
+} from './codexAppServerApprovals.js';
 import type { OpenCodePermissionResponse } from './opencodePermissions.js';
 import {
   CodexTurnEventNormalizer,
@@ -57,6 +61,7 @@ import {
   buildCodexToolResultContent,
   buildCodexToolUseContent,
   isCodexToolResultError,
+  type CodexThreadItem,
 } from './runtimeEvents.js';
 import {
   resolveTurnTimeouts,
@@ -64,7 +69,10 @@ import {
   type TurnTimeouts,
 } from './turnTimeouts.js';
 import { createTurnIdleGuard, type TurnIdleGuard } from './turnIdleGuard.js';
-import { applyCodexWindowsSandboxPathCompatibility } from './sessionRuntimeHelpers.js';
+import {
+  applyCodexWindowsSandboxPathCompatibility,
+  shouldUseCodexChatCompatProxy,
+} from './sessionRuntimeHelpers.js';
 import { proxyManager } from './proxyManager.js';
 import { setLogCtx, writeLog } from './writeLog.js';
 import {
@@ -80,6 +88,28 @@ type UpdatePermissionsCommand = Extract<SidecarCommand, { type: 'update_permissi
 
 const TURN_IDLE_TIMEOUT_MESSAGE = 'Turn idle timeout: no progress events received';
 const DEFAULT_CODEX_MODEL = 'o4-mini';
+/** Prompt sent as the automatic implementation turn after Plan Approval (Issue 07). */
+const PLAN_IMPLEMENTATION_PROMPT = '请按照上面的计划开始实施。';
+
+/** `collaborationMode/list` preset entry (CollaborationModeMask on the wire). */
+type CollaborationModeMask = {
+  name: string;
+  mode?: string | null;
+  model?: string | null;
+  reasoning_effort?: string | null;
+};
+
+/**
+ * Fallback presets matching the stock Codex CLI response, used when
+ * `collaborationMode/list` is unavailable on older builds.
+ */
+const FALLBACK_PLAN_MODE_MASK: CollaborationModeMask = { name: 'Plan', mode: 'plan' };
+const FALLBACK_DEFAULT_MODE_MASK: CollaborationModeMask = { name: 'Default', mode: 'default' };
+
+type PendingPlanApproval = {
+  requestId: string;
+  resolve: (decision: 'implement' | 'dismiss') => void;
+};
 
 /** Sandbox policy payload sent with each `turn/start` (Issue 06 refines the tiers). */
 type AppServerSandboxPolicy =
@@ -99,6 +129,13 @@ type CodexSessionBootstrap = {
   cwd: string;
   apiKey?: string;
   upstreamBaseUrl?: string;
+  /**
+   * Issue 09: base URL the app-server should dial — the local compat proxy
+   * listening URL when the provider needs protocol translation, otherwise the
+   * upstream endpoint directly.
+   */
+  effectiveBaseUrl?: string;
+  codexNeedsProxy?: boolean;
   model?: string;
   reasoningEffort?: ReasoningEffort;
   permissionConfig?: SidecarPermissionConfig;
@@ -126,6 +163,10 @@ type ActiveTurnState = {
   pendingCompactionItemIds: Set<string>;
   /** Compaction item ids whose boundary was already emitted (dedup guard). */
   emittedCompactionItemIds: Set<string>;
+  /** Issue 07: latest completed assistant text, used as the Plan Approval body. */
+  lastAssistantText: string;
+  /** Issue 07: authoritative plan text from a completed `plan` item, if any. */
+  planText: string;
   settle: (outcome: CodexTurnOutcome) => void;
   settled: boolean;
   cleanedUp: boolean;
@@ -150,6 +191,11 @@ export class CodexAppServerRuntime {
   private activeTurn: ActiveTurnState | null = null;
   private streamingItemState = new Map<string, { kind: 'text' | 'thinking' }>();
   private timeouts: ResolvedTurnTimeouts = resolveTurnTimeouts();
+  /** Issue 07: collaboration mode presets resolved via `collaborationMode/list`. */
+  private planModeMask: CollaborationModeMask = FALLBACK_PLAN_MODE_MASK;
+  private defaultModeMask: CollaborationModeMask = FALLBACK_DEFAULT_MODE_MASK;
+  /** Issue 07: synthetic Plan Approval waiting for the user's Implement/Dismiss. */
+  private pendingPlanApproval: PendingPlanApproval | null = null;
 
   private readonly connectTransport: (options: AppServerTransportOptions) => Promise<AppServerTransport>;
   private readonly emitEvent: (event: unknown) => void;
@@ -172,6 +218,7 @@ export class CodexAppServerRuntime {
       cwd,
       apiKey: cmd.apiKey,
       upstreamBaseUrl: cmd.baseUrl,
+      codexNeedsProxy: cmd.codexNeedsProxy,
       model: cmd.model,
       reasoningEffort: normalizeReasoningEffort(cmd.reasoningEffort),
       permissionConfig: cmd.permissionConfig,
@@ -193,8 +240,17 @@ export class CodexAppServerRuntime {
     }
 
     await this.teardownTransport();
+
+    // Issue 09: providers flagged codex_needs_proxy (or non-official hosts)
+    // route through the shared compat proxy; official OpenAI dials directly.
+    const effectiveBaseUrl = await this.resolveUpstreamRouting(requestedConfig);
+    const config: CodexSessionBootstrap = {
+      ...requestedConfig,
+      ...(effectiveBaseUrl !== undefined ? { effectiveBaseUrl } : {}),
+    };
+
     this.configFingerprint = nextFingerprint;
-    this.config = requestedConfig;
+    this.config = config;
 
     const loadedRuntime = this.loadRuntimeIfNeeded();
     const executable = resolveCodexFromRuntime(loadedRuntime);
@@ -270,6 +326,10 @@ export class CodexAppServerRuntime {
     const result = await this.startOrResumeThread(requestedConfig, threadParams);
     this.threadId = result.threadId;
 
+    // Issue 07: resolve the collaboration mode presets once per app-server
+    // connection so plan/default turns can pass explicit collaborationMode.
+    await this.resolveCollaborationModes(transport);
+
     if (result.rebuilt) {
       // Issue 04: resume failed — the native thread was rebuilt under a new
       // id. The CodeMUX event timeline is untouched; surface the rebuild as a
@@ -301,17 +361,22 @@ export class CodexAppServerRuntime {
   }
 
   updatePermissions(cmd: UpdatePermissionsCommand): void {
-    const planMode = normalizeCodexPlanMode(cmd.planMode) ?? this.config?.planMode ?? 'off';
+    // Only an explicit planMode flips the stored toggle — an absent value must
+    // not rewrite the config (and its ensure fingerprint).
+    const planMode = normalizeCodexPlanMode(cmd.planMode) ?? this.config?.planMode;
     if (this.config) {
       this.config = {
         ...this.config,
         sessionId: cmd.sessionId ?? this.config.sessionId,
         permissionConfig: cmd.permissionConfig,
-        planMode,
+        ...(planMode !== undefined ? { planMode } : {}),
       };
+      // Keep the ensure fingerprint in sync so a follow-up ensure with the new
+      // permission snapshot does not tear down a healthy app-server process.
+      this.configFingerprint = this.requestFingerprint();
     }
     process.stderr.write(
-      `[codex-app-server] Permissions updated: session_id=${cmd.sessionId || this.config?.sessionId || 'none'} plan_mode=${planMode}${this.activeTurn ? ' (next turn)' : ''}\n`,
+      `[codex-app-server] Permissions updated: session_id=${cmd.sessionId || this.config?.sessionId || 'none'} plan_mode=${planMode ?? 'off'}${this.activeTurn ? ' (next turn)' : ''}\n`,
     );
     if (this.activeTurn && this.config) {
       // Issue 06: turn policy is fixed at turn/start — a change mid-turn only
@@ -338,7 +403,12 @@ export class CodexAppServerRuntime {
     }
 
     try {
-      await this.runInput(prompt, inputPayload, true);
+      const planFollowUp = await this.runInput(prompt, inputPayload, true);
+      if (planFollowUp !== null) {
+        // Issue 07: the user approved the plan — automatically start the
+        // implementation turn with Plan Mode already closed.
+        await this.runInput(PLAN_IMPLEMENTATION_PROMPT, undefined, false);
+      }
     } catch (error) {
       if (!isImageUnsupportedError(error)) {
         throw error;
@@ -349,15 +419,23 @@ export class CodexAppServerRuntime {
         message: String(error),
       });
       process.stderr.write(`[codex-app-server] Vision payload unsupported; retrying text-only: ${String(error)}\n`);
-      await this.runInput(prompt, inputPayload, false);
+      const planFollowUp = await this.runInput(prompt, inputPayload, false);
+      if (planFollowUp !== null) {
+        await this.runInput(PLAN_IMPLEMENTATION_PROMPT, undefined, false);
+      }
     }
   }
 
+  /**
+   * Runs a single app-server turn. Returns the Issue 07 implementation
+   * follow-up prompt when the turn was a plan turn whose Plan Approval the
+   * user approved — sendInput then starts that turn automatically.
+   */
   private async runInput(
     prompt: string,
     inputPayload: AgentInputPayload | undefined,
     includeImages: boolean,
-  ): Promise<void> {
+  ): Promise<string | null> {
     const config = this.config;
     const transport = this.transport;
     if (!config || !transport || !this.threadId) {
@@ -369,6 +447,7 @@ export class CodexAppServerRuntime {
 
     const sessionId = config.sessionId || '';
     const model = config.model || DEFAULT_CODEX_MODEL;
+    const planRequested = config.planMode === 'on';
     const startedAt = Date.now();
     const payload = normalizeAgentInputPayload(prompt, inputPayload);
     const imagePaths = includeImages ? await writePayloadImagesToTempFiles(payload) : [];
@@ -406,6 +485,8 @@ export class CodexAppServerRuntime {
       imagePaths,
       pendingCompactionItemIds: new Set<string>(),
       emittedCompactionItemIds: new Set<string>(),
+      lastAssistantText: '',
+      planText: '',
       settled: false,
       cleanedUp: false,
       settle: () => undefined,
@@ -442,7 +523,15 @@ export class CodexAppServerRuntime {
       if (config.model) {
         turnParams.model = config.model;
       }
-      if (config.reasoningEffort) {
+      // Issue 07: always pin the collaboration mode — overrides persist for
+      // subsequent turns, so plan-off turns must explicitly restore `default`.
+      turnParams.collaborationMode = buildTurnCollaborationMode(
+        planRequested ? this.planModeMask : this.defaultModeMask,
+        model,
+      );
+      if (!planRequested && config.reasoningEffort) {
+        // User-chosen effort rides the top-level param; only the plan preset
+        // contributes its own reasoning_effort via the mask settings.
         turnParams.effort = mapToCodexEffort(config.reasoningEffort);
       }
 
@@ -453,7 +542,7 @@ export class CodexAppServerRuntime {
       // Race the ack against settle paths (crash / interrupt / idle timeout)
       // so a hanging turn/start response cannot deadlock the turn.
       await Promise.race([ack, completion]);
-      const outcome = await completion;
+      let outcome = await completion;
 
       if (outcome.outcome === 'completed') {
         // Issue 08: auto-compaction may complete the contextCompaction item
@@ -461,12 +550,29 @@ export class CodexAppServerRuntime {
         // boundary before the turn finishes.
         this.flushPendingCompactionBoundaries(turn);
       }
+      if (planRequested && outcome.outcome === 'completed' && turn.lastAssistantText.trim()) {
+        // Issue 07: hold the turn open as an Interactive Request until the user
+        // chooses Implement or Dismiss (ADR 0004 — idle guard suspended).
+        const decision = await this.requestPlanApproval(turn, turn.planText || turn.lastAssistantText);
+        if (decision === 'implement') {
+          this.closePlanMode();
+          outcome = { ...outcome, outcome: 'completed' };
+          this.emitTurnOutcome(turn, {
+            ...outcome,
+            durationMs: Date.now() - startedAt,
+            ...(turn.usage ? { usage: turn.usage } : {}),
+          });
+          writeLog('[codex-app-server]', 'sendInput COMPLETE outcome=completed (plan approved)');
+          return PLAN_IMPLEMENTATION_PROMPT;
+        }
+      }
       this.emitTurnOutcome(turn, {
         ...outcome,
         durationMs: Date.now() - startedAt,
         ...(turn.usage ? { usage: turn.usage } : {}),
       });
       writeLog('[codex-app-server]', `sendInput COMPLETE outcome=${outcome.outcome}`);
+      return null;
     } catch (error) {
       if (includeImages && isImageUnsupportedError(error)) {
         await this.cleanupTurn(turn);
@@ -483,6 +589,7 @@ export class CodexAppServerRuntime {
       }
       this.emitTurnOutcome(turn, { outcome: 'failed', reason: message, durationMs: Date.now() - startedAt });
       writeLog('[codex-app-server]', 'sendInput FAILED');
+      return null;
     } finally {
       await this.cleanupTurn(turn);
     }
@@ -527,6 +634,8 @@ export class CodexAppServerRuntime {
       compactionTrigger: 'manual',
       pendingCompactionItemIds: new Set<string>(),
       emittedCompactionItemIds: new Set<string>(),
+      lastAssistantText: '',
+      planText: '',
       settled: false,
       cleanedUp: false,
       settle: () => undefined,
@@ -583,14 +692,97 @@ export class CodexAppServerRuntime {
     // to — answer them with the cancel payload so the app-server is not left
     // waiting on a turn that will never resume.
     this.approvalBridge?.cancelAll();
+    this.dismissPendingPlanApproval();
     await this.interruptActiveTurn(turn, 'Interrupted by user');
     await this.cleanupTurn(turn);
+  }
+
+  /**
+   * Issue 10: fork on the long-lived app-server connection via `thread/fork`.
+   * The child thread gets a fresh native id; the parent runtime's own thread
+   * mapping stays untouched.
+   */
+  async forkSession(
+    sourceAgentSessionId?: string,
+    sourceProviderTurnId?: string,
+    sourceProviderTurnOrdinal?: number,
+  ): Promise<string> {
+    const config = this.config;
+    const transport = this.transport;
+    if (!config || !transport) {
+      throw new Error('Codex session has not been created yet');
+    }
+    if (this.activeTurn) {
+      throw new Error('Cannot fork while a Codex turn is active');
+    }
+    const sourceThreadId = sourceAgentSessionId ?? config.agentSessionId ?? this.threadId;
+    if (!sourceThreadId) {
+      throw new Error('Codex session has no provider thread ID');
+    }
+
+    let lastTurnId = sourceProviderTurnId;
+    if (!lastTurnId && sourceProviderTurnOrdinal !== undefined) {
+      lastTurnId = await this.resolveProviderTurnId(transport, sourceThreadId, sourceProviderTurnOrdinal);
+    }
+
+    const params: Record<string, unknown> = {
+      threadId: sourceThreadId,
+      ...(lastTurnId ? { lastTurnId } : {}),
+    };
+    const result = await transport.request<{ thread?: { id?: string; sessionId?: string } }>(
+      'thread/fork',
+      params,
+      { timeoutMs: 30_000 },
+    );
+    const childThreadId = readStringRecordField(result.thread, 'id')
+      ?? readStringRecordField(result.thread, 'sessionId');
+    if (!childThreadId) {
+      throw new Error('Codex app-server fork response did not include a thread ID');
+    }
+    process.stderr.write(
+      `[codex-app-server] Forked thread ${sourceThreadId}${lastTurnId ? ` at turn ${lastTurnId}` : ''} -> ${childThreadId}\n`,
+    );
+    return childThreadId;
+  }
+
+  private async resolveProviderTurnId(
+    transport: AppServerTransport,
+    threadId: string,
+    ordinal: number,
+  ): Promise<string> {
+    const result = await transport.request<{
+      data?: Array<{ id?: string }>;
+      thread?: { turns?: Array<{ id?: string }> };
+    }>(
+      'thread/turns/list',
+      { threadId, limit: 200, sortDirection: 'asc', itemsView: 'summary' },
+      { timeoutMs: 15_000 },
+    );
+    const turns = Array.isArray(result.data)
+      ? result.data
+      : Array.isArray(result.thread?.turns)
+        ? result.thread.turns
+        : [];
+    const turnId = readString(turns[ordinal]?.id);
+    if (!turnId) {
+      throw new Error(`Codex provider turn ${ordinal} was not found`);
+    }
+    return turnId;
   }
 
   async respondToPermission(
     requestId: string,
     response: OpenCodePermissionResponse,
   ): Promise<void> {
+    const planApproval = this.pendingPlanApproval;
+    if (planApproval && planApproval.requestId === requestId) {
+      const decision = isDeclinedPermissionResponse(response) ? 'dismiss' : 'implement';
+      process.stderr.write(
+        `[codex-app-server] Plan approval ${requestId} responded: ${decision}\n`,
+      );
+      planApproval.resolve(decision);
+      return;
+    }
     const bridge = this.approvalBridge;
     if (!bridge) {
       throw new Error('Codex app-server session is not initialized');
@@ -612,6 +804,7 @@ export class CodexAppServerRuntime {
 
   async resetSession(sessionId: string): Promise<void> {
     process.stderr.write(`[codex-app-server] Reset session: ${sessionId}\n`);
+    this.dismissPendingPlanApproval();
     await this.settleActiveTurn('interrupted', 'Session reset');
     await this.teardownTransport();
     this.config = null;
@@ -624,6 +817,7 @@ export class CodexAppServerRuntime {
     }
     const transport = this.transport;
     const threadId = this.threadId;
+    this.dismissPendingPlanApproval();
     await this.settleActiveTurn('interrupted', 'Session deleted');
     if (transport && threadId && transport.isConnected) {
       try {
@@ -639,6 +833,7 @@ export class CodexAppServerRuntime {
 
   async shutdown(): Promise<void> {
     process.stderr.write('[codex-app-server] Shutdown\n');
+    this.dismissPendingPlanApproval();
     await this.settleActiveTurn('interrupted', 'Sidecar shutdown');
     await this.teardownTransport();
     this.config = null;
@@ -790,11 +985,12 @@ export class CodexAppServerRuntime {
       this.emitCompactionBoundary(turn, item.id, 'compacting');
       return;
     }
-    if (item.type === 'agent_message' || item.type === 'reasoning') {
-      // content_started is emitted lazily on the first delta.
+    if (item.type === 'agent_message' || item.type === 'reasoning' || item.type === 'plan') {
+      // content_started is emitted lazily on the first delta (plan items are
+      // only surfaced through the Issue 07 Plan Approval).
       return;
     }
-    const toolUse = buildCodexToolUseContent(item as never, {
+    const toolUse = buildCodexToolUseContent(item, {
       workdir: this.config?.cwd,
     });
     if (toolUse?.type === 'tool_use') {
@@ -825,6 +1021,9 @@ export class CodexAppServerRuntime {
     if (item.type === 'agent_message') {
       this.completeStreamingText(turn, item.id);
       if (typeof item.text === 'string' && item.text.trim()) {
+        turn.lastAssistantText = turn.lastAssistantText
+          ? `${turn.lastAssistantText}\n\n${item.text}`
+          : item.text;
         this.emitTurnEvent(turn, {
           kind: 'assistant_message',
           content: [{ type: 'text', text: item.text }],
@@ -847,13 +1046,21 @@ export class CodexAppServerRuntime {
       }
       return;
     }
-    const result = buildCodexToolResultContent(item as never);
+    if (item.type === 'plan') {
+      // Issue 07: the completed plan item carries the authoritative plan
+      // markdown for the Plan Approval card — not a chat message.
+      if (typeof item.text === 'string' && item.text.trim()) {
+        turn.planText = item.text;
+      }
+      return;
+    }
+    const result = buildCodexToolResultContent(item);
     if (result !== null) {
       this.emitTurnEvent(turn, {
         kind: 'tool_finished',
         toolUseId: item.id,
         content: result,
-        isError: isCodexToolResultError(item as never),
+        isError: isCodexToolResultError(item),
       });
     }
   }
@@ -1046,10 +1253,147 @@ export class CodexAppServerRuntime {
     if (!config) {
       return null;
     }
-    return buildCodexThreadPermissionOptions(
-      config.permissionConfig,
-      config.planMode ?? 'off',
+    return buildCodexThreadPermissionOptions(config.permissionConfig);
+  }
+
+  /** Serializes the request-shaped config (excluding derived fields) for ensure dedup. */
+  private requestFingerprint(): string | null {
+    if (!this.config) {
+      return null;
+    }
+    const { effectiveBaseUrl: _derived, ...requestShape } = this.config;
+    return JSON.stringify(requestShape);
+  }
+
+  /**
+   * Issue 09: resolves the base URL the app-server dials. Providers flagged
+   * `codex_needs_proxy` (or non-official hosts) go through the shared compat
+   * proxy; official OpenAI connects directly. Returns undefined when the
+   * upstream is unset.
+   */
+  private async resolveUpstreamRouting(config: CodexSessionBootstrap): Promise<string | undefined> {
+    const upstream = config.upstreamBaseUrl;
+    if (!upstream) {
+      return undefined;
+    }
+    if (!config.apiKey || !shouldUseCodexChatCompatProxy(upstream, config.codexNeedsProxy)) {
+      return upstream;
+    }
+    let started: { port: number } | null = null;
+    try {
+      started = await proxyManager.start(config.apiKey, upstream, undefined, config.codexNeedsProxy);
+    } catch (error) {
+      throw new Error(
+        `Codex compat 代理启动失败（第三方上游 ${upstream}）: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (!started) {
+      // proxyManager judged the proxy unnecessary (official host) — dial direct.
+      return upstream;
+    }
+    const localUrl = proxyManager.getBaseUrl() ?? `http://127.0.0.1:${started.port}`;
+    process.stderr.write(
+      `[codex-app-server] Using chat-compat proxy upstream=${upstream} local=${localUrl}\n`,
     );
+    return localUrl;
+  }
+
+  /**
+   * Issue 07: fetches the collaboration mode presets. Older app-server builds
+   * without `collaborationMode/list` fall back to the stock plan/default pair.
+   */
+  private async resolveCollaborationModes(transport: AppServerTransport): Promise<void> {
+    try {
+      const result = await transport.request<{ data?: CollaborationModeMask[] }>(
+        'collaborationMode/list',
+        {},
+        { timeoutMs: 15_000 },
+      );
+      const masks = Array.isArray(result.data) ? result.data : [];
+      const plan = masks.find((mask) => mask.mode === 'plan');
+      const fallback = masks.find((mask) => mask.mode === 'default');
+      this.planModeMask = plan ?? FALLBACK_PLAN_MODE_MASK;
+      this.defaultModeMask = fallback ?? FALLBACK_DEFAULT_MODE_MASK;
+      process.stderr.write(
+        `[codex-app-server] Collaboration modes resolved: plan=${this.planModeMask.name} default=${this.defaultModeMask.name}\n`,
+      );
+    } catch (error) {
+      this.planModeMask = FALLBACK_PLAN_MODE_MASK;
+      this.defaultModeMask = FALLBACK_DEFAULT_MODE_MASK;
+      process.stderr.write(
+        `[codex-app-server] collaborationMode/list unavailable, using built-in presets: ${String(error)}\n`,
+      );
+    }
+  }
+
+  /**
+   * Issue 07: synthesizes the Plan Approval Interactive Request and waits for
+   * the user's Implement/Dismiss decision (or the approval timeout, which
+   * counts as Dismiss). The idle guard is suspended while waiting (ADR 0004).
+   */
+  private requestPlanApproval(turn: ActiveTurnState, planText: string): Promise<'implement' | 'dismiss'> {
+    return new Promise((resolve) => {
+      const requestId = crypto.randomUUID();
+      const timeoutMs = this.timeouts.approval_timeout_ms;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const entry: PendingPlanApproval = {
+        requestId,
+        resolve: (decision) => {
+          if (timer) {
+            clearTimeout(timer);
+          }
+          if (this.pendingPlanApproval === entry) {
+            this.pendingPlanApproval = null;
+          }
+          turn.idleGuard.resume();
+          resolve(decision);
+        },
+      };
+      this.pendingPlanApproval = entry;
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          process.stderr.write('[codex-app-server] Plan approval timed out; treating as dismissed\n');
+          entry.resolve('dismiss');
+        }, timeoutMs);
+        if (timer.unref) timer.unref();
+      }
+      turn.idleGuard.suspend();
+      process.stderr.write(`[codex-app-server] Plan approval pending as ${requestId}\n`);
+      this.emitEvent({
+        type: 'permission_requested',
+        session_id: turn.sessionId,
+        sequence: 0,
+        event_id: crypto.randomUUID(),
+        request_id: requestId,
+        permission_id: requestId,
+        permission_type: 'plan_approval',
+        description: 'Codex 已提交实施计划，请确认后执行。',
+        metadata: {
+          presentation: 'plan-approval',
+          title: '实施计划',
+          plan: planText,
+        },
+      });
+    });
+  }
+
+  /** Issue 07: closes Plan Mode after Implement and informs the frontend. */
+  private closePlanMode(): void {
+    if (!this.config || this.config.planMode !== 'on') {
+      return;
+    }
+    this.config = { ...this.config, planMode: 'off' };
+    this.configFingerprint = this.requestFingerprint();
+    this.emitEvent({
+      type: 'permission_mode_changed',
+      session_id: this.config.sessionId ?? '',
+      plan_mode: 'off',
+    });
+  }
+
+  /** Resolves a pending Plan Approval as dismissed (interrupt/teardown). */
+  private dismissPendingPlanApproval(): void {
+    this.pendingPlanApproval?.resolve('dismiss');
   }
 
   private loadRuntimeIfNeeded(): RuntimeLoadResult {
@@ -1186,13 +1530,34 @@ function buildAppServerEnv(config: CodexSessionBootstrap): Record<string, string
   if (config.apiKey) {
     env.OPENAI_API_KEY = config.apiKey;
   }
-  // Official upstream (or a directly reachable OpenAI-compatible endpoint).
-  // Compat-proxy routing is intentionally NOT handled here (Issue 09).
-  if (config.upstreamBaseUrl) {
-    env.OPENAI_BASE_URL = config.upstreamBaseUrl;
+  // Issue 09: dial the resolved base URL — the local compat proxy listening
+  // URL for codex_needs_proxy providers, otherwise the upstream directly.
+  const baseUrl = config.effectiveBaseUrl ?? config.upstreamBaseUrl;
+  if (baseUrl) {
+    env.OPENAI_BASE_URL = baseUrl;
   }
   applyCodexWindowsSandboxPathCompatibility(env as Record<string, string>);
   return env;
+}
+
+/**
+ * Issue 07: builds the `turn/start` collaborationMode payload from a preset
+ * mask. `settings.model` is required by the wire schema; the plan preset may
+ * pin its own reasoning_effort (stock CLI ships `medium` for Plan).
+ */
+function buildTurnCollaborationMode(
+  mask: CollaborationModeMask,
+  model: string,
+): Record<string, unknown> {
+  return {
+    mode: mask.mode === 'plan' ? 'plan' : 'default',
+    settings: {
+      model: mask.model || model,
+      ...(mask.mode === 'plan' && mask.reasoning_effort
+        ? { reasoning_effort: mask.reasoning_effort }
+        : {}),
+    },
+  };
 }
 
 function buildAppServerSandboxPolicy(
@@ -1229,11 +1594,11 @@ function buildAppServerUserInput(entries: Array<Record<string, unknown>>): Array
   });
 }
 
-type AdaptedItem = Record<string, unknown> & { type: string; id: string };
+type AdaptedItem = CodexThreadItem;
 
 /**
- * Adapts an app-server ThreadItem (camelCase) to the SDK-shaped item consumed
- * by the shared runtimeEvents tool-use/result builders (snake_case).
+ * Adapts an app-server ThreadItem (camelCase) to the snake_case shape consumed
+ * by the shared runtimeEvents tool-use/result builders.
  */
 function adaptAppServerItem(item: Record<string, unknown>): AdaptedItem | null {
   const id = readString(item.id);
@@ -1243,6 +1608,9 @@ function adaptAppServerItem(item: Record<string, unknown>): AdaptedItem | null {
   switch (item.type) {
     case 'agentMessage':
       return { type: 'agent_message', id, text: readString(item.text) ?? '' };
+    case 'plan':
+      // Issue 07: EXPERIMENTAL plan item — authoritative proposed plan text.
+      return { type: 'plan', id, text: readString(item.text) ?? '' };
     case 'reasoning': {
       const summary = Array.isArray(item.summary) ? item.summary : [];
       const content = Array.isArray(item.content) ? item.content : [];
@@ -1265,7 +1633,12 @@ function adaptAppServerItem(item: Record<string, unknown>): AdaptedItem | null {
       return {
         type: 'file_change',
         id,
-        changes: Array.isArray(item.changes) ? item.changes : [],
+        changes: Array.isArray(item.changes)
+          ? item.changes.filter(isRecord).map((change) => ({
+            kind: readString(change.kind) ?? '',
+            path: readString(change.path) ?? '',
+          }))
+          : [],
         status: adaptItemStatus(item.status),
       };
     case 'mcpToolCall':
@@ -1276,8 +1649,13 @@ function adaptAppServerItem(item: Record<string, unknown>): AdaptedItem | null {
         tool: readString(item.tool) ?? '',
         arguments: item.arguments ?? {},
         status: adaptItemStatus(item.status),
-        error: isRecord(item.error) ? item.error : undefined,
-        result: isRecord(item.result) ? item.result : undefined,
+        error: isRecord(item.error) ? { message: readString(item.error.message) ?? undefined } : null,
+        result: isRecord(item.result)
+          ? {
+            structured_content: item.result.structuredContent,
+            content: item.result.content,
+          }
+          : null,
       };
     case 'webSearch':
       return { type: 'web_search', id, query: readString(item.query) ?? '' };

@@ -62,6 +62,35 @@ describe('PermissionApprovalCard', () => {
     return waitFor(() => expect(onResponse).toHaveBeenCalledWith('reject'));
   });
 
+  it('renders the Codex plan markdown inside the plan approval card', async () => {
+    const onResponse = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <PermissionApprovalCard
+        request={{
+          request_id: 'codex-plan-1',
+          permission_type: 'plan_approval',
+          description: 'Codex 已提交实施计划，请确认后执行。',
+          metadata: {
+            presentation: 'plan-approval',
+            title: '实施计划',
+            plan: '## 重构计划\n\n1. 先写测试\n2. 再实现',
+          },
+        }}
+        onResponse={onResponse}
+      />,
+    );
+
+    // The plan body renders as markdown (heading + list item).
+    expect(screen.getByRole('heading', { name: '重构计划' })).toBeTruthy();
+    expect(screen.getByText(/先写测试/)).toBeTruthy();
+    expect(screen.queryByText('始终允许匹配规则')).toBeNull();
+
+    fireEvent.click(screen.getByText('批准'));
+    fireEvent.click(screen.getByRole('button', { name: /确认/ }));
+    await waitFor(() => expect(onResponse).toHaveBeenCalledWith('once'));
+  });
+
   it('moves between approval options with arrows and selects with Enter', async () => {
     const onResponse = vi.fn().mockResolvedValue(undefined);
 

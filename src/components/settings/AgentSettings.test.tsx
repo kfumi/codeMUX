@@ -55,7 +55,6 @@ const baseConfig = {
       permission_config: { kind: 'claude_code' as const, permissionMode: 'default' },
     },
     codex: {
-      sdk_mode: 'responses',
     },
     gemini_cli: {},
     opencode: {},

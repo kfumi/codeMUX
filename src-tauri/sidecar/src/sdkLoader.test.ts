@@ -4,7 +4,6 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import {
   loadClaudeSdk,
-  loadCodexSdk,
   loadOpenCodeClientSdk,
   loadOpenCodeServerSdk,
 } from './sdkLoader.js';
@@ -88,47 +87,6 @@ describe('sdkLoader', () => {
       const sdk = await loadClaudeSdk(loaded);
       expect(sdk.query()).toBe('mock-query-result');
       expect(sdk.startup()).toBe('mock-startup-result');
-    });
-  });
-
-  describe('loadCodexSdk', () => {
-    it('loads Codex SDK from runtime path via runtimeRequire', async () => {
-      const runtimePath = path.join(tmpDir, 'codex', '0.139.0');
-      createRuntimePack(runtimePath);
-      createMockSdkModule(runtimePath, '@openai/codex-sdk', {
-        Codex: class MockCodex { constructor(_opts: unknown) {} },
-      });
-
-      const loaded = loadProviderRuntime(makeRef(runtimePath)) as RuntimeLoadResult;
-      const sdk = await loadCodexSdk(loaded);
-      expect(typeof sdk.Codex).toBe('function');
-      // Verify it can be instantiated
-      const instance = new sdk.Codex({});
-      expect(instance).toBeDefined();
-    });
-
-    it('loads an ESM-only SDK through the managed Runtime import fallback', async () => {
-      const runtimePath = path.join(tmpDir, 'codex', '0.139.0-esm');
-      createRuntimePack(runtimePath);
-      const pkgDir = path.join(runtimePath, 'node_modules', '@openai', 'codex-sdk');
-      fs.mkdirSync(path.join(pkgDir, 'dist'), { recursive: true });
-      fs.writeFileSync(
-        path.join(pkgDir, 'package.json'),
-        JSON.stringify({
-          name: '@openai/codex-sdk',
-          version: '0.139.0',
-          type: 'module',
-          exports: { '.': { import: './dist/index.js' } },
-        }),
-      );
-      fs.writeFileSync(
-        path.join(pkgDir, 'dist', 'index.js'),
-        'export class Codex { constructor() {} }',
-      );
-
-      const loaded = loadProviderRuntime(makeRef(runtimePath)) as RuntimeLoadResult;
-      const sdk = await loadCodexSdk(loaded);
-      expect(typeof sdk.Codex).toBe('function');
     });
   });
 

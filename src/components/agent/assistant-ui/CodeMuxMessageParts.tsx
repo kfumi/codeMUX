@@ -473,6 +473,10 @@ export function CodeMuxDataMessagePart({ name, data, sessionId }: CodeMuxDataPar
     return <NativeSessionRebuiltSeam event={data.event} />;
   }
 
+  if (isPermissionUpdateDeferredData(data)) {
+    return <PermissionUpdateDeferredSeam event={data.event} />;
+  }
+
   if (isSessionSummaryData(data)) {
     return <SessionSummaryCard event={data.event} />;
   }
@@ -564,6 +568,28 @@ function isNativeSessionRebuiltData(value: unknown): value is { eventKind: strin
     value.eventKind === 'native_session_rebuilt' &&
     isRecord(value.event) &&
     value.event.kind === 'native_session_rebuilt'
+  );
+}
+
+function isPermissionUpdateDeferredData(value: unknown): value is { eventKind: string; event: Extract<AgentMessage, { kind: 'permission_update_deferred' }> } {
+  return (
+    isRecord(value) &&
+    value.eventKind === 'permission_update_deferred' &&
+    isRecord(value.event) &&
+    value.event.kind === 'permission_update_deferred'
+  );
+}
+
+function PermissionUpdateDeferredSeam({ event }: { event: Extract<AgentMessage, { kind: 'permission_update_deferred' }> }) {
+  return (
+    <div
+      className="text-center py-3 animate-in fade-in fill-mode-forwards animation-duration-[350ms] [animation-timing-function:ease]"
+      title={event.data.content}
+    >
+      <span className="text-ui-caption text-muted-foreground tracking-normal font-medium">
+        — {event.data.content} —
+      </span>
+    </div>
   );
 }
 

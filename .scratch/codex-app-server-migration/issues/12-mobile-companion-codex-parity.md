@@ -6,9 +6,9 @@
 
 **Status:** ready-for-agent
 
-- [ ] MobileComposer 支持 Codex 四档 Workflow Mode（替换旧两档 plan/full_access）
-- [ ] MobileComposer 支持 Plan Mode toggle
-- [ ] 移动端可响应 Codex 工具审批与 AskUserQuestion
-- [ ] 移动端可 Implement / Dismiss Plan Approval
-- [ ] 桌面响应后移动端挂起 UI 清除（及反向）
-- [ ] `src-mobile` vitest 覆盖权限选择与 Plan 审批路径
+- [x] MobileComposer 支持 Codex 四档 Workflow Mode（替换旧两档 plan/full_access）
+- [x] MobileComposer 支持 Plan Mode toggle
+- [x] 移动端可响应 Codex 工具审批与 AskUserQuestion
+- [x] 移动端可 Implement / Dismiss Plan Approval
+- [x] 桌面响应后移动端挂起 UI 清除（及反向）
+- [x] `src-mobile` vitest 覆盖权限选择与 Plan 审批路径

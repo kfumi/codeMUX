@@ -6,10 +6,10 @@
 
 **Status:** ready-for-agent
 
-- [ ] `ensure_session` spawn app-server 并完成 initialize；`delete_session` dispose 子进程
-- [ ] 新 Session：`thread/start` + `turn/start`；文本 User Message 产生流式 assistant 增量与 turn 完成
-- [ ] `turn/interrupt` 可中止进行中的 turn
-- [ ] app-server notification 归一化为现有 CodeMUX 侧事件形状（助手文本、Turn Outcome、token usage 等基础子集）
-- [ ] fake-app-server 单测覆盖完整 send_input 往返（Sidecar Runtime 边界）
-- [ ] 官方 OpenAI 路径不启动 compat 代理（`codex_needs_proxy: false`）
-- [ ] app-server 崩溃后可观测错误 emit，不 silent hang
+- [x] `ensure_session` spawn app-server 并完成 initialize；`delete_session` dispose 子进程
+- [x] 新 Session：`thread/start` + `turn/start`；文本 User Message 产生流式 assistant 增量与 turn 完成
+- [x] `turn/interrupt` 可中止进行中的 turn
+- [x] app-server notification 归一化为现有 CodeMUX 侧事件形状（助手文本、Turn Outcome、token usage 等基础子集）
+- [x] fake-app-server 单测覆盖完整 send_input 往返（Sidecar Runtime 边界）
+- [x] 官方 OpenAI 路径不启动 compat 代理（`codex_needs_proxy: false`）
+- [x] app-server 崩溃后可观测错误 emit，不 silent hang

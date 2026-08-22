@@ -6,10 +6,10 @@
 
 **Status:** ready-for-agent
 
-- [ ] Plan toggle 独立于 Workflow Mode selector（composer 控件区，与 Reasoning Effort 同级）
-- [ ] ensure/turn 前 `collaborationMode/list` 解析 plan 与 code 协作模式
-- [ ] Plan turn 完成后合成 Plan Approval（kind 可区分于 tool approval）；挂起 turn 等待用户
-- [ ] Implement：关 Plan Mode、组装 implementation follow-up prompt、自动 `turn/start`
-- [ ] Dismiss：解挂 Plan Approval，不启动 implementation turn
-- [ ] 桌面 UI 展示 plan markdown + Implement / Dismiss 按钮
-- [ ] fake-app-server 或集成测覆盖 Plan 闭环 happy path
+- [x] Plan toggle 独立于 Workflow Mode selector（composer 控件区，与 Reasoning Effort 同级）
+- [x] ensure/turn 前 `collaborationMode/list` 解析 plan 与 code 协作模式
+- [x] Plan turn 完成后合成 Plan Approval（kind 可区分于 tool approval）；挂起 turn 等待用户
+- [x] Implement：关 Plan Mode、组装 implementation follow-up prompt、自动 `turn/start`
+- [x] Dismiss：解挂 Plan Approval，不启动 implementation turn
+- [x] 桌面 UI 展示 plan markdown + Implement / Dismiss 按钮
+- [x] fake-app-server 或集成测覆盖 Plan 闭环 happy path

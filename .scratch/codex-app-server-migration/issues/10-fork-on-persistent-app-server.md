@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] Fork 走同一 app-server 进程的 `thread/fork`（必要时 `thread/turns/list` 解析 lastTurnId）
-- [ ] 删除或退役 fork 专用临时 app-server spawn 路径
-- [ ] 子 Session mapping 指向新 thread id
-- [ ] Fork 端到端测试或集成测通过（父 Session Codex、fork 点正确）
-- [ ] Fork 失败时用户可见错误
+- [x] Fork 走同一 app-server 进程的 `thread/fork`（必要时 `thread/turns/list` 解析 lastTurnId）
+- [x] 删除或退役 fork 专用临时 app-server spawn 路径
+- [x] 子 Session mapping 指向新 thread id
+- [x] Fork 端到端测试或集成测通过（父 Session Codex、fork 点正确）
+- [x] Fork 失败时用户可见错误

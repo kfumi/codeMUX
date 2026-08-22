@@ -1,13 +1,29 @@
-import type {
-  CommandExecutionItem,
-  FileChangeItem,
-  McpToolCallItem,
-  ThreadItem,
-  TodoListItem,
-  WebSearchItem,
-} from '@openai/codex-sdk';
 import type { RuntimeFlavor } from './types.js';
 export type { RuntimeFlavor } from './types.js';
+
+/**
+ * Codex thread item after the app-server adapter normalizes wire items to
+ * snake_case. Replaces the SDK's generated item types (removed with the SDK
+ * in the ADR 0010 hard cut) — only fields CodeMUX consumes are declared.
+ */
+export type CodexThreadItem = {
+  type: string;
+  id: string;
+  command?: string;
+  cwd?: string;
+  aggregated_output?: string | null;
+  exit_code?: number | null;
+  status?: string;
+  server?: string;
+  tool?: string;
+  arguments?: unknown;
+  query?: string;
+  text?: string;
+  changes?: Array<{ kind: string; path: string }>;
+  error?: { message?: string } | null;
+  result?: { structured_content?: unknown; content?: unknown } | null;
+  items?: Array<{ text: string; completed: boolean }>;
+};
 
 export type CodexTokenUsage = {
   input_tokens: number;
@@ -37,10 +53,10 @@ export function getRuntimeFlavor(agentKind?: string): RuntimeFlavor {
   return 'claude';
 }
 
-export function buildCodexToolUseContent(item: ThreadItem, context: ToolUseContext = {}): AssistantContentBlock | null {
+export function buildCodexToolUseContent(item: CodexThreadItem, context: ToolUseContext = {}): AssistantContentBlock | null {
   switch (item.type) {
     case 'command_execution': {
-      const input: Record<string, unknown> = { command: unwrapWindowsPowerShellCommand(item.command) };
+      const input: Record<string, unknown> = { command: unwrapWindowsPowerShellCommand(item.command ?? '') };
       if (context.timeoutMs !== undefined) {
         input.timeout_ms = context.timeoutMs;
       }
@@ -58,7 +74,7 @@ export function buildCodexToolUseContent(item: ThreadItem, context: ToolUseConte
       return {
         type: 'tool_use',
         id: item.id,
-        name: formatMcpToolName(item.server, item.tool),
+        name: formatMcpToolName(item.server ?? '', item.tool ?? ''),
         input: (item.arguments as Record<string, unknown>) ?? {},
       };
     case 'web_search':
@@ -102,12 +118,12 @@ export function buildCodexTodoListEvent({
   item,
 }: {
   sessionId: string;
-  item: TodoListItem;
+  item: CodexThreadItem;
 }) {
   return {
     type: 'codex_todo_list',
     session_id: sessionId,
-    todos: item.items.map((todo: { text: string; completed: boolean }) => ({
+    todos: (item.items ?? []).map((todo) => ({
       content: todo.text,
       status: todo.completed ? 'completed' : 'pending',
     })),
@@ -123,9 +139,7 @@ function formatMcpToolName(server: string, tool: string): string {
   return `mcp__${server}__${tool}`;
 }
 
-export function buildCodexToolResultContent(
-  item: CommandExecutionItem | FileChangeItem | McpToolCallItem | TodoListItem | WebSearchItem,
-): string | null {
+export function buildCodexToolResultContent(item: CodexThreadItem): string | null {
   switch (item.type) {
     case 'command_execution':
       return item.aggregated_output || `Command finished with status ${item.status}`;
@@ -141,17 +155,15 @@ export function buildCodexToolResultContent(
     case 'web_search':
       return `Search completed for: ${item.query}`;
     case 'file_change':
-      return item.changes.length > 0
-        ? `Patch ${item.status}: ${item.changes.map((change: { kind: string; path: string }) => `${change.kind} ${change.path}`).join(', ')}`
+      return (item.changes?.length ?? 0) > 0
+        ? `Patch ${item.status}: ${item.changes?.map((change: { kind: string; path: string }) => `${change.kind} ${change.path}`).join(', ')}`
         : `Patch ${item.status}`;
     default:
       return null;
   }
 }
 
-export function isCodexToolResultError(
-  item: CommandExecutionItem | FileChangeItem | McpToolCallItem | TodoListItem | WebSearchItem,
-): boolean {
+export function isCodexToolResultError(item: CodexThreadItem): boolean {
   switch (item.type) {
     case 'command_execution':
     case 'mcp_tool_call':

@@ -135,13 +135,13 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
 
   useEffect(() => {
     const configured = selectedAgentKind === 'codex'
-      ? config?.agent_configs.codex.permission_config
+      ? config?.agent_configs.codex?.permission_config
       : config?.agent_configs.claude_code.permission_config;
     setSelectedPermissionConfig(serializePermissionConfig(selectedAgentKind, configured));
     setSelectedPlanMode('off');
   }, [
     config?.agent_configs.claude_code.permission_config,
-    config?.agent_configs.codex.permission_config,
+    config?.agent_configs.codex?.permission_config,
     draftRevision,
     selectedAgentKind,
     setSelectedPermissionConfig,

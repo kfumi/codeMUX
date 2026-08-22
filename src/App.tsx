@@ -229,7 +229,7 @@ function App() {
     const newSessionState = useNewSessionStore.getState();
     const settingsConfig = useSettingsStore.getState().config;
     const configuredPermissionConfig = newSessionState.selectedAgentKind === 'codex'
-      ? settingsConfig?.agent_configs.codex.permission_config
+      ? settingsConfig?.agent_configs.codex?.permission_config
       : settingsConfig?.agent_configs.claude_code.permission_config;
     openDraft(
       projectId,

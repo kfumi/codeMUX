@@ -102,7 +102,7 @@ describe('AgentPermissionSelector', () => {
     expect(onPlanModeChange).toHaveBeenLastCalledWith('off');
   });
 
-  it('keeps the plan entry for legacy Codex plan-mode sessions', () => {
+  it('keeps the plan entry for legacy Codex plan-mode sessions without touching the tier', () => {
     const onPermissionConfigChange = vi.fn();
     const onPlanModeChange = vi.fn();
 
@@ -126,12 +126,10 @@ describe('AgentPermissionSelector', () => {
     fireEvent.click(triggerButton);
     expect(screen.getAllByRole('menuitemradio')).toHaveLength(5);
 
+    // Issue 07: re-selecting plan only flips the toggle — the Workflow tier
+    // snapshot is never rewritten (ADR 0010 orthogonality).
     fireEvent.click(screen.getAllByText('计划模式')[1]);
-    expect(onPermissionConfigChange).toHaveBeenCalledWith({
-      kind: 'codex',
-      workflowMode: 'read-only',
-      networkAccessEnabled: false,
-    });
+    expect(onPermissionConfigChange).not.toHaveBeenCalled();
     expect(onPlanModeChange).toHaveBeenCalledWith('on');
   });
 

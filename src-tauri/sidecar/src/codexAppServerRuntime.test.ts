@@ -9,6 +9,7 @@ import {
   type AppServerTransportOptions,
 } from './appServerTransport.js';
 import { CodexAppServerRuntime } from './codexAppServerRuntime.js';
+import { proxyManager } from './proxyManager.js';
 import type { SidecarCommand } from './types.js';
 
 type EnsureCommand = Extract<SidecarCommand, { type: 'ensure_session' }>;
@@ -173,6 +174,17 @@ function receivedRequests(log: LogEntry[], method: string): WireMessage[] {
 
 function eventTypes(events: Array<Record<string, unknown>>): string[] {
   return events.map((event) => String(event.type));
+}
+
+function waitForEvent(
+  events: Array<Record<string, unknown>>,
+  type: string,
+): Promise<Record<string, unknown>> {
+  return vi.waitFor(() => {
+    const event = events.find((candidate) => candidate.type === type);
+    expect(event).toBeDefined();
+    return event as Record<string, unknown>;
+  }, { timeout: 5_000, interval: 20 });
 }
 
 describe('CodexAppServerRuntime (fake app-server)', () => {
@@ -523,9 +535,17 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
   );
 
   it(
-    'plan mode forces read-only sandbox with on-request approvals',
+    'plan mode keeps the workflow tier and pins the plan collaborationMode on turn/start',
     async () => {
-      const { runtime, readLog, ensureCommand } = await createHarness(DEFAULT_SCENARIO);
+      const { runtime, events, readLog, ensureCommand } = await createHarness({
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_1' } } },
+          'turn/start': {
+            result: {},
+            thenNotifications: DEFAULT_TURN_NOTIFICATIONS,
+          },
+        },
+      });
       try {
         await runtime.ensure(
           ensureCommand({
@@ -538,17 +558,61 @@ describe('CodexAppServerRuntime (fake app-server)', () => {
           }),
         );
 
-        const turnStartsAfterInput = receivedRequests(readLog(), 'thread/start');
-        expect(turnStartsAfterInput[0]?.params).toMatchObject({
-          approvalPolicy: 'on-request',
-          sandbox: 'read-only',
+        // Orthogonal (ADR 0010 Decision 4): plan does NOT downgrade the tier.
+        const threadStarts = receivedRequests(readLog(), 'thread/start');
+        expect(threadStarts[0]?.params).toMatchObject({
+          approvalPolicy: 'never',
+          sandbox: 'danger-full-access',
         });
 
-        await runtime.sendInput('plan something');
+        const input = runtime.sendInput('plan something');
+        const approval = await waitForEvent(events, 'permission_requested');
+        await runtime.respondToPermission(String(approval.request_id), 'reject');
+        await input;
+
         const turnStarts = receivedRequests(readLog(), 'turn/start');
         expect(turnStarts[0]?.params).toMatchObject({
-          approvalPolicy: 'on-request',
-          sandboxPolicy: { type: 'readOnly', networkAccess: false },
+          approvalPolicy: 'never',
+          sandboxPolicy: { type: 'dangerFullAccess' },
+          collaborationMode: { mode: 'plan', settings: { model: 'o4-mini' } },
+        });
+        // The plan preset governs effort; no top-level override is sent.
+        expect(turnStarts[0]?.params).not.toHaveProperty('effort');
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    20_000,
+  );
+
+  it(
+    'restores the default collaborationMode on plan-off turns after resolving presets',
+    async () => {
+      const { runtime, readLog, ensureCommand } = await createHarness({
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_1' } } },
+          'collaborationMode/list': {
+            result: {
+              data: [
+                { name: 'Plan', mode: 'plan', model: null, reasoning_effort: 'medium' },
+                { name: 'Default', mode: 'default', model: null, reasoning_effort: null },
+              ],
+            },
+          },
+          'turn/start': {
+            result: {},
+            thenNotifications: DEFAULT_TURN_NOTIFICATIONS,
+          },
+        },
+      });
+      try {
+        await runtime.ensure(ensureCommand({ reasoningEffort: 'high' }));
+        await runtime.sendInput('normal coding');
+
+        const turnStarts = receivedRequests(readLog(), 'turn/start');
+        expect(turnStarts[0]?.params).toMatchObject({
+          collaborationMode: { mode: 'default', settings: { model: 'o4-mini' } },
+          effort: 'high',
         });
       } finally {
         await runtime.shutdown();
@@ -753,17 +817,6 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
         ...extras,
       },
     };
-  }
-
-  function waitForEvent(
-    events: Array<Record<string, unknown>>,
-    type: string,
-  ): Promise<Record<string, unknown>> {
-    return vi.waitFor(() => {
-      const event = events.find((candidate) => candidate.type === type);
-      expect(event).toBeDefined();
-      return event as Record<string, unknown>;
-    }, { timeout: 5_000, interval: 20 });
   }
 
   function serverResponses(log: LogEntry[], method: string): WireMessage[] {
@@ -1411,6 +1464,365 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
 
         expect(receivedRequests(readLog(), 'thread/compact/start')).toHaveLength(0);
         expect(receivedRequests(readLog(), 'turn/start')).toHaveLength(1);
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    20_000,
+  );
+
+  // ─── Issue 07: Plan Mode + Plan Approval closure ────────────────────────
+
+  const planTurnNotifications = (planText: string) => [
+    { delayMs: 0, method: 'turn/started', params: { threadId: 'thread_1', turn: { id: 'turn_p' } } },
+    {
+      delayMs: 5,
+      method: 'item/completed',
+      params: {
+        threadId: 'thread_1',
+        turnId: 'turn_p',
+        item: { type: 'agentMessage', id: 'item_plan', text: planText },
+      },
+    },
+    {
+      delayMs: 10,
+      method: 'turn/completed',
+      params: { threadId: 'thread_1', turn: { id: 'turn_p', status: 'completed' } },
+    },
+  ];
+
+  function planScenario(): Record<string, unknown> {
+    return {
+      responses: {
+        'thread/start': { result: { thread: { id: 'thread_1' } } },
+        'thread/delete': { result: {} },
+      },
+      responseSequences: {
+        'turn/start': [
+          {
+            result: {},
+            thenNotifications: planTurnNotifications('## 计划\n\n1. 先写测试\n2. 再实现'),
+          },
+          {
+            result: {},
+            thenNotifications: [
+              { delayMs: 0, method: 'turn/started', params: { threadId: 'thread_1', turn: { id: 'turn_impl' } } },
+              {
+                delayMs: 5,
+                method: 'item/completed',
+                params: {
+                  threadId: 'thread_1',
+                  turnId: 'turn_impl',
+                  item: { type: 'agentMessage', id: 'item_impl', text: 'Done implementing.' },
+                },
+              },
+              {
+                delayMs: 10,
+                method: 'turn/completed',
+                params: { threadId: 'thread_1', turn: { id: 'turn_impl', status: 'completed' } },
+              },
+            ],
+          },
+        ],
+      },
+    };
+  }
+
+  it(
+    'synthesizes a Plan Approval after a plan turn and runs the implementation turn on Implement',
+    async () => {
+      const { runtime, events, readLog, ensureCommand } = await createHarness(planScenario());
+      try {
+        await runtime.ensure(ensureCommand({ planMode: 'on' }));
+        events.length = 0;
+
+        const input = runtime.sendInput('帮我规划重构');
+        const approval = await waitForEvent(events, 'permission_requested');
+        // The turn is held open while the approval pends.
+        expect(events.some((event) => event.type === 'turn_finished')).toBe(false);
+        expect(approval).toMatchObject({
+          session_id: 'sess_1',
+          permission_type: 'plan_approval',
+          metadata: {
+            presentation: 'plan-approval',
+            title: '实施计划',
+            plan: expect.stringContaining('先写测试'),
+          },
+        });
+        expect(runtime.isPendingQuestion(String(approval.request_id))).toBe(false);
+
+        await runtime.respondToPermission(String(approval.request_id), 'once');
+        await input;
+
+        // Plan Mode closed automatically and surfaced to the frontend.
+        expect(events).toContainEqual(
+          expect.objectContaining({ type: 'permission_mode_changed', plan_mode: 'off' }),
+        );
+
+        const turnStarts = receivedRequests(readLog(), 'turn/start');
+        expect(turnStarts).toHaveLength(2);
+        // First turn: plan collaborationMode; follow-up: default.
+        expect(turnStarts[0]?.params).toMatchObject({
+          collaborationMode: { mode: 'plan', settings: { model: 'o4-mini' } },
+        });
+        expect(turnStarts[1]?.params).toMatchObject({
+          collaborationMode: { mode: 'default' },
+          input: [{ type: 'text', text: expect.stringContaining('实施') }],
+        });
+
+        // Two completed turns, both reported.
+        const finished = events.filter((event) => event.type === 'turn_finished');
+        expect(finished).toHaveLength(2);
+        expect(finished[0]).toMatchObject({ outcome: 'completed' });
+        expect(finished[1]).toMatchObject({ outcome: 'completed' });
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    20_000,
+  );
+
+  it(
+    'dismisses the Plan Approval without starting an implementation turn',
+    async () => {
+      const { runtime, events, readLog, ensureCommand } = await createHarness(planScenario());
+      try {
+        await runtime.ensure(ensureCommand({ planMode: 'on' }));
+        events.length = 0;
+
+        const input = runtime.sendInput('帮我规划重构');
+        const approval = await waitForEvent(events, 'permission_requested');
+        await runtime.respondToPermission(String(approval.request_id), 'reject');
+        await input;
+
+        expect(receivedRequests(readLog(), 'turn/start')).toHaveLength(1);
+        expect(events).not.toContainEqual(
+          expect.objectContaining({ type: 'permission_mode_changed' }),
+        );
+        const finished = events.filter((event) => event.type === 'turn_finished');
+        expect(finished).toHaveLength(1);
+        expect(finished[0]).toMatchObject({ outcome: 'completed' });
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    20_000,
+  );
+
+  it(
+    'dismisses a pending Plan Approval when the turn is interrupted',
+    async () => {
+      const { runtime, events, readLog, ensureCommand } = await createHarness(planScenario());
+      try {
+        await runtime.ensure(ensureCommand({ planMode: 'on' }));
+        events.length = 0;
+
+        const input = runtime.sendInput('帮我规划重构');
+        await waitForEvent(events, 'permission_requested');
+        await runtime.interrupt();
+        await input;
+
+        expect(receivedRequests(readLog(), 'turn/start')).toHaveLength(1);
+        expect(events).toContainEqual(
+          expect.objectContaining({ type: 'turn_finished', outcome: 'completed' }),
+        );
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    20_000,
+  );
+
+  // ─── Issue 06: mid-turn permission update deferral ──────────────────────
+
+  it(
+    'emits permission_update_deferred when permissions change mid-turn',
+    async () => {
+      const scenario = {
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_1' } } },
+          'turn/start': {
+            result: {},
+            thenNotifications: [
+              { delayMs: 0, method: 'turn/started', params: { threadId: 'thread_1', turn: { id: 'turn_1' } } },
+              { delayMs: 400, method: 'turn/completed', params: { threadId: 'thread_1', turn: { id: 'turn_1', status: 'completed' } } },
+            ],
+          },
+        },
+      };
+      const { runtime, events, readLog, ensureCommand } = await createHarness(scenario);
+      try {
+        await runtime.ensure(ensureCommand());
+        events.length = 0;
+
+        const input = runtime.sendInput('long running');
+        await vi.waitFor(() => {
+          expect(events.some((event) => event.type === 'system_event')).toBe(true);
+        });
+        runtime.updatePermissions({
+          type: 'update_permissions',
+          sessionId: 'sess_1',
+          agentKind: 'codex',
+          permissionConfig: { kind: 'codex', workflowMode: 'read-only' },
+        });
+        await input;
+
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: 'system_event',
+            subtype: 'permission_update_deferred',
+            session_id: 'sess_1',
+          }),
+        );
+
+        // A follow-up ensure with the same snapshot must not respawn the
+        // app-server (fingerprint stays in sync with updatePermissions).
+        await runtime.ensure(ensureCommand({
+          permissionConfig: { kind: 'codex', workflowMode: 'read-only' },
+        }));
+        expect(receivedRequests(readLog(), 'thread/start')).toHaveLength(1);
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    20_000,
+  );
+
+  // ─── Issue 09: third-party upstream compat-proxy rehoming ───────────────
+
+  it(
+    'routes codex_needs_proxy providers through the local compat proxy',
+    async () => {
+      const { runtime, events, ensureCommand } = await createHarness(DEFAULT_SCENARIO);
+      try {
+        await runtime.ensure(ensureCommand({
+          apiKey: 'sk-third-party',
+          baseUrl: 'https://gateway.example.com/v1',
+          codexNeedsProxy: true,
+        }));
+
+        const proxyStatus = events.find((event) => event.type === 'proxy_status') as
+          | Record<string, unknown>
+          | undefined;
+        expect(proxyStatus).toMatchObject({ running: true });
+        expect(String(proxyStatus?.upstreamBaseUrl)).toContain('gateway.example.com');
+      } finally {
+        await runtime.shutdown();
+        await proxyManager.stop();
+      }
+    },
+    20_000,
+  );
+
+  it(
+    'dials official OpenAI directly without starting the compat proxy',
+    async () => {
+      const { runtime, events, ensureCommand } = await createHarness(DEFAULT_SCENARIO);
+      try {
+        await runtime.ensure(ensureCommand({
+          apiKey: 'sk-official',
+          baseUrl: 'https://api.openai.com/v1',
+          codexNeedsProxy: false,
+        }));
+
+        const proxyStatus = events.find((event) => event.type === 'proxy_status') as
+          | Record<string, unknown>
+          | undefined;
+        expect(proxyStatus).toMatchObject({ running: false });
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    20_000,
+  );
+
+  // ─── Issue 10: fork on the persistent app-server connection ─────────────
+
+  it(
+    'forks via thread/fork on the long-lived transport and returns the child thread id',
+    async () => {
+      const scenario = {
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_1' } } },
+          'thread/fork': { result: { thread: { id: 'thread_child' } } },
+          'turn/start': {
+            result: {},
+            thenNotifications: DEFAULT_TURN_NOTIFICATIONS,
+          },
+        },
+      };
+      const { runtime, readLog, ensureCommand } = await createHarness(scenario);
+      try {
+        await runtime.ensure(ensureCommand());
+
+        const childThreadId = await runtime.forkSession('thread_1');
+        expect(childThreadId).toBe('thread_child');
+
+        const forks = receivedRequests(readLog(), 'thread/fork');
+        expect(forks).toHaveLength(1);
+        expect(forks[0]?.params).toMatchObject({ threadId: 'thread_1' });
+
+        // The parent runtime keeps its own thread mapping.
+        await runtime.sendInput('still parent thread');
+        expect(receivedRequests(readLog(), 'turn/start')[0]?.params).toMatchObject({
+          threadId: 'thread_1',
+        });
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    20_000,
+  );
+
+  it(
+    'resolves the fork point by turn ordinal through thread/turns/list',
+    async () => {
+      const scenario = {
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_1' } } },
+          'thread/turns/list': {
+            result: { data: [{ id: 'turn_a' }, { id: 'turn_b' }, { id: 'turn_c' }] },
+          },
+          'thread/fork': { result: { thread: { id: 'thread_child' } } },
+          'turn/start': {
+            result: {},
+            thenNotifications: DEFAULT_TURN_NOTIFICATIONS,
+          },
+        },
+      };
+      const { runtime, readLog, ensureCommand } = await createHarness(scenario);
+      try {
+        await runtime.ensure(ensureCommand());
+
+        const childThreadId = await runtime.forkSession('thread_1', undefined, 1);
+        expect(childThreadId).toBe('thread_child');
+
+        const forks = receivedRequests(readLog(), 'thread/fork');
+        expect(forks[0]?.params).toMatchObject({ threadId: 'thread_1', lastTurnId: 'turn_b' });
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    20_000,
+  );
+
+  it(
+    'surfaces fork failures as a readable error',
+    async () => {
+      const scenario = {
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_1' } } },
+          'thread/fork': { error: { code: -32000, message: 'source thread missing' } },
+          'turn/start': {
+            result: {},
+            thenNotifications: DEFAULT_TURN_NOTIFICATIONS,
+          },
+        },
+      };
+      const { runtime, ensureCommand } = await createHarness(scenario);
+      try {
+        await runtime.ensure(ensureCommand());
+        await expect(runtime.forkSession('thread_1')).rejects.toThrow(/source thread missing/);
       } finally {
         await runtime.shutdown();
       }

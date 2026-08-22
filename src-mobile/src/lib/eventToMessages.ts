@@ -60,7 +60,16 @@ export type ChatMessage =
       result?: string;
       collapsed: boolean;
     }
-  | { kind: 'permission'; id: string; requestId: string; description: string }
+  | {
+      kind: 'permission';
+      id: string;
+      requestId: string;
+      description: string;
+      permissionType?: string;
+      command?: string;
+      /** Issue 07/12: plan markdown carried by Plan Approval cards. */
+      planMarkdown?: string;
+    }
   | {
       kind: 'question';
       id: string;
@@ -425,7 +434,21 @@ export function eventToMessages(event: Record<string, unknown>): ChatMessage[] {
   if (type === 'permission_requested') {
     const description = typeof event.description === 'string' ? event.description : '需要审批';
     const requestId = typeof event.request_id === 'string' ? event.request_id : id;
-    return [{ kind: 'permission', id, requestId, description }];
+    const permissionType = typeof event.permission_type === 'string' ? event.permission_type : undefined;
+    const metadata = (event.metadata && typeof event.metadata === 'object' && !Array.isArray(event.metadata))
+      ? event.metadata as Record<string, unknown>
+      : {};
+    const command = typeof metadata.command === 'string' && metadata.command.trim()
+      ? metadata.command
+      : undefined;
+    const planMarkdown = (permissionType === 'plan_approval'
+      || permissionType === 'ExitPlanMode'
+      || metadata.presentation === 'plan-approval')
+      && typeof metadata.plan === 'string'
+      && metadata.plan.trim()
+      ? metadata.plan
+      : undefined;
+    return [{ kind: 'permission', id, requestId, description, permissionType, ...(command ? { command } : {}), ...(planMarkdown ? { planMarkdown } : {}) }];
   }
 
   if (type === 'user_input_requested') {

@@ -61,7 +61,6 @@ const baseConfig: AppConfig = {
       resume_sessions: true,
     },
     codex: {
-      sdk_mode: 'responses',
     },
     gemini_cli: {},
     opencode: {},
@@ -96,21 +95,6 @@ describe('settings store agent config actions', () => {
 
     expect(setDefaultAgentKindMock).toHaveBeenCalledWith('codex');
     expect(useSettingsStore.getState().config?.agent_defaults.default_agent_kind).toBe('codex');
-  });
-
-  it('persists codex sdk mode updates', async () => {
-    const { useSettingsStore } = await import('./settingsStore');
-
-    await useSettingsStore.getState().updateAgentConfig('codex', {
-      sdk_mode: 'agent',
-    });
-
-    expect(updateAgentConfigMock).toHaveBeenCalledWith('codex', {
-      sdk_mode: 'agent',
-    });
-    expect(useSettingsStore.getState().config?.agent_configs.codex).toEqual({
-      sdk_mode: 'agent',
-    });
   });
 
   it('persists compact AI output preference', async () => {

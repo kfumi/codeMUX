@@ -34,7 +34,6 @@ export interface AgentConfigMap {
     timeouts?: AgentTimeouts | null;
   };
   codex: {
-    sdk_mode?: 'responses' | 'agent';
     default_provider_id?: string | null;
     default_model?: string;
     permission_config?: CodexPermissionConfig;

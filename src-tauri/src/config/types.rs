@@ -48,10 +48,6 @@ fn default_true() -> bool {
     true
 }
 
-fn default_codex_sdk_mode() -> String {
-    "responses".to_string()
-}
-
 fn default_false() -> bool {
     false
 }
@@ -265,8 +261,6 @@ impl Default for ClaudeCodeAgentConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodexAgentConfig {
-    #[serde(default = "default_codex_sdk_mode")]
-    pub sdk_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_provider_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -280,7 +274,6 @@ pub struct CodexAgentConfig {
 impl Default for CodexAgentConfig {
     fn default() -> Self {
         Self {
-            sdk_mode: default_codex_sdk_mode(),
             default_provider_id: None,
             default_model: None,
             permission_config: CodexPermissionConfig::default(),
@@ -300,7 +293,6 @@ pub struct ClaudeCodeAgentConfigUpdate {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CodexAgentConfigUpdate {
-    pub sdk_mode: Option<String>,
     pub default_provider_id: Option<String>,
     pub default_model: Option<String>,
     pub permission_config: Option<CodexPermissionConfig>,
@@ -444,7 +436,6 @@ mod tests {
         );
         assert_eq!(config.agent_configs.claude_code.executable_mode, "auto");
         assert!(config.agent_configs.claude_code.resume_sessions);
-        assert_eq!(config.agent_configs.codex.sdk_mode, "responses");
         assert!(!config.compact_ai_output);
     }
 

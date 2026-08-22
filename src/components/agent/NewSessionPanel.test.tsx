@@ -174,7 +174,6 @@ describe('NewSessionPanel', () => {
         agent_defaults: { default_agent_kind: 'claude_code' },
         agent_configs: {
           claude_code: { executable_mode: 'auto', resume_sessions: true },
-          codex: { sdk_mode: 'responses' },
           gemini_cli: {},
           opencode: {},
         },

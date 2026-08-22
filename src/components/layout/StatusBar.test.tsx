@@ -38,7 +38,6 @@ describe('StatusBar', () => {
             resume_sessions: true,
           },
           codex: {
-            sdk_mode: 'responses',
           },
           gemini_cli: {},
           opencode: {},

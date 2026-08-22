@@ -152,6 +152,32 @@ describe('CodeMUX frontend protocol adapter', () => {
     });
   });
 
+  it('maps deferred permission updates to a visible seam', () => {
+    expect(toLegacySystemMessage({
+      type: 'system_event',
+      subtype: 'permission_update_deferred',
+      content: 'Workflow Mode 变更将在下一回合生效。',
+      agent_kind: 'codex',
+      event_id: 'event-deferred',
+    })).toEqual({
+      kind: 'permission_update_deferred',
+      data: {
+        content: 'Workflow Mode 变更将在下一回合生效。',
+        agent_kind: 'codex',
+      },
+    });
+
+    // Falls back to the default copy when content is missing.
+    expect(toLegacySystemMessage({
+      type: 'system_event',
+      subtype: 'permission_update_deferred',
+      event_id: 'event-deferred-empty',
+    })).toEqual({
+      kind: 'permission_update_deferred',
+      data: { content: '权限变更将在下一回合生效。' },
+    });
+  });
+
   it('preserves file diffs from session summary system events', () => {
     expect(toLegacySystemMessage({
       type: 'system_event',

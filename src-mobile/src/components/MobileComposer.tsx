@@ -153,12 +153,14 @@ function isMobileAgentKind(value: string): value is MobileAgentKind {
   return value === 'claude_code' || value === 'codex' || value === 'opencode';
 }
 
-function parsePermissionMode(
+export function parsePermissionMode(
   agentKind: MobileAgentKind,
   permissionConfig: string | null | undefined,
   planMode: string | null | undefined,
 ): AgentExecutionMode {
-  if (planMode === 'on') {
+  // Codex Plan Mode is orthogonal (ADR 0010) — the Workflow tier stands even
+  // while the plan toggle is on.
+  if (planMode === 'on' && agentKind !== 'codex') {
     return 'plan';
   }
   try {
@@ -232,7 +234,7 @@ function filterFiles(
     .slice(0, 8);
 }
 
-function buildSettingsPatch(
+export function buildSettingsPatch(
   agentKind: MobileAgentKind,
   providerId: string,
   model: string,
@@ -759,6 +761,25 @@ export function MobileComposer({
     ));
   };
 
+  /** Issue 12: independent Plan toggle. Codex keeps its Workflow tier; other kinds map plan onto their permission mode. */
+  const handlePlanToggle = () => {
+    if (!canEditSettings) return;
+    const nextPlanMode = planMode === 'on' ? 'off' : 'on';
+    setPlanMode(nextPlanMode);
+    if (agentKind === 'codex') {
+      void commitSettings(buildSettingsPatch(
+        agentKind,
+        providerId,
+        model,
+        reasoningEffort,
+        permissionMode,
+        nextPlanMode,
+      ));
+      return;
+    }
+    handlePermissionChange(nextPlanMode === 'on' ? 'plan' : 'confirm_before_edit');
+  };
+
   const handleFiles = async (files: FileList | null) => {
     if (!files?.length) return;
     const images = Array.from(files).filter((file) => file.type.startsWith('image/'));
@@ -971,12 +992,12 @@ export function MobileComposer({
                 />
                 {agentKind !== 'opencode' ? (
                   <ToolbarMenuItem
-                    active={permissionMode === 'plan'}
+                    active={planMode === 'on'}
                     icon={ClipboardList}
-                    label="计划模式"
-                    description="先分析和规划，不直接修改"
+                    label={planMode === 'on' ? '关闭计划模式' : '计划模式'}
+                    description={agentKind === 'codex' ? '正交开关：不改变当前权限档位' : '先分析和规划，不直接修改'}
                     onClick={() => {
-                      handlePermissionChange('plan');
+                      handlePlanToggle();
                       setOpenMenu(null);
                     }}
                   />
@@ -990,7 +1011,7 @@ export function MobileComposer({
               active={openMenu === 'permission'}
               disabled={!canEditSettings}
               icon={SelectedPermissionIcon}
-              label={`权限：${selectedPermission?.label ?? '权限模式'}`}
+              label={`权限：${selectedPermission?.label ?? '权限模式'}${agentKind === 'codex' && planMode === 'on' ? ' · 计划' : ''}`}
               onClick={() => setOpenMenu((current) => current === 'permission' ? null : 'permission')}
               tone={permissionMode === 'full_access' ? 'warning' : 'default'}
             />
