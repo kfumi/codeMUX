@@ -17,6 +17,7 @@ const CODE_MUX_DOMAIN_EVENT_TYPES: &[&str] = &[
     "tool_finished",
     "user_input_requested",
     "permission_requested",
+    "permission_resolved",
     "permission_mode_changed",
     "system_event",
     "diagnostic",

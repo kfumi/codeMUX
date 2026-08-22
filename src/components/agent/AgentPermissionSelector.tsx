@@ -14,6 +14,7 @@ import { useMemo, useState } from 'react';
 
 import {
   buildDefaultPermissionConfig,
+  codexWorkflowModeToExecutionMode,
   mapExecutionModeToPermissionConfig,
   serializePermissionConfig,
   type AgentExecutionMode,
@@ -250,17 +251,7 @@ function inferExecutionMode(
 
   if (agentKind === 'codex' && permissionConfig.kind === 'codex') {
     if (planMode === 'on') return 'plan';
-    switch (permissionConfig.workflowMode) {
-      case 'read-only':
-        return 'read_only';
-      case 'auto':
-        return 'auto_edit';
-      case 'auto-review':
-        return 'auto_review';
-      case 'full-access':
-      default:
-        return 'full_access';
-    }
+    return codexWorkflowModeToExecutionMode(permissionConfig.workflowMode);
   }
 
   if (agentKind === 'claude_code' && permissionConfig.kind === 'claude_code') {

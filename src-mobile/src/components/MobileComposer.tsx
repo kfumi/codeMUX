@@ -42,10 +42,10 @@ import { ProviderBrandIcon } from '@/components/settings/ProviderBrandIcon';
 import { AgentBrandIcon } from '@/components/agent/AgentBrandIcon';
 import { getAgentDefinition } from '@/types/agentRegistry';
 import {
+  codexWorkflowModeToExecutionMode,
   mapExecutionModeToPermissionConfig,
   resolveCodexWorkflowMode,
   resolveEffectivePermissionConfig,
-  serializePermissionConfig,
   type AgentExecutionMode,
 } from '@shared/lib/agentPermissions';
 
@@ -169,17 +169,7 @@ export function parsePermissionMode(
       return raw.permissionMode === 'plan' ? 'plan' : 'full_access';
     }
     if (agentKind === 'codex') {
-      switch (resolveCodexWorkflowMode(raw)) {
-        case 'read-only':
-          return 'read_only';
-        case 'auto':
-          return 'auto_edit';
-        case 'auto-review':
-          return 'auto_review';
-        case 'full-access':
-        default:
-          return 'full_access';
-      }
+      return codexWorkflowModeToExecutionMode(resolveCodexWorkflowMode(raw));
     }
     switch (raw.permissionMode) {
       case 'acceptEdits':
@@ -243,6 +233,8 @@ export function buildSettingsPatch(
   planMode: 'on' | 'off',
 ): MobileSessionSettingsPatch {
   const effectivePlanMode = permissionMode === 'plan' ? 'on' : planMode;
+  // resolveEffectivePermissionConfig already normalizes through
+  // serializePermissionConfig, so its result is the final config.
   const config = resolveEffectivePermissionConfig(
     agentKind,
     mapExecutionModeToPermissionConfig(agentKind, permissionMode),
@@ -253,7 +245,7 @@ export function buildSettingsPatch(
     providerId: providerId || null,
     model: model || null,
     reasoningEffort: reasoningEffort || null,
-    permissionConfig: serializePermissionConfig(agentKind, config),
+    permissionConfig: config,
     planMode: effectivePlanMode,
   };
 }

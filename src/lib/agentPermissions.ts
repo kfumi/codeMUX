@@ -99,6 +99,41 @@ export function mapExecutionModeToPermissionConfig(
   }
 }
 
+/**
+ * Maps a Codex Workflow Mode tier onto the shared execution-mode enum.
+ * Inverse of the Codex branch in {@link mapExecutionModeToPermissionConfig};
+ * plan mode stays orthogonal (ADR 0010) and is applied by callers.
+ */
+export function codexWorkflowModeToExecutionMode(workflowMode: CodexWorkflowMode): AgentExecutionMode {
+  switch (workflowMode) {
+    case 'read-only':
+      return 'read_only';
+    case 'auto':
+      return 'auto_edit';
+    case 'auto-review':
+      return 'auto_review';
+    case 'full-access':
+    default:
+      return 'full_access';
+  }
+}
+
+/** Permission types that carry an implementation plan awaiting user approval (Claude ExitPlanMode / Codex plan_approval). */
+const PLAN_APPROVAL_PERMISSION_TYPES = new Set(['plan_approval', 'ExitPlanMode']);
+
+/**
+ * Shared plan-approval predicate for permission_requested events.
+ * Recognizes the Codex `plan_approval` permission type, Claude Code's
+ * `ExitPlanMode`, and the `plan-approval` presentation marker on metadata.
+ */
+export function isPlanApprovalPermission(
+  permissionType: string | undefined | null,
+  metadata?: Record<string, unknown> | null,
+): boolean {
+  return Boolean(permissionType && PLAN_APPROVAL_PERMISSION_TYPES.has(permissionType))
+    || metadata?.presentation === 'plan-approval';
+}
+
 export function resolveEffectivePermissionConfig(
   agentKind: AgentKind,
   config: unknown,

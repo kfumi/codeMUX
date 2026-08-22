@@ -2,6 +2,7 @@ import { Check, Info } from 'lucide-react';
 import { useRef, useState, type KeyboardEvent } from 'react';
 
 import { cn } from '../../lib/utils';
+import { isPlanApprovalPermission } from '../../lib/agentPermissions';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
@@ -97,7 +98,7 @@ function getPermissionTitle(request: AgentPermissionRequest): string {
 }
 
 function isPlanApproval(request: AgentPermissionRequest): boolean {
-  return request.permission_type === 'ExitPlanMode' || request.metadata?.presentation === 'plan-approval';
+  return isPlanApprovalPermission(request.permission_type, request.metadata);
 }
 
 function getPlanMarkdown(request: AgentPermissionRequest): string | null {

@@ -105,6 +105,13 @@ type CodeMuxPermissionModeChangedEvent = {
   plan_mode?: 'on' | 'off';
 };
 
+type CodeMuxPermissionResolvedEvent = {
+  type: 'permission_resolved';
+  session_id?: string;
+  request_id?: string;
+  request_kind?: 'permission' | 'question';
+};
+
 type CodeMuxTurnEvent = {
   type: 'error' | 'turn_finished';
   session_id?: string;
@@ -161,9 +168,11 @@ export function isCodeMuxUserInputRequestedEvent(value: unknown): value is CodeM
 }
 
 export function isCodeMuxPermissionRequestedEvent(value: unknown): value is CodeMuxPermissionRequestedEvent {
-  return Boolean(value)
-    && typeof value === 'object'
-    && (value as { type?: unknown }).type === 'permission_requested';
+  return Boolean(value) && typeof value === 'object' && (value as { type?: unknown }).type === 'permission_requested';
+}
+
+export function isCodeMuxPermissionResolvedEvent(value: unknown): value is CodeMuxPermissionResolvedEvent {
+  return Boolean(value) && typeof value === 'object' && (value as { type?: unknown }).type === 'permission_resolved';
 }
 
 export function isCodeMuxTurnEvent(value: unknown): value is CodeMuxTurnEvent {
@@ -428,6 +437,16 @@ export function toLegacyPermissionModeChangedMessage(event: CodeMuxPermissionMod
   return {
     kind: 'permission_mode_changed',
     data: { session_id: event.session_id, plan_mode: event.plan_mode ?? 'off' },
+  };
+}
+
+export function toLegacyPermissionResolvedMessage(event: CodeMuxPermissionResolvedEvent): AgentMessage {
+  return {
+    kind: 'permission_resolved',
+    data: {
+      request_id: event.request_id ?? '',
+      request_kind: event.request_kind === 'question' ? 'question' : 'permission',
+    },
   };
 }
 

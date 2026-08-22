@@ -31,6 +31,7 @@ import {
   type MobileSessionSettingsPatch,
   updateSessionSettings,
 } from '../lib/api';
+import { isPlanApprovalPermission } from '@shared/lib/agentPermissions';
 import { appendEvent, eventsToMessages, type ChatMessage } from '../lib/eventToMessages';
 import {
   buildDisplayRows,
@@ -430,8 +431,7 @@ export function ChatView({ connection, session: initialSession, onBack, onDiscon
     }
 
     if (message.kind === 'permission') {
-      const isPlanApproval = message.permissionType === 'plan_approval'
-        || message.permissionType === 'ExitPlanMode';
+      const isPlanApproval = isPlanApprovalPermission(message.permissionType);
       return (
         <div
           data-message-row
@@ -722,7 +722,7 @@ function MobileQuestionCard({ questions, onAnswer }: {
       className="rounded-xl border border-border bg-[hsl(var(--surface-2))] px-4 py-3 text-sm"
     >
       {questions.length > 1 ? (
-        <div className="text-[11px] text-muted-foreground">
+        <div className="text-xs text-muted-foreground">
           第 {stepIndex + 1} / {questions.length} 题
         </div>
       ) : null}

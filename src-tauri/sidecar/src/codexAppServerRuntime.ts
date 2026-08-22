@@ -289,6 +289,9 @@ export class CodexAppServerRuntime {
       executable,
       cwd,
       env: buildAppServerEnv(requestedConfig),
+      // The approval bridge registers an `mcpServer/elicitation/request`
+      // handler, so the matching initialize capability must be declared.
+      mcpServerElicitation: true,
       onNotification: (method, params) => this.handleNotification(method, params),
       onError: (error) => this.handleTransportError(error),
       onExit: (code, signal) => this.handleTransportExit(code, signal),
@@ -797,6 +800,7 @@ export class CodexAppServerRuntime {
         `[codex-app-server] Plan approval ${requestId} responded: ${decision}\n`,
       );
       planApproval.resolve(decision);
+      this.emitPermissionResolved(requestId, 'permission');
       return;
     }
     const bridge = this.approvalBridge;
@@ -804,6 +808,7 @@ export class CodexAppServerRuntime {
       throw new Error('Codex app-server session is not initialized');
     }
     await bridge.respondToPermission(requestId, response);
+    this.emitPermissionResolved(requestId, 'permission');
   }
 
   async respondToQuestion(requestId: string, answers: string[][]): Promise<void> {
@@ -812,6 +817,21 @@ export class CodexAppServerRuntime {
       throw new Error('Codex app-server session is not initialized');
     }
     await bridge.respondToQuestion(requestId, answers);
+    this.emitPermissionResolved(requestId, 'question');
+  }
+
+  /**
+   * Issue 12: broadcast the resolution so every surface (desktop and Mobile
+   * Companion) clears its pending Interactive Request UI — the responder's
+   * own client cannot be assumed to be the only one showing it.
+   */
+  private emitPermissionResolved(requestId: string, requestKind: 'permission' | 'question'): void {
+    this.emitEvent({
+      type: 'permission_resolved',
+      session_id: this.config?.sessionId ?? '',
+      request_id: requestId,
+      request_kind: requestKind,
+    });
   }
 
   isPendingQuestion(requestId: string): boolean {

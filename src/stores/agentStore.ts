@@ -43,6 +43,8 @@ import {
   toLegacySystemMessage,
   toLegacyUserInputRequestedMessage,
   toLegacyPermissionRequestedMessage,
+  toLegacyPermissionResolvedMessage,
+  isCodeMuxPermissionResolvedEvent,
   toLegacyPermissionModeChangedMessage,
   toLegacyTurnMessage,
 } from '../lib/codeMuxProtocol';
@@ -89,6 +91,7 @@ export type AgentMessage =
   | { kind: 'ask_user_question'; data: { tool_use_id: string; questions: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string; value?: unknown }>; multiSelect?: boolean; multiple?: boolean; allowOther?: boolean; presentation?: 'plan-approval'; inputPlaceholder?: string }> } }
   | { kind: 'ask_user_question_timeout'; data: { tool_use_id: string; timeout_ms: number; message: string } }
   | { kind: 'permission'; data: AgentPermissionRequest }
+  | { kind: 'permission_resolved'; data: { request_id: string; request_kind: 'permission' | 'question' } }
   | { kind: 'permission_mode_changed'; data: AgentPermissionModeChanged }
   | { kind: 'compact'; data: { compact_metadata: { trigger: 'manual' | 'auto'; pre_tokens: number; status?: 'compacting' | 'completed'; post_tokens?: number }; subtype: string; type: string } }
   | { kind: 'runtime_switch'; data: { from_kind?: string; to_kind?: string; content: string; briefing?: string } }
@@ -238,6 +241,23 @@ function enqueuePendingPermission(
     ? [...current, request]
     : current.map((item, index) => index === existingIndex ? request : item);
   return { ...pendingPermissions, [sessionId]: next };
+}
+
+/**
+ * Issue 12: drop a pending permission approval when another surface (Mobile
+ * Companion) resolved it — the broadcast `permission_resolved` event is the
+ * single source of truth for either client.
+ */
+function dequeueResolvedPermission(
+  pendingPermissions: Record<string, AgentPermissionRequest[]>,
+  sessionId: string,
+  requestId: string,
+): Record<string, AgentPermissionRequest[]> {
+  const current = pendingPermissions[sessionId] ?? [];
+  if (!current.some((item) => item.request_id === requestId)) {
+    return pendingPermissions;
+  }
+  return { ...pendingPermissions, [sessionId]: current.filter((item) => item.request_id !== requestId) };
 }
 
 function getSessionStreamPhase(sessionId: string): 'thinking' | 'answer' {
@@ -788,6 +808,9 @@ function parseAgentEvent(raw: string): AgentMessage {
         return { kind: 'raw', data };
       case 'permission_requested':
         if (isCodeMuxPermissionRequestedEvent(data)) return toLegacyPermissionRequestedMessage(data);
+        return { kind: 'raw', data };
+      case 'permission_resolved':
+        if (isCodeMuxPermissionResolvedEvent(data)) return toLegacyPermissionResolvedMessage(data);
         return { kind: 'raw', data };
       case 'permission_mode_changed':
         if (isCodeMuxPermissionModeChangedEvent(data)) return toLegacyPermissionModeChangedMessage(data);
@@ -2140,6 +2163,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
             todos: { ...s.todos, [sessionId]: extractedTodos.length > 0 ? extractedTodos : (s.todos[sessionId] || []) },
             changedFiles: { ...s.changedFiles, [sessionId]: extractChangedFilesFromEvents(newEvents, acknowledged, s.fileOriginals[sessionId]) },
             ...(event.kind === 'permission' ? { pendingPermissions: enqueuePendingPermission(s.pendingPermissions, sessionId, event.data) } : {}),
+            ...(event.kind === 'permission_resolved' ? { pendingPermissions: dequeueResolvedPermission(s.pendingPermissions, sessionId, event.data.request_id) } : {}),
             ...(acknowledged !== s.acknowledgedFiles[sessionId] ? { acknowledgedFiles: { ...s.acknowledgedFiles, [sessionId]: acknowledged } } : {}),
           };
         });

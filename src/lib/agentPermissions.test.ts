@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildDefaultPermissionConfig,
+  codexWorkflowModeToExecutionMode,
+  isPlanApprovalPermission,
   mapExecutionModeToPermissionConfig,
   resolveEffectivePermissionConfig,
   serializePermissionConfig,
@@ -125,6 +127,26 @@ describe('agentPermissions', () => {
       kind: 'claude_code',
       permissionMode: 'plan',
     });
+  });
+
+  it('inverts the Codex workflow tiers back onto execution modes', () => {
+    expect(codexWorkflowModeToExecutionMode('read-only')).toBe('read_only');
+    expect(codexWorkflowModeToExecutionMode('auto')).toBe('auto_edit');
+    expect(codexWorkflowModeToExecutionMode('auto-review')).toBe('auto_review');
+    expect(codexWorkflowModeToExecutionMode('full-access')).toBe('full_access');
+  });
+
+  it('recognizes plan-approval permission requests across markers', () => {
+    expect(isPlanApprovalPermission('plan_approval')).toBe(true);
+    expect(isPlanApprovalPermission('ExitPlanMode')).toBe(true);
+    expect(isPlanApprovalPermission(undefined, { presentation: 'plan-approval' })).toBe(true);
+    expect(isPlanApprovalPermission('plan_approval', { presentation: 'plan-approval' })).toBe(true);
+    expect(isPlanApprovalPermission('write', { presentation: 'plan-approval' })).toBe(true);
+
+    expect(isPlanApprovalPermission('write')).toBe(false);
+    expect(isPlanApprovalPermission(undefined)).toBe(false);
+    expect(isPlanApprovalPermission('execute', { presentation: 'card' })).toBe(false);
+    expect(isPlanApprovalPermission('write', {})).toBe(false);
   });
 
   it('serializes malformed or missing values to safe defaults', () => {

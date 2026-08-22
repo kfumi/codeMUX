@@ -141,7 +141,7 @@ CodeMUX 当前通过 `@openai/codex-sdk` 驱动 Codex Agent Kind。该路径在�
 ### 托管 Runtime
 
 - npm 安装目标由 `@openai/codex-sdk` 改为 `@openai/codex@<version>`。
-- Runtime 完整性 `key_binaries` 校验 CLI；spawn 时将 Runtime `node_modules/.bin` 前置到 PATH。
+- Runtime 完整性 `candidate_binaries` 校验 CLI（npm alias 提升/嵌套/vendor 多候选布局，任一存在即完整）；spawn 时将 Runtime `node_modules/.bin` 前置到 PATH。
 - Rust Runtime 管理模块同步更新 primary package 名称与校验规则。
 
 ### 上游路由
@@ -169,13 +169,16 @@ CodeMUX 当前通过 `@openai/codex-sdk` 驱动 Codex Agent Kind。该路径在�
 
 - 注册 app-server server-initiated handlers：`item/commandExecution/requestApproval`、`item/fileChange/requestApproval`、`item/tool/requestUserInput`（及别名）、MCP elicitation（form/url 策略）。
 - 映射为 CodeMUX `permission_requested` / 问答事件；用户响应经 sidecar `respond_to_permission` → resolve 等待中的 app-server request Promise。
+- **跨端同步机制（ADR 0008）**：runtime resolve 任一 pending 审批/问答后广播 `permission_resolved` 事件（携带 `request_id` 与 `request_kind: permission | question`）；桌面 `agentStore` 与移动端 `eventToMessages` 消费该事件清除对应挂起卡片，实现任一端响应、双端解挂。
+- MCP elicitation form 能力经 initialize handshake 的 `mcpServerOpenaiFormElicitation` capability 声明（`mcpServerElicitation` 选项按需开启）。
 - Claude/OpenCode 现有 handler 不受影响；Codex 新增分支。
 
 ### 压缩
 
 - `/compact` slash command → `thread/compact/start` RPC（非文本 prompt）。
 - Timeline compaction item：loading → completed；维护 manual vs auto trigger。
-- 双通道去重：`thread/compacted` notification 与 `contextCompaction` item started/completed；turn 结束前 flush 未配对 completion。
+- 双通道去重（互补语义）：`thread/compacted` notification 与 `contextCompaction` item started/completed 二者取先到者收敛为单一边界标记；turn 结束前 flush 未配对 completion。
+- **Token 计数来源**：app-server 协议两通道均不携带压缩后 token 数；`pre_tokens` 取当回合最近已知上下文用量（turn usage 的 `input_tokens + cached_input_tokens`），`post_tokens` 恒为 0（UI 按节省量展示）。
 
 ### Native Session resume 降级
 
@@ -235,7 +238,7 @@ attempt thread/resume(existingThreadId)
 | Compaction | manual `/compact`、双通道 dedup | Paseo compact tests |
 | Compat 重接 | 第三方 base_url → 本地 proxy → turn 成功 | 现有 `proxyManager.test.ts`、`codexCompatProxy.test.ts` 缩小范围 |
 | Mobile | Workflow/Plan UI + respond | 现有 `src-mobile` composer/approval tests 扩展 |
-| Runtime npm | `@openai/codex` 安装与 key_binaries | 现有 `runtime/npm.rs` tests |
+| Runtime npm | `@openai/codex` 安装与 candidate_binaries | 现有 `runtime/npm.rs` tests |
 
 ### 非目标测试
 

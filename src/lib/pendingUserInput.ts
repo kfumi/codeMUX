@@ -48,6 +48,23 @@ export function collectExpiredQuestionIds(events: AgentMessage[]): Set<string> {
   return ids;
 }
 
+/**
+ * Issue 12: request ids resolved from any surface (desktop or Mobile
+ * Companion). A broadcast `permission_resolved` event lands in the timeline
+ * and must dismiss the matching pending question card everywhere.
+ */
+export function collectResolvedRequestIds(events: AgentMessage[]): Set<string> {
+  const ids = new Set<string>();
+
+  for (const event of events) {
+    if (event.kind === 'permission_resolved') {
+      ids.add(event.data.request_id);
+    }
+  }
+
+  return ids;
+}
+
 /** Latest unanswered ask_user_question still blocking the current turn. */
 export function findLatestPendingUserQuestion(
   events: AgentMessage[],
@@ -55,6 +72,7 @@ export function findLatestPendingUserQuestion(
 ): PendingUserQuestion | null {
   const answeredIds = collectAnsweredToolUseIds(events);
   const expiredIds = collectExpiredQuestionIds(events);
+  const resolvedIds = collectResolvedRequestIds(events);
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
@@ -66,7 +84,7 @@ export function findLatestPendingUserQuestion(
     }
 
     const toolUseId = event.data.tool_use_id;
-    if (answeredIds.has(toolUseId) || expiredIds.has(toolUseId) || dismissedIds.has(toolUseId)) {
+    if (answeredIds.has(toolUseId) || expiredIds.has(toolUseId) || dismissedIds.has(toolUseId) || resolvedIds.has(toolUseId)) {
       continue;
     }
 

@@ -1,4 +1,5 @@
 import { createId } from './utils';
+import { isPlanApprovalPermission } from '@shared/lib/agentPermissions';
 import {
   extractUserMessageParts,
   isAgentInjectedUserMessage,
@@ -97,6 +98,7 @@ const IGNORED_EVENT_TYPES = new Set([
   'sidecar_debug',
   'sidecar_stream_status',
   'permission_mode_changed',
+  'permission_resolved',
   'vision_unsupported',
 ]);
 
@@ -441,9 +443,7 @@ export function eventToMessages(event: Record<string, unknown>): ChatMessage[] {
     const command = typeof metadata.command === 'string' && metadata.command.trim()
       ? metadata.command
       : undefined;
-    const planMarkdown = (permissionType === 'plan_approval'
-      || permissionType === 'ExitPlanMode'
-      || metadata.presentation === 'plan-approval')
+    const planMarkdown = isPlanApprovalPermission(permissionType, metadata)
       && typeof metadata.plan === 'string'
       && metadata.plan.trim()
       ? metadata.plan
@@ -607,6 +607,22 @@ function clearResolvedInteractivePrompts(messages: ChatMessage[]): ChatMessage[]
   return messages.filter((message) => message.kind !== 'permission' && message.kind !== 'question');
 }
 
+function clearResolvedRequestPrompts(messages: ChatMessage[], event: Record<string, unknown>): ChatMessage[] {
+  const requestId = typeof event.request_id === 'string' ? event.request_id : '';
+  if (!requestId) {
+    return messages;
+  }
+  return messages.filter((message) => {
+    if (message.kind === 'permission') {
+      return message.requestId !== requestId;
+    }
+    if (message.kind === 'question') {
+      return message.toolUseId !== requestId;
+    }
+    return true;
+  });
+}
+
 function finalizeStreamingMessages(messages: ChatMessage[]): ChatMessage[] {
   return messages.map((message) => {
     if (message.kind === 'assistant' && message.streaming) {
@@ -625,6 +641,12 @@ export function appendEvent(messages: ChatMessage[], event: Record<string, unkno
   let base = shouldClearInteractive ? clearResolvedInteractivePrompts(messages) : messages;
   if (type === 'turn_finished') {
     base = finalizeStreamingMessages(base);
+  }
+  if (type === 'permission_resolved') {
+    // Issue 12: another surface (desktop) resolved the request — drop the
+    // matching pending permission/question prompt instead of waiting for the
+    // next turn event.
+    base = clearResolvedRequestPrompts(base, event);
   }
   return eventToMessages(event).reduce((current, message) => appendMessage(current, message), base);
 }

@@ -15,7 +15,6 @@ import {
   buildDefaultPermissionConfig,
   mapExecutionModeToPermissionConfig,
   resolveEffectivePermissionConfig,
-  serializePermissionConfig,
   type AgentExecutionMode,
   type AgentPlanMode,
 } from '@shared/lib/agentPermissions';
@@ -140,6 +139,8 @@ export function CreateSessionSheet({
     setLoading(true);
     setError(null);
     try {
+      // resolveEffectivePermissionConfig already normalizes through
+      // serializePermissionConfig, so its result is the final config.
       const permissionConfig = resolveEffectivePermissionConfig(
         agentKind as AgentKind,
         mapExecutionModeToPermissionConfig(agentKind as AgentKind, permissionMode),
@@ -154,7 +155,7 @@ export function CreateSessionSheet({
         reasoningEffort,
         planMode: permissionMode === 'plan' ? 'on' : planMode,
         mode: 'agent',
-        permissionConfig: JSON.stringify(serializePermissionConfig(agentKind as AgentKind, permissionConfig)),
+        permissionConfig: JSON.stringify(permissionConfig),
       });
       onCreated(session.id);
       onClose();

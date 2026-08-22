@@ -333,6 +333,12 @@ export type AppServerTransportOptions = {
   clientInfo?: AppServerClientInfo;
   /** Opt into experimental app-server APIs during initialize. */
   experimentalApi?: boolean;
+  /**
+   * Declare the MCP elicitation capability during initialize. Must be enabled
+   * whenever an `mcpServer/elicitation/request` handler is registered —
+   * servers only forward elicitations to clients that declared the capability.
+   */
+  mcpServerElicitation?: boolean;
   /** Timeout for the initialize handshake. */
   initializeTimeoutMs?: number;
   requestTimeoutMs?: number;
@@ -538,6 +544,7 @@ export class AppServerTransport {
 
     const clientInfo = this.options.clientInfo ?? DEFAULT_CLIENT_INFO;
     const experimentalApi = this.options.experimentalApi ?? true;
+    const mcpServerElicitation = this.options.mcpServerElicitation ?? false;
 
     await connection.request(
       'initialize',
@@ -549,6 +556,7 @@ export class AppServerTransport {
         },
         capabilities: {
           experimentalApi,
+          ...(mcpServerElicitation ? { mcpServerOpenaiFormElicitation: true } : {}),
         },
       },
       { timeoutMs: this.options.initializeTimeoutMs ?? DEFAULT_INITIALIZE_TIMEOUT_MS },

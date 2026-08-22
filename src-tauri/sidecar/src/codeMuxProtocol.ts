@@ -133,6 +133,19 @@ export type CodeMuxPermissionModeChangedEvent = {
   plan_mode: 'on' | 'off';
 };
 
+/**
+ * Issue 12: broadcast when an Interactive Request is resolved from any
+ * surface (desktop or Mobile Companion) so every client clears its pending
+ * approval/question UI. `request_id` matches `permission_requested.request_id`
+ * / `user_input_requested.tool_use_id`.
+ */
+export type CodeMuxPermissionResolvedEvent = {
+  type: 'permission_resolved';
+  session_id?: string;
+  request_id: string;
+  request_kind: 'permission' | 'question';
+};
+
 export type CodeMuxTurnEvent =
   | {
       type: 'error';
@@ -158,7 +171,7 @@ export type CodeMuxTurnEvent =
       sequence: number;
     };
 
-export type CodeMuxRuntimeEvent = CodeMuxStreamEvent | CodeMuxToolEvent | CodeMuxAssistantMessageEvent | CodeMuxUserMessageEvent | CodeMuxSystemEvent | CodeMuxDiagnosticEvent | CodeMuxUserInputRequestedEvent | CodeMuxPermissionRequestedEvent | CodeMuxPermissionModeChangedEvent | CodeMuxTurnEvent;
+export type CodeMuxRuntimeEvent = CodeMuxStreamEvent | CodeMuxToolEvent | CodeMuxAssistantMessageEvent | CodeMuxUserMessageEvent | CodeMuxSystemEvent | CodeMuxDiagnosticEvent | CodeMuxUserInputRequestedEvent | CodeMuxPermissionRequestedEvent | CodeMuxPermissionModeChangedEvent | CodeMuxPermissionResolvedEvent | CodeMuxTurnEvent;
 
 export function toCodeMuxStreamEvent(
   sessionId: string | undefined,

@@ -167,6 +167,7 @@ function isCodeMuxDomainEvent(type: unknown): boolean {
     || type === 'tool_finished'
     || type === 'user_input_requested'
     || type === 'permission_requested'
+    || type === 'permission_resolved'
     || type === 'permission_mode_changed'
     || type === 'system_event'
     || type === 'diagnostic'
