@@ -536,9 +536,22 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
                   pendingPermissions={pendingPermissions}
                   onPermissionResponse={handlePermissionResponse}
                   onStop={() => interrupt(sessionId)}
-                  onActivatePlanMode={() => {
-                    // Codex Plan Mode is orthogonal to the Workflow tier
+                  planMode={planMode}
+                  onTogglePlanMode={isReadOnly ? undefined : () => {
+                    // Issue 07: independent Plan toggle in the composer control
+                    // area. Codex Plan Mode is orthogonal to the Workflow tier
                     // (ADR 0010) — only flip the toggle, never the tier config.
+                    if (planMode === 'on') {
+                      handlePlanModeChange('off');
+                      return;
+                    }
+                    if (agentKind === 'codex') {
+                      handlePlanModeChange('on');
+                      return;
+                    }
+                    handleModeChange(mapExecutionModeToPermissionConfig(agentKind, 'plan'), 'on');
+                  }}
+                  onActivatePlanMode={() => {
                     if (agentKind === 'codex') {
                       handlePlanModeChange('on');
                       return;

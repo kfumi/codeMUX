@@ -74,6 +74,9 @@ interface CodeMuxComposerProps {
   placeholder?: string;
   modelSelector?: ReactNode;
   permissionSelector?: ReactNode;
+  /** Issue 07: independent Plan toggle state (orthogonal to Workflow Mode). */
+  planMode?: 'on' | 'off';
+  onTogglePlanMode?: () => void;
   pendingPermissions?: AgentPermissionRequest[];
   onPermissionResponse?: (requestId: string, response: AgentPermissionResponse) => void | Promise<void>;
   disabled?: boolean;
@@ -179,6 +182,8 @@ export function CodeMuxComposer({
   placeholder = '输入消息... (@ 引用文件, / 命令)',
   modelSelector,
   permissionSelector,
+  planMode = 'off',
+  onTogglePlanMode,
   pendingPermissions = [],
   onPermissionResponse,
   disabled = false,
@@ -612,6 +617,24 @@ export function CodeMuxComposer({
                   </button>
                 </PopoverContent>
               </Popover>
+                {onTogglePlanMode ? (
+                  <button
+                    type="button"
+                    onClick={onTogglePlanMode}
+                    aria-pressed={planMode === 'on'}
+                    aria-label={planMode === 'on' ? '关闭计划模式' : '开启计划模式'}
+                    title="计划模式：先规划再实施（与权限档位独立）"
+                    className={cn(
+                      'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-xs font-medium transition-all duration-200 outline-none focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
+                      planMode === 'on'
+                        ? 'border-primary/45 bg-primary/10 text-primary'
+                        : 'border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/78 hover:bg-muted/58 hover:text-foreground',
+                    )}
+                  >
+                    <ListTodo className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">计划</span>
+                  </button>
+                ) : null}
                 {permissionSelector}
               </div>
               <div className="flex min-w-0 items-center justify-end">

@@ -108,7 +108,8 @@ const FALLBACK_DEFAULT_MODE_MASK: CollaborationModeMask = { name: 'Default', mod
 
 type PendingPlanApproval = {
   requestId: string;
-  resolve: (decision: 'implement' | 'dismiss') => void;
+  /** `abort` signals the transport died while the approval was pending. */
+  resolve: (decision: 'implement' | 'dismiss' | 'abort') => void;
 };
 
 /** Sandbox policy payload sent with each `turn/start` (Issue 06 refines the tiers). */
@@ -196,6 +197,9 @@ export class CodexAppServerRuntime {
   private defaultModeMask: CollaborationModeMask = FALLBACK_DEFAULT_MODE_MASK;
   /** Issue 07: synthetic Plan Approval waiting for the user's Implement/Dismiss. */
   private pendingPlanApproval: PendingPlanApproval | null = null;
+  /** ADR 0004 inputs: outstanding approval-bridge requests and the plan hold. */
+  private bridgePendingRequests = 0;
+  private planApprovalPending = false;
 
   private readonly connectTransport: (options: AppServerTransportOptions) => Promise<AppServerTransport>;
   private readonly emitEvent: (event: unknown) => void;
@@ -564,6 +568,18 @@ export class CodexAppServerRuntime {
           });
           writeLog('[codex-app-server]', 'sendInput COMPLETE outcome=completed (plan approved)');
           return PLAN_IMPLEMENTATION_PROMPT;
+        }
+        if (decision === 'abort') {
+          // The transport died while the approval was pending — the error
+          // event is already emitted; finish with a failed outcome.
+          const reason = 'Codex app-server 连接中断，计划审批已中止';
+          this.emitTurnOutcome(turn, {
+            outcome: 'failed',
+            reason,
+            durationMs: Date.now() - startedAt,
+          });
+          writeLog('[codex-app-server]', 'sendInput FAILED (plan approval aborted)');
+          return null;
         }
       }
       this.emitTurnOutcome(turn, {
@@ -1162,6 +1178,7 @@ export class CodexAppServerRuntime {
     const message = `Codex app-server 连接中断: ${error.message}`;
     this.emitTurnEvent(turn, { kind: 'error', subtype: 'runtime', message });
     turn.settle({ outcome: 'failed', reason: message });
+    this.abortPendingPlanApproval();
   }
 
   /**
@@ -1182,6 +1199,7 @@ export class CodexAppServerRuntime {
     const message = `Codex app-server 进程退出 (code=${code ?? 'null'} signal=${signal ?? 'null'})`;
     this.emitTurnEvent(turn, { kind: 'error', subtype: 'runtime', message });
     turn.settle({ outcome: 'failed', reason: message });
+    this.abortPendingPlanApproval();
   }
 
   // ---------------------------------------------------------------------------
@@ -1331,7 +1349,7 @@ export class CodexAppServerRuntime {
    * the user's Implement/Dismiss decision (or the approval timeout, which
    * counts as Dismiss). The idle guard is suspended while waiting (ADR 0004).
    */
-  private requestPlanApproval(turn: ActiveTurnState, planText: string): Promise<'implement' | 'dismiss'> {
+  private requestPlanApproval(turn: ActiveTurnState, planText: string): Promise<'implement' | 'dismiss' | 'abort'> {
     return new Promise((resolve) => {
       const requestId = crypto.randomUUID();
       const timeoutMs = this.timeouts.approval_timeout_ms;
@@ -1345,7 +1363,8 @@ export class CodexAppServerRuntime {
           if (this.pendingPlanApproval === entry) {
             this.pendingPlanApproval = null;
           }
-          turn.idleGuard.resume();
+          this.planApprovalPending = false;
+          this.syncIdleGuard();
           resolve(decision);
         },
       };
@@ -1357,7 +1376,8 @@ export class CodexAppServerRuntime {
         }, timeoutMs);
         if (timer.unref) timer.unref();
       }
-      turn.idleGuard.suspend();
+      this.planApprovalPending = true;
+      this.syncIdleGuard();
       process.stderr.write(`[codex-app-server] Plan approval pending as ${requestId}\n`);
       this.emitEvent({
         type: 'permission_requested',
@@ -1394,6 +1414,17 @@ export class CodexAppServerRuntime {
   /** Resolves a pending Plan Approval as dismissed (interrupt/teardown). */
   private dismissPendingPlanApproval(): void {
     this.pendingPlanApproval?.resolve('dismiss');
+  }
+
+  /**
+   * Resolves a pending Plan Approval as aborted — the transport died while the
+   * user was deciding, so the held turn must fail instead of hanging forever.
+   */
+  private abortPendingPlanApproval(): void {
+    if (this.pendingPlanApproval) {
+      process.stderr.write('[codex-app-server] Aborting pending plan approval after transport loss\n');
+      this.pendingPlanApproval.resolve('abort');
+    }
   }
 
   private loadRuntimeIfNeeded(): RuntimeLoadResult {
@@ -1482,11 +1513,20 @@ export class CodexAppServerRuntime {
    * for an engine stall. Resolving the last request re-arms the window.
    */
   private syncIdleGuardWithApprovals(pendingCount: number): void {
+    this.bridgePendingRequests = pendingCount;
+    this.syncIdleGuard();
+  }
+
+  /**
+   * Single idle-guard decision point covering both app-server approval
+   * requests and the Issue 07 synthetic Plan Approval hold.
+   */
+  private syncIdleGuard(): void {
     const guard = this.activeTurn?.idleGuard;
     if (!guard) {
       return;
     }
-    if (pendingCount > 0) {
+    if (this.bridgePendingRequests > 0 || this.planApprovalPending) {
       guard.suspend();
       return;
     }
@@ -1496,6 +1536,11 @@ export class CodexAppServerRuntime {
   private async teardownTransport(): Promise<void> {
     this.approvalBridge?.dispose();
     this.approvalBridge = null;
+    this.bridgePendingRequests = 0;
+    this.planApprovalPending = false;
+    // A live Plan Approval must not dangle past the connection — aborting
+    // lets the awaiting sendInput settle instead of hanging forever.
+    this.abortPendingPlanApproval();
     const transport = this.transport;
     this.transport = null;
     this.threadId = null;

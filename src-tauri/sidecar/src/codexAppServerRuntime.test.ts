@@ -1633,6 +1633,76 @@ describe('CodexAppServerRuntime interactive request approvals', () => {
     20_000,
   );
 
+  it(
+    'suspends the idle guard while a Plan Approval is pending (ADR 0004)',
+    async () => {
+      const { runtime, events, readLog, ensureCommand } = await createHarness(planScenario());
+      try {
+        await runtime.ensure(ensureCommand({ planMode: 'on', timeouts: { idle_timeout_ms: 300 } }));
+        events.length = 0;
+
+        const input = runtime.sendInput('帮我规划重构');
+        const approval = await waitForEvent(events, 'permission_requested');
+
+        // Wait well past the idle timeout — the held turn must not be killed
+        // while the user has not decided yet.
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        expect(events.some((event) => event.type === 'turn_finished')).toBe(false);
+
+        // Approving re-arms the window and starts the implementation turn.
+        await runtime.respondToPermission(String(approval.request_id), 'once');
+        await input;
+
+        expect(receivedRequests(readLog(), 'turn/start')).toHaveLength(2);
+        const finished = events.filter((event) => event.type === 'turn_finished');
+        expect(finished).toHaveLength(2);
+        expect(finished.every((event) => event.outcome === 'completed')).toBe(true);
+        expect(events.some((event) => event.type === 'error')).toBe(false);
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    20_000,
+  );
+
+  it(
+    'aborts a pending Plan Approval as a failed turn when the app-server crashes',
+    async () => {
+      const scenario = {
+        responses: {
+          'thread/start': { result: { thread: { id: 'thread_1' } } },
+          'turn/start': {
+            result: {},
+            thenNotifications: planTurnNotifications('## 计划'),
+            thenExit: { code: 1, delayMs: 12 },
+          },
+        },
+      };
+      const { runtime, events, ensureCommand } = await createHarness(scenario);
+      try {
+        await runtime.ensure(ensureCommand({ planMode: 'on' }));
+        events.length = 0;
+
+        // approval_timeout 0 (infinite) — only the crash may settle the turn.
+        const input = runtime.sendInput('帮我规划重构');
+        await waitForEvent(events, 'permission_requested');
+        await input;
+
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: 'turn_finished',
+            outcome: 'failed',
+            reason: expect.stringContaining('连接中断'),
+          }),
+        );
+        expect(eventTypes(events)).toContain('sidecar_query_done');
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+    20_000,
+  );
+
   // ─── Issue 06: mid-turn permission update deferral ──────────────────────
 
   it(
