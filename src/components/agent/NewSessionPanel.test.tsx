@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useNewSessionStore } from '../../stores/newSessionStore';
@@ -45,6 +45,9 @@ const composerProps: Array<{
   disabled?: boolean;
   onSend?: (content: unknown) => Promise<void>;
   onCommand?: (command: SlashCommand, args: string) => Promise<void>;
+  planMode?: 'on' | 'off';
+  onTogglePlanMode?: () => void;
+  onActivatePlanMode?: () => void;
 }> = [];
 
 vi.mock('./assistant-ui/CodeMuxAssistantRuntime', () => ({
@@ -242,5 +245,24 @@ describe('NewSessionPanel', () => {
     }));
     render(<NewSessionPanel onSubmit={vi.fn()} />);
     expect(screen.getByText(/请先在设置 → 模型配置/)).toBeTruthy();
+  });
+
+  it('wires the + menu plan mode entry and active chip state into the draft', () => {
+    useNewSessionStore.setState({ selectedAgentKind: 'codex' });
+    render(<NewSessionPanel onSubmit={vi.fn()} />);
+    const lastComposer = () => [...composerProps].reverse()
+      .find((entry) => entry.sessionId === 'new-session-draft');
+    expect(lastComposer()?.planMode).toBe('off');
+
+    act(() => {
+      lastComposer()?.onActivatePlanMode?.();
+    });
+    expect(useNewSessionStore.getState().selectedPlanMode).toBe('on');
+    expect(lastComposer()?.planMode).toBe('on');
+
+    act(() => {
+      lastComposer()?.onTogglePlanMode?.();
+    });
+    expect(useNewSessionStore.getState().selectedPlanMode).toBe('off');
   });
 });

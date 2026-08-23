@@ -287,6 +287,13 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               placeholder={placeholder}
               disabled={!hasUsableProvider || isCheckingRuntime}
               loading={isCheckingRuntime}
+              planMode={selectedPlanMode}
+              onTogglePlanMode={() => {
+                setSelectedPlanMode(selectedPlanMode === 'on' ? 'off' : 'on');
+              }}
+              onActivatePlanMode={() => {
+                setSelectedPlanMode('on');
+              }}
               modelSelector={(
                 <AgentModelSelector
                   agentKind={selectedAgentKind}
