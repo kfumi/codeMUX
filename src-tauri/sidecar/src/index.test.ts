@@ -7,6 +7,7 @@ import { buildOpenCodeSessionMappingEvent, buildUserMessageEvent, createSidecarC
 function createRuntime() {
   return {
     ensure: vi.fn().mockResolvedValue(undefined),
+    canReuse: vi.fn().mockReturnValue(false),
     updatePermissions: vi.fn(),
     sendInput: vi.fn().mockResolvedValue(undefined),
     forkSession: vi.fn().mockResolvedValue('forked-session'),
@@ -402,6 +403,46 @@ describe('sidecar command dispatcher', () => {
     expect(first.shutdown).toHaveBeenCalledTimes(1);
     expect(second.ensure).toHaveBeenCalledTimes(1);
     expect(first.shutdown.mock.invocationCallOrder[0]).toBeLessThan(second.ensure.mock.invocationCallOrder[0]);
+  });
+
+  it('reuses the active OpenCode runtime for a duplicate ensure', async () => {
+    const opencode = createRuntime();
+    opencode.canReuse.mockReturnValue(true);
+    const createOpenCodeRuntime = vi.fn(() => opencode);
+    const dispatcher = createSidecarCommandDispatcher({
+      claudeRuntime: createRuntime(),
+      codexRuntime: createRuntime(),
+      createOpenCodeRuntime,
+      emit: vi.fn(),
+      stopProxy: vi.fn().mockResolvedValue(undefined),
+      exit: vi.fn(),
+    });
+
+    await dispatcher.dispatch({
+      type: 'ensure_session',
+      agentKind: 'opencode',
+      cwd: 'D:\\workspace',
+      sessionId: 'session-1',
+      provider: 'codemux-openai',
+      model: 'gpt-5',
+      runtimeGeneration: 1,
+      planMode: 'on',
+    });
+    await dispatcher.dispatch({
+      type: 'ensure_session',
+      agentKind: 'opencode',
+      cwd: 'D:\\workspace',
+      sessionId: 'session-1',
+      agentSessionId: 'opencode-session-1',
+      provider: 'codemux-openai',
+      model: 'gpt-5',
+      runtimeGeneration: 2,
+      planMode: 'on',
+    });
+
+    expect(createOpenCodeRuntime).toHaveBeenCalledTimes(1);
+    expect(opencode.shutdown).not.toHaveBeenCalled();
+    expect(opencode.updatePermissions).toHaveBeenCalledWith(expect.objectContaining({ planMode: 'on' }));
   });
 
   it('suppresses abort failures but reports permission failures without stopping dispatch', async () => {

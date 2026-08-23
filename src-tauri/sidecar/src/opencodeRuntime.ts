@@ -125,6 +125,35 @@ export class OpenCodeRuntime {
     this.agentSessionId = config.agentSessionId;
   }
 
+  /**
+   * Returns whether an ensure command can reuse this live runtime.
+   *
+   * `runtimeGeneration` is deliberately excluded: Rust advances it for every
+   * lifecycle command, including the duplicate ensure issued when a newly
+   * created session becomes visible in the frontend. The native session ID is
+   * checked against the runtime's actual mapping instead.
+   */
+  canReuse(nextConfig: OpenCodeSessionConfig): boolean {
+    if (this.state !== 'started' || !this.client || !this.agentSessionId) {
+      return false;
+    }
+    if (
+      this.config.sessionId !== nextConfig.sessionId
+      || this.config.cwd !== nextConfig.cwd
+      || this.config.provider !== nextConfig.provider
+      || this.config.model !== nextConfig.model
+      || this.config.credentialSource !== nextConfig.credentialSource
+      || this.config.apiKey !== nextConfig.apiKey
+      || this.config.baseUrl !== nextConfig.baseUrl
+      || JSON.stringify(this.config.runtimeRef) !== JSON.stringify(nextConfig.runtimeRef)
+      || JSON.stringify(this.config.timeouts) !== JSON.stringify(nextConfig.timeouts)
+      || JSON.stringify(this.config.modelLimits) !== JSON.stringify(nextConfig.modelLimits)
+    ) {
+      return false;
+    }
+    return !nextConfig.agentSessionId || nextConfig.agentSessionId === this.agentSessionId;
+  }
+
   start(): Promise<OpenCodeSessionMapping> {
     if (this.startPromise) {
       return this.startPromise;

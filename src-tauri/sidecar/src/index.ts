@@ -1382,6 +1382,7 @@ const codexRuntime = new CodexAppServerRuntime();
 
 type SidecarRuntime = {
   ensure(cmd: EnsureSessionCommand): Promise<void>;
+  canReuse?(cmd: EnsureSessionCommand): boolean;
   updatePermissions(cmd: UpdatePermissionsCommand): void | Promise<void>;
   sendInput(prompt: string, inputPayload?: AgentInputPayload): Promise<void>;
   forkSession?(
@@ -1447,6 +1448,21 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
       await shutdownOpenCodeRuntime();
       const selectedRuntime = flavor === 'codex' ? options.codexRuntime : options.claudeRuntime;
       await selectedRuntime.ensure(cmd);
+      return;
+    }
+
+    const current = activeOpenCodeRuntime;
+    if (current?.canReuse?.(cmd)) {
+      process.stderr.write(
+        `[opencode-task] ensure_session REUSE sessionId=${cmd.sessionId ?? 'null'}\n`,
+      );
+      await current.updatePermissions({
+        type: 'update_permissions',
+        sessionId: cmd.sessionId,
+        agentKind: cmd.agentKind,
+        permissionConfig: cmd.permissionConfig,
+        planMode: cmd.planMode,
+      });
       return;
     }
 
@@ -1765,13 +1781,13 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
   return { dispatch };
 }
 
-function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime {
+function buildOpenCodeSessionConfig(cmd: EnsureSessionCommand): OpenCodeSessionConfig {
   const modelReference = cmd.model?.startsWith('opencode/')
     ? normalizeOpenCodeModelReference(cmd.model)
     : cmd.provider
       ? { provider: cmd.provider, model: cmd.model ?? 'default' }
       : normalizeOpenCodeModelReference(cmd.model ?? 'default');
-  const config: OpenCodeSessionConfig = {
+  return {
     cwd: ensureWorkingDirectory(cmd.cwd),
     sessionId: cmd.sessionId ?? crypto.randomUUID(),
     ...(cmd.agentSessionId ? { agentSessionId: cmd.agentSessionId } : {}),
@@ -1785,6 +1801,10 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
     ...(cmd.timeouts ? { timeouts: cmd.timeouts } : {}),
     ...(cmd.modelLimits ? { modelLimits: cmd.modelLimits } : {}),
   };
+}
+
+function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime {
+  const config = buildOpenCodeSessionConfig(cmd);
   const openCodeRuntime = new OpenCodeRuntime(config);
   if (cmd.planMode === 'on' || cmd.planMode === 'off') {
     openCodeRuntime.updatePermissions({ planMode: cmd.planMode });
@@ -1794,6 +1814,7 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
       const mapping = await openCodeRuntime.start();
       emit(buildOpenCodeSessionMappingEvent(mapping));
     },
+    canReuse: (nextCmd) => openCodeRuntime.canReuse(buildOpenCodeSessionConfig(nextCmd)),
     sendInput: (prompt, inputPayload) => openCodeRuntime.sendInput(prompt, inputPayload),
     updatePermissions: (update) => openCodeRuntime.updatePermissions(update),
     forkSession: (
