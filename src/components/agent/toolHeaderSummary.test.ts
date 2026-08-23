@@ -42,6 +42,23 @@ describe('toolHeaderSummary', () => {
     expect(getToolDisplayName('resume_agent')).toBe('恢复子智能体');
   });
 
+  it('maps Codex multi_agent-prefixed tool names to the Chinese display names', () => {
+    expect(getToolDisplayName('multi_agent_v1__spawn_agent')).toBe('启动子智能体');
+    expect(getToolDisplayName('multi_agent_v1_spawn_agent')).toBe('启动子智能体');
+    expect(getToolDisplayName('multi_agent_v1__send_input')).toBe('发送子智能体输入');
+    expect(getToolDisplayName('multi_agent_v2__spawn_agent')).toBe('启动子智能体');
+    expect(getToolDisplayName('multi_agent_v1__wait_agent')).toBe('等待子智能体');
+    expect(getToolDisplayName('multi_agent_v1__close_agent')).toBe('关闭子智能体');
+    expect(getToolDisplayName('multi_agent_v1__resume_agent')).toBe('恢复子智能体');
+
+    const summary = getToolHeaderSummary('multi_agent_v1__spawn_agent', {
+      fork_context: true,
+      items: [{ type: 'text', text: 'Find all files related to message regenerating' }],
+    });
+    expect(summary.displayName).toBe('启动子智能体');
+    expect(getDisplayableArgs({ fork_context: true, items: [] }, summary.consumedKeys)).toEqual({ items: [] });
+  });
+
   it('maps Codex image and js_repl tools to Chinese display names', () => {
     expect(getToolDisplayName('view_image')).toBe('查看图片');
     expect(getToolDisplayName('js')).toBe('运行 JS');

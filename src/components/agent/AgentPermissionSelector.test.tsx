@@ -34,6 +34,7 @@ describe('AgentPermissionSelector', () => {
 
     expect(screen.getAllByText('变更前确认')).toHaveLength(2);
     expect(screen.getByText('自动编辑')).toBeTruthy();
+    expect(screen.getByText('自动模式')).toBeTruthy();
     expect(screen.getByText('计划模式')).toBeTruthy();
     expect(screen.getByText('完全访问')).toBeTruthy();
 
@@ -41,6 +42,45 @@ describe('AgentPermissionSelector', () => {
 
     expect(onPermissionConfigChange).toHaveBeenCalledWith({ kind: 'claude_code', permissionMode: 'plan' });
     expect(onPlanModeChange).toHaveBeenCalledWith('on');
+  });
+
+  it('selecting the Claude auto tier writes permissionMode auto', () => {
+    const onPermissionConfigChange = vi.fn();
+    const onPlanModeChange = vi.fn();
+
+    render(
+      <AgentPermissionSelector
+        agentKind="claude_code"
+        permissionConfig={{ kind: 'claude_code', permissionMode: 'default' }}
+        planMode="off"
+        onPermissionConfigChange={onPermissionConfigChange}
+        onPlanModeChange={onPlanModeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '变更前确认' }));
+    fireEvent.click(screen.getByText('自动模式'));
+
+    expect(onPermissionConfigChange).toHaveBeenCalledWith({ kind: 'claude_code', permissionMode: 'auto' });
+  });
+
+  it('reflects a stored auto permission as the selected auto tier', () => {
+    render(
+      <AgentPermissionSelector
+        agentKind="claude_code"
+        permissionConfig={{ kind: 'claude_code', permissionMode: 'auto' }}
+        planMode="off"
+        onPermissionConfigChange={vi.fn()}
+        onPlanModeChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /自动模式/ }));
+
+    const items = screen.getAllByRole('menuitemradio');
+    const checked = items.find((item) => item.getAttribute('aria-checked') === 'true');
+    expect(checked?.textContent).toContain('自动模式');
+    expect(checked?.textContent).not.toContain('自动编辑');
   });
 
   it('shows the official three Codex approval tiers', () => {

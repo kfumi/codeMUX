@@ -6,6 +6,7 @@ import {
   Hand,
   Shield,
   ShieldCheck,
+  Zap,
   type LucideIcon,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -55,6 +56,7 @@ type PermissionOption = {
 const claudeOptions: PermissionOption[] = [
   { mode: 'confirm_before_edit', label: '变更前确认', description: '修改文件或运行敏感工具前先询问。', icon: Hand },
   { mode: 'auto_edit', label: '自动编辑', description: '允许 Claude 自动编辑文件。', icon: ShieldCheck },
+  { mode: 'auto_review', label: '自动模式', description: '所有操作自动执行，后台进行安全检查。', icon: Zap },
   { mode: 'plan', label: '计划模式', description: '先分析和规划，暂不直接修改。', icon: ClipboardList },
   { mode: 'full_access', label: '完全访问', description: '跳过权限确认，风险更高。', icon: Shield, tone: 'warning' },
 ];
@@ -256,7 +258,8 @@ function inferExecutionMode(
   if (agentKind === 'claude_code' && permissionConfig.kind === 'claude_code') {
     if (planMode === 'on' || permissionConfig.permissionMode === 'plan') return 'plan';
     if (permissionConfig.permissionMode === 'bypassPermissions') return 'full_access';
-    if (permissionConfig.permissionMode === 'acceptEdits' || permissionConfig.permissionMode === 'auto') return 'auto_edit';
+    if (permissionConfig.permissionMode === 'auto') return 'auto_review';
+    if (permissionConfig.permissionMode === 'acceptEdits') return 'auto_edit';
   }
 
   return 'confirm_before_edit';

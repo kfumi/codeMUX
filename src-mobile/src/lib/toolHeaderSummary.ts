@@ -67,9 +67,15 @@ const BUILT_IN_TOOL_ALIASES: Record<string, string> = {
   webfetch: 'WebFetch',
 };
 
+const CODEX_MULTI_AGENT_TOOL_PATTERN = /^multi_agent_v\d+_+/;
+
 function normalizeToolName(toolName: string): string {
   if (toolName.startsWith('mcp__')) return toolName;
-  return BUILT_IN_TOOL_ALIASES[toolName.toLowerCase()] ?? toolName;
+  const stripped = CODEX_MULTI_AGENT_TOOL_PATTERN.test(toolName)
+    ? toolName.replace(CODEX_MULTI_AGENT_TOOL_PATTERN, '')
+    : toolName;
+  const normalized = BUILT_IN_TOOL_ALIASES[stripped.toLowerCase()] ?? stripped;
+  return normalized || toolName;
 }
 
 export function getToolDisplayName(toolName: string): string {
@@ -121,6 +127,9 @@ export function getToolHeaderSummary(toolName: string, input: Record<string, unk
       case 'Task':
       case 'subagent':
         return fromFirstKey(input, ['description', 'prompt']);
+
+      case 'spawn_agent':
+        return { consumedKeys: ['fork_context'] };
 
       case 'WebSearch':
         return fromFirstKey(input, ['query']);

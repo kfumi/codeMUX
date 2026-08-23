@@ -93,6 +93,8 @@ export function mapExecutionModeToPermissionConfig(
   switch (executionMode) {
     case 'auto_edit':
       return { kind: 'claude_code', permissionMode: 'acceptEdits' };
+    case 'auto_review':
+      return { kind: 'claude_code', permissionMode: 'auto' };
     case 'plan':
       return { kind: 'claude_code', permissionMode: 'plan' };
     case 'full_access':

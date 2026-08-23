@@ -39,6 +39,7 @@ const PERMISSION_OPTIONS: Record<'claude_code' | 'codex' | 'opencode', Array<{ m
   claude_code: [
     { mode: 'confirm_before_edit', label: '变更前确认' },
     { mode: 'auto_edit', label: '自动编辑' },
+    { mode: 'auto_review', label: '自动模式' },
     { mode: 'plan', label: '计划模式' },
     { mode: 'full_access', label: '完全访问' },
   ],

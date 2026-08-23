@@ -368,9 +368,10 @@ describe('AgentSettingsPanel', () => {
 
     await waitFor(() => expect(checkAgentRuntimesMock).toHaveBeenCalled());
 
-    // 4 个权限选项卡片
+    // 5 个权限选项卡片
     expect(screen.getByText('变更前确认')).toBeTruthy();
     expect(screen.getByText('自动编辑')).toBeTruthy();
+    expect(screen.getByText('自动模式')).toBeTruthy();
     expect(screen.getByText('计划模式')).toBeTruthy();
     expect(screen.getByText('完全访问')).toBeTruthy();
 

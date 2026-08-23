@@ -36,6 +36,10 @@ describe('agentPermissions', () => {
       kind: 'claude_code',
       permissionMode: 'acceptEdits',
     });
+    expect(mapExecutionModeToPermissionConfig('claude_code', 'auto_review')).toEqual({
+      kind: 'claude_code',
+      permissionMode: 'auto',
+    });
     expect(mapExecutionModeToPermissionConfig('claude_code', 'plan')).toEqual({
       kind: 'claude_code',
       permissionMode: 'plan',

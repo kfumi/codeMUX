@@ -89,4 +89,25 @@ describe('tool header summaries', () => {
     expect(screen.getByText('子智能体结束')).toBeTruthy();
     expect(screen.queryByText('TaskStop')).toBeNull();
   });
+
+  it('shows Codex multi_agent spawn_agent with a Chinese display name', () => {
+    const { container } = renderWithTooltip(
+      <ToolCallCard
+        toolName="multi_agent_v1__spawn_agent"
+        input={{
+          fork_context: true,
+          items: [{ type: 'text', text: 'Find all files related to message regenerating' }],
+        }}
+        status="done"
+      />,
+    );
+
+    expect(screen.getByText('启动子智能体')).toBeTruthy();
+    expect(screen.queryByText('multi_agent_v1__spawn_agent')).toBeNull();
+
+    fireEvent.click(within(container).getByRole('button'));
+
+    expect(container.textContent).not.toContain('"fork_context"');
+    expect(container.textContent).toContain('"items"');
+  });
 });

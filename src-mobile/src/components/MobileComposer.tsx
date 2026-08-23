@@ -59,6 +59,7 @@ const PERMISSION_OPTIONS: Record<MobileAgentKind, Array<{ mode: AgentExecutionMo
   claude_code: [
     { mode: 'confirm_before_edit', label: '变更前确认' },
     { mode: 'auto_edit', label: '自动编辑' },
+    { mode: 'auto_review', label: '自动模式' },
     { mode: 'plan', label: '计划模式' },
     { mode: 'full_access', label: '完全访问' },
   ],
@@ -174,6 +175,8 @@ export function parsePermissionMode(
     switch (raw.permissionMode) {
       case 'acceptEdits':
         return 'auto_edit';
+      case 'auto':
+        return 'auto_review';
       case 'plan':
         return 'plan';
       case 'bypassPermissions':
