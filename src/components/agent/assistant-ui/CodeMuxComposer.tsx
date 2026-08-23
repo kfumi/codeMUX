@@ -364,6 +364,21 @@ export function CodeMuxComposer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Restore rewound user text after an arbitrary-message rewind (only-if-empty)
+  const pendingComposerRestore = useAgentStore((s) => s.pendingComposerRestore[sessionId]);
+  const clearComposerRestore = useAgentStore((s) => s.clearComposerRestore);
+  useEffect(() => {
+    if (!pendingComposerRestore) {
+      return;
+    }
+    const currentText = editorRef.current?.getText() ?? '';
+    if (currentText.trim().length === 0) {
+      editorRef.current?.setText(pendingComposerRestore);
+      editorRef.current?.focus();
+    }
+    clearComposerRestore(sessionId);
+  }, [pendingComposerRestore, sessionId, clearComposerRestore]);
+
   useEffect(() => {
     setDismissedQuestionIds(new Set());
     setDismissedPlanKeys(new Set());

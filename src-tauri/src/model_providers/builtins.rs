@@ -200,7 +200,7 @@ pub fn builtin_templates() -> Vec<BuiltinProviderTemplate> {
                 Some(true),
             )],
             models: vec![
-                model("mimo-m2.5", "MiMo M2.5", Some(vec!["text"])),
+                model("mimo-m2.5", "MiMo V2.5", Some(vec!["text"])),
                 model("mimo-v2.5-pro", "MiMo V2.5 Pro", Some(vec!["text"])),
                 model(
                     "mimo-v2.5-pro-ultraspeed",

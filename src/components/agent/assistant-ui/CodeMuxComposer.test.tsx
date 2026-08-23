@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { forwardRef, useEffect, useImperativeHandle } from 'react';
 
@@ -224,7 +224,7 @@ describe('CodeMuxComposer', () => {
     composerSendMock.mockClear();
     updatePermissionsMock.mockReset();
     editorSetTextMock.mockClear();
-    useAgentStore.setState({ events: {}, forceStopped: {} });
+    useAgentStore.setState({ events: {}, forceStopped: {}, pendingComposerRestore: {} });
     usePreviewStore.setState({ treeRoot: null });
     registerSkillCommands([]);
     cleanup();
@@ -320,6 +320,38 @@ describe('CodeMuxComposer', () => {
     render(<CodeMuxComposer sessionId="session-1" />);
 
     expect(capturedPopovers).toHaveLength(0);
+  });
+
+  it('restores rewound text into an empty composer and clears the request', async () => {
+    render(<CodeMuxComposer sessionId="session-restore" />);
+
+    await act(async () => {
+      useAgentStore.setState((state) => ({
+        pendingComposerRestore: { ...state.pendingComposerRestore, 'session-restore': '回退的文本' },
+      }));
+    });
+
+    await waitFor(() => expect(editorSetTextMock).toHaveBeenCalledWith('回退的文本'));
+    await waitFor(() =>
+      expect(useAgentStore.getState().pendingComposerRestore['session-restore']).toBeUndefined(),
+    );
+  });
+
+  it('does not overwrite non-empty composer text with restored rewind text', async () => {
+    render(<CodeMuxComposer sessionId="session-keep" />);
+    composerText = '已有草稿';
+    editorSetTextMock.mockClear();
+
+    await act(async () => {
+      useAgentStore.setState((state) => ({
+        pendingComposerRestore: { ...state.pendingComposerRestore, 'session-keep': '回退的文本' },
+      }));
+    });
+
+    await waitFor(() =>
+      expect(useAgentStore.getState().pendingComposerRestore['session-keep']).toBeUndefined(),
+    );
+    expect(editorSetTextMock).not.toHaveBeenCalled();
   });
 
   it('renders the add menu with file and plan mode options', () => {

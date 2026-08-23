@@ -5,6 +5,8 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
+import { useSessionStore } from '../../../stores/sessionStore';
+import type { Session } from '../../../types/session';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
 import { TooltipProvider } from '../../ui/tooltip';
@@ -1073,6 +1075,42 @@ const navigationTurnEvents: AgentMessage[] = [
   },
 ];
 
+const rewindHistoryEvents: AgentMessage[] = [
+  {
+    kind: 'user',
+    data: {
+      content: 'first instruction',
+      locator: {
+        providerMessageId: 'u-rewind-first',
+        role: 'user',
+        textFingerprint: 'first instruction',
+        turnOrdinal: 1,
+      },
+    },
+  },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-rewind-history-1',
+      session_id: 'session-rewind-history',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'first done' }] },
+      parent_tool_use_id: null,
+    },
+  },
+  { kind: 'user', data: { content: 'latest instruction' } },
+  {
+    kind: 'assistant',
+    data: {
+      type: 'assistant',
+      uuid: 'assistant-rewind-history-2',
+      session_id: 'session-rewind-history',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'second done' }] },
+      parent_tool_use_id: null,
+    },
+  },
+];
+
 function buildLargeToolHistoryEvents(turnCount: number): AgentMessage[] {
   const events: AgentMessage[] = [];
 
@@ -1240,6 +1278,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
         'session-plan-final': proposedPlanFinalEvents,
         'session-plan-non-final': proposedPlanNonFinalEvents,
         'session-nav': navigationTurnEvents,
+        'session-rewind-history': rewindHistoryEvents,
       },
       eventTimestamps: {
         'session-1': [1, 2],
@@ -1301,6 +1340,30 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
       changedFiles: {},
       fileOriginals: {},
       acknowledgedFiles: {},
+    });
+
+    const threadSessions: Session[] = [
+      'session-nav',
+      'session-rewind-history',
+      'session-image-rewind',
+      'session-long-rewind',
+    ].map((id) => ({
+      id,
+      title: id,
+      agent_kind: id === 'session-nav' || id === 'session-image-rewind' ? 'claude_code' : 'codex',
+      provider_id: null,
+      model: null,
+      mode: 'agent',
+      project_id: null,
+      created_at: '',
+      updated_at: '',
+    }));
+    useSessionStore.setState({
+      sessions: threadSessions,
+      archivedSessions: [],
+      activeSessionId: threadSessions[0]?.id ?? null,
+      isLoading: false,
+      error: null,
     });
 
     useSettingsStore.setState((state) => ({
@@ -2022,6 +2085,48 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
     });
     expect(screen.queryByText('结果 119')).toBeNull();
   }, 30_000);
+
+  it('offers in-place rewind on a historical user message with a strong locator', async () => {
+    const onSend = vi.fn(async () => {});
+    const rewindToMessage = vi.fn().mockResolvedValue({ text: 'first instruction' });
+    const requestComposerRestore = vi.fn();
+    useAgentStore.setState({ rewindToMessage, requestComposerRestore } as any);
+
+    render(<Harness sessionId="session-rewind-history" onSend={onSend} />);
+
+    const historicalButtons = screen.getAllByRole('button', { name: '回退到此消息（之后的内容将被移除）' });
+    expect(historicalButtons).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: '回退并编辑这条消息' })).toHaveLength(1);
+
+    fireEvent.click(historicalButtons[0]);
+
+    await waitFor(() => {
+      expect(rewindToMessage).toHaveBeenCalledWith('session-rewind-history', 0);
+      expect(requestComposerRestore).toHaveBeenCalledWith('session-rewind-history', 'first instruction');
+    });
+    expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('does not offer in-place rewind on historical optimistic user messages without locators', () => {
+    render(<Harness sessionId="session-nav" />);
+
+    expect(screen.queryByRole('button', { name: '回退到此消息（之后的内容将被移除）' })).toBeNull();
+    expect(screen.getAllByRole('button', { name: '回退并编辑这条消息' })).toHaveLength(1);
+  });
+
+  it('hides rewind entries in read-only sessions', () => {
+    useSessionStore.setState((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.id === 'session-rewind-history' ? { ...session, is_read_only: true } : session,
+      ),
+    }));
+
+    render(<Harness sessionId="session-rewind-history" />);
+
+    expect(screen.queryByRole('button', { name: '回退并编辑这条消息' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '回退到此消息（之后的内容将被移除）' })).toBeNull();
+  });
 
   it('renders streaming thinking content in a live reasoning panel', () => {
     const shortThinking = 'short thinking stays fully visible';

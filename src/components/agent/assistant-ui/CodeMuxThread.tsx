@@ -10,6 +10,7 @@ import {
 } from '@assistant-ui/react';
 import { LexicalComposerInput } from '@assistant-ui/react-lexical';
 import { ArrowDown, ChevronRight, ChevronDown, Loader2, Undo2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { Streamdown } from 'streamdown';
@@ -26,7 +27,7 @@ import {
   ReasoningTrigger,
 } from '@/components/reasoning';
 import { cn } from '../../../lib/utils';
-import { useAgentStore, type AgentMessage } from '../../../stores/agentStore';
+import { AGENT_REWIND_CAPABILITIES, hasStrongRewindLocator, useAgentStore, type AgentMessage } from '../../../stores/agentStore';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { buildConversationTurnIndex, buildConversationTurns } from '../../../lib/conversationTurns';
 import type { ConversationTurn } from '../../../types/conversationTurn';
@@ -68,6 +69,7 @@ type CodeMuxThreadRenderContextValue = {
   sessionId: string;
   compactAiOutput: boolean;
   isRunning: boolean;
+  events: AgentMessage[];
   latestRewindableUserIndex: number | null;
   collapseInfoByEventIndex: Map<number, AssistantCollapseInfo>;
   expandedTurnKeys: Set<string>;
@@ -224,6 +226,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     sessionId,
     compactAiOutput,
     isRunning,
+    events,
     latestRewindableUserIndex,
     collapseInfoByEventIndex,
     expandedTurnKeys,
@@ -238,6 +241,7 @@ export function CodeMuxThread({ sessionId, footer }: CodeMuxThreadProps) {
     sessionId,
     compactAiOutput,
     isRunning,
+    events,
     latestRewindableUserIndex,
     collapseInfoByEventIndex,
     expandedTurnKeys,
@@ -480,13 +484,55 @@ function useCodeMuxThreadRenderContext() {
 
 function CodeMuxUserMessage() {
   const message = useAuiState((state) => state.message);
-  const { isRunning, latestRewindableUserIndex } = useCodeMuxThreadRenderContext();
+  const { sessionId, isRunning, events, latestRewindableUserIndex } = useCodeMuxThreadRenderContext();
+  const rewindToMessage = useAgentStore((state) => state.rewindToMessage);
+  const requestComposerRestore = useAgentStore((state) => state.requestComposerRestore);
+  const agentKind = useSessionStore((state) =>
+    (state.sessions.find((session) => session.id === sessionId)
+      ?? state.archivedSessions.find((session) => session.id === sessionId))?.agent_kind,
+  );
+  const isReadOnly = useSessionStore((state) =>
+    (state.sessions.find((session) => session.id === sessionId)
+      ?? state.archivedSessions.find((session) => session.id === sessionId))?.is_read_only ?? false,
+  );
+  const [isRewinding, setIsRewinding] = useState(false);
   const sourceEventIndex = getSourceEventIndex(message);
+  const event = sourceEventIndex != null ? events[sourceEventIndex] : undefined;
+  const hasStrongLocator = event?.kind === 'user'
+    ? hasStrongRewindLocator(event.data.locator)
+    : false;
+  const isLatestRewindable = sourceEventIndex != null && sourceEventIndex === latestRewindableUserIndex;
+  const supportsConversationRewind = agentKind
+    ? AGENT_REWIND_CAPABILITIES[agentKind].conversation
+    : false;
+  const handleRewindToMessage = useCallback(async () => {
+    if (sourceEventIndex == null || isRewinding) {
+      return;
+    }
+    setIsRewinding(true);
+    try {
+      const payload = await rewindToMessage(sessionId, sourceEventIndex);
+      if (!payload) {
+        toast.warning('当前无法回退：会话正在运行或该消息不可回退');
+        return;
+      }
+      if (payload.text.trim().length > 0) {
+        requestComposerRestore(sessionId, payload.text);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '回退失败，请重试');
+    } finally {
+      setIsRewinding(false);
+    }
+  }, [sourceEventIndex, isRewinding, rewindToMessage, sessionId, requestComposerRestore]);
   return (
     <UserMessage
       message={message}
       sourceEventIndex={sourceEventIndex}
-      canRewind={!isRunning && sourceEventIndex === latestRewindableUserIndex}
+      canRewind={supportsConversationRewind && !isRunning && !isReadOnly && (isLatestRewindable || hasStrongLocator)}
+      isLatestRewindable={isLatestRewindable}
+      isRewinding={isRewinding}
+      onRewindToMessage={handleRewindToMessage}
     />
   );
 }
@@ -545,10 +591,16 @@ function UserMessage({
   message,
   sourceEventIndex,
   canRewind,
+  isLatestRewindable = false,
+  isRewinding = false,
+  onRewindToMessage,
 }: {
   message: MessageState;
   sourceEventIndex?: number;
   canRewind?: boolean;
+  isLatestRewindable?: boolean;
+  isRewinding?: boolean;
+  onRewindToMessage?: () => Promise<void> | void;
 }) {
   const aui = useAui();
   const text = getMessageText(message);
@@ -558,6 +610,19 @@ function UserMessage({
   const imageAttachments = getImageAttachmentItems(message);
   const beginInlineEdit = () => {
     aui.message().composer().beginEdit();
+  };
+  const rewindTooltip = isLatestRewindable
+    ? '回退并编辑这条消息'
+    : '回退到此消息（之后的内容将被移除）';
+  const handleRewindClick = () => {
+    if (isRewinding) {
+      return;
+    }
+    if (isLatestRewindable) {
+      beginInlineEdit();
+      return;
+    }
+    void onRewindToMessage?.();
   };
 
   if (!text && imageAttachments.length === 0) {
@@ -619,13 +684,14 @@ function UserMessage({
         <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity duration-150 group-hover/message-row:opacity-100 group-focus-within/message-row:opacity-100">
           <MessageFooter timestamp={timestamp} className="justify-end" revealOnHover />
           {canRewind ? (
-            <TooltipHint content="回退并编辑这条消息">
+            <TooltipHint content={rewindTooltip}>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label="回退并编辑这条消息"
-                onClick={beginInlineEdit}
+                aria-label={rewindTooltip}
+                disabled={isRewinding}
+                onClick={handleRewindClick}
                 className="mt-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
               >
                 <Undo2 className="h-3 w-3" />

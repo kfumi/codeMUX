@@ -1,5 +1,5 @@
 use log::{debug, info};
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use serde_json::Value;
 use tauri::{AppHandle, State};
 use tokio::sync::oneshot;
@@ -923,6 +923,144 @@ mod tests {
         let summary_event = &events[summary_pos.unwrap()];
         assert_eq!(summary_event["diffs"][0]["file"], "src/foo.ts");
     }
+
+    fn rewind_fixture_connection() -> Connection {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);\
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);",
+        ).unwrap();
+        let messages: [(&str, i64, &str); 4] = [
+            ("user-1", 1000, r#"{"role":"user"}"#),
+            ("assistant-1", 1500, r#"{"role":"assistant"}"#),
+            ("user-2", 2000, r#"{"role":"user"}"#),
+            ("assistant-2", 2500, r#"{"role":"assistant"}"#),
+        ];
+        for (id, time_created, data) in messages {
+            connection
+                .execute(
+                    "INSERT INTO message VALUES (?1, ?2, ?3, ?3, ?4)",
+                    rusqlite::params![id, "session-1", time_created, data],
+                )
+                .unwrap();
+        }
+        connection.execute(
+            "INSERT INTO part VALUES ('part-user-1', 'user-1', 'session-1', 1001, 1001, '{\"type\":\"text\",\"text\":\"first question\"}')",
+            [],
+        ).unwrap();
+        connection.execute(
+            "INSERT INTO part VALUES ('part-assistant-1', 'assistant-1', 'session-1', 1501, 1501, '{\"type\":\"text\",\"text\":\"first answer\"}')",
+            [],
+        ).unwrap();
+        connection.execute(
+            "INSERT INTO part VALUES ('part-user-2', 'user-2', 'session-1', 2001, 2001, '{\"type\":\"text\",\"text\":\"second question\"}')",
+            [],
+        ).unwrap();
+        connection
+    }
+
+    fn count_messages(connection: &Connection) -> i64 {
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM message WHERE session_id = 'session-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn rewinds_opencode_messages_from_target_message_id() {
+        let connection = rewind_fixture_connection();
+        let target = super::super::rewind::RewindTarget {
+            provider_message_id: Some("user-2".to_string()),
+            source_event_index: None,
+            line_index: None,
+            role: None,
+            text_fingerprint: None,
+            turn_ordinal: None,
+        };
+
+        let truncated_to_empty =
+            rewind_opencode_events_from_connection(&connection, "session-1", Some(&target))
+                .unwrap();
+
+        assert!(!truncated_to_empty);
+        assert_eq!(count_messages(&connection), 2);
+        let remaining_parts: i64 = connection
+            .query_row("SELECT COUNT(*) FROM part", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(remaining_parts, 2);
+    }
+
+    #[test]
+    fn rewinds_opencode_to_latest_turn_without_target() {
+        let connection = rewind_fixture_connection();
+
+        let truncated_to_empty =
+            rewind_opencode_events_from_connection(&connection, "session-1", None).unwrap();
+
+        assert!(!truncated_to_empty);
+        assert_eq!(count_messages(&connection), 2);
+    }
+
+    #[test]
+    fn rewinds_opencode_target_by_ordinal_and_fingerprint_truncates_to_empty() {
+        let connection = rewind_fixture_connection();
+        let target = super::super::rewind::RewindTarget {
+            provider_message_id: None,
+            source_event_index: None,
+            line_index: None,
+            role: None,
+            text_fingerprint: Some("first question".to_string()),
+            turn_ordinal: Some(1),
+        };
+
+        let truncated_to_empty =
+            rewind_opencode_events_from_connection(&connection, "session-1", Some(&target))
+                .unwrap();
+
+        assert!(truncated_to_empty);
+        assert_eq!(count_messages(&connection), 0);
+    }
+
+    #[test]
+    fn errors_when_opencode_rewind_target_message_missing_and_leaves_db_unchanged() {
+        let connection = rewind_fixture_connection();
+        let target = super::super::rewind::RewindTarget {
+            provider_message_id: Some("missing-message".to_string()),
+            source_event_index: None,
+            line_index: None,
+            role: None,
+            text_fingerprint: None,
+            turn_ordinal: None,
+        };
+
+        let result =
+            rewind_opencode_events_from_connection(&connection, "session-1", Some(&target));
+
+        assert!(result.is_err());
+        assert_eq!(count_messages(&connection), 4);
+    }
+
+    #[test]
+    fn errors_when_opencode_rewind_fingerprint_mismatches() {
+        let connection = rewind_fixture_connection();
+        let target = super::super::rewind::RewindTarget {
+            provider_message_id: None,
+            source_event_index: None,
+            line_index: None,
+            role: None,
+            text_fingerprint: Some("different text".to_string()),
+            turn_ordinal: Some(1),
+        };
+
+        let result =
+            rewind_opencode_events_from_connection(&connection, "session-1", Some(&target));
+
+        assert!(result.is_err());
+        assert_eq!(count_messages(&connection), 4);
+    }
 }
 
 pub fn load_opencode_native_events(
@@ -950,52 +1088,181 @@ pub fn load_latest_opencode_token_usage(
     load_latest_opencode_token_usage_from_connection(&connection, session_id, freshness)
 }
 
-pub fn rewind_opencode_session_to_latest_turn(
+pub fn rewind_opencode_session(
     home: &std::path::Path,
     session_id: &str,
+    target: Option<&super::rewind::RewindTarget>,
 ) -> Result<bool, String> {
     let Some(path) = find_opencode_database(home) else {
         return Ok(false);
     };
     let connection = Connection::open(path)
         .map_err(|error| format!("Failed to open OpenCode database for rewind: {}", error))?;
-    rewind_opencode_events_from_connection(&connection, session_id)
+    rewind_opencode_events_from_connection(&connection, session_id, target)
+}
+
+/// Resolve the message ID at which the rewind boundary starts: the boundary
+/// message itself and every ordered message after it are removed.
+fn resolve_opencode_rewind_boundary(
+    connection: &Connection,
+    ordered_rows: &[(String, String)],
+    session_id: &str,
+    target: Option<&super::rewind::RewindTarget>,
+) -> Result<Option<String>, String> {
+    if ordered_rows.is_empty() {
+        return Ok(None);
+    }
+
+    let target_not_found = || {
+        format!(
+            "Target rewind user message not found in session history {}",
+            session_id
+        )
+    };
+
+    let Some(target) = target else {
+        return Ok(ordered_rows
+            .iter()
+            .rev()
+            .find(|(_, role)| role == "user")
+            .map(|(id, _)| id.clone()));
+    };
+
+    let provider_message_id = target
+        .provider_message_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(provider_message_id) = provider_message_id {
+        if !ordered_rows.iter().any(|(id, _)| id == provider_message_id) {
+            return Err(target_not_found());
+        }
+        return Ok(Some(provider_message_id.to_string()));
+    }
+
+    if let Some(turn_ordinal) = target.turn_ordinal {
+        if turn_ordinal == 0 {
+            return Err(format!(
+                "Invalid rewind turn ordinal 0 in session history {}",
+                session_id
+            ));
+        }
+        let user_rows: Vec<&(String, String)> = ordered_rows
+            .iter()
+            .filter(|(_, role)| role == "user")
+            .collect();
+        let Some((candidate_id, _)) = user_rows.get(turn_ordinal - 1) else {
+            return Err(target_not_found());
+        };
+        let candidate_id = candidate_id.clone();
+
+        if let Some(fingerprint) = target
+            .text_fingerprint
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            let text = load_opencode_user_text(connection, session_id, &candidate_id)?;
+            if super::rewind::normalize_rewind_text(&text)
+                != super::rewind::normalize_rewind_text(fingerprint)
+            {
+                return Err(target_not_found());
+            }
+        }
+        return Ok(Some(candidate_id));
+    }
+
+    Err(format!(
+        "OpenCode rewind target requires a provider message id or turn ordinal (session {})",
+        session_id
+    ))
+}
+
+fn load_opencode_user_text(
+    connection: &Connection,
+    session_id: &str,
+    message_id: &str,
+) -> Result<String, String> {
+    let parts = load_opencode_parts(connection, session_id, message_id)?;
+    let mut texts = Vec::new();
+    for part in parts {
+        if part.data.get("type").and_then(Value::as_str) == Some("text") {
+            if let Some(text) = part.data.get("text").and_then(Value::as_str) {
+                if !text.is_empty() {
+                    texts.push(text.to_string());
+                }
+            }
+        }
+    }
+    Ok(texts.join("\n"))
+}
+
+fn delete_opencode_rows_by_ids(
+    transaction: &rusqlite::Transaction<'_>,
+    table: &str,
+    column: &str,
+    ids: &[String],
+) -> Result<(), String> {
+    for chunk in ids.chunks(500) {
+        let placeholders = vec!["?"; chunk.len()].join(", ");
+        let sql = format!(
+            "DELETE FROM {} WHERE {} IN ({})",
+            table, column, placeholders
+        );
+        let params: Vec<&dyn rusqlite::ToSql> =
+            chunk.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+        transaction
+            .execute(&sql, params.as_slice())
+            .map_err(|e| format!("Failed to delete OpenCode rows during rewind: {}", e))?;
+    }
+    Ok(())
 }
 
 fn rewind_opencode_events_from_connection(
     connection: &Connection,
     session_id: &str,
+    target: Option<&super::rewind::RewindTarget>,
 ) -> Result<bool, String> {
-    let latest_user_time: Option<i64> = connection
-        .query_row(
-            "SELECT time_created FROM message WHERE session_id = ?1 AND json_extract(data, '$.role') = 'user' ORDER BY time_created DESC, id DESC LIMIT 1",
-            [session_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| format!("Failed to query latest user message in OpenCode session: {}", e))?;
-
-    let Some(latest_user_time) = latest_user_time else {
+    let mut statement = connection
+        .prepare("SELECT id, json_extract(data, '$.role') FROM message WHERE session_id = ?1 ORDER BY time_created ASC, id ASC")
+        .map_err(|e| format!("Failed to query OpenCode messages for rewind: {}", e))?;
+    let ordered_rows = statement
+        .query_map([session_id], |row| {
+            let id: String = row.get(0)?;
+            let role: String = row.get::<_, Option<String>>(1)?.unwrap_or_default();
+            Ok((id, role))
+        })
+        .map_err(|e| format!("Failed to query OpenCode messages for rewind: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read OpenCode messages for rewind: {}", e))?;
+    let Some(boundary_id) =
+        resolve_opencode_rewind_boundary(connection, &ordered_rows, session_id, target)?
+    else {
         return Ok(true);
     };
+    let boundary_index = ordered_rows
+        .iter()
+        .position(|(id, _)| id == &boundary_id)
+        .ok_or_else(|| {
+            format!(
+                "Target rewind user message not found in session history {}",
+                session_id
+            )
+        })?;
+    let delete_ids: Vec<String> = ordered_rows[boundary_index..]
+        .iter()
+        .map(|(id, _)| id.clone())
+        .collect();
+    if delete_ids.is_empty() {
+        return Ok(false);
+    }
 
     let transaction = connection
         .unchecked_transaction()
         .map_err(|e| format!("Failed to begin OpenCode rewind transaction: {}", e))?;
 
-    transaction
-        .execute(
-            "DELETE FROM part WHERE message_id IN (SELECT id FROM message WHERE session_id = ?1 AND time_created >= ?2)",
-            rusqlite::params![session_id, latest_user_time],
-        )
-        .map_err(|e| format!("Failed to delete OpenCode parts during rewind: {}", e))?;
-
-    transaction
-        .execute(
-            "DELETE FROM message WHERE session_id = ?1 AND time_created >= ?2",
-            rusqlite::params![session_id, latest_user_time],
-        )
-        .map_err(|e| format!("Failed to delete OpenCode messages during rewind: {}", e))?;
+    delete_opencode_rows_by_ids(&transaction, "part", "message_id", &delete_ids)?;
+    delete_opencode_rows_by_ids(&transaction, "message", "id", &delete_ids)?;
 
     transaction
         .commit()

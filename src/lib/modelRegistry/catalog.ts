@@ -279,7 +279,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
   { id: "mai-image-2-5", name: "Microsoft: MAI-Image-2.5" },
   { id: "mai-image-2-5-pro", name: "Microsoft: MAI-Image-2.5 Pro" },
   { id: "mercury-2", name: "Mercury 2" },
-  { id: "mimo-v2-5", name: "MiMo M2.5" },
+  { id: "mimo-v2-5", name: "MiMo V2.5" },
   { id: "mimo-v2-5-pro", name: "MiMo V2.5 Pro" },
   { id: "mimo-v2-omni", name: "MiMo-V2-Omni" },
   { id: "mimo-v2-pro", name: "MiMo-V2-Pro" },

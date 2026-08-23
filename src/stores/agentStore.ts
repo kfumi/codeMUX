@@ -154,6 +154,8 @@ interface AgentState {
   acknowledgedFiles: Record<string, Set<string>>;
   /** Draft text for each session's composer input (preserved across session switches) */
   composerDrafts: Record<string, string>;
+  /** Composer text queued for restoration after a rewind, keyed by session */
+  pendingComposerRestore: Record<string, string>;
   /** Sessions whose history load IPC has completed at least once */
   /** Messages submitted while a turn is active, kept out of provider history until dispatched. */
   queuedQueries: Record<string, QueuedAgentQuery[]>;
@@ -191,6 +193,12 @@ interface AgentState {
   getComposerDraft: (sessionId: string) => string;
   /** Rewind the latest user turn and prepare its payload for composer editing */
   rewindLastTurn: (sessionId: string) => Promise<AgentInputPayload | null>;
+  /** Rewind to an arbitrary historical user message by its event index and prepare its payload for composer editing */
+  rewindToMessage: (sessionId: string, userEventIndex: number) => Promise<AgentInputPayload | null>;
+  /** Queue composer text to be restored for a session (applied only when the composer is empty) */
+  requestComposerRestore: (sessionId: string, text: string) => void;
+  /** Consume and clear any pending composer restore text for a session */
+  clearComposerRestore: (sessionId: string) => void;
 }
 
 type StreamingBuffer = {
@@ -901,6 +909,18 @@ function getSessionAgentKind(sessionId: string) {
   return useSessionStore.getState().sessions.find((session) => session.id === sessionId)?.agent_kind;
 }
 
+/** Static rewind capability declaration per agent kind (files/both reserved for a later phase). */
+export const AGENT_REWIND_CAPABILITIES: Record<AgentKind, {
+  conversation: boolean;
+  files: boolean;
+  both: boolean;
+}> = {
+  claude_code: { conversation: true, files: true, both: true },
+  codex: { conversation: true, files: false, both: false },
+  gemini_cli: { conversation: false, files: false, both: false },
+  opencode: { conversation: true, files: false, both: false },
+};
+
 function hasCurrentTurnCommittedThinking(events: AgentMessage[]): boolean {
   let lastUserIdx = -1;
   for (let i = events.length - 1; i >= 0; i -= 1) {
@@ -925,19 +945,22 @@ function isOpencodeLikeAgent(sessionId: string): boolean {
   return kind === 'opencode';
 }
 
+function isRewindableUserEvent(event: AgentMessage): event is Extract<AgentMessage, { kind: 'user' }> {
+  if (event.kind !== 'user') {
+    return false;
+  }
+  if (isInterruptMarker(event.data.content)) {
+    return false;
+  }
+  return event.data.content.trim().length > 0 || (event.data.attachments?.length ?? 0) > 0;
+}
+
 function getRewindableUserIndex(events: AgentMessage[]): number {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
-    if (event.kind !== 'user') {
-      continue;
+    if (isRewindableUserEvent(event)) {
+      return index;
     }
-    if (isInterruptMarker(event.data.content)) {
-      continue;
-    }
-    if (event.data.content.trim().length === 0 && (event.data.attachments?.length ?? 0) === 0) {
-      continue;
-    }
-    return index;
   }
 
   return -1;
@@ -955,7 +978,7 @@ function buildInputPayloadFromUserEvent(event: Extract<AgentMessage, { kind: 'us
     : { text: event.data.content };
 }
 
-function hasStrongRewindLocator(locator: AgentUserMessageLocator | undefined): boolean {
+export function hasStrongRewindLocator(locator: AgentUserMessageLocator | undefined): boolean {
   return Boolean(
     locator?.providerMessageId?.trim()
     || typeof locator?.lineIndex === 'number'
@@ -1374,6 +1397,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
   fileOriginals: {},
   acknowledgedFiles: {},
   composerDrafts: {},
+  pendingComposerRestore: {},
   queuedQueries: {},
   queuePaused: {},
   pendingPermissions: {},
@@ -2602,7 +2626,7 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     return get().composerDrafts[sessionId] ?? '';
   },
 
-  rewindLastTurn: async (sessionId: string) => {
+  rewindToMessage: async (sessionId: string, userEventIndex: number) => {
     const state = get();
     const targetSession = useSessionStore.getState().sessions.find((session) => session.id === sessionId)
       ?? useSessionStore.getState().archivedSessions.find((session) => session.id === sessionId);
@@ -2614,23 +2638,28 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     }
 
     const events = state.events[sessionId] ?? [];
-    const userIndex = getRewindableUserIndex(events);
-    if (userIndex < 0) {
+    if (userEventIndex < 0 || userEventIndex >= events.length) {
+      return null;
+    }
+    const userEvent = events[userEventIndex];
+    if (!isRewindableUserEvent(userEvent)) {
       return null;
     }
 
-    const userEvent = events[userIndex];
-    if (userEvent.kind !== 'user') {
+    // Arbitrary historical rewinds require a strong provider-side locator so the
+    // native history can locate the target line. The latest rewindable message
+    // keeps the ordinal fallback used by live optimistic turns.
+    const latestRewindableIndex = getRewindableUserIndex(events);
+    const hasStrongLocator = hasStrongRewindLocator(userEvent.data.locator);
+    if (userEventIndex !== latestRewindableIndex && !hasStrongLocator) {
       return null;
     }
 
     const agentKind: AgentKind = getSessionAgentKind(sessionId) ?? 'claude_code';
     const payload = buildInputPayloadFromUserEvent(userEvent);
-    const target = hasStrongRewindLocator(userEvent.data.locator)
-      ? userEvent.data.locator
-      : undefined;
+    const target = hasStrongLocator ? userEvent.data.locator : undefined;
     const rewindUserIndex = events
-      .slice(0, userIndex + 1)
+      .slice(0, userEventIndex + 1)
       .filter((event) => event.kind === 'user')
       .length - 1;
 
@@ -2642,8 +2671,8 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     clearSimulatedStream(sessionId);
 
     set((s) => ({
-      events: { ...s.events, [sessionId]: events.slice(0, userIndex) },
-      eventTimestamps: { ...s.eventTimestamps, [sessionId]: (s.eventTimestamps[sessionId] ?? []).slice(0, userIndex) },
+      events: { ...s.events, [sessionId]: events.slice(0, userEventIndex) },
+      eventTimestamps: { ...s.eventTimestamps, [sessionId]: (s.eventTimestamps[sessionId] ?? []).slice(0, userEventIndex) },
       isRunning: { ...s.isRunning, [sessionId]: false },
       queryStartTime: removeSessionEntry(s.queryStartTime, sessionId),
       error: { ...s.error, [sessionId]: null },
@@ -2670,6 +2699,22 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
     } catch {}
 
     return payload;
+  },
+
+  requestComposerRestore: (sessionId: string, text: string) => {
+    set((state) => ({ pendingComposerRestore: { ...state.pendingComposerRestore, [sessionId]: text } }));
+  },
+
+  clearComposerRestore: (sessionId: string) => {
+    set((state) => ({ pendingComposerRestore: removeSessionEntry(state.pendingComposerRestore, sessionId) }));
+  },
+
+  rewindLastTurn: async (sessionId: string) => {
+    const latestIndex = getRewindableUserIndex(get().events[sessionId] ?? []);
+    if (latestIndex < 0) {
+      return null;
+    }
+    return get().rewindToMessage(sessionId, latestIndex);
   },
 });
 });

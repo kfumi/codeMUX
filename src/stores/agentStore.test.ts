@@ -2402,6 +2402,268 @@ describe('agent store Codex history loading', () => {
     expect(useSessionStore.getState().unreadSessions.has(session.id)).toBe(true);
   });
 
+  it('rewinds an arbitrary earlier user message by index using its strong locator', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    const firstLocator: AgentUserMessageLocator = {
+      providerMessageId: 'codex-user-1',
+      lineIndex: 4,
+      role: 'user',
+      textFingerprint: 'first turn',
+      turnOrdinal: 1,
+    };
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'first turn', locator: firstLocator } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-1',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+          {
+            kind: 'user',
+            data: {
+              content: 'second turn',
+              locator: {
+                providerMessageId: 'codex-user-2',
+                lineIndex: 12,
+                role: 'user',
+                textFingerprint: 'second turn',
+                turnOrdinal: 2,
+              },
+            },
+          },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-2',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'second answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+        ],
+      },
+      eventTimestamps: { [session.id]: [1, 2, 3, 4] },
+      todos: { [session.id]: [{ content: 'old todo', status: 'pending' }] },
+      streamingText: { [session.id]: 'streaming' },
+    });
+
+    const payload = await useAgentStore.getState().rewindToMessage(session.id, 0);
+
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'codex', firstLocator, 0);
+    expect(payload).toEqual({ text: 'first turn' });
+    expect(useAgentStore.getState().events[session.id]).toEqual([]);
+    expect(useAgentStore.getState().eventTimestamps[session.id]).toEqual([]);
+    expect(useAgentStore.getState().todos[session.id]).toBeUndefined();
+    expect(useAgentStore.getState().streamingText[session.id]).toBe('');
+  });
+
+  it('rejects rewinding an optimistic earlier user message without a strong locator', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+
+    const events = [
+      { kind: 'user', data: { content: 'first turn' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-1',
+          session_id: session.id,
+          message: { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+          parent_tool_use_id: null,
+        },
+      },
+      { kind: 'user', data: { content: 'second turn' } },
+      {
+        kind: 'assistant',
+        data: {
+          type: 'assistant',
+          uuid: 'assistant-2',
+          session_id: session.id,
+          message: { role: 'assistant', content: [{ type: 'text', text: 'second answer' }] },
+          parent_tool_use_id: null,
+        },
+      },
+    ] as const;
+    useAgentStore.setState({
+      events: { [session.id]: [...events] },
+      eventTimestamps: { [session.id]: [1, 2, 3, 4] },
+    });
+
+    const payload = await useAgentStore.getState().rewindToMessage(session.id, 0);
+
+    expect(payload).toBeNull();
+    expect(rewindSessionMock).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().events[session.id]).toHaveLength(4);
+  });
+
+  it('allows rewinding the latest message without a strong locator via index fallback', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('claude_code');
+
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'first turn' } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-1',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+          { kind: 'user', data: { content: 'second turn' } },
+        ],
+      },
+      eventTimestamps: { [session.id]: [1, 2, 3] },
+    });
+
+    const payload = await useAgentStore.getState().rewindToMessage(session.id, 2);
+
+    expect(payload).toEqual({ text: 'second turn' });
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', undefined, 1);
+    expect(useAgentStore.getState().events[session.id]).toHaveLength(2);
+  });
+
+  it('returns null when the target index is not a rewindable user event', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'first turn' } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-1',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+        ],
+      },
+      eventTimestamps: { [session.id]: [1, 2] },
+    });
+
+    expect(await useAgentStore.getState().rewindToMessage(session.id, 1)).toBeNull();
+    expect(await useAgentStore.getState().rewindToMessage(session.id, 9)).toBeNull();
+    expect(rewindSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects rewinding an arbitrary message while the session is running', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    useAgentStore.setState({
+      isRunning: { [session.id]: true },
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'first turn' } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-1',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+        ],
+      },
+    });
+
+    expect(await useAgentStore.getState().rewindToMessage(session.id, 0)).toBeNull();
+    expect(rewindSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects rewinding an arbitrary message in a read-only session', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const { useSessionStore } = await import('./sessionStore');
+    const session = await primeSession('codex');
+
+    useSessionStore.setState({
+      sessions: [{ ...session, is_read_only: true }],
+    });
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'first turn' } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-1',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+        ],
+      },
+    });
+
+    expect(await useAgentStore.getState().rewindToMessage(session.id, 0)).toBeNull();
+    expect(rewindSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps rewindLastTurn equivalent to rewinding the latest rewindable message', async () => {
+    const { useAgentStore } = await import('./agentStore');
+    const session = await primeSession('codex');
+
+    useAgentStore.setState({
+      events: {
+        [session.id]: [
+          { kind: 'user', data: { content: 'first turn' } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-1',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+          { kind: 'user', data: { content: 'second turn' } },
+          {
+            kind: 'assistant',
+            data: {
+              type: 'assistant',
+              uuid: 'assistant-2',
+              session_id: session.id,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'second answer' }] },
+              parent_tool_use_id: null,
+            },
+          },
+        ],
+      },
+      eventTimestamps: { [session.id]: [1, 2, 3, 4] },
+    });
+
+    const payload = await useAgentStore.getState().rewindLastTurn(session.id);
+
+    expect(payload).toEqual({ text: 'second turn' });
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'codex', undefined, 1);
+    expect(useAgentStore.getState().events[session.id]).toHaveLength(2);
+  });
+
   it('does not restore acknowledged changed-file state while loading history', async () => {
     const { useAgentStore } = await import('./agentStore');
     const session = await primeSession('codex');

@@ -155,7 +155,7 @@ fn extract_user_text_for_rewind(value: &serde_json::Value) -> String {
         .unwrap_or_default()
 }
 
-fn normalize_rewind_text(value: &str) -> String {
+pub(crate) fn normalize_rewind_text(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -432,7 +432,7 @@ pub async fn rewind_agent_session(
         == AgentKind::Opencode
     {
         let truncated_to_empty =
-            opencode_history::rewind_opencode_session_to_latest_turn(&home, &agent_session_id)?;
+            opencode_history::rewind_opencode_session(&home, &agent_session_id, target.as_ref())?;
         (
             RewindOutcome { truncated_to_empty },
             agent_session_id.clone(),
