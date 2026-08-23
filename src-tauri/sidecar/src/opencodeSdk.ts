@@ -60,6 +60,8 @@ export interface OpenCodeClientPort {
   respondToQuestion?(input: { requestId: string; answers: string[][]; directory?: string }): Promise<boolean | void>;
   subscribe?(input: { cwd: string; onEvent: (event: unknown) => void; onError: (error: unknown) => void; onRetry?: (error: unknown) => void; onDisconnect?: (error: unknown) => void }): Promise<OpenCodeEventSubscription>;
   switchAgent?(input: { sessionId: string; agent: string }): Promise<void>;
+  /** Mirrors the official auto-approve toggle by rewriting the server permission config (ask → allow). */
+  setAutoApprovePermissions?(input: { enable: boolean }): Promise<void>;
 }
 
 export interface OpenCodeSdkStartResources {
@@ -402,18 +404,19 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
     const { createOpencodeClient } = await loadOpenCodeClientSdk(runtimeLoaded);
 
     const existingConfig = await readNativeOpenCodeConfig();
+    const serverConfig = buildOpenCodeServerConfig({
+      provider,
+      model,
+      apiKey,
+      baseUrl,
+      credentialSource,
+      existingConfig,
+      modelLimits,
+    });
     const server = await createOpencodeServer({
       hostname: '127.0.0.1',
       port: 0,
-      config: buildOpenCodeServerConfig({
-        provider,
-        model,
-        apiKey,
-        baseUrl,
-        credentialSource,
-        existingConfig,
-        modelLimits,
-      }),
+      config: serverConfig,
     });
     try {
       const client = createOpencodeClient({
@@ -421,6 +424,8 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
         directory: cwd,
       });
       const serverBaseUrl = server.url;
+      let savedPermissionRules: unknown;
+      let autoApproveActive = false;
       return {
         server,
         client: {
@@ -642,6 +647,29 @@ export const officialOpenCodeSdkPort: OpenCodeSdkPort = {
               throw new Error(`OpenCode question reply failed: ${res.status} ${res.statusText}`);
             }
           },
+          async setAutoApprovePermissions({ enable }) {
+            const base = serverBaseUrl.replace(/\/+$/, '');
+            if (enable) {
+              const configRes = await fetch(`${base}/config`, { signal: AbortSignal.timeout(10_000) });
+              if (!configRes.ok) {
+                throw new Error(`OpenCode config read failed: HTTP ${configRes.status}`);
+              }
+              const liveConfig = await configRes.json() as { permission?: unknown };
+              savedPermissionRules = 'permission' in liveConfig ? liveConfig.permission : undefined;
+              const autoApproved = buildAutoApprovedPermissionValue(savedPermissionRules);
+              await patchOpenCodeConfig(base, { permission: autoApproved });
+              autoApproveActive = true;
+              return;
+            }
+            // Nothing to restore when auto-approve was never enabled; patching
+            // an empty permission object would clobber opencode.json rules.
+            if (!autoApproveActive) return;
+            // Restore the pre-enable snapshot; an undefined original means the
+            // server evaluated its built-in defaults, so clear the overrides.
+            await patchOpenCodeConfig(base, { permission: savedPermissionRules ?? {} });
+            savedPermissionRules = undefined;
+            autoApproveActive = false;
+          },
         },
       };
     } catch (error) {
@@ -661,6 +689,59 @@ async function readNativeOpenCodeConfig(): Promise<Config | undefined> {
   } catch {
     return undefined;
   }
+}
+
+async function patchOpenCodeConfig(base: string, patch: Record<string, unknown>): Promise<void> {
+  const res = await fetch(`${base}/config`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    throw new Error(`OpenCode config update failed: HTTP ${res.status}`);
+  }
+}
+
+function isPermissionRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Rewrites permission rules so that everything that would ask is auto-approved
+ * while explicit deny rules stay enforced — mirroring the semantics of the
+ * official `--auto` flag / "Enable auto-approve permissions" TUI command.
+ */
+export function buildAutoApprovedPermissionValue(original: unknown): unknown {
+  if (typeof original === 'string') {
+    // Shorthand form ("allow" | "ask" | "deny"): denies stay, asks become allows.
+    return original === 'deny' ? 'deny' : 'allow';
+  }
+  const source = isPermissionRecord(original) ? original : {};
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(source)) {
+    result[key] = transformPermissionAskToAllow(value);
+  }
+  // These two guards default to "ask" even without an explicit rule; auto
+  // mode approves them like any other request that is not explicitly denied.
+  for (const askByDefault of ['doom_loop', 'external_directory']) {
+    if (!(askByDefault in result)) {
+      result[askByDefault] = 'allow';
+    }
+  }
+  return result;
+}
+
+export function transformPermissionAskToAllow(value: unknown): unknown {
+  if (value === 'ask') return 'allow';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(transformPermissionAskToAllow);
+  if (isPermissionRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, transformPermissionAskToAllow(entry)]),
+    );
+  }
+  return value;
 }
 
 export function mapOpenCodeImages(payload?: AgentInputPayload): OpenCodeImageInput[] {

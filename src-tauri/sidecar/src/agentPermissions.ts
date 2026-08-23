@@ -6,7 +6,7 @@ export type CodexWorkflowMode = 'read-only' | 'auto' | 'auto-review' | 'full-acc
 
 export type SidecarPermissionConfig =
   | { kind: 'claude_code'; permissionMode?: ClaudePermissionMode }
-  | { kind: 'opencode'; permissionMode?: 'full_access' | 'plan' }
+  | { kind: 'opencode'; autoApprovePermissions?: boolean }
   | {
     kind: 'codex';
     workflowMode?: CodexWorkflowMode;
@@ -135,6 +135,16 @@ export function resolveCodexWorkflowMode(raw: Record<string, unknown>): CodexWor
 export function describeCodexPermissionOptions(options: CodexTurnPolicy): string {
   const reviewer = options.approvalsReviewer ? `/${options.approvalsReviewer}` : '';
   return `${options.sandboxMode}/${options.approvalPolicy}${reviewer}/${options.networkAccessEnabled ? 'network-on' : 'network-off'}`;
+}
+
+/**
+ * Mirrors the official OpenCode "auto-approve permissions" toggle. Legacy
+ * snapshots carrying {permissionMode: 'plan' | 'full_access'} migrate onto
+ * the conservative default: 'plan' lives in plan_mode and 'full_access' was
+ * a no-op (the OpenCode server remained authoritative for permissions).
+ */
+export function isOpenCodeAutoApproveEnabled(config: SidecarPermissionConfig | undefined): boolean {
+  return config?.kind === 'opencode' && config.autoApprovePermissions === true;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

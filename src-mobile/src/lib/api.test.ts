@@ -41,7 +41,7 @@ const bootstrap: MobileBootstrap = {
   permissionPresets: {
     claude_code: { permissionMode: 'default' },
     codex: { sandboxMode: 'danger-full-access' },
-    opencode: { permissionMode: 'full_access' },
+    opencode: { autoApprovePermissions: false },
   },
 };
 

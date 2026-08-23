@@ -1807,7 +1807,9 @@ function createOpenCodeSidecarRuntime(cmd: EnsureSessionCommand): SidecarRuntime
   const config = buildOpenCodeSessionConfig(cmd);
   const openCodeRuntime = new OpenCodeRuntime(config);
   if (cmd.planMode === 'on' || cmd.planMode === 'off') {
-    openCodeRuntime.updatePermissions({ planMode: cmd.planMode });
+    openCodeRuntime.updatePermissions({ permissionConfig: cmd.permissionConfig, planMode: cmd.planMode });
+  } else if (cmd.permissionConfig) {
+    openCodeRuntime.updatePermissions({ permissionConfig: cmd.permissionConfig });
   }
   return {
     ensure: async () => {

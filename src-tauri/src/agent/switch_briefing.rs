@@ -274,7 +274,7 @@ pub fn default_permission_config_json(kind: AgentKind) -> &'static str {
         AgentKind::Codex => {
             r#"{"kind":"codex","sandboxMode":"danger-full-access","approvalPolicy":"never","networkAccessEnabled":true}"#
         }
-        AgentKind::Opencode => r#"{"kind":"opencode","permissionMode":"full_access"}"#,
+        AgentKind::Opencode => r#"{"kind":"opencode","autoApprovePermissions":false}"#,
         AgentKind::ClaudeCode | AgentKind::GeminiCli => {
             r#"{"kind":"claude_code","permissionMode":"default"}"#
         }

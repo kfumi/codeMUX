@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildCommandInput, buildSettingsPatch, canSubmitComposer, findActiveComposerTrigger, parsePermissionMode } from './MobileComposer';
+import { buildCommandInput, buildSettingsPatch, canSubmitComposer, findActiveComposerTrigger, parseOpenCodeAutoApprove, parsePermissionMode } from './MobileComposer';
 
 describe('canSubmitComposer', () => {
   it('allows an image-only submission', () => {
@@ -63,6 +63,22 @@ describe('parsePermissionMode', () => {
     expect(parsePermissionMode('claude_code', null, 'on')).toBe('plan');
     expect(parsePermissionMode('opencode', null, 'on')).toBe('plan');
   });
+
+  it('maps OpenCode build snapshots onto the build mode regardless of the shield state', () => {
+    const config = JSON.stringify({ kind: 'opencode', autoApprovePermissions: true });
+    expect(parsePermissionMode('opencode', config, 'off')).toBe('confirm_before_edit');
+    // Legacy pre-shield snapshot shape.
+    expect(parsePermissionMode('opencode', JSON.stringify({ kind: 'opencode', permissionMode: 'full_access' }), 'off')).toBe('confirm_before_edit');
+  });
+});
+
+describe('parseOpenCodeAutoApprove', () => {
+  it('reads the shield state from the snapshot and defaults to off', () => {
+    expect(parseOpenCodeAutoApprove(JSON.stringify({ kind: 'opencode', autoApprovePermissions: true }))).toBe(true);
+    expect(parseOpenCodeAutoApprove(JSON.stringify({ kind: 'claude_code', permissionMode: 'default' }))).toBe(false);
+    expect(parseOpenCodeAutoApprove(null)).toBe(false);
+    expect(parseOpenCodeAutoApprove('not-json')).toBe(false);
+  });
 });
 
 describe('buildSettingsPatch', () => {
@@ -76,5 +92,11 @@ describe('buildSettingsPatch', () => {
     const patch = buildSettingsPatch('codex', 'p1', 'gpt-5', 'high', 'full_access', 'on');
     expect(patch.planMode).toBe('on');
     expect(patch.permissionConfig).toMatchObject({ kind: 'codex', workflowMode: 'full-access', networkAccessEnabled: true });
+  });
+
+  it('preserves the OpenCode auto-approve shield state across settings rewrites', () => {
+    const patch = buildSettingsPatch('opencode', 'p1', 'model', 'high', 'confirm_before_edit', 'off', true);
+    expect(patch.planMode).toBe('off');
+    expect(patch.permissionConfig).toEqual({ kind: 'opencode', autoApprovePermissions: true });
   });
 });

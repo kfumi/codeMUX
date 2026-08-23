@@ -43,6 +43,7 @@ import { AgentBrandIcon } from '@/components/agent/AgentBrandIcon';
 import { getAgentDefinition } from '@/types/agentRegistry';
 import {
   codexWorkflowModeToExecutionMode,
+  isOpenCodeAutoApproveEnabled,
   mapExecutionModeToPermissionConfig,
   resolveCodexWorkflowMode,
   resolveEffectivePermissionConfig,
@@ -70,8 +71,8 @@ const PERMISSION_OPTIONS: Record<MobileAgentKind, Array<{ mode: AgentExecutionMo
     { mode: 'full_access', label: '完全访问' },
   ],
   opencode: [
+    { mode: 'confirm_before_edit', label: '构建模式' },
     { mode: 'plan', label: '计划模式' },
-    { mode: 'full_access', label: '完全访问' },
   ],
 };
 
@@ -167,7 +168,9 @@ export function parsePermissionMode(
   try {
     const raw = JSON.parse(permissionConfig ?? '{}') as Record<string, unknown>;
     if (agentKind === 'opencode') {
-      return raw.permissionMode === 'plan' ? 'plan' : 'full_access';
+      // Plan vs build mirrors the official agent selector; plan_mode carries
+      // it (handled above), the snapshot only tracks the auto-approve shield.
+      return 'confirm_before_edit';
     }
     if (agentKind === 'codex') {
       return codexWorkflowModeToExecutionMode(resolveCodexWorkflowMode(raw));
@@ -234,13 +237,18 @@ export function buildSettingsPatch(
   reasoningEffort: string,
   permissionMode: AgentExecutionMode,
   planMode: 'on' | 'off',
+  openCodeAutoApprove = false,
 ): MobileSessionSettingsPatch {
   const effectivePlanMode = permissionMode === 'plan' ? 'on' : planMode;
   // resolveEffectivePermissionConfig already normalizes through
-  // serializePermissionConfig, so its result is the final config.
+  // serializePermissionConfig, so its result is the final config. For
+  // OpenCode the auto-approve shield state must survive settings rewrites.
+  const requestedConfig = agentKind === 'opencode'
+    ? { kind: 'opencode' as const, autoApprovePermissions: openCodeAutoApprove }
+    : mapExecutionModeToPermissionConfig(agentKind, permissionMode);
   const config = resolveEffectivePermissionConfig(
     agentKind,
-    mapExecutionModeToPermissionConfig(agentKind, permissionMode),
+    requestedConfig,
     effectivePlanMode,
   );
   return {
@@ -251,6 +259,15 @@ export function buildSettingsPatch(
     permissionConfig: config,
     planMode: effectivePlanMode,
   };
+}
+
+/** Parses the OpenCode auto-approve shield state from a session snapshot. */
+export function parseOpenCodeAutoApprove(permissionConfig: string | null | undefined): boolean {
+  try {
+    return isOpenCodeAutoApproveEnabled(JSON.parse(permissionConfig ?? '{}'));
+  } catch {
+    return false;
+  }
 }
 
 function ToolbarMenuButton({
@@ -657,6 +674,10 @@ export function MobileComposer({
   const selectedAgent = AGENT_OPTIONS.find((option) => option.id === agentKind);
   const selectedAgentDefinition = getAgentDefinition(agentKind);
   const selectedPermission = PERMISSION_OPTIONS[agentKind].find((option) => option.mode === permissionMode);
+  const openCodeAutoApprove = useMemo(
+    () => parseOpenCodeAutoApprove(session.permission_config),
+    [session.permission_config],
+  );
   const selectedModel = models.find((entry) => entry.id === model);
   const selectedModelLabel = selectedModel?.name ?? selectedModel?.id ?? (model || '模型');
   const selectedProviderLabel = selectedProvider?.name ?? '供应商';
@@ -712,6 +733,7 @@ export function MobileComposer({
       reasoningEffort,
       permissionMode,
       planMode,
+      openCodeAutoApprove,
     ));
   };
 
@@ -725,6 +747,7 @@ export function MobileComposer({
       reasoningEffort,
       permissionMode,
       planMode,
+      openCodeAutoApprove,
     ));
   };
 
@@ -738,6 +761,7 @@ export function MobileComposer({
       nextReasoningEffort,
       permissionMode,
       planMode,
+      openCodeAutoApprove,
     ));
   };
 
@@ -753,6 +777,21 @@ export function MobileComposer({
       reasoningEffort,
       nextPermissionMode,
       nextPlanMode,
+      openCodeAutoApprove,
+    ));
+  };
+
+  /** Official OpenCode "auto-approve permissions" shield toggle (orthogonal to build/plan). */
+  const handleAutoApproveToggle = () => {
+    if (!canEditSettings || agentKind !== 'opencode') return;
+    void commitSettings(buildSettingsPatch(
+      agentKind,
+      providerId,
+      model,
+      reasoningEffort,
+      permissionMode,
+      planMode,
+      !openCodeAutoApprove,
     ));
   };
 
@@ -1030,6 +1069,19 @@ export function MobileComposer({
                     tone={option.mode === 'full_access' ? 'warning' : 'default'}
                   />
                 ))}
+                {agentKind === 'opencode' ? (
+                  <ToolbarMenuItem
+                    active={openCodeAutoApprove}
+                    icon={openCodeAutoApprove ? ShieldCheck : Shield}
+                    label={openCodeAutoApprove ? '关闭自动接受权限' : '自动接受权限'}
+                    description="显式拒绝的规则仍会生效"
+                    onClick={() => {
+                      handleAutoApproveToggle();
+                      setOpenMenu(null);
+                    }}
+                    tone={openCodeAutoApprove ? 'warning' : 'default'}
+                  />
+                ) : null}
               </ToolbarPopover>
             ) : null}
           </div>

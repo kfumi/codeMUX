@@ -4,7 +4,17 @@ export type AgentExecutionMode = 'confirm_before_edit' | 'auto_edit' | 'plan' | 
 export type AgentPlanMode = 'off' | 'on';
 export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk' | 'bypassPermissions';
 export type CodexWorkflowMode = 'read-only' | 'auto' | 'auto-review' | 'full-access';
-export type OpenCodePermissionMode = 'full_access' | 'plan';
+
+export type OpenCodePermissionConfig = {
+  kind: 'opencode';
+  /**
+   * Mirrors the official OpenCode "auto-approve permissions" toggle: when on,
+   * permission rules that would ask are auto-approved (explicit deny rules are
+   * still enforced by the server). Plan vs build stays an orthogonal
+   * plan_mode toggle, like the official Build/Plan agent selector.
+   */
+  autoApprovePermissions: boolean;
+};
 
 export type ClaudePermissionConfig = {
   kind: 'claude_code';
@@ -15,11 +25,6 @@ export type CodexPermissionConfig = {
   kind: 'codex';
   workflowMode: CodexWorkflowMode;
   networkAccessEnabled: boolean;
-};
-
-export type OpenCodePermissionConfig = {
-  kind: 'opencode';
-  permissionMode: OpenCodePermissionMode;
 };
 
 export type AgentPermissionConfig = ClaudePermissionConfig | CodexPermissionConfig | OpenCodePermissionConfig;
@@ -45,7 +50,7 @@ const CODEX_DEFAULT_PERMISSIONS: Omit<CodexPermissionConfig, 'kind'> = {
 
 export function buildDefaultPermissionConfig(agentKind: AgentKind): AgentPermissionConfig {
   if (agentKind === 'opencode') {
-    return { kind: 'opencode', permissionMode: 'full_access' };
+    return { kind: 'opencode', autoApprovePermissions: false };
   }
 
   if (agentKind === 'codex') {
@@ -61,15 +66,12 @@ export function buildDefaultPermissionConfig(agentKind: AgentKind): AgentPermiss
 export function mapExecutionModeToPermissionConfig(
   agentKind: AgentKind,
   executionMode: AgentExecutionMode,
+  previousConfig?: unknown,
 ): AgentPermissionConfig {
   if (agentKind === 'opencode') {
-    switch (executionMode) {
-      case 'plan':
-        return { kind: 'opencode', permissionMode: 'plan' };
-      case 'full_access':
-      default:
-        return { kind: 'opencode', permissionMode: 'full_access' };
-    }
+    // Build/Plan only drives the orthogonal plan_mode toggle (official
+    // agent selector); the auto-approve shield toggle is preserved.
+    return { kind: 'opencode', autoApprovePermissions: isOpenCodeAutoApproveEnabled(previousConfig) };
   }
 
   if (agentKind === 'codex') {
@@ -140,6 +142,13 @@ export function isPlanApprovalPermission(
     || metadata?.presentation === 'plan-approval';
 }
 
+export function isOpenCodeAutoApproveEnabled(config: unknown): boolean {
+  return Boolean(config)
+    && typeof config === 'object'
+    && (config as Record<string, unknown>).kind === 'opencode'
+    && (config as Record<string, unknown>).autoApprovePermissions === true;
+}
+
 export function resolveEffectivePermissionConfig(
   agentKind: AgentKind,
   config: unknown,
@@ -147,10 +156,9 @@ export function resolveEffectivePermissionConfig(
 ): AgentPermissionConfig {
   const normalized = serializePermissionConfig(agentKind, config);
   if (agentKind === 'opencode') {
-    if (planMode === 'on') {
-      return { kind: 'opencode', permissionMode: 'plan' };
-    }
-    return { kind: 'opencode', permissionMode: 'full_access' };
+    // Plan vs build is carried by the orthogonal plan_mode column; the
+    // serialized snapshot only tracks the auto-approve toggle.
+    return normalized;
   }
   if (agentKind === 'claude_code' && planMode === 'on') {
     return {
@@ -170,9 +178,13 @@ export function serializePermissionConfig(agentKind: AgentKind, value: unknown):
 
   const raw = value as Record<string, unknown>;
   if (agentKind === 'opencode') {
+    // Legacy snapshots carried {permissionMode: 'plan' | 'full_access'};
+    // 'plan' now lives in the plan_mode column and 'full_access' was a
+    // no-op (the OpenCode server remained authoritative), so both migrate
+    // onto the conservative autoApprovePermissions: false default.
     return {
       kind: 'opencode',
-      permissionMode: isOpenCodePermissionMode(raw.permissionMode) ? raw.permissionMode : 'full_access',
+      autoApprovePermissions: raw.autoApprovePermissions === true,
     };
   }
   if (agentKind === 'codex') {
@@ -206,10 +218,6 @@ export function resolveCodexWorkflowMode(raw: Record<string, unknown>): CodexWor
   if (sandboxMode === 'workspace-write') return 'auto';
   if (sandboxMode === 'danger-full-access') return 'full-access';
   return CODEX_DEFAULT_PERMISSIONS.workflowMode;
-}
-
-function isOpenCodePermissionMode(value: unknown): value is OpenCodePermissionMode {
-  return value === 'full_access' || value === 'plan';
 }
 
 function isClaudePermissionMode(value: unknown): value is ClaudePermissionMode {

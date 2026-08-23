@@ -61,9 +61,12 @@ const claudeOptions: PermissionOption[] = [
   { mode: 'full_access', label: '完全访问', description: '跳过权限确认，风险更高。', icon: Shield, tone: 'warning' },
 ];
 
+// Official OpenCode exposes a Build/Plan agent selector plus an orthogonal
+// "auto-approve permissions" shield toggle. The dropdown mirrors the agent
+// selector (plan drives plan_mode); the shield lives beside the chip.
 const opencodeOptions: PermissionOption[] = [
+  { mode: 'confirm_before_edit', label: '构建模式', description: '正常执行，敏感操作按 OpenCode 权限规则确认。', icon: Zap },
   { mode: 'plan', label: '计划模式', description: '先分析和规划，暂不直接修改。', icon: ClipboardList },
-  { mode: 'full_access', label: '完全访问', description: 'OpenCode 使用服务端按工具配置的权限规则。', icon: Shield, tone: 'warning' },
 ];
 
 // Workflow Mode tiers (ADR 0010): auto / auto-review / full-access, worded
@@ -131,7 +134,11 @@ export function AgentPermissionSelector({
   const SelectedIcon = selected.icon;
 
   const selectMode = (mode: AgentExecutionMode) => {
-    const nextConfig = mapExecutionModeToPermissionConfig(agentKind, mode);
+    // OpenCode Build/Plan only flips plan_mode; the auto-approve shield state
+    // must survive the switch.
+    const nextConfig = agentKind === 'opencode'
+      ? { kind: 'opencode' as const, autoApprovePermissions: normalized.kind === 'opencode' && normalized.autoApprovePermissions }
+      : mapExecutionModeToPermissionConfig(agentKind, mode);
     // Codex Plan Mode is orthogonal (ADR 0010 Decision 4): picking a Workflow
     // tier never flips the plan toggle. Claude/OpenCode treat plan as a native
     // permission mode, so their selection drives plan state directly.
@@ -152,67 +159,107 @@ export function AgentPermissionSelector({
     setOpen(false);
   };
 
+  const toggleAutoApprove = () => {
+    const nextConfig: AgentPermissionConfig = {
+      kind: 'opencode',
+      autoApprovePermissions: !(normalized.kind === 'opencode' && normalized.autoApprovePermissions),
+    };
+    if (onModeChange) {
+      onModeChange(nextConfig, planMode);
+    } else {
+      onPermissionConfigChange(nextConfig);
+    }
+  };
+
   return (
     <div>
-      <Popover open={open} onOpenChange={setOpen}>
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  disabled={disabled}
-                  aria-haspopup="menu"
-                  aria-expanded={open}
-                  aria-label={selected.label}
-                  className={cn(
-                    'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-200 outline-none hover:bg-muted/58 hover:text-foreground focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
-                    compact ? 'max-w-9' : 'max-w-40',
-                    selected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
-                  )}
-                >
-                  <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
-                  {!compact && <span className="truncate">{selected.label}</span>}
-                  {!compact && <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />}
-                </button>
-              </PopoverTrigger>
-            </TooltipTrigger>
-            <TooltipContent>{selected.label}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-        <PopoverContent
-          side="top"
-          sideOffset={8}
-          align="start"
-          className="w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 p-1.5 shadow-[0_22px_54px_-28px_hsl(var(--surface-shadow-strong)/0.55)] backdrop-blur-lg"
-        >
-          {options.map((option) => {
-            const active = selectedMode === option.mode;
-            const Icon = option.icon;
+      <TooltipProvider delayDuration={300}>
+        <div className="flex items-center gap-1">
+          <Popover open={open} onOpenChange={setOpen}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    aria-haspopup="menu"
+                    aria-expanded={open}
+                    aria-label={selected.label}
+                    className={cn(
+                      'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 px-2 text-xs font-medium text-muted-foreground/78 transition-all duration-200 outline-none hover:bg-muted/58 hover:text-foreground focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
+                      compact ? 'max-w-9' : 'max-w-40',
+                      selected.tone === 'warning' && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
+                    )}
+                  >
+                    <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
+                    {!compact && <span className="truncate">{selected.label}</span>}
+                    {!compact && <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+                  </button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{selected.label}</TooltipContent>
+            </Tooltip>
+            <PopoverContent
+              side="top"
+              sideOffset={8}
+              align="start"
+              className="w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border/70 bg-[hsl(var(--surface-2))]/98 p-1.5 shadow-[0_22px_54px_-28px_hsl(var(--surface-shadow-strong)/0.55)] backdrop-blur-lg"
+            >
+              {options.map((option) => {
+                const active = selectedMode === option.mode;
+                const Icon = option.icon;
+                return (
+                  <button
+                    key={option.mode}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={active}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => selectMode(option.mode)}
+                    className={cn(
+                      'flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/56',
+                      active && 'bg-muted/64',
+                    )}
+                  >
+                    <Icon className={cn('h-4 w-4 shrink-0 text-muted-foreground', option.tone === 'warning' && 'text-orange-500')} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-medium text-foreground">{option.label}</span>
+                      <span className="block truncate text-ui-caption leading-4 text-muted-foreground">{option.description}</span>
+                    </span>
+                    {active && <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+                  </button>
+                );
+              })}
+            </PopoverContent>
+          </Popover>
+
+          {agentKind === 'opencode' && (() => {
+            const autoApprove = normalized.kind === 'opencode' && normalized.autoApprovePermissions;
+            const AutoApproveIcon = autoApprove ? ShieldCheck : Shield;
             return (
-              <button
-                key={option.mode}
-                type="button"
-                role="menuitemradio"
-                aria-checked={active}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => selectMode(option.mode)}
-                className={cn(
-                  'flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/56',
-                  active && 'bg-muted/64',
-                )}
-              >
-                <Icon className={cn('h-4 w-4 shrink-0 text-muted-foreground', option.tone === 'warning' && 'text-orange-500')} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-medium text-foreground">{option.label}</span>
-                  <span className="block truncate text-ui-caption leading-4 text-muted-foreground">{option.description}</span>
-                </span>
-                {active && <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    data-testid="opencode-auto-approve-toggle"
+                    disabled={disabled}
+                    aria-label="自动接受权限"
+                    aria-pressed={autoApprove}
+                    onClick={toggleAutoApprove}
+                    className={cn(
+                      'inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-border/40 bg-[hsl(var(--surface-2))]/70 text-muted-foreground/78 transition-all duration-200 outline-none hover:bg-muted/58 hover:text-foreground focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
+                      autoApprove && 'border-orange-500/35 text-orange-500 hover:text-orange-400',
+                    )}
+                  >
+                    <AutoApproveIcon className="h-3.5 w-3.5 shrink-0" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{autoApprove ? '关闭自动接受权限（恢复逐项确认）' : '自动接受权限请求（显式拒绝的规则仍生效）'}</TooltipContent>
+              </Tooltip>
             );
-          })}
-        </PopoverContent>
-      </Popover>
+          })()}
+        </div>
+      </TooltipProvider>
 
       {pendingPermission && (
         <div data-testid="pending-agent-permission" className="mt-2 rounded-md border border-orange-500/40 bg-orange-500/10 px-2.5 py-2 text-xs">
@@ -244,9 +291,11 @@ function inferExecutionMode(
   permissionConfig: AgentPermissionConfig,
   planMode: AgentPlanMode,
 ): AgentExecutionMode {
-  if (agentKind === 'opencode' && permissionConfig.kind === 'opencode') {
-    if (planMode === 'on' || permissionConfig.permissionMode === 'plan') return 'plan';
-    return 'full_access';
+  if (agentKind === 'opencode') {
+    // Plan vs build mirrors the official agent selector and is carried by
+    // the orthogonal plan_mode toggle; the snapshot only tracks the shield.
+    if (planMode === 'on') return 'plan';
+    return 'confirm_before_edit';
   }
 
   if (agentKind === 'codex' && permissionConfig.kind === 'codex') {

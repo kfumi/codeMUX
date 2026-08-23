@@ -23,7 +23,7 @@ describe('agentPermissions', () => {
     });
     expect(buildDefaultPermissionConfig('opencode')).toEqual({
       kind: 'opencode',
-      permissionMode: 'full_access',
+      autoApprovePermissions: false,
     });
   });
 
@@ -50,19 +50,47 @@ describe('agentPermissions', () => {
     });
   });
 
-  it('maps OpenCode plan and full-access modes to the runtime contract', () => {
+  it('keeps OpenCode build/plan orthogonal to the auto-approve shield', () => {
+    // Build/Plan only drives plan_mode; the shield state survives mode switches.
     expect(mapExecutionModeToPermissionConfig('opencode', 'confirm_before_edit')).toEqual({
       kind: 'opencode',
-      permissionMode: 'full_access',
+      autoApprovePermissions: false,
     });
     expect(mapExecutionModeToPermissionConfig('opencode', 'plan')).toEqual({
       kind: 'opencode',
-      permissionMode: 'plan',
+      autoApprovePermissions: false,
     });
+    expect(mapExecutionModeToPermissionConfig('opencode', 'plan', { kind: 'opencode', autoApprovePermissions: true })).toEqual({
+      kind: 'opencode',
+      autoApprovePermissions: true,
+    });
+  });
+
+  it('serializes OpenCode snapshots and migrates legacy permission modes', () => {
     expect(serializePermissionConfig('opencode', { kind: 'claude_code', permissionMode: 'default' })).toEqual({
       kind: 'opencode',
-      permissionMode: 'full_access',
+      autoApprovePermissions: false,
     });
+    expect(serializePermissionConfig('opencode', { kind: 'opencode', autoApprovePermissions: true })).toEqual({
+      kind: 'opencode',
+      autoApprovePermissions: true,
+    });
+    // Legacy 'full_access' was a no-op (the server remained authoritative) and
+    // 'plan' moved to the plan_mode column — both land on the safe default.
+    expect(serializePermissionConfig('opencode', { kind: 'opencode', permissionMode: 'full_access' })).toEqual({
+      kind: 'opencode',
+      autoApprovePermissions: false,
+    });
+    expect(serializePermissionConfig('opencode', { kind: 'opencode', permissionMode: 'plan' })).toEqual({
+      kind: 'opencode',
+      autoApprovePermissions: false,
+    });
+    // The snapshot never carries plan; the orthogonal plan_mode column does.
+    expect(resolveEffectivePermissionConfig(
+      'opencode',
+      { kind: 'opencode', autoApprovePermissions: true },
+      'on',
+    )).toEqual({ kind: 'opencode', autoApprovePermissions: true });
   });
 
   it('maps the four Codex workflow tiers to distinct permission configs', () => {

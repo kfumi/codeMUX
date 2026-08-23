@@ -250,31 +250,83 @@ describe('AgentPermissionSelector', () => {
     expect(screen.getByRole('button', { name: '请求批准' })).toBeTruthy();
   });
 
-  it('shows OpenCode plan and full-access modes without exposing Claude modes', () => {
+  it('shows OpenCode build and plan agent modes without exposing Claude modes', () => {
     const onPermissionConfigChange = vi.fn();
     const onPlanModeChange = vi.fn();
 
     render(
       <AgentPermissionSelector
         agentKind="opencode"
-        permissionConfig={{ kind: 'opencode', permissionMode: 'full_access' }}
+        permissionConfig={{ kind: 'opencode', autoApprovePermissions: false }}
         planMode="off"
         onPermissionConfigChange={onPermissionConfigChange}
         onPlanModeChange={onPlanModeChange}
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '完全访问' }));
+    fireEvent.click(screen.getByRole('button', { name: '构建模式' }));
 
-    expect(screen.getAllByText('完全访问')).toHaveLength(2);
+    expect(screen.getAllByText('构建模式')).toHaveLength(2);
     expect(screen.getAllByRole('menuitemradio')).toHaveLength(2);
     expect(screen.getByText('计划模式')).toBeTruthy();
+    expect(screen.queryByText('完全访问')).toBeNull();
     expect(screen.queryByText('自动编辑')).toBeNull();
     expect(screen.queryByText('变更前确认')).toBeNull();
 
-    fireEvent.click(screen.getAllByText('完全访问')[1]);
-    expect(onPermissionConfigChange).toHaveBeenCalledWith({ kind: 'opencode', permissionMode: 'full_access' });
-    expect(onPlanModeChange).toHaveBeenCalledWith('off');
+    fireEvent.click(screen.getByText('计划模式'));
+    // Build/Plan only flips plan_mode; the shield snapshot is preserved.
+    expect(onPermissionConfigChange).toHaveBeenCalledWith({ kind: 'opencode', autoApprovePermissions: false });
+    expect(onPlanModeChange).toHaveBeenCalledWith('on');
+  });
+
+  it('migrates legacy OpenCode full-access snapshots onto the build mode', () => {
+    render(
+      <AgentPermissionSelector
+        agentKind="opencode"
+        permissionConfig={{ kind: 'opencode', permissionMode: 'full_access' } as never}
+        planMode="off"
+        onPermissionConfigChange={vi.fn()}
+        onPlanModeChange={vi.fn()}
+      />,
+    );
+
+    // Legacy snapshots serialize onto the conservative default (shield off)
+    // and the chip reflects the official build/plan selector instead.
+    expect(screen.getByRole('button', { name: '构建模式' })).toBeTruthy();
+  });
+
+  it('toggles the OpenCode auto-approve shield without touching plan mode', () => {
+    const onPermissionConfigChange = vi.fn();
+    const onPlanModeChange = vi.fn();
+    const onModeChange = vi.fn();
+
+    const { rerender } = render(
+      <AgentPermissionSelector
+        agentKind="opencode"
+        permissionConfig={{ kind: 'opencode', autoApprovePermissions: false }}
+        planMode="off"
+        onPermissionConfigChange={onPermissionConfigChange}
+        onPlanModeChange={onPlanModeChange}
+        onModeChange={onModeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('opencode-auto-approve-toggle'));
+    expect(onModeChange).toHaveBeenCalledWith({ kind: 'opencode', autoApprovePermissions: true }, 'off');
+    expect(onPermissionConfigChange).not.toHaveBeenCalled();
+
+    rerender(
+      <AgentPermissionSelector
+        agentKind="opencode"
+        permissionConfig={{ kind: 'opencode', autoApprovePermissions: true }}
+        planMode="off"
+        onPermissionConfigChange={onPermissionConfigChange}
+        onPlanModeChange={onPlanModeChange}
+        onModeChange={onModeChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('opencode-auto-approve-toggle'));
+    expect(onModeChange).toHaveBeenLastCalledWith({ kind: 'opencode', autoApprovePermissions: false }, 'off');
   });
 
   it('shows unknown native permission type and description without rewriting the raw values', () => {

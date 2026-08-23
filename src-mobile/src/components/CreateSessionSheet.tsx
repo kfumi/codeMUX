@@ -12,7 +12,6 @@ import {
 import type { CompanionConnection } from '../lib/storage';
 import { cn } from '../lib/utils';
 import {
-  buildDefaultPermissionConfig,
   mapExecutionModeToPermissionConfig,
   resolveEffectivePermissionConfig,
   type AgentExecutionMode,
@@ -50,8 +49,8 @@ const PERMISSION_OPTIONS: Record<'claude_code' | 'codex' | 'opencode', Array<{ m
     { mode: 'full_access', label: '完全访问' },
   ],
   opencode: [
+    { mode: 'confirm_before_edit', label: '构建模式' },
     { mode: 'plan', label: '计划模式' },
-    { mode: 'full_access', label: '完全访问' },
   ],
 };
 
@@ -100,14 +99,9 @@ export function CreateSessionSheet({
     const provider = resolveDefaultProvider(bootstrap, agentKind);
     setProviderId(provider?.id ?? '');
     setModel(provider?.defaultModel || provider?.models[0]?.id || '');
-    const defaultConfig = buildDefaultPermissionConfig(agentKind as AgentKind);
     const defaultMode = PERMISSION_OPTIONS[agentKind][0]?.mode ?? 'confirm_before_edit';
     setPermissionMode(defaultMode);
-    if (agentKind === 'opencode' && defaultConfig.kind === 'opencode' && defaultConfig.permissionMode === 'plan') {
-      setPlanMode('on');
-    } else {
-      setPlanMode('off');
-    }
+    setPlanMode(defaultMode === 'plan' ? 'on' : 'off');
   }, [agentKind, bootstrap]);
 
   useEffect(() => {
