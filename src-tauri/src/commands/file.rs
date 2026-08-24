@@ -357,28 +357,61 @@ fn resolve_secure_path_for_write(
     Ok(full_path)
 }
 
+/// Resolve and validate a directory path before opening it in the system file explorer.
+fn resolve_explorer_directory(path: &str) -> Result<std::path::PathBuf, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+        return Err("无效路径".to_string());
+    }
+
+    let canonical = std::path::Path::new(trimmed)
+        .canonicalize()
+        .map_err(|_| format!("目录不存在: {}", trimmed))?;
+
+    if !canonical.is_dir() {
+        return Err(format!("不是目录: {}", trimmed));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let mut text = canonical.to_string_lossy().to_string();
+        if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+            text = format!(r"\\{}", rest);
+        } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+            text = rest.to_string();
+        }
+        return Ok(std::path::PathBuf::from(text));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(canonical)
+    }
+}
+
 /// Open a directory in the system file explorer.
 #[tauri::command]
 pub fn open_in_explorer(path: String) -> Result<(), String> {
-    info!(target: "file", "Opening in explorer path={}", path);
+    let canonical = resolve_explorer_directory(&path)?;
+    info!(target: "file", "Opening in explorer path={}", canonical.display());
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("explorer")
-            .arg(&path)
+            .arg(canonical.to_string_lossy().to_string())
             .spawn()
             .map_err(|e| format!("Failed to open explorer: {}", e))?;
     }
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
-            .arg(&path)
+            .arg(&canonical)
             .spawn()
             .map_err(|e| format!("Failed to open finder: {}", e))?;
     }
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
-            .arg(&path)
+            .arg(&canonical)
             .spawn()
             .map_err(|e| format!("Failed to open file manager: {}", e))?;
     }
@@ -629,12 +662,26 @@ fn resolve_secure_home_path(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_open_project_command, build_open_project_commands, resolve_secure_home_path,
+        build_open_project_command, build_open_project_commands, resolve_explorer_directory,
+        resolve_secure_home_path,
     };
     fn temp_home() -> std::path::PathBuf {
         let home = std::env::temp_dir().join(format!("codemux-home-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&home).unwrap();
         home
+    }
+
+    #[test]
+    fn resolve_explorer_directory_rejects_dot() {
+        assert!(resolve_explorer_directory(".").is_err());
+        assert!(resolve_explorer_directory("").is_err());
+    }
+
+    #[test]
+    fn resolve_explorer_directory_accepts_existing_directory() {
+        let home = temp_home();
+        let resolved = resolve_explorer_directory(&home.to_string_lossy()).unwrap();
+        assert!(resolved.is_dir());
     }
 
     #[test]

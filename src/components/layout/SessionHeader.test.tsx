@@ -7,6 +7,7 @@ import type { Project } from '../../types/project';
 import type { Session } from '../../types/session';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
+import { useAgentStore } from '../../stores/agentStore';
 import { SessionHeader } from './SessionHeader';
 
 const mocks = vi.hoisted(() => ({
@@ -82,6 +83,10 @@ describe('SessionHeader', () => {
         writeText: vi.fn().mockResolvedValue(undefined),
       },
     });
+    useAgentStore.setState({
+      sessionWorkingPaths: {},
+      events: {},
+    });
     useProjectStore.setState({
       projects: [makeProject({})],
       activeProjectId: 'project-1',
@@ -120,6 +125,33 @@ describe('SessionHeader', () => {
     expect(screen.getByText('复制路径')).toBeTruthy();
     expect(screen.getByText('复制任务路径')).toBeTruthy();
     expect(screen.getByText('复制会话ID')).toBeTruthy();
+  });
+
+  it('shows the worktree path chip when the session cwd differs from the project root', () => {
+    useAgentStore.setState({
+      sessionWorkingPaths: {
+        'session-1': 'C:\\Users\\me\\.codemux\\worktrees\\abc123\\shaggy-baboon',
+      },
+    });
+
+    render(<SessionHeader sessionId="session-1" />);
+
+    expect(screen.getByText('shaggy-baboon')).toBeTruthy();
+  });
+
+  it('opens the remembered worktree path from the session menu', async () => {
+    useAgentStore.setState({
+      sessionWorkingPaths: {
+        'session-1': 'C:\\Users\\me\\.codemux\\worktrees\\abc123\\shaggy-baboon',
+      },
+    });
+
+    openMenu();
+    fireEvent.click(screen.getByText('在资源管理器中打开'));
+
+    expect(mocks.openInExplorer).toHaveBeenCalledWith({
+      path: 'C:\\Users\\me\\.codemux\\worktrees\\abc123\\shaggy-baboon',
+    });
   });
 
   it('handles pin, unread, project path, task path, agent id, and archive actions', async () => {

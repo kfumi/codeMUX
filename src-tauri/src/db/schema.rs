@@ -29,6 +29,7 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             is_read_only INTEGER NOT NULL DEFAULT 0,
             is_archived INTEGER NOT NULL DEFAULT 0,
             is_pinned INTEGER NOT NULL DEFAULT 0,
+            working_path TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
@@ -243,6 +244,13 @@ pub fn initialize_database(conn: &Connection) -> Result<()> {
             "ALTER TABLE sessions ADD COLUMN pending_switch_briefing TEXT",
             [],
         );
+    }
+
+    let has_working_path: bool = conn
+        .prepare("SELECT working_path FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_working_path {
+        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN working_path TEXT", []);
     }
 
     let _ = conn.execute("DROP TABLE IF EXISTS tool_calls", []);

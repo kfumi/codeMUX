@@ -20,6 +20,8 @@ import { CodeMuxAssistantRuntimeProvider } from './assistant-ui/CodeMuxAssistant
 import { CodeMuxComposer } from './assistant-ui/CodeMuxComposer';
 import { AgentModelSelector } from './AgentModelSelector';
 import { getProfileModelContextWindow } from './modelDisplay';
+import { DraftWorkspaceToolbar } from './DraftWorkspaceToolbar';
+import { resolveDraftProjectPath } from '../../lib/sessionCwd';
 
 interface NewSessionPanelProps {
   onSubmit: (input: AgentInputPayload) => Promise<void> | void;
@@ -49,6 +51,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     setSelectedPermissionConfig,
     setSelectedPlanMode,
     draftProjectId,
+    draftWorkspace,
   } = useNewSessionStore();
   const projects = useProjectStore((state) => state.projects);
   const config = useSettingsStore((s) => s.config);
@@ -105,10 +108,14 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     () => projects.find((project) => project.id === draftProjectId) ?? null,
     [draftProjectId, projects],
   );
+  const draftProjectPath = useMemo(
+    () => resolveDraftProjectPath(projects, draftProjectId, draftWorkspace),
+    [draftProjectId, draftWorkspace, projects],
+  );
   const projectName = draftProject?.name ?? '';
   const projectSkillEntry = useProjectSkillStore((state) => (
-    draftProject?.path
-      ? state.entries[projectSkillCacheKey(draftProject.path, selectedAgentKind)]
+    draftProjectPath
+      ? state.entries[projectSkillCacheKey(draftProjectPath, selectedAgentKind)]
       : undefined
   ));
   const projectSkills = projectSkillEntry?.skills ?? [];
@@ -121,17 +128,17 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
   }, [selectedAgent]);
 
   useEffect(() => {
-    if (draftProject?.path) {
-      setProjectPath(draftProject.path);
+    if (draftProjectPath) {
+      setProjectPath(draftProjectPath);
     } else {
       setProjectPath(null);
       usePreviewStore.setState({ treeRoot: null, treeRootPath: null });
     }
-  }, [draftProject?.path, setProjectPath]);
+  }, [draftProjectPath, setProjectPath]);
 
   useEffect(() => {
-    void loadProjectSkills(draftProject?.path, selectedAgentKind);
-  }, [draftProject?.path, loadProjectSkills, selectedAgentKind]);
+    void loadProjectSkills(draftProjectPath, selectedAgentKind);
+  }, [draftProjectPath, loadProjectSkills, selectedAgentKind]);
 
   useEffect(() => {
     const configured = selectedAgentKind === 'codex'
@@ -211,7 +218,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
     if (command.handler === 'local' && command.action) {
       const context: CommandContext = {
         sessionId: NEW_SESSION_DRAFT_SESSION_ID,
-        cwd: draftProject?.path ?? '',
+        cwd: draftProjectPath ?? '',
         showInfoDialog: () => {},
         createSession: async () => {},
         clearEvents,
@@ -263,7 +270,7 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
                 hasUsableProvider={hasUsableProvider}
                 isLoadingModel={areModelsLoading}
                 hasModel={Boolean(effectiveModel)}
-                hasWorkspace={Boolean(draftProject?.path)}
+                hasWorkspace={Boolean(draftProjectPath)}
               />
               <div className="flex flex-wrap justify-center gap-2">
                 {(STARTER_PROMPTS[selectedAgentKind] ?? STARTER_PROMPTS.claude_code).map((prompt) => (
@@ -280,11 +287,13 @@ export function NewSessionPanel({ onSubmit }: NewSessionPanelProps) {
               </div>
             </div>
 
+            <DraftWorkspaceToolbar />
+
             <CodeMuxComposer
               key={draftRevision}
               sessionId={NEW_SESSION_DRAFT_SESSION_ID}
               agentKind={selectedAgentKind}
-              projectPath={draftProject?.path}
+              projectPath={draftProjectPath}
               projectSkills={projectSkills}
               configuredContextWindow={configuredContextWindow}
               placeholder={placeholder}

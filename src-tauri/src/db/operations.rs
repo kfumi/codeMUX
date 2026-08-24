@@ -20,6 +20,31 @@ fn validate_agent_kind(value: &str) -> Result<AgentKind> {
     })
 }
 
+const SESSION_LIST_SELECT: &str = "id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at, working_path, (SELECT parent_session_id FROM session_lineage WHERE child_session_id = sessions.id)";
+
+fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
+    Ok(Session {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        agent_kind: validate_agent_kind(&row.get::<_, String>(2)?)?,
+        provider_id: row.get(3)?,
+        model: row.get(4)?,
+        reasoning_effort: row.get(5)?,
+        mode: row.get(6)?,
+        permission_config: row.get(7)?,
+        plan_mode: row.get(8)?,
+        project_id: row.get(9)?,
+        origin: row.get(10)?,
+        is_read_only: row.get::<_, i32>(11)? != 0,
+        is_archived: row.get::<_, i32>(12)? != 0,
+        is_pinned: row.get::<_, i32>(13)? != 0,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
+        working_path: row.get(16)?,
+        parent_session_id: row.get(17)?,
+    })
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Project {
     pub id: String,
@@ -45,6 +70,7 @@ pub struct Session {
     pub is_read_only: bool,
     pub is_archived: bool,
     pub is_pinned: bool,
+    pub working_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub parent_session_id: Option<String>,
@@ -184,6 +210,7 @@ pub fn create_session_with_mode_and_permissions(
         is_read_only: false,
         is_archived: false,
         is_pinned: false,
+        working_path: None,
         created_at: now.clone(),
         updated_at: now,
         parent_session_id: None,
@@ -226,6 +253,7 @@ pub fn create_session_for_project_with_permissions(
         is_read_only: false,
         is_archived: false,
         is_pinned: false,
+        working_path: None,
         created_at: now.clone(),
         updated_at: now,
         parent_session_id: None,
@@ -233,32 +261,14 @@ pub fn create_session_for_project_with_permissions(
 }
 
 pub fn get_session(conn: &Connection, session_id: &str) -> Result<Option<Session>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at, (SELECT parent_session_id FROM session_lineage WHERE child_session_id = sessions.id) FROM sessions WHERE id = ?1 LIMIT 1",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SESSION_LIST_SELECT} FROM sessions WHERE id = ?1 LIMIT 1"
+    ))?;
     let mut rows = stmt.query([session_id])?;
     let Some(row) = rows.next()? else {
         return Ok(None);
     };
-    Ok(Some(Session {
-        id: row.get(0)?,
-        title: row.get(1)?,
-        agent_kind: validate_agent_kind(&row.get::<_, String>(2)?)?,
-        provider_id: row.get(3)?,
-        model: row.get(4)?,
-        reasoning_effort: row.get(5)?,
-        mode: row.get(6)?,
-        permission_config: row.get(7)?,
-        plan_mode: row.get(8)?,
-        project_id: row.get(9)?,
-        origin: row.get(10)?,
-        is_read_only: row.get::<_, i32>(11)? != 0,
-        is_archived: row.get::<_, i32>(12)? != 0,
-        is_pinned: row.get::<_, i32>(13)? != 0,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
-        parent_session_id: row.get(16)?,
-    }))
+    Ok(Some(map_session_row(row)?))
 }
 
 pub fn create_forked_session(
@@ -280,8 +290,8 @@ pub fn create_forked_session(
         "INSERT INTO sessions (
             id, title, agent_kind, provider_id, model, reasoning_effort, mode,
             permission_config, plan_mode, project_id, origin, is_read_only,
-            is_archived, is_pinned, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'native', 0, 0, 0, ?11, ?11)",
+            is_archived, is_pinned, working_path, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'native', 0, 0, 0, ?11, ?12, ?12)",
         params![
             child_id,
             title,
@@ -293,6 +303,7 @@ pub fn create_forked_session(
             source.permission_config.as_deref().unwrap_or(""),
             source.plan_mode.as_deref().unwrap_or("off"),
             source.project_id.as_deref(),
+            source.working_path.as_deref(),
             &now,
         ],
     )?;
@@ -348,10 +359,29 @@ pub fn create_forked_session(
         is_read_only: false,
         is_archived: false,
         is_pinned: false,
+        working_path: source.working_path,
         created_at: now.clone(),
         updated_at: now,
         parent_session_id: Some(source_session_id.to_string()),
     })
+}
+
+pub fn update_session_working_path(
+    conn: &Connection,
+    session_id: &str,
+    working_path: &str,
+) -> Result<()> {
+    let trimmed = working_path.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE sessions SET working_path = ?1, updated_at = ?2 WHERE id = ?3",
+        params![trimmed, now, session_id],
+    )?;
+    Ok(())
 }
 
 pub fn get_imported_source(
@@ -622,60 +652,24 @@ pub fn get_session_message_attachments(
 }
 
 pub fn get_all_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at, (SELECT parent_session_id FROM session_lineage WHERE child_session_id = sessions.id) FROM sessions WHERE is_archived = 0 ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SESSION_LIST_SELECT} FROM sessions WHERE is_archived = 0 ORDER BY updated_at DESC"
+    ))?;
 
     let sessions = stmt
-        .query_map([], |row| {
-            Ok(Session {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                agent_kind: validate_agent_kind(&row.get::<_, String>(2)?)?,
-                provider_id: row.get(3)?,
-                model: row.get(4)?,
-                reasoning_effort: row.get(5)?,
-                mode: row.get(6)?,
-                permission_config: row.get(7)?,
-                plan_mode: row.get(8)?,
-                project_id: row.get(9)?,
-                origin: row.get(10)?,
-                is_read_only: row.get::<_, i32>(11)? != 0,
-                is_archived: row.get::<_, i32>(12)? != 0,
-                is_pinned: row.get::<_, i32>(13)? != 0,
-                created_at: row.get(14)?,
-                updated_at: row.get(15)?,
-                parent_session_id: row.get(16)?,
-            })
-        })?
+        .query_map([], map_session_row)?
         .collect::<Result<Vec<_>>>()?;
 
     Ok(sessions)
 }
 
 pub fn get_all_archived_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare("SELECT id, title, agent_kind, provider_id, model, reasoning_effort, mode, permission_config, plan_mode, project_id, origin, is_read_only, is_archived, is_pinned, created_at, updated_at, (SELECT parent_session_id FROM session_lineage WHERE child_session_id = sessions.id) FROM sessions WHERE is_archived = 1 ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SESSION_LIST_SELECT} FROM sessions WHERE is_archived = 1 ORDER BY updated_at DESC"
+    ))?;
 
     let sessions = stmt
-        .query_map([], |row| {
-            Ok(Session {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                agent_kind: validate_agent_kind(&row.get::<_, String>(2)?)?,
-                provider_id: row.get(3)?,
-                model: row.get(4)?,
-                reasoning_effort: row.get(5)?,
-                mode: row.get(6)?,
-                permission_config: row.get(7)?,
-                plan_mode: row.get(8)?,
-                project_id: row.get(9)?,
-                origin: row.get(10)?,
-                is_read_only: row.get::<_, i32>(11)? != 0,
-                is_archived: row.get::<_, i32>(12)? != 0,
-                is_pinned: row.get::<_, i32>(13)? != 0,
-                created_at: row.get(14)?,
-                updated_at: row.get(15)?,
-                parent_session_id: row.get(16)?,
-            })
-        })?
+        .query_map([], map_session_row)?
         .collect::<Result<Vec<_>>>()?;
 
     Ok(sessions)

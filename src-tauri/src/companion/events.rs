@@ -1,29 +1,12 @@
 use log::warn;
 use tauri::{AppHandle, Manager};
 
+use crate::agent::snapshot_persist::{
+    append_domain_events, is_code_mux_domain_event, should_persist_domain_event,
+};
 use crate::companion::actions::send_companion_message;
 use crate::companion::state::CompanionBroadcastEvent;
 use crate::companion::CompanionState;
-
-const CODE_MUX_DOMAIN_EVENT_TYPES: &[&str] = &[
-    "content_started",
-    "text_delta",
-    "reasoning_delta",
-    "tool_input_delta",
-    "content_finished",
-    "user_message",
-    "assistant_message",
-    "tool_started",
-    "tool_finished",
-    "user_input_requested",
-    "permission_requested",
-    "permission_resolved",
-    "permission_mode_changed",
-    "system_event",
-    "diagnostic",
-    "error",
-    "turn_finished",
-];
 
 pub fn handle_sidecar_event_for_companion(app: &AppHandle, raw_event: &str) {
     let companion_state = app.state::<CompanionState>();
@@ -54,11 +37,12 @@ pub fn handle_sidecar_event_for_companion(app: &AppHandle, raw_event: &str) {
             .collect();
         let persistable_events: Vec<serde_json::Value> = all_domain_events
             .iter()
-            .filter(|event| should_persist_companion_domain_event(event))
+            .filter(|event| should_persist_domain_event(event))
             .cloned()
             .collect();
         if !persistable_events.is_empty() {
-            persist_domain_events(app, session_id, &persistable_events);
+            let app_state = app.state::<crate::AppState>();
+            append_domain_events(app_state.inner(), session_id, &persistable_events);
         }
         for event in all_domain_events {
             maybe_finish_turn_and_drain_queue(app, session_id, &event);
@@ -67,7 +51,7 @@ pub fn handle_sidecar_event_for_companion(app: &AppHandle, raw_event: &str) {
         return;
     }
 
-    if !should_persist_companion_domain_event(&value) {
+    if !should_persist_domain_event(&value) {
         if is_code_mux_domain_event(&value) {
             let session_id = value
                 .get("session_id")
@@ -85,7 +69,8 @@ pub fn handle_sidecar_event_for_companion(app: &AppHandle, raw_event: &str) {
         .and_then(|item| item.as_str())
         .unwrap_or("")
         .to_string();
-    persist_domain_events(app, &session_id, std::slice::from_ref(&value));
+    let app_state = app.state::<crate::AppState>();
+    append_domain_events(app_state.inner(), &session_id, std::slice::from_ref(&value));
     maybe_finish_turn_and_drain_queue(app, &session_id, &value);
     broadcast_event(&companion_state, &session_id, value);
 }
@@ -138,51 +123,9 @@ fn broadcast_event(companion_state: &CompanionState, session_id: &str, event: se
     let _ = companion_state.inner.event_tx.send(payload);
 }
 
-fn persist_domain_events(app: &AppHandle, session_id: &str, events: &[serde_json::Value]) {
-    if session_id.is_empty() || events.is_empty() {
-        return;
-    }
-
-    let app_state = app.state::<crate::AppState>();
-    let mut db = match app_state.db.lock() {
-        Ok(db) => db,
-        Err(_) => return,
-    };
-
-    if let Err(error) = crate::db::operations::append_snapshot_events(&mut db, session_id, events) {
-        warn!(
-            target: "companion",
-            "Failed to persist snapshot events for session_id={}: {}",
-            session_id,
-            error
-        );
-    }
-}
-
-fn is_code_mux_domain_event(value: &serde_json::Value) -> bool {
-    let Some(event_type) = value.get("type").and_then(|item| item.as_str()) else {
-        return false;
-    };
-    CODE_MUX_DOMAIN_EVENT_TYPES.contains(&event_type)
-}
-
-fn should_persist_companion_domain_event(value: &serde_json::Value) -> bool {
-    if !is_code_mux_domain_event(value) {
-        return false;
-    }
-    if value.get("type").and_then(|item| item.as_str()) != Some("system_event") {
-        return true;
-    }
-    let subtype = value
-        .get("subtype")
-        .and_then(|item| item.as_str())
-        .unwrap_or_default();
-    !matches!(subtype, "connected" | "retrying" | "disconnected")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{is_code_mux_domain_event, should_persist_companion_domain_event};
+    use crate::agent::snapshot_persist::{is_code_mux_domain_event, should_persist_domain_event};
 
     #[test]
     fn recognizes_codemux_domain_events() {
@@ -204,7 +147,7 @@ mod tests {
             "status": "connected"
         });
         assert!(is_code_mux_domain_event(&event));
-        assert!(!should_persist_companion_domain_event(&event));
+        assert!(!should_persist_domain_event(&event));
     }
 
     #[test]
@@ -214,6 +157,6 @@ mod tests {
             "subtype": "session_summary",
             "diffs": []
         });
-        assert!(should_persist_companion_domain_event(&event));
+        assert!(should_persist_domain_event(&event));
     }
 }

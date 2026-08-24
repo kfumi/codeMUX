@@ -2,6 +2,7 @@ use crate::config::types::{AppConfig, Provider};
 use crate::AppState;
 use encoding_rs::GBK;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -58,6 +59,16 @@ pub struct GitRepositoryState {
     pub has_uncommitted_changes: bool,
     pub ahead_count: usize,
     pub has_unpushed_commits: bool,
+    pub upstream_branch: Option<String>,
+    pub upstream_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWorktree {
+    pub path: String,
+    pub branch: Option<String>,
+    pub is_main: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -536,6 +547,7 @@ pub fn read_git_repository_state(project_path: &Path) -> Result<GitRepositorySta
         current_branch.is_none() && run_git(&root, &["rev-parse", "--short", "HEAD"]).is_ok();
 
     let ahead_count = read_ahead_count(&root, current_branch.as_deref())?;
+    let (upstream_branch, upstream_ref) = read_upstream_tracking(&root)?;
 
     Ok(GitRepositoryState {
         current_branch,
@@ -544,7 +556,43 @@ pub fn read_git_repository_state(project_path: &Path) -> Result<GitRepositorySta
         has_uncommitted_changes: has_uncommitted_changes(&root)?,
         ahead_count,
         has_unpushed_commits: ahead_count > 0,
+        upstream_branch,
+        upstream_ref,
     })
+}
+
+fn read_upstream_tracking(root: &Path) -> Result<(Option<String>, Option<String>), String> {
+    if run_git(root, &["rev-parse", "--verify", "HEAD"]).is_err() {
+        return Ok((None, None));
+    }
+
+    let upstream_ref_output = run_git(root, &["rev-parse", "--symbolic-full-name", "@{u}"]);
+    let upstream_ref = match upstream_ref_output {
+        Ok(output) => {
+            let text = String::from_utf8_lossy(&output).trim().to_string();
+            if text.is_empty() {
+                None
+            } else {
+                Some(text)
+            }
+        }
+        Err(_) => None,
+    };
+
+    let upstream_branch_output = run_git(root, &["rev-parse", "--abbrev-ref", "@{u}"]);
+    let upstream_branch = match upstream_branch_output {
+        Ok(output) => {
+            let text = String::from_utf8_lossy(&output).trim().to_string();
+            if text.is_empty() || text == "@{u}" {
+                None
+            } else {
+                Some(text)
+            }
+        }
+        Err(_) => None,
+    };
+
+    Ok((upstream_branch, upstream_ref))
 }
 
 pub fn create_git_branch_in_project(
@@ -581,6 +629,181 @@ pub fn checkout_git_branch_in_project(
         return Err("请先提交或还原当前修改，再切换分支".to_string());
     }
     run_git(&root, &["checkout", &branch_name]).map(|_| ())
+}
+
+fn resolve_git_root(project_path: &Path) -> Result<PathBuf, String> {
+    let root = project_path
+        .canonicalize()
+        .map_err(|e| format!("Project path not found: {}", e))?;
+    if !is_inside_git_repo(&root) {
+        return Err("当前项目不是 Git 仓库".to_string());
+    }
+    let output = run_git(&root, &["rev-parse", "--show-toplevel"])?;
+    let text = String::from_utf8_lossy(&output).trim().to_string();
+    if text.is_empty() {
+        return Err("无法解析 Git 仓库根目录".to_string());
+    }
+    PathBuf::from(&text)
+        .canonicalize()
+        .map_err(|e| format!("Git 根目录不存在: {}", e))
+}
+
+fn normalize_path_for_compare(path: &str) -> String {
+    path.replace('\\', "/").trim_end_matches('/').to_lowercase()
+}
+
+fn branch_exists(root: &Path, branch_name: &str) -> bool {
+    run_git(
+        root,
+        &[
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch_name}"),
+        ],
+    )
+    .is_ok()
+}
+
+fn resolve_worktree_base_ref(root: &Path, base_branch: Option<&str>) -> Result<String, String> {
+    let Some(base) = base_branch.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok("HEAD".to_string());
+    };
+    if branch_exists(root, base) {
+        return Ok(base.to_string());
+    }
+    if run_git(root, &["rev-parse", "--verify", base]).is_ok() {
+        return Ok(base.to_string());
+    }
+    Err(format!("基准分支不存在: {base}"))
+}
+
+pub fn list_git_worktrees_in_project(project_path: &Path) -> Result<Vec<GitWorktree>, String> {
+    let root = resolve_git_root(project_path)?;
+    let output = run_git(&root, &["worktree", "list", "--porcelain"])?;
+    let text = String::from_utf8_lossy(&output);
+    let main_path = path_to_display_string(&root);
+    let main_compare = normalize_path_for_compare(&main_path);
+
+    let mut worktrees = Vec::new();
+    let mut current_path: Option<String> = None;
+    let mut current_branch: Option<String> = None;
+
+    for line in text.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            if let Some(path) = current_path.take() {
+                let branch = current_branch.take();
+                let path_display = path_to_display_string(Path::new(&path));
+                worktrees.push(GitWorktree {
+                    is_main: normalize_path_for_compare(&path_display) == main_compare,
+                    path: path_display,
+                    branch,
+                });
+            }
+            current_path = Some(path.to_string());
+            current_branch = None;
+        } else if let Some(branch) = line.strip_prefix("branch ") {
+            current_branch = Some(
+                branch
+                    .trim()
+                    .trim_start_matches("refs/heads/")
+                    .to_string(),
+            );
+        }
+    }
+
+    if let Some(path) = current_path {
+        let path_display = path_to_display_string(Path::new(&path));
+        worktrees.push(GitWorktree {
+            is_main: normalize_path_for_compare(&path_display) == main_compare,
+            path: path_display,
+            branch: current_branch,
+        });
+    }
+
+    Ok(worktrees)
+}
+
+fn worktree_project_hash(repo_root: &Path) -> String {
+    let canonical = repo_root
+        .canonicalize()
+        .unwrap_or_else(|_| repo_root.to_path_buf());
+    let canonical = path_to_display_string(&canonical).to_lowercase();
+    let digest = Sha256::digest(canonical.as_bytes());
+    format!("{:x}", digest)[..16].to_string()
+}
+
+fn codemux_home_dir() -> Result<PathBuf, String> {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| "无法解析用户主目录".to_string())?;
+    Ok(PathBuf::from(home).join(".codemux"))
+}
+
+fn resolve_codemux_worktrees_dir(repo_root: &Path, codemux_home: &Path) -> PathBuf {
+    codemux_home
+        .join("worktrees")
+        .join(worktree_project_hash(repo_root))
+}
+
+fn resolve_worktree_path(
+    repo_root: &Path,
+    branch_name: &str,
+    codemux_home: Option<&Path>,
+) -> Result<PathBuf, String> {
+    let folder_name = branch_name.replace('/', "-");
+    let worktrees_dir = if let Some(codemux_home) = codemux_home {
+        resolve_codemux_worktrees_dir(repo_root, codemux_home)
+    } else {
+        repo_root.join(".worktrees")
+    };
+    std::fs::create_dir_all(&worktrees_dir)
+        .map_err(|e| format!("无法创建 worktree 目录: {}", e))?;
+    Ok(worktrees_dir.join(folder_name))
+}
+
+pub fn create_git_worktree_in_project(
+    project_path: &Path,
+    branch_name: &str,
+    base_branch: Option<&str>,
+    codemux_home: Option<&Path>,
+) -> Result<GitWorktree, String> {
+    let root = resolve_git_root(project_path)?;
+    let branch_name = validate_branch_name(&root, &branch_name)?;
+    let worktree_path = resolve_worktree_path(&root, &branch_name, codemux_home)?;
+    if worktree_path.exists() {
+        return Err(format!(
+            "工作树路径已存在: {}",
+            path_to_display_string(&worktree_path)
+        ));
+    }
+
+    let worktree_arg = path_to_display_string(&worktree_path);
+    if branch_exists(&root, &branch_name) {
+        run_git(
+            &root,
+            &["worktree", "add", &worktree_arg, &branch_name],
+        )?;
+    } else {
+        let base = resolve_worktree_base_ref(&root, base_branch)?;
+        run_git(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                &branch_name,
+                &worktree_arg,
+                &base,
+            ],
+        )?;
+    }
+
+    Ok(GitWorktree {
+        path: worktree_arg,
+        branch: Some(branch_name),
+        is_main: false,
+    })
 }
 
 fn is_untracked_file(root: &Path, relative_path: &str) -> Result<bool, String> {
@@ -1606,6 +1829,26 @@ pub fn checkout_git_branch(project_path: String, branch_name: String) -> Result<
 }
 
 #[tauri::command]
+pub fn list_git_worktrees(project_path: String) -> Result<Vec<GitWorktree>, String> {
+    list_git_worktrees_in_project(Path::new(&project_path))
+}
+
+#[tauri::command]
+pub fn create_git_worktree(
+    project_path: String,
+    branch_name: String,
+    base_branch: Option<String>,
+) -> Result<GitWorktree, String> {
+    let codemux_home = codemux_home_dir()?;
+    create_git_worktree_in_project(
+        Path::new(&project_path),
+        &branch_name,
+        base_branch.as_deref(),
+        Some(&codemux_home),
+    )
+}
+
+#[tauri::command]
 pub fn revert_git_status_changes(
     project_path: String,
     area: GitStatusArea,
@@ -1648,8 +1891,9 @@ mod tests {
         build_commit_message_prompt, build_commit_message_prompt_in_project,
         build_pull_request_prompt, checkout_git_branch_in_project, clean_commit_message,
         collect_pr_context, commit_git_changes_in_project, create_git_branch_in_project,
-        decode_text_bytes, detect_pr_base_branch, generate_pull_request_description_in_project,
-        parse_anthropic_commit_message_response, parse_openai_commit_message_response,
+        create_git_worktree_in_project, decode_text_bytes, detect_pr_base_branch,
+        generate_pull_request_description_in_project,
+        list_git_worktrees_in_project, parse_anthropic_commit_message_response, parse_openai_commit_message_response,
         parse_pull_request_suggestion, push_git_branch_in_project, read_git_changed_files_for_tree,
         read_git_repository_state, read_git_status_change_detail, read_git_status_changes,
         revert_git_status_changes_in_project, select_commit_message_provider,
@@ -1657,6 +1901,7 @@ mod tests {
     };
     use crate::config::types::AppConfig;
     use std::fs;
+    use std::path::Path;
     use std::process::Command;
 
     fn git_available() -> bool {
@@ -1830,6 +2075,64 @@ mod tests {
 
         let _ = fs::remove_dir_all(project);
         let _ = fs::remove_dir_all(remote);
+    }
+
+    #[test]
+    fn git_worktree_create_and_list() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+
+        let created = create_git_worktree_in_project(
+            &project,
+            "feature/worktree-test",
+            Some("HEAD"),
+            None,
+        )
+        .unwrap();
+
+        assert!(!created.is_main);
+        assert_eq!(created.branch.as_deref(), Some("feature/worktree-test"));
+        assert!(Path::new(&created.path).exists());
+
+        let worktrees = list_git_worktrees_in_project(&project).unwrap();
+        assert_eq!(worktrees.len(), 2);
+        assert!(worktrees.iter().any(|entry| entry.is_main));
+        assert!(worktrees.iter().any(|entry| entry.path == created.path));
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn git_worktree_create_outside_repo_when_codemux_home_is_set() {
+        if !git_available() {
+            return;
+        }
+
+        let project = temp_project();
+        init_project_with_commit(&project);
+        let codemux_home = std::env::temp_dir().join(format!(
+            "codemux-home-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+
+        let created = create_git_worktree_in_project(
+            &project,
+            "feature/external-worktree",
+            Some("HEAD"),
+            Some(&codemux_home),
+        )
+        .unwrap();
+
+        assert!(!created.path.contains(".worktrees"));
+        assert!(Path::new(&created.path).starts_with(&codemux_home.join("worktrees")));
+        assert!(Path::new(&created.path).exists());
+
+        let _ = fs::remove_dir_all(project);
+        let _ = fs::remove_dir_all(codemux_home);
     }
 
     #[test]

@@ -4,8 +4,11 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { agentApi } from '../../lib/tauri';
+import { resolveSessionWorkingPath } from '../../lib/sessionCwd';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
+import type { AgentMessage } from '../../stores/agentStore';
+import { useAgentStore } from '../../stores/agentStore';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
 import { Button } from '../ui/button';
@@ -15,6 +18,8 @@ import { TooltipHint } from '../ui/tooltip';
 interface SessionHeaderProps {
   sessionId: string;
 }
+
+const EMPTY_SESSION_EVENTS: AgentMessage[] = [];
 
 export function SessionHeader({ sessionId }: SessionHeaderProps) {
   const {
@@ -28,6 +33,14 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
 
   const session = sessions.find((entry) => entry.id === sessionId);
   const project = session?.project_id ? projects.find((entry) => entry.id === session.project_id) : null;
+  const sessionEvents = useAgentStore((state) => state.events[sessionId] ?? EMPTY_SESSION_EVENTS);
+  const rememberedWorkingPath = useAgentStore((state) => state.sessionWorkingPaths[sessionId] ?? null);
+  const workingPath = session
+    ? resolveSessionWorkingPath(session, projects, {
+      events: sessionEvents,
+      rememberedPath: rememberedWorkingPath,
+    })
+    : null;
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
@@ -54,6 +67,17 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
     toast.success('已复制');
   };
 
+  const handleOpenInExplorer = async () => {
+    if (!workingPath) {
+      return;
+    }
+    try {
+      await invoke('open_in_explorer', { path: workingPath });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const copyAgentSessionValue = async (field: 'agentSessionId' | 'messagePath') => {
     if (!session) return;
     const info = await agentApi.getSessionInfo(session.id, session.agent_kind);
@@ -76,14 +100,21 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
           </span>
         </TooltipHint>
       )}
-      {project && (
+      {workingPath ? (
+        <div className="hidden shrink-0 items-center gap-1.5 rounded-md border border-border/42 bg-[hsl(var(--surface-2))]/88 px-2 py-1 text-ui-meta text-foreground/68 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.03)] dark:border-[hsl(var(--surface-edge))]/72 dark:bg-[hsl(var(--surface-3))]/74 dark:text-foreground/76 dark:shadow-[inset_0_1px_0_hsl(var(--foreground)/0.045),0_8px_20px_-18px_hsl(var(--surface-shadow-strong)/0.9)] min-[640px]:flex">
+          <FolderOpen className="h-3 w-3 shrink-0 text-foreground/54 dark:text-[hsl(var(--sidebar-accent))]/78" />
+          <TooltipHint content={workingPath}>
+            <span>{workingPath.split(/[/\\]+/).filter(Boolean).at(-1) ?? workingPath}</span>
+          </TooltipHint>
+        </div>
+      ) : project ? (
         <div className="hidden shrink-0 items-center gap-1.5 rounded-md border border-border/42 bg-[hsl(var(--surface-2))]/88 px-2 py-1 text-ui-meta text-foreground/68 shadow-[inset_0_1px_0_hsl(var(--foreground)/0.03)] dark:border-[hsl(var(--surface-edge))]/72 dark:bg-[hsl(var(--surface-3))]/74 dark:text-foreground/76 dark:shadow-[inset_0_1px_0_hsl(var(--foreground)/0.045),0_8px_20px_-18px_hsl(var(--surface-shadow-strong)/0.9)] min-[640px]:flex">
           <FolderOpen className="h-3 w-3 shrink-0 text-foreground/54 dark:text-[hsl(var(--sidebar-accent))]/78" />
           <TooltipHint content={project.path}>
             <span>{project.path.split(/[/\\]+/).filter(Boolean).at(-1) ?? project.path}</span>
           </TooltipHint>
         </div>
-      )}
+      ) : null}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
@@ -109,19 +140,19 @@ export function SessionHeader({ sessionId }: SessionHeaderProps) {
           <DropdownMenuItem icon={<Mail className="h-3.5 w-3.5" />} onClick={() => markSessionUnread(sessionId)}>
             标记为未读
           </DropdownMenuItem>
-          {project && (
+          {workingPath ? (
             <>
               <DropdownMenuItem
                 icon={<FolderOpen className="h-3.5 w-3.5" />}
-                onClick={() => void invoke('open_in_explorer', { path: project.path })}
+                onClick={() => void handleOpenInExplorer()}
               >
                 在资源管理器中打开
               </DropdownMenuItem>
-              <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyText(project.path)}>
+              <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyText(workingPath)}>
                 复制路径
               </DropdownMenuItem>
             </>
-          )}
+          ) : null}
           {session?.agent_kind !== 'opencode' && (
             <DropdownMenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void copyAgentSessionValue('messagePath')}>
               复制任务路径

@@ -1,6 +1,9 @@
 import { useState } from 'react';
-import { Archive, Loader2, LockKeyhole, Pencil, Pin, PinOff, Trash2, Undo2 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { Archive, Loader2, LockKeyhole, FolderOpen, Pencil, Pin, PinOff, Trash2, Undo2 } from 'lucide-react';
+import { toast } from 'sonner';
 
+import { resolveSessionWorkingPath } from '../../lib/sessionCwd';
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui/context-menu';
@@ -10,6 +13,7 @@ import { cn } from '../../lib/utils';
 import type { AgentPermissionRequest } from '../../types/agent';
 import { getAgentDefinition, type AgentDefinition } from '../../types/agentRegistry';
 import { useAgentStore, type AgentMessage } from '../../stores/agentStore';
+import { useProjectStore } from '../../stores/projectStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import type { Session } from '../../types/session';
 
@@ -117,6 +121,18 @@ export function SessionItem({
     state.events[session.id] ?? EMPTY_EVENTS,
     state.pendingPermissions[session.id] ?? EMPTY_PERMISSIONS,
   ));
+  const sessionEvents = useAgentStore((state) => state.events[session.id] ?? EMPTY_EVENTS);
+  const rememberedWorkingPath = useAgentStore((state) => state.sessionWorkingPaths[session.id] ?? null);
+  const projects = useProjectStore((state) => state.projects);
+  const latestSession = useSessionStore((state) => (
+    state.sessions.find((entry) => entry.id === session.id)
+    ?? state.archivedSessions.find((entry) => entry.id === session.id)
+    ?? session
+  ));
+  const workingPath = resolveSessionWorkingPath(latestSession, projects, {
+    events: sessionEvents,
+    rememberedPath: rememberedWorkingPath,
+  });
   const timeLabel = formatRelativeTime(session.updated_at);
   const ArchiveIcon = archiveIcon === 'archive' ? Archive : Undo2;
   const PinIcon = session.is_pinned ? PinOff : Pin;
@@ -144,6 +160,17 @@ export function SessionItem({
 
   const handleDelete = () => {
     window.setTimeout(() => setConfirmOpen(true), 0);
+  };
+
+  const handleOpenInExplorer = async () => {
+    if (!workingPath) {
+      return;
+    }
+    try {
+      await invoke('open_in_explorer', { path: workingPath });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
   };
 
   return (
@@ -242,6 +269,11 @@ export function SessionItem({
           <ContextMenuItem icon={<Pencil className="h-3.5 w-3.5" />} onClick={handleRenameStart}>
             重命名
           </ContextMenuItem>
+          {workingPath ? (
+            <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} onClick={handleOpenInExplorer}>
+              在资源管理器中打开
+            </ContextMenuItem>
+          ) : null}
           <ContextMenuItem icon={<ArchiveIcon className="h-3.5 w-3.5" />} onClick={handleArchive}>
             {archiveLabel}
           </ContextMenuItem>

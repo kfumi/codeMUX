@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { AgentKind, ReasoningEffort, Session, SessionMode } from '../types/session';
 import type { AgentPermissionConfig, AgentPlanMode } from '../lib/agentPermissions';
+import { isValidWorkingPath } from '../lib/sessionCwd';
 import { sessionApi, agentApi } from '../lib/tauri';
 import { useAgentStore } from './agentStore';
 import { useSettingsStore } from './settingsStore';
@@ -161,8 +162,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   fetchSessions: async () => {
     set({ isLoading: true, error: null });
     try {
-      const sessions = await sessionApi.getAll();
+      const rememberedPaths = useAgentStore.getState().sessionWorkingPaths;
+      const fetched = await sessionApi.getAll();
+      const sessions = fetched.map((session) => {
+        const remembered = rememberedPaths[session.id]?.trim();
+        if (isValidWorkingPath(remembered) && remembered !== session.working_path) {
+          return { ...session, working_path: remembered };
+        }
+        return session;
+      });
       set({ sessions, isLoading: false });
+      for (const session of sessions) {
+        const remembered = rememberedPaths[session.id]?.trim();
+        if (isValidWorkingPath(remembered) && remembered !== session.working_path) {
+          useAgentStore.getState().setSessionWorkingPath(session.id, remembered);
+        }
+      }
     } catch (error) {
       set({ error: String(error), isLoading: false });
     }

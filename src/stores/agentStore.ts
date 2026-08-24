@@ -4,6 +4,7 @@ import { createLogger, serializeError } from '../lib/logger';
 import {
   buildSessionTitleFromUserContent,
 } from '../lib/sessionTitle';
+import { extractSessionWorkingPathFromEvents, isValidWorkingPath } from '../lib/sessionCwd';
 import {
   isClaudeSubagentEvent,
   isClaudeCompactSummaryRawEvent,
@@ -22,6 +23,7 @@ import {
   type SessionSummaryEvent,
 } from './agentEventParsing';
 import { useSessionStore } from './sessionStore';
+import { useProjectStore } from './projectStore';
 import { normalizeFilePath, usePreviewStore } from './previewStore';
 import { useSettingsStore } from './settingsStore';
 import { countDiffLines } from '../lib/diffStats';
@@ -159,6 +161,10 @@ interface AgentState {
   /** Sessions whose history load IPC has completed at least once */
   /** Messages submitted while a turn is active, kept out of provider history until dispatched. */
   queuedQueries: Record<string, QueuedAgentQuery[]>;
+  /** Last known working directory per session (includes worktree paths). */
+  sessionWorkingPaths: Record<string, string>;
+  /** Remember the effective cwd for a session (e.g. worktree path). */
+  setSessionWorkingPath: (sessionId: string, cwd: string) => void;
   /** Queue is paused after an interruption or failed dispatch. */
   queuePaused: Record<string, boolean>;
   pendingPermissions: Record<string, AgentPermissionRequest[]>;
@@ -1300,6 +1306,62 @@ export function extractChangedFilesFromEvents(
   return allFiles;
 }
 
+const SESSION_WORKING_PATHS_KEY = 'codemux-session-working-paths';
+
+function loadSessionWorkingPaths(): Record<string, string> {
+  if (typeof localStorage === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = localStorage.getItem(SESSION_WORKING_PATHS_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>)
+        .filter((entry): entry is [string, string] => (
+          typeof entry[0] === 'string'
+          && typeof entry[1] === 'string'
+          && entry[1].trim().length > 0
+        )),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function persistSessionWorkingPaths(paths: Record<string, string>): void {
+  if (typeof localStorage === 'undefined') {
+    return;
+  }
+
+  try {
+    localStorage.setItem(SESSION_WORKING_PATHS_KEY, JSON.stringify(paths));
+  } catch {
+    // ignore quota errors
+  }
+}
+
+function updateSessionWorkingPaths(
+  paths: Record<string, string>,
+  sessionId: string,
+  cwd: string,
+): Record<string, string> {
+  const trimmed = cwd.trim();
+  if (!trimmed) {
+    return paths;
+  }
+
+  const next = { ...paths, [sessionId]: trimmed };
+  persistSessionWorkingPaths(next);
+  return next;
+}
+
 export const useAgentStore = create<AgentState>((set, get) => {
   const queuedDispatches = new Map<string, Promise<void>>();
 
@@ -1408,8 +1470,31 @@ export const useAgentStore = create<AgentState>((set, get) => {
   composerDrafts: {},
   pendingComposerRestore: {},
   queuedQueries: {},
+  sessionWorkingPaths: loadSessionWorkingPaths(),
   queuePaused: {},
   pendingPermissions: {},
+
+  setSessionWorkingPath: (sessionId, cwd) => {
+    const trimmed = cwd.trim();
+    if (!isValidWorkingPath(trimmed)) {
+      return;
+    }
+
+    set((state) => ({
+      sessionWorkingPaths: updateSessionWorkingPaths(state.sessionWorkingPaths, sessionId, trimmed),
+    }));
+    useSessionStore.setState((state) => ({
+      sessions: state.sessions.map((session) => (
+        session.id === sessionId ? { ...session, working_path: trimmed } : session
+      )),
+      archivedSessions: state.archivedSessions.map((session) => (
+        session.id === sessionId ? { ...session, working_path: trimmed } : session
+      )),
+    }));
+    void sessionApi.updateWorkingPath(sessionId, trimmed).catch((error) => {
+      logger.warn('Failed to persist session working path', { sessionId }, serializeError(error));
+    });
+  },
 
   startQuery: async (sessionId: string, prompt: string, cwd: string, reasoningEffort?: ReasoningEffort, displayContent?: string, inputPayload?: AgentInputPayload, modelForVision?: string, fromQueue = false) => {
     const targetSession = useSessionStore.getState().sessions.find((session) => session.id === sessionId)
@@ -1418,6 +1503,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
       set((state) => ({ error: { ...state.error, [sessionId]: '会话为只读，原生会话无法恢复' } }));
       return;
     }
+    get().setSessionWorkingPath(sessionId, cwd);
     const pendingHistoryLoad = pendingSessionMessageLoads.get(sessionId);
     if (pendingHistoryLoad) {
       await pendingHistoryLoad;
@@ -2555,6 +2641,13 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
         }
 
         const hydratedEvents = await hydrateSessionMessageAttachments(sessionId, events);
+        const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId)
+          ?? useSessionStore.getState().archivedSessions.find((entry) => entry.id === sessionId);
+        const projectPath = session?.project_id
+          ? useProjectStore.getState().projects.find((entry) => entry.id === session.project_id)?.path?.trim() ?? null
+          : null;
+        const rememberedCwd = extractSessionWorkingPathFromEvents(hydratedEvents);
+        const existingWorkingPath = get().sessionWorkingPaths[sessionId] ?? session?.working_path ?? null;
 
         set((state) => {
           const currentEvents = state.events[sessionId];
@@ -2570,6 +2663,14 @@ set((s) => ({ forceStopped: { ...s.forceStopped, [sessionId]: false } }));
             todos: { ...state.todos, [sessionId]: extractTodosFromEvents(nextEvents) },
           };
         });
+
+        if (
+          rememberedCwd
+          && !existingWorkingPath
+          && (!projectPath || rememberedCwd !== projectPath)
+        ) {
+          get().setSessionWorkingPath(sessionId, rememberedCwd);
+        }
         await get().refreshLatestTokenUsage(sessionId, 'restored');
         logger.info('Loaded session events from agent JSONL', {
           sessionId,

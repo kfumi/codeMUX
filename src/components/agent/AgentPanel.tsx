@@ -1,7 +1,7 @@
 import { Profiler, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
-import { getStoredAgentCwd } from '../../lib/sessionCwd';
+import { getStoredAgentCwd, resolveSessionWorkingPath } from '../../lib/sessionCwd';
 import { getProviderPrimaryModel } from '../../lib/agentProfileSelector';
 import { getActiveModelProvider, isProviderUsable } from '../../lib/modelProviders';
 import type { CommandContext, SlashCommand } from '../../lib/slashCommands';
@@ -13,6 +13,7 @@ import type { AgentInputPayload } from '../../types/agentInput';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '../../types/agent';
 import { agentApi, sessionApi } from '../../lib/tauri';
 import { useAgentStore } from '../../stores/agentStore';
+import type { AgentMessage } from '../../stores/agentStore';
 import { usePreviewStore } from '../../stores/previewStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { projectSkillCacheKey, useProjectSkillStore } from '@/stores/projectSkillStore';
@@ -44,6 +45,7 @@ interface AgentPanelProps {
 
 const EMPTY_PENDING_PERMISSIONS: AgentPermissionRequest[] = [];
 const EMPTY_PROJECT_SKILLS: ProjectSkill[] = [];
+const EMPTY_SESSION_EVENTS: AgentMessage[] = [];
 
 export function AgentPanel({ sessionId }: AgentPanelProps) {
   const { sessions, createSession, updateSessionPermissions, switchSessionAgentKind } = useSessionStore();
@@ -51,6 +53,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const startQuery = useAgentStore((state) => state.startQuery);
   const interrupt = useAgentStore((state) => state.interrupt);
   const loadSessionMessages = useAgentStore((state) => state.loadSessionMessages);
+  const sessionsLoading = useSessionStore((state) => state.isLoading);
   const clearEvents = useAgentStore((state) => state.clearEvents);
   const respondToPermission = useAgentStore((state) => state.respondToPermission);
   const pendingPermissions = useAgentStore((state) => state.pendingPermissions[sessionId] ?? EMPTY_PENDING_PERMISSIONS);
@@ -76,6 +79,17 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
 
   const session = sessions.find((entry) => entry.id === sessionId);
   const project = session?.project_id ? projects.find((entry) => entry.id === session.project_id) : null;
+  const sessionEvents = useAgentStore((state) => state.events[sessionId] ?? EMPTY_SESSION_EVENTS);
+  const rememberedWorkingPath = useAgentStore((state) => state.sessionWorkingPaths[sessionId] ?? null);
+  const workingPath = useMemo(() => {
+    if (!session) {
+      return null;
+    }
+    return resolveSessionWorkingPath(session, projects, {
+      events: sessionEvents,
+      rememberedPath: rememberedWorkingPath,
+    });
+  }, [session, projects, sessionEvents, rememberedWorkingPath]);
   const isReadOnly = Boolean(session?.is_read_only);
   const reasoningEffort = normalizeReasoningEffort(session?.reasoning_effort);
   const agentKind = session?.agent_kind ?? 'claude_code';
@@ -145,7 +159,10 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
   const [infoTitle, setInfoTitle] = useState('');
   const [infoContent, setInfoContent] = useState('');
   const [cwd, setCwd] = useState(() => getStoredAgentCwd());
+  const effectiveCwd = workingPath ?? cwd;
+  const pendingWorkingPath = Boolean(session?.working_path?.trim() && !workingPath);
   const ensuredSessionsRef = useRef<Set<string>>(new Set());
+  const [historyReady, setHistoryReady] = useState(false);
   const [pendingSwitchKind, setPendingSwitchKind] = useState<AgentKind | null>(null);
   const [isSwitchingAgent, setIsSwitchingAgent] = useState(false);
   const canSwitchAgent = !isRunning
@@ -155,36 +172,42 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     && (agentKind === 'claude_code' || agentKind === 'codex' || agentKind === 'opencode');
 
   useEffect(() => {
-    loadSessionMessages(sessionId);
+    setHistoryReady(false);
+    void loadSessionMessages(sessionId).finally(() => {
+      setHistoryReady(true);
+    });
   }, [sessionId, loadSessionMessages]);
 
   useEffect(() => {
-    if (project?.path) {
+    if (workingPath) {
+      setProjectPath(workingPath);
+    } else if (project?.path) {
       setProjectPath(project.path);
     } else {
       setProjectPath(null);
       usePreviewStore.setState({ treeRoot: null, treeRootPath: null });
     }
-  }, [project?.path, setProjectPath]);
+  }, [workingPath, project?.path, setProjectPath]);
 
   useEffect(() => {
-    if (project?.path) {
+    if (workingPath) {
+      setCwd(workingPath);
+    } else if (project?.path) {
       setCwd(project.path);
     } else {
       setCwd(getStoredAgentCwd());
     }
-  }, [sessionId, project?.path]);
+  }, [sessionId, workingPath, project?.path]);
 
   useEffect(() => {
     void loadProjectSkills(project?.path, agentKind);
   }, [agentKind, loadProjectSkills, project?.path]);
 
   useEffect(() => {
-    if (isRunning || isReadOnly) {
+    if (isRunning || isReadOnly || sessionsLoading || pendingWorkingPath || !historyReady) {
       return;
     }
 
-    const effectiveCwd = project?.path || cwd;
     const ensureKey = JSON.stringify({
       sessionId,
       agentKind,
@@ -206,7 +229,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     });
   }, [
     sessionId,
-    cwd,
+    effectiveCwd,
     project?.path,
     reasoningEffort,
     session?.permission_config,
@@ -216,13 +239,15 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     agentKind,
     isRunning,
     isReadOnly,
+    sessionsLoading,
+    pendingWorkingPath,
+    historyReady,
   ]);
 
   const handleSend = async (input: AgentInputPayload, displayContent = input.text) => {
     if (!hasUsableProvider || isReadOnly) {
       return;
     }
-    const effectiveCwd = project?.path || cwd;
     const latestSession = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId) ?? session;
     const latestReasoningEffort = normalizeReasoningEffort(latestSession?.reasoning_effort ?? reasoningEffort);
     const content = input.text;
@@ -272,7 +297,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
       // Re-ensure immediately so Codex resumes the same thread with the new
       // model before the next send, instead of waiting for startSession.
       if (!isRunning) {
-        const effectiveCwd = project?.path || cwd;
+        const effectiveCwd = workingPath ?? cwd;
         await agentApi.ensureSession(sessionId, effectiveCwd, undefined, reasoningEffort);
       }
     } catch (error) {
@@ -285,6 +310,7 @@ export function AgentPanel({ sessionId }: AgentPanelProps) {
     activeProviderId,
     agentKind,
     cwd,
+    workingPath,
     isProviderAgent,
     isReadOnly,
     isRunning,

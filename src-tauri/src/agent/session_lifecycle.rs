@@ -455,6 +455,10 @@ async fn ensure_sidecar_for_session(
             {
                 Ok(true) => continue,
                 Ok(false) => {
+                    crate::agent::snapshot_persist::handle_sidecar_snapshot_event(
+                        app_state.inner(),
+                        &event,
+                    );
                     let app_for_companion = app_handle.clone();
                     let event_for_companion = event.clone();
                     crate::companion::handle_sidecar_event_for_companion(
@@ -747,26 +751,46 @@ async fn handle_agent_session_mapping_event(
     Ok(persisted)
 }
 
-fn resolve_skill_cwd(
+fn resolve_session_cwd(
     state: &crate::AppState,
     session_id: &str,
     cwd: &str,
 ) -> Result<String, String> {
-    let (origin, imported_cwd) = {
+    let (working_path, origin, imported_cwd) = {
         let db = state.db.lock().unwrap();
         db.query_row(
-            "SELECT s.origin, ss.cwd FROM sessions s LEFT JOIN session_sources ss ON ss.app_session_id = s.id WHERE s.id = ?1 LIMIT 1",
+            "SELECT s.working_path, s.origin, ss.cwd FROM sessions s LEFT JOIN session_sources ss ON ss.app_session_id = s.id WHERE s.id = ?1 LIMIT 1",
             [session_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
         )
-        .map_err(|error| format!("无法读取会话来源信息: {}", error))?
+        .map_err(|error| format!("无法读取会话工作目录: {}", error))?
     };
+
     if origin == "imported" {
         if let Some(imported_cwd) = imported_cwd.filter(|value| !value.trim().is_empty()) {
             return Ok(imported_cwd);
         }
     }
+
+    if let Some(working_path) = working_path.filter(|value| !value.trim().is_empty()) {
+        return Ok(working_path);
+    }
+
     Ok(cwd.to_string())
+}
+
+fn resolve_skill_cwd(
+    state: &crate::AppState,
+    session_id: &str,
+    cwd: &str,
+) -> Result<String, String> {
+    resolve_session_cwd(state, session_id, cwd)
 }
 
 async fn preload_project_skills(project_root: String, agent_kind: &str) -> Result<(), String> {
@@ -800,6 +824,7 @@ pub(crate) fn build_ensure_session_command(
     timeouts: Option<AgentTimeouts>,
     model_limits: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
+    let cwd = resolve_session_cwd(state, session_id, &cwd)?;
     let mut cmd = serde_json::json!({
         "type": "ensure_session",
         "agentKind": agent_kind,
@@ -827,21 +852,19 @@ pub(crate) fn build_ensure_session_command(
         )
     })?;
 
-    let (session_origin, imported_cwd) = {
+    let session_origin = {
         let db = state.db.lock().unwrap();
         db.query_row(
-            "SELECT s.origin, ss.cwd FROM sessions s LEFT JOIN session_sources ss ON ss.app_session_id = s.id WHERE s.id = ?1 LIMIT 1",
+            "SELECT origin FROM sessions WHERE id = ?1 LIMIT 1",
             [session_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            |row| row.get::<_, String>(0),
         )
         .map_err(|error| format!("无法读取会话来源信息: {}", error))?
     };
     if session_origin == "imported" {
         cmd["resumeOnly"] = serde_json::Value::Bool(true);
-        if let Some(imported_cwd) = imported_cwd.filter(|value| !value.trim().is_empty()) {
-            cmd["cwd"] = serde_json::Value::String(imported_cwd);
-        }
     }
+
     if agent_kind == "opencode" {
         if let Some(generation) = runtime_generation {
             cmd["runtimeGeneration"] = serde_json::json!(generation);
@@ -1293,20 +1316,21 @@ pub async fn ensure_agent_session(
     let lifecycle_lock = session_lifecycle_lock(agent_state.inner(), &session_id).await;
     let _lifecycle_guard = lifecycle_lock.lock().await;
     let agent_kind = resolve_session_agent_kind(&state, &session_id)?;
+    let resolved_cwd = resolve_session_cwd(state.inner(), &session_id, &cwd)?;
     let runtime_config = resolve_active_runtime_config(&state, &session_id)?;
     let runtime_generation = if agent_kind == "opencode" {
         Some(begin_session_generation(agent_state.inner(), &session_id).await)
     } else {
         None
     };
-    let skill_cwd = resolve_skill_cwd(state.inner(), &session_id, &cwd)?;
+    let skill_cwd = resolve_skill_cwd(state.inner(), &session_id, &resolved_cwd)?;
     preload_project_skills(skill_cwd, &agent_kind).await?;
 
     let cmd = build_ensure_session_command(
         &state,
         &session_id,
         &agent_kind,
-        cwd,
+        resolved_cwd,
         runtime_config.api_key,
         runtime_config.base_url,
         runtime_config.model,

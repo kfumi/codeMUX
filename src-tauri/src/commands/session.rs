@@ -166,6 +166,20 @@ pub fn update_session_title(
 }
 
 #[tauri::command]
+pub fn update_session_working_path(
+    state: State<'_, AppState>,
+    session_id: String,
+    working_path: String,
+) -> Result<operations::Session, String> {
+    let db = state.db.lock().unwrap();
+    operations::update_session_working_path(&db, &session_id, &working_path)
+        .map_err(|error| error.to_string())?;
+    operations::get_session(&db, &session_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "会话不存在".to_string())
+}
+
+#[tauri::command]
 pub fn touch_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
     let db = state.db.lock().unwrap();
     operations::touch_session(&db, &session_id).map_err(|e| e.to_string())

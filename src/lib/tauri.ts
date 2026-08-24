@@ -94,6 +94,14 @@ export interface GitRepositoryState {
   hasUncommittedChanges: boolean;
   aheadCount: number;
   hasUnpushedCommits: boolean;
+  upstreamBranch: string | null;
+  upstreamRef: string | null;
+}
+
+export interface GitWorktree {
+  path: string;
+  branch: string | null;
+  isMain: boolean;
 }
 
 export interface GitCommitMessageSuggestion {
@@ -273,6 +281,8 @@ export const sessionApi = {
   setPinned: (sessionId: string, pinned: boolean): Promise<void> => invokeLogged('set_session_pinned', { sessionId, pinned }),
   setReadOnly: (sessionId: string, readOnly: boolean): Promise<void> => invokeLogged('set_session_read_only', { sessionId, readOnly }),
   updateTitle: (sessionId: string, title: string): Promise<void> => invokeLogged('update_session_title', { sessionId, title }),
+  updateWorkingPath: (sessionId: string, workingPath: string): Promise<Session> =>
+    invokeLogged('update_session_working_path', { sessionId, workingPath }),
   touch: (sessionId: string): Promise<void> => invokeLogged('touch_session', { sessionId }),
   updateProvider: (sessionId: string, providerId: string | null, model: string, reasoningEffort?: ReasoningEffort): Promise<void> =>
     invokeLogged('update_session_provider', { sessionId, providerId, model, reasoningEffort }),
@@ -530,6 +540,18 @@ export const gitApi = {
     invokeLogged('create_git_branch', { projectPath, branchName, checkout }),
   checkoutBranch: (projectPath: string, branchName: string): Promise<void> =>
     invokeLogged('checkout_git_branch', { projectPath, branchName }),
+  listWorktrees: (projectPath: string): Promise<GitWorktree[]> =>
+    invokeLogged('list_git_worktrees', { projectPath }),
+  createWorktree: (
+    projectPath: string,
+    branchName: string,
+    baseBranch?: string | null,
+  ): Promise<GitWorktree> =>
+    invokeLogged('create_git_worktree', {
+      projectPath,
+      branchName,
+      baseBranch: baseBranch ?? null,
+    }),
   getStatusChanges: (projectPath: string, area: GitStatusArea): Promise<GitStatusChange[]> =>
     invokeLogged('get_git_status_changes', { projectPath, area }),
   getStatusChangeDetail: (projectPath: string, area: GitStatusArea, filePath: string): Promise<GitStatusChange> =>

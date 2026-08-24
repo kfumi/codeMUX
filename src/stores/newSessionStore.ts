@@ -1,5 +1,10 @@
 import { create } from 'zustand';
 
+import {
+  createDefaultDraftWorkspace,
+  type DraftWorkspaceSelection,
+  getDraftWorktreePath,
+} from '../lib/draftWorkspacePicker';
 import type { AgentKind, ReasoningEffort } from '../types/session';
 import {
   buildDefaultPermissionConfig,
@@ -18,10 +23,13 @@ interface NewSessionState {
   selectedPermissionConfig: AgentPermissionConfig;
   selectedPlanMode: AgentPlanMode;
   draftProjectId: string | null;
+  draftWorkspace: DraftWorkspaceSelection;
   draftRevision: number;
   isDraftOpen: boolean;
   openDraft: (projectId?: string | null, permissionConfig?: AgentPermissionConfig) => void;
   closeDraft: () => void;
+  setDraftWorkspace: (draftWorkspace: DraftWorkspaceSelection) => void;
+  setDraftProjectId: (projectId: string | null) => void;
   setSelectedAgentKind: (agentKind: AgentKind) => void;
   setSelectedModel: (model: string | null) => void;
   setSelectedProviderId: (providerId: string | null) => void;
@@ -38,10 +46,12 @@ export const useNewSessionStore = create<NewSessionState>((set) => ({
   selectedPermissionConfig: buildDefaultPermissionConfig('claude_code'),
   selectedPlanMode: 'off',
   draftProjectId: null,
+  draftWorkspace: createDefaultDraftWorkspace(),
   draftRevision: 0,
   isDraftOpen: false,
   openDraft: (draftProjectId = null, permissionConfig) => set((state) => ({
     draftProjectId,
+    draftWorkspace: createDefaultDraftWorkspace(),
     draftRevision: state.draftRevision + 1,
     isDraftOpen: true,
     selectedModel: null,
@@ -52,6 +62,7 @@ export const useNewSessionStore = create<NewSessionState>((set) => ({
   })),
   closeDraft: () => set((state) => ({
     draftProjectId: null,
+    draftWorkspace: createDefaultDraftWorkspace(),
     isDraftOpen: false,
     selectedModel: null,
     selectedProviderId: null,
@@ -77,4 +88,13 @@ export const useNewSessionStore = create<NewSessionState>((set) => ({
   setSelectedReasoningEffort: (selectedReasoningEffort) => set({ selectedReasoningEffort }),
   setSelectedPermissionConfig: (selectedPermissionConfig) => set({ selectedPermissionConfig }),
   setSelectedPlanMode: (selectedPlanMode) => set({ selectedPlanMode }),
+  setDraftWorkspace: (draftWorkspace) => set({ draftWorkspace }),
+  setDraftProjectId: (draftProjectId) => set({
+    draftProjectId,
+    draftWorkspace: createDefaultDraftWorkspace(),
+  }),
 }));
+
+export function selectDraftWorktreePath(state: NewSessionState): string | null {
+  return getDraftWorktreePath(state.draftWorkspace);
+}

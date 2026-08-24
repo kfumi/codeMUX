@@ -3,6 +3,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const invokeMock = vi.hoisted(() => vi.fn(async () => undefined));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: invokeMock,
+}));
+
 import { SessionItem } from './SessionItem';
 import { useAgentStore } from '../../stores/agentStore';
 import type { Session } from '../../types/session';
@@ -29,12 +35,14 @@ function makeSession(overrides: Partial<Session>): Session {
 
 describe('SessionItem', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(() => {});
     useAgentStore.setState({
       events: {},
       pendingPermissions: {},
       isRunning: {},
       error: {},
+      sessionWorkingPaths: {},
     });
   });
 
@@ -163,5 +171,33 @@ describe('SessionItem', () => {
     );
 
     expect(screen.getByText('等待确认')).toBeTruthy();
+  });
+
+  it('opens the remembered worktree path from the session context menu', async () => {
+    useAgentStore.setState({
+      sessionWorkingPaths: {
+        'session-6': 'D:/project/codeMUX/.worktrees/brave-otter',
+      },
+    });
+
+    render(
+      <SessionItem
+        session={makeSession({ id: 'session-6', title: 'Worktree Session', project_id: 'project-1' })}
+        isActive={false}
+        onClick={vi.fn()}
+        onTogglePinned={vi.fn()}
+        onArchive={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByText('Worktree Session'));
+    await waitFor(() => expect(screen.getByText('在资源管理器中打开')).toBeTruthy());
+    fireEvent.click(screen.getByText('在资源管理器中打开'));
+
+    expect(invokeMock).toHaveBeenCalledWith('open_in_explorer', {
+      path: 'D:/project/codeMUX/.worktrees/brave-otter',
+    });
   });
 });

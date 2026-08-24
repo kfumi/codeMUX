@@ -14,6 +14,8 @@ export interface Session {
   permission_config: string | null;
   plan_mode: AgentPlanMode | null;
   project_id: string | null;
+  /** Effective agent cwd; set for worktree sessions. */
+  working_path?: string | null;
   /** `native` sessions are managed by CodeMUX; imported sessions are snapshots. */
   origin?: 'native' | 'imported';
   is_read_only?: boolean;
