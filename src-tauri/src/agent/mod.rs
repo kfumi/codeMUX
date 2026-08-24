@@ -135,6 +135,23 @@ fn configure_sidecar_command(command: &mut Command) -> &mut Command {
     command
 }
 
+/// Strip Windows extended-length prefixes before passing paths to Node.js.
+/// Tauri resource paths often use `\\?\`; Node's module loader mishandles them
+/// and fails with `EISDIR: lstat 'D:'`.
+fn normalize_windows_verbatim_path(path: PathBuf) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let text = path.to_string_lossy();
+        if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{}", rest));
+        }
+        if let Some(rest) = text.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+    path
+}
+
 /// Spawn the sidecar process and return a handle + event receiver.
 ///
 /// Events are raw JSON strings (one per line) from the sidecar's stdout.
@@ -146,8 +163,9 @@ pub async fn spawn_sidecar(
     let resource_dir = app_handle.path().resource_dir().ok();
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let environment = build_environment();
-    let script_path =
-        resolve_sidecar_script_path(resource_dir.as_deref(), &manifest_dir, environment)?;
+    let script_path = normalize_windows_verbatim_path(
+        resolve_sidecar_script_path(resource_dir.as_deref(), &manifest_dir, environment)?,
+    );
     let node_path = resolve_node_runtime_path(resource_dir.as_deref(), environment)?;
 
     info!(target: "agent", "Spawning sidecar from {}", script_path.display());
@@ -301,10 +319,10 @@ pub async fn spawn_sidecar(
 #[cfg(test)]
 mod tests {
     use super::{
-        missing_node_prerequisite_error, resolve_node_runtime_path, resolve_sidecar_script_path,
-        BuildEnvironment,
+        missing_node_prerequisite_error, normalize_windows_verbatim_path,
+        resolve_node_runtime_path, resolve_sidecar_script_path, BuildEnvironment,
     };
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn release_build_requires_bundled_sidecar_resources() {
@@ -356,5 +374,17 @@ mod tests {
         assert!(message.contains("Node.js 18+ is required"));
         assert!(message.contains("https://nodejs.org/"));
         assert!(message.contains("restart CodeMUX"));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn strips_windows_verbatim_prefix_from_sidecar_script_path() {
+        let path = PathBuf::from(r"\\?\D:\CodeMUX\sidecar\dist\index.js");
+        let normalized = normalize_windows_verbatim_path(path);
+
+        assert_eq!(
+            normalized,
+            PathBuf::from(r"D:\CodeMUX\sidecar\dist\index.js")
+        );
     }
 }

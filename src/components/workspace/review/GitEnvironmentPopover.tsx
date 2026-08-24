@@ -153,7 +153,6 @@ function EnvironmentSection({
 }: {
   gitLoadState: GitLoadState;
   unavailableMessage: string | null;
-  projectPath: string;
   totals: { additions: number; deletions: number };
   currentBranch: string;
   branchOpen: boolean;
