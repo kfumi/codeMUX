@@ -19,6 +19,7 @@ use super::session_lifecycle::{
 };
 use super::SidecarHandle;
 use std::str::FromStr;
+use tokio::sync::oneshot;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -408,7 +409,85 @@ pub(crate) fn rewind_jsonl_before_target_turn(
     })
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RewindMode {
+    Conversation,
+    Files,
+    Both,
+}
+
+impl RewindMode {
+    fn from_str(value: &str) -> Result<Self, String> {
+        match value {
+            "conversation" => Ok(Self::Conversation),
+            "files" => Ok(Self::Files),
+            "both" => Ok(Self::Both),
+            other => Err(format!("Unknown rewind mode: {}", other)),
+        }
+    }
+
+    fn includes_conversation(self) -> bool {
+        matches!(self, Self::Conversation | Self::Both)
+    }
+
+    fn includes_files(self) -> bool {
+        matches!(self, Self::Files | Self::Both)
+    }
+}
+
+async fn rewind_agent_files_via_sidecar(
+    agent_state: &AgentState,
+    app_session_id: &str,
+    provider_message_id: &str,
+) -> Result<(), String> {
+    let sender = {
+        let sidecars = agent_state.sidecars.lock().await;
+        sidecars
+            .get(app_session_id)
+            .map(SidecarHandle::command_sender)
+    };
+    let Some(sender) = sender else {
+        return Err("Agent runtime is not active; reopen the session and try again".to_string());
+    };
+
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let (result_sender, result_receiver) = oneshot::channel();
+    agent_state
+        .session_rewind_files_waiters
+        .lock()
+        .await
+        .insert(request_id.clone(), result_sender);
+    let command = serde_json::json!({
+        "type": "rewind_files",
+        "sessionId": app_session_id,
+        "requestId": request_id,
+        "providerMessageId": provider_message_id,
+    });
+    if sender.send(command.to_string()).await.is_err() {
+        agent_state
+            .session_rewind_files_waiters
+            .lock()
+            .await
+            .remove(&request_id);
+        return Err("Failed to send the file rewind command to the sidecar".to_string());
+    }
+
+    match tokio::time::timeout(std::time::Duration::from_secs(60), result_receiver).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err("Agent sidecar stopped before confirming the file rewind".to_string()),
+        Err(_) => {
+            agent_state
+                .session_rewind_files_waiters
+                .lock()
+                .await
+                .remove(&request_id);
+            Err("Timed out waiting for the file rewind".to_string())
+        }
+    }
+}
+
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn rewind_agent_session(
     state: State<'_, crate::AppState>,
     agent_state: State<'_, AgentState>,
@@ -416,9 +495,14 @@ pub async fn rewind_agent_session(
     agent_kind: String,
     target: Option<RewindTarget>,
     rewind_user_index: Option<i64>,
+    mode: Option<String>,
 ) -> Result<(), String> {
     reject_read_only_session(&state, &app_session_id)?;
     let agent_kind = AgentKind::from_str(&agent_kind)?;
+    let mode = match mode.as_deref() {
+        Some(value) if !value.trim().is_empty() => RewindMode::from_str(value.trim())?,
+        _ => RewindMode::Conversation,
+    };
     let Some(agent_session_id) = get_agent_session_id(state.inner(), &app_session_id, agent_kind)?
     else {
         return Err(format!(
@@ -426,6 +510,27 @@ pub async fn rewind_agent_session(
             app_session_id
         ));
     };
+
+    if mode.includes_files() {
+        if agent_kind != AgentKind::ClaudeCode {
+            return Err("This agent does not support rewinding files".to_string());
+        }
+        let provider_message_id = target
+            .as_ref()
+            .and_then(|value| value.provider_message_id.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                "File rewind requires the provider message ID of the target".to_string()
+            })?
+            .to_string();
+        rewind_agent_files_via_sidecar(agent_state.inner(), &app_session_id, &provider_message_id)
+            .await?;
+    }
+
+    if !mode.includes_conversation() {
+        return Ok(());
+    }
 
     let home = home_dir()?;
     let (rewind_outcome, history_display): (RewindOutcome, String) = if agent_kind

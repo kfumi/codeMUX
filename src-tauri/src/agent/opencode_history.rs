@@ -1044,6 +1044,28 @@ mod tests {
     }
 
     #[test]
+    fn errors_when_opencode_rewind_target_history_is_empty_instead_of_clearing_mapping() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);\
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);",
+        ).unwrap();
+        let target = super::super::rewind::RewindTarget {
+            provider_message_id: Some("msg_missing".to_string()),
+            source_event_index: None,
+            line_index: None,
+            role: None,
+            text_fingerprint: None,
+            turn_ordinal: None,
+        };
+
+        let result =
+            rewind_opencode_events_from_connection(&connection, "session-empty", Some(&target));
+
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn errors_when_opencode_rewind_fingerprint_mismatches() {
         let connection = rewind_fixture_connection();
         let target = super::super::rewind::RewindTarget {
@@ -1110,6 +1132,16 @@ fn resolve_opencode_rewind_boundary(
     target: Option<&super::rewind::RewindTarget>,
 ) -> Result<Option<String>, String> {
     if ordered_rows.is_empty() {
+        // An explicit target against an empty native history means the mapped
+        // session no longer matches the conversation (e.g. the mapping drifted).
+        // Fail loudly instead of reporting an empty truncation, which would
+        // clear the session mapping and orphan the real native conversation.
+        if target.is_some() {
+            return Err(format!(
+                "Target rewind user message not found in session history {}",
+                session_id
+            ));
+        }
         return Ok(None);
     }
 

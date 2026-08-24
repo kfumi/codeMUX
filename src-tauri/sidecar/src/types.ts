@@ -48,6 +48,7 @@ export interface RuntimeEventContext {
 export type SidecarCommand =
   | { type: 'ensure_session'; agentKind?: string; cwd: string; sessionId?: string; agentSessionId?: string; resumeOnly?: boolean; runtimeGeneration?: number; apiKey?: string; baseUrl?: string; provider?: string; credentialSource?: OpenCodeCredentialSource; model?: string; reasoningEffort?: string; codexNeedsProxy?: boolean; skills?: string[]; settingSources?: string[]; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode; runtimeRef?: ProviderRuntimeRef; timeouts?: TurnTimeouts; modelLimits?: SidecarModelLimits }
   | { type: 'fork_session'; sessionId: string; requestId: string; sourceAgentSessionId?: string; sourceProviderMessageId?: string; sourceProviderTurnId?: string; sourceProviderTurnOrdinal?: number }
+  | { type: 'rewind_files'; sessionId: string; requestId: string; providerMessageId: string }
   | { type: 'update_permissions'; sessionId?: string; agentKind?: string; permissionConfig?: SidecarPermissionConfig; planMode?: AgentPlanMode }
   | { type: 'enrich_attachments'; requestId: string; attachments: AgentInputAttachment[]; protocol: 'anthropic' | 'openai_compatible'; apiKey: string; baseUrl: string; model: string }
   | { type: 'send_input'; sessionId?: string; prompt: string; displayContent?: string; inputPayload?: AgentInputPayload }

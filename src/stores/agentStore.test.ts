@@ -2312,7 +2312,7 @@ describe('agent store Codex history loading', () => {
       role: 'user',
       textFingerprint: 'inspect image',
       turnOrdinal: 2,
-    }, 1);
+    }, 1, 'conversation');
     expect(payload).toEqual({
       text: 'inspect image',
       images: [{ name: 'screen.png', mediaType: 'image/png', dataUrl: 'data:image/png;base64,abc' }],
@@ -2353,7 +2353,7 @@ describe('agent store Codex history loading', () => {
 
     await useAgentStore.getState().rewindLastTurn(session.id);
 
-    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', undefined, 0);
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', undefined, 0, 'conversation');
   });
 
   it('marks an inactive session unread after a rewound turn completes', async () => {
@@ -2459,7 +2459,7 @@ describe('agent store Codex history loading', () => {
 
     const payload = await useAgentStore.getState().rewindToMessage(session.id, 0);
 
-    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'codex', firstLocator, 0);
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'codex', firstLocator, 0, 'conversation');
     expect(payload).toEqual({ text: 'first turn' });
     expect(useAgentStore.getState().events[session.id]).toEqual([]);
     expect(useAgentStore.getState().eventTimestamps[session.id]).toEqual([]);
@@ -2534,7 +2534,7 @@ describe('agent store Codex history loading', () => {
     const payload = await useAgentStore.getState().rewindToMessage(session.id, 2);
 
     expect(payload).toEqual({ text: 'second turn' });
-    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', undefined, 1);
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'claude_code', undefined, 1, 'conversation');
     expect(useAgentStore.getState().events[session.id]).toHaveLength(2);
   });
 
@@ -2660,7 +2660,7 @@ describe('agent store Codex history loading', () => {
     const payload = await useAgentStore.getState().rewindLastTurn(session.id);
 
     expect(payload).toEqual({ text: 'second turn' });
-    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'codex', undefined, 1);
+    expect(rewindSessionMock).toHaveBeenCalledWith(session.id, 'codex', undefined, 1, 'conversation');
     expect(useAgentStore.getState().events[session.id]).toHaveLength(2);
   });
 

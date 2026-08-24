@@ -466,6 +466,74 @@ export class SessionRuntime {
     return forkedSessionId;
   }
 
+  async rewindFiles(providerMessageId: string): Promise<void> {
+    const config = this.config;
+    if (!config?.agentSessionId) {
+      throw new Error('Claude session has not been created yet');
+    }
+    if (this.turnActive) {
+      throw new Error('Cannot rewind files while a Claude turn is active');
+    }
+    if (!this.claudeSdk) {
+      throw new Error('Claude SDK not loaded; cannot rewind files');
+    }
+
+    // An empty prompt resumes the SDK session without creating a user turn;
+    // rewindFiles is a control request on that live query.
+    const rewindQuery = this.claudeSdk.query({
+      prompt: '',
+      options: {
+        ...this.buildOptions(config),
+        abortController: new AbortController(),
+        resume: config.agentSessionId,
+      } as any,
+    });
+
+    const consumed = (async () => {
+      try {
+        for await (const _message of rewindQuery) {
+          // Idle resume: no prompt is pushed, so no model turn starts. Keep
+          // draining until close() so the control channel stays alive.
+        }
+      } catch {
+        // Draining ends when the query closes; errors surface via rewindFiles.
+      }
+    })();
+
+    try {
+      const result = await new Promise<{ canRewind: boolean; error?: string; filesChanged?: string[] }>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error('Timed out waiting for Claude file rewind')),
+          30_000,
+        );
+        if (timer.unref) timer.unref();
+        (rewindQuery as any)
+          .rewindFiles(providerMessageId, { dryRun: false })
+          .then((value: { canRewind: boolean; error?: string; filesChanged?: string[] }) => {
+            clearTimeout(timer);
+            resolve(value);
+          })
+          .catch((error: unknown) => {
+            clearTimeout(timer);
+            reject(error instanceof Error ? error : new Error(String(error)));
+          });
+      });
+      if (!result?.canRewind) {
+        throw new Error(result?.error ?? `No file checkpoint found for message ${providerMessageId}`);
+      }
+      process.stderr.write(
+        `[sidecar] Rewound Claude files to ${providerMessageId} files=${result.filesChanged?.length ?? 0}\n`,
+      );
+    } finally {
+      try {
+        rewindQuery.close();
+      } catch {
+        // Closing an already completed query is best-effort.
+      }
+      await consumed.catch(() => undefined);
+    }
+  }
+
   async interrupt(): Promise<void> {
     clearClaudeToolResponses(this.config?.sessionId);
     if (!this.queryHandle) {
@@ -773,6 +841,7 @@ export class SessionRuntime {
       permissionMode: permissionOptions.permissionMode,
       allowDangerouslySkipPermissions: permissionOptions.allowDangerouslySkipPermissions,
       env: subprocessEnv,
+      enableFileCheckpointing: true,
       ...(Object.keys(cleanSettings).length > 0 ? { settings: cleanSettings } : {}),
       includePartialMessages: true,
       systemPrompt: {
@@ -1391,6 +1460,7 @@ type SidecarRuntime = {
     sourceProviderTurnOrdinal?: number,
     sourceProviderMessageId?: string,
   ): Promise<string>;
+  rewindFiles?(providerMessageId: string): Promise<void>;
   resetSession(sessionId: string): Promise<void>;
   deleteSession?(agentSessionId: string): Promise<void>;
   interrupt(): Promise<void>;
@@ -1624,6 +1694,32 @@ export function createSidecarCommandDispatcher(options: SidecarCommandDispatcher
             request_id: cmd.requestId,
             session_id: cmd.sessionId,
             agent_kind: activeAgentKind,
+            ok: false,
+            error: String(error),
+          });
+        }
+        return;
+      }
+      case 'rewind_files': {
+        await ensureTail;
+        try {
+          const current = selectedRuntime();
+          const flavor = getRuntimeFlavor(activeAgentKind);
+          if (flavor !== 'claude' || !current?.rewindFiles) {
+            throw new Error('This provider runtime does not support file rewind');
+          }
+          await current.rewindFiles(cmd.providerMessageId);
+          options.emit({
+            type: 'session_rewind_files_result',
+            request_id: cmd.requestId,
+            session_id: cmd.sessionId,
+            ok: true,
+          });
+        } catch (error) {
+          options.emit({
+            type: 'session_rewind_files_result',
+            request_id: cmd.requestId,
+            session_id: cmd.sessionId,
             ok: false,
             error: String(error),
           });
