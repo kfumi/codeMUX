@@ -4,7 +4,7 @@ import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/re
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
 
-import { AgentSettingsPanel, RuntimeCard } from './AgentSettings';
+import { AgentPreferencesPanel, AgentSettingsPanel, RuntimeCard } from './AgentSettings';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { AgentInstallationReport, AgentRuntimeCheck } from '../../lib/tauri';
 
@@ -957,6 +957,71 @@ describe('AgentSettingsPanel', () => {
         '命令已执行但版本未变,可能升级写入非默认位置,已自动诊断',
         { id: 'toast-id' },
       );
+    });
+  });
+});
+
+describe('AgentPreferencesPanel', () => {
+  beforeEach(() => {
+    useSettingsStore.setState((state) => ({
+      ...state,
+      config: baseConfig,
+      setDefaultAgentKind: vi.fn(),
+      getDefaultAgentKind: () => 'codex',
+      updateAgentConfig: vi.fn(async () => {}),
+    }));
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('展示 Codex 默认权限下拉与 OpenCode 自动接受权限开关', () => {
+    render(<AgentPreferencesPanel />);
+
+    expect(screen.getByRole('combobox', { name: 'Codex 默认权限' })).toBeTruthy();
+    expect(screen.getByRole('switch', { name: '自动接受权限' })).toBeTruthy();
+    expect(screen.getByText('自动接受权限')).toBeTruthy();
+  });
+
+  it('修改 Codex 默认权限时写入 permission_config', async () => {
+    const updateAgentConfig = vi.fn(async () => {});
+    useSettingsStore.setState((state) => ({
+      ...state,
+      updateAgentConfig,
+    }));
+
+    render(<AgentPreferencesPanel />);
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Codex 默认权限' }));
+    fireEvent.click(screen.getByRole('option', { name: '完全访问' }));
+
+    await waitFor(() => {
+      expect(updateAgentConfig).toHaveBeenCalledWith('codex', {
+        permission_config: {
+          kind: 'codex',
+          workflowMode: 'full-access',
+          networkAccessEnabled: true,
+        },
+      });
+    });
+  });
+
+  it('切换 OpenCode 自动接受权限时写入 permission_config', async () => {
+    const updateAgentConfig = vi.fn(async () => {});
+    useSettingsStore.setState((state) => ({
+      ...state,
+      updateAgentConfig,
+    }));
+
+    render(<AgentPreferencesPanel />);
+
+    fireEvent.click(screen.getByRole('switch', { name: '自动接受权限' }));
+
+    await waitFor(() => {
+      expect(updateAgentConfig).toHaveBeenCalledWith('opencode', {
+        permission_config: { kind: 'opencode', autoApprovePermissions: true },
+      });
     });
   });
 });

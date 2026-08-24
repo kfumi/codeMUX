@@ -12,18 +12,16 @@ describe('formatElapsed', () => {
   });
 
   it('formats minutes and seconds when under an hour', () => {
-    expect(formatElapsed(70_000)).toBe('1m10s');
-    expect(formatElapsed(80_000)).toBe('1m20s');
+    expect(formatElapsed(70_000)).toBe('1m 10s');
+    expect(formatElapsed(80_000)).toBe('1m 20s');
   });
 
-  it('formats hours, minutes, seconds when under a day', () => {
-    // 1h 20m 10s = 4810s
-    expect(formatElapsed(4_810_000)).toBe('1h20m10s');
+  it('formats the two largest units when under a day', () => {
+    expect(formatElapsed(4_810_000)).toBe('1h 20m');
   });
 
-  it('formats days, hours, minutes, seconds when over a day', () => {
-    // 1d 10h 10m 10s = 86400 + 36000 + 600 + 10 = 123010s
-    expect(formatElapsed(123_010_000)).toBe('1d10h10m10s');
+  it('formats the two largest units when over a day', () => {
+    expect(formatElapsed(123_010_000)).toBe('1d 10h');
   });
 
   it('clamps negative values to zero', () => {
@@ -53,6 +51,6 @@ describe('RunningElapsedTimer', () => {
     act(() => {
       vi.advanceTimersByTime(40_000);
     });
-    expect(screen.getAllByText('正在执行 · 1m10s').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('正在执行 · 1m 10s').length).toBeGreaterThan(0);
   });
 });

@@ -1,5 +1,5 @@
 import type { AgentKind } from './session';
-import type { ClaudePermissionConfig, CodexPermissionConfig } from '../lib/agentPermissions';
+import type { ClaudePermissionConfig, CodexPermissionConfig, OpenCodePermissionConfig } from '../lib/agentPermissions';
 import type { OpenTarget } from '../lib/openTargets';
 
 export type Theme = 'Light' | 'Dark' | 'System';
@@ -43,6 +43,7 @@ export interface AgentConfigMap {
   opencode: {
     default_provider_id?: string | null;
     default_model?: string;
+    permission_config?: OpenCodePermissionConfig;
     timeouts?: AgentTimeouts | null;
   };
 }

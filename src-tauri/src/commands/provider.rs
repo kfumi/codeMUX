@@ -1,7 +1,8 @@
 use crate::config;
 use crate::config::types::{
     AgentKind, AppConfig, AttachmentEnrichmentConfig, ClaudeCodeAgentConfigUpdate,
-    CodexAgentConfigUpdate, GitSettingsConfig, NotificationSettings, Provider, Theme,
+    CodexAgentConfigUpdate, GitSettingsConfig, NotificationSettings, OpenCodeAgentConfigUpdate,
+    Provider, Theme,
 };
 use crate::AppState;
 use futures::StreamExt;
@@ -82,15 +83,17 @@ fn apply_agent_config_update(
         }
         AgentKind::GeminiCli => {}
         AgentKind::Opencode => {
-            if let Some(provider_id) = config
-                .get("default_provider_id")
-                .and_then(|value| value.as_str())
-            {
-                app_config.agent_configs.opencode.default_provider_id =
-                    Some(provider_id.to_string());
+            let update: OpenCodeAgentConfigUpdate = serde_json::from_value(config)
+                .map_err(|e| format!("Invalid OpenCode config: {}", e))?;
+
+            if let Some(provider_id) = update.default_provider_id {
+                app_config.agent_configs.opencode.default_provider_id = Some(provider_id);
             }
-            if let Some(model) = config.get("default_model").and_then(|value| value.as_str()) {
-                app_config.agent_configs.opencode.default_model = Some(model.to_string());
+            if let Some(model) = update.default_model {
+                app_config.agent_configs.opencode.default_model = Some(model);
+            }
+            if let Some(permission_config) = update.permission_config {
+                app_config.agent_configs.opencode.permission_config = permission_config;
             }
         }
     }

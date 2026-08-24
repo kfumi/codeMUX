@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useSidePanelStore } from '../../../stores/sidePanelStore';
@@ -47,6 +47,10 @@ describe('getStreamStatusDisplay', () => {
 describe('CodeMuxToolCallMessagePart', () => {
   beforeEach(() => {
     useSidePanelStore.getState().reset();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it('只展示子智能体工具消息本身，不再追加子智能体详情面板', () => {
@@ -104,6 +108,69 @@ describe('CodeMuxToolCallMessagePart', () => {
     expect(toolRoot.style.getPropertyValue('--animation-duration')).toBe('200ms');
     expect(toolContent.className).toContain('animate-collapsible-down');
     expect(toolContent.className).toContain('duration-(--animation-duration)');
+  });
+
+  it('工具标题行按内容收缩，参数可截断但不把折叠按钮和 diff 统计推到行尾', () => {
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="Grep"
+        args={{ pattern: 'getInstallTodoListByTerrCodeV2', path: 'src' }}
+        result="1 match"
+      />,
+    );
+
+    const trigger = container.querySelector('[data-slot="tool-fallback-trigger"]');
+    const param = screen.getByText('getInstallTodoListByTerrCodeV2');
+
+    expect(trigger?.className).toContain('inline-flex');
+    expect(trigger?.className).toContain('max-w-full');
+    expect(trigger?.className.split(/\s+/)).not.toContain('w-full');
+    expect(param.className).toContain('truncate');
+    expect(param.className).not.toContain('flex-1');
+  });
+
+  it('编辑类工具把 diff 统计紧跟在文件路径后面', () => {
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="Edit"
+        args={{
+          file_path: 'src/main/java/InstallListPage.java',
+          old_string: 'foo',
+          new_string: 'bar',
+        }}
+        result="ok"
+      />,
+    );
+
+    const trigger = container.querySelector('[data-slot="tool-fallback-trigger"]');
+    const label = container.querySelector('[data-slot="tool-fallback-trigger-label"]');
+    const path = screen.getByText('InstallListPage.java');
+    const chevron = container.querySelector('[data-slot="tool-fallback-trigger-chevron"]');
+
+    expect(trigger?.className.split(/\s+/)).not.toContain('w-full');
+    expect(label?.className).not.toContain('flex-1');
+    expect(path.className).not.toContain('flex-1');
+    expect(label?.textContent).toMatch(/\+\d+/);
+    expect(label?.textContent).toMatch(/-\d+/);
+    expect(path.compareDocumentPosition(chevron!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('运行命令的长参数仍可在最大宽度内截断展示', () => {
+    const command = 'cd /d/project/ai-code/codeMUX && git diff --stat HEAD | head -40 && npm run build -- --mode production';
+    const { container } = renderWithTooltip(
+      <CodeMuxToolCallMessagePart
+        toolName="Bash"
+        args={{ command }}
+        result="done"
+      />,
+    );
+
+    const trigger = container.querySelector('[data-slot="tool-fallback-trigger"]');
+    const param = screen.getByText(command);
+
+    expect(trigger?.className).toContain('max-w-full');
+    expect(param.className).toContain('truncate');
+    expect(param.className).not.toContain('flex-1');
   });
 
   it('运行命令展开后以终端面板展示命令和输出，不再拆成参数 JSON 和结果标签', () => {

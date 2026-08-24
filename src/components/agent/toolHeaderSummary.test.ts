@@ -105,6 +105,16 @@ describe('toolHeaderSummary', () => {
     expect(getShellCommand({ description: 'No command field' })).toBeUndefined();
   });
 
+  it('prefers command over description in Bash header summaries', () => {
+    const summary = getToolHeaderSummary('Bash', {
+      description: 'Run affected tests',
+      command: 'npx vitest run src/components/agent/assistant-ui/CodeMuxAssistantRuntime.test.tsx',
+    });
+
+    expect(summary.displayName).toBe('运行命令');
+    expect(summary.text).toBe('npx vitest run src/components/agent/assistant-ui/CodeMuxAssistantRuntime.test.tsx');
+  });
+
   it('treats write and edit tools from all agents as file mutations', () => {
     expect(isFileMutationTool('Write')).toBe(true);
     expect(isFileMutationTool('write')).toBe(true);

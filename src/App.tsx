@@ -230,7 +230,9 @@ function App() {
     const settingsConfig = useSettingsStore.getState().config;
     const configuredPermissionConfig = newSessionState.selectedAgentKind === 'codex'
       ? settingsConfig?.agent_configs.codex?.permission_config
-      : settingsConfig?.agent_configs.claude_code.permission_config;
+      : newSessionState.selectedAgentKind === 'opencode'
+        ? settingsConfig?.agent_configs.opencode?.permission_config
+        : settingsConfig?.agent_configs.claude_code.permission_config;
     openDraft(
       projectId,
       serializePermissionConfig(newSessionState.selectedAgentKind, configuredPermissionConfig),

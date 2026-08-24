@@ -28,7 +28,7 @@ describe('tool header summaries', () => {
     expect(container.textContent).not.toContain('"file_path"');
   });
 
-  it('shows Bash description in the header without expanded args', () => {
+  it('shows Bash command in the header without expanded args', () => {
     const { container } = renderWithTooltip(
       <ToolCallCard
         toolName="Bash"
@@ -40,13 +40,12 @@ describe('tool header summaries', () => {
       />,
     );
 
-    expect(screen.getByText('Run typecheck')).toBeTruthy();
+    expect(screen.getByText('npm run build')).toBeTruthy();
 
     fireEvent.click(within(container).getByRole('button'));
 
     expect(container.textContent).not.toContain('"description"');
     expect(container.textContent).not.toContain('"command"');
-    expect(container.textContent).not.toContain('npm run build');
   });
 
   it('shows shell_command command in the header and keeps it in expanded args', () => {

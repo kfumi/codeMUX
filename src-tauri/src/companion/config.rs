@@ -123,9 +123,8 @@ fn build_permission_presets(configs: &AgentConfigs) -> MobilePermissionPresets {
             .unwrap_or(Value::Object(Default::default())),
         codex: serde_json::to_value(&configs.codex.permission_config)
             .unwrap_or(Value::Object(Default::default())),
-        opencode: serde_json::json!({
-            "permissionMode": "full_access"
-        }),
+        opencode: serde_json::to_value(&configs.opencode.permission_config)
+            .unwrap_or(Value::Object(Default::default())),
     }
 }
 

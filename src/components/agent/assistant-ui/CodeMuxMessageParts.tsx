@@ -285,7 +285,7 @@ export function CodeMuxToolCallMessagePart({
               role="button"
               tabIndex={0}
               aria-label={`预览计划 ${exitPlanModePlanFilePath}`}
-              className="ml-2 inline-block max-w-[min(33rem,54vw)] truncate align-middle text-xs font-normal text-primary underline underline-offset-2 transition-colors hover:text-primary/80"
+              className="ml-2 min-w-0 truncate align-middle text-xs font-normal text-primary underline underline-offset-2 transition-colors hover:text-primary/80"
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -308,7 +308,7 @@ export function CodeMuxToolCallMessagePart({
           tooltipPath ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="ml-2 inline-block max-w-[min(33rem,54vw)] truncate align-middle text-xs font-normal text-muted-foreground/48">
+                <span className="ml-2 min-w-0 truncate align-middle text-xs font-normal text-muted-foreground/48">
                   {headerText}
                 </span>
               </TooltipTrigger>
@@ -317,7 +317,7 @@ export function CodeMuxToolCallMessagePart({
               </TooltipContent>
             </Tooltip>
           ) : (
-            <span className="ml-2 inline-block max-w-[min(33rem,56vw)] truncate align-middle text-xs font-normal text-muted-foreground/48">
+            <span className="ml-2 min-w-0 truncate align-middle text-xs font-normal text-muted-foreground/48">
               {headerText}
             </span>
           )

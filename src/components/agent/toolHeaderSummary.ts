@@ -121,6 +121,7 @@ export function getToolHeaderSummary(toolName: string, input: Record<string, unk
 
       case 'Bash':
       case 'shell_command':
+      case 'shell':
         return shellCommandSummary(normalizedToolName, input);
 
       case 'Agent':
@@ -225,7 +226,7 @@ function readSummary(input: Record<string, unknown>): ToolHeaderSummary {
 }
 
 function shellCommandSummary(toolName: string, input: Record<string, unknown>): ToolHeaderSummary {
-  const key = firstPresentKey(input, ['description', 'command', 'cmd', 'script']);
+  const key = firstPresentKey(input, ['command', 'cmd', 'script', 'description']);
   if (!key) return { consumedKeys: [] };
 
   return {

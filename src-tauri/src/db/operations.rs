@@ -903,10 +903,9 @@ pub fn update_session_permissions(
     permission_config: Option<&str>,
     plan_mode: Option<&str>,
 ) -> Result<()> {
-    let now = Utc::now().to_rfc3339();
     conn.execute(
-        "UPDATE sessions SET permission_config = COALESCE(?1, permission_config, ''), plan_mode = COALESCE(?2, plan_mode, 'off'), updated_at = ?3 WHERE id = ?4",
-        params![permission_config, plan_mode, now, session_id],
+        "UPDATE sessions SET permission_config = COALESCE(?1, permission_config, ''), plan_mode = COALESCE(?2, plan_mode, 'off') WHERE id = ?3",
+        params![permission_config, plan_mode, session_id],
     )?;
     Ok(())
 }

@@ -20,7 +20,7 @@ import { ToolGroup } from '@/components/assistant-ui/tool-group';
 import { CODEMUX_MARKDOWN_STREAMDOWN_PROPS } from '@/components/assistant-ui/markdown-text';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { TooltipHint } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   ReasoningContent,
   ReasoningRoot,
@@ -693,21 +693,24 @@ function UserMessage({
           <MessageFooter timestamp={timestamp} className="justify-end" revealOnHover />
           {canRewind ? (
             <DropdownMenu>
-              <TooltipHint content={rewindTooltip}>
+              <Tooltip>
                 <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={rewindTooltip}
-                    disabled={isRewinding}
-                    className="mt-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-                  >
-                    {isRewinding ? <Loader2 className="h-3 w-3 animate-spin" /> : <Undo2 className="h-3 w-3" />}
-                  </Button>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={rewindTooltip}
+                      disabled={isRewinding}
+                      className="mt-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/65 hover:bg-muted/40 hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:ring-0 disabled:pointer-events-none disabled:opacity-40"
+                    >
+                      {isRewinding ? <Loader2 className="h-3 w-3 animate-spin" /> : <Undo2 className="h-3 w-3" />}
+                    </Button>
+                  </TooltipTrigger>
                 </DropdownMenuTrigger>
-              </TooltipHint>
-              <DropdownMenuContent align="end" side="top" className="min-w-44">
+                <TooltipContent side="top">{rewindTooltip}</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end" side="bottom" className="min-w-44">
                 <div className="px-2.5 pb-1.5 pt-1.5 text-xs text-muted-foreground">
                   此操作无法撤销
                 </div>

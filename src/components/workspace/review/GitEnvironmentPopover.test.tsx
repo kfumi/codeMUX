@@ -50,6 +50,36 @@ describe('GitEnvironmentPopover', () => {
     ]);
   });
 
+  it('shows the environment section immediately while git info is still loading', async () => {
+    let resolveRepositoryState: ((value: unknown) => void) | undefined;
+    gitApiMock.getRepositoryState.mockImplementation(
+      () => new Promise((resolve) => {
+        resolveRepositoryState = resolve;
+      }),
+    );
+    gitApiMock.getStatusChanges.mockResolvedValue([]);
+
+    render(<GitEnvironmentPopover projectPath="D:/project/app" />);
+
+    fireEvent.click(screen.getByTestId('git-environment-trigger'));
+
+    expect(screen.getByText('环境信息')).toBeTruthy();
+    expect(screen.getByTestId('git-environment-loading')).toBeTruthy();
+    expect(screen.queryByTestId('git-environment-changes')).toBeNull();
+
+    resolveRepositoryState?.({
+      currentBranch: 'feat/mobile-companion',
+      branches: [{ name: 'feat/mobile-companion', current: true }],
+      detached: false,
+      hasUncommittedChanges: false,
+      aheadCount: 0,
+      hasUnpushedCommits: false,
+    });
+
+    await waitFor(() => expect(screen.getByTestId('git-environment-changes')).toBeTruthy());
+    expect(screen.queryByTestId('git-environment-loading')).toBeNull();
+  });
+
   it('shows environment totals and opens the review panel from the changes row', async () => {
     render(<GitEnvironmentPopover projectPath="D:/project/app" />);
 
@@ -136,7 +166,7 @@ describe('GitEnvironmentPopover', () => {
     expect(screen.queryByTestId('git-environment-todos')).toBeNull();
   });
 
-  it('hides the environment section and error when the project is not a git repo', async () => {
+  it('shows the environment section with a hint when the project is not a git repo', async () => {
     gitApiMock.getRepositoryState.mockRejectedValue('当前项目不是 Git 仓库');
 
     render(
@@ -147,12 +177,12 @@ describe('GitEnvironmentPopover', () => {
     );
 
     fireEvent.click(screen.getByTestId('git-environment-trigger'));
-    await screen.findByText('任务');
+    await screen.findByText('环境信息');
 
-    expect(screen.queryByText('环境信息')).toBeNull();
+    expect(screen.getByTestId('git-environment-unavailable')).toBeTruthy();
+    expect(screen.getByText('当前项目不是 Git 仓库')).toBeTruthy();
     expect(screen.queryByTestId('git-environment-changes')).toBeNull();
     expect(screen.queryByTestId('git-environment-branch')).toBeNull();
-    expect(screen.queryByText(/当前项目不是 Git 仓库/)).toBeNull();
     expect(screen.getByText('任务一')).toBeTruthy();
   });
 });

@@ -26,10 +26,12 @@ import {
   type AgentRuntimeUpgradeResult,
 } from '../../lib/tauri';
 import {
+  codexWorkflowModeToExecutionMode,
   mapExecutionModeToPermissionConfig,
   type AgentExecutionMode,
   type AgentPermissionConfig,
   type ClaudePermissionMode,
+  type CodexWorkflowMode,
 } from '../../lib/agentPermissions';
 import { cn } from '../../lib/utils';
 import { isProviderUsable } from '../../lib/modelProviders';
@@ -40,6 +42,7 @@ import type { AgentKind } from '../../types/session';
 import { AgentBrandIcon } from '../agent/AgentBrandIcon';
 import { ProviderBrandIcon } from './ProviderBrandIcon';
 import { Button } from '../ui/button';
+import { Switch } from '../ui/switch';
 import {
   Select,
   SelectContent,
@@ -94,6 +97,18 @@ const CLAUDE_PERMISSION_OPTIONS: Array<{
   { mode: 'full_access', label: '完全访问', description: '跳过权限确认，风险更高。', icon: Shield, tone: 'warning' },
 ];
 
+const CODEX_PERMISSION_OPTIONS: Array<{
+  mode: AgentExecutionMode;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+  tone?: 'default' | 'warning';
+}> = [
+  { mode: 'auto_edit', label: '请求批准', description: '编辑外部文件和使用互联网时始终询问。', icon: Hand },
+  { mode: 'auto_review', label: '帮我批准', description: '仅对检测到的风险操作请求批准。', icon: ShieldCheck },
+  { mode: 'full_access', label: '完全访问', description: '可不受限制地访问互联网和你电脑上的任何文件。', icon: Shield, tone: 'warning' },
+];
+
 function claudePermissionModeToExecutionMode(mode: ClaudePermissionMode): AgentExecutionMode {
   switch (mode) {
     case 'acceptEdits':
@@ -109,6 +124,10 @@ function claudePermissionModeToExecutionMode(mode: ClaudePermissionMode): AgentE
     default:
       return 'confirm_before_edit';
   }
+}
+
+function codexPermissionConfigToExecutionMode(config: { workflowMode: CodexWorkflowMode }): AgentExecutionMode {
+  return codexWorkflowModeToExecutionMode(config.workflowMode);
 }
 
 export function AgentSettingsPanel() {
@@ -320,6 +339,11 @@ export function AgentPreferencesPanel() {
   const selectedKind = config?.agent_defaults.default_agent_kind ?? getDefaultAgentKind();
   const claudePermissionMode: ClaudePermissionMode =
     config?.agent_configs.claude_code.permission_config?.permissionMode ?? 'default';
+  const codexPermissionConfig = config?.agent_configs.codex?.permission_config;
+  const codexExecutionMode = codexPermissionConfig
+    ? codexPermissionConfigToExecutionMode(codexPermissionConfig)
+    : codexPermissionConfigToExecutionMode({ workflowMode: 'auto' });
+  const openCodeAutoApprove = config?.agent_configs.opencode?.permission_config?.autoApprovePermissions ?? false;
 
   const handleClaudePermissionChange = useCallback(
     (mode: AgentExecutionMode) => {
@@ -331,6 +355,25 @@ export function AgentPreferencesPanel() {
     [updateAgentConfig],
   );
 
+  const handleCodexPermissionChange = useCallback(
+    (mode: AgentExecutionMode) => {
+      const nextConfig: AgentPermissionConfig = mapExecutionModeToPermissionConfig('codex', mode);
+      if (nextConfig.kind === 'codex') {
+        updateAgentConfig('codex', { permission_config: nextConfig });
+      }
+    },
+    [updateAgentConfig],
+  );
+
+  const handleOpenCodeAutoApproveChange = useCallback(
+    (enabled: boolean) => {
+      updateAgentConfig('opencode', {
+        permission_config: { kind: 'opencode', autoApprovePermissions: enabled },
+      });
+    },
+    [updateAgentConfig],
+  );
+
   return (
     <div className="space-y-8">
       <AgentConfigurationSection
@@ -338,6 +381,10 @@ export function AgentPreferencesPanel() {
         onSelectDefault={setDefaultAgentKind}
         claudeExecutionMode={claudePermissionModeToExecutionMode(claudePermissionMode)}
         onClaudePermissionChange={handleClaudePermissionChange}
+        codexExecutionMode={codexExecutionMode}
+        onCodexPermissionChange={handleCodexPermissionChange}
+        openCodeAutoApprove={openCodeAutoApprove}
+        onOpenCodeAutoApproveChange={handleOpenCodeAutoApproveChange}
       />
       <ProxyRouteSection proxyRunning={proxyRunning} proxyUrl={proxyUrl} />
     </div>
@@ -349,6 +396,10 @@ interface AgentConfigurationSectionProps {
   onSelectDefault: (kind: AgentKind) => void;
   claudeExecutionMode: AgentExecutionMode;
   onClaudePermissionChange: (mode: AgentExecutionMode) => void;
+  codexExecutionMode: AgentExecutionMode;
+  onCodexPermissionChange: (mode: AgentExecutionMode) => void;
+  openCodeAutoApprove: boolean;
+  onOpenCodeAutoApproveChange: (enabled: boolean) => void;
 }
 
 function AgentConfigurationSection({
@@ -356,6 +407,10 @@ function AgentConfigurationSection({
   onSelectDefault,
   claudeExecutionMode,
   onClaudePermissionChange,
+  codexExecutionMode,
+  onCodexPermissionChange,
+  openCodeAutoApprove,
+  onOpenCodeAutoApproveChange,
 }: AgentConfigurationSectionProps) {
   return (
     <section className="space-y-4">
@@ -374,6 +429,10 @@ function AgentConfigurationSection({
             onSelectDefault={() => onSelectDefault(entry.kind)}
             claudeExecutionMode={entry.kind === 'claude_code' ? claudeExecutionMode : undefined}
             onClaudePermissionChange={onClaudePermissionChange}
+            codexExecutionMode={entry.kind === 'codex' ? codexExecutionMode : undefined}
+            onCodexPermissionChange={onCodexPermissionChange}
+            openCodeAutoApprove={entry.kind === 'opencode' ? openCodeAutoApprove : undefined}
+            onOpenCodeAutoApproveChange={onOpenCodeAutoApproveChange}
           />
         ))}
       </div>
@@ -387,6 +446,10 @@ interface AgentConfigurationCardProps {
   onSelectDefault: () => void;
   claudeExecutionMode?: AgentExecutionMode;
   onClaudePermissionChange: (mode: AgentExecutionMode) => void;
+  codexExecutionMode?: AgentExecutionMode;
+  onCodexPermissionChange: (mode: AgentExecutionMode) => void;
+  openCodeAutoApprove?: boolean;
+  onOpenCodeAutoApproveChange: (enabled: boolean) => void;
 }
 
 function AgentConfigurationCard({
@@ -395,6 +458,10 @@ function AgentConfigurationCard({
   onSelectDefault,
   claudeExecutionMode,
   onClaudePermissionChange,
+  codexExecutionMode,
+  onCodexPermissionChange,
+  openCodeAutoApprove,
+  onOpenCodeAutoApproveChange,
 }: AgentConfigurationCardProps) {
   const definition = getAgentDefinition(agent.kind);
   const agentDefinition = definition ?? {
@@ -459,6 +526,19 @@ function AgentConfigurationCard({
           compact
           executionMode={claudeExecutionMode}
           onChange={onClaudePermissionChange}
+        />
+      )}
+      {agent.kind === 'codex' && codexExecutionMode && (
+        <CodexPermissionSection
+          compact
+          executionMode={codexExecutionMode}
+          onChange={onCodexPermissionChange}
+        />
+      )}
+      {agent.kind === 'opencode' && openCodeAutoApprove != null && (
+        <OpenCodeAutoApproveSection
+          enabled={openCodeAutoApprove}
+          onChange={onOpenCodeAutoApproveChange}
         />
       )}
     </article>
@@ -943,6 +1023,129 @@ function ProxyRouteSection({ proxyRunning, proxyUrl }: ProxyRouteSectionProps) {
             {proxyRunning ? '自动运行' : '按需启动'}
           </span>
         </div>
+      </div>
+    </section>
+  );
+}
+
+/* ----------------------------- Codex 默认权限区 ----------------------------- */
+
+interface CodexPermissionSectionProps {
+  compact?: boolean;
+  executionMode: AgentExecutionMode;
+  onChange: (mode: AgentExecutionMode) => void;
+}
+
+function CodexPermissionSection({
+  compact = false,
+  executionMode,
+  onChange,
+}: CodexPermissionSectionProps) {
+  const selectedOption = useMemo(
+    () => CODEX_PERMISSION_OPTIONS.find((option) => option.mode === executionMode) ?? CODEX_PERMISSION_OPTIONS[0],
+    [executionMode],
+  );
+
+  if (compact) {
+    return (
+      <section className="mt-4 flex min-w-0 flex-col gap-2 border-t border-border/50 pt-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="shrink-0 space-y-1 lg:w-44">
+          <h3 className="text-sm font-semibold text-foreground">Codex 默认权限</h3>
+          <p className="text-xs leading-relaxed text-muted-foreground">新建对话时默认使用的审批级别。</p>
+        </div>
+        <div className="w-full lg:w-72 lg:flex-none">
+          <Select value={executionMode} onValueChange={(value) => onChange(value as AgentExecutionMode)}>
+            <SelectTrigger aria-label="Codex 默认权限" className="h-9 w-full">
+              <SelectValue placeholder="选择默认权限" />
+            </SelectTrigger>
+            <SelectContent>
+              {CODEX_PERMISSION_OPTIONS.map((option) => (
+                <SelectItem key={option.mode} value={option.mode}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="space-y-3">
+      <div className="space-y-1">
+        <h3 className="text-sm font-semibold text-foreground">Codex 默认权限</h3>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          控制新建 Codex 对话时默认选中的审批级别，与发送框下拉保持一致。
+        </p>
+      </div>
+      <div className={cn('grid gap-2 sm:grid-cols-2', compact && 'sm:grid-cols-1')}>
+        {CODEX_PERMISSION_OPTIONS.map((option) => {
+          const active = option.mode === selectedOption.mode;
+          const Icon = option.icon;
+          return (
+            <button
+              key={option.mode}
+              type="button"
+              onClick={() => onChange(option.mode)}
+              className={cn(
+                'flex items-start gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-200',
+                active
+                  ? 'border-[hsl(var(--primary)/0.32)] bg-[hsl(var(--primary)/0.06)]'
+                  : 'border-border/55 bg-background hover:border-border hover:bg-muted/25',
+                option.tone === 'warning' && !active && 'hover:border-orange-500/35',
+              )}
+            >
+              <span
+                className={cn(
+                  'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border',
+                  active
+                    ? 'border-[hsl(var(--primary)/0.22)] bg-[hsl(var(--primary)/0.14)] text-[hsl(var(--primary))]'
+                    : option.tone === 'warning'
+                      ? 'border-border/55 text-orange-500'
+                      : 'border-border/55 text-muted-foreground',
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+              </span>
+              <span className="min-w-0 flex-1 space-y-0.5">
+                <span className="block text-sm font-medium text-foreground">{option.label}</span>
+                <span className="block text-ui-caption leading-4 text-muted-foreground">{option.description}</span>
+              </span>
+              {active && (
+                <Check className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--primary))]" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/* ----------------------------- OpenCode 自动接受权限区 ----------------------------- */
+
+interface OpenCodeAutoApproveSectionProps {
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}
+
+function OpenCodeAutoApproveSection({ enabled, onChange }: OpenCodeAutoApproveSectionProps) {
+  return (
+    <section className="mt-4 flex min-w-0 flex-col gap-3 border-t border-border/50 pt-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="min-w-0 space-y-1 lg:flex-1">
+        <h3 className="text-sm font-semibold text-foreground">自动接受权限</h3>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          开启后，原本需要确认的权限请求将自动通过；显式拒绝的规则仍由 OpenCode 服务端强制执行。
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2 lg:w-72 lg:justify-end">
+        <span className="text-xs text-muted-foreground">{enabled ? '已开启' : '已关闭'}</span>
+        <Switch
+          checked={enabled}
+          onCheckedChange={onChange}
+          aria-label="自动接受权限"
+        />
       </div>
     </section>
   );

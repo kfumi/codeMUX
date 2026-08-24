@@ -2540,7 +2540,7 @@ describe('CodeMuxAssistantRuntimeProvider', () => {
 
     const toggle = screen.getByRole('button', { name: /灞曞紑AI杩囩▼|展开AI过程/ });
     expect(toggle.textContent).toContain('已处理');
-    expect(toggle.textContent).toContain('1m13s');
+    expect(toggle.textContent).toContain('1m 13s');
 
     fireEvent.click(toggle);
 

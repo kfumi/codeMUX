@@ -37,7 +37,11 @@ function getTodoStatusIcon(status: TodoItem['status']) {
         </span>
       );
     case 'pending':
-      return <span className="h-2 w-2 rounded-full bg-muted-foreground/20" />;
+      return (
+        <span className="flex h-4 w-4 items-center justify-center">
+          <span className="h-2 w-2 rounded-full bg-muted-foreground/20" />
+        </span>
+      );
   }
 }
 
@@ -119,6 +123,164 @@ function getTotals(files: GitStatusChange[]) {
   );
 }
 
+type GitLoadState = 'idle' | 'loading' | 'ready' | 'unavailable';
+
+function EnvironmentRowSkeleton() {
+  return (
+    <div className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5" aria-hidden>
+      <span className="h-6 w-6 shrink-0 animate-pulse rounded-md bg-muted/60" />
+      <span className="h-3 flex-1 animate-pulse rounded bg-muted/50" />
+      <span className="h-3 w-12 shrink-0 animate-pulse rounded bg-muted/40" />
+    </div>
+  );
+}
+
+function EnvironmentSection({
+  gitLoadState,
+  unavailableMessage,
+  totals,
+  currentBranch,
+  branchOpen,
+  onBranchOpenChange,
+  branchQuery,
+  onBranchQueryChange,
+  filteredBranches,
+  branchLoading,
+  branchError,
+  onCheckoutBranch,
+  onOpenReview,
+  onOpenBranchDialog,
+}: {
+  gitLoadState: GitLoadState;
+  unavailableMessage: string | null;
+  projectPath: string;
+  totals: { additions: number; deletions: number };
+  currentBranch: string;
+  branchOpen: boolean;
+  onBranchOpenChange: (open: boolean) => void;
+  branchQuery: string;
+  onBranchQueryChange: (value: string) => void;
+  filteredBranches: GitRepositoryState['branches'];
+  branchLoading: boolean;
+  branchError: string | null;
+  onCheckoutBranch: (branchName: string) => void;
+  onOpenReview: () => void;
+  onOpenBranchDialog: () => void;
+}) {
+  return (
+    <div data-testid="git-environment-section">
+      <div className="flex items-center justify-between px-1.5 py-1">
+        <span className="text-xs font-medium text-muted-foreground">环境信息</span>
+      </div>
+
+      {gitLoadState === 'loading' ? (
+        <div data-testid="git-environment-loading" className="space-y-0.5">
+          <EnvironmentRowSkeleton />
+          <EnvironmentRowSkeleton />
+        </div>
+      ) : null}
+
+      {gitLoadState === 'ready' ? (
+        <>
+          <button
+            type="button"
+            data-testid="git-environment-changes"
+            onClick={onOpenReview}
+            className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-muted/45"
+          >
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <GitCommitHorizontal className="h-3 w-3" />
+            </span>
+            <span className="min-w-0 flex-1 text-xs text-muted-foreground">变更</span>
+            <span className="shrink-0 font-mono text-ui-caption">
+              <span className="text-[hsl(var(--success))]">+{formatDelta(totals.additions)}</span>
+              <span className="ml-2 text-[hsl(var(--destructive))]">-{formatDelta(totals.deletions)}</span>
+            </span>
+            <ChevronRight className="h-4 w-4 text-muted-foreground/55" />
+          </button>
+
+          <Popover open={branchOpen} onOpenChange={onBranchOpenChange}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                data-testid="git-environment-branch"
+                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-muted/45"
+              >
+                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted/65 text-muted-foreground">
+                  <GitBranch className="h-3 w-3" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <TooltipHint content={currentBranch}>
+                    <span className="block truncate text-xs text-foreground/88">{currentBranch}</span>
+                  </TooltipHint>
+                </span>
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/55" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              side="left"
+              sideOffset={8}
+              className="w-64 rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-[0_22px_58px_-34px_hsl(var(--surface-shadow-strong)/0.42)]"
+            >
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/65" />
+                <Input
+                  value={branchQuery}
+                  onChange={(event) => onBranchQueryChange(event.target.value)}
+                  placeholder="搜索分支"
+                  aria-label="搜索分支"
+                  className="h-8 rounded-lg pl-8 text-xs"
+                  autoFocus
+                />
+              </div>
+              <div className="mt-2 max-h-56 overflow-y-auto">
+                {filteredBranches.map((branch) => (
+                  <button
+                    key={branch.name}
+                    type="button"
+                    disabled={branchLoading || branch.current}
+                    onClick={() => onCheckoutBranch(branch.name)}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    <GitBranch className={cn('h-3.5 w-3.5', branch.current ? 'text-primary' : 'text-muted-foreground')} />
+                    <TooltipHint content={branch.name}>
+                      <span className={cn('min-w-0 flex-1 truncate', branch.current && 'font-medium text-primary')}>
+                        {branch.name}
+                      </span>
+                    </TooltipHint>
+                    {branch.current && <span className="text-ui-micro text-muted-foreground">当前</span>}
+                  </button>
+                ))}
+              </div>
+              {branchError ? <p className="px-2 py-1 text-xs text-destructive">{branchError}</p> : null}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="mt-1 h-7 w-full justify-start gap-2 px-2 text-xs"
+                onClick={onOpenBranchDialog}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                创建并检出新分支...
+              </Button>
+            </PopoverContent>
+          </Popover>
+        </>
+      ) : null}
+
+      {gitLoadState === 'unavailable' ? (
+        <p
+          data-testid="git-environment-unavailable"
+          className="px-2.5 py-2 text-xs leading-relaxed text-muted-foreground/70"
+        >
+          {unavailableMessage ?? '当前项目不是 Git 仓库'}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath: string; todos?: TodoItem[] }) {
   const openReviewTab = useSidePanelStore((state) => state.openReviewTab);
   const [open, setOpen] = useState(false);
@@ -126,16 +288,16 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
   const [repositoryState, setRepositoryState] = useState<GitRepositoryState | null>(null);
   const [totals, setTotals] = useState({ additions: 0, deletions: 0 });
   const [branchQuery, setBranchQuery] = useState('');
-  const [, setLoading] = useState(false);
+  const [gitLoadState, setGitLoadState] = useState<GitLoadState>('idle');
   const [branchLoading, setBranchLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [unavailableMessage, setUnavailableMessage] = useState<string | null>(null);
   const [branchDialogOpen, setBranchDialogOpen] = useState(false);
   const [branchError, setBranchError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!projectPath) return;
-    setLoading(true);
-    setError(null);
+    setGitLoadState((prev) => (prev === 'ready' ? prev : 'loading'));
+    setUnavailableMessage(null);
     try {
       const [nextState, files] = await Promise.all([
         gitApi.getRepositoryState(projectPath),
@@ -143,16 +305,21 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
       ]);
       setRepositoryState(nextState);
       setTotals(getTotals(files));
+      setGitLoadState('ready');
     } catch (err) {
-      setError(String(err));
+      setUnavailableMessage(String(err));
       setRepositoryState(null);
       setTotals({ additions: 0, deletions: 0 });
-    } finally {
-      setLoading(false);
+      setGitLoadState('unavailable');
     }
   }, [projectPath]);
 
-  const isGitRepo = repositoryState != null && error == null;
+  useEffect(() => {
+    setGitLoadState('idle');
+    setRepositoryState(null);
+    setTotals({ additions: 0, deletions: 0 });
+    setUnavailableMessage(null);
+  }, [projectPath]);
 
   useEffect(() => {
     if (open) void load();
@@ -200,7 +367,15 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
 
   return (
     <>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (nextOpen && gitLoadState === 'idle') {
+            setGitLoadState('loading');
+          }
+          setOpen(nextOpen);
+        }}
+      >
         <TooltipHint content="切换摘要">
           <PopoverTrigger asChild>
             <button
@@ -219,104 +394,28 @@ export function GitEnvironmentPopover({ projectPath, todos = [] }: { projectPath
           sideOffset={8}
           className="w-84 rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-[0_22px_58px_-34px_hsl(var(--surface-shadow-strong)/0.42)]"
         >
-          {isGitRepo && (
-            <>
-              <div className="flex items-center justify-between px-1.5 py-1">
-                <span className="text-xs font-medium text-muted-foreground">环境信息</span>
-              </div>
-
-              <button
-                type="button"
-                data-testid="git-environment-changes"
-                onClick={() => {
-                  openReviewTab(projectPath);
-                  setOpen(false);
-                }}
-                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-muted/45"
-              >
-                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary">
-                  <GitCommitHorizontal className="h-3 w-3" />
-                </span>
-                <span className="min-w-0 flex-1 text-xs text-muted-foreground">变更</span>
-                <span className="shrink-0 font-mono text-ui-caption">
-                  <span className="text-[hsl(var(--success))]">+{formatDelta(totals.additions)}</span>
-                  <span className="ml-2 text-[hsl(var(--destructive))]">-{formatDelta(totals.deletions)}</span>
-                </span>
-                <ChevronRight className="h-4 w-4 text-muted-foreground/55" />
-              </button>
-
-              <Popover open={branchOpen} onOpenChange={setBranchOpen}>
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    data-testid="git-environment-branch"
-                    className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-muted/45"
-                  >
-                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted/65 text-muted-foreground">
-                      <GitBranch className="h-3 w-3" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <TooltipHint content={currentBranch}>
-                        <span className="block truncate text-xs text-foreground/88">{currentBranch}</span>
-                      </TooltipHint>
-                    </span>
-                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/55" />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent
-                  align="start"
-                  side="left"
-                  sideOffset={8}
-                  className="w-64 rounded-xl border-border/70 bg-popover/98 p-1.5 shadow-[0_22px_58px_-34px_hsl(var(--surface-shadow-strong)/0.42)]"
-                >
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/65" />
-                    <Input
-                      value={branchQuery}
-                      onChange={(event) => setBranchQuery(event.target.value)}
-                      placeholder="搜索分支"
-                      aria-label="搜索分支"
-                      className="h-8 rounded-lg pl-8 text-xs"
-                      autoFocus
-                    />
-                  </div>
-                  <div className="mt-2 max-h-56 overflow-y-auto">
-                    {filteredBranches.map((branch) => (
-                      <button
-                        key={branch.name}
-                        type="button"
-                        disabled={branchLoading || branch.current}
-                        onClick={() => void checkoutBranch(branch.name)}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/82 transition-colors hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-55"
-                      >
-                        <GitBranch className={cn('h-3.5 w-3.5', branch.current ? 'text-primary' : 'text-muted-foreground')} />
-                        <TooltipHint content={branch.name}>
-                          <span className={cn('min-w-0 flex-1 truncate', branch.current && 'font-medium text-primary')}>
-                            {branch.name}
-                          </span>
-                        </TooltipHint>
-                        {branch.current && <span className="text-ui-micro text-muted-foreground">当前</span>}
-                      </button>
-                    ))}
-                  </div>
-                  {branchError && <p className="px-2 py-1 text-xs text-destructive">{branchError}</p>}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="mt-1 h-7 w-full justify-start gap-2 px-2 text-xs"
-                    onClick={() => {
-                      setBranchOpen(false);
-                      setBranchDialogOpen(true);
-                    }}
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    创建并检出新分支...
-                  </Button>
-                </PopoverContent>
-              </Popover>
-            </>
-          )}
+          <EnvironmentSection
+            gitLoadState={gitLoadState}
+            unavailableMessage={unavailableMessage}
+            totals={totals}
+            currentBranch={currentBranch}
+            branchOpen={branchOpen}
+            onBranchOpenChange={setBranchOpen}
+            branchQuery={branchQuery}
+            onBranchQueryChange={setBranchQuery}
+            filteredBranches={filteredBranches}
+            branchLoading={branchLoading}
+            branchError={branchError}
+            onCheckoutBranch={(branchName) => void checkoutBranch(branchName)}
+            onOpenReview={() => {
+              openReviewTab(projectPath);
+              setOpen(false);
+            }}
+            onOpenBranchDialog={() => {
+              setBranchOpen(false);
+              setBranchDialogOpen(true);
+            }}
+          />
 
           <TodoSection todos={todos} />
         </PopoverContent>

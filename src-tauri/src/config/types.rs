@@ -289,12 +289,27 @@ pub struct CodexAgentConfigUpdate {
     pub permission_config: Option<CodexPermissionConfig>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct OpenCodeAgentConfigUpdate {
+    pub default_provider_id: Option<String>,
+    pub default_model: Option<String>,
+    pub permission_config: Option<OpenCodePermissionConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OpenCodePermissionConfig {
+    #[serde(default, rename = "autoApprovePermissions")]
+    pub auto_approve_permissions: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OpenCodeAgentConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_provider_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
+    #[serde(default)]
+    pub permission_config: OpenCodePermissionConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeouts: Option<crate::provider_profiles::types::AgentTimeouts>,
 }

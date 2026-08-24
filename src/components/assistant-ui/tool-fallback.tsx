@@ -98,7 +98,7 @@ function ToolFallbackTrigger({
     <CollapsibleTrigger
       data-slot="tool-fallback-trigger"
       className={cn(
-        'aui-tool-fallback-trigger group/trigger flex w-full items-center gap-2 text-sm font-normal text-muted-foreground/52 transition-colors hover:text-muted-foreground/78',
+        'aui-tool-fallback-trigger group/trigger inline-flex max-w-full items-center gap-2 text-sm font-normal text-muted-foreground/52 transition-colors hover:text-muted-foreground/78',
         className,
       )}
       {...props}
@@ -115,11 +115,11 @@ function ToolFallbackTrigger({
       <span
         data-slot="tool-fallback-trigger-label"
         className={cn(
-          'relative inline-flex items-center gap-2 text-start leading-none',
+          'relative inline-flex min-w-0 items-center gap-2 overflow-hidden text-start leading-none',
           isCancelled && 'text-muted-foreground line-through',
         )}
       >
-        <span>
+        <span className="shrink-0">
           <span>{toolName}</span>
         </span>
         {children}

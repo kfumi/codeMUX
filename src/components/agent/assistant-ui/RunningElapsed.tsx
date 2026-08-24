@@ -9,13 +9,17 @@ export function formatElapsed(ms: number): string {
   const hours = totalHours % 24;
   const days = Math.floor(totalHours / 24);
 
-  const parts: string[] = [];
-  if (days > 0) parts.push(`${days}d`);
-  if (hours > 0 || days > 0) parts.push(`${hours}h`);
-  if (minutes > 0 || hours > 0 || days > 0) parts.push(`${minutes}m`);
-  parts.push(`${seconds}s`);
+  const parts: Array<{ value: number; suffix: string }> = [];
+  if (days > 0) parts.push({ value: days, suffix: 'd' });
+  if (hours > 0) parts.push({ value: hours, suffix: 'h' });
+  if (minutes > 0) parts.push({ value: minutes, suffix: 'm' });
+  if (seconds > 0) parts.push({ value: seconds, suffix: 's' });
 
-  return parts.join('');
+  if (parts.length === 0) return '0s';
+  return parts
+    .slice(0, 2)
+    .map((part) => `${part.value}${part.suffix}`)
+    .join(' ');
 }
 
 type RunningElapsedTimerProps = {
